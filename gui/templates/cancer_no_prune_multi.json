@@ -82,7 +82,6 @@
       "resample_use_n": true,
       "multi_hypothesis": true,
       "max_fop": "50",
-      "caas_b0_diagnostic": true,
       "export_groups": true,
       "export_perm_discovery": false
     },

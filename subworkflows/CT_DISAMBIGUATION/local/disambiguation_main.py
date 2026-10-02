@@ -10,6 +10,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+from src.core.labelings import design_max_pairs
 from src.data.loaders import read_caas_metadata_table
 from src.utils.gene_wrapper import process_all_genes
 from src.plots.plotter import generate_bulk_plots
@@ -136,45 +137,6 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def _compute_max_pairs_from_trait(trait_file: Path) -> int:
-    import csv
-
-    max_pair_id = 0
-    files_to_read = []
-    if trait_file.is_dir():
-        h_files = sorted(trait_file.glob("traitfile_H*.tab"))
-        if h_files:
-            files_to_read = h_files
-        else:
-            files_to_read = [
-                f for f in sorted(trait_file.glob("*.tab"))
-                if f.name != "traitfile_fop.tab"
-            ]
-        if not files_to_read:
-            files_to_read = [f for f in sorted(trait_file.glob("*")) if f.is_file()]
-    elif trait_file.is_file():
-        files_to_read = [trait_file]
-
-    for fpath in files_to_read:
-        try:
-            with open(fpath, "r", encoding="utf-8-sig") as f:
-                reader = csv.reader(f, delimiter="\t")
-                for row in reader:
-                    if not row or len(row) < 3:
-                        continue
-                    pair_val = row[2]
-                    if pair_val is None or str(pair_val).strip() == "":
-                        continue
-                    try:
-                        pair_id = int(str(pair_val).strip())
-                        max_pair_id = max(max_pair_id, pair_id)
-                    except Exception:
-                        continue
-        except Exception as e:
-            logger.warning(f"Could not read traitfile {fpath}: {e}")
-    return max_pair_id or 1
-
-
 def main():
     """Run the aggregation pipeline end-to-end."""
     args = parse_arguments()
@@ -228,7 +190,7 @@ def main():
 
     # Determine schema max_pairs from trait file (fixed schema requirement)
     try:
-        max_pairs = _compute_max_pairs_from_trait(Path(args.trait_file))
+        max_pairs = design_max_pairs(Path(args.trait_file))
         logger.info(f"Detected max_pairs={max_pairs} from trait file")
     except Exception as e:
         # The master CSV schema (domain_<d>_* columns) is fixed by the trait file so that every batch

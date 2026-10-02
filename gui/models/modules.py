@@ -70,7 +70,6 @@ class CaasConfig(ModuleConfigBase):
     resample_use_n: bool = True  # --resample_use_n
     multi_hypothesis: bool = True  # --multi_hypothesis
     max_fop: str = "100"  # --max_fop (max FOP alternative hypotheses H1..Hn per contrast)
-    caas_b0_diagnostic: bool = False  # --caas_b0_diagnostic (replay the real labeling b_0 through the null path; validation only)
 
     # Debug-only (conf/ct.config warns: don't run these unless needed).
     export_groups: bool = False  # --export_groups

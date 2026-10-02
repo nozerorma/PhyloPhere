@@ -25,7 +25,7 @@ from src.core.driver import load_gene_context  # noqa: E402
 from src.core.labelings import observed_pss, read_trait_pairs  # noqa: E402
 from src.core.master import write_master_csv  # noqa: E402
 from src.core.meta import caas_id  # noqa: E402
-from src.core.observed import observed_entries, observed_master_rows, score_observed  # noqa: E402
+from src.core.observed import observed_entries, observed_master_rows, score_observed, unresolved_entries  # noqa: E402
 from src.reporting.disambiguation_writers import _generate_dynamic_fields  # noqa: E402
 
 GOLD = HERE / "golden/pepc_c4_complete"
@@ -124,3 +124,18 @@ def test_the_row_order_of_the_input_changes_only_the_residue_chosen_where_two_re
 def test_the_discovery_order_gives_the_rows_in_the_order_of_the_frozen_master(pepc, tmp_path):
     got, gold = _master(pepc, pepc["rows"], tmp_path / "m.csv"), _gold()
     assert list(zip(got.msa_pos, got.caap_group, got.side)) == list(zip(gold.msa_pos, gold.caap_group, gold.side))
+
+
+def test_entries_without_a_resolvable_hypothesis_are_rejected_in_a_multi_contrast_design(pepc):
+    rows = [dict(r) for r in pepc["rows"][:3]]
+    rows[1]["trait"] = "traitfile.tab"          # names no hypothesis
+    rows[2]["trait"] = "traitfile_H9999.tab"    # names one the design does not have
+    entries = observed_entries("PEPC", rows)
+    assert [e.trait for e in unresolved_entries(entries, pepc["trait_pairs"])] == ["traitfile.tab", "traitfile_H9999.tab"]
+    with pytest.raises(ValueError, match="2 entries name no hypothesis"):
+        score_observed(pepc["ctx"], "PEPC", entries, pepc["trait_pairs"], pepc["pss"], 0.1)
+
+
+def test_a_single_contrast_design_accepts_any_trait_name(pepc):
+    rows = [dict(r, trait="traitfile.tab") for r in pepc["rows"][:3]]
+    assert unresolved_entries(observed_entries("PEPC", rows), {1: [("a", "b")]}) == []

@@ -116,7 +116,6 @@ Usage:
 Permulation sizing:
 --max_tries                  <INTEGER>                    1000000 (draw budget; raised 50% up to twice if the pool is short, then fails)
 --caas_full_perms            <INTEGER>                    1000    (accepted permulations harvested AND replayed through the CAAS FCS null)
---caas_b0_diagnostic         <true|false>                 false   (also replay the real labeling b_0 through the null path -> caas_permulation/b0/; never enters the null)
 
 Output: directory of resample_*.tab files (one per chunk_size cycles).
 

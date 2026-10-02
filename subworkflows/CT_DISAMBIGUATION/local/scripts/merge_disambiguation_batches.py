@@ -10,7 +10,7 @@ which is why that stage needs CAAS_CORE_MERGE's pass B instead of a plain merge)
 
 caas_convergence_master.csv/no_change_debug.csv column schemas are identical
 across batches by construction: max_pairs is computed once from the shared,
-unpartitioned trait file (see disambiguation_main.py::_compute_max_pairs_from_trait)
+unpartitioned trait file (see core/labelings.py::design_max_pairs)
 and threaded through to every batch's export_from_db call, so every batch
 emits the same domain_N_* column set. This script asserts that invariant
 rather than silently reconciling a mismatch.

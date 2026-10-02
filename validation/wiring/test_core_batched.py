@@ -7,6 +7,7 @@ commands run by hand.
 import csv
 import gzip
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -62,10 +63,12 @@ def inp(tmp_path_factory):
     return d
 
 
-def _nf(tmp_path, inp, size, alignments=None, reuse=None):
+def _nf(tmp_path, inp, size, alignments=None, reuse=None, fop_pairs=None):
     tmp_path.mkdir(parents=True, exist_ok=True)
     i = inp / "observed_inputs"
     extra = []
+    if fop_pairs:
+        extra += ["--mini_fop_pairs", str(fop_pairs)]
     if alignments:
         extra += ["--mini_alignments", ",".join(str(inp / "ali" / f"{g}.fa") for g in alignments)]
     if reuse:
@@ -269,3 +272,74 @@ def test_the_merge_reads_a_legacy_concatenated_detail_file(tmp_path, inp, shard_
     out, merged = _merge_nf(tmp_path / "nf", inp, [legacy])
     _assert_same_outputs(out, ref, with_b0=False)  # the legacy file holds the null cycles only
     assert merged is None
+
+
+# ── the observed labeling (b_0) in the same task ─────────────────────────────
+
+@pytest.fixture(scope="module")
+def fop_pairs(inp):
+    """fop_pairs.tsv with the b_0 PSS weights of the design (the null cycles carry none: equal weights)."""
+    f = inp / "fop_pairs.tsv"
+    with open(f, "w") as fh:
+        fh.write("cycle\thypothesis_id\tpair\tspecies1\tspecies2\tpss_score\n")
+        for r in csv.DictReader(open(inp / "cfg/contrast_hypotheses_pairs.tsv"), delimiter="\t"):
+            fh.write("\t".join(["b_0", r["hypothesis_id"], r["pair"], r["species1"], r["species2"], r["pss_score"]]) + "\n")
+    return f
+
+
+def _b0_dirs(tmp_path):
+    return [Path(l) for l in (tmp_path / "out/b0_observed_dirs.txt").read_text().split()]
+
+
+@tw.needs_nextflow
+def test_the_b0_master_does_not_depend_on_the_batch_size_and_equals_the_frozen_one(tmp_path, inp, fop_pairs):
+    import pandas as pd
+    genes = ["PEPC", "PEPD", "NOHIT"]
+    _nf(tmp_path / "b1", inp, 1, genes, fop_pairs=fop_pairs)
+    _nf(tmp_path / "b2", inp, 2, genes, fop_pairs=fop_pairs)
+    one, two = _b0_dirs(tmp_path / "b1"), _b0_dirs(tmp_path / "b2")
+    assert (len(one), len(two)) == (3, 2)
+
+    def collect(dirs):
+        out = {}
+        for d in dirs:
+            for f in d.glob("*"):
+                assert f.name not in out
+                out[f.name] = gzip.open(f, "rt").read() if f.suffix == ".gz" else f.read_text()
+        return out
+    a, b = collect(one), collect(two)
+    # NOHIT has no hit under any labeling: it has a tested-positions line, no discovery rows and no master shard
+    assert sorted(a) == ["NOHIT.b0.background", "PEPC.b0.background", "PEPC.b0.discovery.tsv", "PEPC.master.csv.gz",
+                         "PEPD.b0.background", "PEPD.b0.discovery.tsv", "PEPD.master.csv.gz"]
+    assert a == b
+    gold = pd.read_csv(GOLD / "caas_convergence_master.csv", keep_default_na=False)
+    key = ["msa_pos", "caap_group", "side"]
+    gold = gold.sort_values(key, kind="stable").reset_index(drop=True)
+    modal = [c for c in gold.columns if re.fullmatch(r"domain_\d+_(anc|top|bot)_aa", c)]
+    for g in ("PEPC", "PEPD"):
+        shard = next(d for d in one if (d / f"{g}.master.csv.gz").exists()) / f"{g}.master.csv.gz"
+        got = pd.read_csv(gzip.open(shard, "rt"), keep_default_na=False).sort_values(key, kind="stable").reset_index(drop=True)
+        assert list(got.columns) == list(gold.columns) and len(got) == len(gold) == 217
+        for c in gold.columns:
+            if c in ("tag_support", "gene") or c in modal:
+                continue  # ids are content hashes of the gene; the modal residues are checked below
+            if gold[c].dtype.kind == "f":
+                assert float((got[c] - gold[c]).abs().max(skipna=True) or 0.0) <= 1e-12, c
+            else:
+                assert got[c].equals(gold[c]), c
+        # The export lists a position's entries in a fixed order, the frozen discovery.tab in the order of the
+        # file system: the rows are the same, and a modal residue differs only where two residues tie for the maximum.
+        for c in modal:
+            for i in got.index[got[c] != gold[c]]:
+                counts = dict((r, int(n)) for r, n in (p.split(":") for p in got.loc[i, c + "_support"].split(",")))
+                assert counts[got.loc[i, c]] == counts[gold.loc[i, c]] == max(counts.values()), (c, i)
+
+
+@tw.needs_nextflow
+def test_a_batch_that_reuses_exports_has_no_b0_slice(tmp_path, inp, fop_pairs):
+    live_dir = tmp_path / "live"
+    _nf(live_dir, inp, 2, ["PEPC", "PEPD"], fop_pairs=fop_pairs)
+    published = sorted((live_dir / "out/caas_permulation/perm_disc").glob("*.perm_replay.discovery.output"))
+    _nf(tmp_path / "reuse", inp, 2, reuse=published, fop_pairs=fop_pairs)
+    dirs = _b0_dirs(tmp_path / "reuse")
+    assert len(dirs) == 1 and list(dirs[0].iterdir()) == []

@@ -6,8 +6,8 @@ real labeling (`b_0`). Spec: the "Unified CAAS core" plan.
 - `compare_b0.py`: observed vs `b_0` at checkpoints A (discovery rows), B (post-filter survivors),
   C (`asr_path_score`), D (`caas_row`/`CAAS_score`), E (gene score). Exact key-set equality, |delta| <= 1e-12.
   `test_compare_b0.py` is its plumbing test (synthetic run).
-- `--caas_b0_diagnostic true` makes the pipeline write the `b_0` slice to `<outdir>/caas_permulation/b0/`
-  (never part of the null). Works with the batched and the unbatched null.
+- The pipeline always replays `b_0` with the null and writes its slice to `<outdir>/caas_permulation/b0/`
+  (never part of the null). Works with any `ct_core_batch_size`.
 - `golden/pepc_c4_complete/`: frozen observed outputs of the Tier 1 PEPC genotypic run
   (`validation/tier1/output/pepc/results/c4_complete`, code at 7892848).
 - `baseline/`: harness reports on the code before unification (see below).
@@ -19,7 +19,7 @@ python validation/unification/compare_b0.py --run <results_dir> [--out report.js
 
 ## Baselines (code before unification; `baseline/*.json`)
 
-`compare_b0.py` on runs that also replay b_0 through the null path (`--caas_b0_diagnostic true`).
+`compare_b0.py` on runs that also replayed b_0 through the null path (made with the former `caas_b0_diagnostic` switch).
 
 | Fixture | A discovery | B survivors | C asr_path_score | D CAAS_score | E gene score |
 |---|---|---|---|---|---|

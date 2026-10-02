@@ -11,6 +11,7 @@ hypothesis ('H3', 'traitfile_H3.tab' or 'b_0~H3'). The order of the entries deci
 within a position and breaks the ties of the modal residues (the first residue seen wins), so a producer should
 present them in the order discovery.tab has (position, then hypothesis, then scheme). Nothing else depends on it.
 """
+import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.convergence.disambiguate_single import analyze_gene_disambiguation
@@ -47,6 +48,18 @@ def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosi
     return entries
 
 
+def unresolved_entries(entries: List[CAASPosition], trait_pairs: Dict[int, List[Tuple[str, str]]]) -> List[CAASPosition]:
+    """The entries whose `trait` names no contrast of `trait_pairs`; none when the design has one contrast."""
+    if len(trait_pairs) <= 1:
+        return []
+    out = []
+    for e in entries:
+        m = re.search(r"H(\d+)", e.trait or "")
+        if not m or int(m.group(1)) not in trait_pairs:
+            out.append(e)
+    return out
+
+
 def score_observed(
     ctx: Dict[str, Any],
     gene: str,
@@ -56,7 +69,16 @@ def score_observed(
     posterior_threshold: float,
 ) -> List[Any]:
     """Pooled full-mode ConvergenceResults of one gene. `ctx` is core.driver.load_gene_context's return;
-    `trait_pairs` is core.labelings.read_trait_pairs of the design and `hyp_pairs_pss` its observed_pss."""
+    `trait_pairs` is core.labelings.read_trait_pairs of the design and `hyp_pairs_pss` its observed_pss.
+
+    With several contrasts every entry must name its hypothesis (`H<n>` in `trait`, n a contrast of the design):
+    an entry that does not would be scored against the union of all the pairs, which is a different quantity
+    and slow, so it is rejected."""
+    unresolved = unresolved_entries(entries, trait_pairs)
+    if unresolved:
+        raise ValueError(
+            f"{gene}: {len(unresolved)} entries name no hypothesis of the {len(trait_pairs)}-contrast design "
+            f"(trait of the first: {unresolved[0].trait!r})")
     node_posteriors = ctx["node_posteriors"]
     results, _ = analyze_gene_disambiguation(
         gene=gene,

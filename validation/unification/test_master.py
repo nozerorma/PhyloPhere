@@ -1,5 +1,6 @@
 """core.master: the master CSV is written from the workers' rows, in the order the database export used."""
 import csv
+import gzip
 import sys
 from pathlib import Path
 
@@ -47,3 +48,11 @@ def test_process_all_genes_needs_max_pairs():
                           taxid_mapping_path=None, asr_mode="compute", asr_model="lg", asr_cache_dir=None,
                           posterior_threshold=0.1, threads_per_gene=1, workers=1, run_diagnostics=False,
                           output_dir=Path("."), max_pairs=None)
+
+
+def test_a_gz_path_is_written_compressed_with_the_same_content(tmp_path):
+    rows = [("A", 9, master_row({"gene": "A", "msa_pos": 9, "side": "top"}, FIELDS)),
+            ("A", 2, master_row({"gene": "A", "msa_pos": 2, "side": "bottom"}, FIELDS))]
+    write_master_csv(rows, tmp_path / "m.csv", FIELDS)
+    write_master_csv(rows, tmp_path / "m.csv.gz", FIELDS)
+    assert gzip.open(tmp_path / "m.csv.gz", "rt").read() == open(tmp_path / "m.csv").read()

@@ -86,12 +86,6 @@ SPEC = ModuleTabSpec(
             placeholder="draw budget; raised 50% up to twice if the pool falls short",
             importance="optional",
         ),
-        FieldSpec(
-            name="caas_b0_diagnostic",
-            label="Replay b_0 through the null path (validation)",
-            kind="bool",
-            importance="optional",
-        ),
     ),
     advanced_fields=(
         Section("Missingness parameters in discovery mode and otherwise"),

@@ -75,3 +75,29 @@ def test_the_runner_with_the_real_ct_exports_what_a_direct_call_exports(tmp_path
     a = pd.read_csv(tmp_path / "PEPC.perm_replay.discovery.output", sep="\t")
     b = pd.read_csv(tmp_path / "d.disc", sep="\t")
     assert len(b) > 8000 and a.equals(b)
+
+
+def test_the_runner_exports_the_b0_slice_only_when_asked(tmp_path):
+    fake = tmp_path / "ct"
+    fake.write_text('#!/usr/bin/env bash\necho "$@" >> calls.log\n')
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    (tmp_path / "alignments").mkdir()
+    assert _runner(tmp_path, fake, "G1\tG1.fa\nG2\tG2.fa\n", "cfg", "lab.tab").returncode == 0
+    assert all("b0" not in c for c in (tmp_path / "calls.log").read_text().splitlines())
+    (tmp_path / "calls.log").unlink()
+    assert _runner(tmp_path, fake, "G1\tG1.fa\nG2\tG2.fa\n", "cfg", "lab.tab", "--export-b0", "1").returncode == 0
+    for gene, call in zip(("G1", "G2"), sorted((tmp_path / "calls.log").read_text().splitlines())):
+        assert f"--export_b0_discovery {gene}.b0.discovery.tsv --export_b0_background {gene}.b0.background" in call
+
+
+def test_the_runner_b0_export_equals_a_direct_call(tmp_path):
+    cfg, lab = _pepc_inputs(tmp_path)
+    r = _runner(tmp_path, CT, "PEPC\tPEPC.fa\n", cfg, lab, "--export-b0", "1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    direct = subprocess.run([str(CT), "perm-replay", "-a", "alignments/PEPC.fa", "-t", str(cfg), "-s", str(lab), "-o", "d.out",
+                             "--fmt", "fasta", *ARGS, "--export_b0_discovery", "d.b0", "--export_b0_background", "d.bg"],
+                            cwd=tmp_path, capture_output=True, text=True)
+    assert direct.returncode == 0, direct.stdout + direct.stderr
+    assert (tmp_path / "PEPC.b0.discovery.tsv").read_text() == (tmp_path / "d.b0").read_text()
+    assert (tmp_path / "PEPC.b0.background").read_text() == (tmp_path / "d.bg").read_text()
+    assert len((tmp_path / "PEPC.b0.discovery.tsv").read_text().splitlines()) > 8000

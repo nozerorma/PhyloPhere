@@ -76,6 +76,8 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
             disambiguation["caas_map_dir"] = old
         caas = modules.get("caas")
         if isinstance(caas, dict):
+            if caas.pop("caas_b0_diagnostic", None) is not None:
+                logger.warning("project parameter caas_b0_diagnostic was retired: the real labeling (b_0) is always replayed with the null")
             dropped = [k for k in _RETIRED_CAAS_FIELDS if caas.pop(k, None) is not None]
             if dropped:
                 logger.warning("project parameters %s were replaced by ct_core_batch_size; the project uses its value (%s)",

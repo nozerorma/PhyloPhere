@@ -2,8 +2,8 @@
 """Observed results vs the b_0 slice of the permulation-null code path.
 
 The null is calibrated only if its labelings go through the same computation as the
-real one. A run with ``--caas_b0_diagnostic true`` also replays the real labeling (b_0)
-through the null path (written to ``<run>/caas_permulation/b0/``); this script compares
+real one. Every run also replays the real labeling (b_0) through the null path
+(written to ``<run>/caas_permulation/b0/``); this script compares
 that slice with the observed results at five checkpoints:
 
   A  discovery rows            (gene, hypothesis, caap_group, position, caas, amino_encoded)
@@ -86,7 +86,7 @@ def read_detail(b0_dir):
     """b_0 per-(gene, position, group, side) detail shards written by the null path."""
     shards = sorted(glob.glob(str(Path(b0_dir) / "perm_pos_detail" / "*.tsv.gz")))
     if not shards:
-        sys.exit(f"ERROR: no b_0 detail shards under {b0_dir}/perm_pos_detail (run with --caas_b0_diagnostic true)")
+        sys.exit(f"ERROR: no b_0 detail shards under {b0_dir}/perm_pos_detail (the run has no b_0 slice)")
     return pd.concat((pd.read_csv(s, sep="\t", float_precision="round_trip") for s in shards), ignore_index=True)
 
 

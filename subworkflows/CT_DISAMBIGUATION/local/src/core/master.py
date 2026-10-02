@@ -6,6 +6,7 @@ workers already hold and written here, in the order the database export used (ge
 a gene's rows were produced). The database keeps only the decoration outputs.
 """
 import csv
+import gzip
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
@@ -27,9 +28,11 @@ def write_master_csv(
     rows: Iterable[Tuple[str, Any, Dict[str, str]]], path: Path, fields: Sequence[str]
 ) -> int:
     """Write (gene, msa_pos, row) triples sorted by gene then msa_pos (stable: production order within
-    a position is kept). Returns the number of rows written; an empty input writes just the header."""
+    a position is kept). Returns the number of rows written; an empty input writes just the header.
+    A path ending in .gz is written compressed."""
     ordered = sorted(rows, key=lambda t: (t[0], -1 if t[1] is None else t[1]))
-    with open(path, "w", newline="") as fh:
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "wt", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(fields), extrasaction="ignore")
         writer.writeheader()
         for _gene, _pos, row in ordered:
