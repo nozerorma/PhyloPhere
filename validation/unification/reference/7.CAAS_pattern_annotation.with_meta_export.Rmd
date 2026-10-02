@@ -18,7 +18,9 @@ output:
 params:
   discovery_input: NULL
   background_input: NULL
+  output_dir: "."
   caap_mode: FALSE
+  seed: "1998"
 ---
 
 <style type="text/css">
@@ -253,6 +255,116 @@ if (has_caap_group) {
   
   print(p_pattern)
 }
+```
+
+## 3. Meta-CAAS Extraction
+
+Export standardized meta-CAAS tables for downstream disambiguation and post-processing.
+
+```{r meta_caas_export}
+cat("\n=== Exporting Meta-CAAS Data ===\n")
+
+# Function to assign random CAAS tags
+assign_caas_tags <- function(n_rows) {
+  seed_val <- if (exists("params") && !is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998
+  set.seed(seed_val)  # For reproducibility
+  
+  tags <- sapply(1:n_rows, function(i) {
+    paste0("CAAS_", 
+           paste0(sample(LETTERS, 5, TRUE), collapse = ""),
+           sprintf("%04d", sample(9999, 1)),
+           sample(LETTERS, 1))
+  })
+  
+  return(tags)
+}
+
+# Use local directory for Nextflow to capture
+meta_dir <- "meta_caas"
+createDir(meta_dir)
+
+if (has_caap_group) {
+  # Per-group meta-CAAS
+  for (grp in unique(caas_for_export$caap_group)) {
+    grp_data <- caas_for_export %>% filter(caap_group == grp)
+    
+    grp_meta <- grp_data %>%
+      mutate(
+        GenePos = paste(Gene, Position, sep = "_"),
+        tag = assign_caas_tags(n()),
+        is_conserved_meta = if_else(!is.na(is_conserved_meta) & toupper(trimws(as.character(is_conserved_meta))) == "TRUE", TRUE, FALSE),
+        conserved_pair = if_else(
+          !is.na(conserved_pair) & conserved_pair != "",
+          sub("^\\d+:", "", conserved_pair),
+          NA_character_
+        ),
+        caas = if ("caas" %in% names(.)) caas else NA_character_,
+        amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_
+      ) %>%
+      select(
+        tag, GenePos, Gene, Position, pattern, caap_group,
+        is_conserved_meta, conserved_pair, caas, amino_encoded,
+        dplyr::any_of(c("trait", "hyp_id"))
+      )
+
+    output_file <- file.path(meta_dir, paste0(grp, "_meta_caas.tsv"))
+    write_tsv(grp_meta, output_file)
+    
+    cat(sprintf("  %s: %d positions\n", grp, nrow(grp_meta)))
+  }
+  
+  # Global meta-CAAS
+  global_meta <- caas_for_export %>%
+    mutate(
+      GenePos = paste(Gene, Position, sep = "_"),
+      tag = assign_caas_tags(n()),
+      is_conserved_meta = if_else(!is.na(is_conserved_meta) & toupper(trimws(as.character(is_conserved_meta))) == "TRUE", TRUE, FALSE),
+      conserved_pair = if_else(
+        !is.na(conserved_pair) & conserved_pair != "",
+        sub("^\\d+:", "", conserved_pair),
+        NA_character_
+      ),
+      caas = if ("caas" %in% names(.)) caas else NA_character_,
+      amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_,
+      hyp_id = if ("trait" %in% names(.)) ifelse(grepl("H[0-9]+", trait), sub(".*(H[0-9]+).*", "\\1", trait), trait) else NA_character_
+    ) %>%
+    select(
+      tag, GenePos, Gene, Position, pattern, caap_group,
+      is_conserved_meta, conserved_pair, caas, amino_encoded,
+      dplyr::any_of(c("trait", "hyp_id"))
+    )
+
+  output_file <- file.path(meta_dir, "global_meta_caas.tsv")
+  write_tsv(global_meta, output_file)
+  
+  cat(sprintf("  Global: %d positions\n", nrow(global_meta)))
+} else {
+  # Standard meta-CAAS
+  meta_caas <- caas_for_export %>%
+    mutate(
+      GenePos = paste(Gene, Position, sep = "_"),
+      tag = assign_caas_tags(n()),
+      is_conserved_meta = if_else(!is.na(is_conserved_meta) & toupper(trimws(as.character(is_conserved_meta))) == "TRUE", TRUE, FALSE),
+      conserved_pair = if_else(
+        !is.na(conserved_pair) & conserved_pair != "",
+        sub("^\\d+:", "", conserved_pair),
+        NA_character_
+      ),
+      caas = if ("caas" %in% names(.)) caas else NA_character_,
+      amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_
+    ) %>%
+    select(
+      tag, GenePos, Gene, Position, pattern,
+      is_conserved_meta, conserved_pair, caas, amino_encoded
+    )
+
+  output_file <- file.path(meta_dir, "meta_caas.tsv")
+  write_tsv(meta_caas, output_file)
+  
+  cat(sprintf("  Total: %d positions\n", nrow(meta_caas)))
+}
+
+cat(sprintf("\nMeta-CAAS data exported to: %s\n", meta_dir))
 ```
 
 ---

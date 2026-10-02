@@ -2,7 +2,8 @@
 
 /*
  * CT meta-CAAS workflow
- * Runs CT pattern annotation / meta_caas generation independently (upstream of disambiguation).
+ * Renders the CT pattern annotation report of a discovery.tab. The meta_caas tables are written by the observed
+ * scoring (CAAS_CORE_OBSERVED, CAAS_OBSERVED).
  */
 
 include { CAAS_META_CAAS_REPORT } from '../subworkflows/CT_META_CAAS/ctpp_meta_caas'
@@ -71,6 +72,4 @@ workflow CT_META_CAAS {
 
     emit:
         report = meta_caas_results.report
-        meta_caas = meta_caas_results.meta_caas
-        global_meta_caas = meta_caas_results.global_meta_caas
 }

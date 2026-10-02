@@ -59,14 +59,14 @@ process EXTRACT_DISAMBIG_DIR {
 
 workflow ASR_ROBUSTNESS {
     take:
-        disambiguation_dir_channel    // results_dir from CT_DISAMBIGUATION_RUN (full ct_disambiguation/ dir)
+        disambiguation_dir_channel    // ct_disambiguation/ directory of the observed scoring (holds caas_convergence_master.csv)
 
     main:
         // Resolve the disambiguation directory from upstream or standalone param
         def disambig_dir_ch
 
         if (disambiguation_dir_channel) {
-            log.info "📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION"
+            log.info "📥 [asr_robustness] Using the observed scoring output from upstream"
             disambig_dir_ch = disambiguation_dir_channel
         } else {
             assert params.disambiguation_dir : \

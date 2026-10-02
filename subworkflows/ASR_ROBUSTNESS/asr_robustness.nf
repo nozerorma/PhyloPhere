@@ -4,7 +4,7 @@
 #  ASR Robustness: Characterization and reporting (Rmarkdown)
 #
 #  Consumes the full ct_disambiguation/ output directory produced by
-#  CT_DISAMBIGUATION_RUN.  Focal MRCA nodes are auto-derived from the
+#  the observed scoring (CAAS_CORE_OBSERVED, CAAS_OBSERVED).  Focal MRCA nodes are auto-derived from the
 #  mrca_1_node / mrca_2_node / … columns in caas_convergence_master.csv.
 #  The canonical filtering threshold is params.ct_disambig_posterior_threshold.
 */

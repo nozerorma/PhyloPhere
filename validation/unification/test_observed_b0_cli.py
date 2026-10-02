@@ -101,3 +101,16 @@ def test_the_ids_of_the_master_are_those_of_the_meta_tables_at_the_same_position
             assert item.rsplit(":", 1)[0] in ids[(r.msa_pos, r.caap_group)]
             checked += 1
     assert checked > 200
+
+
+def test_a_whole_discovery_tab_gives_the_same_shard_as_the_b0_directory(inp, tmp_path):
+    i = inp / "observed_inputs"
+    cmd = [sys.executable, str(MAIN), "--alignment-dir", str(inp / "align"), "--tree", str(i / "pruned_tree_file.nwk"),
+           "--discovery", str(inp / "b0/PEPC.b0.discovery.tsv"), "--design", str(i / "traitfiles"), "--output-dir", str(tmp_path / "out"),
+           "--asr-model", "lg", "--posterior-threshold", "0.1", "--workers", "2", "--asr-cache-dir", str(i / "asr_cache"),
+           "--taxid-mapping", str(i / "taxid.tsv"), "--ensembl-genes-file", str(i / "gene_ensembl.tsv"),
+           "--fop-pairs", str(i / "traitfiles/contrast_hypotheses_pairs.tsv")]  # the observed file of weights: no cycle column
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    assert p.returncode == 0, p.stdout[-1500:] + p.stderr[-1500:]
+    got = pd.read_csv(tmp_path / "out/PEPC.master.csv.gz", keep_default_na=False)
+    _same_but_tag_support(got, _gold())

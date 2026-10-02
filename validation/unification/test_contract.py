@@ -1,8 +1,9 @@
 """core.contract: the observed contract files written from the b_0 slice.
 
-Oracles: the scripts of CONCAT_DISCOVERY and CONCAT_BACKGROUND (run on the same files, in every arrival order), the
-code of the pattern-annotation report (7.CAAS_pattern_annotation.Rmd, extracted with knitr::purl and run without
-rendering) for the meta tables, and the frozen PEPC discovery.tab and master for the byte-exact reconstructions.
+Oracles: the tables of the former concatenation processes (discovery.tab and background files by gene, whatever the
+arrival order), written out below; the code of the pattern-annotation report that wrote them (reference/7.CAAS_pattern_annotation.with_meta_export.Rmd,
+extracted with knitr::purl and run without rendering) for the meta tables; and the frozen PEPC discovery.tab and
+master for the byte-exact reconstructions.
 """
 import csv
 import gzip
@@ -25,11 +26,21 @@ from src.core import contract  # noqa: E402
 from src.core.labelings import design_max_pairs  # noqa: E402
 from src.core.meta import caas_id  # noqa: E402
 from src.reporting.disambiguation_writers import _generate_dynamic_fields  # noqa: E402
-from test_concat import HEADER, _run, _script, F1, F2, F3, BG  # noqa: E402
 
 GOLD = HERE / "golden/pepc_c4_complete"
-RMD = ROOT / "subworkflows/CT_META_CAAS/local/7.CAAS_pattern_annotation.Rmd"
+RMD = HERE / "reference/7.CAAS_pattern_annotation.with_meta_export.Rmd"  # the report as it was when it wrote the meta tables
 H19 = "\t".join(contract.EMPTY_DISCOVERY_HEADER)
+HEADER = "gene\tmode\tcaap_group\ttrait\tposition"
+
+# one file per gene or batch of genes; a gene's rows keep their production order; H10 before H2 within a gene
+F1 = f"{HEADER}\nSPN\tCAAP\tUS\tH10\t9\nSPN\tCAAP\tUS\tH2\t9\nSPN\tCAAP\tGS1\tH10\t100\n"
+F2 = f"{HEADER}\nAIPL1\tCAAP\tUS\tH1\t5\nAIPL1\tCAAP\tUS\tH1\t3\n"
+F3 = f"{HEADER}\nSHANK2\tCAAP\tUS\tH1\t7\n"
+EXPECTED = (HEADER + "\n"
+            "AIPL1\tCAAP\tUS\tH1\t5\nAIPL1\tCAAP\tUS\tH1\t3\n"      # production order inside a gene is kept
+            "SHANK2\tCAAP\tUS\tH1\t7\n"
+            "SPN\tCAAP\tUS\tH10\t9\nSPN\tCAAP\tUS\tH2\t9\nSPN\tCAAP\tGS1\tH10\t100\n")
+BG = {"a": "SPN\t9,100\n", "b": "AIPL1\tNULL\n", "c": "SHANK2\t7\n", "d": "ANK3\t\n"}
 
 
 def _batch_dirs(tmp_path, files):
@@ -43,39 +54,33 @@ def _batch_dirs(tmp_path, files):
     return dirs
 
 
-# ── discovery.tab and background: the former concatenation processes are the oracle ───────────────
+# ── discovery.tab and background ─────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("order", list(itertools.permutations([("A.b0.discovery.tsv", F1), ("B.b0.discovery.tsv", F2), ("C.b0.discovery.tsv", F3)])))
-def test_discovery_equals_the_former_concatenation_in_every_arrival_order(tmp_path, order):
+def test_discovery_is_gene_ordered_whatever_the_arrival_order(tmp_path, order):
     base = tmp_path / "in"
     base.mkdir()
     dirs = _batch_dirs(base, order)
     out = tmp_path / "discovery.tab"
     contract.write_discovery(contract.batch_files(dirs, contract.DISCOVERY_SUFFIX), out)
-    work = _run("CONCAT_DISCOVERY", [t for _, t in order], tmp_path, "discovery")
-    assert out.read_text() == (work / "discovery.tab").read_text() and out.read_text().count(HEADER) == 1
+    assert out.read_text() == EXPECTED
 
 
-def test_an_empty_discovery_has_the_header_of_the_former_empty_table(tmp_path):
+def test_an_empty_discovery_has_the_header_of_the_empty_table(tmp_path):
     out = tmp_path / "discovery.tab"
     assert contract.write_discovery([], out) == 0
-    work = tmp_path / "w"
-    work.mkdir()
-    (work / "run.sh").write_text(_script("CONCAT_DISCOVERY"))
-    assert subprocess.run(["bash", "run.sh"], cwd=work, capture_output=True).returncode == 0
-    assert out.read_text() == (work / "discovery.tab").read_text() == H19 + "\n"
+    assert out.read_text() == H19 + "\n"
 
 
 @pytest.mark.parametrize("order", list(itertools.permutations(list(BG.items()))))
-def test_background_equals_the_former_concatenation_in_every_arrival_order(tmp_path, order):
+def test_background_is_gene_ordered_and_lists_genes_with_positions(tmp_path, order):
     base = tmp_path / "in"
     base.mkdir()
     dirs = _batch_dirs(base, [(f"{k}.b0.background", v) for k, v in order])
     out, genes = tmp_path / "background.output", tmp_path / "background_genes.output"
     contract.write_background(contract.batch_files(dirs, contract.BACKGROUND_SUFFIX), out, genes)
-    work = _run("CONCAT_BACKGROUND", [v for _, v in order], tmp_path, "background")
-    assert out.read_text() == (work / "background.output").read_text()
-    assert genes.read_text() == (work / "background_genes.output").read_text() == "SHANK2\nSPN\n"
+    assert out.read_text() == "AIPL1\tNULL\nANK3\t\nSHANK2\t7\nSPN\t9,100\n"
+    assert genes.read_text() == "SHANK2\nSPN\n"
 
 
 def test_an_empty_background_is_the_header_and_no_genes(tmp_path):
@@ -219,20 +224,52 @@ def test_the_command_line_writes_every_contract_file_and_ignores_a_sentinel_amon
     assert p.returncode == 0, p.stderr[-1500:]
     out = tmp_path / "out"
     assert (out / "discovery.tab").read_text() == gzip.open(GOLD / "discovery.tab.gz", "rt").read()
-    assert (out / "caas_convergence_master.csv").read_text() == GOLD_MASTER
+    assert (out / "ct_disambiguation/caas_convergence_master.csv").read_text() == GOLD_MASTER
     assert (out / "background.output").read_text() == "PEPC\t1,2,3\n" and (out / "background_genes.output").read_text() == "PEPC\n"
     assert sorted(f.name for f in (out / "meta_caas").iterdir()) == ["GS1_meta_caas.tsv", "GS2_meta_caas.tsv", "GS3_meta_caas.tsv",
                                                                      "GS4_meta_caas.tsv", "US_meta_caas.tsv", "global_meta_caas.tsv"]
 
 
-def test_the_command_line_with_no_directory_writes_the_empty_tables(tmp_path):
+def test_the_command_line_with_batches_that_carry_no_b0_slice_writes_nothing(tmp_path):
     design = tmp_path / "design"
     design.mkdir()
     (design / "traitfile_H1.tab").write_text("a\t1\t1\nb\t0\t1\n")
-    p = subprocess.run([sys.executable, str(SRC / "contract_main.py"), "--b0-dirs", str(tmp_path / "NO_B0_OBSERVED"),
+    (tmp_path / "empty").mkdir()
+    p = subprocess.run([sys.executable, str(SRC / "contract_main.py"), "--b0-dirs", str(tmp_path / "NO_B0_OBSERVED"), str(tmp_path / "empty"),
                         "--design", str(design), "--output-dir", str(tmp_path / "out")], capture_output=True, text=True)
     assert p.returncode == 0, p.stderr[-1500:]
+    assert list((tmp_path / "out").iterdir()) == []
+
+
+def test_the_command_line_with_a_gene_without_hits_writes_its_background_and_the_empty_tables(tmp_path):
+    design = tmp_path / "design"
+    design.mkdir()
+    (design / "traitfile_H1.tab").write_text("a\t1\t1\nb\t0\t1\n")
+    d = tmp_path / "b0"
+    d.mkdir()
+    (d / "NOHIT.b0.background").write_text("NOHIT\t1,2\n")
+    p = subprocess.run([sys.executable, str(SRC / "contract_main.py"), "--b0-dirs", str(d), "--design", str(design),
+                        "--output-dir", str(tmp_path / "out")], capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr[-1500:]
     out = tmp_path / "out"
-    assert (out / "discovery.tab").read_text() == H19 + "\n" and (out / "background.output").read_text() == "Gene\tPosition\n"
-    assert (out / "background_genes.output").read_text() == ""
-    assert (out / "caas_convergence_master.csv").read_text().strip() == ",".join(_generate_dynamic_fields(1))
+    assert (out / "discovery.tab").read_text() == H19 + "\n" and (out / "background.output").read_text() == "NOHIT\t1,2\n"
+    assert (out / "background_genes.output").read_text() == "NOHIT\n"
+    assert (out / "ct_disambiguation/caas_convergence_master.csv").read_text().strip() == ",".join(_generate_dynamic_fields(1))
+
+
+def test_the_command_line_can_write_the_master_and_meta_tables_for_a_discovery_file_that_exists(tmp_path):
+    d = tmp_path / "shards"
+    d.mkdir()
+    _shard(d / "PEPC.master.csv.gz", GOLD_MASTER)
+    disc = tmp_path / "discovery.tab"
+    disc.write_text(gzip.open(GOLD / "discovery.tab.gz", "rt").read())
+    design = tmp_path / "design"
+    design.mkdir()
+    (design / "traitfile_H1.tab").write_text("".join(f"s{i}a\t1\t{i}\ns{i}b\t0\t{i}\n" for i in range(1, 5)))
+    p = subprocess.run([sys.executable, str(SRC / "contract_main.py"), "--b0-dirs", str(d), "--design", str(design),
+                        "--discovery-file", str(disc), "--output-dir", str(tmp_path / "out")], capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr[-1500:]
+    out = tmp_path / "out"
+    assert sorted(f.name for f in out.iterdir()) == ["ct_disambiguation", "meta_caas"]  # no discovery.tab or background rewritten
+    assert (out / "ct_disambiguation/caas_convergence_master.csv").read_text() == GOLD_MASTER
+    assert (out / "meta_caas/global_meta_caas.tsv").exists()

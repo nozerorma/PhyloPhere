@@ -89,8 +89,7 @@ Usage:
 --max_miss_fraction         <FLOAT 0-1>                  0.0
 --miss_pair                 <true|false>                 true
 --caap_mode                 <true|false>                 true
---ct_discovery_batch_size   <INTEGER>                    25    (genes per task)
---ct_core_batch_size        <INTEGER>                    20    (permulation null: genes per replay + ASR replay task; 1 = one task per gene)
+--ct_core_batch_size        <INTEGER>                    20    (permulation core: genes per replay + ASR replay task, observed labeling included; 1 = one task per gene)
 --publish_intermediates     <true|false>                 false
 
 NOTE: fractions are resolved to floor(n_pairs * fraction) at runtime.
@@ -161,7 +160,7 @@ Classifies each discovered CAAS as convergent, parallel or divergent using
 ancestral state reconstruction (ASR) relative to the phenotype tree topology.
 
 Usage:
---meta_caas_from                <"meta_caas_output">          null  (standalone entry; --signification_from still accepted as a deprecated alias)
+--meta_caas_from                <"meta_caas_output">          null  (a previous run's global_meta_caas.tsv: locates that run's outdir to reuse its permulation exports; --signification_from still accepted as a deprecated alias)
 --ct_disambig_asr_mode            <"precomputed">                "precomputed"
 --ct_disambig_asr_model             <"lg">                          "lg"
 --ct_disambig_asr_cache_dir          <"cache_dir">                   null

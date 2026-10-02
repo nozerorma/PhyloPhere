@@ -2,7 +2,7 @@
 """The observed labeling (b_0) as full records: one master shard per gene.
 
 Reads the b_0 discovery rows a perm-replay batch exported (`<alignment id>.b0.discovery.tsv`, the rows of
-discovery.tab), scores each gene through `core.observed` against its ASR (cache first, PAML on a miss) and writes
+discovery.tab), or a discovery.tab that already exists (`--discovery`), scores each gene through `core.observed` against its ASR (cache first, PAML on a miss) and writes
 `<gene>.master.csv.gz`: the gene's rows of caas_convergence_master.csv, in master column order. The merge step
 concatenates the shards. A gene with no alignment or ASR is left out with a warning.
 """
@@ -34,7 +34,9 @@ def parse_arguments():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("--alignment-dir", required=True, help="Directory with alignment files")
     p.add_argument("--tree", required=True, help="Phylogenetic tree (Newick)")
-    p.add_argument("--b0-dir", required=True, help=f"Directory with the *{DISCOVERY_SUFFIX} files of a perm-replay batch")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--b0-dir", help=f"Directory with the *{DISCOVERY_SUFFIX} files of a perm-replay batch")
+    src.add_argument("--discovery", help="A discovery.tab: every gene in it is scored")
     p.add_argument("--design", required=True, help="Observed design: the trait file, or the directory of traitfile_H*.tab")
     p.add_argument("--fop-pairs", default=None, help="fop_pairs.tsv holding the b_0 PSS weights (omit for a single contrast)")
     p.add_argument("--output-dir", required=True, help="Directory for the <gene>.master.csv.gz shards")
@@ -50,10 +52,12 @@ def parse_arguments():
     return p.parse_args()
 
 
-def read_b0_rows(b0_dir):
-    """{gene: [discovery rows]} of every b_0 discovery file in the directory, rows in file order."""
+def read_b0_rows(source):
+    """{gene: [discovery rows]} of every b_0 discovery file in a directory, or of one discovery.tab; rows in file order."""
     by_gene = {}
-    for path in sorted(Path(b0_dir).glob(f"*{DISCOVERY_SUFFIX}")):
+    source = Path(source)
+    paths = [source] if source.is_file() else sorted(source.glob(f"*{DISCOVERY_SUFFIX}"))
+    for path in paths:
         with open(path, newline="") as fh:
             for row in csv.DictReader(fh, delimiter="\t"):
                 by_gene.setdefault(row["gene"], []).append(row)
@@ -79,7 +83,7 @@ def main():
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    by_gene = read_b0_rows(args.b0_dir)
+    by_gene = read_b0_rows(args.b0_dir or args.discovery)
     logger.info(f"[observed] {len(by_gene)} genes with b_0 hits")
     if not by_gene:
         return

@@ -144,7 +144,7 @@ workflow SCORING {
         // Value channel via collect()/map (NOT .first(), which warns on a value channel).
         //
         // Three ways to get here, in precedence order:
-        //   1. caas_perms_ch      — CAAS_PERMULATION ran live in this pass; always valid.
+        //   1. caas_perms_ch      — CAAS_CORE_MERGE ran live in this pass; always valid.
         //   2. caas_pos_detail_file — no live null, but a prior run's raw per-cycle
         //      detail is available: CAAS_CORE_MERGE rebuilds it rather than importing a cached RDS. The null
         //      must hold the same gene-level statistic as the observed gene score
@@ -160,7 +160,7 @@ workflow SCORING {
             def _detail = file(params.caas_pos_detail_file)
             assert _detail.exists() : "SCORING: --caas_pos_detail_file not found: ${params.caas_pos_detail_file}"
             log.info "SCORING: rebuilding CAAS permulation null from ${_detail.name} (no ASR replay)"
-            _rebuild = CAAS_CORE_MERGE(Channel.value(_detail), resolved_background, Channel.value(params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE')), Channel.value(file('NO_B0_OBSERVED')), Channel.value(file('NO_DESIGN')))
+            _rebuild = CAAS_CORE_MERGE(Channel.value(_detail), resolved_background, Channel.value(params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE')))
             caas_perms_resolved = _rebuild.perms.collect().map { it[0] }
         } else {
             caas_perms_resolved = (caas_perms_ch ?: Channel.empty())

@@ -25,3 +25,24 @@ def test_no_tracked_file_outside_the_allowlist_names_the_retired_layout():
             continue
         hits += [f"{name}:{n}: {line.strip()[:100]}" for n, line in enumerate(text.splitlines(), 1) if RETIRED.search(line)]
     assert not hits, "\n".join(hits)
+
+
+RETIRED_OBSERVED = re.compile(r"DISCOVERY_BATCHED|CONCAT_DISCOVERY|CONCAT_BACKGROUND|CT_DISAMBIGUATION_(?:RUN|SPLIT_GENES|MERGE|PLOTS)"
+                              r"|\bCAAS_PERMULATION\b|run_ct_discovery_batch|process_discovery_batched|ct_discovery\.nf|\basr_ready\b"
+                              r"|merge_disambiguation_batches|regenerate_disambiguation_plots")
+# the frozen records, the archive and the style archetypes keep their history; the GUI is checked by test_gui_core_batch.py
+ALLOWED_OBSERVED = ("archive/", "validation/", "style/", "docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md", "gui/")
+
+
+def test_no_tracked_file_names_a_process_of_the_former_observed_chain():
+    files = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split("\0")
+    hits = []
+    for name in filter(None, files):
+        if name.startswith(ALLOWED_OBSERVED):
+            continue
+        try:
+            text = (ROOT / name).read_text()
+        except (UnicodeDecodeError, FileNotFoundError, IsADirectoryError):
+            continue
+        hits += [f"{name}:{n}: {line.strip()[:100]}" for n, line in enumerate(text.splitlines(), 1) if RETIRED_OBSERVED.search(line)]
+    assert not hits, "\n".join(hits)

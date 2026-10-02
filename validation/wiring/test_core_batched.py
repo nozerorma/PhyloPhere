@@ -345,79 +345,104 @@ def test_a_batch_that_reuses_exports_has_no_b0_slice(tmp_path, inp, fop_pairs):
     assert len(dirs) == 1 and list(dirs[0].iterdir()) == []
 
 
-# ── CAAS_CORE_MERGE: the observed contract files ─────────────────────────────
+# ── CAAS_CORE_OBSERVED: the observed contract files ─────────────────────────
 
 @pytest.fixture(scope="module")
 def b0_batches(tmp_path_factory, inp, fop_pairs):
-    """Shard and b_0 directories of two one-gene batches (PEPC, PEPD), as CAAS_CORE_BATCHED leaves them."""
+    """b_0 directories of two one-gene batches (PEPC, PEPD), as CAAS_CORE_BATCHED leaves them."""
     root = tmp_path_factory.mktemp("b0batches")
-    details = _nf(root, inp, 1, ["PEPC", "PEPD"], fop_pairs=fop_pairs)
-    return details, _b0_dirs(root)
+    _nf(root, inp, 1, ["PEPC", "PEPD"], fop_pairs=fop_pairs)
+    return _b0_dirs(root)
 
 
-def _contract(tmp_path, inp, details, b0_dirs):
-    out, _ = _merge_nf(tmp_path, inp, details, "--mini_b0", ",".join(str(d) for d in b0_dirs), "--mini_design", str(inp / "cfg"))
-    paths = [Path(p) for p in (tmp_path / "out/contract_paths.txt").read_text().split()]
+def _observed(tmp_path, inp, b0_dirs):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    tw._mini(tmp_path, "mini_core_observed.nf", "--mini_b0", ",".join(str(d) for d in b0_dirs), "--mini_design", str(inp / "cfg"),
+             "--outdir", str(tmp_path / "out"))
+    listing = tmp_path / "out/contract_paths.txt"
+    if not listing.exists():
+        return {}
     got = {}
-    for p in paths:
-        if p.is_dir():
-            got.update({f"meta_caas/{f.name}": f.read_text() for f in p.glob("*.tsv")})
-        else:
-            got[p.name] = p.read_text()
+    for p in map(Path, listing.read_text().split()):
+        got[p.name] = p.read_text()
+        if p.name == "global_meta_caas.tsv":
+            got.update({f"meta_caas/{f.name}": f.read_text() for f in p.parent.glob("*.tsv")})
+        if p.name == "caas_convergence_master.csv":
+            assert p.parent.name == "ct_disambiguation"
     return got
 
 
 @tw.needs_nextflow
-def test_the_merge_writes_the_contract_files_from_the_b0_slices_in_any_batch_order(tmp_path, inp, b0_batches):
-    details, b0_dirs = b0_batches
-    assert len(b0_dirs) == 2
-    forward = _contract(tmp_path / "fwd", inp, details, b0_dirs)
-    backward = _contract(tmp_path / "bwd", inp, details, b0_dirs[::-1])
-    assert forward == backward
+def test_the_observed_files_come_from_the_b0_slices_in_any_batch_order(tmp_path, inp, b0_batches):
+    assert len(b0_batches) == 2
+    forward = _observed(tmp_path / "fwd", inp, b0_batches)
+    assert forward == _observed(tmp_path / "bwd", inp, b0_batches[::-1])
     # the same files as the command line gives on the same directories
     direct = tmp_path / "direct"
-    subprocess.run([sys.executable, str(LOCAL / "contract_main.py"), "--b0-dirs", *map(str, b0_dirs), "--design", str(inp / "cfg"),
+    subprocess.run([sys.executable, str(LOCAL / "contract_main.py"), "--b0-dirs", *map(str, b0_batches), "--design", str(inp / "cfg"),
                     "--output-dir", str(direct)], check=True, capture_output=True)
     expect = {f.name: f.read_text() for f in direct.iterdir() if f.is_file()}
+    expect["caas_convergence_master.csv"] = (direct / "ct_disambiguation/caas_convergence_master.csv").read_text()
     expect.update({f"meta_caas/{f.name}": f.read_text() for f in (direct / "meta_caas").glob("*.tsv")})
-    assert forward == expect
+    assert {k: v for k, v in forward.items() if k in expect} == expect and set(expect) <= set(forward)
     genes = [l.split("\t")[0] for l in forward["discovery.tab"].splitlines()[1:]]
     assert genes == sorted(genes) and set(genes) == {"PEPC", "PEPD"}
-    assert forward["background_genes.output"] == "PEPC\nPEPD\n" and forward["background.output"].count("\n") == 2  # one line per gene of the batches
+    assert forward["background_genes.output"] == "PEPC\nPEPD\n" and forward["background.output"].count("\n") == 2  # one line per gene
     assert len(forward["caas_convergence_master.csv"].splitlines()) == 1 + 2 * 217
-    assert set(forward) >= {"meta_caas/global_meta_caas.tsv", "meta_caas/US_meta_caas.tsv"}
 
 
 @tw.needs_nextflow
-def test_the_merge_without_b0_slices_writes_no_contract_file(tmp_path, inp, shard_batches):
-    _merge_nf(tmp_path, inp, shard_batches)
-    assert not (tmp_path / "out/contract_paths.txt").exists()
+def test_batches_without_a_b0_slice_give_no_observed_file(tmp_path, inp, shard_batches):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert _observed(tmp_path / "run", inp, [empty]) == {}
 
 
-def test_the_standalone_scoring_route_passes_distinct_sentinels_for_the_inputs_the_merge_gets_there_without_a_batch():
-    call = next(l for l in (tw.ROOT / "workflows/scoring.nf").read_text().splitlines() if "CAAS_CORE_MERGE(" in l and "_rebuild" in l)
-    assert "file('NO_B0_OBSERVED')" in call and "file('NO_DESIGN')" in call
-    assert call.count("file('NO_FILE')") <= 1  # two inputs named NO_FILE would collide when staged
-
-
-def _permulation(tmp_path, inp, fop_pairs, genes):
+@tw.needs_nextflow
+def test_the_core_hands_the_b0_slices_of_its_batches_to_the_observed_step_and_the_null_merge_does_not_wait_for_them(tmp_path, inp, fop_pairs):
     i = inp / "observed_inputs"
-    r = tw._mini(tmp_path, "mini_permulation.nf", "--mini_cfg", str(inp / "cfg"), "--mini_resample", str(inp / "resample_perms.tab"),
+    r = tw._mini(tmp_path, "mini_core_chain.nf", "--mini_cfg", str(inp / "cfg"), "--mini_resample", str(inp / "resample_perms.tab"),
                  "--mini_tree", str(i / "pruned_tree_file.nwk"), "--mini_fop_pairs", str(fop_pairs), "--mini_lengths", str(i / "gene_ensembl.tsv"),
-                 "--mini_alignments", ",".join(str(inp / "ali" / f"{g}.fa") for g in genes), "--outdir", str(tmp_path / "out"),
+                 "--mini_alignments", ",".join(str(inp / "ali" / f"{g}.fa") for g in ("PEPC", "PEPD")), "--outdir", str(tmp_path / "out"),
                  "--alignment", str(inp / "ali"), "--ct_core_batch_size", "1", "--ct_disambig_asr_cache_dir", str(i / "asr_cache"),
                  "--tax_id", str(i / "taxid.tsv"), "--gene_ensembl_file", str(i / "gene_ensembl.tsv"), "--ct_disambig_posterior_threshold", "0.1",
                  "--ct_disambig_asr_model", "lg", "--ali_format", "fasta", "--patterns", "1,2,3", "--miss_pair", "true", "--caap_mode", "true",
                  "--min_divergent_fraction", "0.5", "--seed", "1998")
-    listing = tmp_path / "out/contract_paths.txt"
+    listing = tmp_path / "out/chain_paths.txt"
     assert listing.exists(), r.stdout[-1500:] + r.stderr[-1500:]
-    return {Path(p).name: Path(p).read_text() for p in listing.read_text().split()}
-
-
-@tw.needs_nextflow
-def test_the_permulation_workflow_hands_the_b0_slices_of_its_batches_to_the_merge(tmp_path, inp, fop_pairs):
-    files = _permulation(tmp_path, inp, fop_pairs, ("PEPC", "PEPD"))
-    assert sorted(files) == ["background.output", "background_genes.output", "caas_convergence_master.csv", "discovery.tab", "global_meta_caas.tsv"]
+    files = {Path(p).name: Path(p).read_text() if Path(p).suffix != ".rds" else "" for p in listing.read_text().split()}
+    assert sorted(files) == ["background.output", "background_genes.output", "caas_convergence_master.csv", "caas_perms.rds", "discovery.tab",
+                             "global_meta_caas.tsv"]
     assert len(files["caas_convergence_master.csv"].splitlines()) == 1 + 2 * 217
     assert {l.split("\t")[0] for l in files["discovery.tab"].splitlines()[1:]} == {"PEPC", "PEPD"}
 
+
+@tw.needs_nextflow
+def test_a_discovery_tab_that_exists_is_scored_to_the_frozen_master_and_the_meta_tables(tmp_path, inp):
+    i = inp / "observed_inputs"
+    disc = tmp_path / "discovery.tab"
+    disc.write_text(gzip.open(GOLD / "discovery.tab.gz", "rt").read())
+    (tmp_path / "ali").mkdir()
+    shutil.copy(GOLD / "PEPC.fasta", tmp_path / "ali/PEPC.fa")
+    r = tw._mini(tmp_path, "mini_caas_observed.nf", "--mini_discovery", str(disc), "--mini_design", str(i / "traitfiles"),
+                 "--mini_tree", str(i / "pruned_tree_file.nwk"), "--mini_hyp_pairs", str(i / "traitfiles/contrast_hypotheses_pairs.tsv"),
+                 "--outdir", str(tmp_path / "out"), "--alignment", str(tmp_path / "ali"), "--ct_disambig_asr_cache_dir", str(i / "asr_cache"),
+                 "--tax_id", str(i / "taxid.tsv"), "--gene_ensembl_file", str(i / "gene_ensembl.tsv"), "--ct_disambig_posterior_threshold", "0.1",
+                 "--ct_disambig_asr_model", "lg")
+    listing = tmp_path / "out/observed_paths.txt"
+    assert listing.exists(), r.stdout[-1500:] + r.stderr[-1500:]
+    master, meta = sorted(map(Path, listing.read_text().split()), key=lambda p: p.suffix)  # .csv, .tsv
+    import pandas as pd
+    got = pd.read_csv(master, keep_default_na=False)
+    gold = pd.read_csv(GOLD / "caas_convergence_master.csv", keep_default_na=False)
+    assert list(got.columns) == list(gold.columns) and len(got) == len(gold) == 217
+    for c in gold.columns:  # the ids of tag_support are content hashes; everything else is the frozen master
+        if c == "tag_support":
+            continue
+        if gold[c].dtype.kind == "f":
+            assert float((got[c] - gold[c]).abs().max(skipna=True) or 0.0) <= 1e-12, c
+        else:
+            assert got[c].equals(gold[c]), c
+    assert sorted(f.name for f in meta.parent.iterdir() if f.suffix == ".tsv") == [
+        "GS1_meta_caas.tsv", "GS2_meta_caas.tsv", "GS3_meta_caas.tsv", "GS4_meta_caas.tsv", "US_meta_caas.tsv", "global_meta_caas.tsv"]
+    assert len(meta.read_text().splitlines()) == 1 + len(disc.read_text().splitlines()) - 1

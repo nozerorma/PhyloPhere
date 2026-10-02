@@ -47,7 +47,7 @@ include {REPORTING} from './workflows/reporting.nf'
 include {CONTRAST_SELECTION} from './workflows/contrast_selection.nf'
 include {CT_META_CAAS} from './workflows/ct_meta_caas.nf'
 include {CT_POSTPROC} from './workflows/ct_postproc.nf'
-include {CT_DISAMBIGUATION} from './workflows/ct_disambiguation.nf'
+include {CT_OBSERVED} from './workflows/ct_observed.nf'
 include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
 include {FADE_REPORT as FADE_REPORT_PRECOMP_TOP; FADE_REPORT as FADE_REPORT_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_report.nf'
@@ -62,7 +62,7 @@ include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}                       from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
 include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_META_CAAS/ctpp_meta_caas.nf'
-include {CAAS_PERMULATION; CAAS_PERMS_PREP} from './subworkflows/CT/caas_permulation.nf'
+include {CAAS_CORE; CAAS_CORE_OBSERVED; CAAS_CORE_MERGE; CAAS_PERMS_PREP} from './subworkflows/CT/caas_permulation.nf'
 include {ENRICHMENT}      from './workflows/enrichment.nf'
 
 // Coerce a param that may arrive as Boolean, String ("false", "0", ...) or null into a Boolean.
@@ -227,7 +227,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             ran_any = true
         }
         def meta_caas_results = null
-        def disambiguation_results = null
+        def observed_results = null   // master_csv and results_dir (ct_disambiguation/) of the observed labeling
+        def observed_meta = null      // CT_OBSERVED outputs, when a discovery.tab was scored there
         def postproc_results = null
 
         // Track which sub-tools actually ran so we can pass null (not Channel.empty())
@@ -241,30 +242,18 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                                     ? params.ct_tool.split(',').collect { it.trim() } : []
         def ran_discovery     = ct_tools_ran.contains('discovery')
 
-        // CT_META_CAAS (pattern/caap_group summary + meta_caas.tsv export) runs
-        // downstream of discovery. No separate --ct_meta_caas toggle: it is
-        // implied by running discovery (or a standalone --discovery_from file).
-        def run_meta_caas = ran_discovery || params.discovery_from
-
-        def run_ct_disambiguation = toBool(params.ct_disambiguation) && (run_meta_caas || params.meta_caas_from || params.disambiguation_input)
+        // The observed labeling is the b_0 slice of the permulation core: when the core replays the alignments
+        // (ct_tool 'discovery', or the standalone replay), CAAS_CORE_OBSERVED writes discovery.tab, the background
+        // files, the meta_caas tables and the master CSV from it. A discovery.tab given with --discovery_from is
+        // scored by CT_OBSERVED instead, with the same code.
+        def run_ct_disambiguation = toBool(params.ct_disambiguation) && (ran_discovery || params.discovery_from || params.disambiguation_input)
         def run_ct_postproc       = toBool(params.ct_postproc) && (run_ct_disambiguation || params.disambiguation_input)
         def run_ct_accumulation   = toBool(params.ct_accumulation) && (run_ct_postproc || params.accumulation_background_input)
-        def run_caas_permulation  = run_ct_disambiguation || (toBool(params.enrichment) && toBool(params.caas_permulation_enrichment))
+        def run_caas_permulation  = run_ct_disambiguation || ran_discovery || (toBool(params.enrichment) && toBool(params.caas_permulation_enrichment))
 
         // Stable channel references for CT_POSTPROC outputs used by multiple consumers.
         // Populated inside the ct_postproc block when --ct_postproc is enabled.
         def pp_cleaned_bg     = null   // cleaned_background_main (single file, value channel)
-
-        if (run_meta_caas) {
-            // Only pass CT channels when the corresponding tool actually ran.
-            // Pass null (not Channel.empty()) when absent so the if(channel) guard
-            // inside CT_META_CAAS correctly detects absence and falls back to params.
-            def discovery_ch        = (ct_results && ran_discovery) ? ct_results.discovery_file   : null
-            def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes  : null
-
-            meta_caas_results = CT_META_CAAS(discovery_ch, background_genes_ch)
-            ran_any = true
-        }
 
         def scoring_caas_perms_ch = null
         def scoring_caas_perm_scores_ch = null
@@ -273,98 +262,27 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         def scoring_caas_pos_quantiles_ch = null
         def scoring_caas_pos_detail_ch = null        // sharded perm_pos_detail dir — CT_ACCUMULATION permulation null (Tier 3E)
         def scoring_caas_gene_cycle_scores_ch = null // gene_cycle_scores.tsv — CT_ACCUMULATION permulation null (Tier 3E)
-        def caas_perm_out = null
-
-        if (run_ct_disambiguation) {
-            // Forward both possible CT_META_CAAS metadata artifacts; CT_DISAMBIGUATION
-            // will prefer global_meta_caas.tsv when present and otherwise accept
-            // the per-run meta_caas.tsv fallback.
-            def meta_for_disambiguation = meta_caas_results
-                ? meta_caas_results.global_meta_caas.mix(meta_caas_results.meta_caas)
-                : null
-            // Disambiguation needs the fg/bg trait file(s) that defined the contrasts the
-            // CAAS were discovered under. Two suppliers, in order of preference:
-            //   • CT ran live            -> ct_results.trait_file (carries traitfiles_ok_dir in multi-hypothesis mode)
-            //   • CONTRAST_SELECTION ran -> (contrast_out.trait_dir_out ?: contrast_out.trait_file_out)
-            // CONTRAST_SELECTION is deterministic given the same --my_traits and tree,
-            // so the pairing it emits here matches the one the precomputed discovery
-            // used. Falling through to Channel.empty() lands on --caas_config, which
-            // only standalone (non-GUI) runs set. Same resolution as the stats/tree
-            // channels built for POSENRICH below.
-            def trait_for_disambiguation = ct_results
-                ? ct_results.trait_file
-                : (contrast_out ? (contrast_out.trait_dir_out ?: contrast_out.trait_file_out) : Channel.empty())
-            def tree_for_disambiguation = ct_results
-                ? ct_results.tree_file
-                : (contrast_out ? contrast_out.tree_file_out : Channel.empty())
-
-            // FOP pair weights from the same trait supplier: in multi-hypothesis
-            // mode the trait channel is a directory (traitfiles_ok_dir /
-            // Traitfiles) holding contrast_hypotheses_pairs.tsv.
-            def hyp_pairs_for_disambiguation = (ct_results || contrast_out)
-                ? trait_for_disambiguation.map { d ->
-                      def f = file("${d}/contrast_hypotheses_pairs.tsv")
-                      (file(d).isDirectory() && f.exists()) ? f : file('NO_HYP_PAIRS')
-                  }
-                : null
-
-            disambiguation_results = CT_DISAMBIGUATION(meta_for_disambiguation, trait_for_disambiguation,
-                                                       tree_for_disambiguation, hyp_pairs_for_disambiguation)
-            ran_any = true
-        }
-
-        // CT_POSTPROC is resolved before the permulation null so that the null receives the real
-        // cleaned background as its gene universe (dataflow, not call order, decides when tasks run).
-        if (run_ct_postproc) {
-            // Post-processing is downstream from disambiguation; consume disambiguation master CSV when available
-            // Pass null (not Channel.empty()) when there is no upstream result so that the
-            // if(channel) guard inside CT_POSTPROC correctly detects absence and falls back
-            // to --disambiguation_input / --background_input params (same pattern as CT_META_CAAS).
-            def disambiguation_ch = disambiguation_results ? disambiguation_results.master_csv : null
-            // Only wire the background genes when discovery actually ran; otherwise pass null so
-            // CT_POSTPROC falls back to the --background_input param.
-            def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes    : null
-            // Pass full ct_disambiguation/ directory for ASR robustness diagnostics (null = standalone mode)
-            def disambiguation_dir_ch = disambiguation_results ? disambiguation_results.results_dir : null
-            postproc_results = CT_POSTPROC(disambiguation_ch, background_genes_ch, disambiguation_dir_ch)
-            ran_any = true
-
-            // Capture postproc outputs as reusable references.
-            // cleaned_background is already a value channel (single file from CAAS_BACKGROUND_CLEANUP).
-            pp_cleaned_bg = postproc_results.cleaned_background
-        }
-
-        // Fallback resolution for precomputed / standalone runs where --ct_postproc did not run live
-        if (!pp_cleaned_bg) {
-            def bg_candidate = params.background_input ?: (params.scoring_background_input ?: (params.accumulation_background_input ?: ''))
-            if (!bg_candidate && params.scoring_postproc_input) {
-                def pfile = file(params.scoring_postproc_input)
-                def pdir = pfile ? pfile.parent : null
-                if (pdir && file("${pdir}/cleaned_background_main.txt").exists()) {
-                    bg_candidate = "${pdir}/cleaned_background_main.txt"
-                }
-            }
-            if (bg_candidate && file(bg_candidate).exists()) {
-                pp_cleaned_bg = Channel.value(file(bg_candidate))
-            }
-        }
-
+        def core = null               // the permulation core: shard directories and b_0 slices of the batches
+        def core_observed = null      // the observed contract files, written from the b_0 slices
+        def core_replays = false      // true when the core replays the alignments (it then has a b_0 slice)
+        def caas_gene_lengths_ch = Channel.value(
+            params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE'))
         if (run_caas_permulation) {
-
 
             def perm_align_ch = Channel.empty()   // alignments to replay
             def perm_reuse_ch = Channel.empty()   // perm-discovery exports that already exist
             def perm_cfg_ch = Channel.value(file('NO_CONFIG'))
             def perm_subset_ch = null
             def perm_fop_pairs_ch = Channel.value(file('NO_FOP_PAIRS'))
-            // Must stay a channel: CAAS_PERMULATION does tree_file.combine(asr_ready)
-            // on it. ct_results.tree_file / contrast_out.tree_file_out are workflow
-            // emits (already channels); the bare params.tree path needs wrapping or
-            // the .combine() call throws MissingMethodException on sun.nio.fs.UnixPath.
+            // Must stay a channel: CAAS_CORE turns it into a value channel with collect().
+            // ct_results.tree_file / contrast_out.tree_file_out are workflow emits (already
+            // channels); the bare params.tree path needs wrapping or the call throws
+            // MissingMethodException on sun.nio.fs.UnixPath.
             def perm_tree_ch = ct_results ? ct_results.tree_file : (contrast_out ? contrast_out.tree_file_out : (params.tree ? Channel.value(file(params.tree)) : Channel.empty()))
 
             if (ct_results && ct_results.caas_align_tuple && ct_results.caas_resample_subset) {
                 perm_align_ch = ct_results.caas_align_tuple
+                core_replays = true
                 perm_subset_ch = ct_results.caas_resample_subset
                 perm_cfg_ch = ct_results.trait_file
                 if (ct_results.caas_fop_pairs) perm_fop_pairs_ch = ct_results.caas_fop_pairs
@@ -425,7 +343,13 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 precomp_subset_file = precomp_found?.subset
 
                 if (precomp_disc_files && precomp_subset_file) {
-                    log.info "[CAAS_PERMULATION] Reusing precomputed permulation discovery (${precomp_disc_files.size()} file(s)) + resample file (${precomp_subset_file.name}) for ASR re-disambiguation"
+                    // The exports were made from the labelings file next to them; b_0 is its first row when the
+                    // run replayed the real labeling. Exports without it carry no b_0 slice.
+                    def first_labeling = precomp_subset_file.withReader { r -> r.readLine() } ?: ''
+                    if (!(first_labeling ==~ /^b_0(~[^\t]*)?\t.*/)) {
+                        error "[CAAS_CORE] The perm-discovery exports to reuse were made without the real labeling (b_0): ${precomp_subset_file} has no b_0 rows. Rerun the null to replay it."
+                    }
+                    log.info "[CAAS_CORE] Reusing precomputed permulation discovery (${precomp_disc_files.size()} file(s)) + resample file (${precomp_subset_file.name}) for ASR re-disambiguation"
                     perm_reuse_ch = Channel.fromPath(precomp_disc_files).collect()
                     perm_subset_ch = Channel.value(precomp_subset_file)
                 } else {
@@ -461,6 +385,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
 
                             def perms_prep = CAAS_PERMS_PREP(caas_cfg_standalone, resample_src)
                             perm_align_ch = align_tuple_standalone
+                            core_replays = true
                             perm_cfg_ch = (caas_cfg_standalone instanceof java.nio.file.Path) ? Channel.value(caas_cfg_standalone) : caas_cfg_standalone
                             perm_subset_ch = perms_prep.resample_subset
                             perm_fop_pairs_ch = perms_prep.fop_pairs
@@ -470,39 +395,122 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             }
 
             if (perm_subset_ch) {
-                def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
-                // In asr_mode=compute the live CT_DISAMBIGUATION_RUN writes the
-                // shared ASR cache that CAAS_CORE_BATCHED reads — gate the
-                // batches on it completing (its master_csv is written only after
-                // every gene's ASR is cached). No gate when ASR is precomputed
-                // (cache already on disk) or disambiguation didn't run live.
-                def asr_gate_ch = (params.ct_disambiguation
-                                   && (params.ct_disambig_asr_mode ?: 'precomputed') == 'compute'
-                                   && disambiguation_results)
-                    ? disambiguation_results.master_csv
-                    : Channel.value('NO_GATE')
-                def caas_gene_lengths_ch = Channel.value(
-                    params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE'))
-                caas_perm_out = CAAS_PERMULATION(
+                core = CAAS_CORE(
                     perm_align_ch,
                     perm_reuse_ch,
                     perm_cfg_ch,
                     perm_subset_ch,
                     perm_tree_ch,
-                    caas_universe_ch,
                     perm_fop_pairs_ch,
-                    caas_gene_lengths_ch,
-                    asr_gate_ch
+                    caas_gene_lengths_ch
                 )
-                scoring_caas_perms_ch = caas_perm_out.perms
-                scoring_caas_perm_scores_ch = Channel.empty()
-                scoring_caas_pos_cycle_caas_ch = caas_perm_out.pos_cycle_caas  // per (gene,position,side,cycle) caas_score -> p.emp
-                scoring_caas_pos_sample_ch = caas_perm_out.pos_sample  // cycle-stratified sample for distribution plots
-                scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles  // per (cycle,scheme) distribution shape
-                scoring_caas_pos_detail_ch = caas_perm_out.pos_detail                   // sharded perm_pos_detail dir
-                scoring_caas_gene_cycle_scores_ch = caas_perm_out.gene_cycle_scores     // genes x cycles raw scores
+                // The b_0 slice of a replay is the observed labeling. A discovery.tab given with --discovery_from
+                // is scored by CT_OBSERVED instead, so the two never write the same files.
+                if (core_replays && !params.discovery_from && (ran_discovery || run_ct_disambiguation)) {
+                    core_observed = CAAS_CORE_OBSERVED(core.b0_observed.collect(), perm_cfg_ch.collect().map { items -> items[0] })
+                }
                 ran_any = true
             }
+        }
+
+        // The pattern-annotation report reads the observed discovery: the core's, or the one given with --discovery_from.
+        def run_meta_caas = (core_observed != null) || params.discovery_from
+        if (run_meta_caas) {
+            // Only pass the core's channels when it produced the observed files.
+            // Pass null (not Channel.empty()) when absent so the if(channel) guard
+            // inside CT_META_CAAS correctly detects absence and falls back to params.
+            def discovery_ch        = core_observed ? core_observed.discovery        : null
+            def background_genes_ch = core_observed ? core_observed.background_genes : null
+
+            meta_caas_results = CT_META_CAAS(discovery_ch, background_genes_ch)
+            ran_any = true
+        }
+
+        if (run_ct_disambiguation) {
+            if (core_observed) {
+                observed_results = [master_csv: core_observed.master_csv, results_dir: core_observed.results_dir]
+            } else if (params.discovery_from) {
+                // A discovery.tab that already exists is scored with the code of the core's b_0 slice.
+                // Disambiguation needs the fg/bg trait file(s) that defined the contrasts the
+                // CAAS were discovered under. Two suppliers, in order of preference:
+                //   • CT ran live            -> ct_results.trait_file (carries traitfiles_ok_dir in multi-hypothesis mode)
+                //   • CONTRAST_SELECTION ran -> (contrast_out.trait_dir_out ?: contrast_out.trait_file_out)
+                // CONTRAST_SELECTION is deterministic given the same --my_traits and tree,
+                // so the pairing it emits here matches the one the precomputed discovery
+                // used. Falling through to Channel.empty() lands on --caas_config, which
+                // only standalone (non-GUI) runs set.
+                def trait_for_observed = ct_results
+                    ? ct_results.trait_file
+                    : (contrast_out ? (contrast_out.trait_dir_out ?: contrast_out.trait_file_out) : Channel.empty())
+                def tree_for_observed = ct_results
+                    ? ct_results.tree_file
+                    : (contrast_out ? contrast_out.tree_file_out : Channel.empty())
+
+                // FOP pair weights from the same trait supplier: in multi-hypothesis
+                // mode the trait channel is a directory (traitfiles_ok_dir /
+                // Traitfiles) holding contrast_hypotheses_pairs.tsv.
+                def hyp_pairs_for_observed = (ct_results || contrast_out)
+                    ? trait_for_observed.map { d ->
+                          def f = file("${d}/contrast_hypotheses_pairs.tsv")
+                          (file(d).isDirectory() && f.exists()) ? f : file('NO_HYP_PAIRS')
+                      }
+                    : null
+
+                def discovery_file_obj = file(params.discovery_from)
+                assert discovery_file_obj.exists() : "Error: discovery_from file not found: ${params.discovery_from}"
+                def observed_run = CT_OBSERVED(Channel.value(discovery_file_obj), trait_for_observed, tree_for_observed, hyp_pairs_for_observed)
+                observed_results = [master_csv: observed_run.master_csv, results_dir: observed_run.results_dir]
+                observed_meta = observed_run
+                ran_any = true
+            }
+        }
+        // CT_POSTPROC is resolved before the permulation null so that the null receives the real
+        // cleaned background as its gene universe (dataflow, not call order, decides when tasks run).
+        if (run_ct_postproc) {
+            // Post-processing is downstream from disambiguation; consume disambiguation master CSV when available
+            // Pass null (not Channel.empty()) when there is no upstream result so that the
+            // if(channel) guard inside CT_POSTPROC correctly detects absence and falls back
+            // to --disambiguation_input / --background_input params (same pattern as CT_META_CAAS).
+            def disambiguation_ch = observed_results ? observed_results.master_csv : null
+            // Only wire the background genes when discovery actually ran; otherwise pass null so
+            // CT_POSTPROC falls back to the --background_input param.
+            def background_genes_ch = core_observed ? core_observed.background_genes : null
+            // Pass full ct_disambiguation/ directory for ASR robustness diagnostics (null = standalone mode)
+            def disambiguation_dir_ch = observed_results ? observed_results.results_dir : null
+            postproc_results = CT_POSTPROC(disambiguation_ch, background_genes_ch, disambiguation_dir_ch)
+            ran_any = true
+
+            // Capture postproc outputs as reusable references.
+            // cleaned_background is already a value channel (single file from CAAS_BACKGROUND_CLEANUP).
+            pp_cleaned_bg = postproc_results.cleaned_background
+        }
+
+        // Fallback resolution for precomputed / standalone runs where --ct_postproc did not run live
+        if (!pp_cleaned_bg) {
+            def bg_candidate = params.background_input ?: (params.scoring_background_input ?: (params.accumulation_background_input ?: ''))
+            if (!bg_candidate && params.scoring_postproc_input) {
+                def pfile = file(params.scoring_postproc_input)
+                def pdir = pfile ? pfile.parent : null
+                if (pdir && file("${pdir}/cleaned_background_main.txt").exists()) {
+                    bg_candidate = "${pdir}/cleaned_background_main.txt"
+                }
+            }
+            if (bg_candidate && file(bg_candidate).exists()) {
+                pp_cleaned_bg = Channel.value(file(bg_candidate))
+            }
+        }
+
+        if (core) {
+            def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
+            def caas_perm_out = CAAS_CORE_MERGE(core.pos_detail.collect(), caas_universe_ch, caas_gene_lengths_ch.collect().map { items -> items[0] })
+            scoring_caas_perms_ch = caas_perm_out.perms
+            scoring_caas_perm_scores_ch = Channel.empty()
+            scoring_caas_pos_cycle_caas_ch = caas_perm_out.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))  // per (gene,position,side,cycle) caas_score -> p.emp
+            scoring_caas_pos_sample_ch = caas_perm_out.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))  // cycle-stratified sample for distribution plots
+            scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))  // per (cycle,scheme) distribution shape
+            scoring_caas_pos_detail_ch = caas_perm_out.pos_detail                   // sharded perm_pos_detail dir
+            scoring_caas_gene_cycle_scores_ch = caas_perm_out.gene_cycle_scores     // genes x cycles raw scores
+            ran_any = true
         }
 
 
@@ -526,8 +534,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             // accumulation null's eligible pool (intersected with the cleaned-background
             // genes inside the subworkflow). Resolved exactly like POSENRICH's own
             // background: live CT output when discovery ran, else the precomputed param.
-            def acc_tested_pos_ch = (ct_results && ran_discovery)
-                ? ct_results.background_file
+            def acc_tested_pos_ch = core_observed
+                ? core_observed.background
                 : (params.posenrich_background_file
                     ? Channel.fromPath(params.posenrich_background_file)
                     : Channel.empty())
@@ -536,7 +544,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             // only consumed when accumulation_randomization_type == 'permulation'
             // (Tier 3E); NO_FILE sentinel otherwise, with the standalone
             // --caas_pos_detail_file / --caas_gene_cycle_scores_file params as a
-            // fallback for reruns without a live CAAS_PERMULATION. The gene_cycle_scores
+            // fallback for reruns without a live permulation core. The gene_cycle_scores
             // file is what gives the permulation null its exact cycle count instead of
             // inferring it from perm_pos_detail alone (see randomize.py).
             def acc_pos_detail_ch = (scoring_caas_pos_detail_ch ?: Channel.empty())
@@ -582,8 +590,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 : Channel.empty()
 
             // CT discovery output for toy_mode gene reuse (null when CT didn't run)
-            def ct_discovery_source_ch = (ct_results && ran_discovery)
-                ? ct_results.discovery_file
+            def ct_discovery_source_ch = core_observed
+                ? core_observed.discovery
                 : Channel.empty()
 
             // gene_set mode sources its directional gene lists from the
@@ -684,7 +692,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // Runs whenever caas_permulation_enrichment is enabled. If live CT ran,
         // consumes ct_results channels; if CT is precomputed
         // (RUN_CAAS=false), resolves precomputed resample + alignment inputs to run
-        // CAAS_PERMS_PREP and CAAS_PERMULATION.
+        // CAAS_PERMS_PREP and CAAS_CORE.
 
 
         if (params.scoring) {
@@ -760,27 +768,10 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             // with fallback to CT_META_CAAS's global_meta_caas.tsv when standalone.
             if (params.scoring) {
                 def signif_caas_upstream = scoring_postproc_ch
-                if (!signif_caas_upstream && meta_caas_results) {
-                    signif_caas_upstream = meta_caas_results.global_meta_caas
-                        .mix(meta_caas_results.meta_caas)
-                        .flatten()
-                        .filter { f ->
-                            def p = f.toString().toLowerCase()
-                            p.endsWith('global_meta_caas.tsv') ||
-                            p.contains('meta_caas/global_meta_caas.tsv') ||
-                            p.endsWith('meta_caas.tsv') ||
-                            p.contains('meta_caas/meta_caas.tsv')
-                        }
-                        .collect()
-                        .map { files ->
-                            if (!files) return null
-                            def preferred = files.find { f ->
-                                def p = f.toString().toLowerCase()
-                                p.endsWith('global_meta_caas.tsv') || p.contains('meta_caas/global_meta_caas.tsv')
-                            }
-                            preferred ?: files[0]
-                        }
-                        .filter { it != null }
+                if (!signif_caas_upstream && core_observed) {
+                    signif_caas_upstream = core_observed.global_meta_caas
+                } else if (!signif_caas_upstream && observed_meta) {
+                    signif_caas_upstream = observed_meta.global_meta_caas
                 }
 
                 if (signif_caas_upstream) {
@@ -817,7 +808,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 def scoring_vep_cosmic_ch = params.vep ? VEP.out.cosmic_tsv    : null
                 // POSENRICH background = caastools background.output (tested positions);
                 // the engine restricts it to the cleaned_background genes.
-                def posenrich_background_ch = (ct_results && ran_discovery) ? ct_results.background_file : file('NO_FILE')
+                def posenrich_background_ch = core_observed ? core_observed.background : file('NO_FILE')
 
                 // RER's own gene universe + gene lists (significant/accelerating/
                 // decelerating) and FADE's per-direction universe + significant
