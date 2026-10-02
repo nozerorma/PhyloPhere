@@ -28,12 +28,12 @@ CALLED BY: ct
 
 
 from modules.perm_replay_io import *
-from modules.disco import process_position
 from modules.caas_id import (
     US, GS1, GS2, GS3, GS4, SCHEMES,
     check_pattern, check_caap_pattern, iscaas,
-    encode_to_groups, _pair_sort_key
+    encode_to_groups, _pair_sort_key, process_position
 )
+from modules.pindex import load_cfg
 from modules.alimport import *
 
 import os
@@ -512,6 +512,45 @@ def _emit_groups_rows(groups_out, genename, hits, caap_mode):
             groups_out.write(f"{trait}\t{genename}\t{posnum}\tCAAP\t{scheme_name}\n")
 
 
+def _ungapped_sorted(cfg, species_iter, pos_dict, trait=None):
+    """The species of `species_iter` with a resolved residue at this position, in pair order."""
+    keep = [sp for sp in species_iter
+            if sp in pos_dict and pos_dict[sp].split("@")[0].upper() not in _VEC_GAP_SYMBOLS]
+    keep.sort(key=lambda sp: _pair_sort_key(cfg, sp, trait))
+    return keep
+
+
+def _reconstruct_hit(cfg, pos_dict, scheme_dict, trait, max_conserved):
+    """One kernel hit with exact pair-ordered residues: the species lists and what check_pattern says.
+
+    check_pattern is the scalar path's own verdict on the same fg/bg residues; `is_match` False means the
+    kernel and the scalar CAAS test disagree.
+    """
+    fg = _ungapped_sorted(cfg, cfg.trait2fg.get(trait, ()), pos_dict, trait)
+    bg = _ungapped_sorted(cfg, cfg.trait2bg.get(trait, ()), pos_dict, trait)
+    fg_aas = "".join(pos_dict[sp].split("@")[0] for sp in fg)
+    bg_aas = "".join(pos_dict[sp].split("@")[0] for sp in bg)
+    is_match, pattern, substitution, conserved_pairs = check_pattern(
+        fg_aas, bg_aas, scheme_dict=scheme_dict,
+        max_conserved=max_conserved, multiconfig=cfg,
+        fg_species_list=fg, bg_species_list=bg, trait=trait
+    )
+    encoded = encode_to_groups(fg_aas, scheme_dict) + "/" + encode_to_groups(bg_aas, scheme_dict)
+    return dict(fg=fg, bg=bg, is_match=is_match, pattern=pattern, substitution=substitution,
+                conserved_pairs=conserved_pairs, encoded=encoded)
+
+
+def _conserved_fields(conserved_pairs):
+    """[is_conserved_meta, conserved_pair] of a row, from check_pattern's '{count}:{pair ids}'."""
+    oc = conserved_pairs.split(":")[0] if conserved_pairs else "0"
+    pl = conserved_pairs.split(":")[1] if conserved_pairs and ":" in conserved_pairs else ""
+    return ["TRUE" if int(oc) > 0 else "FALSE", f"{oc}:{pl}"]
+
+
+def _hits_by_position(positions_with_schemes, genename):
+    return {genename + "@" + str(_posnum_from_posdict(pos_dict)): pos_dict for pos_dict, _schemes in positions_with_schemes}
+
+
 def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_schemes,
                               hits, caap_mode, max_conserved):
     """Materialize perm_discovery rows for the vectorized hits.
@@ -519,23 +558,13 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
     The kernel identifies WHICH (position, scheme, labeling) are CAAS/CAAP; each hit's row
     is reconstructed with exact pair-ordered substitution strings and group encodings.
 
-    check_pattern is the scalar path's own verdict on the same fg/bg residues. A hit it rejects
-    means the kernel and the scalar CAAS test disagree; that must not pass silently, so it is
-    counted and raised once every row of the call has been written.
+    A hit check_pattern rejects means the kernel and the scalar CAAS test disagree; that must not pass
+    silently, so it is counted and raised once every row of the call has been written.
     """
     if not hits or not perm_discovery_out:
         return
     disagreements = []
-    posname_to_posdict = {}
-    for pos_dict, _schemes in positions_with_schemes:
-        pn = genename + "@" + str(_posnum_from_posdict(pos_dict))
-        posname_to_posdict[pn] = pos_dict
-
-    def _ungapped_sorted(species_iter, pos_dict, trait=None):
-        keep = [sp for sp in species_iter
-                if sp in pos_dict and pos_dict[sp].split("@")[0].upper() not in _VEC_GAP_SYMBOLS]
-        keep.sort(key=lambda sp: _pair_sort_key(cfg, sp, trait))
-        return keep
+    posname_to_posdict = _hits_by_position(positions_with_schemes, genename)
 
     for key, trait_names in hits.items():
         if not trait_names:
@@ -551,31 +580,112 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
         posnum = position_name.split("@", 1)[1]
 
         for trait in trait_names:
-            fg = _ungapped_sorted(cfg.trait2fg.get(trait, ()), pos_dict, trait)
-            bg = _ungapped_sorted(cfg.trait2bg.get(trait, ()), pos_dict, trait)
-            fg_aas = "".join(pos_dict[sp].split("@")[0] for sp in fg)
-            bg_aas = "".join(pos_dict[sp].split("@")[0] for sp in bg)
-
-            is_match, pattern, substitution, conserved_pairs = check_pattern(
-                fg_aas, bg_aas, scheme_dict=scheme_dict,
-                max_conserved=max_conserved, multiconfig=cfg,
-                fg_species_list=fg, bg_species_list=bg, trait=trait
-            )
-            encoded = encode_to_groups(fg_aas, scheme_dict) + "/" + encode_to_groups(bg_aas, scheme_dict)
-            if not is_match:
+            hit = _reconstruct_hit(cfg, pos_dict, scheme_dict, trait, max_conserved)
+            if not hit["is_match"]:
                 disagreements.append((trait, genename, scheme_name, posnum))
             fields = [trait, genename, "CAAP", scheme_name, trait, str(posnum),
-                      substitution, encoded, pattern]
+                      hit["substitution"], hit["encoded"], hit["pattern"]]
             if max_conserved > 0:
-                oc = conserved_pairs.split(":")[0] if conserved_pairs else "0"
-                pl = conserved_pairs.split(":")[1] if conserved_pairs and ":" in conserved_pairs else ""
-                fields.extend(["TRUE" if int(oc) > 0 else "FALSE", f"{oc}:{pl}"])
+                fields.extend(_conserved_fields(hit["conserved_pairs"]))
             perm_discovery_out.write("\t".join(fields) + "\n")
 
     if disagreements:
         raise RuntimeError(
             f"vectorized kernel and check_pattern disagree on {len(disagreements)} hit(s) "
             f"(labeling, gene, scheme, position), first: {disagreements[:5]}")
+
+
+_B0_DISCOVERY_HEADER = ["gene", "mode", "caap_group", "trait", "position", "caas", "amino_encoded", "pattern",
+                        "ffgn", "fbgn", "gfg", "gbg", "mfg", "mbg", "ffg", "fbg", "ms"]
+_HYPOTHESIS = re.compile(r"H\d+")
+
+
+def _hypothesis_of(name):
+    """'b_0~H3' / 'traitfile_H3.tab' -> 'H3'; no hypothesis token (a single contrast) -> 'H1'."""
+    m = _HYPOTHESIS.search(str(name).split("~", 1)[1] if "~" in str(name) else str(name))
+    return m.group(0) if m else "H1"
+
+
+def _b0_discovery_rows(design_cfg, labeling_cfg, sliced_object, genename, positions_with_schemes,
+                       hits, caap_mode, max_conserved):
+    """The rows `ct discovery` writes to discovery.tab for the b_0 hits of the kernel, as lists of fields.
+
+    The kernel says which (position, hypothesis, scheme) are CAAS. caas, amino_encoded and pattern come from
+    the same reconstruction as the perm-discovery export; the other columns (species counts, gaps, missing,
+    species lists) are `process_position`'s, the scalar definitions, on the real design: its trait names
+    (traitfile_H3.tab, not b_0~H3) and its missing species. Rows are in a fixed order: position, then trait by
+    file name, then scheme (the scalar's trait order is the glob order of the trait directory, so it changes
+    from one filesystem to another). `ms` lists the missing species in pair order, foreground first
+    (the scalar builds it from a set, so its order is arbitrary).
+    """
+    if not hits:
+        return []
+    design_trait = {}
+    for name in design_cfg.alltraits:
+        design_trait.setdefault(_hypothesis_of(name), name)
+    trait_rank = {name: i for i, name in enumerate(sorted(design_cfg.alltraits))}
+    scheme_rank = {name: i for i, name in enumerate(SCHEMES)}
+    posname_to_posdict = _hits_by_position(positions_with_schemes, genename)
+    processed = {}
+    rows = []
+    disagreements = []
+
+    for key, labelings in hits.items():
+        tags = [t for t in labelings if _fop_base_cycle(t) == "b_0"]
+        if not tags:
+            continue
+        if caap_mode:
+            position_name, scheme_name = key
+            scheme_dict = _VEC_SCHEME_MAP.get(scheme_name, US)
+        else:
+            position_name, scheme_name, scheme_dict = key, "US", US
+        pos_dict = posname_to_posdict.get(position_name)
+        if not pos_dict:
+            continue
+        posnum = position_name.split("@", 1)[1]
+        if position_name not in processed:
+            processed[position_name] = process_position(pos_dict, design_cfg, sliced_object.species)
+        z = processed[position_name]
+
+        for tag in tags:
+            trait = design_trait.get(_hypothesis_of(tag))
+            if trait is None:
+                raise RuntimeError(f"no trait of the design matches the b_0 labeling {tag!r}: {sorted(design_trait)[:5]}")
+            hit = _reconstruct_hit(labeling_cfg, pos_dict, scheme_dict, tag, max_conserved)
+            order = lambda sp: _pair_sort_key(design_cfg, sp, trait)
+            fg = sorted(z.trait2ungapped_fg[trait], key=order)
+            bg = sorted(z.trait2ungapped_bg[trait], key=order)
+            if not hit["is_match"] or set(fg) != set(hit["fg"]) or set(bg) != set(hit["bg"]):
+                disagreements.append((tag, genename, scheme_name, posnum))
+            missing = set(z.trait2missings[trait])
+            ms = (sorted((sp for sp in design_cfg.trait2fg[trait] if sp in missing), key=order)
+                  + sorted((sp for sp in design_cfg.trait2bg[trait] if sp in missing), key=order))
+            fields = [genename, "CAAP", scheme_name, trait, str(posnum), hit["substitution"], hit["encoded"], hit["pattern"],
+                      str(len(fg)), str(len(bg)),
+                      str(z.trait2gaps_fg.get(trait, 0)), str(z.trait2gaps_bg.get(trait, 0)),
+                      str(z.trait2miss_fg.get(trait, 0)), str(z.trait2miss_bg.get(trait, 0)),
+                      ",".join(fg) if fg else "NA", ",".join(bg) if bg else "NA", ",".join(ms) if ms else "NA"]
+            if max_conserved > 0:
+                fields.extend(_conserved_fields(hit["conserved_pairs"]))
+            rows.append(((int(posnum), trait_rank[trait], scheme_rank[scheme_name]), fields))
+
+    if disagreements:
+        raise RuntimeError(
+            f"vectorized kernel and the scalar definitions disagree on {len(disagreements)} b_0 hit(s) "
+            f"(labeling, gene, scheme, position), first: {disagreements[:5]}")
+    rows.sort(key=lambda r: r[0])
+    return [fields for _key, fields in rows]
+
+
+def _write_b0_discovery(path, rows, max_conserved):
+    """Like `ct discovery`: a header and the rows, and no file at all when there is no row."""
+    if not rows:
+        return
+    header = _B0_DISCOVERY_HEADER + (["is_conserved_meta", "conserved_pair"] if max_conserved > 0 else [])
+    with open(path, "w") as out:
+        out.write("\t".join(header) + "\n")
+        for fields in rows:
+            out.write("\t".join(fields) + "\n")
 
 
 # UTILITY FUNCTIONS for progress tracking
@@ -742,7 +852,7 @@ def parse_discovery_positions(discovery_file, genename):
 # FUNCTION run_perm_replay_on_alignment()
 # Launches perm-replay in several lines. Returns a dictionary gene@position --> pvalue
 
-def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, output_file, miss_pair=False, max_conserved=0, discovery_file=None, progress_log=None, caap_mode=False, export_groups=None, export_perm_discovery=None, fop_mode=False, export_b0_background=None):
+def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, output_file, miss_pair=False, max_conserved=0, discovery_file=None, progress_log=None, caap_mode=False, export_groups=None, export_perm_discovery=None, fop_mode=False, export_b0_background=None, export_b0_discovery=None):
     """
     Run perm-replay on a single alignment.
 
@@ -783,6 +893,9 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
             print(f"[FOP] base-cycle collapse over {resampled_traits}")
             resampled_traits = simtrait_revive(resampled_traits)
 
+    if export_b0_discovery and isinstance(resampled_traits, str) and os.path.isdir(resampled_traits):
+        raise ValueError("--export_b0_discovery needs a single resample file (-s), not a directory")
+
     # positions tested by the b_0 labelings (see VectorizedPermReplay.count), one line per gene
     bg_sink = set() if export_b0_background else None
 
@@ -810,7 +923,7 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
         perm_discovery_handle.write("\t".join(header_fields) + "\n")
 
     # Vectorized BLAS path.
-    collect_hits = perm_discovery_handle is not None or groups_handle is not None or fop_mode
+    collect_hits = perm_discovery_handle is not None or groups_handle is not None or fop_mode or bool(export_b0_discovery)
 
     try:
         # Detect if resampled_traits is a directory path or a multicfg object
@@ -991,6 +1104,10 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                     )
                 if groups_handle is not None:
                     _emit_groups_rows(groups_handle, the_genename, hits, caap_mode)
+                if export_b0_discovery:
+                    _write_b0_discovery(export_b0_discovery, _b0_discovery_rows(
+                        load_cfg(trait_config_file), resampled_traits_obj, sliced_object, the_genename,
+                        positions_with_schemes, hits, caap_mode, max_conserved), max_conserved)
             else:
                 counts = _vectorized_position_counts(
                     resampled_traits_obj, sliced_object, the_genename, positions_with_schemes,

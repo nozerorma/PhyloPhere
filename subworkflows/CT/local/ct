@@ -373,6 +373,10 @@ if tool.lower() == "perm-replay":
                     help="Path to output file for exporting the per-cycle permuted discovery results (DEBUG). Default = disabled.", default = None)
 
     ###     3.3.11b b_0 background (positions tested by the real labeling)
+    ###     3.3.11c b_0 discovery rows (the discovery.tab rows of the real labeling)
+    parser.add_option("--export_b0_discovery", dest="export_b0_discovery",
+                    help="Path to output file for the discovery.tab rows of the b_0 labeling(s), with the columns of `ct discovery`, named by the traits of -t and in discovery.tab order. Needs -s to be a single resample file. Written only when there is a row. Default = disabled.", default = None)
+
     parser.add_option("--export_b0_background", dest="export_b0_background",
                     help="Path to output file for the positions tested by the b_0 labeling(s): '<gene>\\t<pos,pos,...|NULL>', same as discovery's background output. Default = disabled.", default = None)
 
@@ -487,7 +491,8 @@ if tool.lower() == "perm-replay":
                     export_groups = options.export_groups,
                     export_perm_discovery = options.export_perm_discovery,
                     fop_mode = options.fop_mode,
-                    export_b0_background = options.export_b0_background
+                    export_b0_background = options.export_b0_background,
+                    export_b0_discovery = options.export_b0_discovery
                     )
 
     ###     3.8.4 Final output
