@@ -1,9 +1,13 @@
-"""The observed disambiguation reproduces the frozen PEPC master CSV, with or without decoration.
+"""The observed labeling end to end on PEPC: discovery rows -> master shard -> ct_disambiguation/caas_convergence_master.csv.
 
-golden/pepc_c4_complete/observed_inputs.tar.gz holds what the pipeline fed CT_DISAMBIGUATION_RUN for
-the Tier 1 PEPC genotypic run (global_meta_caas.tsv, the 100 traitfiles and their hypothesis pairs, the
-cached ASR of PEPC, tree, taxid map, gene list). This is the safety net for changes to the observed path.
+golden/pepc_c4_complete/observed_inputs.tar.gz holds what the pipeline fed the observed scoring for the Tier 1 PEPC
+genotypic run (the 100 traitfiles and their hypothesis pairs, the cached ASR of PEPC, tree, taxid map, gene list) and
+discovery.tab.gz the 8 205 discovery rows; caas_convergence_master.csv is the frozen master of that run. The ids of
+`tag_support` are content hashes now (test_observed_b0 checks their shape); every other column equals the frozen one,
+floats within 1e-12 (a pool of many hypotheses is summed with math.fsum, which can differ from the frozen naive sum
+in the last bits).
 """
+import gzip
 import os
 import shutil
 import subprocess
@@ -15,9 +19,11 @@ import pandas as pd
 import pytest
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[1]
+ROOT = Path(os.environ.get("PHYLOPHERE_ROOT", HERE.parents[1]))
 GOLD = HERE / "golden/pepc_c4_complete"
-MAIN = ROOT / "subworkflows/CT_DISAMBIGUATION/local/disambiguation_main.py"
+LOCAL = ROOT / "subworkflows/CT_DISAMBIGUATION/local"
+sys.path.insert(0, str(HERE))
+from test_observed_b0 import _gold, _same_but_tag_support  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -27,57 +33,37 @@ def inputs(tmp_path_factory):
         t.extractall(d)
     (d / "align").mkdir()
     shutil.copy(GOLD / "PEPC.fasta", d / "align" / "PEPC.fasta")
+    with gzip.open(GOLD / "discovery.tab.gz", "rt") as src, open(d / "discovery.tab", "w") as dst:
+        shutil.copyfileobj(src, dst)
     return d
 
 
-def _run(inputs, out, *extra):
+def _observed(inputs, out, workers):
+    """CAAS_OBSERVED's two steps by hand: score the discovery rows, then write the master."""
     i = inputs / "observed_inputs"
-    cmd = [sys.executable, str(MAIN), "--alignment-dir", str(inputs / "align"), "--tree", str(i / "pruned_tree_file.nwk"),
-           "--caas-metadata", str(i / "global_meta_caas.tsv"), "--trait-file", str(i / "traitfiles"),
-           "--output-dir", str(out), "--asr-mode", "compute", "--asr-model", "lg", "--posterior-threshold", "0.1",
-           "--threads", "1", "--workers", "2", "--max-tasks-per-child", "50",
-           "--hypotheses-pairs", str(i / "traitfiles/contrast_hypotheses_pairs.tsv"),
-           "--asr-cache-dir", str(i / "asr_cache"), "--taxid-mapping", str(i / "taxid.tsv"),
-           "--ensembl-genes-file", str(i / "gene_ensembl.tsv"), *extra]
-    p = subprocess.run(cmd, cwd=MAIN.parent, capture_output=True, text=True)
-    assert p.returncode == 0, p.stdout[-1500:] + p.stderr[-1500:]
-    return pd.read_csv(out / "caas_convergence_master.csv", keep_default_na=False)
-
-
-def _golden():
-    return pd.read_csv(GOLD / "caas_convergence_master.csv", keep_default_na=False)
-
-
-def _assert_same_up_to_float_noise(got, gold, tol=1e-12):
-    """Every cell equal, except float columns, which may differ by summation rounding (<= tol).
-
-    The pooled scores add M hypothesis scores; the sum is correctly rounded now, so a pool of many
-    hypotheses can differ from the naive sum of the frozen run in the last bits.
-    """
-    worst = 0.0
-    for c in gold.columns:
-        if gold[c].dtype.kind == "f":
-            d = (got[c] - gold[c]).abs()
-            assert (got[c].isna() == gold[c].isna()).all(), c
-            worst = max(worst, float(d.max(skipna=True) or 0.0))
-        else:
-            assert got[c].equals(gold[c]), c
-    print(f"max float difference to the frozen run: {worst:.2e}")
-    assert worst <= tol
+    shards = out / "shards"
+    steps = [
+        [sys.executable, str(LOCAL / "observed_b0_main.py"), "--alignment-dir", str(inputs / "align"), "--tree", str(i / "pruned_tree_file.nwk"),
+         "--discovery", str(inputs / "discovery.tab"), "--design", str(i / "traitfiles"), "--output-dir", str(shards), "--asr-model", "lg",
+         "--posterior-threshold", "0.1", "--workers", str(workers), "--asr-cache-dir", str(i / "asr_cache"), "--taxid-mapping", str(i / "taxid.tsv"),
+         "--ensembl-genes-file", str(i / "gene_ensembl.tsv"), "--fop-pairs", str(i / "traitfiles/contrast_hypotheses_pairs.tsv")],
+        [sys.executable, str(LOCAL / "contract_main.py"), "--b0-dirs", str(shards), "--design", str(i / "traitfiles"),
+         "--discovery-file", str(inputs / "discovery.tab"), "--output-dir", str(out)],
+    ]
+    for cmd in steps:
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        assert p.returncode == 0, p.stdout[-1500:] + p.stderr[-1500:]
+    return out / "ct_disambiguation/caas_convergence_master.csv"
 
 
 def test_master_csv_matches_the_frozen_pipeline_run(inputs, tmp_path):
-    got = _run(inputs, tmp_path / "out")
-    gold = _golden()
+    got = pd.read_csv(_observed(inputs, tmp_path, 2), keep_default_na=False)
+    gold = _gold()
     assert len(gold) == 217 and list(got.columns) == list(gold.columns) and len(gold.columns) == 46
-    _assert_same_up_to_float_noise(got, gold)
+    _same_but_tag_support(got, gold)
 
 
-def test_precomputed_asr_mode_reproduces_the_same_master(inputs, tmp_path):
-    """The cache holds PEPC's ASR, so reading it must give exactly what computing (cache hit) gave."""
-    _assert_same_up_to_float_noise(_run(inputs, tmp_path / "out", "--asr-mode", "precomputed"), _golden())
-
-
-@pytest.mark.skipif(not os.environ.get("RUN_SLOW"), reason="decoration costs ~80 s; set RUN_SLOW=1")
-def test_decoration_does_not_change_the_master_csv(inputs, tmp_path):
-    _assert_same_up_to_float_noise(_run(inputs, tmp_path / "out", "--run-diagnostics", "--verbose"), _golden())
+def test_the_master_does_not_depend_on_the_number_of_workers(inputs, tmp_path):
+    one = _observed(inputs, tmp_path / "one", 1).read_bytes()
+    two = _observed(inputs, tmp_path / "two", 2).read_bytes()
+    assert one == two and len(one) > 100_000

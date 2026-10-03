@@ -29,7 +29,9 @@ def test_no_tracked_file_outside_the_allowlist_names_the_retired_layout():
 
 RETIRED_OBSERVED = re.compile(r"DISCOVERY_BATCHED|CONCAT_DISCOVERY|CONCAT_BACKGROUND|CT_DISAMBIGUATION_(?:RUN|SPLIT_GENES|MERGE|PLOTS)"
                               r"|\bCAAS_PERMULATION\b|run_ct_discovery_batch|process_discovery_batched|ct_discovery\.nf|\basr_ready\b"
-                              r"|merge_disambiguation_batches|regenerate_disambiguation_plots")
+                              r"|merge_disambiguation_batches|regenerate_disambiguation_plots"
+                              r"|disambiguation_main|disambiguation_db|disambiguation_writers|disambiguation_json|generate_bulk_plots"
+                              r"|split_meta_caas_by_genes|\bprocess_all_genes\b|process_single_gene|export_from_db|list_gene_caas_positions")
 # the frozen records, the archive and the style archetypes keep their history; the GUI is checked by test_gui_core_batch.py
 ALLOWED_OBSERVED = ("archive/", "validation/", "style/", "docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md", "gui/")
 

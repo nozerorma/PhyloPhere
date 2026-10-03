@@ -123,7 +123,7 @@ class FileRole(Enum):
     NF_HELP     = auto()  # workflows/help.nf — full PhyloPhere header
     NF_WORKFLOW = auto()  # workflows/*.nf — slim header + DSL2 required
     NF_PROCESS  = auto()  # subworkflows/**/*.nf — slim header + process checks
-    PY_MAIN     = auto()  # main.py / *_main.py / disambiguation_main.py — full header
+    PY_MAIN     = auto()  # main.py / *_main.py / observed_b0_main.py — full header
     PY_MODULE   = auto()  # standalone *.py called directly from NF — slim header
     PY_PKG      = auto()  # src/**/*.py or __init__.py — slim header, no shebang
     R_SCRIPT    = auto()  # *.R called from NF via Rscript — slim header + shebang

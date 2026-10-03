@@ -1,4 +1,4 @@
-"""Public utility exports for I/O, logging, DB helpers, and wrappers."""
+"""Public utility exports for I/O, logging and concurrency."""
 
 from .io_utils import (
     find_gene_alignment,
@@ -13,42 +13,6 @@ from .concurrency import (
     init_worker,
     codeml_slot,
 )
-from .disambiguation_db import (
-    init_db,
-    get_connection,
-    insert_gene_alignment,
-    insert_result,
-    fetch_alignment_for_gene,
-)
-
-
-def convert_convergence_result_to_dict(*args, **kwargs):
-    """Proxy to :func:`src.utils.gene_wrapper.convert_convergence_result_to_dict`."""
-    from .gene_wrapper import convert_convergence_result_to_dict as _impl
-
-    return _impl(*args, **kwargs)
-
-
-def convert_biochem_result_to_dict(*args, **kwargs):
-    """Proxy to :func:`src.utils.gene_wrapper.convert_biochem_result_to_dict`."""
-    from .gene_wrapper import convert_biochem_result_to_dict as _impl
-
-    return _impl(*args, **kwargs)
-
-
-def process_single_gene(*args, **kwargs):
-    """Proxy to :func:`src.utils.gene_wrapper.process_single_gene`."""
-    from .gene_wrapper import process_single_gene as _impl
-
-    return _impl(*args, **kwargs)
-
-
-def process_all_genes(*args, **kwargs):
-    """Proxy to :func:`src.utils.gene_wrapper.process_all_genes`."""
-    from .gene_wrapper import process_all_genes as _impl
-
-    return _impl(*args, **kwargs)
-
 
 __all__ = [
     "find_gene_alignment",
@@ -58,13 +22,4 @@ __all__ = [
     "plan_concurrency",
     "init_worker",
     "codeml_slot",
-    "init_db",
-    "get_connection",
-    "insert_gene_alignment",
-    "insert_result",
-    "fetch_alignment_for_gene",
-    "convert_convergence_result_to_dict",
-    "convert_biochem_result_to_dict",
-    "process_single_gene",
-    "process_all_genes",
 ]

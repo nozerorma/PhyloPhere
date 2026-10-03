@@ -18,10 +18,9 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from src.core.driver import load_gene_context
 from src.core.labelings import design_max_pairs, observed_pss, read_trait_pairs
-from src.core.master import write_master_csv
+from src.core.master import master_fields, write_master_csv
 from src.core.observed import observed_entries, observed_master_rows, score_observed
 from src.data.loaders import load_ensembl_genes
-from src.reporting.disambiguation_writers import _generate_dynamic_fields
 from src.utils.concurrency import init_worker, plan_concurrency
 from src.utils.logger import configure_logging
 
@@ -88,7 +87,7 @@ def main():
     if not by_gene:
         return
 
-    fields = _generate_dynamic_fields(design_max_pairs(Path(args.design)))
+    fields = master_fields(design_max_pairs(Path(args.design)))
     trait_pairs = read_trait_pairs(Path(args.design))
     pss = observed_pss(args.fop_pairs) if args.fop_pairs else None
     ensembl = (load_ensembl_genes(Path(args.ensembl_genes_file)) or set()) if args.ensembl_genes_file else None

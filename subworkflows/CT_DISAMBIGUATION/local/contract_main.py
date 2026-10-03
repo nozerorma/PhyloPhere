@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from src.core import contract
 from src.core.labelings import design_max_pairs
-from src.reporting.disambiguation_writers import _generate_dynamic_fields
+from src.core.master import master_fields
 from src.utils.logger import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     dirs = args.b0_dirs  # a sentinel file among them has no batch files
     shards = contract.batch_files(dirs, contract.MASTER_SUFFIX)
-    fields = _generate_dynamic_fields(design_max_pairs(Path(args.design)))
+    fields = master_fields(design_max_pairs(Path(args.design)))
     master_path = out / "ct_disambiguation" / "caas_convergence_master.csv"
     master_path.parent.mkdir(parents=True, exist_ok=True)
     if args.discovery_file:

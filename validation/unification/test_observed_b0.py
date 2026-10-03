@@ -26,7 +26,7 @@ from src.core.labelings import observed_pss, read_trait_pairs  # noqa: E402
 from src.core.master import write_master_csv  # noqa: E402
 from src.core.meta import caas_id  # noqa: E402
 from src.core.observed import observed_entries, observed_master_rows, score_observed, unresolved_entries  # noqa: E402
-from src.reporting.disambiguation_writers import _generate_dynamic_fields  # noqa: E402
+from src.core.master import master_fields  # noqa: E402
 
 GOLD = HERE / "golden/pepc_c4_complete"
 
@@ -43,7 +43,7 @@ def pepc(tmp_path_factory):
                             str(i / "asr_cache"), 0.1)
     rows = pd.read_csv(gzip.open(GOLD / "discovery.tab.gz", "rt"), sep="\t", dtype=str, keep_default_na=False).to_dict("records")
     return dict(dir=d, ctx=ctx, rows=rows, trait_pairs=read_trait_pairs(i / "traitfiles"),
-                pss=observed_pss(i / "traitfiles/contrast_hypotheses_pairs.tsv"), fields=_generate_dynamic_fields(4))
+                pss=observed_pss(i / "traitfiles/contrast_hypotheses_pairs.tsv"), fields=master_fields(4))
 
 
 def _master(pepc, rows, out):

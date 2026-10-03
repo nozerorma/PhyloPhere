@@ -25,7 +25,7 @@ sys.path.insert(0, str(HERE))
 from src.core import contract  # noqa: E402
 from src.core.labelings import design_max_pairs  # noqa: E402
 from src.core.meta import caas_id  # noqa: E402
-from src.reporting.disambiguation_writers import _generate_dynamic_fields  # noqa: E402
+from src.core.master import master_fields  # noqa: E402
 
 GOLD = HERE / "golden/pepc_c4_complete"
 RMD = HERE / "reference/7.CAAS_pattern_annotation.with_meta_export.Rmd"  # the report as it was when it wrote the meta tables
@@ -200,7 +200,7 @@ def test_the_master_is_ordered_by_gene_whatever_the_shard_order(tmp_path, revers
 
 
 def test_a_master_without_shards_has_the_columns_of_the_design(tmp_path):
-    fields = _generate_dynamic_fields(4)
+    fields = master_fields(4)
     assert contract.write_master([], tmp_path / "m.csv", fields) == 0
     assert (tmp_path / "m.csv").read_text().splitlines()[0] == GOLD_MASTER.splitlines()[0] == ",".join(fields)
 
@@ -254,7 +254,7 @@ def test_the_command_line_with_a_gene_without_hits_writes_its_background_and_the
     out = tmp_path / "out"
     assert (out / "discovery.tab").read_text() == H19 + "\n" and (out / "background.output").read_text() == "NOHIT\t1,2\n"
     assert (out / "background_genes.output").read_text() == "NOHIT\n"
-    assert (out / "ct_disambiguation/caas_convergence_master.csv").read_text().strip() == ",".join(_generate_dynamic_fields(1))
+    assert (out / "ct_disambiguation/caas_convergence_master.csv").read_text().strip() == ",".join(master_fields(1))
 
 
 def test_the_command_line_can_write_the_master_and_meta_tables_for_a_discovery_file_that_exists(tmp_path):

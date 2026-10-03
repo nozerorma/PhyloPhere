@@ -1,9 +1,7 @@
 """The master CSV of the observed labeling: rows are serialized once, in the worker, and written once.
 
-caas_convergence_master.csv is the table the rest of the pipeline reads. It used to be produced by
-re-reading every result from the aggregation SQLite database; the rows are now built from the records the
-workers already hold and written here, in the order the database export used (gene, msa_pos, then the order
-a gene's rows were produced). The database keeps only the decoration outputs.
+caas_convergence_master.csv is the table the rest of the pipeline reads. Its rows are built from the records the workers
+hold and written here ordered by gene, then msa_pos (rows of one position keep the order they were produced in).
 """
 import csv
 import gzip
@@ -18,6 +16,63 @@ def serialize_value(val: Any) -> str:
     if val is None:
         return ""
     return str(val)
+
+
+def master_fields(max_pairs: int) -> List[str]:
+    """The columns of the master CSV: the fixed ones, then eight per Voronoi domain for `max_pairs` domains
+    (the largest pair id of the observed design). Every batch and every route writes the same schema."""
+    fields = [
+        # Core identification (stable structure)
+        "gene",
+        "msa_pos",
+        "caas",
+        # Pattern classification
+        "convergence_type",
+        # Metadata-driven convergence context
+        "caap_group",
+        "amino_encoded",
+        # `caas`/`amino_encoded` above are the union of divergent (non-conserved)
+        # residues across every pooled hypothesis, not one hypothesis's raw
+        # pattern (see disambiguate_single._derive_convergent_call). These
+        # tallies carry the full per-hypothesis breakdown; `tag_support` also
+        # stands in for the row identifier no longer carried as its own column.
+        "tag_support",
+        "caas_support",
+        "amino_encoded_support",
+        # Hypotheses that drove >= 1 changed domain on THIS SIDE -- the sole
+        # hypothesis-provenance column, side-aware (top/bottom rows for the
+        # same position can legitimately differ); SCORING's pos_scores
+        # aggregation consumes it by name.
+        "participating_hypotheses",
+        # Harvest size (M) for this (position, scheme) pool, not per-side.
+        "n_hypotheses",
+        # Direction key of the row (top / bottom / none).
+        "side",
+        # CAAS convergence score on the Voronoi domain
+        "asr_path_score",
+        "derived_agreement",
+    ]
+
+    # Per-domain columns for the K fixed Voronoi domains (at end).
+    for idx in range(1, max_pairs + 1):
+        fields.extend(
+            [
+                f"domain_{idx}_posterior",
+                f"domain_{idx}_score",
+                # Raw derived/ancestral residues (modal over the harvest): feed
+                # the FOP harvest-wide per-scheme derived_agreement rebuild.
+                # _top_aa / _bot_aa empty when that side did not change.
+                f"domain_{idx}_anc_aa",
+                f"domain_{idx}_top_aa",
+                f"domain_{idx}_bot_aa",
+                # Cross-hypothesis support tallies for the modal residues above.
+                f"domain_{idx}_anc_aa_support",
+                f"domain_{idx}_top_aa_support",
+                f"domain_{idx}_bot_aa_support",
+            ]
+        )
+
+    return fields
 
 
 def master_row(record: Dict[str, Any], fields: Sequence[str]) -> Dict[str, str]:

@@ -3,7 +3,6 @@
 from .models import BiochemResults, CAASPosition, ConvergenceResult
 from .loaders import (
     list_gene_caas_entries,
-    list_gene_caas_positions,
     load_ensembl_genes,
     parse_trait_pairs,
     read_caas_metadata_table,
@@ -14,7 +13,6 @@ __all__ = [
     "CAASPosition",
     "ConvergenceResult",
     "list_gene_caas_entries",
-    "list_gene_caas_positions",
     "load_ensembl_genes",
     "parse_trait_pairs",
     "read_caas_metadata_table",

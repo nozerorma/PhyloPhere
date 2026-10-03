@@ -110,29 +110,38 @@ def test_a_gene_whose_asr_fails_is_left_out_with_a_warning(pepc, monkeypatch, tm
     assert spies.runs == 1 and any("PEPC" in r.getMessage() and r.levelno >= logging.WARNING for r in caplog.records)
 
 
-def test_the_observed_path_returns_no_rows_for_a_gene_without_asr_with_a_warning_and_no_error(pepc, monkeypatch, tmp_path, caplog):
-    from src.utils import gene_wrapper as gw
-
-    monkeypatch.setattr(gw, "load_gene_context", lambda *a, **k: None)
+def _job(pepc, cache, rows=()):
     i = pepc / "observed_inputs"
+    # (gene, rows, alignment_dir, tree, taxid, model, cache, threshold, ensembl, trait_pairs, pss, master fields)
+    return ("PEPC", list(rows), str(pepc / "align"), str(i / "pruned_tree_file.nwk"), str(i / "taxid.tsv"), "lg", str(cache), 0.1, None, {}, None, ["gene"])
+
+
+def test_the_observed_step_leaves_out_a_gene_without_asr_and_does_not_fail(pepc, monkeypatch, tmp_path, caplog):
+    import observed_b0_main as obs
+
+    monkeypatch.setattr(obs, "load_gene_context", lambda *a, **k: None)
     with caplog.at_level(logging.INFO):
-        out = gw.process_single_gene(
-            "PEPC", str(pepc / "align"), str(i / "pruned_tree_file.nwk"), str(i / "global_meta_caas.tsv"), str(i / "traitfiles"),
-            str(i / "taxid.tsv"), "precomputed", "lg", str(tmp_path / "cache"), 0.1, 1, False, tmp_path, master_fields=["gene"])
-    assert out == ("PEPC", None)
-    assert any(r.levelno == logging.WARNING and "ASR unavailable" in r.getMessage() for r in caplog.records)
+        assert obs._score_gene(_job(pepc, tmp_path / "cache")) == ("PEPC", None)
     assert not any(r.levelno >= logging.ERROR for r in caplog.records)
 
 
-def test_the_observed_path_loads_the_asr_through_the_core_loader(pepc, monkeypatch, tmp_path):
-    from src.utils import gene_wrapper as gw
+def test_the_observed_step_loads_the_asr_through_the_core_loader_with_the_cache_it_was_given(pepc, monkeypatch, tmp_path):
+    import observed_b0_main as obs
 
     seen = []
-    monkeypatch.setattr(gw, "load_gene_context", lambda *a, **k: seen.append((a, k)))
-    i = pepc / "observed_inputs"
-    gw.process_single_gene("PEPC", str(pepc / "align"), str(i / "pruned_tree_file.nwk"), str(i / "global_meta_caas.tsv"),
-                           str(i / "traitfiles"), str(i / "taxid.tsv"), "precomputed", "lg", "", 0.1, 5, False, tmp_path,
-                           master_fields=["gene"])
-    args, kwargs = seen[0]
-    assert args[0] == "PEPC" and kwargs["threads"] == 5
-    assert args[5] == str(tmp_path / "asr")  # no cache directory given: the run's own asr directory
+    monkeypatch.setattr(obs, "load_gene_context", lambda *a, **k: seen.append((a, k)))
+    obs._score_gene(_job(pepc, tmp_path / "cache"))
+    args, _ = seen[0]
+    assert args[0] == "PEPC" and args[5] == str(tmp_path / "cache") and args[6] == 0.1  # gene, cache directory, posterior threshold
+
+
+def test_a_failure_in_one_gene_is_logged_and_gives_no_rows(pepc, monkeypatch, tmp_path, caplog):
+    import observed_b0_main as obs
+
+    def boom(*a, **k):
+        raise RuntimeError("scoring failed")
+
+    monkeypatch.setattr(obs, "load_gene_context", boom)
+    with caplog.at_level(logging.ERROR):
+        assert obs._score_gene(_job(pepc, tmp_path / "cache")) == ("PEPC", None)
+    assert any("PEPC" in r.getMessage() and "scoring failed" in r.getMessage() for r in caplog.records)
