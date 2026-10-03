@@ -16,10 +16,9 @@ straight from disambig.enabled, not a sibling field) — Post-processing was nev
 meaningfully independent of Disambiguation in practice, so the extra checkbox only
 added a state (Disambiguation on, Post-processing off) nobody used on purpose.
 
-ASR mode: disambiguation_main.py's own argparse only accepts "compute" or
-"precomputed" (subworkflows/CT_DISAMBIGUATION/local/disambiguation_main.py) — an
-earlier version of this tab only offered "precomputed" as a choice, silently ruling
-out live ASR computation.
+ASR: a gene's reconstruction is read from the cache directory when it is there and
+computed with PAML (and written to the cache) when it is not, so there is no mode to
+choose.
 """
 
 # ── Local ─────────────────────────────────────────────────────────────────────
@@ -51,13 +50,6 @@ SPEC = ModuleTabSpec(
     essential_fields=(
         Section("Disambiguation parameters (conf/ct_disambiguation.config)"),
         FieldSpec(
-            name="ct_disambig_asr_mode",
-            label="ASR mode",
-            kind="choice",
-            choices=("precomputed", "compute"),
-            importance="default",
-        ),
-        FieldSpec(
             name="ct_disambig_asr_model",
             label="ASR substitution model",
             kind="choice",
@@ -73,8 +65,8 @@ SPEC = ModuleTabSpec(
             kind="path_dir",
             importance="optional",
             help=(
-                "This doubles as the ASR result cache in both ASR modes, not just a "
-                "place to point at precomputed states — but leaving it blank auto-"
+                "This is the ASR result cache: a gene found here is read, a gene "
+                "missing from it is computed and written to it. Leaving it blank auto-"
                 "generates a working default (repo_dir/caches/.asr_cache, created "
                 "automatically; see gui/generation/templates/run_single.sh.j2's bash "
                 "fallback). Override only to reuse a cache from a previous run or "
@@ -181,7 +173,6 @@ SPEC = ModuleTabSpec(
         ),
         Section("Performance and batching"),
         FieldSpec(name="ct_disambig_max_tasks_per_child", label="Max tasks per worker child", importance="optional"),
-        FieldSpec(name="ct_disambig_batch_size", label="Disambiguation genes per batch", importance="optional"),
         Section("Exploratory parameter sweep values (conf/ct_postproc.config)"),
         # Borderline default/optional: these only shape the diagnostic sweep grid
         # (Exploratory mode), not the production filter thresholds above that

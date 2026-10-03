@@ -797,14 +797,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Pubblica file intermedi',
         'de': 'Zwischendateien veröffentlichen',
     },
-    'Discovery genes per task': {
-        'en': 'Discovery genes per task',
-        'es': 'Genes de descubrimiento por tarea',
-        'ca': 'Gens de descobriment per tasca',
-        'fr': 'Gènes de découverte par tâche',
-        'it': 'Geni di scoperta per attività',
-        'de': 'Discovery-Gene pro Aufgabe',
-    },
     'Permulation-null replay genes per batch': {
         'en': 'Permulation-null replay genes per batch',
     },
@@ -985,14 +977,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'fr': "Accumulation et Score ont besoin de la sortie de ce module. Fournissez meta_caas_from/disambiguation_input/disambiguation_dir/background_input dans l'onglet Exécution Précalculée.",
         'it': "Accumulo e Punteggio necessitano dell'output di questo modulo. Fornire meta_caas_from/disambiguation_input/disambiguation_dir/background_input nella scheda Esecuzione Precalcolata.",
         'de': 'Akkumulation und Bewertung benötigen die Ausgabe dieses Moduls. Geben Sie stattdessen meta_caas_from/disambiguation_input/disambiguation_dir/background_input im Tab „Vorberechneter Lauf“ an.',
-    },
-    'ASR mode': {
-        'en': 'ASR mode',
-        'es': 'Modo ASR',
-        'ca': 'Mode ASR',
-        'fr': 'Mode ASR',
-        'it': 'Modalità ASR',
-        'de': 'ASR-Modus',
     },
     'ASR cache directory': {
         'en': 'ASR cache directory',

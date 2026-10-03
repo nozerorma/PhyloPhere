@@ -578,7 +578,6 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | Parameter | Default | Purpose |
 |---|---|---|
 | `meta_caas_from` | `""` | Standalone CT_META_CAAS output directory input. |
-| `ct_disambig_asr_mode` | `"precomputed"` | ASR source mode (`"precomputed"` or `"compute"`). |
 | `ct_disambig_asr_model` | `"lg"` | Substitution matrix model used for ASR reconstruction. |
 | `ct_disambig_asr_cache_dir` | `""` | Directory containing precomputed ASR state files. |
 | `ct_disambig_posterior_threshold` | `0.1` | Canonical posterior probability threshold ($\tau = 0.10$). |

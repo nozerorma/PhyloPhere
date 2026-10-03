@@ -539,7 +539,7 @@ def _postproc_build_script(report: DetectedReport, repo_dir: Path, use_singulari
 
 def _meta_caas_find_slots(outdir: Listing) -> list[InputSlot]:
     # CAAS_META_CAAS_REPORT (workflows/ct_meta_caas.nf) takes CT's own
-    # discovery.tab directly -- it runs upstream of CT_DISAMBIGUATION in the
+    # discovery.tab directly -- it runs after the observed files are written in the
     # live DAG and never sees caas_convergence_master.csv (that belongs to a
     # different, later report). The old glob here looked for that CSV and,
     # failing that, a "*discovery*.csv" that doesn't exist either (the real

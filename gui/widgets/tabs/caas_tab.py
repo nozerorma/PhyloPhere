@@ -104,7 +104,6 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="max_miss_fraction", label="Max any-missing fraction", importance="default"),
         FieldSpec(name="miss_pair", label="Enforce missing pairs", kind="bool", importance="default"),
         Section("Batching logic (performance)"),
-        FieldSpec(name="ct_discovery_batch_size", label="Discovery genes per task", importance="optional"),
         FieldSpec(
             name="ct_core_batch_size",
             label="Permulation-null genes per task (replay + ASR replay)",

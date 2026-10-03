@@ -20,7 +20,7 @@ SPEC = ModuleTabSpec(
         "• cons_decile: bins positions into conservation deciles (from the Valdar "
         "variability score) and randomizes within each gene's own decile profile — "
         "controls for genes differing in overall conservation. Default.\n"
-        "• permulation: reuses a prior CAAS_PERMULATION null (via --caas_pos_detail_file, "
+        "• permulation: reuses a prior permulation null (via --caas_pos_detail_file, "
         "auto-wired when that module ran upstream) — holds the phenotype-tree confound "
         "but is NOT conservation-decile matched. Opt-in."
     ),

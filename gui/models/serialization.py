@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 # Batch-size parameters of the permulation null that ct_core_batch_size replaced; their values are not carried over.
 _RETIRED_CAAS_FIELDS = ("ct_perm_replay_batch_size", "ct_disambig_perms_batch_size")
 
+# Parameters of processes that no longer exist (the per-gene discovery task, the observed disambiguation chunking) or that
+# nothing reads (the ASR mode: a gene is read from the ASR cache when it is there and computed when it is not).
+_RETIRED_FIELDS = {"caas": ("ct_discovery_batch_size",), "disambiguation": ("ct_disambig_asr_mode", "ct_disambig_batch_size")}
+
 
 def to_dict(project: ProjectConfig) -> dict[str, Any]:
     """Serialize a ProjectConfig to a plain, JSON-ready, key-order-stable dict."""
@@ -82,6 +86,11 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
             if dropped:
                 logger.warning("project parameters %s were replaced by ct_core_batch_size; the project uses its value (%s)",
                                ", ".join(dropped), caas.get("ct_core_batch_size", "default"))
+        for module, names in _RETIRED_FIELDS.items():
+            section = modules.get(module)
+            gone = [k for k in names if isinstance(section, dict) and section.pop(k, None) is not None]
+            if gone:
+                logger.warning("project parameters %s were retired (module %s): no process reads them any more", ", ".join(gone), module)
     return data
 
 
