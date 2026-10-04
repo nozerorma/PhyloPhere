@@ -5,15 +5,20 @@
  * ────────────────────────────
  * Builds a genome-wide *excess* null for CAAS FCS pathway enrichment:
  *   1. SUBSET_RESAMPLE_PERMS: take the first N (caas_full_perms) permuted
- *      labelings in cycle order (b_0, the real labeling, is never part of the null;
- *      with caas_b0_diagnostic it is rebuilt from the observed design and replayed
- *      alongside, written to caas_permulation/b0/).
+ *      labelings in cycle order (N = 0 keeps none). The real labeling b_0 is rebuilt from the
+ *      observed design and replayed alongside; it is never part of the null (its shards go to
+ *      caas_permulation/b0/).
  *   2. CAAS_CORE_BATCHED (one task per batch of ct_core_batch_size genes): full-pool
  *      perm-replay with export_perm_discovery, then the ASR replay of the same genes
- *      (disambiguation_perms_main.py --detail-only) → per-gene perm_pos_detail shards.
+ *      (disambiguation_perms_main.py --detail-only) → per-gene perm_pos_detail shards, and the
+ *      observed labeling (b_0) as full records (observed_b0_main.py) → b0_observed/.
  *      Perm-discovery exports that already exist are disambiguated without a replay.
- *   3. CAAS_CORE_MERGE unions the batches' shards and derives the genome-wide tables
- *      and caas_perms.rds from them.
+ *   3. CAAS_CORE_OBSERVED writes the observed contract files (discovery.tab, background.output,
+ *      background_genes.output, meta_caas/, ct_disambiguation/caas_convergence_master.csv) from the
+ *      batches' b_0 slices.
+ *   4. CAAS_CORE_MERGE unions the batches' shards and derives the genome-wide tables and
+ *      caas_perms.rds from them. It needs the gene universe, which the post-processing of the
+ *      observed results provides, so it runs after CAAS_CORE_OBSERVED.
  *
  * The aggregate RDS feeds the existing FCS p.perm path (fcs_enrich.R), giving
  * the CAAS scoring FCS report a permulation-corrected p.perm — exactly like RER.
@@ -54,14 +59,13 @@ process SUBSET_RESAMPLE_PERMS {
     path "fop_pairs.tsv", emit: fop_pairs, optional: true
 
     script:
-    def b0 = params.caas_b0_diagnostic ? true : false
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     """
     # Deterministic collect: cycles are ordered by their numeric id and the first N are
-    # kept, so a resample reused with more cycles than N yields the same null every time.
-    # (-L: the resample dir is staged as a symlink.) The real labeling b_0 is never part
-    # of the null; with caas_b0_diagnostic it is rebuilt from the observed design and
-    # prepended, so it is replayed through the same path and split off downstream.
+    # kept (N = 0 keeps none), so a resample reused with more cycles than N yields the same null
+    # every time. (-L: the resample dir is staged as a symlink.) The real labeling b_0 is rebuilt
+    # from the observed design and prepended, so it is replayed through the same path as the
+    # permuted cycles and split off downstream.
     FOP_TAB=""
     if [ -d "${resample_dir}" ]; then
         FOP_TAB=\$(find -L ${resample_dir} -name 'fop_labelings.tab' | head -n 1)
@@ -73,28 +77,24 @@ process SUBSET_RESAMPLE_PERMS {
         # FOP mirror: labelings are "<base>~H<m>". Keep ALL hypothesis rows of the first N
         # base cycles, plus the matching fop_pairs.tsv rows (PSS weights for pooling).
         FOP_PAIRS=\$(find -L ${resample_dir} -name 'fop_pairs.tsv' | head -n 1)
+        if [ -z "\$FOP_PAIRS" ]; then echo "ERROR: FOP labelings without fop_pairs.tsv (b_0 needs its PSS weights)" >&2; exit 1; fi
         awk -F'\\t' 'NF>=3 && \$1!~/^b_0(~|\$)/' "\$FOP_TAB" > candidates.tab
         awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' candidates.tab | sort -u \\
             | awk '{b=\$1; sub(/^b_/,"",b); print b"\\t"\$1}' | sort -k1,1n | cut -f2 > base_all.txt
-        awk -v n=${n_perms} '{print; if(++c>=n) exit}' base_all.txt > keep_base.txt
+        awk -v n=${n_perms} 'n>0{print; if(++c>=n) exit}' base_all.txt > keep_base.txt
         awk -F'\\t' 'NR==FNR{k[\$1]=1; next} {b=\$1; sub(/~.*/,"",b); if(b in k) print}' \\
             keep_base.txt candidates.tab | awk -F'\\t' "\$CYC" | sort -s -k1,1n | cut -f2- > resample_perms.tab
-        if [ -n "\$FOP_PAIRS" ]; then
-            awk -F'\\t' 'NR==FNR{k[\$1]=1; next} FNR==1{if(!seen){print; seen=1}; next} (\$1 in k){print}' \\
-                keep_base.txt "\$FOP_PAIRS" > fop_pairs.tsv
-        fi
+        head -n 1 "\$FOP_PAIRS" > fop_pairs.tsv
+        awk -F'\\t' 'NR==FNR{k[\$1]=1; next} FNR>1 && (\$1 in k){print}' keep_base.txt "\$FOP_PAIRS" >> fop_pairs.tsv
         n=\$(awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' resample_perms.tab | sort -u | wc -l)
         rows=\$(wc -l < resample_perms.tab)
         avail=\$(wc -l < base_all.txt)
         echo "[caas_perms] FOP mirror: first \$n of \$avail base cycles in cycle order (\$rows hypothesis labelings; requested ${n_perms})"
-        if [ "\$rows" -eq 0 ]; then echo "ERROR: no FOP labelings selected" >&2; exit 1; fi
-        if $b0; then
-            ${run} $baseDir/subworkflows/CT/local/scripts/build_b0_labelings.py --config ${caas_config} --fop \\
-                --labelings-out b0_labelings.tab --pairs-out b0_pairs.tsv
-            cat b0_labelings.tab resample_perms.tab > resample_perms.tmp && mv resample_perms.tmp resample_perms.tab
-            if [ ! -f fop_pairs.tsv ]; then echo "ERROR: b_0 needs fop_pairs.tsv" >&2; exit 1; fi
-            cat b0_pairs.tsv >> fop_pairs.tsv
-        fi
+        if [ "${n_perms}" -gt 0 ] && [ "\$rows" -eq 0 ]; then echo "ERROR: no FOP labelings selected" >&2; exit 1; fi
+        ${run} $baseDir/subworkflows/CT/local/scripts/build_b0_labelings.py --config ${caas_config} --fop \\
+            --labelings-out b0_labelings.tab --pairs-out b0_pairs.tsv
+        cat b0_labelings.tab resample_perms.tab > resample_perms.tmp && mv resample_perms.tmp resample_perms.tab
+        cat b0_pairs.tsv >> fop_pairs.tsv
         exit 0
     fi
 
@@ -106,15 +106,13 @@ process SUBSET_RESAMPLE_PERMS {
         echo "ERROR: resample input not found: ${resample_dir}" >&2; exit 1
     fi
     awk -F'\\t' 'NF>=3 && \$1!="b_0"' all_resamples.tab | awk -F'\\t' "\$CYC" | sort -s -k1,1n | cut -f2- > candidates.tab
-    awk -v n=${n_perms} '{print; if(++c>=n) exit}' candidates.tab > resample_perms.tab
+    awk -v n=${n_perms} 'n>0{print; if(++c>=n) exit}' candidates.tab > resample_perms.tab
     n=\$(wc -l < resample_perms.tab)
     avail=\$(wc -l < candidates.tab)
     echo "[caas_perms] first \$n of \$avail permuted labelings in cycle order (requested ${n_perms})"
-    if [ "\$n" -eq 0 ]; then echo "ERROR: no permuted labelings selected" >&2; exit 1; fi
-    if $b0; then
-        ${run} $baseDir/subworkflows/CT/local/scripts/build_b0_labelings.py --config ${caas_config} --labelings-out b0_labelings.tab
-        cat b0_labelings.tab resample_perms.tab > resample_perms.tmp && mv resample_perms.tmp resample_perms.tab
-    fi
+    if [ "${n_perms}" -gt 0 ] && [ "\$n" -eq 0 ]; then echo "ERROR: no permuted labelings selected" >&2; exit 1; fi
+    ${run} $baseDir/subworkflows/CT/local/scripts/build_b0_labelings.py --config ${caas_config} --labelings-out b0_labelings.tab
+    cat b0_labelings.tab resample_perms.tab > resample_perms.tmp && mv resample_perms.tmp resample_perms.tab
     """
 }
 
@@ -124,8 +122,11 @@ process SUBSET_RESAMPLE_PERMS {
 // for the rest of the genome between the two steps. Pass B scores each cycle against genome-wide pools
 // and runs once, in CAAS_CORE_MERGE, over the union of the batches' shards.
 // A batch that arrives with perm-discovery files already computed (permDiscFiles) skips the replay.
-// Output: perm_pos_detail/ (one gz shard per gene; the b_0 shards, when b_0 is in the labelings, under b0/),
-// and the perm-discovery exports of a replayed batch.
+// The same replay exports the b_0 slice of each gene (the discovery.tab rows of the real labeling and the
+// positions it tested); observed_b0_main.py then scores those rows as full records.
+// Output: perm_pos_detail/ (one gz shard per gene; the b_0 shards under b0/), b0_observed/ (per gene with b_0
+// hits: its discovery rows, its tested positions and its master rows), and the perm-discovery exports of a
+// replayed batch. A batch that reuses exports has no b_0 slice: b0_observed/ is empty.
 process CAAS_CORE_BATCHED {
     tag "$batchID (${batchSize} genes)"
     label 'process_resample'
@@ -142,6 +143,7 @@ process CAAS_CORE_BATCHED {
 
     output:
     path "perm_pos_detail", emit: pos_detail
+    path "b0_observed", emit: b0_observed
     path "perm_disc/*.perm_replay.discovery.output", emit: perm_discovery, optional: true
 
     script:
@@ -159,7 +161,7 @@ process CAAS_CORE_BATCHED {
     """
     # One worker pool per step runs the genes in parallel; BLAS and OpenMP stay at one thread each.
     export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
-    mkdir -p perm_disc
+    mkdir -p perm_disc b0_observed
     PERM_DISC=perm_disc_in
     if ${replay}; then
         # Bounds the vectorized kernel's per-call chunk buffers to a quarter of one worker's share of task.memory.
@@ -191,11 +193,12 @@ process CAAS_CORE_BATCHED {
             --workers ${task.cpus} \\
             --ali-format ${params.ali_format} \\
             --ct-bin ${ctBinary} \\
-            --progress-log 0 \\
             --export-groups 0 \\
             --export-perm-discovery 1 \\
+            --export-b0 1 \\
             --extra-args-file .ct_perm_replay_batch_args
         find . -maxdepth 1 -name '*.perm_replay.discovery.output' -exec mv {} perm_disc/ \\;
+        find . -maxdepth 1 \\( -name '*.b0.discovery.tsv' -o -name '*.b0.background' \\) -exec mv {} b0_observed/ \\;
         PERM_DISC=perm_disc
     fi
 
@@ -226,6 +229,24 @@ process CAAS_CORE_BATCHED {
     cp -R caas_perms_out/perm_pos_detail perm_pos_detail
     # b_0 shards sit in a subdirectory the null readers never glob; CAAS_CORE_MERGE scores them as a one-labeling run.
     if [ -d caas_perms_out/b0/perm_pos_detail ]; then cp -R caas_perms_out/b0/perm_pos_detail perm_pos_detail/b0; fi
+
+    # The observed labeling as full records: one master shard per gene with b_0 hits.
+    if compgen -G 'b0_observed/*.b0.discovery.tsv' > /dev/null; then
+        ${run} ./observed_b0_main.py \\
+            --alignment-dir ${params.alignment} \\
+            --tree ${tree_file} \\
+            --b0-dir b0_observed \\
+            --design ${caas_config} \\
+            ${fop_pairs.name =~ /^NO_/ ? '' : "--fop-pairs ${fop_pairs}"} \\
+            --output-dir b0_observed \\
+            --asr-model ${params.ct_disambig_asr_model} \\
+            --posterior-threshold ${params.ct_disambig_posterior_threshold} \\
+            --workers ${task.cpus} \\
+            --max-tasks-per-child ${max_tasks_per_child} \\
+            --asr-cache-dir ${asr_cache_dir} \\
+            ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
+            ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
+    fi
     """
 }
 
@@ -276,7 +297,44 @@ workflow CAAS_CORE {
 
     emit:
         pos_detail     = core.pos_detail
+        b0_observed    = core.b0_observed
         perm_discovery = core.perm_discovery
+}
+
+// ── 3. The observed contract files, from the b_0 slices of the batches ───────────────────────────────
+// contract_main.py turns the b0_observed/ directories into discovery.tab, background.output,
+// background_genes.output, meta_caas/ and ct_disambiguation/caas_convergence_master.csv: every table holds the
+// genes in name order, whatever order the batches finished in. Batches that reuse perm-discovery exports carry
+// no b_0 slice and give no file. Published where the rest of the pipeline reads them: caastools/, meta_caas/meta_caas/
+// and ct_disambiguation/.
+process CAAS_CORE_OBSERVED {
+    tag "caas_core_observed"
+    label 'process_low'
+    publishDir path: "${params.outdir}/caastools", mode: 'copy', overwrite: true, pattern: '{discovery.tab,background.output,background_genes.output}'
+    publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: 'meta_caas/**'
+    publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, pattern: 'ct_disambiguation/**'
+
+    input:
+    path b0Observed, stageAs: 'b0obs_*'   // the batches' b0_observed directories
+    path design                           // observed design: the master columns come from it
+
+    output:
+    path "discovery.tab",                emit: discovery, optional: true
+    path "background.output",            emit: background, optional: true
+    path "background_genes.output",      emit: background_genes, optional: true
+    path "ct_disambiguation",            emit: results_dir, optional: true
+    path "ct_disambiguation/caas_convergence_master.csv", emit: master_csv, optional: true
+    path "meta_caas",                    emit: meta_caas, optional: true
+    path "meta_caas/global_meta_caas.tsv", emit: global_meta_caas, optional: true
+
+    script:
+    def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
+    def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
+    """
+    cp -R ${local_dir}/* .
+    find . -name '*.pyc' -delete 2>/dev/null || true
+    ${py} ./contract_main.py --b0-dirs b0obs_* --design ${design} --output-dir .
+    """
 }
 
 // ── 3. Merge the batches' shards and derive the genome-wide null (no ASR replay) ──────────────────────
@@ -357,6 +415,7 @@ process CAAS_CORE_MERGE {
         --gene-cycle-scores gene_cycle_scores.tsv \\
         ${universe_arg} \\
         --output caas_perms.rds
+
     """
 }
 
@@ -367,48 +426,9 @@ workflow CAAS_PERMS_PREP {
         resample_dir       // path (resample_*.tab directory)
 
     main:
-        def subset = SUBSET_RESAMPLE_PERMS(resample_dir, params.caas_full_perms ?: 10, caas_config)
+        def subset = SUBSET_RESAMPLE_PERMS(resample_dir, params.caas_full_perms == null ? 10 : (params.caas_full_perms as int), caas_config)  // 0 is a valid N: b_0 only
 
     emit:
         resample_subset = subset.subset
         fop_pairs = subset.fop_pairs.ifEmpty(file('NO_FOP_PAIRS'))
-}
-
-// ── Subworkflow: build the null matrices — runs in main.nf after CT ───────────
-workflow CAAS_PERMULATION {
-    take:
-        align_tuple        // Channel<tuple(id, alignmentFile)> to replay (empty when reusing exports)
-        reuse_disc         // Channel<List<file>> of perm-discovery exports to disambiguate (empty when replaying)
-        caas_config        // path trait file or directory (replay)
-        resample_subset    // path resample_perms.tab
-        tree_file          // path species tree
-        universe           // path cleaned_background or NO_FILE
-        fop_pairs          // path fop_pairs.tsv (FOP mirror) or NO_FOP_PAIRS
-        gene_lengths       // path gene_ensembl_file (CT_POSTPROC filters) or NO_FILE
-        asr_ready          // gate: emits once the live CT_DISAMBIGUATION has
-                           // finished writing the shared ASR cache. A 'NO_GATE'
-                           // sentinel when ASR is precomputed / disambiguation
-                           // is off (no wait needed then).
-
-    main:
-        // The ASR replay only reads --asr-cache-dir (no compute on a miss). With asr_mode=compute the live
-        // CT_DISAMBIGUATION_RUN populates that dir lazily and nothing else orders the two, so the tree
-        // input is held until asr_ready emits and every batch starts after the cache is complete.
-        def gated_tree = tree_file
-            .combine(asr_ready)
-            .map { t, _ready -> t }
-            .collect()
-            .map { items -> items[0] }
-
-        def core = CAAS_CORE(align_tuple, reuse_disc, caas_config, resample_subset, gated_tree, fop_pairs, gene_lengths)
-        def gene_lengths_bc = gene_lengths.collect().map { items -> items[0] }
-        def merged = CAAS_CORE_MERGE(core.pos_detail.collect(), universe, gene_lengths_bc)
-
-    emit:
-        perms              = merged.perms
-        pos_cycle_caas     = merged.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))  // per (gene,position,side,cycle) caas_score -> p.emp
-        pos_sample         = merged.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))          // cycle-stratified sample for distribution plots
-        pos_quantiles      = merged.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))    // per (cycle,scheme) distribution shape
-        pos_detail         = merged.pos_detail      // full per-cycle detail (sharded dir); re-scoring needs no ASR replay
-        gene_cycle_scores  = merged.gene_cycle_scores // genes x cycles raw scores; feeds the report's FPR calibration figure
 }

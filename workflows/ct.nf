@@ -24,25 +24,16 @@
 
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  CT Workflow: This workflow integrates the discovery and resampling modules for CAAStools.
+ *  CT Workflow: resamples the phenotype labelings and prepares the inputs of the permulation core,
+ *  which discovers the observed CAAS as its b_0 slice (CAAS_CORE, main.nf).
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
 // Import local modules/subworkflows
-include { DISCOVERY; DISCOVERY_BATCHED } from '../subworkflows/CT/ct_discovery'
 include { RESAMPLE } from '../subworkflows/CT/ct_resample'
 include { listAlignmentFiles; sampleAlignmentFiles } from '../subworkflows/CT/ct_alignment_files'
-include { CONCAT_DISCOVERY; CONCAT_BACKGROUND; CONCAT_RESAMPLE } from '../subworkflows/CT/ct_concat'
+include { CONCAT_RESAMPLE } from '../subworkflows/CT/ct_concat'
 include { CAAS_PERMS_PREP } from '../subworkflows/CT/caas_permulation'
-
-/**
- * Render a list of TSV row strings into a heredoc-safe manifest block.
- */
-def createBatchManifestText(List<String> rows) {
-    return rows
-        .collect { row -> row.replaceFirst(/^\s+/, '') }
-        .join(System.lineSeparator()) + System.lineSeparator()
-}
 
 // Main workflow
 
@@ -53,13 +44,10 @@ workflow CT {
         tree_file_in
     main:
         // Output channels for emit block - must be defined at workflow level
-        def discovery_concat_out = Channel.empty()
-        def background_concat_out = Channel.empty()
-        def background_raw_out = Channel.empty()
-        def background_genes_out = Channel.empty()
         def trait_file_emit = Channel.empty()
-        // CAAS permulation-excess null (full-pool perm-discovery export). Populated
-        // only when --caas_permulation_enrichment is set and perm-replay+resample run.
+        // Inputs of the permulation core: the alignments to replay, the labelings subset (b_0 and the first N
+        // permuted cycles) and the FOP pair weights. Populated when discovery is requested or
+        // --caas_permulation_enrichment is set.
         def caas_align_tuple_out = Channel.empty()
         def caas_resample_subset_out = Channel.empty()
         def caas_fop_pairs_out = Channel.value(file('NO_FOP_PAIRS'))
@@ -73,10 +61,10 @@ workflow CT {
             ? params.ct_tool.split(',').collect { it.trim() }.findAll { it }
             : []
 
-        // Define the alignment channel (used by discovery and the permulation-excess null).
+        // Define the alignment channel (replayed by the permulation core).
         // params.alignment is a directory of per-gene alignment files.
         // When toy_mode=true, a seeded random subset of toy_n alignments is used (the same one for the same
-        // --seed), which also keeps the batches of DISCOVERY_BATCHED, and so -resume cache hits, stable.
+        // --seed), which also keeps the batches of the core, and so -resume cache hits, stable.
         def allFiles = listAlignmentFiles(params.alignment)
         if (params.toy_mode) {
             def n = (params.toy_n ?: 50) as int
@@ -89,11 +77,6 @@ workflow CT {
         // Initialize variables
         def trait_file_out
         def permulation_trait_file_out
-        def discovery_results = Channel.empty()
-        def background_results = Channel.empty()
-
-        def discovery_out = Channel.empty()
-        def discovery_done = Channel.value(true)
         // resample_dir_out  → partitioned directory passed to the permulation-excess null
         // resample_out      → concatenated resample.tab used for reporting / emit
         def resample_out = Channel.empty()
@@ -130,85 +113,19 @@ workflow CT {
         trait_file_emit = (params.contrast_selection && trait_file_in && permulation_trait_file_in) ? trait_file_out : Channel.value(trait_file_out)
         tree_file_emit  = (params.contrast_selection && trait_file_in && permulation_trait_file_in) ? tree_file_out  : Channel.value(tree_file_out)
 
-        if (toolsToRun.contains('discovery')) {
-            def discoveryBatchSize = (params.ct_discovery_batch_size ?: 1) as int
-            if (discoveryBatchSize > 1) {
-                def discoveryBatchCounter = 0
-                def discovery_batches = align_tuple
-                    .collate(discoveryBatchSize)
-                    .map { batch ->
-                        def batchID = String.format('discovery_batch_%05d', ++discoveryBatchCounter)
-                        def manifestText = createBatchManifestText(
-                            batch.collect { row -> "${row[0]}\t${row[1].name}" }
-                        )
-                        tuple(batchID, batch.size(), manifestText, batch.collect { row -> row[1] }.unique())
-                    }
-
-                discovery_out = DISCOVERY_BATCHED(discovery_batches, trait_file_out)
-                discovery_results = discovery_out.discovery_out
-                    .flatten()
-                    .map { file -> tuple(file.baseName, file) }
-                background_results = discovery_out.background_out
-                    .flatten()
-            } else {
-                discovery_out = DISCOVERY(align_tuple, trait_file_out)
-                discovery_results = discovery_out.discovery_out
-                background_results = discovery_out.background_out
-            }
-
-            // Hard barrier: downstream steps should start only after discovery is fully complete
-            discovery_done = discovery_results
-                .collect()
-                .ifEmpty([])
-            
-            // Concatenate discovery outputs - collect actual files for staging
-            discovery_results
-                .map { id, file -> file }
-                .collect()
-                .ifEmpty([])
-                .set { discovery_files_to_concat }
-            CONCAT_DISCOVERY(discovery_files_to_concat)
-            discovery_concat_out = CONCAT_DISCOVERY.out.discovery_concat
-            
-            // Concatenate background outputs - collect actual files for staging
-            background_raw_out = background_results
-            background_results
-                .collect()
-                .ifEmpty([])
-                .set { background_files_to_concat }
-            CONCAT_BACKGROUND(background_files_to_concat)
-            background_concat_out = CONCAT_BACKGROUND.out.background_concat
-            background_genes_out = CONCAT_BACKGROUND.out.background_genes
-        }
         if (toolsToRun.contains('resample')) {
-            // Discovery barrier trigger (if discovery was requested, wait until it fully completes)
-            def resample_trigger = discovery_done
-
             // Handle channels differently based on whether they come from contrast_selection
             if (params.contrast_selection && trait_file_in && permulation_trait_file_in) {
                 // tree_file_out, trait_file_out, and trait_val are already channels from CONTRAST_SELECTION.
-                // Combine with resample_trigger to enforce discovery → resample ordering.
                 // File-staging collisions are prevented by stageAs aliases in the RESAMPLE process.
                 nw_tree = tree_file_out
-                    .combine(resample_trigger)
-                    .map { row ->
-                        (row instanceof List || row?.getClass()?.isArray()) ? row[0] : row
-                    }
                 caas_config = trait_file_out
-                    .combine(resample_trigger)
-                    .map { row ->
-                        (row instanceof List || row?.getClass()?.isArray()) ? row[0] : row
-                    }
                 trait_values = trait_val
-                    .combine(resample_trigger)
-                    .map { row ->
-                        (row instanceof List || row?.getClass()?.isArray()) ? row[0] : row
-                    }
             } else {
                 // tree_file_out, trait_file_out, and trait_val are file objects that need to be channelized
-                nw_tree = resample_trigger.map { file(tree_file_out) }
-                caas_config = resample_trigger.map { file(trait_file_out) }
-                trait_values = resample_trigger.map { file(trait_val) }
+                nw_tree = Channel.value(file(tree_file_out))
+                caas_config = Channel.value(file(trait_file_out))
+                trait_values = Channel.value(file(trait_val))
             }
             resample_dir_out = RESAMPLE(nw_tree, caas_config, trait_values)
 
@@ -218,10 +135,13 @@ workflow CT {
             // NOTE: resample_dir_out retains the raw directory so perm-replay receives
             // the partitioned resample_NNN.tab files, not the merged flat file.
         }
-        // CAAS permulation-excess null: the first N permuted labelings are subset here; CAAS_PERMULATION
-        // (main.nf) replays them over the alignments in align_tuple. Needs trait_file_out and
-        // resample_dir_out, in scope from discovery/resample above, not gated on params.ct_tool.
-        if (params.caas_permulation_enrichment) {
+        // Permulation core: b_0 and the first N permuted labelings are subset here; CAAS_CORE (main.nf)
+        // replays them over the alignments in align_tuple. Needs trait_file_out and resample_dir_out, in scope from
+        // the resample step above. Discovery is the b_0 slice of that replay, so it needs the labelings too.
+        if (toolsToRun.contains('discovery') || params.caas_permulation_enrichment) {
+            if (toolsToRun.contains('discovery') && !toolsToRun.contains('resample') && !params.resample_from) {
+                error "ct_tool 'discovery' needs the permuted labelings of the core: add 'resample' to --ct_tool or give --resample_from"
+            }
             def perms_prep = CAAS_PERMS_PREP(trait_file_out, resample_dir_out)
             caas_align_tuple_out     = align_tuple
             caas_resample_subset_out = perms_prep.resample_subset
@@ -230,14 +150,10 @@ workflow CT {
     }
     
     emit:
-        discovery_file = discovery_concat_out
-        background_file_raw = background_raw_out
-        background_file = background_concat_out
-        background_genes = background_genes_out
         trait_file = trait_file_emit
         tree_file = tree_file_emit
         // CAAS permulation-excess: the alignments to replay + the N-cycle resample
-        // subset, consumed downstream by CAAS_PERMULATION (main.nf) → caas_perms.rds.
+        // subset, consumed downstream by CAAS_CORE (main.nf) → caas_perms.rds.
         caas_align_tuple = caas_align_tuple_out
         caas_resample_subset = caas_resample_subset_out
         caas_fop_pairs = caas_fop_pairs_out

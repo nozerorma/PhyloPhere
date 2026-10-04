@@ -70,7 +70,7 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     # than falling back to the NO_FILE sentinel and crashing.
     POSENRICH_BACKGROUND_FILE="${EXPLORATORY_OUTDIR}/caastools/background.output"
 
-    # CAAS permulation-excess null. CAAS_PERMULATION only runs where CT ran — i.e.
+    # CAAS permulation-excess null. The permulation core only runs where CT ran, i.e.
     # the _exploratory pass — but SCORING/ENRICHMENT, which consume it, run only
     # here. Point them at _exploratory's published outputs, exactly as the tree /
     # trait / background substitutions above do. Without this the CAAS FCS p.perm
@@ -301,7 +301,7 @@ fi
 
 # Contrast selection is tracked separately from CAAS because it is the only producer
 # of the fg/bg trait file (CHECK_MIN_CONTRASTS' traitfile_ok.tab), and that file is
-# consumed by more than CT itself. CT_DISAMBIGUATION needs it to know which species
+# consumed by more than CT itself. The observed scoring needs it to know which species
 # are foreground vs background when it re-analyses convergence, so a run that reuses
 # a precomputed CAAStools discovery but still computes disambiguation must keep
 # contrast selection on — otherwise no trait file exists anywhere and main.nf stops
@@ -457,7 +457,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "max_contrasts": "${MAX_CONTRASTS:-0}",
   "min_contrasts": "${MIN_CONTRASTS:-3}",
   "publish_intermediates": {{ run_defaults.publish_intermediates }},
-  "ct_discovery_batch_size": "${CT_DISCOVERY_BATCH_SIZE:-25}",
   "ct_core_batch_size": "${CT_CORE_BATCH_SIZE:-20}",
   "min_divergent_fraction": "${MIN_DIVERGENT_FRACTION:-0.5}",
   "max_bg_gaps_fraction": "${MAX_BG_GAPS_FRACTION:-0.0}",
@@ -474,7 +473,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "chunk_size": "${CHUNK_SIZE:-500}",
   "multi_hypothesis": {{ run_defaults.multi_hypothesis }},
   "max_fop": "${MAX_FOP:-100}",
-  "caas_b0_diagnostic": {{ run_defaults.caas_b0_diagnostic }},
   "export_groups": {{ run_defaults.export_groups }},
   "export_perm_discovery": {{ run_defaults.export_perm_discovery }},
   "discovery_from": "${DISCOVERY_FROM:-}",
@@ -483,12 +481,10 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "ct_disambiguation": $_RUN_DISAMBIGUATION,
   "ct_postproc": $_RUN_CT_POSTPROC,
   "asr_robustness": $_ASR_ROBUSTNESS,
-  "ct_disambig_asr_mode": "$ASR_MODE",
   "ct_disambig_asr_model": "${ASR_MODEL:-lg}",
   "ct_disambig_asr_cache_dir": "${ASR_CACHE_DIR:-$REPO_DIR/caches/.asr_cache}",
   "ct_disambig_posterior_threshold": "${POSTERIOR_THRESHOLD:-0.1}",
   "ct_disambig_max_tasks_per_child": "${MAX_TASKS_PER_CHILD:-50}",
-  "ct_disambig_batch_size": "${DISAMBIG_BATCH_SIZE:-1}",
   "meta_caas_from": "${META_CAAS_FROM:-}",
   "disambiguation_input": "${DISAMBIGUATION_INPUT:-}",
   "disambiguation_dir": "${DISAMBIGUATION_DIR:-}",

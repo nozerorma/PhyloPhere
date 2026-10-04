@@ -82,7 +82,7 @@ def validate(project: ProjectConfig) -> list[str]:
     #   • CAAS on  -> CONTRAST_SELECTION's trait/tree feed CT(...) directly.
     #   • CAAS off, Disambiguation on (Precomputed Run reuse) -> ct_tool is empty so
     #     CT() never runs, but CONTRAST_SELECTION still does, and main.nf hands its
-    #     trait_file_out/tree_file_out to CT_DISAMBIGUATION.
+    #     trait_file_out/tree_file_out to the observed scoring (CT_OBSERVED).
     # The --caas_config fallbacks (ct.nf, ct_disambiguation.nf) are therefore only
     # reachable by standalone non-GUI invocations, which is why the GUI can drive
     # phenotypes purely through --my_traits.
@@ -105,11 +105,10 @@ def validate(project: ProjectConfig) -> list[str]:
 
     # --- Disambiguation (+ Post-processing) ---
     if disambig.enabled:
-        if disambig.ct_disambig_asr_mode == "precomputed":
-            require(
-                disambig.ct_disambig_asr_cache_dir,
-                "Disambiguation: ASR cache directory is required when asr_mode=precomputed.",
-            )
+        require(
+            disambig.ct_disambig_asr_cache_dir,
+            "Disambiguation: the ASR cache directory is required.",
+        )
         if not caas.enabled and not any([pc.use_discovery, pc.use_resample]):
             errors.append(
                 "Disambiguation is enabled but CAAS is disabled with no reuse box checked on "

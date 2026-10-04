@@ -294,6 +294,45 @@ def read_pss(path, default_cycle: str = OBSERVED_CYCLE) -> PssMap:
     return out
 
 
+def design_max_pairs(trait_file: Path) -> int:
+    """Largest pair id of the observed design (a trait file, or a directory of traitfile_H*.tab): the number of
+    pair columns the master CSV schema needs. 1 when there is none."""
+    max_pair_id = 0
+    files_to_read = []
+    if trait_file.is_dir():
+        h_files = sorted(trait_file.glob("traitfile_H*.tab"))
+        if h_files:
+            files_to_read = h_files
+        else:
+            files_to_read = [
+                f for f in sorted(trait_file.glob("*.tab"))
+                if f.name != "traitfile_fop.tab"
+            ]
+        if not files_to_read:
+            files_to_read = [f for f in sorted(trait_file.glob("*")) if f.is_file()]
+    elif trait_file.is_file():
+        files_to_read = [trait_file]
+
+    for fpath in files_to_read:
+        try:
+            with open(fpath, "r", encoding="utf-8-sig") as f:
+                reader = csv.reader(f, delimiter="\t")
+                for row in reader:
+                    if not row or len(row) < 3:
+                        continue
+                    pair_val = row[2]
+                    if pair_val is None or str(pair_val).strip() == "":
+                        continue
+                    try:
+                        pair_id = int(str(pair_val).strip())
+                        max_pair_id = max(max_pair_id, pair_id)
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.warning(f"Could not read traitfile {fpath}: {e}")
+    return max_pair_id or 1
+
+
 def observed_pss(path) -> Optional[Dict[Tuple[str, int], float]]:
     """PSS weights of the observed cycle, or None when there are none."""
     return read_pss(path).get(OBSERVED_CYCLE) or None

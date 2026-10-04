@@ -74,3 +74,78 @@ def test_a_project_with_the_new_batch_size_loads_without_a_warning(caplog):
     with caplog.at_level(logging.WARNING):
         p = from_dict(copy.deepcopy(d))
     assert p.modules.caas.ct_core_batch_size == "33" and not caplog.records
+
+
+# ── b_0 is always replayed: the switch that enabled it is gone ───────────────
+
+def test_the_b0_diagnostic_switch_is_gone_from_model_tab_templates_and_generators():
+    assert "caas_b0_diagnostic" not in CaasConfig.__dataclass_fields__
+    names = _tab_field_names("caas_tab.py", "essential_fields") + _tab_field_names("caas_tab.py", "advanced_fields")
+    assert "caas_b0_diagnostic" not in names
+    for path in TEMPLATES:
+        assert "caas_b0_diagnostic" not in json.loads(path.read_text())["modules"]["caas"], path.name
+    proj = load_project(ROOT / "gui/templates/cancer_no_prune_multi.json")
+    assert "b0_diagnostic" not in render_single(proj) + render_batch(proj)
+    assert not re.search(r"^\s*caas_b0_diagnostic\s*=", (ROOT / "conf/ct.config").read_text(), re.M)
+
+
+def test_a_project_saved_with_the_b0_diagnostic_switch_loads_with_a_warning(caplog):
+    d = json.loads((ROOT / "gui/templates/cancer_no_prune_multi.json").read_text())
+    d["modules"]["caas"]["caas_b0_diagnostic"] = True
+    with caplog.at_level(logging.WARNING):
+        p = from_dict(copy.deepcopy(d))
+    assert not hasattr(p.modules.caas, "caas_b0_diagnostic")
+    assert "caas_b0_diagnostic" in " ".join(r.getMessage() for r in caplog.records)
+
+
+# ── parameters nothing reads: the per-gene discovery batch, the observed disambiguation batch, the ASR mode ──
+
+RETIRED_PARAMS = {"caas": ("ct_discovery_batch_size",), "disambiguation": ("ct_disambig_asr_mode", "ct_disambig_batch_size")}
+_ALL_RETIRED = [name for names in RETIRED_PARAMS.values() for name in names]
+
+
+def test_the_retired_parameters_are_gone_from_the_model_the_tabs_and_the_config():
+    from gui.models.modules import DisambiguationConfig
+    for model, module in ((CaasConfig, "caas"), (DisambiguationConfig, "disambiguation")):
+        assert not set(model.__dataclass_fields__) & set(RETIRED_PARAMS[module])
+    names = (_tab_field_names("caas_tab.py", "essential_fields") + _tab_field_names("caas_tab.py", "advanced_fields")
+             + _tab_field_names("disambiguation_tab.py", "essential_fields") + _tab_field_names("disambiguation_tab.py", "advanced_fields"))
+    assert not set(names) & set(_ALL_RETIRED)
+    conf = " ".join((ROOT / "conf" / f).read_text() for f in ("ct.config", "ct_disambiguation.config"))
+    assert not any(re.search(rf"^\s*{name}\s*=", conf, re.M) for name in _ALL_RETIRED)
+
+
+@pytest.mark.parametrize("path", TEMPLATES, ids=lambda p: p.name)
+def test_no_template_carries_a_retired_parameter(path):
+    modules = json.loads(path.read_text())["modules"]
+    for module, names in RETIRED_PARAMS.items():
+        assert not set(modules[module]) & set(names), (path.name, module)
+
+
+def test_the_generators_write_none_of_the_retired_parameters():
+    proj = load_project(ROOT / "gui/templates/cancer_no_prune_multi.json")
+    text = render_single(proj) + render_batch(proj)
+    for name in _ALL_RETIRED:
+        assert not re.search(rf"\b{name}\b", text) and not re.search(rf"\b{name.upper()}\b", text), name
+    assert "ct_disambig_asr_cache_dir" in text and "ct_disambig_asr_model" in text  # the ones that stay
+
+
+def test_a_project_saved_with_the_retired_parameters_loads_with_one_warning_per_module(caplog):
+    d = json.loads((ROOT / "gui/templates/cancer_no_prune_multi.json").read_text())
+    d["modules"]["caas"]["ct_discovery_batch_size"] = "100"
+    d["modules"]["disambiguation"].update({"ct_disambig_asr_mode": "compute", "ct_disambig_batch_size": "20"})
+    with caplog.at_level(logging.WARNING):
+        p = from_dict(copy.deepcopy(d))
+    assert not any(hasattr(p.modules.caas, n) for n in RETIRED_PARAMS["caas"])
+    assert not any(hasattr(p.modules.disambiguation, n) for n in RETIRED_PARAMS["disambiguation"])
+    warned = " ".join(r.getMessage() for r in caplog.records)
+    assert all(n in warned for n in _ALL_RETIRED)
+
+
+def test_the_asr_cache_directory_is_always_required_when_disambiguation_runs():
+    from gui.generation.validate import validate
+    proj = load_project(ROOT / "gui/templates/cancer_no_prune_multi.json")
+    proj.modules.disambiguation.ct_disambig_asr_cache_dir = ""
+    assert any("ASR cache directory is required" in e for e in validate(proj))
+    proj.modules.disambiguation.ct_disambig_asr_cache_dir = "/some/cache"
+    assert not any("ASR cache directory is required" in e for e in validate(proj))

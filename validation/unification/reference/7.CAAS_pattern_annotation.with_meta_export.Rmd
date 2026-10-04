@@ -1,0 +1,386 @@
+---
+title: "CAAS Pattern Annotation"
+subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
+output:
+  html_document:
+    theme: flatly
+    syntax_highlighting: tango
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+    df_print: paged
+    fig_width: 10
+    fig_height: 6
+    self_contained: true
+params:
+  discovery_input: NULL
+  background_input: NULL
+  output_dir: "."
+  caap_mode: FALSE
+  seed: "1998"
+---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .main-container {
+    max-width: 95% !important;
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #2c3e50;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .subtitle {
+    font-size: 24px;
+    font-weight: normal;
+    color: #7f8c8d;
+    margin-top: 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .author, .date {
+    font-size: 16px;
+    color: #7f8c8d;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 7
+)
+
+# Load required libraries
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(knitr)
+  library(scales)
+  library(data.table)
+  library(paletteer)
+})
+
+# Directory management
+createDir <- function(path) {
+  if (!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
+}
+
+# Define color palettes, including a colorblind-friendly palette for categories
+tableau_10 <- paletteer_d("ggthemes::Tableau_10")
+names(tableau_10) <- c(
+  "blue", "orange", "vermillion", "bluish_green",
+  "green", "yellow", "reddish_purple", "pink",
+  "brown", "gray"
+)
+
+# Consistent colorblind-friendly palette
+category_palette <- c(
+  "Normal" = tableau_10[["gray"]],
+  "Dubious" = tableau_10[["blue"]],
+  "Extreme" = tableau_10[["vermillion"]],
+  "Both" = tableau_10[["reddish_purple"]]
+)
+
+removal_palette <- c(
+  Discarded = tableau_10[["vermillion"]],
+  Good = tableau_10[["green"]]
+)
+```
+
+## 1. Data Import and Validation
+
+This section loads the filtered CAAS data and validates input files.
+
+```{r data_import, message=FALSE}
+# Load filtered discovery file
+filtered_discovery_path <- params$discovery_input
+if (is.null(filtered_discovery_path)) {
+  stop("Filtered discovery file parameter is NULL")
+}
+
+cat(sprintf("Attempting to load: %s\n", filtered_discovery_path))
+cat(sprintf("  File exists: %s\n", file.exists(filtered_discovery_path)))
+cat(sprintf("  Working directory: %s\n", getwd()))
+
+if (!file.exists(filtered_discovery_path)) {
+  # List files in current directory for debugging
+  cat("Files in current directory:\n")
+  print(list.files(".", full.names = TRUE))
+  stop("Filtered discovery file not found: ", filtered_discovery_path)
+}
+
+discovery_df <- read_tsv(filtered_discovery_path, show_col_types = FALSE)
+
+# discovery.tab is now fully lowercase (gene/mode/trait/position/pattern/ffgn/…).
+# Map ONLY the structural keys to the CamelCase names this report uses internally
+# (joins on Gene/Position, GenePos = paste(Gene, Position)). Concept columns —
+# including the cardinal `pattern` contrast index — stay lowercase (canonical), so
+# they are no longer re-capitalised here.
+.disc_keymap <- c(Gene = "gene", Position = "position")
+for (.new in names(.disc_keymap)) {
+  .old <- .disc_keymap[[.new]]
+  if (.old %in% names(discovery_df) && !(.new %in% names(discovery_df))) {
+    names(discovery_df)[names(discovery_df) == .old] <- .new
+  }
+}
+
+# Normalize discovery schema (legacy CAAS files may not include caap_group)
+if (!"caap_group" %in% names(discovery_df)) {
+  discovery_df <- discovery_df %>% mutate(caap_group = "US")
+}
+cat(sprintf("Loaded discovery file: %s\n", basename(filtered_discovery_path)))
+cat(sprintf("  Total CAAS positions: %s\n", format(nrow(discovery_df), big.mark = ",")))
+
+# Detect CAAP mode (after normalization)
+has_caap_group <- 'caap_group' %in% names(discovery_df)
+cat(sprintf("  CAAP mode detected: %s\n", has_caap_group))
+
+if (has_caap_group) {
+  groups <- unique(discovery_df$caap_group)
+  cat(sprintf("  Groups present: %s\n", paste(groups, collapse = ", ")))
+}
+
+# Load filtered background
+filtered_background_path <- params$background_input
+if (is.null(filtered_background_path) || !file.exists(filtered_background_path)) {
+  stop("Filtered background file not found: ", filtered_background_path)
+}
+
+background_df <- read_tsv(filtered_background_path, show_col_types = FALSE)
+cat(sprintf("Loaded background file: %s\n", basename(filtered_background_path)))
+cat(sprintf("Total genes in background: %s\n", format(nrow(background_df), big.mark = ",")))
+
+# Validate required columns
+required_cols <- c("Gene", "Position", "pattern")
+missing_cols <- setdiff(required_cols, names(discovery_df))
+if (length(missing_cols) > 0) {
+  stop("Missing required columns in discovery: ", paste(missing_cols, collapse = ", "))
+}
+
+```
+
+## 2. Pattern-Based Analysis
+
+Analyze CAAS patterns across discovered positions.
+
+```{r pattern_analysis}
+cat("\n=== Pattern-Based Analysis ===\n")
+
+# Normalize optional conserved columns for downstream meta export
+if (!"is_conserved_meta" %in% names(discovery_df)) {
+  discovery_df <- discovery_df %>% mutate(is_conserved_meta = NA)
+}
+if (!"conserved_pair" %in% names(discovery_df)) {
+  discovery_df <- discovery_df %>% mutate(conserved_pair = NA_character_)
+}
+
+caas_for_export <- discovery_df
+
+# Detect available patterns
+patterns_present <- unique(caas_for_export$pattern)
+cat(sprintf("Patterns detected: %s\n", paste(patterns_present, collapse = ", ")))
+
+# Pattern distribution
+if (has_caap_group) {
+  pattern_summary <- caas_for_export %>%
+    group_by(caap_group, pattern) %>%
+    summarize(
+      Total = n(),
+      .groups = "drop"
+    ) %>%
+    arrange(caap_group, pattern)
+  
+  cat("\nPattern Distribution by Group:\n")
+  print(kable(pattern_summary, format.args = list(big.mark = ",")))
+  
+  p_pattern <- ggplot(pattern_summary, aes(x = factor(pattern), y = Total, fill = factor(pattern))) +
+    geom_bar(stat = "identity") +
+    facet_wrap(~ caap_group, scales = "free_y") +
+    theme_minimal() +
+    labs(
+      title = "CAAS Pattern Distribution by Group",
+      x = "Pattern",
+      y = "Candidate Count",
+      fill = "Pattern"
+    ) +
+    theme(
+      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
+      plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+      axis.text.x = element_text(angle = 0, hjust = 0.5),
+      panel.grid.major = element_line(color = "darkgray", size = 0.5),
+      legend.position = "none"
+    )
+  
+  print(p_pattern)
+} else {
+  pattern_summary <- caas_for_export %>%
+    group_by(pattern) %>%
+    summarize(
+      Total = n(),
+      .groups = "drop"
+    )
+  
+  cat("\nPattern Distribution:\n")
+  print(kable(pattern_summary, format.args = list(big.mark = ",")))
+  
+  p_pattern <- ggplot(pattern_summary, aes(x = factor(pattern), y = Total, fill = factor(pattern))) +
+    geom_bar(stat = "identity") +
+    theme_minimal() +
+    labs(
+      title = "CAAS Pattern Distribution",
+      x = "Pattern",
+      y = "Candidate Count"
+    ) +
+    theme(
+      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
+      plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+      axis.text.x = element_text(angle = 0, hjust = 0.5),
+      panel.grid.major = element_line(color = "darkgray", size = 0.5),
+      legend.position = "none"
+    )
+  
+  print(p_pattern)
+}
+```
+
+## 3. Meta-CAAS Extraction
+
+Export standardized meta-CAAS tables for downstream disambiguation and post-processing.
+
+```{r meta_caas_export}
+cat("\n=== Exporting Meta-CAAS Data ===\n")
+
+# Function to assign random CAAS tags
+assign_caas_tags <- function(n_rows) {
+  seed_val <- if (exists("params") && !is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998
+  set.seed(seed_val)  # For reproducibility
+  
+  tags <- sapply(1:n_rows, function(i) {
+    paste0("CAAS_", 
+           paste0(sample(LETTERS, 5, TRUE), collapse = ""),
+           sprintf("%04d", sample(9999, 1)),
+           sample(LETTERS, 1))
+  })
+  
+  return(tags)
+}
+
+# Use local directory for Nextflow to capture
+meta_dir <- "meta_caas"
+createDir(meta_dir)
+
+if (has_caap_group) {
+  # Per-group meta-CAAS
+  for (grp in unique(caas_for_export$caap_group)) {
+    grp_data <- caas_for_export %>% filter(caap_group == grp)
+    
+    grp_meta <- grp_data %>%
+      mutate(
+        GenePos = paste(Gene, Position, sep = "_"),
+        tag = assign_caas_tags(n()),
+        is_conserved_meta = if_else(!is.na(is_conserved_meta) & toupper(trimws(as.character(is_conserved_meta))) == "TRUE", TRUE, FALSE),
+        conserved_pair = if_else(
+          !is.na(conserved_pair) & conserved_pair != "",
+          sub("^\\d+:", "", conserved_pair),
+          NA_character_
+        ),
+        caas = if ("caas" %in% names(.)) caas else NA_character_,
+        amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_
+      ) %>%
+      select(
+        tag, GenePos, Gene, Position, pattern, caap_group,
+        is_conserved_meta, conserved_pair, caas, amino_encoded,
+        dplyr::any_of(c("trait", "hyp_id"))
+      )
+
+    output_file <- file.path(meta_dir, paste0(grp, "_meta_caas.tsv"))
+    write_tsv(grp_meta, output_file)
+    
+    cat(sprintf("  %s: %d positions\n", grp, nrow(grp_meta)))
+  }
+  
+  # Global meta-CAAS
+  global_meta <- caas_for_export %>%
+    mutate(
+      GenePos = paste(Gene, Position, sep = "_"),
+      tag = assign_caas_tags(n()),
+      is_conserved_meta = if_else(!is.na(is_conserved_meta) & toupper(trimws(as.character(is_conserved_meta))) == "TRUE", TRUE, FALSE),
+      conserved_pair = if_else(
+        !is.na(conserved_pair) & conserved_pair != "",
+        sub("^\\d+:", "", conserved_pair),
+        NA_character_
+      ),
+      caas = if ("caas" %in% names(.)) caas else NA_character_,
+      amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_,
+      hyp_id = if ("trait" %in% names(.)) ifelse(grepl("H[0-9]+", trait), sub(".*(H[0-9]+).*", "\\1", trait), trait) else NA_character_
+    ) %>%
+    select(
+      tag, GenePos, Gene, Position, pattern, caap_group,
+      is_conserved_meta, conserved_pair, caas, amino_encoded,
+      dplyr::any_of(c("trait", "hyp_id"))
+    )
+
+  output_file <- file.path(meta_dir, "global_meta_caas.tsv")
+  write_tsv(global_meta, output_file)
+  
+  cat(sprintf("  Global: %d positions\n", nrow(global_meta)))
+} else {
+  # Standard meta-CAAS
+  meta_caas <- caas_for_export %>%
+    mutate(
+      GenePos = paste(Gene, Position, sep = "_"),
+      tag = assign_caas_tags(n()),
+      is_conserved_meta = if_else(!is.na(is_conserved_meta) & toupper(trimws(as.character(is_conserved_meta))) == "TRUE", TRUE, FALSE),
+      conserved_pair = if_else(
+        !is.na(conserved_pair) & conserved_pair != "",
+        sub("^\\d+:", "", conserved_pair),
+        NA_character_
+      ),
+      caas = if ("caas" %in% names(.)) caas else NA_character_,
+      amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_
+    ) %>%
+    select(
+      tag, GenePos, Gene, Position, pattern,
+      is_conserved_meta, conserved_pair, caas, amino_encoded
+    )
+
+  output_file <- file.path(meta_dir, "meta_caas.tsv")
+  write_tsv(meta_caas, output_file)
+  
+  cat(sprintf("  Total: %d positions\n", nrow(meta_caas)))
+}
+
+cat(sprintf("\nMeta-CAAS data exported to: %s\n", meta_dir))
+```
+
+---
+
+## Summary
+
+This report summarizes the results of the **CAAS Pattern Annotation** step.
+
+---
+
+<details>
+<summary>Session Info</summary>
+```{r session-info}
+sessionInfo()
+```
+</details>
+
+*Generated by PhyloPhere — CAAS Pattern Annotation (CT_META_CAAS module)*
+*Date of generation: `r Sys.Date()`*

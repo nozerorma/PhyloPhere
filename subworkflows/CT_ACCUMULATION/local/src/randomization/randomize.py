@@ -17,7 +17,7 @@ positions) is controlled for by construction.
 
 'permulation' — an excess null, opt-in (see run_permulation_null below). The
 randomised CAAS set for a gene at cycle i is that gene's ACTUAL detections
-replayed from a prior CAAS_PERMULATION run, not a synthetic draw from a pool;
+replayed from a prior CAAS_CORE_MERGE run, not a synthetic draw from a pool;
 the per-gene count is free per cycle rather than pinned to the observed count.
 It holds the phenotype-tree confound but is NOT conservation-decile matched.
 
@@ -615,7 +615,7 @@ def run_permulation_null(detail_path, gene_to_id, n_genes, actual_counts, change
             "of cycles seen in perm_pos_detail, which silently understates N by one for "
             "any cycle with zero detections genome-wide across every gene and scheme. "
             "Pass --gene-cycle-scores (gene_cycle_scores.tsv from the same "
-            "CAAS_PERMULATION run) for an exact count.")
+            "CAAS_CORE_MERGE run) for an exact count.")
         n_total = len(all_cycles)
 
     if n_total == 0:
@@ -1065,12 +1065,12 @@ if __name__ == "__main__":
     parser.add_argument('--randomization-type', choices=['naive', 'cons_decile', 'permulation'], required=True)
     parser.add_argument('--perm-pos-detail', dest='perm_pos_detail', default=None,
                         help='perm_pos_detail/ shard dir (or legacy perm_pos_detail.tsv.gz) from '
-                             'a prior CAAS_PERMULATION run. Required iff --randomization-type '
+                             'a prior CAAS_CORE_MERGE run. Required iff --randomization-type '
                              'permulation: the null-anchored accumulation type replays the SAME '
                              'permulation cycles CAAS uses elsewhere, rather than drawing from an '
                              'eligible pool.')
     parser.add_argument('--gene-cycle-scores', dest='gene_cycle_scores', default=None,
-                        help='gene_cycle_scores.tsv from the SAME CAAS_PERMULATION run as '
+                        help='gene_cycle_scores.tsv from the SAME CAAS_CORE_MERGE run as '
                              '--perm-pos-detail. Optional but strongly recommended for '
                              '--randomization-type permulation: gives the exact cycle count '
                              '(N) instead of inferring it from which cycles happen to appear '

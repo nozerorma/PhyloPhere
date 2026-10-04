@@ -74,7 +74,6 @@ fi
 if [ "${RUN_DISAMBIGUATION:-true}" = true ]; then
     NF_FLAGS+=(
         --ct_disambiguation
-        --ct_disambig_asr_mode "precomputed"
         --ct_disambig_asr_cache_dir "$ASR_CACHE_DIR"
         --ct_postproc
     )
@@ -84,7 +83,6 @@ if [ "${RUN_ACCUMULATION:-true}" = true ]; then
     NF_FLAGS+=(
         --ct_accumulation
         --accumulation_n_randomizations "$N_RANDOMIZATIONS"
-        --ct_disambig_asr_mode "precomputed"
         --ct_disambig_asr_cache_dir "$ASR_CACHE_DIR"
         --accumulation_entropy_dir "$ENTROPY_DIR"
     )

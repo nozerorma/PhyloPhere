@@ -7,6 +7,7 @@ commands run by hand.
 import csv
 import gzip
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -62,10 +63,12 @@ def inp(tmp_path_factory):
     return d
 
 
-def _nf(tmp_path, inp, size, alignments=None, reuse=None):
+def _nf(tmp_path, inp, size, alignments=None, reuse=None, fop_pairs=None):
     tmp_path.mkdir(parents=True, exist_ok=True)
     i = inp / "observed_inputs"
     extra = []
+    if fop_pairs:
+        extra += ["--mini_fop_pairs", str(fop_pairs)]
     if alignments:
         extra += ["--mini_alignments", ",".join(str(inp / "ali" / f"{g}.fa") for g in alignments)]
     if reuse:
@@ -269,3 +272,177 @@ def test_the_merge_reads_a_legacy_concatenated_detail_file(tmp_path, inp, shard_
     out, merged = _merge_nf(tmp_path / "nf", inp, [legacy])
     _assert_same_outputs(out, ref, with_b0=False)  # the legacy file holds the null cycles only
     assert merged is None
+
+
+# ── the observed labeling (b_0) in the same task ─────────────────────────────
+
+@pytest.fixture(scope="module")
+def fop_pairs(inp):
+    """fop_pairs.tsv with the b_0 PSS weights of the design (the null cycles carry none: equal weights)."""
+    f = inp / "fop_pairs.tsv"
+    with open(f, "w") as fh:
+        fh.write("cycle\thypothesis_id\tpair\tspecies1\tspecies2\tpss_score\n")
+        for r in csv.DictReader(open(inp / "cfg/contrast_hypotheses_pairs.tsv"), delimiter="\t"):
+            fh.write("\t".join(["b_0", r["hypothesis_id"], r["pair"], r["species1"], r["species2"], r["pss_score"]]) + "\n")
+    return f
+
+
+def _b0_dirs(tmp_path):
+    return [Path(l) for l in (tmp_path / "out/b0_observed_dirs.txt").read_text().split()]
+
+
+@tw.needs_nextflow
+def test_the_b0_master_does_not_depend_on_the_batch_size_and_equals_the_frozen_one(tmp_path, inp, fop_pairs):
+    import pandas as pd
+    genes = ["PEPC", "PEPD", "NOHIT"]
+    _nf(tmp_path / "b1", inp, 1, genes, fop_pairs=fop_pairs)
+    _nf(tmp_path / "b2", inp, 2, genes, fop_pairs=fop_pairs)
+    one, two = _b0_dirs(tmp_path / "b1"), _b0_dirs(tmp_path / "b2")
+    assert (len(one), len(two)) == (3, 2)
+
+    def collect(dirs):
+        out = {}
+        for d in dirs:
+            for f in d.glob("*"):
+                assert f.name not in out
+                out[f.name] = gzip.open(f, "rt").read() if f.suffix == ".gz" else f.read_text()
+        return out
+    a, b = collect(one), collect(two)
+    # NOHIT has no hit under any labeling: it has a tested-positions line, no discovery rows and no master shard
+    assert sorted(a) == ["NOHIT.b0.background", "PEPC.b0.background", "PEPC.b0.discovery.tsv", "PEPC.master.csv.gz",
+                         "PEPD.b0.background", "PEPD.b0.discovery.tsv", "PEPD.master.csv.gz"]
+    assert a == b
+    gold = pd.read_csv(GOLD / "caas_convergence_master.csv", keep_default_na=False)
+    key = ["msa_pos", "caap_group", "side"]
+    gold = gold.sort_values(key, kind="stable").reset_index(drop=True)
+    modal = [c for c in gold.columns if re.fullmatch(r"domain_\d+_(anc|top|bot)_aa", c)]
+    for g in ("PEPC", "PEPD"):
+        shard = next(d for d in one if (d / f"{g}.master.csv.gz").exists()) / f"{g}.master.csv.gz"
+        got = pd.read_csv(gzip.open(shard, "rt"), keep_default_na=False).sort_values(key, kind="stable").reset_index(drop=True)
+        assert list(got.columns) == list(gold.columns) and len(got) == len(gold) == 217
+        for c in gold.columns:
+            if c in ("tag_support", "gene") or c in modal:
+                continue  # ids are content hashes of the gene; the modal residues are checked below
+            if gold[c].dtype.kind == "f":
+                assert float((got[c] - gold[c]).abs().max(skipna=True) or 0.0) <= 1e-12, c
+            else:
+                assert got[c].equals(gold[c]), c
+        # The export lists a position's entries in a fixed order, the frozen discovery.tab in the order of the
+        # file system: the rows are the same, and a modal residue differs only where two residues tie for the maximum.
+        for c in modal:
+            for i in got.index[got[c] != gold[c]]:
+                counts = dict((r, int(n)) for r, n in (p.split(":") for p in got.loc[i, c + "_support"].split(",")))
+                assert counts[got.loc[i, c]] == counts[gold.loc[i, c]] == max(counts.values()), (c, i)
+
+
+@tw.needs_nextflow
+def test_a_batch_that_reuses_exports_has_no_b0_slice(tmp_path, inp, fop_pairs):
+    live_dir = tmp_path / "live"
+    _nf(live_dir, inp, 2, ["PEPC", "PEPD"], fop_pairs=fop_pairs)
+    published = sorted((live_dir / "out/caas_permulation/perm_disc").glob("*.perm_replay.discovery.output"))
+    _nf(tmp_path / "reuse", inp, 2, reuse=published, fop_pairs=fop_pairs)
+    dirs = _b0_dirs(tmp_path / "reuse")
+    assert len(dirs) == 1 and list(dirs[0].iterdir()) == []
+
+
+# ── CAAS_CORE_OBSERVED: the observed contract files ─────────────────────────
+
+@pytest.fixture(scope="module")
+def b0_batches(tmp_path_factory, inp, fop_pairs):
+    """b_0 directories of two one-gene batches (PEPC, PEPD), as CAAS_CORE_BATCHED leaves them."""
+    root = tmp_path_factory.mktemp("b0batches")
+    _nf(root, inp, 1, ["PEPC", "PEPD"], fop_pairs=fop_pairs)
+    return _b0_dirs(root)
+
+
+def _observed(tmp_path, inp, b0_dirs):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    tw._mini(tmp_path, "mini_core_observed.nf", "--mini_b0", ",".join(str(d) for d in b0_dirs), "--mini_design", str(inp / "cfg"),
+             "--outdir", str(tmp_path / "out"))
+    listing = tmp_path / "out/contract_paths.txt"
+    if not listing.exists():
+        return {}
+    got = {}
+    for p in map(Path, listing.read_text().split()):
+        got[p.name] = p.read_text()
+        if p.name == "global_meta_caas.tsv":
+            got.update({f"meta_caas/{f.name}": f.read_text() for f in p.parent.glob("*.tsv")})
+        if p.name == "caas_convergence_master.csv":
+            assert p.parent.name == "ct_disambiguation"
+    return got
+
+
+@tw.needs_nextflow
+def test_the_observed_files_come_from_the_b0_slices_in_any_batch_order(tmp_path, inp, b0_batches):
+    assert len(b0_batches) == 2
+    forward = _observed(tmp_path / "fwd", inp, b0_batches)
+    assert forward == _observed(tmp_path / "bwd", inp, b0_batches[::-1])
+    # the same files as the command line gives on the same directories
+    direct = tmp_path / "direct"
+    subprocess.run([sys.executable, str(LOCAL / "contract_main.py"), "--b0-dirs", *map(str, b0_batches), "--design", str(inp / "cfg"),
+                    "--output-dir", str(direct)], check=True, capture_output=True)
+    expect = {f.name: f.read_text() for f in direct.iterdir() if f.is_file()}
+    expect["caas_convergence_master.csv"] = (direct / "ct_disambiguation/caas_convergence_master.csv").read_text()
+    expect.update({f"meta_caas/{f.name}": f.read_text() for f in (direct / "meta_caas").glob("*.tsv")})
+    assert {k: v for k, v in forward.items() if k in expect} == expect and set(expect) <= set(forward)
+    genes = [l.split("\t")[0] for l in forward["discovery.tab"].splitlines()[1:]]
+    assert genes == sorted(genes) and set(genes) == {"PEPC", "PEPD"}
+    assert forward["background_genes.output"] == "PEPC\nPEPD\n" and forward["background.output"].count("\n") == 2  # one line per gene
+    assert len(forward["caas_convergence_master.csv"].splitlines()) == 1 + 2 * 217
+
+
+@tw.needs_nextflow
+def test_batches_without_a_b0_slice_give_no_observed_file(tmp_path, inp, shard_batches):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert _observed(tmp_path / "run", inp, [empty]) == {}
+
+
+@tw.needs_nextflow
+def test_the_core_hands_the_b0_slices_of_its_batches_to_the_observed_step_and_the_null_merge_does_not_wait_for_them(tmp_path, inp, fop_pairs):
+    i = inp / "observed_inputs"
+    r = tw._mini(tmp_path, "mini_core_chain.nf", "--mini_cfg", str(inp / "cfg"), "--mini_resample", str(inp / "resample_perms.tab"),
+                 "--mini_tree", str(i / "pruned_tree_file.nwk"), "--mini_fop_pairs", str(fop_pairs), "--mini_lengths", str(i / "gene_ensembl.tsv"),
+                 "--mini_alignments", ",".join(str(inp / "ali" / f"{g}.fa") for g in ("PEPC", "PEPD")), "--outdir", str(tmp_path / "out"),
+                 "--alignment", str(inp / "ali"), "--ct_core_batch_size", "1", "--ct_disambig_asr_cache_dir", str(i / "asr_cache"),
+                 "--tax_id", str(i / "taxid.tsv"), "--gene_ensembl_file", str(i / "gene_ensembl.tsv"), "--ct_disambig_posterior_threshold", "0.1",
+                 "--ct_disambig_asr_model", "lg", "--ali_format", "fasta", "--patterns", "1,2,3", "--miss_pair", "true", "--caap_mode", "true",
+                 "--min_divergent_fraction", "0.5", "--seed", "1998")
+    listing = tmp_path / "out/chain_paths.txt"
+    assert listing.exists(), r.stdout[-1500:] + r.stderr[-1500:]
+    files = {Path(p).name: Path(p).read_text() if Path(p).suffix != ".rds" else "" for p in listing.read_text().split()}
+    assert sorted(files) == ["background.output", "background_genes.output", "caas_convergence_master.csv", "caas_perms.rds", "discovery.tab",
+                             "global_meta_caas.tsv"]
+    assert len(files["caas_convergence_master.csv"].splitlines()) == 1 + 2 * 217
+    assert {l.split("\t")[0] for l in files["discovery.tab"].splitlines()[1:]} == {"PEPC", "PEPD"}
+
+
+@tw.needs_nextflow
+def test_a_discovery_tab_that_exists_is_scored_to_the_frozen_master_and_the_meta_tables(tmp_path, inp):
+    i = inp / "observed_inputs"
+    disc = tmp_path / "discovery.tab"
+    disc.write_text(gzip.open(GOLD / "discovery.tab.gz", "rt").read())
+    (tmp_path / "ali").mkdir()
+    shutil.copy(GOLD / "PEPC.fasta", tmp_path / "ali/PEPC.fa")
+    r = tw._mini(tmp_path, "mini_caas_observed.nf", "--mini_discovery", str(disc), "--mini_design", str(i / "traitfiles"),
+                 "--mini_tree", str(i / "pruned_tree_file.nwk"), "--mini_hyp_pairs", str(i / "traitfiles/contrast_hypotheses_pairs.tsv"),
+                 "--outdir", str(tmp_path / "out"), "--alignment", str(tmp_path / "ali"), "--ct_disambig_asr_cache_dir", str(i / "asr_cache"),
+                 "--tax_id", str(i / "taxid.tsv"), "--gene_ensembl_file", str(i / "gene_ensembl.tsv"), "--ct_disambig_posterior_threshold", "0.1",
+                 "--ct_disambig_asr_model", "lg")
+    listing = tmp_path / "out/observed_paths.txt"
+    assert listing.exists(), r.stdout[-1500:] + r.stderr[-1500:]
+    master, meta = sorted(map(Path, listing.read_text().split()), key=lambda p: p.suffix)  # .csv, .tsv
+    import pandas as pd
+    got = pd.read_csv(master, keep_default_na=False)
+    gold = pd.read_csv(GOLD / "caas_convergence_master.csv", keep_default_na=False)
+    assert list(got.columns) == list(gold.columns) and len(got) == len(gold) == 217
+    for c in gold.columns:  # the ids of tag_support are content hashes; everything else is the frozen master
+        if c == "tag_support":
+            continue
+        if gold[c].dtype.kind == "f":
+            assert float((got[c] - gold[c]).abs().max(skipna=True) or 0.0) <= 1e-12, c
+        else:
+            assert got[c].equals(gold[c]), c
+    assert sorted(f.name for f in meta.parent.iterdir() if f.suffix == ".tsv") == [
+        "GS1_meta_caas.tsv", "GS2_meta_caas.tsv", "GS3_meta_caas.tsv", "GS4_meta_caas.tsv", "US_meta_caas.tsv", "global_meta_caas.tsv"]
+    assert len(meta.read_text().splitlines()) == 1 + len(disc.read_text().splitlines()) - 1

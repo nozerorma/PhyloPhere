@@ -40,7 +40,7 @@ def test_b0_kernel_matches_frozen_discovery(tmp_path):
     assert len(hyps) == 100
 
     _run(["python3", B0_SCRIPT, "--config", cfg, "--fop", "--labelings-out", "b0.tab", "--pairs-out", "/dev/null"], tmp_path)
-    _run([CT, "perm-replay", "-a", GOLD / "PEPC.fasta", "-t", cfg, "-s", "b0.tab", "-o", "k.out", "--fmt", "fasta",
+    _run([CT, "perm-replay", "-a", GOLD / "PEPC.fasta", "-t", cfg, "-s", "b0.tab", "--fmt", "fasta",
           "--patterns", "1,2,3", "--miss_pair", "--caap_mode", "--max_conserved", "2",
           "--max_fg_gaps", "0", "--max_bg_gaps", "0", "--max_gaps", "0",
           "--max_fg_miss", "0", "--max_bg_miss", "0", "--max_miss", "0",

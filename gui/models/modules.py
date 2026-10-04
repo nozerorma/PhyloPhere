@@ -53,7 +53,6 @@ class CaasConfig(ModuleConfigBase):
 
     # Discovery/resample fine-tuning (conf/ct.config)
     publish_intermediates: bool = False  # --publish_intermediates
-    ct_discovery_batch_size: str = "25"  # --ct_discovery_batch_size
     ct_core_batch_size: str = "20"  # --ct_core_batch_size (genes per CAAS_CORE_BATCHED task of the permulation null; 1 = one task per gene)
     min_divergent_fraction: str = "0.5"  # --min_divergent_fraction
     max_bg_gaps_fraction: str = "0.0"  # --max_bg_gaps_fraction
@@ -70,7 +69,6 @@ class CaasConfig(ModuleConfigBase):
     resample_use_n: bool = True  # --resample_use_n
     multi_hypothesis: bool = True  # --multi_hypothesis
     max_fop: str = "100"  # --max_fop (max FOP alternative hypotheses H1..Hn per contrast)
-    caas_b0_diagnostic: bool = False  # --caas_b0_diagnostic (replay the real labeling b_0 through the null path; validation only)
 
     # Debug-only (conf/ct.config warns: don't run these unless needed).
     export_groups: bool = False  # --export_groups
@@ -85,12 +83,10 @@ class CaasConfig(ModuleConfigBase):
 
 @dataclass(kw_only=True)
 class DisambiguationConfig(ModuleConfigBase):
-    ct_disambig_asr_mode: str = "precomputed"  # --ct_disambig_asr_mode (precomputed|compute)
     ct_disambig_asr_model: str = "lg"  # --ct_disambig_asr_model
     ct_disambig_asr_cache_dir: str = ""  # --ct_disambig_asr_cache_dir
     ct_disambig_posterior_threshold: str = "0.1"  # --ct_disambig_posterior_threshold
     ct_disambig_max_tasks_per_child: str = "50"  # --ct_disambig_max_tasks_per_child
-    ct_disambig_batch_size: str = "1"  # --ct_disambig_batch_size (CT_DISAMBIGUATION_RUN gene-batch chunking; 1 = unbatched)
     # Separate ASR Robustness diagnostics report/stage (conf/ct_disambiguation.config).
     asr_robustness: bool = True  # --asr_robustness
 
@@ -297,7 +293,7 @@ class EnrichmentConfig(ModuleConfigBase):
     fcs_batch_size: str = "4"  # --fcs_batch_size (GMTs per FCS_COMPUTE_BATCHED task)
     # NOTE: caas_permulation_enrichment lives on CaasConfig, not here -- it's one
     # param (conf/enrichment.config) but also gates whether CT's own
-    # CAAS_PERMULATION subworkflow runs (see main.nf), so its one true home is the
+    # permulation core (CAAS_CORE) runs (see main.nf), so its one true home is the
     # CAAS tab. A duplicate field here would silently do nothing (never wired to
     # any template flag) and imply Enrichment has independent control it doesn't.
 

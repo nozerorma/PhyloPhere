@@ -71,7 +71,7 @@ def parse_args():
                         "PAI3D itself could annotate; restricts the background used "
                         "for pai3d_orthogroups")
     p.add_argument("--caas-cycle-null", default=None,
-                   help="perm_pos_cycle_caas.tsv.gz from CAAS_PERMULATION (Gene, Position, "
+                   help="perm_pos_cycle_caas.tsv.gz from CAAS_CORE_MERGE (Gene, Position, "
                         "side, cycle, caas_score, n_schemes) - the CAAS permulation null. When "
                         "supplied, its real cycles REPLACE this script's own label shuffle as "
                         "the null for p_value/p_adj/perm_nes, mirroring fcs_enrich.R's "

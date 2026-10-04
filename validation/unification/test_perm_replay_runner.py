@@ -1,4 +1,4 @@
-"""run_ct_perm_replay_batch.sh: two-column manifest, no discovery filter, no FOP option.
+"""run_ct_perm_replay_batch.sh: two-column manifest, no discovery filter, no FOP option, no counts file.
 
 One test runs the batch runner with a stand-in `ct` that records its arguments; the other runs it with the real `ct`
 on the PEPC alignment and compares the exported perm-discovery rows with a direct `ct perm-replay` call.
@@ -42,6 +42,7 @@ def test_the_runner_passes_no_discovery_filter_and_no_fop_option(tmp_path):
     assert len(calls) == 2
     for c in calls:
         assert "--discovery" not in c and "--fop" not in c.split()
+        assert "-o" not in c.split() and "--progress_log" not in c  # no counts file, no progress log
         assert "--export_perm_discovery" in c
     assert _runner(tmp_path, fake, "G1\tG1.fa\n", "cfg", "lab.tab", "--fop", "1").returncode != 0  # the option is gone
 
@@ -68,10 +69,36 @@ def test_the_runner_with_the_real_ct_exports_what_a_direct_call_exports(tmp_path
     cfg, lab = _pepc_inputs(tmp_path)
     r = _runner(tmp_path, CT, "PEPC\tPEPC.fa\n", cfg, lab)
     assert r.returncode == 0, r.stdout + r.stderr
-    direct = subprocess.run([str(CT), "perm-replay", "-a", "alignments/PEPC.fa", "-t", str(cfg), "-s", str(lab), "-o", "d.out",
+    direct = subprocess.run([str(CT), "perm-replay", "-a", "alignments/PEPC.fa", "-t", str(cfg), "-s", str(lab), 
                              "--fmt", "fasta", *ARGS, "--export_perm_discovery", "d.disc"],
                             cwd=tmp_path, capture_output=True, text=True)
     assert direct.returncode == 0, direct.stdout + direct.stderr
     a = pd.read_csv(tmp_path / "PEPC.perm_replay.discovery.output", sep="\t")
     b = pd.read_csv(tmp_path / "d.disc", sep="\t")
     assert len(b) > 8000 and a.equals(b)
+
+
+def test_the_runner_exports_the_b0_slice_only_when_asked(tmp_path):
+    fake = tmp_path / "ct"
+    fake.write_text('#!/usr/bin/env bash\necho "$@" >> calls.log\n')
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    (tmp_path / "alignments").mkdir()
+    assert _runner(tmp_path, fake, "G1\tG1.fa\nG2\tG2.fa\n", "cfg", "lab.tab").returncode == 0
+    assert all("b0" not in c for c in (tmp_path / "calls.log").read_text().splitlines())
+    (tmp_path / "calls.log").unlink()
+    assert _runner(tmp_path, fake, "G1\tG1.fa\nG2\tG2.fa\n", "cfg", "lab.tab", "--export-b0", "1").returncode == 0
+    for gene, call in zip(("G1", "G2"), sorted((tmp_path / "calls.log").read_text().splitlines())):
+        assert f"--export_b0_discovery {gene}.b0.discovery.tsv --export_b0_background {gene}.b0.background" in call
+
+
+def test_the_runner_b0_export_equals_a_direct_call(tmp_path):
+    cfg, lab = _pepc_inputs(tmp_path)
+    r = _runner(tmp_path, CT, "PEPC\tPEPC.fa\n", cfg, lab, "--export-b0", "1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    direct = subprocess.run([str(CT), "perm-replay", "-a", "alignments/PEPC.fa", "-t", str(cfg), "-s", str(lab), 
+                             "--fmt", "fasta", *ARGS, "--export_b0_discovery", "d.b0", "--export_b0_background", "d.bg"],
+                            cwd=tmp_path, capture_output=True, text=True)
+    assert direct.returncode == 0, direct.stdout + direct.stderr
+    assert (tmp_path / "PEPC.b0.discovery.tsv").read_text() == (tmp_path / "d.b0").read_text()
+    assert (tmp_path / "PEPC.b0.background").read_text() == (tmp_path / "d.bg").read_text()
+    assert len((tmp_path / "PEPC.b0.discovery.tsv").read_text().splitlines()) > 8000

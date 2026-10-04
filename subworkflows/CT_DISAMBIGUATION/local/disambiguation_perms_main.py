@@ -165,10 +165,10 @@ def main():
     if args.cycles:
         cycles = [c.strip() for c in args.cycles.split(",") if c.strip()]
 
-    # The real labeling (b_0, present only under caas_b0_diagnostic) is replayed as its
-    # own single-labeling run into <output-dir>/b0: it goes through the identical code
-    # but must never enter the null (n_detected, percent-rank pools and gene removal are
-    # all computed over the cycles of one call).
+    # The real labeling (b_0) is replayed as its own single-labeling run into <output-dir>/b0: it goes
+    # through the identical code but must never enter the null (n_detected, percent-rank pools and gene
+    # removal are all computed over the cycles of one call). With no permuted labeling (N = 0) only b_0 is
+    # replayed, which --detail-only allows: the pass that scores the null has nothing to do.
     all_tags = cycles if cycles else sorted(_read_resample_labelings(args.resample_dir))
     b0_tags = [c for c in all_tags if base_cycle(c) == "b_0"]
     null_tags = [c for c in all_tags if base_cycle(c) != "b_0"]
@@ -206,11 +206,16 @@ def main():
         )
 
     t0 = time.time()
-    if not null_tags:
+    if not null_tags and not (b0_tags and args.detail_only):
         raise RuntimeError("[perms] no permuted labelings to replay (only b_0 or nothing was found)")
-    out_path = run(null_tags, output_dir)
+    if null_tags:
+        out_path = run(null_tags, output_dir)
+    else:
+        logger.info("[perms] no permuted labelings (N = 0): the null has no shards")
+        (output_dir / "perm_pos_detail").mkdir(parents=True, exist_ok=True)
+        out_path = output_dir
     if b0_tags:
-        logger.info(f"b_0 diagnostic: replaying {len(b0_tags)} b_0 labeling(s) -> {output_dir / 'b0'}")
+        logger.info(f"b_0: replaying {len(b0_tags)} b_0 labeling(s) -> {output_dir / 'b0'}")
         run(b0_tags, output_dir / "b0")
     logger.info(f"Done in {time.time() - t0:.1f}s → {out_path}")
 

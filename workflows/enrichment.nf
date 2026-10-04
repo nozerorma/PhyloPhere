@@ -460,7 +460,7 @@ workflow ENRICHMENT {
             def pos_fade_sites_bottom_ch = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FILE_FADE_BOTTOM') }
 
             // CAAS permulation null (perm_pos_cycle_caas.tsv.gz), for POSENRICH's
-            // p.perm -- absent whenever CAAS_PERMULATION didn't run this
+            // p.perm -- absent whenever CAAS_CORE_MERGE didn't run this
             // invocation (--caas_permulation_enrichment off, or CT skipped).
             def pos_caas_cycle_null_ch = (caas_pos_cycle_caas_ch ?: Channel.empty())
                 .ifEmpty { file('NO_FILE_CAAS_CYCLE_NULL') }

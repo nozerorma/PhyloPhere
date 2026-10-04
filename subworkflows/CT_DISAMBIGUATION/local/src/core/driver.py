@@ -10,15 +10,31 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from src.asr.asr_single import load_alignment_and_mappings, load_and_match_tree, run_asr_pipeline
+from src.asr.asr_single import (
+    SingleGeneASRConfig,
+    load_alignment_and_mappings,
+    load_and_match_tree,
+    load_precomputed_asr,
+    run_asr_pipeline,
+)
 from src.convergence.disambiguate_single import PositionAxes, analyze_gene_disambiguation
 from src.convergence.fop_pool import base_cycle, pool_domains
 from src.core.labelings import hyp_id, trait_pairs_from
 from src.core.pooling import pooled_sides
 from src.phylo.tree_utils import build_tree_node_mapping, extract_tip_labels
+from src.utils.concurrency import codeml_slot
 from src.utils.io_utils import find_gene_alignment
 
 logger = logging.getLogger(__name__)
+
+
+def _cached_asr(gene: str, config: SingleGeneASRConfig, alignment_data) -> Optional[Any]:
+    """The cached ASR of a gene (`asr_<G>/rst`, or the layout `<G>/asr_<G>/rst`), or None when it has no posteriors."""
+    try:
+        found = load_precomputed_asr(gene, config, alignment_data)
+    except FileNotFoundError:
+        return None
+    return found if getattr(found, "posteriors_node", None) else None
 
 
 def load_gene_context(
@@ -30,12 +46,15 @@ def load_gene_context(
     asr_cache_dir: str,
     posterior_threshold: float,
     ensembl_genes: Optional[Set[str]] = None,
+    threads: int = 1,
 ) -> Optional[Dict[str, Any]]:
-    """Load alignment + tree + precomputed ASR posteriors for one gene ONCE.
+    """Load alignment, tree and ASR posteriors of one gene ONCE, for every labeling that will be scored on it.
 
-    Mirrors the precomputed-ASR load path of process_single_gene (the
-    phenotype-invariant part), including the PAML tree rebuild for node alignment.
-    Returns a context dict, or None if alignment/ASR unavailable.
+    The ASR comes from `asr_cache_dir` when the gene is there; otherwise PAML runs (inside `codeml_slot`, with
+    `threads` threads) and writes it to the cache. A gene is not always cached: one that only a permuted labeling
+    hits is never in a cache made from the observed run, and leaving it out would bias the null.
+    The tree is rebuilt from the PAML tree so that node ids align with the posteriors.
+    Returns a context dict, or None if the alignment or the ASR is unavailable.
     """
     alignment_path = find_gene_alignment(Path(alignment_dir), gene, ensembl_genes)
     if not alignment_path:
@@ -51,8 +70,6 @@ def load_gene_context(
         Path(taxid_mapping_path) if taxid_mapping_path else None,
     )
 
-    from src.asr.asr_single import SingleGeneASRConfig, run_asr_pipeline
-
     asr_config = SingleGeneASRConfig(
         alignment_path=alignment_path,
         tree_path=Path(tree_file),
@@ -60,21 +77,19 @@ def load_gene_context(
         model=asr_model,
         posterior_threshold=posterior_threshold,
         output_dir=Path(asr_cache_dir),
+        threads=threads,
     )
-    # run_asr_pipeline loads the cached ASR when present (rst + rst1) and COMPUTES
-    # it into asr_cache_dir on a miss. This makes the permulation replay robust to
-    # genes that appear only under a null labeling — never in the observed run, so
-    # never cached by CT_DISAMBIGUATION_RUN — which in asr_mode=compute would
-    # otherwise be silently dropped from the null. Observed-significant genes are
-    # already cached by the time this runs (the asr_ready gate in
-    # caas_permulation.nf), so this only computes the null-only tail.
     try:
-        node_posteriors = run_asr_pipeline(
-            gene, asr_config, skip_if_exists=True,
-            alignment_data=alignment_data, tree_data=tree_data,
-        )
+        node_posteriors = _cached_asr(gene, asr_config, alignment_data)
+        if node_posteriors is None:
+            logger.info(f"[asr] {gene}: not in {asr_cache_dir}, computing it")
+            with codeml_slot():
+                node_posteriors = run_asr_pipeline(
+                    gene, asr_config, skip_if_exists=True,
+                    alignment_data=alignment_data, tree_data=tree_data,
+                )
     except Exception as exc:  # noqa: BLE001 — codeml / parse failure for this one gene
-        logger.warning(f"[perms] ASR unavailable for {gene} ({exc}) — excluded from the null")
+        logger.warning(f"[asr] ASR unavailable for {gene} ({exc}); the gene is left out")
         return None
     if not node_posteriors:
         return None

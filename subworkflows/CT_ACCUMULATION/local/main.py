@@ -61,10 +61,10 @@ def main():
     parser.add_argument("--caas-csv",                   help="Meta-CAAS file (global_meta_caas.tsv or CAAS CSV)")
     parser.add_argument("--randomization-type",         choices=["naive", "cons_decile", "permulation"])
     parser.add_argument("--perm-pos-detail",            dest="perm_pos_detail", default=None,
-                        help="perm_pos_detail/ shard dir from a prior CAAS_PERMULATION run. "
+                        help="perm_pos_detail/ shard dir from a prior CAAS_CORE_MERGE run. "
                              "Required iff --randomization-type permulation.")
     parser.add_argument("--gene-cycle-scores",          dest="gene_cycle_scores", default=None,
-                        help="gene_cycle_scores.tsv from the same CAAS_PERMULATION run. "
+                        help="gene_cycle_scores.tsv from the same CAAS_CORE_MERGE run. "
                              "Optional but recommended with --randomization-type permulation "
                              "for an exact cycle count.")
     parser.add_argument("--n-randomizations",           type=int, default=10000)

@@ -22,7 +22,7 @@ Pair-aware implementation: Miguel Ramon (miguel.ramon@upf.edu)
 MODULE NAME: alimport.py
 DESCRIPTION: MSA importation from various format through BioPython
 INPUTS:      Input MSAs
-CALLED BY:   caas_id.py, fastcaas_core.py, disco.py
+CALLED BY:   caas_id.py, fastcaas_core.py
 
 TABLE OF CONTENTS
 ------------------------------------------

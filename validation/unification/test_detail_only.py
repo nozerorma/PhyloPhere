@@ -82,3 +82,27 @@ def test_the_cli_flag_reaches_the_null_and_the_b0_runs(monkeypatch, tmp_path):
         dpm.main()
         assert len(calls) == 2  # null + b_0
         assert [bool(c.get("detail_only")) for c in calls] == [expected, expected]
+
+
+def _cli(monkeypatch, tmp_path, tags, *extra):
+    calls = []
+    monkeypatch.setattr(dpm, "process_all_genes_perms", lambda **kw: calls.append(kw) or kw["output_dir"])
+    monkeypatch.setattr(dpm, "_genes_from_export", lambda p: (["GENEA"], {"GENEA": 1}))
+    monkeypatch.setattr(dpm, "_read_resample_labelings", lambda d: {t: 0 for t in tags})
+    monkeypatch.setattr(sys, "argv", ["x", "--alignment-dir", "a", "--tree", "t", "--perm-discovery", "d", "--resample-dir", "r",
+                                      "--output-dir", str(tmp_path / "o"), "--asr-cache-dir", "c", *extra])
+    dpm.main()
+    return calls
+
+
+def test_with_no_permuted_labeling_only_b0_is_replayed_and_the_null_has_an_empty_shard_directory(monkeypatch, tmp_path):
+    calls = _cli(monkeypatch, tmp_path, ["b_0~H1", "b_0~H2"], "--detail-only")
+    assert [(c["cycles"], c["output_dir"]) for c in calls] == [(["b_0~H1", "b_0~H2"], tmp_path / "o/b0")]
+    assert (tmp_path / "o/perm_pos_detail").is_dir() and not list((tmp_path / "o/perm_pos_detail").iterdir())
+
+
+def test_without_permuted_labelings_the_full_run_and_an_empty_resample_still_fail(monkeypatch, tmp_path):
+    with pytest.raises(RuntimeError, match="no permuted labelings"):
+        _cli(monkeypatch, tmp_path, ["b_0"])  # pass B has no null to score
+    with pytest.raises(RuntimeError, match="no permuted labelings"):
+        _cli(monkeypatch, tmp_path, [], "--detail-only")

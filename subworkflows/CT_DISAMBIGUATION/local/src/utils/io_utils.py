@@ -37,7 +37,7 @@ def _scan_alignment_dir(alignment_dir: Path) -> Dict[str, Path]:
     `find_gene_alignment` used to re-run this `glob("**/*")` + per-entry
     `is_file()` stat sweep on EVERY call -- an O(N_files) NFS readdir+stat
     storm (~16,100 alignment files in production) repeated once per gene, and
-    (since the CT_DISAMBIGUATION_RUN_BATCHED/null-replay Stage 2 chunking,
+    (since the null-replay Stage 2 chunking,
     docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md) once per CHUNK of a gene --
     multiplying real NFS latency by up to ~40x for a large gene split into many
     chunks. Confirmed live: workers spend nearly all wall-clock time in `S`

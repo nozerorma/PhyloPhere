@@ -9,10 +9,9 @@ consistent ordering and row handling across aggregation and single-gene pipeline
 Workflow
 --------
 1. **read_caas_metadata_table**: Load CAAS metadata from file, normalize columns, filter by gene if specified
-2. **list_gene_caas_positions**: Extract all CAAS positions for a gene from metadata
-3. **list_gene_caas_entries**: Load CAAS metadata rows for a gene as CAASPosition entries
-4. **parse_trait_pairs**: Parse trait file into species pairs grouped by contrast
-5. **load_ensembl_genes**: Load Ensembl gene names from file
+2. **list_gene_caas_entries**: Load CAAS metadata rows for a gene as CAASPosition entries
+3. **parse_trait_pairs**: Parse trait file into species pairs grouped by contrast
+4. **load_ensembl_genes**: Load Ensembl gene names from file
 
 Position Indexing Convention
 ------------------------------
@@ -238,33 +237,13 @@ def read_caas_metadata_table(
     return df
 
 
-def list_gene_caas_positions(caas_metadata_path: Path, gene: str) -> List[int]:
-    """
-    Load all CAAS positions available for a specific gene from metadata file.
-
-    Args:
-        caas_metadata_path: Path to CAAS metadata (.output) file
-        gene: Gene name (e.g., "NUTM2A")
-
-    Returns:
-        List of zero-based MSA positions for the gene
-    """
-    logger.info(f"Loading CAAS positions for {gene} from {caas_metadata_path}")
-    df = read_caas_metadata_table(caas_metadata_path, gene)
-    logger.debug(f"Metadata has {len(df)} entries for {gene}")
-
-    positions = []
-
-    for gene_pos in df["GenePos"]:
-        # Use canonical parser for GenePos token
-        gene_name_parsed, pos = _parse_gene_pos_token(gene_pos)
-        if gene_name_parsed == gene and pos is not None:
-            positions.append(pos)
-
-    logger.info(
-        f"Found {len(positions)} positions for {gene}: {sorted(positions[:5])}..."
-    )
-    return sorted(set(positions))
+def as_bool(v: Any) -> bool:
+    """A metadata cell as a boolean: True/1/yes/y in any case; None and everything else False."""
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return False
+    return str(v).strip().lower() in {"true", "1", "yes", "y"}
 
 
 def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosition]:
@@ -276,13 +255,6 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
     """
     logger.info(f"Loading CAAS entries for {gene} from {caas_metadata_path}")
     df = read_caas_metadata_table(caas_metadata_path, gene)
-
-    def _b(v: Any) -> bool:
-        if isinstance(v, bool):
-            return v
-        if v is None:
-            return False
-        return str(v).strip().lower() in {"true", "1", "yes", "y"}
 
     entries: List[CAASPosition] = []
     # ``to_dict("records")`` once is far cheaper than ``iterrows()`` + per-column
@@ -316,7 +288,7 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
             trait0_aa=trait0,
             caap_group=str(row.get("caap_group", "US") or "US"),
             amino_encoded=str(row.get("amino_encoded", "") or ""),
-            is_conserved_meta=_b(row.get("is_conserved_meta")),
+            is_conserved_meta=as_bool(row.get("is_conserved_meta")),
             conserved_pair=_parse_conserved_pair(str(row.get("conserved_pair", "") or "")),
             trait=str(row.get("trait", "") or ""),
         )

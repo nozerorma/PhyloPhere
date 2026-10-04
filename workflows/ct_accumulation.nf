@@ -27,9 +27,9 @@ workflow CT_ACCUMULATION {
         trait_file_channel    // traitfile from CT (pruned when contrast_selection is on; or Channel.empty())
         tested_positions_channel // caastools background.output — TESTED positions; the
                                  // randomization null's eligible pool (or Channel.empty())
-        pos_detail_channel       // sharded perm_pos_detail/ dir from CAAS_PERMULATION; the
+        pos_detail_channel       // sharded perm_pos_detail/ dir from CAAS_CORE_MERGE; the
                                  // permulation randomization type's null (or Channel.empty())
-        gene_cycle_scores_channel // gene_cycle_scores.tsv from the SAME CAAS_PERMULATION run;
+        gene_cycle_scores_channel // gene_cycle_scores.tsv from the SAME CAAS_CORE_MERGE run;
                                  // authoritative cycle count for the permulation null (or Channel.empty())
 
     main:

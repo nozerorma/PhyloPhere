@@ -144,7 +144,7 @@ workflow SCORING {
         // Value channel via collect()/map (NOT .first(), which warns on a value channel).
         //
         // Three ways to get here, in precedence order:
-        //   1. caas_perms_ch      — CAAS_PERMULATION ran live in this pass; always valid.
+        //   1. caas_perms_ch      — CAAS_CORE_MERGE ran live in this pass; always valid.
         //   2. caas_pos_detail_file — no live null, but a prior run's raw per-cycle
         //      detail is available: CAAS_CORE_MERGE rebuilds it rather than importing a cached RDS. The null
         //      must hold the same gene-level statistic as the observed gene score

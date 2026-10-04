@@ -470,9 +470,7 @@ schemes that detected the position:
 
 $$\text{caas\_row} = \text{asr\_path\_score}$$
 
-(T1 decision E dropped a permutation-rank phenotype factor from `caas_row` on
-both the observed and null sides; the BOOTSTRAP/recovery_boot null arm that
-factor came from has since been retired entirely.)
+(`caas_row` carries no permutation-rank phenotype factor, on the observed or the null side.)
 $$\text{CAAS\_score} = \operatorname{mean}_{s \in \text{detected schemes}} \text{caas\_row}_s$$
 
 `n_schemes` (how many partitions detected the position) and `scheme_set`

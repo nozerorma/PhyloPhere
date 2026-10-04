@@ -6,8 +6,16 @@ real labeling (`b_0`). Spec: the "Unified CAAS core" plan.
 - `compare_b0.py`: observed vs `b_0` at checkpoints A (discovery rows), B (post-filter survivors),
   C (`asr_path_score`), D (`caas_row`/`CAAS_score`), E (gene score). Exact key-set equality, |delta| <= 1e-12.
   `test_compare_b0.py` is its plumbing test (synthetic run).
-- `--caas_b0_diagnostic true` makes the pipeline write the `b_0` slice to `<outdir>/caas_permulation/b0/`
-  (never part of the null). Works with the batched and the unbatched null.
+- `compare_contract.py`: the observed contract files of two runs (the baseline of the former observed chain and a run
+  of the core's `b_0` slice), file by file: `caastools/discovery.tab` and the background files as sets of rows,
+  `meta_caas/meta_caas/*_meta_caas.tsv` without the `tag` (every tag of the new run is recomputed as the content id of
+  its row), `ct_disambiguation/caas_convergence_master.csv` by (gene, `msa_pos`, scheme, side) with floats within 1e-12,
+  `tag_support` by shape and with its ids among the new meta ids, and the modal-residue columns tolerated only where two
+  residues tie for the maximum support (counted in the report). The order of the rows inside a position is not compared.
+  `test_compare_contract.py` runs it on synthetic runs, on mutations of the frozen PEPC master and on the whole PEPC
+  chain (frozen files and the former report's meta tables against the `b_0` path with shuffled discovery rows).
+- The pipeline always replays `b_0` with the null and writes its slice to `<outdir>/caas_permulation/b0/`
+  (never part of the null). Works with any `ct_core_batch_size`.
 - `golden/pepc_c4_complete/`: frozen observed outputs of the Tier 1 PEPC genotypic run
   (`validation/tier1/output/pepc/results/c4_complete`, code at 7892848).
 - `baseline/`: harness reports on the code before unification (see below).
@@ -15,11 +23,12 @@ real labeling (`b_0`). Spec: the "Unified CAAS core" plan.
 Usage:
 ```bash
 python validation/unification/compare_b0.py --run <results_dir> [--out report.json]
+python validation/unification/compare_contract.py --a <baseline results_dir> --b <new results_dir> [--report report.json]
 ```
 
 ## Baselines (code before unification; `baseline/*.json`)
 
-`compare_b0.py` on runs that also replay b_0 through the null path (`--caas_b0_diagnostic true`).
+`compare_b0.py` on runs that also replayed b_0 through the null path (made with the former `caas_b0_diagnostic` switch).
 
 | Fixture | A discovery | B survivors | C asr_path_score | D CAAS_score | E gene score |
 |---|---|---|---|---|---|

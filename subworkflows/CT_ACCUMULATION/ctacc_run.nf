@@ -103,7 +103,7 @@ process CT_ACCUMULATION_RANDOMIZE {
     path caas_csv
     path background_positions   // caastools background.output (tested positions)
     path bg_caas_universe       // cleaned_background_main.txt (surviving genes)
-    path perm_pos_detail        // sharded perm_pos_detail/ dir from CAAS_PERMULATION (NO_ sentinel when absent)
+    path perm_pos_detail        // sharded perm_pos_detail/ dir from CAAS_CORE_MERGE (NO_ sentinel when absent)
     path gene_cycle_scores      // gene_cycle_scores.tsv from the SAME run (NO_ sentinel when absent) —
                                  // authoritative cycle count for the permulation null (see randomize.py)
 

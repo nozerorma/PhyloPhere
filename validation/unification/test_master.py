@@ -1,12 +1,14 @@
 """core.master: the master CSV is written from the workers' rows, in the order the database export used."""
 import csv
+import gzip
 import sys
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "subworkflows/CT_DISAMBIGUATION/local"))
-from src.core.master import master_row, serialize_value, write_master_csv  # noqa: E402
+from src.core.labelings import design_max_pairs  # noqa: E402
+from src.core.master import master_fields, master_row, serialize_value, write_master_csv  # noqa: E402
 
 FIELDS = ["gene", "msa_pos", "side", "asr_path_score", "participating_hypotheses"]
 
@@ -40,10 +42,28 @@ def test_empty_input_writes_only_the_header(tmp_path):
     assert open(tmp_path / "m.csv").read().strip() == ",".join(FIELDS)
 
 
-def test_process_all_genes_needs_max_pairs():
-    from src.utils.gene_wrapper import process_all_genes
-    with pytest.raises(ValueError, match="max_pairs"):
-        process_all_genes(genes=["G"], alignment_dir="a", tree_file="t", caas_metadata_path="m", trait_file_path="f",
-                          taxid_mapping_path=None, asr_mode="compute", asr_model="lg", asr_cache_dir=None,
-                          posterior_threshold=0.1, threads_per_gene=1, workers=1, run_diagnostics=False,
-                          output_dir=Path("."), max_pairs=None)
+def test_the_master_columns_follow_the_number_of_pairs_of_the_design():
+    one, four = master_fields(1), master_fields(4)
+    assert four[:len(one)] == one and len(four) - len(one) == 3 * 8 and len(four) == 46
+    assert [f for f in four if f.startswith("domain_4_")] == [
+        f"domain_4_{k}" for k in ("posterior", "score", "anc_aa", "top_aa", "bot_aa", "anc_aa_support", "top_aa_support", "bot_aa_support")]
+    golden = (Path(__file__).resolve().parent / "golden/pepc_c4_complete/caas_convergence_master.csv").read_text().splitlines()[0]
+    assert ",".join(four) == golden  # the frozen master has the columns of a four-pair design
+
+
+def test_the_pair_count_of_a_design_is_its_largest_pair_id(tmp_path):
+    (tmp_path / "dir").mkdir()
+    (tmp_path / "dir/traitfile_H1.tab").write_text("a\t1\t1\nb\t0\t1\nc\t1\t3\nd\t0\t3\n")
+    (tmp_path / "dir/traitfile_H2.tab").write_text("a\t1\t2\nb\t0\t2\n")
+    (tmp_path / "one.tab").write_text("a\t1\t1\nb\t0\t1\ne\t1\t2\nf\t0\t2\n")
+    (tmp_path / "bad.tab").write_text("a\t1\nb\t0\n")
+    assert design_max_pairs(tmp_path / "dir") == 3 and design_max_pairs(tmp_path / "one.tab") == 2
+    assert design_max_pairs(tmp_path / "bad.tab") == 1 and design_max_pairs(tmp_path / "missing") == 1  # nothing readable: one pair
+
+
+def test_a_gz_path_is_written_compressed_with_the_same_content(tmp_path):
+    rows = [("A", 9, master_row({"gene": "A", "msa_pos": 9, "side": "top"}, FIELDS)),
+            ("A", 2, master_row({"gene": "A", "msa_pos": 2, "side": "bottom"}, FIELDS))]
+    write_master_csv(rows, tmp_path / "m.csv", FIELDS)
+    write_master_csv(rows, tmp_path / "m.csv.gz", FIELDS)
+    assert gzip.open(tmp_path / "m.csv.gz", "rt").read() == open(tmp_path / "m.csv").read()

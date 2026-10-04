@@ -109,7 +109,6 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "caap_mode": _bool_str(caas.caap_mode),
         "resample_use_n": _bool_str(getattr(caas, 'resample_use_n', True)),
         "multi_hypothesis": _bool_str(getattr(caas, 'multi_hypothesis', True)),
-        "caas_b0_diagnostic": _bool_str(getattr(caas, 'caas_b0_diagnostic', False)),
         "publish_intermediates": _bool_str(caas.publish_intermediates),
         "export_groups": _bool_str(caas.export_groups),
         "export_perm_discovery": _bool_str(caas.export_perm_discovery),

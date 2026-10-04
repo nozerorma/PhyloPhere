@@ -72,7 +72,7 @@ FOP, las etiquetas `<ciclo>~H*` se colapsan al ciclo base antes de agregar.
 `perm_pos_detail/` sin volver a la ASR.
 
 El fichero llega a SCORING como `--caas_pos_cycle_caas` (desde
-`CAAS_PERMULATION` en `main.nf`, o desde `params.caas_pos_cycle_caas_file` en
+`CAAS_CORE_MERGE` en `main.nf`, o desde `params.caas_pos_cycle_caas_file` en
 `workflows/scoring.nf` al reutilizar un nulo previo).
 
 ### 2.2 Consumo en R (§2f-ter)
