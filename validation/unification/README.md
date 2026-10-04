@@ -6,6 +6,14 @@ real labeling (`b_0`). Spec: the "Unified CAAS core" plan.
 - `compare_b0.py`: observed vs `b_0` at checkpoints A (discovery rows), B (post-filter survivors),
   C (`asr_path_score`), D (`caas_row`/`CAAS_score`), E (gene score). Exact key-set equality, |delta| <= 1e-12.
   `test_compare_b0.py` is its plumbing test (synthetic run).
+- `compare_contract.py`: the observed contract files of two runs (the baseline of the former observed chain and a run
+  of the core's `b_0` slice), file by file: `caastools/discovery.tab` and the background files as sets of rows,
+  `meta_caas/meta_caas/*_meta_caas.tsv` without the `tag` (every tag of the new run is recomputed as the content id of
+  its row), `ct_disambiguation/caas_convergence_master.csv` by (gene, `msa_pos`, scheme, side) with floats within 1e-12,
+  `tag_support` by shape and with its ids among the new meta ids, and the modal-residue columns tolerated only where two
+  residues tie for the maximum support (counted in the report). The order of the rows inside a position is not compared.
+  `test_compare_contract.py` runs it on synthetic runs, on mutations of the frozen PEPC master and on the whole PEPC
+  chain (frozen files and the former report's meta tables against the `b_0` path with shuffled discovery rows).
 - The pipeline always replays `b_0` with the null and writes its slice to `<outdir>/caas_permulation/b0/`
   (never part of the null). Works with any `ct_core_batch_size`.
 - `golden/pepc_c4_complete/`: frozen observed outputs of the Tier 1 PEPC genotypic run
@@ -15,6 +23,7 @@ real labeling (`b_0`). Spec: the "Unified CAAS core" plan.
 Usage:
 ```bash
 python validation/unification/compare_b0.py --run <results_dir> [--out report.json]
+python validation/unification/compare_contract.py --a <baseline results_dir> --b <new results_dir> [--report report.json]
 ```
 
 ## Baselines (code before unification; `baseline/*.json`)
