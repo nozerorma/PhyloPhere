@@ -48,6 +48,7 @@ class RuntimeConfig:
     resume: bool = True  # -resume
     toy_mode: bool = False  # --toy_mode
     toy_n: str = "1000"  # --toy_n
+    toy_perms: str = "100"  # permulation cycles of a toy run (CAAS_FULL_PERMS; MAX_TRIES follows it)
 
     # --- Execution target ---
     runtime_type: str = "slurm"  # "local" | "slurm"

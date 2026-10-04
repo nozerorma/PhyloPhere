@@ -348,7 +348,7 @@ These parameters define the primary input data files, phenotype target, and modu
 | `ali_sp_names` | `""` | Precomputed flat file listing species names present across alignments (speeds startup). |
 | `gene_ensembl_file` | `""` | Mapping file from Ensembl gene IDs to gene symbols. |
 | `seed` | `"1998"` | Random seed for reproducible permutations and sampling. |
-| `toy_mode` / `toy_n` | `false` / `200` | Subsamples `N` random alignments for quick end-to-end smoke testing. |
+| `toy_mode` / `toy_n` | `false` / `200` | Subsamples `N` random alignments for quick end-to-end smoke testing. The GUI-generated scripts also set the permulation cycles of a toy run (`caas_full_perms`, Runtime tab, default 100) with the draw budget `max_tries` at 200 per cycle. |
 | `n_trait` / `c_trait` | `""` | Total sample size (`n_trait`) and case count (`c_trait`) for prevalence/frequency phenotypes. |
 | `secondary_trait` / `branch_trait` | `""` | Optional secondary trait column for reports / trait column for branch coloring. |
 | `trait_type` | `""` | `""`/`auto` infers; `continuous` forces the Phylogenetic Shift Score (PSS, OU/BM) pair-selection path; `ordinal` treats the trait as a foreground/background code (highest level = foreground, lowest = background, any middle level = intermediate and excluded from contrasts) — use for binary presence/absence or ordinal category phenotypes. Auto-inference flags a trait as ordinal when it has 2–5 distinct integer values. The foreground/background partition is produced by `4.Independent_contrasts.Rmd` from the phylogenetically-independent selected pairs. |

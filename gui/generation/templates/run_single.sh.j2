@@ -447,10 +447,9 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "ct_tool": "$_CT_TOOL",
   "caas_config": "$CAAS_CONFIG",
   "patterns": "${PATTERNS:-1,2,3}",
-  {# toy mode clamps CAAS_FULL_PERMS=100 + MAX_TRIES=20000 together in
-     sbatch_array.sh.j2 — the two MUST stay coupled (a big harvest target with
-     a small draw budget just triggers permulations.R's target-aware
-     escalation, but a toy target of 1000+ defeats the smoke test). #}
+  {# toy mode sets CAAS_FULL_PERMS from the Runtime tab (toy_perms) and MAX_TRIES = 200 * CAAS_FULL_PERMS together in
+     sbatch_array.sh.j2: the two MUST stay coupled (a big harvest target with a small draw budget just triggers
+     permulations.R's target-aware escalation and defeats the smoke test). #}
   "caas_permulation_enrichment": {{ run_defaults.caas_permulation_enrichment }},
   "caas_full_perms": "$CAAS_FULL_PERMS",
   "pss_top_pct": "${PSS_TOP_PCT:-0.01}",

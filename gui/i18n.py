@@ -557,6 +557,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "it": "Dimensione campione di prova (--toy_n)",
         "de": "Test-Stichprobengröße (--toy_n)",
     },
+    "Toy permulation cycles (CAAS_FULL_PERMS)": {
+        "en": "Toy permulation cycles (CAAS_FULL_PERMS)",
+        "es": "Ciclos de permulación de prueba (CAAS_FULL_PERMS)",
+        "ca": "Cicles de permulació de prova (CAAS_FULL_PERMS)",
+        "fr": "Cycles de permulation de test (CAAS_FULL_PERMS)",
+        "it": "Cicli di permulazione di prova (CAAS_FULL_PERMS)",
+        "de": "Permulationszyklen im Testlauf (CAAS_FULL_PERMS)",
+    },
     "Runtime": {
         "en": "Runtime",
         "es": "Ejecución",

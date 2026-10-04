@@ -78,6 +78,11 @@ class RuntimeTab(QWidget):
         self.toy_n_label = QLabel("Toy sample size (--toy_n)")
         form.addRow(self.toy_n_label, self.toy_n)
 
+        self.toy_perms = QLineEdit(self._config.toy_perms)
+        self.toy_perms.textChanged.connect(self._on_toy_perms_changed)
+        self.toy_perms_label = QLabel("Toy permulation cycles (CAAS_FULL_PERMS)")
+        form.addRow(self.toy_perms_label, self.toy_perms)
+
         return self.top_box
 
     def _build_execution_group(self) -> QGroupBox:
@@ -291,6 +296,10 @@ class RuntimeTab(QWidget):
         self._config.toy_n = value
         self.changed.emit()
 
+    def _on_toy_perms_changed(self, value: str) -> None:
+        self._config.toy_perms = value
+        self.changed.emit()
+
     def _on_runtime_type_changed(self, value: str) -> None:
         self._config.runtime_type = value
         self.changed.emit()
@@ -424,6 +433,8 @@ class RuntimeTab(QWidget):
             self.dataset_box.setTitle(tr("Dataset paths (shared across every phenotype in this batch)", lang))
         if hasattr(self, "toy_n_label"):
             self.toy_n_label.setText(tr("Toy sample size (--toy_n)", lang))
+        if hasattr(self, "toy_perms_label"):
+            self.toy_perms_label.setText(tr("Toy permulation cycles (CAAS_FULL_PERMS)", lang))
         if hasattr(self, "runtime_type_label"):
             self.runtime_type_label.setText(tr("Runtime", lang))
         if hasattr(self, "work_dir_label"):

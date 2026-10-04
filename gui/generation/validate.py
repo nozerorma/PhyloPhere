@@ -45,6 +45,9 @@ def validate(project: ProjectConfig) -> list[str]:
     require(rt.work_dir, "Runtime: work directory is required.")
     require(rt.results_dir, "Runtime: results directory is required.")
 
+    if rt.toy_mode and not (rt.toy_perms.strip().isascii() and rt.toy_perms.strip().isdigit() and int(rt.toy_perms) >= 1):
+        errors.append(f"Runtime: toy permulation cycles must be a positive integer (got {rt.toy_perms!r}).")
+
     if not rt.phenotype_rows:
         errors.append("Runtime: the phenotype catalogue must have at least one row.")
 
