@@ -572,6 +572,15 @@ class MainWindow(QMainWindow):
             "Scripts saved",
             f"Wrote {filenames_str} to {repo_dir} on {target}.",
         )
+        self._close_preview()
+
+    def _close_preview(self) -> None:
+        # The preview is a top-level window owned only by self._preview_window; once the scripts are on disk it has
+        # nothing left to offer, and dropping the reference lets Qt free it.
+        preview = getattr(self, "_preview_window", None)
+        if preview is not None:
+            preview.close()
+            self._preview_window = None
 
 
 def _monospace_font():
