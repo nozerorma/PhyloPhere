@@ -18,13 +18,13 @@
 #   The ~99.8% zero-scoring positions contribute 0 to the pathway sum.
 #   Permuting the non-zero scores randomly across the ~1.47M background pool
 #   N_perms times yields an exact, magnitude-weighted empirical null distribution
-#   -- UNLESS the CAAS permulation null (perm_pos_cycle_caas.tsv.gz) is supplied,
-#   in which case its real permulation cycles REPLACE the label shuffle as the
-#   null (same preference fcs_enrich.R's fcs_run_permulation gives FCS's own
-#   Permsum test): a naive label shuffle treats every position's score as an
-#   independent draw, ignoring the phylogenetic non-independence the CAAS null
-#   corrects for, so it isn't kept as a second, independent gate once the valid
-#   null is available -- it's simply superseded by it.
+#   -- BUT that label shuffle is only run on request (--allow-label-shuffle): a naive
+#   label shuffle treats every position's score as an independent draw, ignoring
+#   the phylogenetic non-independence the CAAS null corrects for. The null is the
+#   CAAS permulation null (perm_pos_cycle_caas.tsv.gz): its real permulation cycles
+#   (same preference fcs_enrich.R's fcs_run_permulation gives FCS's own Permsum
+#   test). Without one, p_value, p_adj, perm_nes and the null columns are NA and
+#   nothing is significant; the observed sums are still written.
 #
 # Output:
 #   posenrich_characterization.tsv : ranking, database, pathway, description,
@@ -73,24 +73,29 @@ def parse_args():
     p.add_argument("--caas-cycle-null", default=None,
                    help="perm_pos_cycle_caas.tsv.gz from CAAS_CORE_MERGE (Gene, Position, "
                         "side, cycle, caas_score, n_schemes) - the CAAS permulation null. When "
-                        "supplied, its real cycles REPLACE this script's own label shuffle as "
-                        "the null for p_value/p_adj/perm_nes, mirroring fcs_enrich.R's "
-                        "fcs_run_permulation null_mat preference. Omit or pass a NO_FILE* "
-                        "sentinel to fall back to the private label shuffle. Ignored when "
+                        "supplied, its real cycles are the null for p_value/p_adj/perm_nes, "
+                        "mirroring fcs_enrich.R's fcs_run_permulation null_mat preference. "
+                        "Omit or pass a NO_FILE* sentinel for no null (those values are NA "
+                        "unless --allow-label-shuffle). Ignored when "
                         "--caas-null-prepped is given.")
     p.add_argument("--caas-null-prepped", default=None,
                    help="caas_null_prepped.pkl from POSENRICH_PREP_NULL (posenrich_prep_caas_null.py) "
                         "- the same CAAS permulation null as --caas-cycle-null, already parsed and "
                         "split by direction once for the whole batched run instead of once per batch "
                         "task. Takes precedence over --caas-cycle-null when both are given. Omit or "
-                        "pass a NO_FILE* sentinel to fall back to the private label shuffle.")
+                        "pass a NO_FILE* sentinel for no null (those values are NA unless "
+                        "--allow-label-shuffle).")
     p.add_argument("--output-dir", required=True)
     p.add_argument("--min-size", type=int, default=5,
                    help="min positions per set in background (GMT sources only)")
     p.add_argument("--max-size", type=int, default=0,
                    help="max positions per set in background (0 = no cap; GMT sources only)")
     p.add_argument("--n-perms", type=int, default=100000,
-                   help="number of label permutations for Path Sum Permulation (default 10000)")
+                   help="number of label permutations of the label-shuffle test, used only with --allow-label-shuffle "
+                        "(the permulation test reads its draws from the CAAS null)")
+    p.add_argument("--allow-label-shuffle", action="store_true",
+                   help="when no CAAS permulation null is supplied, run a private label shuffle instead of leaving the "
+                        "null-based values NA. It ignores the phylogeny (anticonservative) and is exploratory.")
     p.add_argument("--perm-chunk-size", type=int, default=1000,
                    help="permutations materialized at once as a dense (n_terms x chunk) "
                         "array before being folded into running sum/sumsq/count accumulators "
@@ -238,7 +243,7 @@ def load_caas_cycle_null(path):
     on one side still counts as a real null draw contributing 0 to that side's
     term sums (not a missing cycle). Returns (None, None) if path is missing,
     a NO_FILE* sentinel, or doesn't exist -- callers must treat that as "no
-    CAAS null available" and fall back to the private label shuffle.
+    CAAS null available".
     """
     if not path or os.path.basename(path).startswith("NO_FILE") or not os.path.exists(path):
         return None, None
@@ -297,8 +302,9 @@ def caas_null_term_sums(M_mat, bg_idx_map, N, null_sub, all_cycle_levels):
     span ALL_cycle_levels (every real null cycle from the whole file), not
     just cycles with a nonzero row in this direction/background, so a cycle
     with zero hits still counts as a real null draw contributing 0 rather
-    than being silently dropped. Returns None when no CAAS null was supplied,
-    in which case the caller falls back to a private label shuffle.
+    than being silently dropped. Returns None when no CAAS null was supplied;
+    the caller then leaves the null-based values undefined (or, only when asked
+    to, runs a private label shuffle).
     """
     if null_sub is None or len(all_cycle_levels) == 0:
         return None
@@ -350,7 +356,7 @@ def bh_adjust(pvals):
 # ── Sparse Path Sum Permulation Engine ───────────────────────────────────────
 def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_size, max_size,
                              n_perms=10000, seed=1998, annot=None, flag_names=None,
-                             perm_chunk_size=1000, caas_null_sub=None, caas_null_cycles=None):
+                             perm_chunk_size=1000, caas_null_sub=None, caas_null_cycles=None, allow_label_shuffle=False):
     """
     Position-Level Path Sum Permulation test.
     Vectorized sparse matrix multiplication over background pool (N positions).
@@ -417,6 +423,21 @@ def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_siz
     # a weaker test. No separate p.perm column: p_value/p_adj already reflect
     # whichever null was used.
     null_cycle_sums = caas_null_term_sums(M_mat, bg_idx_map, N, caas_null_sub, caas_null_cycles)
+
+    if null_cycle_sums is None and not allow_label_shuffle:
+        # No phylogenetic null: the observed sums are reported and every value that needs a null is undefined. A label
+        # shuffle would put a weaker, anticonservative test under the names of the permulation test (it is opt-in).
+        out = []
+        for i, (term, desc, m_bg) in enumerate(valid_terms):
+            driver_positions = {p for p in m_bg if obs_scores_dict.get(p, 0.0) > 0}
+            row = dict(
+                pathway=term, description=desc, layer_size=len(m_bg), n_pos_with_score=len(driver_positions),
+                obs_sum=float(obs_sums[i]), null_mean=np.nan, null_sd=np.nan, perm_nes=np.nan, p_value=np.nan,
+                direction="", background_n=N, _overlap=driver_positions,
+            )
+            row.update(annotate_overlap(driver_positions, annot or {}, flag_names or []))
+            out.append(row)
+        return out
 
     if null_cycle_sums is not None:
         n_draws = null_cycle_sums.shape[1]
@@ -576,14 +597,17 @@ def main():
             print(f"[posenrich] CAAS permulation null: {len(caas_null_cycles)} cycles "
                   f"loaded (prepped) from {args.caas_null_prepped} -> used as the primary null", flush=True)
         else:
-            print("[posenrich] no CAAS permulation null supplied -> falling back to label shuffle", flush=True)
+            print("[posenrich] no CAAS permulation null supplied", flush=True)
     else:
         caas_null_long, caas_null_cycles = load_caas_cycle_null(args.caas_cycle_null)
         if caas_null_long is not None:
             print(f"[posenrich] CAAS permulation null: {len(caas_null_cycles)} cycles "
                   f"loaded from {args.caas_cycle_null} -> used as the primary null", flush=True)
         else:
-            print("[posenrich] no CAAS permulation null supplied -> falling back to label shuffle", flush=True)
+            print("[posenrich] no CAAS permulation null supplied", flush=True)
+    if caas_null_by_direction is None and caas_null_long is None:
+        print("[posenrich] without a null, p_value, p_adj, perm_nes and the null columns are NA and nothing is significant"
+              + ("" if args.allow_label_shuffle else " (--allow-label-shuffle runs the weaker label-shuffle test instead)"), flush=True)
 
     directions = ["global", "top", "bottom"]
     rows = []
@@ -615,12 +639,14 @@ def main():
                 n_perms=args.n_perms, seed=args.seed,
                 annot=annot, flag_names=flag_names,
                 perm_chunk_size=args.perm_chunk_size,
-                caas_null_sub=null_sub, caas_null_cycles=caas_null_cycles
+                caas_null_sub=null_sub, caas_null_cycles=caas_null_cycles,
+                allow_label_shuffle=args.allow_label_shuffle
             )
             if not res:
                 continue
 
-            padj = bh_adjust([r["p_value"] for r in res])
+            no_null = null_sub is None and not args.allow_label_shuffle
+            padj = np.full(len(res), np.nan) if no_null else bh_adjust([r["p_value"] for r in res])
             for i, r in enumerate(res):
                 r["p_adj"] = padj[i]
                 r["n_scored"] = n_scored

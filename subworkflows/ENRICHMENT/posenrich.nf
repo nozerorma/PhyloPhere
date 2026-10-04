@@ -109,8 +109,8 @@ process POSENRICH_RUN {
     // magnitudes are summed per term and compared against a null. When
     // caas_cycle_null is supplied, its real permulation cycles are used AS
     // the null (same preference fcs_enrich.R gives FCS's own Permsum test);
-    // otherwise a private label shuffle of posenrich_n_perms permutations is
-    // used instead. Significance is p_adj < posenrich_padj_thr with NES > 0.
+    // without one the null-based values (p_value, p_adj, perm_nes) are NA and nothing is
+    // significant. Significance is p_adj < posenrich_padj_thr with NES > 0.
     def annot_arg = annot_file.name != 'NO_FILE' ? "--annot-file ${annot_file}" : ""
     // cosmic_orthogroups/pai3d_orthogroups are GMTs derived from external,
     // incompletely-covered databases; restricting their background to genes

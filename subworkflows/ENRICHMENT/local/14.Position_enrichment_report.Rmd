@@ -1805,10 +1805,10 @@ readr::write_tsv(region_export,
   and compared against a null built from the real cycles of the CAAS
   permulation null (`perm_pos_cycle_caas.tsv.gz`) when supplied — same
   preference gene-level FCS's Path Sum Permulation test gives that null
-  (`12.FCS_general_report.Rmd`) — falling back to a label shuffle of the
-  non-zero position scores ($K \approx 3{,}000$), randomly permuted
-  $N_\text{perms} = 2,000$ times across the full ~1.47M position background,
-  only when no CAAS null is supplied. Normalized Enrichment Score
+  (`12.FCS_general_report.Rmd`). Without a CAAS null the null-based values
+  (NES, p-values) are `NA` and no set is called significant; a label shuffle of
+  the non-zero position scores runs only when requested (`--allow-label-shuffle`).
+  Normalized Enrichment Score
   ($\text{NES} = (T_\text{obs} - \mu_\text{null}) / \sigma_\text{null}$) and
   empirical p-values ($p = \frac{\#\{T_\text{null} \ge T_\text{obs}\} + 1}{N_\text{draws} + 1}$)
   are computed per term against whichever null was used. Run separately for
