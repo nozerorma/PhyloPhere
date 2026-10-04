@@ -19,6 +19,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_wiring as tw  # noqa: E402
 
+sys.path.insert(0, str(tw.ROOT / "validation/unification"))
+from frozen_master import without_new  # noqa: E402  (the frozen PEPC master predates the newer master columns)
+
 GOLD = tw.ROOT / "validation/unification/golden/pepc_c4_complete"
 CT = tw.ROOT / "subworkflows/CT/local/ct"
 LOCAL = tw.ROOT / "subworkflows/CT_DISAMBIGUATION/local"
@@ -224,6 +227,25 @@ def shard_batches(tmp_path_factory, inp):
     return dirs
 
 
+def _rds_cycles(rds):
+    out = subprocess.run(["Rscript", "-e", f'x <- readRDS("{rds}"); cat(colnames(x$caas_corStat_byrank$global), sep=",")'], capture_output=True, text=True)
+    return out.stdout.split(",")
+
+
+@tw.needs_nextflow
+def test_the_cycle_roster_of_the_labelings_gives_the_null_one_column_per_replayed_cycle(tmp_path, inp, shard_batches):
+    plain, _ = _merge_nf(tmp_path / "plain", inp, shard_batches)
+    exact, _ = _merge_nf(tmp_path / "exact", inp, shard_batches, "--mini_labelings", str(inp / "resample_perms.tab"))
+    assert _rds_cycles(exact / "caas_perms.rds") == _rds_cycles(plain / "caas_perms.rds") and _same_rds(exact / "caas_perms.rds", plain / "caas_perms.rds")
+    extra = tmp_path / "labelings_with_a_silent_cycle.tab"
+    extra.write_text((inp / "resample_perms.tab").read_text() + "b_99~H1\ta,c\tb,d\n")
+    more, _ = _merge_nf(tmp_path / "more", inp, shard_batches, "--mini_labelings", str(extra))
+    assert _rds_cycles(more / "caas_perms.rds") == _rds_cycles(plain / "caas_perms.rds") + ["b_99~H1"]   # this detail is not pooled: a column per labeling
+    for name in _TABLES + ["perm_pos_cycle_caas.tsv.gz"]:      # only the roster of the RDS changes
+        opener = gzip.open if name.endswith(".gz") else open
+        assert opener(more / name, "rt").read() == opener(plain / name, "rt").read(), name
+
+
 @tw.needs_nextflow
 def test_the_merge_equals_a_copy_union_followed_by_the_same_pass_b_and_links_the_shards(tmp_path, inp, shard_batches):
     ref, _ = _reference_merge(tmp_path / "ref", inp, shard_batches)
@@ -318,7 +340,7 @@ def test_the_b0_master_does_not_depend_on_the_batch_size_and_equals_the_frozen_o
     modal = [c for c in gold.columns if re.fullmatch(r"domain_\d+_(anc|top|bot)_aa", c)]
     for g in ("PEPC", "PEPD"):
         shard = next(d for d in one if (d / f"{g}.master.csv.gz").exists()) / f"{g}.master.csv.gz"
-        got = pd.read_csv(gzip.open(shard, "rt"), keep_default_na=False).sort_values(key, kind="stable").reset_index(drop=True)
+        got = without_new(pd.read_csv(gzip.open(shard, "rt"), keep_default_na=False)).sort_values(key, kind="stable").reset_index(drop=True)
         assert list(got.columns) == list(gold.columns) and len(got) == len(gold) == 217
         for c in gold.columns:
             if c in ("tag_support", "gene") or c in modal:
@@ -471,7 +493,7 @@ def test_a_discovery_tab_that_exists_is_scored_to_the_frozen_master_and_the_meta
     assert listing.exists(), r.stdout[-1500:] + r.stderr[-1500:]
     master, meta = sorted(map(Path, listing.read_text().split()), key=lambda p: p.suffix)  # .csv, .tsv
     import pandas as pd
-    got = pd.read_csv(master, keep_default_na=False)
+    got = without_new(pd.read_csv(master, keep_default_na=False))
     gold = pd.read_csv(GOLD / "caas_convergence_master.csv", keep_default_na=False)
     assert list(got.columns) == list(gold.columns) and len(got) == len(gold) == 217
     for c in gold.columns:  # the ids of tag_support are content hashes; everything else is the frozen master
