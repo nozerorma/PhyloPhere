@@ -14,7 +14,10 @@ Compares run A (the baseline, made by the former observed chain) with run B (the
                                                --tol; `tag_support` by shape (the same tally of counts) and with its ids
                                                among B's meta ids at that position and scheme; the modal-residue columns
                                                (domain_N_{anc,top,bot}_aa) may differ only where two residues tie for the
-                                               maximum support, and those cells are counted
+                                               maximum support, and those cells are counted; `derived_agreement` and
+                                               `convergence_type` are functions of the modal derived residues (fop_pool), so
+                                               they may differ only in a row where a top/bot residue cell was tolerated as a
+                                               tie, and those cells are counted too
 
 A file missing from one run fails; a file missing from both is skipped. Exit status is 1 if any comparison fails.
 The order of the rows inside a position is not compared: the b_0 export lists entries by position, trait file name and
@@ -44,6 +47,8 @@ META_DIR = "meta_caas/meta_caas"
 MASTER = "ct_disambiguation/caas_convergence_master.csv"
 MASTER_KEY = ["gene", "msa_pos", "caap_group", "side"]
 _MODAL = re.compile(r"domain_\d+_(anc|top|bot)_aa")
+_DERIVED_MODAL = re.compile(r"domain_\d+_(top|bot)_aa")   # the residues agree_num / convergence_type are computed from
+DERIVED = ("derived_agreement", "convergence_type")
 _ID = re.compile(r"CAAS_[0-9A-F]{16}")
 EXAMPLES = 3
 
@@ -164,8 +169,30 @@ def compare_master(pa, pb, tol, meta_b=None):
     both = m[m["_merge"] == "both"]
     deltas, na_mismatch, other_diff, tie_cells, not_tie = {}, 0, {}, 0, []
     tag_shape_bad = 0
+    # first the modal-residue cells: the rows holding a tolerated tie in a derived residue explain the derived columns
+    tie_rows = set()
     for c in a.columns:
-        if c in MASTER_KEY or c == "_n":
+        if not _MODAL.fullmatch(c):
+            continue
+        for i in both.index[both[f"{c}_a"] != both[f"{c}_b"]]:
+            ta, tb = _tally(both.at[i, f"{c}_support_a"]), _tally(both.at[i, f"{c}_support_b"])
+            va, vb = both.at[i, f"{c}_a"], both.at[i, f"{c}_b"]
+            if ta and tb and ta.get(va) == max(ta.values()) and tb.get(vb) == max(tb.values()):
+                tie_cells += 1
+                if _DERIVED_MODAL.fullmatch(c):
+                    tie_rows.add(i)
+            else:
+                not_tie.append((c, *(both.loc[i, MASTER_KEY].tolist()), va, vb))
+    derived_tied, derived_unexplained = {}, []
+
+    def derived_differs(c, rows):
+        for i in rows:
+            if i in tie_rows:
+                derived_tied[c] = derived_tied.get(c, 0) + 1
+            else:
+                derived_unexplained.append((c, *both.loc[i, MASTER_KEY].tolist()))
+    for c in a.columns:
+        if c in MASTER_KEY or c == "_n" or _MODAL.fullmatch(c):
             continue
         ca, cb = both[f"{c}_a"], both[f"{c}_b"]
         if c == "tag_support":
@@ -176,19 +203,16 @@ def compare_master(pa, pb, tol, meta_b=None):
             x, y = num[0].to_numpy(float), num[1].to_numpy(float)
             na_mismatch += int((np.isnan(x) != np.isnan(y)).sum())
             ok = ~np.isnan(x) & ~np.isnan(y)
+            if c in DERIVED:
+                derived_differs(c, both.index[ok & (np.abs(np.where(ok, x - y, 0.0)) > tol)])
+                continue
             deltas[c] = float(np.abs(x[ok] - y[ok]).max()) if ok.any() else 0.0
             continue
         diff = ca != cb
         if not diff.any():
             continue
-        if _MODAL.fullmatch(c):
-            for i in both.index[diff]:
-                ta, tb = _tally(both.at[i, f"{c}_support_a"]), _tally(both.at[i, f"{c}_support_b"])
-                va, vb = both.at[i, f"{c}_a"], both.at[i, f"{c}_b"]
-                if ta and tb and ta.get(va) == max(ta.values()) and tb.get(vb) == max(tb.values()):
-                    tie_cells += 1
-                else:
-                    not_tie.append((c, *(both.loc[i, MASTER_KEY].tolist()), va, vb))
+        if c in DERIVED:
+            derived_differs(c, both.index[diff])
         else:
             other_diff[c] = int(diff.sum())
     worst = max(deltas.values(), default=0.0)
@@ -207,8 +231,10 @@ def compare_master(pa, pb, tol, meta_b=None):
            "worst_column": max(deltas, key=deltas.get) if deltas else None, "na_mismatch": na_mismatch,
            "columns_with_other_differences": other_diff, "modal_residue_tie_cells_tolerated": tie_cells,
            "modal_residue_cells_differing_without_a_tie": len(not_tie), "examples_not_tie": not_tie[:EXAMPLES],
+           "derived_cells_explained_by_a_tie": derived_tied,
+           "derived_cells_differing_without_a_tie": len(derived_unexplained), "examples_derived_without_a_tie": derived_unexplained[:EXAMPLES],
            "tag_support_shape_differs": tag_shape_bad, "tag_support_ids_outside_meta_b": ids_outside}
-    out["pass"] = (only_a == 0 and only_b == 0 and na_mismatch == 0 and worst <= tol and not other_diff and not not_tie
+    out["pass"] = (only_a == 0 and only_b == 0 and na_mismatch == 0 and worst <= tol and not other_diff and not not_tie and not derived_unexplained
                    and tag_shape_bad == 0 and not ids_outside)
     return out
 

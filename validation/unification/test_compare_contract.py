@@ -158,6 +158,48 @@ def test_a_modal_residue_that_differs_without_a_tie_fails(tmp_path):
     assert r["pass"] is False and r["modal_residue_cells_differing_without_a_tie"] == 1
 
 
+def _flip_derived(df, i):
+    df.at[i, "derived_agreement"] = "0.5" if df.at[i, "derived_agreement"] != "0.5" else "1.0"
+    df.at[i, "convergence_type"] = "divergent" if df.at[i, "convergence_type"] != "divergent" else "convergent"
+
+
+def test_the_derived_columns_may_differ_in_a_row_where_a_derived_residue_tie_was_tolerated(tmp_path):
+    i, c, other, _ = _tie_cell(_frame())
+    assert re.fullmatch(r"domain_\d+_(top|bot)_aa", c)
+
+    def mutate(df):
+        df.at[i, c] = other
+        _flip_derived(df, i)
+    r = _master_result(tmp_path, mutate)
+    assert r["pass"] is True and r["modal_residue_tie_cells_tolerated"] == 1
+    assert r["derived_cells_explained_by_a_tie"] == {"derived_agreement": 1, "convergence_type": 1}
+
+
+def test_the_derived_columns_that_differ_in_a_row_without_a_tied_residue_fail(tmp_path):
+    i, c, other, _ = _tie_cell(_frame())
+    j = 0 if i != 0 else 1
+    r = _master_result(tmp_path / "other_row", lambda df: _flip_derived(df, j))
+    assert r["pass"] is False and r["derived_cells_differing_without_a_tie"] == 2
+    r = _master_result(tmp_path / "tie_row_untouched_residue", lambda df: _flip_derived(df, i))
+    assert r["pass"] is False and r["derived_cells_differing_without_a_tie"] == 2
+    only_agreement = _master_result(tmp_path / "one", lambda df: df.at.__setitem__((j, "derived_agreement"), "0.123"))
+    assert only_agreement["pass"] is False and only_agreement["derived_cells_differing_without_a_tie"] == 1
+
+
+def test_a_tie_in_an_ancestral_residue_does_not_explain_the_derived_columns(tmp_path):
+    base = _frame()
+    anc = next(c for c in base.columns if re.fullmatch(r"domain_\d+_anc_aa", c) and (base[c] != "").any())
+    i = int(base.index[base[anc] != ""][0])
+    tied = lambda df, aa: (df.at.__setitem__((i, anc), aa), df.at.__setitem__((i, anc + "_support"), "A:2,B:2,"))
+    a, b = _frame(), _frame()
+    tied(a, "A")
+    tied(b, "B")
+    _flip_derived(b, i)
+    r = cc.compare_runs(_master_run(tmp_path / "a", _text(a)), _master_run(tmp_path / "b", _text(b)))[cc.MASTER]
+    assert r["modal_residue_tie_cells_tolerated"] == 1 and r["modal_residue_cells_differing_without_a_tie"] == 0
+    assert r["pass"] is False and r["derived_cells_differing_without_a_tie"] == 2
+
+
 def test_any_other_text_column_a_missing_row_and_a_changed_tally_shape_fail(tmp_path):
     assert _master_result(tmp_path / "1", lambda df: df.at.__setitem__((0, "caas"), "Z/Z"))["pass"] is False
     assert _master_result(tmp_path / "2", lambda df: df.drop(index=3, inplace=True))["pass"] is False
