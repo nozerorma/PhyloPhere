@@ -661,6 +661,51 @@ fcs_enrich_col_types <- function() {
   )
 }
 
+# TRUE when the permulation null was built but holds no cycle: caas_perms.rds of a run with no permuted labeling
+# (--caas_full_perms 0) has its matrix lists empty. A missing file, an unreadable one or one that is not a null is not "empty".
+fcs_null_is_empty <- function(corperms) {
+  if (is.null(corperms) || !is.null(corperms[["corStat"]])) return(FALSE)
+  present <- Filter(Negate(is.null), list(corperms[["corStat_byrank"]], corperms[["caas_corStat_byrank"]]))
+  length(present) > 0 && all(vapply(present, length, integer(1)) == 0L)
+}
+
+# Evidence gates and labels. Per-method FDR gates (see conf/enrichment.config); each defaults to fdr_thr.
+#   sig_wilcoxon: FDR gate + optional Wilcoxon permulation gate + direction. p.perm is NA when no perms_file is
+#     supplied (or the null is empty): the gate is then skipped.
+#   sig_lachenbruch: FDR gate + optional Lachenbruch permulation gate, the same shared CAAS/RER null.
+#   sig_permulation: FDR gate + direction; the null is the shared CAAS/RER permulation null when available, a private
+#     label shuffle otherwise (same gate, same columns, different null).
+# With an empty null (null_empty) there is no phylogenetic gate at all: sig_permulation cannot pass, and a row that
+# passed the gates that exist is "Exploratory (relative)", never "Supported", "Hard evidence" or "(phylogenetic)".
+fcs_classify_evidence <- function(enrich_df, fdr_wilcoxon, fdr_lachenbruch, fdr_permsum, p_perm_thr, null_empty = FALSE) {
+  enrich_df %>%
+    dplyr::mutate(
+      sig_wilcoxon    = !is.na(p.adj)       & p.adj       < fdr_wilcoxon &
+                        (is.na(p.perm) | p.perm < p_perm_thr) &
+                        !is.na(stat)  & stat > 0,
+      sig_lachenbruch = !is.na(lach_p.adj)  & lach_p.adj  < fdr_lachenbruch &
+                        (is.na(lach_p.perm) | lach_p.perm < p_perm_thr),
+      sig_permulation = if (null_empty) rep(FALSE, dplyr::n()) else
+                        !is.na(perm_p.adj)  & perm_p.adj  < fdr_permsum &
+                        !is.na(perm_nes) & perm_nes > 0,
+      evidence_count  = as.integer(sig_wilcoxon) +
+                        as.integer(sig_lachenbruch) +
+                        as.integer(sig_permulation),
+      evidence_label  = if (null_empty) {
+        dplyr::case_when(evidence_count >= 1L ~ "Exploratory (relative)", TRUE ~ "Not significant")
+      } else dplyr::case_when(
+        evidence_count == 3L ~ "Hard evidence",
+        evidence_count == 2L ~ "Supported",
+        # Permulation carries no relative-to-other-genes requirement (unlike Wilcoxon/Lachenbruch, which both
+        # require it in addition to their own phylogenetic gate): a lone Permulation pass is a different kind of
+        # claim, so it gets its own label rather than sharing plain "Exploratory".
+        evidence_count == 1L & sig_permulation ~ "Exploratory (phylogenetic)",
+        evidence_count == 1L                   ~ "Exploratory (relative)",
+        TRUE                 ~ "Not significant"
+      )
+    )
+}
+
 fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "NO_FILE",
                         fdr_thr = 0.15, p_perm_thr = 0.025, n_perms_sum = 10000,
                         fdr_wilcoxon = fdr_thr, fdr_lachenbruch = fdr_thr,
@@ -670,6 +715,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
   # corStat_byrk without an "object not found" error. Overwritten below with
   # the real per-ranking resolution once/if a perms file loads successfully.
   corStat_byrank <- NULL; base_corStat <- NULL; base_corRho <- NULL
+  null_empty <- FALSE   # TRUE when the perms file holds a null with no cycle (fcs_null_is_empty)
   corStat_byrk   <- setNames(vector("list", length(rankings)), names(rankings))
   res <- list(); alts <- list()
   for (rk in names(rankings)) {
@@ -696,6 +742,8 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
   if (!is.null(perms_file) && perms_file != "NO_FILE" && file.exists(perms_file)) {
     fcs_progress(paste0("Loading null permulations from: ", perms_file))
     corperms <- tryCatch(readRDS(perms_file), error = function(e) NULL)
+    null_empty <- fcs_null_is_empty(corperms)
+    if (null_empty) fcs_progress("The permulation null holds no cycle: no permulation p-value is computed for any ranking.")
 
     # Two perms-RDS shapes are supported:
     #   • RER  : corperms$corStat (genes×N) [+ optional corRho] - ONE matrix shared
@@ -818,6 +866,12 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
       lach_res[[rk]] <- dplyr::mutate(lach_rk, ranking = rk)
     }
 
+    if (null_empty) {
+      # A private label shuffle ignores the phylogeny: with an empty null it would fill the permulation columns with
+      # a different null under the same names, so they stay NA.
+      fcs_progress(sprintf("Path sum permulation: ranking %s skipped (the null holds no cycle)", rk))
+      next
+    }
     fcs_progress(sprintf("Path sum permulation: ranking %s (%s null, %d perms)", rk,
                          if (!is.null(corStat_rk)) "CAAS/RER" else "private-shuffle",
                          if (!is.null(corStat_rk)) ncol(corStat_rk) else n_perms_sum))
@@ -849,43 +903,9 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
       perm_pval = NA_real_, perm_p.adj = NA_real_, perm_nes = NA_real_)
   }
 
-  # ── Evidence gates and classification ────────────────────────────────────────
-  # Per-method FDR gates (see conf/enrichment.config). Each defaults to fdr_thr.
-  # sig_wilcoxon: FDR gate + optional Wilcoxon permulation gate + direction.
-  #   p.perm is NA when no perms_file is supplied - gate skipped in that case.
-  # sig_lachenbruch: FDR gate + optional Lachenbruch permulation gate (same
-  #   dual-gate pattern as sig_wilcoxon, same shared CAAS/RER null now that
-  #   lach_p.perm exists). lach_p.perm is NA when no perms_file is supplied
-  #   (or this ranking has no null) - gate then reduces to FDR-only, exactly
-  #   as before this null was wired in.
-  # sig_permulation: FDR gate + direction; null source is now the shared
-  #   CAAS/RER permulation null when available (private label-shuffle
-  #   fallback otherwise) - same gate, same columns, different null.
-  enrich_df <- enrich_df %>%
-    dplyr::mutate(
-      sig_wilcoxon    = !is.na(p.adj)       & p.adj       < fdr_wilcoxon &
-                        (is.na(p.perm) | p.perm < p_perm_thr) &
-                        !is.na(stat)  & stat > 0,
-      sig_lachenbruch = !is.na(lach_p.adj)  & lach_p.adj  < fdr_lachenbruch &
-                        (is.na(lach_p.perm) | lach_p.perm < p_perm_thr),
-      sig_permulation = !is.na(perm_p.adj)  & perm_p.adj  < fdr_permsum &
-                        !is.na(perm_nes) & perm_nes > 0,
-      evidence_count  = as.integer(sig_wilcoxon) +
-                        as.integer(sig_lachenbruch) +
-                        as.integer(sig_permulation),
-      evidence_label  = dplyr::case_when(
-        evidence_count == 3L ~ "Hard evidence",
-        evidence_count == 2L ~ "Supported",
-        # Permulation carries no relative-to-other-genes requirement (unlike
-        # Wilcoxon/Lachenbruch, which both require it in addition to their own
-        # p.perm/lach_p.perm phylogenetic gate) - a lone Permulation pass is a
-        # different kind of claim than a lone Wilcoxon or Lachenbruch pass, so
-        # it gets its own label rather than sharing plain "Exploratory".
-        evidence_count == 1L & sig_permulation ~ "Exploratory (phylogenetic)",
-        evidence_count == 1L                   ~ "Exploratory (relative)",
-        TRUE                 ~ "Not significant"
-      )
-    )
+  # ── Evidence gates and classification (fcs_classify_evidence) ──
+  enrich_df <- fcs_classify_evidence(enrich_df, fdr_wilcoxon = fdr_wilcoxon, fdr_lachenbruch = fdr_lachenbruch,
+                                     fdr_permsum = fdr_permsum, p_perm_thr = p_perm_thr, null_empty = null_empty)
 
   enrich_df %>% dplyr::relocate(ranking, database, pathway,
                                  evidence_count, evidence_label)
