@@ -392,6 +392,24 @@ def test_the_observed_files_come_from_the_b0_slices_in_any_batch_order(tmp_path,
 
 
 @tw.needs_nextflow
+def test_the_observed_files_land_in_outdir_where_the_rest_of_the_pipeline_reads_them(tmp_path, inp, b0_batches):
+    """publishDir patterns that match nothing publish nothing while the run still succeeds: look in outdir."""
+    _observed(tmp_path / "run", inp, b0_batches)
+    out = tmp_path / "run/out"
+    direct = tmp_path / "direct"
+    subprocess.run([sys.executable, str(LOCAL / "contract_main.py"), "--b0-dirs", *map(str, b0_batches), "--design", str(inp / "cfg"),
+                    "--output-dir", str(direct)], check=True, capture_output=True)
+    for name in ("discovery.tab", "background.output", "background_genes.output"):
+        assert (out / "caastools" / name).read_text() == (direct / name).read_text(), name
+    assert (out / "ct_disambiguation/caas_convergence_master.csv").read_text() == \
+        (direct / "ct_disambiguation/caas_convergence_master.csv").read_text()
+    tables = sorted(f.name for f in (direct / "meta_caas").glob("*_meta_caas.tsv"))
+    assert len(tables) == 6 and sorted(f.name for f in (out / "meta_caas/meta_caas").iterdir()) == tables
+    for t in tables:
+        assert (out / "meta_caas/meta_caas" / t).read_text() == (direct / "meta_caas" / t).read_text(), t
+
+
+@tw.needs_nextflow
 def test_batches_without_a_b0_slice_give_no_observed_file(tmp_path, inp, shard_batches):
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -446,3 +464,7 @@ def test_a_discovery_tab_that_exists_is_scored_to_the_frozen_master_and_the_meta
     assert sorted(f.name for f in meta.parent.iterdir() if f.suffix == ".tsv") == [
         "GS1_meta_caas.tsv", "GS2_meta_caas.tsv", "GS3_meta_caas.tsv", "GS4_meta_caas.tsv", "US_meta_caas.tsv", "global_meta_caas.tsv"]
     assert len(meta.read_text().splitlines()) == 1 + len(disc.read_text().splitlines()) - 1
+    # published where the rest of the pipeline reads them (a pattern that matches nothing publishes nothing and the run succeeds)
+    out = tmp_path / "out"
+    assert (out / "ct_disambiguation/caas_convergence_master.csv").read_text() == master.read_text()
+    assert (out / "meta_caas/meta_caas/global_meta_caas.tsv").read_text() == meta.read_text()

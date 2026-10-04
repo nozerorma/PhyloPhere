@@ -311,8 +311,8 @@ process CAAS_CORE_OBSERVED {
     tag "caas_core_observed"
     label 'process_low'
     publishDir path: "${params.outdir}/caastools", mode: 'copy', overwrite: true, pattern: '{discovery.tab,background.output,background_genes.output}'
-    publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: 'meta_caas/**'
-    publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, pattern: 'ct_disambiguation/**'
+    publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: 'meta_caas'
+    publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, pattern: 'ct_disambiguation'
 
     input:
     path b0Observed, stageAs: 'b0obs_*'   // the batches' b0_observed directories

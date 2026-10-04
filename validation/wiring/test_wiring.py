@@ -211,11 +211,13 @@ def _publish_dirs(path, process):
     return [(m.group(1), m.group(2)) for m in re.finditer(r'publishDir path: "\$\{params\.outdir\}([^"]*)"[^\n]*?pattern: \'([^\']*)\'', body)]
 
 
-def test_the_observed_files_are_published_where_the_rest_of_the_pipeline_reads_them():
-    expected = {("/caastools", "{discovery.tab,background.output,background_genes.output}"), ("/meta_caas", "meta_caas/**"),
-                ("", "ct_disambiguation/**")}
+def test_the_observed_processes_publish_their_output_directories_by_name():
+    """A process that declares a directory as output publishes it by its name: `dir/**` matches no declared output and
+    publishes nothing while the run succeeds (the files in outdir are checked by test_core_batched.py)."""
+    expected = {("/caastools", "{discovery.tab,background.output,background_genes.output}"), ("/meta_caas", "meta_caas"),
+                ("", "ct_disambiguation")}
     assert set(_publish_dirs("subworkflows/CT/caas_permulation.nf", "CAAS_CORE_OBSERVED")) == expected
-    assert set(_publish_dirs("subworkflows/CT_DISAMBIGUATION/ct_observed.nf", "CAAS_OBSERVED")) == {("/meta_caas", "meta_caas/**"), ("", "ct_disambiguation/**")}
+    assert set(_publish_dirs("subworkflows/CT_DISAMBIGUATION/ct_observed.nf", "CAAS_OBSERVED")) == {("/meta_caas", "meta_caas"), ("", "ct_disambiguation")}
 
 
 def test_the_standalone_scoring_route_rebuilds_the_null_with_the_merge_process():
