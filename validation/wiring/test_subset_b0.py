@@ -41,9 +41,9 @@ def _fop(d):
     return cfg, res
 
 
-def _subset(tmp_path, cfg, res, n):
+def _subset(tmp_path, cfg, res, n, *extra):
     r = tw._mini(tmp_path, "mini_subset.nf", "--mini_cfg", str(cfg), "--mini_resample", str(res), "--outdir", str(tmp_path / "out"),
-                 "--caas_full_perms", str(n))
+                 "--caas_full_perms", str(n), *extra)
     listing = tmp_path / "out/subset_paths.txt"
     assert listing.exists(), r.stdout[-1500:] + r.stderr[-1500:]
     paths = [Path(p) for p in listing.read_text().split()]
@@ -70,3 +70,42 @@ def test_fop_subset_holds_b0_and_the_first_n_cycles_with_their_pairs(tmp_path, n
     assert sorted({r[0] for r in rows}) == ["b_0"] + cycles
     b0 = {(r[1], r[2]): r[5] for r in rows if r[0] == "b_0"}
     assert b0 == {("H1", "1"): "0.5", ("H1", "2"): "0.25", ("H2", "1"): "0.75", ("H2", "2"): "0.125"}  # PSS strings verbatim
+
+
+# N = 0: the harvest of permuted cycles is empty, so the resample directory holds no resample_*.tab and no fop_labelings.tab.
+
+@tw.needs_nextflow
+def test_plain_subset_with_an_empty_harvest_holds_b0_only(tmp_path):
+    cfg, res = _plain(tmp_path)
+    for f in res.iterdir():
+        f.unlink()
+    (res / "permulation_manifest.tsv").write_text("cycle\ttier\n")
+    tags, pairs = _subset(tmp_path, cfg, res, 0)
+    assert tags == ["b_0"] and pairs is None
+
+
+@tw.needs_nextflow
+def test_fop_subset_with_an_empty_harvest_holds_every_hypothesis_of_b0_with_its_weights(tmp_path):
+    """The design is multi-hypothesis (--multi_hypothesis): b_0 keeps all its hypotheses and PSS weights though no fop file exists."""
+    cfg, res = _fop(tmp_path)
+    for f in res.iterdir():
+        f.unlink()
+    (res / "permulation_manifest.tsv").write_text("cycle\ttier\n")
+    tags, pairs = _subset(tmp_path, cfg, res, 0, "--multi_hypothesis", "true")
+    assert sorted(tags) == ["b_0~H1", "b_0~H2"]
+    lines = pairs.read_text().splitlines()
+    assert lines[0] == FOP_HEADER.rstrip("\n")
+    b0 = {(r[1], r[2]): r[5] for r in (l.split("\t") for l in lines[1:]) if r[0] == "b_0"}
+    assert b0 == {("H1", "1"): "0.5", ("H1", "2"): "0.25", ("H2", "1"): "0.75", ("H2", "2"): "0.125"}
+
+
+@tw.needs_nextflow
+def test_an_empty_harvest_with_cycles_requested_still_fails(tmp_path):
+    cfg, res = _plain(tmp_path)
+    for f in res.iterdir():
+        f.unlink()
+    r = tw._mini(tmp_path, "mini_subset.nf", "--mini_cfg", str(cfg), "--mini_resample", str(res), "--outdir", str(tmp_path / "out"),
+                 "--caas_full_perms", "2")
+    assert r.returncode != 0 and "no permuted labelings selected" in r.stdout + r.stderr
+    listing = tmp_path / "out/subset_paths.txt"      # the fop_pairs sentinel may be listed; the subset itself must not be
+    assert not listing.exists() or "resample_perms.tab" not in listing.read_text()

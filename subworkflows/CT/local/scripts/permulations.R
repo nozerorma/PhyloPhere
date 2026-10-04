@@ -677,10 +677,13 @@ if (fop_null) {
          n_hyp = length(hv$hypotheses))
   }
 
+  # First cycle of each batch; seq(1, 0, by = ...) is an error, and an empty pool (N = 0) has no batch.
+  batch_starts <- function(n, size) if (n > 0L) seq(1L, n, by = size) else integer(0)
+
   n_hyp_tot <- 0L
   any_lab   <- FALSE
   any_pair  <- FALSE
-  for (start in seq(1L, length(pool), by = FOP_BATCH)) {
+  for (start in batch_starts(length(pool), FOP_BATCH)) {
     block <- start:min(start + FOP_BATCH - 1L, length(pool))
     res <- parallel::mclapply(block, fop_one, mc.cores = min(n_workers, length(block)),
                               mc.preschedule = TRUE)

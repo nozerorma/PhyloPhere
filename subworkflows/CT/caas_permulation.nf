@@ -60,6 +60,9 @@ process SUBSET_RESAMPLE_PERMS {
 
     script:
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
+    // A multi-hypothesis design (a directory of hypotheses) keeps all of them for b_0 even when the harvest holds no permuted cycle
+    // (N = 0) and so wrote no fop_labelings.tab.
+    def fop_design = "${params.multi_hypothesis}" == 'true'
     """
     # Deterministic collect: cycles are ordered by their numeric id and the first N are
     # kept (N = 0 keeps none), so a resample reused with more cycles than N yields the same null
@@ -73,12 +76,19 @@ process SUBSET_RESAMPLE_PERMS {
     # numeric cycle id of a row's tag: "b_12~H3" -> 12
     CYC='{b=\$1; sub(/^b_/,"",b); sub(/~.*/,"",b); print b"\\t"\$0}'
 
-    if [ -n "\$FOP_TAB" ]; then
+    if [ -n "\$FOP_TAB" ] || { [ "${fop_design}" = true ] && [ -d "${caas_config}" ]; }; then
         # FOP mirror: labelings are "<base>~H<m>". Keep ALL hypothesis rows of the first N
         # base cycles, plus the matching fop_pairs.tsv rows (PSS weights for pooling).
-        FOP_PAIRS=\$(find -L ${resample_dir} -name 'fop_pairs.tsv' | head -n 1)
-        if [ -z "\$FOP_PAIRS" ]; then echo "ERROR: FOP labelings without fop_pairs.tsv (b_0 needs its PSS weights)" >&2; exit 1; fi
-        awk -F'\\t' 'NF>=3 && \$1!~/^b_0(~|\$)/' "\$FOP_TAB" > candidates.tab
+        if [ -n "\$FOP_TAB" ]; then
+            FOP_PAIRS=\$(find -L ${resample_dir} -name 'fop_pairs.tsv' | head -n 1)
+            if [ -z "\$FOP_PAIRS" ]; then echo "ERROR: FOP labelings without fop_pairs.tsv (b_0 needs its PSS weights)" >&2; exit 1; fi
+            awk -F'\\t' 'NF>=3 && \$1!~/^b_0(~|\$)/' "\$FOP_TAB" > candidates.tab
+        else
+            # no permuted cycle was harvested (N = 0): b_0 comes from the design alone
+            : > candidates.tab
+            printf 'cycle\\thypothesis_id\\tpair\\tspecies1\\tspecies2\\tpss_score\\n' > fop_pairs_header.tsv
+            FOP_PAIRS=fop_pairs_header.tsv
+        fi
         awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' candidates.tab | sort -u \\
             | awk '{b=\$1; sub(/^b_/,"",b); print b"\\t"\$1}' | sort -k1,1n | cut -f2 > base_all.txt
         awk -v n=${n_perms} 'n>0{print; if(++c>=n) exit}' base_all.txt > keep_base.txt
