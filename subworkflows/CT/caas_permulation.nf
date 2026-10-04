@@ -379,6 +379,8 @@ process CAAS_CORE_MERGE {
     def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript'  : 'Rscript'
     // Gene removal needs the annotation file.
+    // N = 0 (b_0 only): the null has no shard, and says so explicitly. Written without `?:`: Groovy reads a numeric 0 as false.
+    def empty_null_arg = (params.caas_full_perms != null && (params.caas_full_perms as int) == 0) ? "--empty-null" : ""
     def removal_args = (caasPostprocOn() && !gene_lengths.name.startsWith('NO_')) ? "--gene-lengths ${gene_lengths} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
@@ -398,7 +400,7 @@ process CAAS_CORE_MERGE {
     ${py} ./reaggregate_perm_scores.py \\
         --detail "\$DETAIL" \\
         --output-dir . \\
-        --seed ${params.seed ?: 1998} ${removal_args}
+        --seed ${params.seed ?: 1998} ${empty_null_arg} ${removal_args}
 
     # b_0 rebuilt from its merged shards as a one-labeling run: same code, own rank/size pools.
     if [ -d "\$DETAIL/b0" ]; then

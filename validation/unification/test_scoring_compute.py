@@ -15,16 +15,24 @@ NA = dict(keep_default_na=False, na_values=["NA", ""])
 pytestmark = pytest.mark.skipif(shutil.which("Rscript") is None, reason="Rscript not available")
 
 
-def _stage(tmp_path):
+def _stage(tmp_path, positions=None):
+    """Scripts and core tables of the frozen PEPC run; `positions` keeps only the first N positions of its postproc table."""
     for f in ("scoring_compute.R", "aa_grouping.R"):
         shutil.copy(SRC / f, tmp_path / f)
-    subprocess.run([sys.executable, str(SRC / "observed_core_scores.py"), "--input", str(GOLD / "filtered_discovery.tsv"),
+    source = GOLD / "filtered_discovery.tsv"
+    if positions:
+        df = pd.read_csv(source, sep="\t", dtype=str, keep_default_na=False)
+        keep = df[["Gene", "Position"]].drop_duplicates().head(positions)
+        source = tmp_path / "small_discovery.tsv"
+        df.merge(keep).to_csv(source, sep="\t", index=False)
+    (tmp_path / "postproc.txt").write_text(str(source))
+    subprocess.run([sys.executable, str(SRC / "observed_core_scores.py"), "--input", str(source),
                     "--positions-out", str(tmp_path / "core_pos.tsv"), "--genes-out", str(tmp_path / "core_genes.tsv")],
                    check=True, capture_output=True)
 
 
 def _r(tmp_path, *extra, core=True):
-    args = ["Rscript", "scoring_compute.R", "--postproc", str(GOLD / "filtered_discovery.tsv")]
+    args = ["Rscript", "scoring_compute.R", "--postproc", (tmp_path / "postproc.txt").read_text()]
     if core:
         args += ["--core_positions", "core_pos.tsv", "--core_genes", "core_genes.tsv"]
     return subprocess.run(args + list(extra), cwd=tmp_path, capture_output=True, text=True)
@@ -81,3 +89,31 @@ def test_a_null_without_caas_score_is_rejected(tmp_path):
                    "caas_sum": 0.5, "n_schemes": 1}]).to_csv(tmp_path / "old.tsv.gz", sep="\t", index=False)
     r = _r(tmp_path, "--caas_pos_cycle_caas", str(tmp_path / "old.tsv.gz"))
     assert r.returncode != 0 and "caas_score" in r.stderr
+
+
+def _empty_null(tmp_path):
+    """The null tables of N = 0, written by the producers themselves: header-only tables and the RDS built from them."""
+    (tmp_path / "empty_detail").mkdir()
+    subprocess.run([sys.executable, "./reaggregate_perm_scores.py", "--detail", str(tmp_path / "empty_detail"), "--output-dir",
+                    str(tmp_path / "null"), "--empty-null"], cwd=SRC.parents[2] / "CT_DISAMBIGUATION/local", check=True, capture_output=True)
+    subprocess.run(["Rscript", str(SRC / "scoring_caas_perms.R"), "--gene-cycle-scores", str(tmp_path / "null/gene_cycle_scores.tsv"),
+                    "--output", str(tmp_path / "null/caas_perms.rds")], check=True, capture_output=True)
+    return tmp_path / "null"
+
+
+@pytest.mark.parametrize("positions", [None, 4], ids=["many_positions", "few_positions"])
+def test_an_empty_null_leaves_every_null_based_value_undefined_and_keeps_the_observed_scores(tmp_path, positions):
+    _stage(tmp_path, positions)
+    assert _r(tmp_path).returncode == 0
+    without = pd.read_csv(tmp_path / "position_scores.tsv", sep="\t", **NA)
+    gene_without = pd.read_csv(tmp_path / "gene_scores.tsv", sep="\t", **NA)
+    null = _empty_null(tmp_path)
+    r = _r(tmp_path, "--caas_pos_cycle_caas", str(null / "perm_pos_cycle_caas.tsv.gz"), "--caas_perms", str(null / "caas_perms.rds"))
+    assert r.returncode == 0, r.stderr[-800:]
+    ps = pd.read_csv(tmp_path / "position_scores.tsv", sep="\t", **NA)
+    assert ps[["p.emp", "p.adj_bh", "p.adj_sam"]].isna().all().all()
+    gs = pd.read_csv(tmp_path / "gene_scores.tsv", sep="\t", **NA)
+    assert gs[[c for c in gs.columns if "pperm" in c]].isna().all().all()
+    # the observed side does not depend on the null
+    assert ps["CAAS_score"].equals(without["CAAS_score"]) and gs["gene_caas_score"].equals(gene_without["gene_caas_score"])
+    assert "p.emp" in (r.stdout + r.stderr) and "no null" in (r.stdout + r.stderr).lower()

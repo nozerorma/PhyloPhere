@@ -436,6 +436,26 @@ def test_the_core_hands_the_b0_slices_of_its_batches_to_the_observed_step_and_th
 
 
 @tw.needs_nextflow
+def test_a_run_without_permuted_labelings_gives_the_observed_files_and_an_empty_null(tmp_path, inp, fop_pairs):
+    """N = 0: the labelings file holds b_0 alone, so the null has no shard at all."""
+    i = inp / "observed_inputs"
+    (inp / "resample_n0.tab").write_text((inp / "b0.tab").read_text())
+    r = tw._mini(tmp_path, "mini_core_chain.nf", "--mini_cfg", str(inp / "cfg"), "--mini_resample", str(inp / "resample_n0.tab"),
+                 "--mini_tree", str(i / "pruned_tree_file.nwk"), "--mini_fop_pairs", str(fop_pairs), "--mini_lengths", str(i / "gene_ensembl.tsv"),
+                 "--mini_alignments", ",".join(str(inp / "ali" / f"{g}.fa") for g in ("PEPC", "PEPD")), "--outdir", str(tmp_path / "out"),
+                 "--alignment", str(inp / "ali"), "--ct_core_batch_size", "1", "--ct_disambig_asr_cache_dir", str(i / "asr_cache"),
+                 "--tax_id", str(i / "taxid.tsv"), "--gene_ensembl_file", str(i / "gene_ensembl.tsv"), "--ct_disambig_posterior_threshold", "0.1",
+                 "--ct_disambig_asr_model", "lg", "--ali_format", "fasta", "--patterns", "1,2,3", "--miss_pair", "true", "--caap_mode", "true",
+                 "--min_divergent_fraction", "0.5", "--seed", "1998", "--caas_full_perms", "0")
+    listing = tmp_path / "out/chain_paths.txt"
+    assert listing.exists(), r.stdout[-2500:] + r.stderr[-2500:]
+    paths = {Path(p).name: Path(p) for p in listing.read_text().split()}
+    assert {l.split("\t")[0] for l in paths["discovery.tab"].read_text().splitlines()[1:]} == {"PEPC", "PEPD"}
+    assert len(paths["caas_convergence_master.csv"].read_text().splitlines()) == 1 + 2 * 217
+    assert "caas_perms.rds" in paths
+
+
+@tw.needs_nextflow
 def test_a_discovery_tab_that_exists_is_scored_to_the_frozen_master_and_the_meta_tables(tmp_path, inp):
     i = inp / "observed_inputs"
     disc = tmp_path / "discovery.tab"

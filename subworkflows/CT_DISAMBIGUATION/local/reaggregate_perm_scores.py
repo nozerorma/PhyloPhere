@@ -34,6 +34,7 @@ the streaming one. Same code path, or the null stops matching the observed side.
 Run from the CT_DISAMBIGUATION/local directory (as the Nextflow process does).
 """
 import argparse
+import gzip
 import logging
 import sys
 from pathlib import Path
@@ -83,6 +84,10 @@ def main() -> int:
     ap.add_argument("--gene-filter-mode", default="none", choices=["none", "extreme", "dubious", "both"])
     ap.add_argument("--keep-clusters", action="store_true",
                     help="keep cluster-train positions in the scored pool (params.remove_caas_clusters false)")
+    ap.add_argument("--empty-null", action="store_true",
+                    help="the null has no permuted labeling (N = 0): write the null tables empty. Refused when --detail "
+                         "holds shards, and without it a null with no shard is an error (a replay that lost every hit "
+                         "must not pass for an empty null)")
     ap.add_argument("--iqr-multiplier", type=float, default=3.0)
     ap.add_argument("--extreme-percentile", type=float, default=0.99)
     args = ap.parse_args()
@@ -91,6 +96,24 @@ def main() -> int:
         logger.error("detail path not found: %s", args.detail)
         return 1
     args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.empty_null:
+        shards = sorted(args.detail.glob("*.tsv.gz")) if args.detail.is_dir() else [args.detail]
+        if shards:
+            logger.error("--empty-null given but %s holds %d shard(s): the null is not empty", args.detail, len(shards))
+            return 1
+        # The tables go through the same writer as a normal run, over a detail with a header and no rows, so their
+        # columns cannot drift from it.
+        empty_detail = args.output_dir / ".empty_perm_pos_detail.tsv.gz"
+        with gzip.open(empty_detail, "wt") as fh:
+            fh.write("")
+        try:
+            _finalize_perm_scores(detail_path=empty_detail, output_dir=args.output_dir, cycle_tags=[], removed=set(),
+                                  seed=args.seed, remove_clusters=not args.keep_clusters)
+        finally:
+            empty_detail.unlink()
+        logger.warning("[reaggregate] empty null (no permuted labeling): no gene x cycle scores were written")
+        return 0
 
     logger.info("[reaggregate] scanning %s", args.detail)
     cycle_tags, n_rows = scan_detail(args.detail)

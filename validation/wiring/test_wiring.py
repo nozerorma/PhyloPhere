@@ -220,6 +220,25 @@ def test_the_observed_processes_publish_their_output_directories_by_name():
     assert set(_publish_dirs("subworkflows/CT_DISAMBIGUATION/ct_observed.nf", "CAAS_OBSERVED")) == {("/meta_caas", "meta_caas"), ("", "ct_disambiguation")}
 
 
+@needs_nextflow
+def test_accumulation_with_the_permulation_null_stops_early_when_the_null_has_no_cycle(tmp_path):
+    r = _run_preview(tmp_path, caas_full_perms="0", ct_accumulation=True, accumulation_randomization_type="permulation")
+    text = r.stdout + r.stderr
+    assert r.returncode != 0 and "caas_full_perms 0" in text and "permulation" in text, text[-800:]
+
+
+@needs_nextflow
+def test_accumulation_with_another_randomization_runs_without_permuted_labelings(tmp_path):
+    edges = _preview(tmp_path, caas_full_perms="0", ct_accumulation=True, accumulation_randomization_type="cons_decile")
+    assert ("CAAS_CORE_OBSERVED", "CAAS_CORE_MERGE") not in edges and any(dst == "CAAS_CORE_MERGE" for _, dst in edges)
+
+
+@needs_nextflow
+def test_accumulation_with_the_permulation_null_runs_when_there_are_permuted_labelings(tmp_path):
+    edges = _preview(tmp_path, caas_full_perms="10", ct_accumulation=True, accumulation_randomization_type="permulation")
+    assert any(dst == "CAAS_CORE_MERGE" for _, dst in edges)
+
+
 def test_the_standalone_scoring_route_rebuilds_the_null_with_the_merge_process():
     """Source-level check (the scoring route needs inputs `-preview` does not accept); the process itself is run by
     test_core_batched.py on one shard directory, the shape this route passes."""

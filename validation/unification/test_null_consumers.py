@@ -70,3 +70,14 @@ def test_prep_script_reads_caas_score_exactly(tmp_path):
     d = pickle.load(open(tmp_path / "o.pkl", "rb"))
     scores = pd.concat([v["score"] for k, v in d.items() if isinstance(v, pd.DataFrame)]).tolist()
     assert exact in scores
+
+
+def test_a_null_table_without_rows_is_no_null_for_the_enrichment(tmp_path):
+    """N = 0 writes the header only: the loader answers 'no CAAS null' and the prep script writes an empty artifact."""
+    mod = _module("posenrich_enrich")
+    _write(tmp_path / "empty.tsv.gz", [], ["Gene", "Position", "side", "cycle", "caas_score", "n_schemes"])
+    assert mod.load_caas_cycle_null(str(tmp_path / "empty.tsv.gz")) == (None, None)
+    r = subprocess.run([sys.executable, str(ENR / "posenrich_prep_caas_null.py"), "--caas-cycle-null", str(tmp_path / "empty.tsv.gz"),
+                        "--output", str(tmp_path / "o.pkl")], capture_output=True, text=True)
+    assert r.returncode == 0 and "empty CAAS null" in (r.stdout + r.stderr)
+    assert mod.load_prepped_caas_null(str(tmp_path / "o.pkl")) == (None, None)

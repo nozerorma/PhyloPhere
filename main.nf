@@ -525,6 +525,12 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 error "CT_ACCUMULATION requires CT post-processing output (--ct_postproc) or a standalone CAAS file (--accumulation_caas_input)."
             }
 
+            // The permulation null of this run has no cycle when only b_0 is replayed (--caas_full_perms 0). Written without
+            // `?:`: Groovy reads a numeric 0 as false.
+            if (core && params.accumulation_randomization_type == 'permulation' && params.caas_full_perms != null && (params.caas_full_perms as int) == 0) {
+                error "CT_ACCUMULATION with --accumulation_randomization_type permulation needs the permuted null, which is empty with --caas_full_perms 0: use naive or cons_decile, or raise --caas_full_perms."
+            }
+
             // Use filtered_discovery.tsv from postproc (gene_filtering stage)
             def acc_caas_ch       = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
             def acc_background_ch = pp_cleaned_bg    ?: Channel.empty()

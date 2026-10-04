@@ -482,7 +482,9 @@ def _iter_perm_detail_rows(detail_path):
     if p.is_dir():
         shards = sorted(p.glob("*.tsv.gz"))
         if not shards:
-            raise FileNotFoundError(f"[permulation] no *.tsv.gz shards under {p}")
+            raise FileNotFoundError(
+                f"[permulation] no *.tsv.gz shards under {p}: the null holds no permuted cycle (--caas_full_perms 0, or no "
+                f"permuted cycle re-detected a position). A 'permulation' randomization needs one; use naive or cons_decile.")
         for shard in shards:
             with gzip.open(shard, "rt", newline="") as f_in:
                 yield from _csv.DictReader(f_in, delimiter="\t")

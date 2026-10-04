@@ -290,6 +290,13 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
 # observed position gets. Values within TIE_TOL of the observed score count as ties (>=).
 pos_scores$p.emp <- NA_real_
 has_caas_pos_cycle_caas <- file_exists(caas_pos_cycle_caas_file)
+# A null table with a header and no row (N = 0, or no permuted cycle re-detected any position) has no cycle to count:
+# (k + 1) / (N + 1) would read 1 for every position, a value rather than the absence of one. p.emp, p.adj_bh and
+# p.adj_sam stay NA, as when no null is given.
+if (has_caas_pos_cycle_caas && length(read_lines(caas_pos_cycle_caas_file, n_max = 2)) < 2) {
+  cat("  perm_pos_cycle_caas.tsv.gz has no row: no null cycle, so p.emp, p.adj_bh and p.adj_sam stay NA\n")
+  has_caas_pos_cycle_caas <- FALSE
+}
 # caas_perms.rds is loaded here when present (its columns are the cycle roster
 # for N below) and reused by the gene-level p.perm in §4.
 caas_perms <- NULL
