@@ -26,6 +26,7 @@ from src.core import contract  # noqa: E402
 from src.core.labelings import design_max_pairs  # noqa: E402
 from src.core.meta import caas_id  # noqa: E402
 from src.core.master import master_fields  # noqa: E402
+from frozen_master import fields_without_new  # noqa: E402
 
 GOLD = HERE / "golden/pepc_c4_complete"
 RMD = HERE / "reference/7.CAAS_pattern_annotation.with_meta_export.Rmd"  # the report as it was when it wrote the meta tables
@@ -202,7 +203,8 @@ def test_the_master_is_ordered_by_gene_whatever_the_shard_order(tmp_path, revers
 def test_a_master_without_shards_has_the_columns_of_the_design(tmp_path):
     fields = master_fields(4)
     assert contract.write_master([], tmp_path / "m.csv", fields) == 0
-    assert (tmp_path / "m.csv").read_text().splitlines()[0] == GOLD_MASTER.splitlines()[0] == ",".join(fields)
+    assert (tmp_path / "m.csv").read_text().splitlines()[0] == ",".join(fields)
+    assert GOLD_MASTER.splitlines()[0] == ",".join(fields_without_new(fields))
 
 
 # ── the command line ─────────────────────────────────────────────────────────────────────────────

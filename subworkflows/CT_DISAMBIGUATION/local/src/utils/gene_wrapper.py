@@ -112,6 +112,7 @@ def convert_convergence_result_to_dict(
     # derived_agreement is the diagnostic agree_num/agree_den.
     result_dict["asr_path_score"] = getattr(result, "asr_path_score", None)
     result_dict["derived_agreement"] = getattr(result, "derived_agreement", None)
+    result_dict["agreement_ambiguous"] = getattr(result, "agreement_ambiguous", None)
 
     # ── Per-domain flat block (scoring_v2 core v3) ────────────────────────────
     # domain_<d>_score from domain_scores; domain_<d>_anc_aa / _top_aa / _bot_aa

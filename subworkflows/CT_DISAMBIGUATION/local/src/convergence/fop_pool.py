@@ -35,22 +35,27 @@ from src.convergence.path_scores import _convergence_type
 from src.convergence.support_fmt import fmt_support
 
 
-def _modal_str(vals: Sequence[Optional[str]]) -> Optional[str]:
-    """Most frequent non-empty string (first-seen breaks ties). Settles a
-    domain's derived / ancestral residue when several hypotheses reconstruct the
-    same domain (they normally agree — tip residues are labeling-invariant)."""
+def _tally_str(vals: Sequence[Optional[str]]) -> Dict[str, int]:
     counts: Dict[str, int] = {}
-    order: List[str] = []
     for v in vals:
-        if not v:
-            continue
-        s = str(v)
-        if s not in counts:
-            order.append(s)
-        counts[s] = counts.get(s, 0) + 1
-    if not order:
-        return None
-    return max(order, key=lambda s: (counts[s], -order.index(s)))
+        if v:
+            counts[str(v)] = counts.get(str(v), 0) + 1
+    return counts
+
+
+def _modal_str(vals: Sequence[Optional[str]]) -> Optional[str]:
+    """Most frequent non-empty string. Settles a domain's derived / ancestral residue when several
+    hypotheses reconstruct the same domain (they normally agree: tip residues are labeling-invariant).
+    A tie goes to the smallest string, so the result does not depend on the order of the hypotheses;
+    the choice is a convention, not a reading of the data (see :func:`_has_tie`)."""
+    counts = _tally_str(vals)
+    return min(counts, key=lambda s: (-counts[s], s)) if counts else None
+
+
+def _has_tie(vals: Sequence[Optional[str]]) -> bool:
+    """True when two or more strings share the highest count."""
+    counts = _tally_str(vals)
+    return bool(counts) and sum(1 for n in counts.values() if n == max(counts.values())) > 1
 
 
 def _support_str(vals: Sequence[Optional[str]]) -> str:
@@ -175,6 +180,8 @@ def pool_domains(
         for sd in changed:
             grp[modal_enc[sd]] = grp.get(modal_enc[sd], 0) + 1
         agree_num = max(grp.values()) if grp else 0
+        # A tied domain was settled by the convention of _modal_str: agreement and convergence type may rest on it.
+        agreement_tie = any(_has_tie(v) for v in der_enc.values())
 
         return {
             "asr_path_score": core,
@@ -186,6 +193,7 @@ def pool_domains(
             "domain_anc_support": {rep.get(sd, sd): _support_str(anc_raw.get(sd, [])) for sd in changed},
             "agree_num": agree_num,
             "agree_den": agree_den,
+            "agreement_tie": agreement_tie,
             "n_participating": agree_den,
             "convergence_type": _convergence_type(agree_num, agree_den),
             "participating_hyps": sorted({h for hs in hyp_ids_by_domain.values() for h in hs}),

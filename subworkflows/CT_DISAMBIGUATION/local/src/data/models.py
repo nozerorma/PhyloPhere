@@ -133,6 +133,9 @@ class ConvergenceResult:
     # Diagnostic only: agree_num / agree_den (largest same-encoded-residue group
     # over the domains changed in >= 1 hypothesis / count of those domains).
     derived_agreement: Optional[float] = None
+    # True when a changed domain's derived residue was tied for the highest support and settled by a convention
+    # (smallest residue), so derived_agreement and convergence_type may rest on that choice.
+    agreement_ambiguous: Optional[bool] = None
     # Per-domain pooled score s̄_d for the emitted side (was pair_path_scores).
     domain_scores: Optional[Dict[int, float]] = None
     # Raw (un-encoded) ancestral + per-side derived residues per changed domain,

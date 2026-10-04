@@ -23,6 +23,7 @@ ROOT = Path(os.environ.get("PHYLOPHERE_ROOT", HERE.parents[1]))
 GOLD = HERE / "golden/pepc_c4_complete"
 LOCAL = ROOT / "subworkflows/CT_DISAMBIGUATION/local"
 sys.path.insert(0, str(HERE))
+from frozen_master import without_new  # noqa: E402
 from test_observed_b0 import _gold, _same_but_tag_support  # noqa: E402
 
 
@@ -59,7 +60,7 @@ def _observed(inputs, out, workers):
 def test_master_csv_matches_the_frozen_pipeline_run(inputs, tmp_path):
     got = pd.read_csv(_observed(inputs, tmp_path, 2), keep_default_na=False)
     gold = _gold()
-    assert len(gold) == 217 and list(got.columns) == list(gold.columns) and len(gold.columns) == 46
+    assert len(gold) == 217 and list(without_new(got).columns) == list(gold.columns) and len(gold.columns) == 46
     _same_but_tag_support(got, gold)
 
 

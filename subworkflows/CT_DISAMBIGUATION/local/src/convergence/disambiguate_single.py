@@ -186,6 +186,7 @@ def _emit_pooled_side_rows(
             participating_hypotheses=sd["participating_hyps"],
             asr_path_score=sd["asr_path_score"],
             derived_agreement=sd["derived_agreement"],
+            agreement_ambiguous=sd["agreement_ambiguous"],
             convergence_type=sd.get("convergence_type", base.convergence_type),
             domain_scores=sd["domain_scores"],
             domain_anc_aa=sd["domain_anc"],

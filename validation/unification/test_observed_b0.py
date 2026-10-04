@@ -27,6 +27,7 @@ from src.core.master import write_master_csv  # noqa: E402
 from src.core.meta import caas_id  # noqa: E402
 from src.core.observed import observed_entries, observed_master_rows, score_observed, unresolved_entries  # noqa: E402
 from src.core.master import master_fields  # noqa: E402
+from frozen_master import without_new  # noqa: E402
 
 GOLD = HERE / "golden/pepc_c4_complete"
 
@@ -58,6 +59,7 @@ def _gold():
 
 
 def _same_but_tag_support(got, gold, tol=1e-12):
+    got = without_new(got)       # the frozen master predates the columns of frozen_master.NEW_COLUMNS
     assert list(got.columns) == list(gold.columns) and len(got) == len(gold)
     for c in gold.columns:
         if c == "tag_support":
@@ -106,19 +108,28 @@ def test_entries_carry_the_content_id_the_hypothesis_and_the_parsed_conserved_pa
         assert e.is_conserved_meta == (r["is_conserved_meta"] in ("TRUE", "True", "true", "1"))
 
 
-def test_the_row_order_of_the_input_changes_only_the_residue_chosen_where_two_residues_tie(pepc, tmp_path):
+def test_the_row_order_of_the_input_changes_nothing_in_the_master_ties_included(pepc, tmp_path):
     shuffled = list(pepc["rows"])
     random.Random(3).shuffle(shuffled)
     key = ["msa_pos", "caap_group", "side"]
     a = _master(pepc, pepc["rows"], tmp_path / "a.csv").sort_values(key, kind="stable").reset_index(drop=True)
     b = _master(pepc, shuffled, tmp_path / "b.csv").sort_values(key, kind="stable").reset_index(drop=True)
-    modal = [c for c in a.columns if re.fullmatch(r"domain_\d+_(anc|top|bot)_aa", c)]
-    assert all(a[c].equals(b[c]) for c in a.columns if c not in modal)
-    changed = [(i, c) for c in modal for i in a.index[a[c] != b[c]]]
-    assert changed  # the property is exercised: this input has ties
-    for i, c in changed:  # a tie: both residues have the same support, which is the maximum
-        counts = dict((r, int(n)) for r, n in (p.split(":") for p in a.loc[i, c + "_support"].split(",")))
-        assert counts[a.loc[i, c]] == counts[b.loc[i, c]] == max(counts.values())
+    assert a.equals(b)
+    # every row says whether its pool had a tied derived residue (PEPC has none that decides an agreement: its tied raw
+    # residues D and N share an encoding)
+    assert set(a["agreement_ambiguous"].astype(str)) == {"False"}
+
+
+def test_a_result_flagged_as_ambiguous_reaches_the_master_row(pepc):
+    from types import SimpleNamespace
+    from src.core.master import master_row
+    from src.utils.gene_wrapper import convert_convergence_result_to_dict
+    base = next(iter(score_observed(pepc["ctx"], "PEPC", observed_entries("PEPC", pepc["rows"][:40]), pepc["trait_pairs"], pepc["pss"], 0.1)))
+    for flag in (True, False):
+        flagged = SimpleNamespace(**{**vars(base), "agreement_ambiguous": flag}) if hasattr(base, "__dict__") else None
+        assert flagged is not None
+        row = master_row(convert_convergence_result_to_dict(flagged, multi_hypothesis=None), pepc["fields"])
+        assert row["agreement_ambiguous"] == str(flag)
 
 
 def test_the_discovery_order_gives_the_rows_in_the_order_of_the_frozen_master(pepc, tmp_path):

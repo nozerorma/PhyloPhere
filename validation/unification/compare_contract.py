@@ -17,7 +17,8 @@ Compares run A (the baseline, made by the former observed chain) with run B (the
                                                maximum support, and those cells are counted; `derived_agreement` and
                                                `convergence_type` are functions of the modal derived residues (fop_pool), so
                                                they may differ only in a row where a top/bot residue cell was tolerated as a
-                                               tie, and those cells are counted too
+                                               tie, and those cells are counted too; a column of NEW_IN_B that only B has
+                                               (`agreement_ambiguous`) is left out of the comparison and listed
 
 A file missing from one run fails; a file missing from both is skipped. Exit status is 1 if any comparison fails.
 The order of the rows inside a position is not compared: the b_0 export lists entries by position, trait file name and
@@ -49,6 +50,7 @@ MASTER_KEY = ["gene", "msa_pos", "caap_group", "side"]
 _MODAL = re.compile(r"domain_\d+_(anc|top|bot)_aa")
 _DERIVED_MODAL = re.compile(r"domain_\d+_(top|bot)_aa")   # the residues agree_num / convergence_type are computed from
 DERIVED = ("derived_agreement", "convergence_type")
+NEW_IN_B = ("agreement_ambiguous",)   # master columns a baseline made before they existed may lack
 _ID = re.compile(r"CAAS_[0-9A-F]{16}")
 EXAMPLES = 3
 
@@ -160,6 +162,8 @@ def _id_tallies_shape(cell):
 def compare_master(pa, pb, tol, meta_b=None):
     a = pd.read_csv(pa, dtype=str, keep_default_na=False, na_values=[])
     b = pd.read_csv(pb, dtype=str, keep_default_na=False, na_values=[])
+    added = [c for c in b.columns if c not in a.columns and c in NEW_IN_B]
+    b = b.drop(columns=added)
     if list(a.columns) != list(b.columns):
         return {"pass": False, "columns_a": list(a.columns), "columns_b": list(b.columns)}
     for df in (a, b):
@@ -227,7 +231,7 @@ def compare_master(pa, pb, tol, meta_b=None):
             d = r._asdict()
             for tok in _tally(d["tag_support"]):
                 ids_outside += tok not in known.get((int(d["msa_pos"]), d["caap_group"]), ())
-    out = {"n_a": len(a), "n_b": len(b), "only_a": only_a, "only_b": only_b, "max_abs_delta": worst,
+    out = {"columns_added_in_b": added, "n_a": len(a), "n_b": len(b), "only_a": only_a, "only_b": only_b, "max_abs_delta": worst,
            "worst_column": max(deltas, key=deltas.get) if deltas else None, "na_mismatch": na_mismatch,
            "columns_with_other_differences": other_diff, "modal_residue_tie_cells_tolerated": tie_cells,
            "modal_residue_cells_differing_without_a_tie": len(not_tie), "examples_not_tie": not_tie[:EXAMPLES],

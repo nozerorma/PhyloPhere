@@ -321,13 +321,13 @@ def pepc_runs(tmp_path_factory):
 
 
 @needs_r
-def test_the_pepc_chain_passes_with_shuffled_discovery_rows_and_reports_the_ties(pepc_runs):
+def test_the_pepc_chain_passes_with_shuffled_discovery_rows_and_no_tied_cell_depends_on_their_order(pepc_runs):
     a, b = pepc_runs
     r = cc.compare_runs(a, b)
     assert {k: v["pass"] for k, v in r.items()} == {k: True for k in r}, {k: v for k, v in r.items() if v["pass"] is not True}
     assert len([k for k in r if k.startswith(cc.META_DIR)]) == 6
     m = r[cc.MASTER]
-    assert m["n_a"] == m["n_b"] == 217 and m["max_abs_delta"] <= 1e-12 and m["modal_residue_tie_cells_tolerated"] >= 1
+    assert m["n_a"] == m["n_b"] == 217 and m["max_abs_delta"] <= 1e-12 and m["modal_residue_tie_cells_tolerated"] == 0
     assert m["tag_support_ids_outside_meta_b"] == 0
 
 
@@ -341,3 +341,24 @@ def test_the_pepc_chain_fails_when_one_cell_of_b_is_wrong(pepc_runs, tmp_path):
     df.to_csv(f, index=False)
     r = cc.compare_runs(a, tmp_path / "b2")
     assert r[cc.MASTER]["pass"] is False and all(v["pass"] is True for k, v in r.items() if k != cc.MASTER)
+
+
+def _with_ambiguity(df):
+    df = df.copy()
+    df.insert(list(df.columns).index("derived_agreement") + 1, "agreement_ambiguous", "False")
+    return df
+
+
+def test_a_baseline_without_the_ambiguity_column_matches_a_master_that_has_it(tmp_path):
+    r = cc.compare_runs(_master_run(tmp_path / "a", MASTER_TEXT), _master_run(tmp_path / "b", _text(_with_ambiguity(_frame()))))[cc.MASTER]
+    assert r["pass"] is True and r["columns_added_in_b"] == ["agreement_ambiguous"]
+
+
+def test_any_other_difference_in_the_master_columns_still_fails(tmp_path):
+    with_col = _with_ambiguity(_frame())
+    gone = cc.compare_runs(_master_run(tmp_path / "a1", _text(with_col)), _master_run(tmp_path / "b1", MASTER_TEXT))[cc.MASTER]
+    assert gone["pass"] is False and "columns_a" in gone                       # a column that B lost
+    extra = _frame()
+    extra["something_else"] = "x"
+    other = cc.compare_runs(_master_run(tmp_path / "a2", MASTER_TEXT), _master_run(tmp_path / "b2", _text(extra)))[cc.MASTER]
+    assert other["pass"] is False and "columns_b" in other                     # a new column that is not listed

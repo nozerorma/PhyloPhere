@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "subworkflows/CT_DISAMBIGUATION/local"))
 from src.core.labelings import design_max_pairs  # noqa: E402
 from src.core.master import master_fields, master_row, serialize_value, write_master_csv  # noqa: E402
+from frozen_master import fields_without_new  # noqa: E402
 
 FIELDS = ["gene", "msa_pos", "side", "asr_path_score", "participating_hypotheses"]
 
@@ -44,11 +45,11 @@ def test_empty_input_writes_only_the_header(tmp_path):
 
 def test_the_master_columns_follow_the_number_of_pairs_of_the_design():
     one, four = master_fields(1), master_fields(4)
-    assert four[:len(one)] == one and len(four) - len(one) == 3 * 8 and len(four) == 46
+    assert four[:len(one)] == one and len(four) - len(one) == 3 * 8 and len(four) == 47
     assert [f for f in four if f.startswith("domain_4_")] == [
         f"domain_4_{k}" for k in ("posterior", "score", "anc_aa", "top_aa", "bot_aa", "anc_aa_support", "top_aa_support", "bot_aa_support")]
     golden = (Path(__file__).resolve().parent / "golden/pepc_c4_complete/caas_convergence_master.csv").read_text().splitlines()[0]
-    assert ",".join(four) == golden  # the frozen master has the columns of a four-pair design
+    assert ",".join(fields_without_new(four)) == golden  # the frozen master has the columns of a four-pair design, less the newer ones
 
 
 def test_the_pair_count_of_a_design_is_its_largest_pair_id(tmp_path):

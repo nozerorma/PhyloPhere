@@ -51,6 +51,8 @@ def master_fields(max_pairs: int) -> List[str]:
         # CAAS convergence score on the Voronoi domain
         "asr_path_score",
         "derived_agreement",
+        # True when a changed domain's derived residue was tied and settled by convention (smallest residue).
+        "agreement_ambiguous",
     ]
 
     # Per-domain columns for the K fixed Voronoi domains (at end).
