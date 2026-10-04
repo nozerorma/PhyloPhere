@@ -385,7 +385,7 @@ if (has_caas_pos_cycle_caas) {
   pos_scores <- pos_scores %>%
     select(-any_of("p.emp")) %>%
     left_join(.k_emp %>% select(Gene, Position, p.emp), by = c("Gene", "Position"))
-} else {
+} else if (!file_exists(caas_pos_cycle_caas_file)) {
   cat("  no --caas_pos_cycle_caas provided, skipping p.emp\n")
 }
 

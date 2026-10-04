@@ -117,3 +117,4 @@ def test_an_empty_null_leaves_every_null_based_value_undefined_and_keeps_the_obs
     # the observed side does not depend on the null
     assert ps["CAAS_score"].equals(without["CAAS_score"]) and gs["gene_caas_score"].equals(gene_without["gene_caas_score"])
     assert "p.emp" in (r.stdout + r.stderr) and "no null" in (r.stdout + r.stderr).lower()
+    assert "no --caas_pos_cycle_caas provided" not in r.stdout      # the table was provided; it is the null that is empty
