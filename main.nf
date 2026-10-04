@@ -502,7 +502,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
 
         if (core) {
             def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
-            def caas_perm_out = CAAS_CORE_MERGE(core.pos_detail.collect(), caas_universe_ch, caas_gene_lengths_ch.collect().map { items -> items[0] })
+            def caas_perm_out = CAAS_CORE_MERGE(core.pos_detail.collect(), caas_universe_ch, caas_gene_lengths_ch.collect().map { items -> items[0] }, core.labelings)
             scoring_caas_perms_ch = caas_perm_out.perms
             scoring_caas_perm_scores_ch = Channel.empty()
             scoring_caas_pos_cycle_caas_ch = caas_perm_out.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))  // per (gene,position,side,cycle) caas_score -> p.emp

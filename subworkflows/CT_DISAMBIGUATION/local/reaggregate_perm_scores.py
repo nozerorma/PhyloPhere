@@ -41,6 +41,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from src.convergence.fop_pool import base_cycle  # noqa: E402
 from src.utils.gene_wrapper import (  # noqa: E402
     _cycle_gene_removal_from_detail,
     _finalize_perm_scores,
@@ -66,6 +67,21 @@ def scan_detail(detail_path: Path):
     return sorted(cycles), n_rows
 
 
+def read_roster(labelings_path: Path, by_labeling: bool = False):
+    """Cycles of a labelings file (one row per labeling, tag in the first column), the real labeling b_0 left out.
+
+    A cycle is a base cycle ("b_5") unless `by_labeling`: then it is the full tag ("b_5~H3"), the grain of a detail
+    whose hypotheses were not pooled.
+    """
+    tags = set()
+    with open(labelings_path) as fh:
+        for line in fh:
+            tag = line.split("\t", 1)[0].strip() if line.strip() else ""
+            if tag and base_cycle(tag) != "b_0":
+                tags.add(tag if by_labeling else base_cycle(tag))
+    return sorted(tags)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -84,6 +100,11 @@ def main() -> int:
     ap.add_argument("--gene-filter-mode", default="none", choices=["none", "extreme", "dubious", "both"])
     ap.add_argument("--keep-clusters", action="store_true",
                     help="keep cluster-train positions in the scored pool (params.remove_caas_clusters false)")
+    ap.add_argument("--cycles-from", type=Path, default=None,
+                    help="labelings file the cycles were replayed from (resample_perms.tab). N of the null is the number "
+                         "of its cycles, not the number of cycles that left a row: writes cycle_roster.txt for "
+                         "scoring_caas_perms.R, warns about the cycles without a row, and refuses rows of a cycle it "
+                         "does not list")
     ap.add_argument("--empty-null", action="store_true",
                     help="the null has no permuted labeling (N = 0): write the null tables empty. Refused when --detail "
                          "holds shards, and without it a null with no shard is an error (a replay that lost every hit "
@@ -121,6 +142,21 @@ def main() -> int:
     if not cycle_tags:
         logger.error("no cycles found in detail file; nothing to do")
         return 1
+
+    if args.cycles_from is not None:
+        # The roster is kept at the grain of the detail: base cycles when the hypotheses were pooled (the production
+        # case), the labeling tags otherwise.
+        roster = read_roster(args.cycles_from, by_labeling=any("~" in c for c in cycle_tags))
+        present = set(cycle_tags)
+        stray = sorted(present - set(roster))
+        if stray:
+            logger.error("detail rows of %d cycle(s) that are not in %s: %s", len(stray), args.cycles_from, ", ".join(stray[:5]))
+            return 1
+        silent = sorted(set(roster) - present)
+        if silent:
+            logger.warning("[reaggregate] %d of %d replayed cycles left no row (%s%s): they count in N as cycles with no signal",
+                           len(silent), len(roster), ", ".join(silent[:5]), ", ..." if len(silent) > 5 else "")
+        (args.output_dir / "cycle_roster.txt").write_text("".join(f"{c}\n" for c in roster))
 
     removed = set()
     if args.gene_lengths and args.gene_filter_mode != "none":

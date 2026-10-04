@@ -306,6 +306,7 @@ workflow CAAS_CORE {
         def core = CAAS_CORE_BATCHED(live.mix(reuse), subset_bc, config_bc, tree_bc, fop_bc, lengths_bc)
 
     emit:
+        labelings      = subset_bc                 // the labelings file the batches replayed (the null's cycle roster)
         pos_detail     = core.pos_detail
         b0_observed    = core.b0_observed
         perm_discovery = core.perm_discovery
@@ -369,6 +370,7 @@ process CAAS_CORE_MERGE {
     path batchDetail, stageAs: 'batch_*'   // batch shard directories, or one legacy perm_pos_detail.tsv.gz
     path universe
     path gene_lengths   // gene_ensembl_file (gene removal) or NO_FILE
+    path labelings      // the labelings file the cycles were replayed from, or NO_FILE: N is then read from the detail rows
 
     output:
     path "perm_pos_detail",           emit: pos_detail, optional: true   // the union of the batches' shards (absent for a legacy file)
@@ -391,6 +393,8 @@ process CAAS_CORE_MERGE {
     // Gene removal needs the annotation file.
     // N = 0 (b_0 only): the null has no shard, and says so explicitly. Written without `?:`: Groovy reads a numeric 0 as false.
     def empty_null_arg = (params.caas_full_perms != null && (params.caas_full_perms as int) == 0) ? "--empty-null" : ""
+    // N is the number of cycles replayed, which the detail rows alone understate when a cycle left no row.
+    def roster_arg = labelings.name.startsWith('NO_') ? "" : "--cycles-from ${labelings}"
     def removal_args = (caasPostprocOn() && !gene_lengths.name.startsWith('NO_')) ? "--gene-lengths ${gene_lengths} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
@@ -410,7 +414,7 @@ process CAAS_CORE_MERGE {
     ${py} ./reaggregate_perm_scores.py \\
         --detail "\$DETAIL" \\
         --output-dir . \\
-        --seed ${params.seed ?: 1998} ${empty_null_arg} ${removal_args}
+        --seed ${params.seed ?: 1998} ${empty_null_arg} ${roster_arg} ${removal_args}
 
     # b_0 rebuilt from its merged shards as a one-labeling run: same code, own rank/size pools.
     if [ -d "\$DETAIL/b0" ]; then
@@ -423,8 +427,11 @@ process CAAS_CORE_MERGE {
         cp -RL "\$DETAIL/b0" b0/perm_pos_detail
     fi
 
+    ROSTER_ARG=""
+    if [ -f cycle_roster.txt ]; then ROSTER_ARG="--cycles cycle_roster.txt"; fi
     ${rs} ${scoring_local}/src/scoring_caas_perms.R \\
         --gene-cycle-scores gene_cycle_scores.tsv \\
+        \$ROSTER_ARG \\
         ${universe_arg} \\
         --output caas_perms.rds
 

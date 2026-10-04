@@ -5,6 +5,7 @@ include { CAAS_CORE_MERGE } from './subworkflows/CT/caas_permulation'
 
 workflow {
     def merged = CAAS_CORE_MERGE(Channel.value(params.mini_details.split(',').collect { f -> file(f) }),
-                                 Channel.value(file('NO_FILE')), Channel.value(file(params.mini_lengths)))
+                                 Channel.value(file('NO_FILE')), Channel.value(file(params.mini_lengths)),
+                                 Channel.value(file(params.mini_labelings ?: 'NO_LABELINGS')))
     merged.pos_detail.map { d -> d.toString() }.collectFile(name: 'pos_detail_dir.txt', storeDir: params.outdir, newLine: true)
 }

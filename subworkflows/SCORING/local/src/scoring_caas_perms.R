@@ -16,6 +16,8 @@ get_arg <- function(flag, default = NULL) {
 gcs_file      <- get_arg("--gene-cycle-scores")
 universe_file <- get_arg("--universe", "NO_FILE")
 out_file      <- get_arg("--output", "caas_perms.rds")
+# cycles replayed (one tag per line), from the labelings file: N counts them even when a cycle left no row
+cycles_file   <- get_arg("--cycles", NULL)
 
 stopifnot(!is.null(gcs_file), file.exists(gcs_file))
 
@@ -39,6 +41,13 @@ if (nrow(gcs) == 0) {
 }
 
 cycle_levels <- sort(unique(gcs$cycle))
+if (!is.null(cycles_file)) {
+  roster <- trimws(readLines(cycles_file)); roster <- roster[nzchar(roster)]
+  stray <- setdiff(cycle_levels, roster)
+  if (length(stray)) stop(sprintf("gene-cycle scores of %d cycle(s) not in %s: %s", length(stray), cycles_file,
+                                  paste(head(stray, 5), collapse = ", ")))
+  cycle_levels <- sort(unique(roster))
+}
 n_perms <- length(cycle_levels)
 
 # Gene universe: cleaned_background if given, else genes present in the table
