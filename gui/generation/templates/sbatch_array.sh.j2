@@ -69,10 +69,10 @@ if [ "{{ run_defaults.toy_mode }}" = true ]; then
     # full-run value: toy_mode subsamples alignments, never species, so the
     # permulation step still works on the full tree at the full acceptance
     # rate. 100 accepted needs well under 1k draws even under BM, so 200 draws
-    # per cycle is generous headroom, and it caps a run that CANNOT fill the
+    # per cycle (200 with no cycle) is generous headroom, and it caps a run that CANNOT fill the
     # pool at about a minute instead of grinding through 1M draws plus two
     # escalations before failing, which would defeat the point of a smoke test.
-    export MAX_TRIES="$(( CAAS_FULL_PERMS * 200 ))"
+    export MAX_TRIES="$(( CAAS_FULL_PERMS > 0 ? CAAS_FULL_PERMS * 200 : 200 ))"
     export N_RANDOMIZATIONS="1000"
     export RER_PERM_BATCHES="10"
     export RER_PERMS_PER_BATCH="10"

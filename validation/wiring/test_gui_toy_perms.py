@@ -62,15 +62,20 @@ def test_the_script_has_no_fixed_toy_cycle_count_left():
     assert 'CAAS_FULL_PERMS="100"' not in text and 'MAX_TRIES="20000"' not in text
 
 
-@pytest.mark.parametrize("bad", ["", "abc", "0", "-3", "1.5", " "])
-def test_a_toy_run_needs_a_positive_integer_number_of_cycles(bad):
+@pytest.mark.parametrize("bad", ["", "abc", "-3", "1.5", " "])
+def test_a_toy_run_needs_a_non_negative_integer_number_of_cycles(bad):
     errors = validate(_project(perms=bad))
     assert any("toy" in e.lower() and "cycles" in e.lower() for e in errors), errors
     assert not any("cycles" in e.lower() for e in validate(_project(toy_mode=False, perms=bad)))
 
 
-def test_a_valid_number_of_cycles_adds_no_error():
-    assert not any("cycles" in e.lower() for e in validate(_project(perms="1000")))
+@pytest.mark.parametrize("ok", ["0", "1", "1000"])
+def test_a_valid_number_of_cycles_adds_no_error(ok):
+    assert not any("cycles" in e.lower() for e in validate(_project(perms=ok)))
+
+
+def test_no_cycle_keeps_a_positive_draw_budget():
+    assert _toy_environment(render_batch(_project(perms="0"))) == (0, 200)
 
 
 def test_a_project_saved_before_the_field_loads_with_the_default():
