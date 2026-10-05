@@ -362,3 +362,33 @@ def test_any_other_difference_in_the_master_columns_still_fails(tmp_path):
     extra["something_else"] = "x"
     other = cc.compare_runs(_master_run(tmp_path / "a2", MASTER_TEXT), _master_run(tmp_path / "b2", _text(extra)))[cc.MASTER]
     assert other["pass"] is False and "columns_b" in other                     # a new column that is not listed
+
+
+def _ambiguity_run(tmp_path, mutate):
+    """Baseline = the frozen master; B = the frozen master with the ambiguity column (all False) and `mutate` applied."""
+    df = _with_ambiguity(_frame())
+    mutate(df)
+    return cc.compare_runs(_master_run(tmp_path / "a", MASTER_TEXT), _master_run(tmp_path / "b", _text(df)))[cc.MASTER]
+
+
+def test_with_the_ambiguity_column_a_derived_difference_is_explained_by_a_flagged_row_and_by_nothing_else(tmp_path):
+    def flagged(df):
+        _flip_derived(df, 0)
+        df.at[0, "agreement_ambiguous"] = "True"           # no modal residue differs in that row: the flag alone explains it
+    r = _ambiguity_run(tmp_path / "flagged", flagged)
+    assert r["pass"] is True and r["derived_cells_explained_by_a_tie"] == {"derived_agreement": 1, "convergence_type": 1}
+    assert r["rows_flagged_ambiguous_in_b"] == 1
+
+    def unflagged(df):
+        _flip_derived(df, 0)
+    r = _ambiguity_run(tmp_path / "unflagged", unflagged)
+    assert r["pass"] is False and r["derived_cells_differing_without_a_tie"] == 2
+
+
+def test_with_the_ambiguity_column_a_tolerated_residue_tie_does_not_explain_a_derived_difference_in_an_unflagged_row(tmp_path):
+    i, c, other, _ = _tie_cell(_frame())
+    def tie_without_flag(df):
+        df.at[i, c] = other
+        _flip_derived(df, i)
+    r = _ambiguity_run(tmp_path, tie_without_flag)
+    assert r["modal_residue_tie_cells_tolerated"] == 1 and r["pass"] is False and r["derived_cells_differing_without_a_tie"] == 2

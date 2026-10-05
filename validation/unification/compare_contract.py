@@ -17,7 +17,8 @@ Compares run A (the baseline, made by the former observed chain) with run B (the
                                                maximum support, and those cells are counted; `derived_agreement` and
                                                `convergence_type` are functions of the modal derived residues (fop_pool), so
                                                they may differ only in a row where a top/bot residue cell was tolerated as a
-                                               tie, and those cells are counted too; a column of NEW_IN_B that only B has
+                                               tie (or, when B has `agreement_ambiguous`, in a row B flags True, which
+                                               is the exact criterion), and those cells are counted too; a column of NEW_IN_B that only B has
                                                (`agreement_ambiguous`) is left out of the comparison and listed
 
 A file missing from one run fails; a file missing from both is skipped. Exit status is 1 if any comparison fails.
@@ -163,9 +164,13 @@ def compare_master(pa, pb, tol, meta_b=None):
     a = pd.read_csv(pa, dtype=str, keep_default_na=False, na_values=[])
     b = pd.read_csv(pb, dtype=str, keep_default_na=False, na_values=[])
     added = [c for c in b.columns if c not in a.columns and c in NEW_IN_B]
+    has_flag = "agreement_ambiguous" in added
+    flag_b = b["agreement_ambiguous"].copy() if has_flag else None
     b = b.drop(columns=added)
     if list(a.columns) != list(b.columns):
         return {"pass": False, "columns_a": list(a.columns), "columns_b": list(b.columns)}
+    if has_flag:
+        b["_flag_b"] = flag_b                          # kept apart: the comparison below runs over A's columns
     for df in (a, b):
         df["_n"] = df.groupby(MASTER_KEY).cumcount()
     m = a.merge(b, on=MASTER_KEY + ["_n"], how="outer", suffixes=("_a", "_b"), indicator=True)
@@ -187,6 +192,10 @@ def compare_master(pa, pb, tol, meta_b=None):
                     tie_rows.add(i)
             else:
                 not_tie.append((c, *(both.loc[i, MASTER_KEY].tolist()), va, vb))
+    if has_flag:
+        # B says itself which rows rest on a tie of the encoded derived residue, the one agreement is computed from;
+        # the residue cell shown in the master is only a proxy for it.
+        tie_rows = set(both.index[both["_flag_b"] == "True"])
     derived_tied, derived_unexplained = {}, []
 
     def derived_differs(c, rows):
@@ -235,7 +244,7 @@ def compare_master(pa, pb, tol, meta_b=None):
            "worst_column": max(deltas, key=deltas.get) if deltas else None, "na_mismatch": na_mismatch,
            "columns_with_other_differences": other_diff, "modal_residue_tie_cells_tolerated": tie_cells,
            "modal_residue_cells_differing_without_a_tie": len(not_tie), "examples_not_tie": not_tie[:EXAMPLES],
-           "derived_cells_explained_by_a_tie": derived_tied,
+           "rows_flagged_ambiguous_in_b": len(tie_rows) if has_flag else None, "derived_cells_explained_by_a_tie": derived_tied,
            "derived_cells_differing_without_a_tie": len(derived_unexplained), "examples_derived_without_a_tie": derived_unexplained[:EXAMPLES],
            "tag_support_shape_differs": tag_shape_bad, "tag_support_ids_outside_meta_b": ids_outside}
     out["pass"] = (only_a == 0 and only_b == 0 and na_mismatch == 0 and worst <= tol and not other_diff and not not_tie and not derived_unexplained
