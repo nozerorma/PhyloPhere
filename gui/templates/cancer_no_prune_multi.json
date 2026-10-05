@@ -15,7 +15,6 @@
     "toy_mode": true,
     "toy_n": "",
     "runtime_type": "slurm",
-    "batched": true,
     "script_base_name": "cancer_b0_toy",
     "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_cancer_b0_toy",
     "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_b0_toy",

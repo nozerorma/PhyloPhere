@@ -83,6 +83,8 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "toy_mode": _bool_str(project.runtime.toy_mode),
         "caas": _bool_str(caas_enabled),
         "caas_permulation_enrichment": _bool_str(caas.caas_permulation_enrichment),
+        "caas_perms_postproc": _bool_str(caas.caas_perms_postproc),
+        "scoring_gene_perm_pooled": _bool_str(scoring.scoring_gene_perm_pooled),
         "disambiguation": _bool_str(disambiguation_enabled),
         "ct_postproc": _bool_str(ct_postproc_enabled),
         "run_postproc_exploratory": _bool_str(getattr(disambig, 'run_postproc_exploratory', True)),

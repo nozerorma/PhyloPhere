@@ -15,7 +15,6 @@
     "toy_mode": false,
     "toy_n": "",
     "runtime_type": "local",
-    "batched": false,
     "script_base_name": "tier1_pepc",
     "work_dir": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/output/pepc/work",
     "results_dir": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/output/pepc/results",

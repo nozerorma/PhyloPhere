@@ -74,6 +74,12 @@ SPEC = ModuleTabSpec(
                 "validity."
             ),
         ),
+        FieldSpec(
+            name="ct_disambig_hypotheses_pairs",
+            label="Contrast hypotheses pairs file for the observed scoring (optional)",
+            kind="path_file",
+            importance="optional",
+        ),
         Section("Post-processing mode (conf/ct_postproc.config)"),
         FieldSpec(
             name="run_postproc_exploratory",

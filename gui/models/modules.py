@@ -44,6 +44,7 @@ class CaasConfig(ModuleConfigBase):
     patterns: str = "1,2,3"  # --patterns
     caas_full_perms: str = "1000"  # --caas_full_perms
     caas_permulation_enrichment: bool = True  # --caas_permulation_enrichment
+    caas_perms_postproc: bool = True  # --caas_perms_postproc (apply the observed post-processing filters to the permulation null)
 
     # Contrast-selection tuning (conf/common.config) — used when --contrast_selection
     # runs upstream of CT (bundled unconditionally with CAAS, see run_single.sh.j2).
@@ -83,6 +84,7 @@ class CaasConfig(ModuleConfigBase):
 class DisambiguationConfig(ModuleConfigBase):
     ct_disambig_asr_model: str = "lg"  # --ct_disambig_asr_model
     ct_disambig_asr_cache_dir: str = ""  # --ct_disambig_asr_cache_dir
+    ct_disambig_hypotheses_pairs: str = ""  # --ct_disambig_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for the observed scoring)
     ct_disambig_posterior_threshold: str = "0.1"  # --ct_disambig_posterior_threshold
     ct_disambig_max_tasks_per_child: str = "50"  # --ct_disambig_max_tasks_per_child
     # Separate ASR Robustness diagnostics report/stage (conf/ct_disambiguation.config).
@@ -255,6 +257,8 @@ class ScoringConfig(ModuleConfigBase):
     scoring_window_size_bp: str = "1000000"  # --scoring_window_size_bp
     scoring_p_emp_thr: str = "0.05"  # --scoring_p_emp_thr (position-level CAAS permulation p.adj_bh / p.adj_sam; also gates gene_caas_pperm_adj)
     caas_evidence_top_n: str = "0"  # --caas_evidence_top_n (evidence table of the N best positions after SCORING; 0 = off)
+    scoring_gene_perm_pooled: bool = False  # --scoring_gene_perm_pooled (opt-in n-stratified pooled-null gene permulation p)
+    scoring_hypotheses_pairs: str = ""  # --scoring_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for SCORING)
 
     # NOTE: scoring_postproc_input/scoring_accum_dir/scoring_vep_primateai/
     # scoring_background_input/caas_perms_file/scoring_fade_site_top/bottom moved
@@ -275,6 +279,10 @@ class EnrichmentConfig(ModuleConfigBase):
     fcs_min_genes: str = "5"  # --fcs_min_genes
     fcs_max_genes: str = "500"  # --fcs_max_genes (0 = no limit)
     fcs_fdr: str = "0.15"  # --fcs_fdr
+    fcs_fdr_wilcoxon: str = ""  # --fcs_fdr_wilcoxon (blank -> the FCS FDR)
+    fcs_fdr_lachenbruch: str = ""  # --fcs_fdr_lachenbruch (blank -> the FCS FDR)
+    fcs_fdr_permsum: str = "0.05"  # --fcs_fdr_permsum
+    pfam_cache_dir: str = ""  # --pfam_cache_dir (blank -> ~/.cache/phylophere/pfam)
     fcs_pperm_thr: str = "0.025"  # --fcs_pperm_thr
     fcs_top_n: str = "20"  # --fcs_top_n
     fcs_batch_size: str = "4"  # --fcs_batch_size (GMTs per FCS_COMPUTE_BATCHED task)

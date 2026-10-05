@@ -71,6 +71,7 @@ SPEC = ModuleTabSpec(
     ),
     advanced_fields=(
         Section("Caching"),
+        FieldSpec(name="pfam_cache_dir", label="Pfam cache directory (optional)", kind="path_dir", importance="optional"),
         FieldSpec(
             name="string_cache_dir",
             label="STRING cache directory",
@@ -85,6 +86,9 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="fcs_min_genes", label="FCS minimum genes per set", importance="default"),
         FieldSpec(name="fcs_max_genes", label="FCS maximum genes per set (0 = uncapped)", importance="default"),
         FieldSpec(name="fcs_fdr", label="FCS FDR threshold", importance="default"),
+        FieldSpec(name="fcs_fdr_wilcoxon", label="FCS FDR gate, Wilcoxon (blank = FCS FDR)", importance="optional"),
+        FieldSpec(name="fcs_fdr_lachenbruch", label="FCS FDR gate, Lachenbruch (blank = FCS FDR)", importance="optional"),
+        FieldSpec(name="fcs_fdr_permsum", label="FCS FDR gate, path-sum permulation", importance="optional"),
         FieldSpec(name="fcs_pperm_thr", label="FCS permulation p threshold", importance="default"),
         FieldSpec(name="fcs_top_n", label="FCS top-N leading edge", importance="optional"),
         FieldSpec(name="fcs_batch_size", label="FCS GMTs per task", importance="optional"),

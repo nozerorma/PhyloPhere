@@ -80,7 +80,8 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     CAAS_POS_CYCLE_CAAS_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_cycle_caas.tsv.gz"
     CAAS_POS_SAMPLE_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
     CAAS_POS_QUANTILES_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
-    for _f in "$CAAS_PERMS_FILE" "$CAAS_POS_CYCLE_CAAS_FILE" "$CAAS_POS_SAMPLE_FILE" "$CAAS_POS_QUANTILES_FILE"; do
+    CAAS_GENE_CYCLE_SCORES_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/gene_cycle_scores.tsv"
+    for _f in "$CAAS_PERMS_FILE" "$CAAS_POS_CYCLE_CAAS_FILE" "$CAAS_POS_SAMPLE_FILE" "$CAAS_POS_QUANTILES_FILE" "$CAAS_GENE_CYCLE_SCORES_FILE"; do
         [ -f "$_f" ] || echo "[WARN] expected permulation output missing, p.perm will be empty: $_f" >&2
     done
     # When set, SCORING REBUILDS the null from this instead of importing caas_perms.rds
@@ -183,6 +184,7 @@ if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     CAAS_POS_CYCLE_CAAS_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_cycle_caas.tsv.gz"
     CAAS_POS_SAMPLE_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
     CAAS_POS_QUANTILES_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
+    CAAS_GENE_CYCLE_SCORES_FILE="${PRECOMP_OUTDIR}/caas_permulation/gene_cycle_scores.tsv"
     # Triggers CAAS_CORE_MERGE in SCORING -- see the reuse_exploratory branch for why.
     CAAS_POS_DETAIL_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_detail"
     [ -d "$CAAS_POS_DETAIL_FILE" ] || CAAS_POS_DETAIL_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_detail.tsv.gz"  # legacy single-file layout
@@ -449,6 +451,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
      sbatch_array.sh.j2: the two MUST stay coupled (a big harvest target with a small draw budget just triggers
      permulations.R's target-aware escalation and defeats the smoke test). #}
   "caas_permulation_enrichment": {{ run_defaults.caas_permulation_enrichment }},
+  "caas_perms_postproc": {{ run_defaults.caas_perms_postproc }},
   "caas_full_perms": "$CAAS_FULL_PERMS",
   "pss_top_pct": "${PSS_TOP_PCT:-0.01}",
   "max_contrasts": "${MAX_CONTRASTS:-0}",
@@ -556,6 +559,9 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring_gene_top_pct": "${SCORING_GENE_TOP_PCT:-0.10}",
   "scoring_p_emp_thr": "${SCORING_P_EMP_THR:-0.05}",
   "caas_evidence_top_n": "${CAAS_EVIDENCE_TOP_N:-0}",
+  "scoring_gene_perm_pooled": {{ run_defaults.scoring_gene_perm_pooled }},
+  "scoring_hypotheses_pairs": "${SCORING_HYPOTHESES_PAIRS:-}",
+  "ct_disambig_hypotheses_pairs": "${CT_DISAMBIG_HYPOTHESES_PAIRS:-}",
   "scoring_postproc_input": "${SCORING_POSTPROC_INPUT:-}",
   "scoring_accum_dir": "${SCORING_ACCUM_DIR:-}",
   "scoring_vep_primateai": "${SCORING_VEP_PRIMATEAI:-}",
@@ -571,6 +577,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "caas_pos_sample_file": "${CAAS_POS_SAMPLE_FILE:-}",
   "caas_pos_quantiles_file": "${CAAS_POS_QUANTILES_FILE:-}",
   "caas_pos_detail_file": "${CAAS_POS_DETAIL_FILE:-}",
+  "caas_gene_cycle_scores_file": "${CAAS_GENE_CYCLE_SCORES_FILE:-}",
 
   "vep": $_RUN_VEP,
   "caas_map_dir": "${MAP_DIR:-}",
@@ -588,6 +595,10 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "fcs_min_genes": "${FCS_MIN_GENES:-5}",
   "fcs_max_genes": "${FCS_MAX_GENES:-500}",
   "fcs_fdr": "${FCS_FDR:-0.15}",
+{% if modules.enrichment.fcs_fdr_wilcoxon %}  "fcs_fdr_wilcoxon": "{{ modules.enrichment.fcs_fdr_wilcoxon }}",
+{% endif %}{% if modules.enrichment.fcs_fdr_lachenbruch %}  "fcs_fdr_lachenbruch": "{{ modules.enrichment.fcs_fdr_lachenbruch }}",
+{% endif %}  "fcs_fdr_permsum": "${FCS_FDR_PERMSUM:-0.05}",
+  "pfam_cache_dir": "${PFAM_CACHE_DIR:-}",
   "fcs_pperm_thr": "${FCS_PPERM_THR:-0.025}",
   "fcs_top_n": "${FCS_TOP_N:-20}",
   "fcs_batch_size": "${FCS_BATCH_SIZE:-4}",

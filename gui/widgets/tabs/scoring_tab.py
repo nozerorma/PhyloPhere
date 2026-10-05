@@ -41,6 +41,12 @@ SPEC = ModuleTabSpec(
             label="Ensembl BioMart dataset (optional)",
             importance="optional",
         ),
+        FieldSpec(
+            name="scoring_hypotheses_pairs",
+            label="Contrast hypotheses pairs file for scoring (optional)",
+            kind="path_file",
+            importance="optional",
+        ),
         Section("Evidence of the best positions"),
         FieldSpec(name="caas_evidence_top_n", label="Evidence of the N best positions (0 = off)", importance="optional"),
     ),
@@ -52,6 +58,7 @@ SPEC = ModuleTabSpec(
             label="Position-level permulation p.adj_bh / p.adj_sam threshold",
             importance="default",
         ),
+        FieldSpec(name="scoring_gene_perm_pooled", label="Pooled-null gene permulation p (n-stratified, opt-in)", kind="bool", importance="optional"),
     ),
 )
 

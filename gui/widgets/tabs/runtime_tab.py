@@ -96,10 +96,6 @@ class RuntimeTab(QWidget):
         self.runtime_type_label = QLabel("Runtime")
         form.addRow(self.runtime_type_label, self.runtime_type)
 
-        self.batched = QCheckBox("Batched SLURM array job (generates the SBATCH wrapper)")
-        self.batched.setChecked(self._config.batched)
-        self.batched.toggled.connect(self._on_batched_changed)
-        form.addRow(self.batched)
 
         self.script_base_name = QLineEdit(self._config.script_base_name)
         self.script_base_name.setPlaceholderText("phenotypes (default)")
@@ -304,10 +300,6 @@ class RuntimeTab(QWidget):
         self._config.runtime_type = value
         self.changed.emit()
 
-    def _on_batched_changed(self, value: bool) -> None:
-        self._config.batched = value
-        self.changed.emit()
-
     def _on_script_base_name_changed(self, value: str) -> None:
         self._config.script_base_name = value
         self.changed.emit()
@@ -465,8 +457,6 @@ class RuntimeTab(QWidget):
             self.resume.setText(tr("Resume (-resume)", lang))
         if hasattr(self, "toy_mode"):
             self.toy_mode.setText(tr("Toy mode (--toy_mode)", lang))
-        if hasattr(self, "batched"):
-            self.batched.setText(tr("Batched SLURM array job (generates the SBATCH wrapper)", lang))
         if hasattr(self, "script_base_name_label"):
             self.script_base_name_label.setText(tr("Generated script name", lang))
         if hasattr(self, "alignment_label"):

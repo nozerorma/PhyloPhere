@@ -5,7 +5,7 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Covers -resume/toy-mode toggles, local-vs-slurm execution, the batched-SBATCH-array
+Covers -resume/toy-mode toggles, local-vs-slurm execution, the SBATCH-array
 phenotype catalogue (mirrors SBATCH_run_phenotypes_primates.sh's CASE block), and
 the dataset paths shared across every phenotype in a batch ("COMMON THINGS" in the
 reference script's own comment).
@@ -52,7 +52,6 @@ class RuntimeConfig:
 
     # --- Execution target ---
     runtime_type: str = "slurm"  # "local" | "slurm"
-    batched: bool = True  # slurm-only: generate the SBATCH array-job wrapper
 
     # Overrides the "phenotypes"/"phenotype" token in generated script filenames
     # (run_phenotypes_local.sh, SBATCH_run_phenotypes.sh, run_phenotype_single.sh,
@@ -66,7 +65,7 @@ class RuntimeConfig:
     # --- Seqera Cloud / Tower ---
     use_tower: bool = True  # -with-tower
 
-    # --- SBATCH array-job wrapper (slurm + batched only) ---
+    # --- SBATCH array-job wrapper (slurm only) ---
     sbatch_job_name: str = "phylophere"
     sbatch_partition: str = ""  # SLURM partition; "" = the cluster default
     sbatch_time: str = "144:00:00"
