@@ -24,6 +24,7 @@
  */
 
 include { EXTRACT_EXTREME_SPECIES } from './selection_utils.nf'
+include { listAlignmentFiles; sampleAlignmentFiles } from '../CT/ct_alignment_files'
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -35,6 +36,16 @@ def createBatchManifestText(List<String> rows) {
     return rows
         .collect { row -> row.replaceFirst(/^\s+/, '') }
         .join(System.lineSeparator()) + System.lineSeparator()
+}
+
+/**
+ * Gene ids of the toy sample: n alignments chosen by the seeded shuffle of the name-sorted list that CT draws from
+ * (sampleAlignmentFiles), so the same seed picks the same genes whatever order the filesystem lists them in.
+ * Returned in the order drawn.
+ */
+def fade_toy_genes(String ali_dir, n, seed) {
+    def files = ali_tuples_from_dir(ali_dir, null).collect { t -> t[1] }
+    return sampleAlignmentFiles(files, n, seed).collect { f -> f.name.tokenize('.')[0] }
 }
 
 /**
@@ -50,15 +61,17 @@ def ali_tuples_from_dir(String ali_dir, Set wanted) {
         log.warn "SELECTION_PREP: alignment directory not found: ${ali_dir}"
         return []
     }
-    def all_files = ali_path.listFiles()?.findAll { f ->
+    // The shared listing is in file-name order and leaves out tables and logs; the extensions below are the ones
+    // this module converts (none of them is among those the shared listing leaves out, so they pick the same files).
+    def all_files = listAlignmentFiles(ali_dir).findAll { f ->
         def name = f.name.toLowerCase()
-        f.isFile() && (name.endsWith('.phy') ||
-                       name.endsWith('.phylip') ||
-                       name.endsWith('.aln') ||
-                       name.endsWith('.fa') ||
-                       name.endsWith('.fasta') ||
-                       !f.name.contains('.'))
-    } ?: []
+        name.endsWith('.phy') ||
+        name.endsWith('.phylip') ||
+        name.endsWith('.aln') ||
+        name.endsWith('.fa') ||
+        name.endsWith('.fasta') ||
+        !f.name.contains('.')
+    }
 
     def tuples = all_files.collect { f ->
         def gid = f.name.tokenize('.')[0]
@@ -227,10 +240,8 @@ workflow SELECTION_PREP {
                     log.info "[toy_mode] SELECTION_PREP: reusing ${toy_genes.size()} genes from CT discovery"
                 } else {
                     def n = (params.toy_n ?: 50) as int
-                    def all_tuples = ali_tuples_from_dir(ali_dir, null)
-                    // Seeded shuffle ensures reproducibility and cache preservation across runs.
-                    Collections.shuffle(all_tuples, new Random((params.seed ?: 1998) as long))
-                    toy_genes = all_tuples.take(n).collect { it[0] }.toSet()
+                    // Seeded shuffle of the name-sorted list: reproducible, and the same genes CT draws from this directory.
+                    toy_genes = fade_toy_genes(ali_dir, n, (params.seed ?: 1998) as long).toSet()
                     log.info "[toy_mode] SELECTION_PREP: using ${toy_genes.size()} randomly sampled genes (seed=${params.seed ?: 1998})"
                 }
                 ali_tuples_from_dir(ali_dir, toy_genes)
