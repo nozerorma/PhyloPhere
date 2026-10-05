@@ -90,6 +90,8 @@ def test_a_project_saved_before_the_field_loads_with_the_default():
 def test_the_scoring_tab_shows_the_field_and_its_label_is_translated():
     src = (ROOT / "gui/widgets/tabs/scoring_tab.py").read_text()
     assert re.search(r'FieldSpec\(name="caas_evidence_top_n", label="Evidence of the N best positions', src)
+    # an output-producing switch is an essential field: the advanced disclosure is collapsed by default
+    assert src.index('name="caas_evidence_top_n"') < src.index("advanced_fields=(")
     label = next(k for k in TRANSLATIONS if k.startswith(LABEL))
     assert set(TRANSLATIONS[label]) >= {"en", "es", "ca", "fr", "it", "de"}
 
