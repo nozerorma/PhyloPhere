@@ -60,4 +60,6 @@ workflow CT_OBSERVED {
         master_csv = observed.master_csv
         meta_caas = observed.meta_caas
         global_meta_caas = observed.global_meta_caas
+        design = trait_file   // the design and tree this scoring resolved, for the steps that explain its results
+        tree = tree_file
 }

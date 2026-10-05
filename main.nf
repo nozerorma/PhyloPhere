@@ -63,6 +63,7 @@ include {VEP}                       from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
 include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_META_CAAS/ctpp_meta_caas.nf'
 include {CAAS_CORE; CAAS_CORE_OBSERVED; CAAS_CORE_MERGE; CAAS_PERMS_PREP} from './subworkflows/CT/caas_permulation.nf'
+include {CAAS_EVIDENCE}   from './subworkflows/CT_DISAMBIGUATION/ct_evidence.nf'
 include {ENRICHMENT}      from './workflows/enrichment.nf'
 
 // Coerce a param that may arrive as Boolean, String ("false", "0", ...) or null into a Boolean.
@@ -265,6 +266,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         def core = null               // the permulation core: shard directories and b_0 slices of the batches
         def core_observed = null      // the observed contract files, written from the b_0 slices
         def core_replays = false      // true when the core replays the alignments (it then has a b_0 slice)
+        def evidence_inputs = null    // [discovery, design, tree] of the observed labeling, for CAAS_EVIDENCE
         def caas_gene_lengths_ch = Channel.value(
             params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE'))
         if (run_caas_permulation) {
@@ -408,6 +410,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 // is scored by CT_OBSERVED instead, so the two never write the same files.
                 if (core_replays && !params.discovery_from && (ran_discovery || run_ct_disambiguation)) {
                     core_observed = CAAS_CORE_OBSERVED(core.b0_observed.collect(), perm_cfg_ch.collect().map { items -> items[0] })
+                    evidence_inputs = [discovery: core_observed.discovery, design: perm_cfg_ch, tree: perm_tree_ch]
                 }
                 ran_any = true
             }
@@ -461,6 +464,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 def observed_run = CT_OBSERVED(Channel.value(discovery_file_obj), trait_for_observed, tree_for_observed, hyp_pairs_for_observed)
                 observed_results = [master_csv: observed_run.master_csv, results_dir: observed_run.results_dir]
                 observed_meta = observed_run
+                evidence_inputs = [discovery: Channel.value(discovery_file_obj), design: observed_run.design, tree: observed_run.tree]
                 ran_any = true
             }
         }
@@ -701,6 +705,10 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // CAAS_PERMS_PREP and CAAS_CORE.
 
 
+        def evidence_top_n = (params.caas_evidence_top_n ?: 0) as int
+        if (evidence_top_n > 0 && !params.scoring) {
+            error "caas_evidence_top_n > 0 explains the best positions of position_scores.tsv: it needs --scoring."
+        }
         if (params.scoring) {
             if (!params.ct_postproc && !params.scoring_postproc_input) {
                 error "SCORING requires CT post-processing output (--ct_postproc) or --scoring_postproc_input."
@@ -764,6 +772,16 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 scoring_hyp_pairs_ch           // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
             )
             ran_any = true
+
+            // The evidence of the N best positions: what each domain of each hypothesis saw. It re-scores the rows of
+            // those positions from the observed discovery.tab, so it needs the one this run wrote or was given.
+            if (evidence_top_n > 0) {
+                if (!evidence_inputs) {
+                    error "caas_evidence_top_n > 0 needs the observed discovery.tab: run the alignments through the core (ct_tool 'discovery') or give --discovery_from."
+                }
+                CAAS_EVIDENCE(evidence_inputs.discovery.first(), SCORING.out.position_scores.first(),
+                              evidence_inputs.design.first(), evidence_inputs.tree.first())
+            }
 
             // CAAS_SIGNIFICANCE_REPORT: a DISTINCT, LATER stage than
             // CAAS_META_CAAS_REPORT (run above inside the run_meta_caas
