@@ -5,8 +5,11 @@ One gene's ASR is loaded once (`load_gene_context`), every labeling is scored ag
 domain-pooled record per position and scheme (`pool_labelings`). Reading discovery files, splitting a
 gene into chunks and writing tables stay with the callers.
 """
+import contextlib
+import fcntl
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -37,6 +40,33 @@ def _cached_asr(gene: str, config: SingleGeneASRConfig, alignment_data) -> Optio
     return found if getattr(found, "posteriors_node", None) else None
 
 
+def _read_cached(gene: str, config: SingleGeneASRConfig, alignment_data) -> Tuple[Optional[Any], str]:
+    """(result, state) of a gene's cache entry: 'hit', 'miss' (no entry or no posteriors) or 'corrupt' (an entry that does not parse,
+    as one left half-written by a crashed run or still being written by another process)."""
+    try:
+        found = _cached_asr(gene, config, alignment_data)
+    except Exception as exc:  # noqa: BLE001 - any parse failure of a partial entry
+        logger.debug(f"[asr] {gene}: the cache entry does not parse yet ({exc})")
+        return None, "corrupt"
+    return found, ("hit" if found is not None else "miss")
+
+
+@contextlib.contextmanager
+def _gene_cache_lock(cache_dir: str, gene: str):
+    """Exclusive lock, across processes, on one gene's cache entry.
+
+    The workers of a pool replay chunks of the same gene and every chunk loads its context. On a cold cache the entry is written by
+    PAML while the others read it: whoever holds this lock computes, the rest wait and then find the entry complete."""
+    directory = Path(cache_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    with open(directory / f".{re.sub(r'[^A-Za-z0-9_.-]', '_', gene)}.lock", "a") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def load_gene_context(
     gene: str,
     alignment_dir: str,
@@ -52,7 +82,8 @@ def load_gene_context(
 
     The ASR comes from `asr_cache_dir` when the gene is there; otherwise PAML runs (inside `codeml_slot`, with
     `threads` threads) and writes it to the cache. A gene is not always cached: one that only a permuted labeling
-    hits is never in a cache made from the observed run, and leaving it out would bias the null.
+    hits is never in a cache made from the observed run, and leaving it out would bias the null. Only one process
+    computes a given gene (`_gene_cache_lock`); the others wait for it, and an entry that does not parse is computed again.
     The tree is rebuilt from the PAML tree so that node ids align with the posteriors.
     Returns a context dict, or None if the alignment or the ASR is unavailable.
     """
@@ -80,14 +111,18 @@ def load_gene_context(
         threads=threads,
     )
     try:
-        node_posteriors = _cached_asr(gene, asr_config, alignment_data)
+        node_posteriors, state = _read_cached(gene, asr_config, alignment_data)
         if node_posteriors is None:
-            logger.info(f"[asr] {gene}: not in {asr_cache_dir}, computing it")
-            with codeml_slot():
-                node_posteriors = run_asr_pipeline(
-                    gene, asr_config, skip_if_exists=True,
-                    alignment_data=alignment_data, tree_data=tree_data,
-                )
+            with _gene_cache_lock(asr_cache_dir, gene):
+                # another process may have finished the entry while this one waited for the lock
+                node_posteriors, state = _read_cached(gene, asr_config, alignment_data)
+                if node_posteriors is None:
+                    logger.info(f"[asr] {gene}: not in {asr_cache_dir}, computing it")
+                    with codeml_slot():
+                        node_posteriors = run_asr_pipeline(
+                            gene, asr_config, skip_if_exists=(state != "corrupt"),
+                            alignment_data=alignment_data, tree_data=tree_data,
+                        )
     except Exception as exc:  # noqa: BLE001 — codeml / parse failure for this one gene
         logger.warning(f"[asr] ASR unavailable for {gene} ({exc}); the gene is left out")
         return None

@@ -346,7 +346,7 @@ def _perms_worker_replay(
     perm_discovery_file: str,
     ensembl_genes: Optional[Set[str]] = None,
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None,
-) -> Tuple[str, List[Tuple[str, List[Any]]]]:
+) -> Tuple[str, Optional[List[Tuple[str, List[Any]]]]]:
     """Phase A of a chunked gene replay (see _perms_worker_finalize for phase B).
 
     Loads the gene's cached ASR context and replays ONLY the given cycle_tags --
@@ -361,7 +361,8 @@ def _perms_worker_replay(
     cycle's variants. Returns the gene name and this chunk's pooled
     (cycle_or_base, records) pairs; _perms_worker_finalize does the cross-chunk
     whole-gene reduction (n_detected, clustering, detail rows) once every chunk
-    for a gene has arrived.
+    for a gene has arrived. A chunk whose context could not be loaded, or whose replay raised, returns
+    (gene, None); a chunk with nothing to report returns (gene, []).
     """
     try:
         _t_ctx0 = time.perf_counter()
@@ -385,8 +386,8 @@ def _perms_worker_replay(
         if ctx is None:
             # load_gene_context computes ASR on a cache miss, so ctx is None only
             # when the alignment could not be found or codeml/parse failed for
-            # this one gene (already warned inside). Skip it.
-            return (gene, [])
+            # this one gene (already warned inside).
+            return (gene, None)
 
         # Load the gene's perm-replay discovery output in memory once. Two layouts,
         # one shared parser (_parse_discovery_entries):
@@ -410,7 +411,7 @@ def _perms_worker_replay(
         return (gene, pool_labelings(all_cycle_results, fop_pairs))
     except Exception as e:
         logger.error(f"[perms] replay worker failed for {gene}: {e}", exc_info=True)
-        return (gene, [])
+        return (gene, None)
 
 
 def _merge_gene_chunks(chunk_results: List[Tuple[str, List[Any]]]) -> List[Tuple[str, List[Any]]]:
@@ -443,6 +444,15 @@ def _gene_train_columns(
     if cols is None:
         genes_without_map.append(gene)
     return cols
+
+
+def _require_consistent_chunks(gene: str, failed: int, total: int) -> None:
+    """A gene is replayed in `total` chunks. Every chunk failing leaves the gene out of the null, as it is left out of the observed;
+    some failing leaves a null that holds only part of the cycles while N still counts all of them, so the run stops."""
+    if 0 < failed < total:
+        raise RuntimeError(
+            f"[perms] {gene}: {failed} of {total} chunks could not be replayed (ASR or replay failure); the null would hold only part "
+            "of its cycles. See the errors above.")
 
 
 def _perms_worker_replay_wrapper(args):
@@ -1136,6 +1146,7 @@ def process_all_genes_perms(
     # chunks can be in flight at once) are ever partially resident here.
     pending_pooled: Dict[str, List[Tuple[str, List[Any]]]] = {}
     received: Dict[str, int] = {}
+    failed_chunks: Dict[str, int] = {}
     try:
         # chunksize=1: each item here is one gene-cycle-chunk's replay (real
         # seconds of work), not the many-cheap-tasks shape chunksize>1 is for.
@@ -1157,10 +1168,14 @@ def process_all_genes_perms(
         results_iterator = pool.imap_unordered(_perms_worker_replay_wrapper, args_generator, chunksize=1)
 
         for _gene, chunk_pooled in results_iterator:
+            if chunk_pooled is None:
+                failed_chunks[_gene] = failed_chunks.get(_gene, 0) + 1
+                chunk_pooled = []
             pending_pooled.setdefault(_gene, []).extend(chunk_pooled)
             received[_gene] = received.get(_gene, 0) + 1
             if received[_gene] < chunks_per_gene.get(_gene, 1):
                 continue  # more chunks still in flight for this gene
+            _require_consistent_chunks(_gene, failed_chunks.pop(_gene, 0), chunks_per_gene.get(_gene, 1))
 
             gene_pooled = _merge_gene_chunks(pending_pooled.pop(_gene))
             received.pop(_gene, None)
