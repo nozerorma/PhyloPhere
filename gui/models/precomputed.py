@@ -154,7 +154,7 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
     if config.use_postproc:
         gene_list = os.path.join(outdir, "postproc", "gene_filtering", "filtered_discovery.tsv")
         background = os.path.join(outdir, "postproc", "cleaned_backgrounds", "cleaned_background_main.txt")
-        entries.append(("accumulation_caas_input / vep_caas_input / scoring_postproc_input", gene_list, "file"))
+        entries.append(("accumulation_caas_input / scoring_postproc_input", gene_list, "file"))
         entries.append(("accumulation_background_input / scoring_background_input", background, "file"))
 
     if config.use_accumulation:

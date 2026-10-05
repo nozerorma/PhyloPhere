@@ -21,19 +21,9 @@ SPEC = ModuleTabSpec(
         "fallback) live on the Precomputed Run tab."
     ),
     essential_fields=(
-        Section("Ranking cutoffs and composite weights"),
+        Section("Ranking cutoffs"),
         FieldSpec(name="scoring_gene_top_pct", label="Top gene percentile", importance="default"),
         FieldSpec(name="scoring_position_top_pct", label="Top position percentile", importance="default"),
-        FieldSpec(name="scoring_weight_caas", label="CAAS score weight", importance="default"),
-        FieldSpec(name="scoring_weight_rer", label="RERconverge weight", importance="default"),
-        FieldSpec(name="scoring_weight_fade", label="FADE weight", importance="default"),
-        FieldSpec(
-            name="scoring_rer_direction",
-            label="RER direction filter",
-            kind="choice",
-            choices=("both", "accelerated", "decelerated"),
-            importance="default",
-        ),
         FieldSpec(
             name="gene_ensembl_file",
             label="Gene-Ensembl mapping file",
@@ -55,20 +45,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="caas_evidence_top_n", label="Evidence of the N best positions (0 = off)", importance="optional"),
     ),
     advanced_fields=(
-        Section("Downstream characterization and active modules"),
-        FieldSpec(name="scoring_ami", label="Enable AMI active module report", kind="bool", importance="optional"),
-        FieldSpec(name="scoring_string", label="Enable STRING DB integration", kind="bool", importance="optional"),
-        FieldSpec(name="scoring_compare_fdr", label="Cross-tool comparison FDR cutoff", importance="default"),
-        FieldSpec(name="scoring_compare_top_n", label="Cross-tool comparison top-N genes", importance="optional"),
-        FieldSpec(name="scoring_stress", label="Run stress-enrichment analysis", kind="bool", importance="optional"),
-        FieldSpec(name="scoring_stress_top_n", label="Stress-enrichment top-N", importance="optional"),
-        FieldSpec(
-            name="scoring_stress_rank_metric",
-            label="Stress-enrichment rank metric",
-            kind="choice",
-            choices=("spearman", "pearson"),
-            importance="optional",
-        ),
+        Section("Genomic windows and position-level significance"),
         FieldSpec(name="scoring_window_size_bp", label="Genomic window size (bp)", importance="optional"),
         FieldSpec(
             name="scoring_p_emp_thr",

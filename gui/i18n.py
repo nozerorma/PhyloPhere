@@ -944,22 +944,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Soglia alfa (significatività)',
         'de': 'Alpha-Schwelle (Signifikanz)',
     },
-    'Export groups (DEBUG)': {
-        'en': 'Export groups (DEBUG)',
-        'es': 'Exportar grupos (DEPURACIÓN)',
-        'ca': 'Exportar grups (DEPURACIÓ)',
-        'fr': 'Exporter les groupes (DÉBOGAGE)',
-        'it': 'Esporta gruppi (DEBUG)',
-        'de': 'Gruppen exportieren (DEBUG)',
-    },
-    'Export permuted discovery (DEBUG)': {
-        'en': 'Export permuted discovery (DEBUG)',
-        'es': 'Exportar descubrimiento permutado (DEPURACIÓN)',
-        'ca': 'Exportar descobriment permutat (DEPURACIÓ)',
-        'fr': 'Exporter la découverte permutée (DÉBOGAGE)',
-        'it': 'Esporta scoperta permutata (DEBUG)',
-        'de': 'Permutierte Discovery exportieren (DEBUG)',
-    },
 
     # Disambiguation Tab (extra)
     'Disambiguation': {
@@ -1602,14 +1586,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Arricchimento necessita delle liste geniche/sfondo di Punteggio quando questo è disattivato. Tutti i fallback di input autonomo di Punteggio (incluso il fallback a livello di sito di FADE) si trovano nella scheda Esecuzione Precalcolata.',
         'de': 'Anreicherung benötigt die Genlisten/den Hintergrund von Bewertung, wenn dies deaktiviert ist. Alle eigenständigen Eingabe-Fallbacks von Bewertung (einschließlich des FADE-Positionsebene-Fallbacks) befinden sich im Tab „Vorberechneter Lauf“.',
     },
-    'Run stress-enrichment analysis': {
-        'en': 'Run stress-enrichment analysis',
-        'es': 'Ejecutar análisis de enriquecimiento de estrés',
-        'ca': "Executar anàlisi d'enriquiment d'estrès",
-        'fr': "Exécuter l'analyse d'enrichissement de stress",
-        'it': 'Esegui analisi di arricchimento da stress',
-        'de': 'Stress-Anreicherungsanalyse ausführen',
-    },
     'Evidence of the N best positions (0 = off)': {
         'en': 'Evidence of the N best positions (0 = off)',
         'es': 'Evidencia de las N mejores posiciones (0 = desactivado)',
@@ -1633,22 +1609,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'fr': 'Fichier de correspondance Gene-Ensembl',
         'it': 'File di mappatura Gene-Ensembl',
         'de': 'Gen-Ensembl-Zuordnungsdatei',
-    },
-    'Stress-enrichment top-N': {
-        'en': 'Stress-enrichment top-N',
-        'es': 'Top-N de enriquecimiento de estrés',
-        'ca': "Top-N d'enriquiment d'estrès",
-        'fr': "Top-N d'enrichissement de stress",
-        'it': 'Top-N di arricchimento da stress',
-        'de': 'Top-N der Stress-Anreicherung',
-    },
-    'Stress-enrichment rank metric': {
-        'en': 'Stress-enrichment rank metric',
-        'es': 'Métrica de rango de enriquecimiento de estrés',
-        'ca': "Mètrica de rang d'enriquiment d'estrès",
-        'fr': "Métrique de rang d'enrichissement de stress",
-        'it': "Metrica di rank per l'arricchimento da stress",
-        'de': 'Rangmetrik der Stress-Anreicherung',
     },
     'Top position percentile': {
         'en': 'Top position percentile',
@@ -1683,14 +1643,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'fr': 'Annote les hits CAAS avec les scores de pathogénicité PrimateAI-3D et le chevauchement de mutations cancéreuses COSMIC.',
         'it': 'Annota gli hit CAAS con punteggi di patogenicità PrimateAI-3D e sovrapposizione con mutazioni tumorali COSMIC.',
         'de': 'Annotiert CAAS-Treffer mit PrimateAI-3D-Pathogenitäts-Scores und COSMIC-Krebsmutations-Überlappung.',
-    },
-    'Scoring needs a vep_caas_input fallback (Precomputed Run tab) when this is off.': {
-        'en': 'Scoring needs a vep_caas_input fallback (Precomputed Run tab) when this is off.',
-        'es': 'Puntuación necesita un valor de reserva vep_caas_input (pestaña Ejecución Precomputada) cuando esto está desactivado.',
-        'ca': 'Puntuació necessita un valor de reserva vep_caas_input (pestanya Execució Precomputada) quan això està desactivat.',
-        'fr': "Score a besoin d'un repli vep_caas_input (onglet Exécution Précalculée) lorsque ceci est désactivé.",
-        'it': 'Punteggio necessita di un fallback vep_caas_input (scheda Esecuzione Precalcolata) quando questo è disattivato.',
-        'de': 'Bewertung benötigt einen vep_caas_input-Fallback (Tab „Vorberechneter Lauf“), wenn dies deaktiviert ist.',
     },
     'PrimateAI-3D database': {
         'en': 'PrimateAI-3D database',

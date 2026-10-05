@@ -264,7 +264,6 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("Enrichment: STRING database directory", m.enrichment.string_db_dir, "dir"),
         ("Enrichment: eggNOG members file", m.enrichment.egg_members_file, "file"),
         ("Enrichment: eggNOG annotations file", m.enrichment.egg_annotations_file, "file"),
-        ("Enrichment: COSMIC database", m.enrichment.cosmic_db, "file"),
         ("Enrichment: domain variability file", m.enrichment.domain_variability_file, "file"),
         ("Enrichment: UCR positions file", m.enrichment.ucr_positions_file, "file"),
         ("Enrichment: FUBAR sites file", m.enrichment.fubar_sites_file, "file"),

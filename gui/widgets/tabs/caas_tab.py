@@ -111,8 +111,6 @@ SPEC = ModuleTabSpec(
         ),
         Section("Publishing norms (debug)"),
         FieldSpec(name="publish_intermediates", label="Publish intermediate files", kind="bool", importance="optional"),
-        FieldSpec(name="export_groups", label="Export groups (DEBUG)", kind="bool", importance="optional"),
-        FieldSpec(name="export_perm_discovery", label="Export permuted discovery (DEBUG)", kind="bool", importance="optional"),
         Section("Contrast-selection tuning (conf/common.config)"),
         FieldSpec(name="pss_top_pct", label="PSS top percentile candidate gate", importance="default"),
         FieldSpec(name="max_contrasts", label="Max contrasts (0 = dynamic)", importance="default"),

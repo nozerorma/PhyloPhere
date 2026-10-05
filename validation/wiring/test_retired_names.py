@@ -94,3 +94,23 @@ def test_no_tracked_file_names_a_legacy_input_of_the_scorer_or_an_unreachable_mo
             continue
         hits += [f"{name}:{n}: {line.strip()[:100]}" for n, line in enumerate(text.splitlines(), 1) if RETIRED_SCORER.search(line)]
     assert not hits, "\n".join(hits)
+
+
+# Parameters no pipeline code ever read (found by the parameter audit) and the GUI fields that fed them.
+RETIRED_PARAMS = re.compile(r"scoring_weight_(?:caas|rer|fade)|scoring_rer_direction|scoring_stress|fade_postproc_(?:top|bottom)"
+                            r"|signification_from|config_profile_(?:contact|description|url)|vep_caas_input")
+ALLOWED_PARAMS = ("archive/", "validation/", "style/", "gui/models/serialization.py")
+
+
+def test_no_tracked_file_names_a_parameter_nothing_reads():
+    files = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split("\0")
+    hits = []
+    for name in filter(None, files):
+        if name.startswith(ALLOWED_PARAMS) or name.startswith("gui/templates/") and False:
+            continue
+        try:
+            text = (ROOT / name).read_text()
+        except (UnicodeDecodeError, FileNotFoundError, IsADirectoryError):
+            continue
+        hits += [f"{name}:{n}: {line.strip()[:100]}" for n, line in enumerate(text.splitlines(), 1) if RETIRED_PARAMS.search(line)]
+    assert not hits, "\n".join(hits)

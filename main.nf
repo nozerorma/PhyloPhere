@@ -605,7 +605,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 : Channel.empty()
 
             // gene_set mode sources its directional gene lists from the
-            // --fade_postproc_top / --fade_postproc_bottom params (resolved inside
+            // the fade precomputed-summary params (resolved inside
             // SELECTION_PREP); the empty channels here keep the take: signature.
             def sel_pp_top_ch    = Channel.empty()
             def sel_pp_bottom_ch = Channel.empty()

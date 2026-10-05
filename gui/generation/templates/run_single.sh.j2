@@ -204,7 +204,6 @@ if [ "${PRECOMP_USE_POSTPROC:-false}" = true ]; then
     # gene_filtering/cleaned_backgrounds only exist if the source run had
     # gene_filter_mode != 'none' (the default).
     ACCUMULATION_CAAS_INPUT="${PRECOMP_OUTDIR}/postproc/gene_filtering/filtered_discovery.tsv"
-    VEP_CAAS_INPUT="$ACCUMULATION_CAAS_INPUT"
     SCORING_POSTPROC_INPUT="$ACCUMULATION_CAAS_INPUT"
     ACCUMULATION_BACKGROUND_INPUT="${PRECOMP_OUTDIR}/postproc/cleaned_backgrounds/cleaned_background_main.txt"
     SCORING_BACKGROUND_INPUT="$ACCUMULATION_BACKGROUND_INPUT"
@@ -283,7 +282,6 @@ _RUN_RER="${RUN_RER:-{{ run_defaults.rer }}}"
 _RUN_FADE="${RUN_FADE:-{{ run_defaults.fade }}}"
 _RUN_VEP="${RUN_VEP:-{{ run_defaults.vep }}}"
 _RUN_SCORING="${RUN_SCORING:-{{ run_defaults.scoring }}}"
-_RUN_SCORING_STRESS="${RUN_SCORING_STRESS:-{{ run_defaults.scoring_stress }}}"
 _RUN_ENRICHMENT="${RUN_ENRICHMENT:-{{ run_defaults.enrichment }}}"
 _RUN_POSENRICH="${RUN_POSENRICH:-{{ run_defaults.posenrich }}}"
 _ASR_ROBUSTNESS="${ASR_ROBUSTNESS:-{{ run_defaults.asr_robustness }}}"
@@ -361,8 +359,8 @@ fi
 #
 # Boolean values are unquoted true/false (valid JSON boolean literals).
 # String values use shell $VAR expansion (heredoc is unquoted for this).
-# For params whose real conf/*.config default IS "" by design (e.g. fade_postproc_top,
-# trait_out) the ${VAR:-} fallback below is correct and intentional. But for any param
+# For params whose real conf/*.config default IS "" by design (e.g. gene_ensembl_file,
+# secondary_trait) the ${VAR:-} fallback below is correct and intentional. But for any param
 # whose config default is a real, non-empty value (e.g. lg_dat_path, gene_trees), the
 # same ${VAR:-} pattern silently breaks it the moment the corresponding GUI field is
 # left blank (the common/optional case) — hit for real with lg_dat_path (crashed
@@ -472,8 +470,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "chunk_size": "${CHUNK_SIZE:-500}",
   "multi_hypothesis": {{ run_defaults.multi_hypothesis }},
   "max_fop": "${MAX_FOP:-100}",
-  "export_groups": {{ run_defaults.export_groups }},
-  "export_perm_discovery": {{ run_defaults.export_perm_discovery }},
   "discovery_from": "${DISCOVERY_FROM:-}",
   "resample_from": "${RESAMPLE_FROM:-}",
 
@@ -555,10 +551,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "fade_json_dir_bottom": "${FADE_JSON_DIR_BOTTOM:-}",
 
   "scoring": $_RUN_SCORING,
-  "scoring_stress": $_RUN_SCORING_STRESS,
   "scoring_window_size_bp": "${SCORING_WINDOW_SIZE_BP:-1000000}",
-  "scoring_stress_top_n": "${SCORING_STRESS_TOP_N:-25}",
-  "scoring_stress_rank_metric": "${SCORING_STRESS_RANK_METRIC:-spearman}",
   "scoring_position_top_pct": "${SCORING_POSITION_TOP_PCT:-0.10}",
   "scoring_gene_top_pct": "${SCORING_GENE_TOP_PCT:-0.10}",
   "scoring_p_emp_thr": "${SCORING_P_EMP_THR:-0.05}",
@@ -583,7 +576,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "caas_map_dir": "${MAP_DIR:-}",
   "vep_primateai_db": "${VEP_PRIMATEAI_DB:-}",
   "cosmic_db": "${COSMIC_DB:-}",
-  "vep_caas_input": "${VEP_CAAS_INPUT:-}",
   "vep_ensembl": ${VEP_ENSEMBL:-false},
   "vep_cache_dir": "${VEP_CACHE_DIR:-}",
   "vep_species": "${VEP_SPECIES:-homo_sapiens}",

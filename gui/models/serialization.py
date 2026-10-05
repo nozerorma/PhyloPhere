@@ -31,7 +31,13 @@ _RETIRED_CAAS_FIELDS = ("ct_perm_replay_batch_size", "ct_disambig_perms_batch_si
 
 # Parameters of processes that no longer exist (the per-gene discovery task, the observed disambiguation chunking) or that
 # nothing reads (the ASR mode: a gene is read from the ASR cache when it is there and computed when it is not).
-_RETIRED_FIELDS = {"caas": ("ct_discovery_batch_size",), "disambiguation": ("ct_disambig_asr_mode", "ct_disambig_batch_size")}
+_RETIRED_FIELDS = {
+    "caas": ("ct_discovery_batch_size", "export_groups", "export_perm_discovery"),
+    "disambiguation": ("ct_disambig_asr_mode", "ct_disambig_batch_size"),
+    "scoring": ("scoring_weight_caas", "scoring_weight_rer", "scoring_weight_fade", "scoring_rer_direction", "scoring_stress", "scoring_stress_top_n",
+                "scoring_stress_rank_metric", "scoring_ami", "scoring_string", "scoring_compare_fdr", "scoring_compare_top_n"),
+    "enrichment": ("cosmic_db",),
+}
 
 
 def to_dict(project: ProjectConfig) -> dict[str, Any]:

@@ -71,8 +71,6 @@ class CaasConfig(ModuleConfigBase):
     max_fop: str = "100"  # --max_fop (max FOP alternative hypotheses H1..Hn per contrast)
 
     # Debug-only (conf/ct.config warns: don't run these unless needed).
-    export_groups: bool = False  # --export_groups
-    export_perm_discovery: bool = False  # --export_perm_discovery
 
     # NOTE: discovery_from/resample_from/bootstrap_from moved to
     # gui/models/precomputed.py::PrecomputedConfig.
@@ -240,7 +238,6 @@ class VepConfig(ModuleConfigBase):
     vep_species: str = "homo_sapiens"  # --vep_species
     vep_assembly: str = "GRCh38"  # --vep_assembly
 
-    # NOTE: vep_caas_input moved to gui/models/precomputed.py::PrecomputedConfig.
 
 
 # ── Scoring ──────────────────────────────────────────────────────────────────
@@ -250,22 +247,11 @@ class VepConfig(ModuleConfigBase):
 class ScoringConfig(ModuleConfigBase):
     scoring_gene_top_pct: str = "0.10"  # --scoring_gene_top_pct
     scoring_position_top_pct: str = "0.10"  # --scoring_position_top_pct
-    scoring_weight_caas: str = "1.0"  # --scoring_weight_caas
-    scoring_weight_rer: str = "1.0"  # --scoring_weight_rer
-    scoring_weight_fade: str = "1.0"  # --scoring_weight_fade
-    scoring_rer_direction: str = "both"  # --scoring_rer_direction (both|accelerated|decelerated)
     gene_ensembl_file: str = ""  # --gene_ensembl_file
     auto_generate_ensembl: bool = False  # Generate gene_ensembl_file via BioMart if unset
     ensembl_dataset: str = ""  # Ensembl BioMart dataset (e.g. hsapiens_gene_ensembl); blank -> derived from ref_species_name
 
     # Advanced parameters (conf/scoring.config)
-    scoring_ami: bool = True  # --scoring_ami
-    scoring_string: bool = True  # --scoring_string
-    scoring_compare_fdr: str = "0.1"  # --scoring_compare_fdr
-    scoring_compare_top_n: str = "20"  # --scoring_compare_top_n
-    scoring_stress: bool = False  # --scoring_stress (leave-one-axis-out stress test)
-    scoring_stress_top_n: str = "25"  # --scoring_stress_top_n
-    scoring_stress_rank_metric: str = "spearman"  # --scoring_stress_rank_metric (spearman|pearson)
     scoring_window_size_bp: str = "1000000"  # --scoring_window_size_bp
     scoring_p_emp_thr: str = "0.05"  # --scoring_p_emp_thr (position-level CAAS permulation p.adj_bh / p.adj_sam; also gates gene_caas_pperm_adj)
     caas_evidence_top_n: str = "0"  # --caas_evidence_top_n (evidence table of the N best positions after SCORING; 0 = off)
@@ -339,7 +325,6 @@ class EnrichmentConfig(ModuleConfigBase):
     egg_members_file: str = ""  # --egg_members_file
     egg_annotations_file: str = ""  # --egg_annotations_file
 
-    cosmic_db: str = ""  # --cosmic_db (also read by VEP; see VepConfig.cosmic_db)
     fubar_sites_file: str = ""  # --fubar_sites_file
 
     # POSENRICH thresholds (position-wise Path Sum Permulation, not the gene FCS above)

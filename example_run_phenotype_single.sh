@@ -112,9 +112,6 @@ if [ "${RUN_SCORING:-true}" = true ]; then
         --scoring_window_size_bp "${SCORING_WINDOW_SIZE_BP:-1000000}"
         --gene_ensembl_file "${GENE_ENSEMBL_FILE}"
     )
-    if [ "${RUN_SCORING_STRESS:-true}" = true ]; then
-        NF_FLAGS+=(--scoring_stress)
-    fi
 fi
 
 # VEP Flags

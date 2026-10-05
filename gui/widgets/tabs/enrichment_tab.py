@@ -109,7 +109,7 @@ SPEC = ModuleTabSpec(
         # Borderline default/optional: gates whether the concordance null chunk is
         # computed at all, but disabling it doesn't change any existing result's
         # validity — it just skips an extra corroborating statistical test, same
-        # spirit as scoring_stress below.
+        # spirit as the other optional report switches.
         FieldSpec(
             name="comparison_perm_null",
             label="COMPARE: CAAS x RER concordance null",

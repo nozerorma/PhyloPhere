@@ -92,7 +92,6 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "fade": _bool_str(fade_enabled),
         "vep": _bool_str(vep_enabled),
         "scoring": _bool_str(scoring.enabled),
-        "scoring_stress": _bool_str(getattr(scoring, 'scoring_stress', False)),
         "enrichment": _bool_str(enrichment.enabled),
         "posenrich": _bool_str(enrichment.posenrich_enabled),
         "scoring_ami": _bool_str(getattr(enrichment, 'scoring_ami', enrichment.scoring_string)),
@@ -110,8 +109,6 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "resample_use_n": _bool_str(getattr(caas, 'resample_use_n', True)),
         "multi_hypothesis": _bool_str(getattr(caas, 'multi_hypothesis', True)),
         "publish_intermediates": _bool_str(caas.publish_intermediates),
-        "export_groups": _bool_str(caas.export_groups),
-        "export_perm_discovery": _bool_str(caas.export_perm_discovery),
         "asr_robustness": _bool_str(disambig.asr_robustness),
     }
 
