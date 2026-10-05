@@ -1610,6 +1610,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Esegui analisi di arricchimento da stress',
         'de': 'Stress-Anreicherungsanalyse ausführen',
     },
+    'Evidence of the N best positions (0 = off)': {
+        'en': 'Evidence of the N best positions (0 = off)',
+        'es': 'Evidencia de las N mejores posiciones (0 = desactivado)',
+        'ca': 'Evidència de les N millors posicions (0 = desactivat)',
+        'fr': 'Preuves des N meilleures positions (0 = désactivé)',
+        'it': 'Evidenze delle N posizioni migliori (0 = disattivato)',
+        'de': 'Belege für die N besten Positionen (0 = aus)',
+    },
     'Genomic window size (bp)': {
         'en': 'Genomic window size (bp)',
         'es': 'Tamaño de ventana genómica (pb)',

@@ -96,15 +96,17 @@ def _scoring_inputs(tmp_path):
 
 
 @tw.needs_nextflow
-def test_the_process_is_off_by_default(tmp_path):
-    edges = tw._preview(tmp_path, **_SCORED)
+@pytest.mark.parametrize("zero", [None, "0"])
+def test_the_process_is_off_by_default(tmp_path, zero):
+    edges = tw._preview(tmp_path, **_SCORED, **({} if zero is None else {"caas_evidence_top_n": zero}))
     assert ("CAAS_CORE_MERGE", "SCORING_COMPUTE") in edges
     assert not any("CAAS_EVIDENCE" in e for e in edges)
 
 
 @tw.needs_nextflow
-def test_a_live_run_feeds_it_the_scores_and_the_observed_discovery_of_the_core(tmp_path):
-    edges = tw._preview(tmp_path, caas_evidence_top_n=2, **_SCORED)
+@pytest.mark.parametrize("n", [2, "2"])   # the generated scripts write the parameter as a string
+def test_a_live_run_feeds_it_the_scores_and_the_observed_discovery_of_the_core(tmp_path, n):
+    edges = tw._preview(tmp_path, caas_evidence_top_n=n, **_SCORED)
     assert ("SCORING_COMPUTE", "CAAS_EVIDENCE") in edges
     assert ("CAAS_CORE_OBSERVED", "CAAS_EVIDENCE") in edges
 

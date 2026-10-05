@@ -427,6 +427,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 |---|---|---|
 | `scoring_ami` | `true` | Enables downstream DOMINO Active Module Identification and STRING analysis. |
 | `scoring_string` | `true` | Enables STRING DB integration for module functional term enrichment. |
+| `caas_evidence_top_n` | `0` | Number of best positions of `position_scores.tsv` whose evidence is written after SCORING to `scoring/evidence/` (`evidence_top<N>.tsv`, `top_positions.tsv`); `0` = off. Needs `--scoring`, the observed `discovery.tab` (the run's own, or `--discovery_from`) and `ct_disambig_asr_cache_dir`. |
 | `scoring_compare_fdr` / `scoring_compare_top_n` | `0.15` / `20` | Significance FDR and top-N gene count for cross-tool comparison reports. |
 | `scoring_stress` / `scoring_stress_top_n` | `true` / `25` | Enables leave-one-axis-out stress testing and top-N stability checks. |
 | `scoring_stress_rank_metric` | `"spearman"` | Correlation metric used in scoring stress tests (`spearman` or `pearson`). |

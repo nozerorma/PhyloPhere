@@ -187,6 +187,19 @@ def validate(project: ProjectConfig) -> list[str]:
         # ^NO_ basename) drives has_rer / has_fade, skipping every RER/FADE code path.
         # A CAAS-only Scoring run is valid; do not block it here.
 
+    # --- Evidence of the N best positions (workflow CAAS_EVIDENCE, after SCORING) ---
+    n_evidence = scoring.caas_evidence_top_n.strip()
+    if not (n_evidence.isascii() and n_evidence.isdigit()):
+        errors.append(f"Scoring: the number of positions to explain (evidence) must be a non-negative integer (got {scoring.caas_evidence_top_n!r}).")
+    elif int(n_evidence) > 0:
+        if not scoring.enabled:
+            errors.append("Scoring: evidence of the best positions explains position_scores.tsv, so Scoring must be enabled.")
+        # main.nf re-scores the rows of those positions from the observed discovery.tab: the run's own (CAAS replay
+        # feeding Disambiguation) or the reused one (Precomputed Run, discovery_from).
+        if not disambig.enabled or not (caas.enabled or pc.use_discovery):
+            errors.append("Scoring: evidence of the best positions needs the observed discovery.tab: enable CAAS and "
+                          "Disambiguation, or reuse a discovery on the Precomputed Run tab with Disambiguation enabled.")
+
     # --- Enrichment (+ POSENRICH) ---
     enrichment = project.modules.enrichment
     # gmt_dir is no longer required: leaving it blank defaults to the curated

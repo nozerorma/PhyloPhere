@@ -607,6 +607,31 @@ La tabla se ordena por `gene_caas_score`; **los ejes NO se funden en un compuest
 (`fade_significant_top = TRUE`), `rer_min_pval 0.02` `rer_rho +0.3`
 (`rer_acceleration "accelerated"`), `accum_cct_p 0.04`.
 
+### H.8. Evidencia de las N mejores posiciones  (`explain_positions.py`, `core/evidence.py`; `caas_evidence_top_n`)
+
+Paso posterior a SCORING que explica de dónde sale el score de las posiciones más altas. Está apagado con
+`caas_evidence_top_n = 0` y no cambia ningún valor de `position_scores.tsv`.
+
+- **Selección** (`select_top_positions`). Cada posición se ordena por el mayor `CAAS_score` entre sus lados; los
+  empates se resuelven por menor `p.emp` (NA al final), después por gen y posición. Una posición sin score no es
+  candidata.
+- **Reproceso.** Las filas de `discovery.tab` de esas posiciones se puntúan de nuevo con el código del observado
+  (`analyze_observed`), conservando las filas antes de agrupar las hipótesis de la posición (`keep_unpooled`). Solo se
+  explican los esquemas con los que se puntuó la posición, es decir, la unión de `scheme_set` entre sus lados;
+  `discovery.tab` puede traer más esquemas (unidades de gen eliminadas).
+- **Salida** (`scoring/evidence/`). `evidence_top<N>.tsv` tiene una fila por entrada (posición × esquema × hipótesis)
+  y dominio, con `gene`, `msa_pos`, `caap_group`, `hypothesis`, `tag`, `caas`, `domain`; el MRCA del par del dominio
+  (`mrca_node`, `mrca_state`, `mrca_posterior`); las especies y los residuos de las puntas de ambos lados
+  (`top_species`, `bottom_species`, `top_tip_aa`, `bottom_tip_aa`); el score del dominio en cada lado
+  (`top_domain_score`, `bottom_domain_score`) y el LCA de los dominios que comparten residuo (`top_pair_lca`,
+  `bottom_pair_lca`). `top_positions.tsv` lista gen, posición, `CAAS_score` y `p.emp` en orden de ranking.
+- **Relación con el master.** `domain_<d>_score` del master es la media, sobre las hipótesis de la posición, del score
+  del dominio en ese lado (0 donde el dominio no cambió). La tabla reproduce esa media con sus propias filas y no
+  añade ningún cálculo. Los pesos PSS actúan solo al agrupar las hipótesis, de modo que no intervienen aquí.
+- **Requisitos y fallos.** Necesita `--scoring`, el `discovery.tab` del observado (el de la corrida, o el dado con
+  `--discovery_from`) y la caché de ASR. Si un gen elegido carece de alineamiento, ASR o filas de descubrimiento, o si
+  una posición elegida no tiene filas en `discovery.tab`, el script escribe lo que pudo explicar y termina con error.
+
 ---
 
 ## I. Uso del null: caracterización y enriquecimientos

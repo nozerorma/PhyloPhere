@@ -68,6 +68,7 @@ SPEC = ModuleTabSpec(
             importance="optional",
         ),
         FieldSpec(name="scoring_window_size_bp", label="Genomic window size (bp)", importance="optional"),
+        FieldSpec(name="caas_evidence_top_n", label="Evidence of the N best positions (0 = off)", importance="optional"),
         FieldSpec(
             name="scoring_p_emp_thr",
             label="Position-level permulation p.adj_bh / p.adj_sam threshold",
