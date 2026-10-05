@@ -142,3 +142,38 @@ def test_a_gene_outside_the_ensembl_list_is_left_out(inp, tmp_path):
     assert p.returncode == 0, p.stdout[-1500:] + p.stderr[-1500:]
     assert "1 left out" in p.stderr + p.stdout and "PEPC" in p.stderr + p.stdout
     assert len(_table(tmp_path / "out/evidence_top2.tsv")) == 0
+
+
+def test_only_the_schemes_that_were_scored_are_explained(inp, tmp_path):
+    """position_scores.tsv lists the schemes a position was scored with (scheme_set, per side); discovery.tab can hold
+    more of them (a removed unit), and the table must not explain what the score did not use."""
+    rows, disc = _scores(), _table(inp / "b0/PEPC.b0.discovery.tsv")
+    scored = {}
+    for r in rows:
+        scored.setdefault(r["Position"], set()).update(r["scheme_set"].split("+"))
+    beyond = sorted(pos for pos in scored if set(disc[disc.position == pos].caap_group) > scored[pos])
+    assert beyond, "the fixture needs a position whose discovery rows go beyond the scored schemes"
+    with open(tmp_path / "scores.tsv", "w") as fh:        # put one such position and the best ones on top
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]), delimiter="\t")
+        w.writeheader()
+        w.writerows([{**r, "CAAS_score": "9.0"} if r["Position"] == beyond[0] else r for r in rows])
+    p = _run(inp, tmp_path / "out", "--top", "3", scores=tmp_path / "scores.tsv")
+    assert p.returncode == 0, p.stderr[-800:]
+    ev = _table(tmp_path / "out/evidence_top3.tsv")
+    assert beyond[0] in set(ev.msa_pos)
+    for pos, g in ev.groupby("msa_pos"):
+        assert set(g.caap_group) == scored[pos], pos
+
+
+def test_a_missing_scheme_set_does_not_filter(inp, tmp_path):
+    rows = _scores()
+    with open(tmp_path / "scores.tsv", "w") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]), delimiter="\t")
+        w.writeheader()
+        w.writerows([{**r, "scheme_set": "NA"} for r in rows])
+    p = _run(inp, tmp_path / "out", "--top", "2", scores=tmp_path / "scores.tsv")
+    assert p.returncode == 0, p.stderr[-800:]
+    disc = _table(inp / "b0/PEPC.b0.discovery.tsv")
+    ev = _table(tmp_path / "out/evidence_top2.tsv")
+    for pos, g in ev.groupby("msa_pos"):
+        assert set(g.caap_group) == set(disc[disc.position == pos].caap_group)
