@@ -599,6 +599,7 @@ def analyze_gene_disambiguation(
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     build_node_posteriors: bool = False,
     hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]] = None,
+    keep_unpooled: bool = False,
 ) -> Tuple[List[ConvergenceResult], Dict[str, Any]]:
     """
     Perform complete convergence/disambiguation analysis for a gene's CAAS entries.
@@ -622,6 +623,10 @@ def analyze_gene_disambiguation(
             ``compute_asr_path_score`` return (``.sides``). The asr_path_score is
             scored by the same :func:`_position_axes` helper as the full path, so
             it is bit-for-bit identical.
+
+        keep_unpooled: Also return, in ``diagnostics["unpooled"]``, the rows as they are before the
+            hypotheses of a position are pooled: one per entry, each with its ``pair_details`` and ``sides``
+            (the evidence of what every domain of every hypothesis saw). Ignored in axes_only mode.
 
     Returns:
         Tuple of (results list, diagnostics dict). In axes_only mode the list holds
@@ -943,6 +948,9 @@ def analyze_gene_disambiguation(
             diagnostics["skipped_positions"] += 1
             diagnostics["skip_reasons"][str(e).split(":")[0]] += 1
             continue
+
+    if keep_unpooled and not axes_only:
+        diagnostics["unpooled"] = list(results)
 
     if not axes_only and results:
         # core v3: group the per-hypothesis base rows by (position, scheme) and

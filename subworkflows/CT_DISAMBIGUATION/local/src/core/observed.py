@@ -61,16 +61,18 @@ def unresolved_entries(entries: List[CAASPosition], trait_pairs: Dict[int, List[
     return out
 
 
-def score_observed(
+def analyze_observed(
     ctx: Dict[str, Any],
     gene: str,
     entries: List[CAASPosition],
     trait_pairs: Dict[int, List[Tuple[str, str]]],
     hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]],
     posterior_threshold: float,
-) -> List[Any]:
-    """Pooled full-mode ConvergenceResults of one gene. `ctx` is core.driver.load_gene_context's return;
-    `trait_pairs` is core.labelings.read_trait_pairs of the design and `hyp_pairs_pss` its observed_pss.
+    keep_unpooled: bool = False,
+) -> Tuple[List[Any], Dict[str, Any]]:
+    """Pooled full-mode ConvergenceResults of one gene and the scorer's diagnostics (with `keep_unpooled`, the rows
+    before pooling under "unpooled"). `ctx` is core.driver.load_gene_context's return; `trait_pairs` is
+    core.labelings.read_trait_pairs of the design and `hyp_pairs_pss` its observed_pss.
 
     With several contrasts every entry must name its hypothesis (`H<n>` in `trait`, n a contrast of the design):
     an entry that does not would be scored against the union of all the pairs, which is a different quantity
@@ -81,7 +83,7 @@ def score_observed(
             f"{gene}: {len(unresolved)} entries name no hypothesis of the {len(trait_pairs)}-contrast design "
             f"(trait of the first: {unresolved[0].trait!r})")
     node_posteriors = ctx["node_posteriors"]
-    results, _ = analyze_gene_disambiguation(
+    return analyze_gene_disambiguation(
         gene=gene,
         alignment_data=ctx["alignment_data"],
         tree_data=ctx["tree_data"],
@@ -91,8 +93,20 @@ def score_observed(
         posterior_data=node_posteriors.posteriors_node if node_posteriors else None,
         posterior_threshold=posterior_threshold,
         hyp_pairs_pss=hyp_pairs_pss,
+        keep_unpooled=keep_unpooled,
     )
-    return results
+
+
+def score_observed(
+    ctx: Dict[str, Any],
+    gene: str,
+    entries: List[CAASPosition],
+    trait_pairs: Dict[int, List[Tuple[str, str]]],
+    hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]],
+    posterior_threshold: float,
+) -> List[Any]:
+    """The pooled results of :func:`analyze_observed` alone."""
+    return analyze_observed(ctx, gene, entries, trait_pairs, hyp_pairs_pss, posterior_threshold)[0]
 
 
 def observed_master_rows(gene: str, results: Iterable[Any], master_fields: List[str]) -> List[Tuple[str, Any, Dict[str, str]]]:
