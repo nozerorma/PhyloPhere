@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Evidence of the N best positions of a run: what each domain of each hypothesis saw.
+
+Picks the N best positions of position_scores.tsv (`core.evidence.select_top_positions`), takes their rows from
+discovery.tab, scores them again through `core.observed` with the unpooled rows kept and writes
+`evidence_top<N>.tsv` (one row per entry and domain, `core.evidence.EVIDENCE_COLUMNS`) and `top_positions.tsv`
+(gene, position, CAAS_score, p.emp in rank order). The scoring is the one of observed_b0_main.py, so the numbers
+are those of the master before the hypotheses of a position are pooled (the PSS weights act only in the pooling, so they are not an input). A gene with no alignment or ASR is left out
+with a warning; a chosen position with no discovery row is reported.
+"""
+import argparse
+import csv
+import logging
+import multiprocessing as mp
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+from observed_b0_main import read_b0_rows
+from src.core.driver import load_gene_context
+from src.core.evidence import EVIDENCE_COLUMNS, evidence_rows, select_top_positions
+from src.core.labelings import read_trait_pairs
+from src.core.observed import analyze_observed, observed_entries
+from src.data.loaders import load_ensembl_genes
+from src.utils.concurrency import init_worker, plan_concurrency
+from src.utils.logger import configure_logging
+
+logger = logging.getLogger(__name__)
+
+TOP_COLUMNS = ["gene", "position", "CAAS_score", "p.emp"]
+
+
+def parse_arguments():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("--alignment-dir", required=True, help="Directory with alignment files")
+    p.add_argument("--tree", required=True, help="Phylogenetic tree (Newick)")
+    p.add_argument("--discovery", required=True, help="discovery.tab of the run")
+    p.add_argument("--position-scores", required=True, help="position_scores.tsv of the run")
+    p.add_argument("--top", type=int, required=True, help="Number of positions to explain (0 writes empty tables)")
+    p.add_argument("--design", required=True, help="Observed design: the trait file, or the directory of traitfile_H*.tab")
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--asr-model", default="lg")
+    p.add_argument("--asr-cache-dir", required=True, help="ASR cache dir")
+    p.add_argument("--posterior-threshold", type=float, default=0.0)
+    p.add_argument("--taxid-mapping", default=None)
+    p.add_argument("--ensembl-genes-file", default=None)
+    p.add_argument("--workers", type=int, default=None)
+    p.add_argument("--verbose", "-v", action="store_true")
+    p.add_argument("--log-file", type=Path, default=None)
+    return p.parse_args()
+
+
+def _explain_gene(job):
+    (gene, rows, alignment_dir, tree, taxid, model, cache, threshold, ensembl, trait_pairs) = job
+    try:
+        ctx = load_gene_context(gene, alignment_dir, tree, taxid, model, cache, threshold, ensembl)
+        if ctx is None:
+            return gene, None
+        _, diag = analyze_observed(ctx, gene, observed_entries(gene, rows), trait_pairs, None, threshold, keep_unpooled=True)
+        return gene, evidence_rows(diag["unpooled"])
+    except Exception as exc:  # noqa: BLE001 - one gene must not end the run; the summary reports it
+        logger.error(f"[evidence] {gene} failed: {exc}", exc_info=True)
+        return gene, None
+
+
+def _write_tsv(path, columns, rows):
+    with open(path, "w", newline="") as fh:
+        w = csv.writer(fh, delimiter="\t", lineterminator="\n")
+        w.writerow(columns)
+        w.writerows([[r[c] for c in columns] for r in rows])
+
+
+def main():
+    args = parse_arguments()
+    configure_logging(verbose=args.verbose, log_file=args.log_file)
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(args.position_scores, newline="") as fh:
+        chosen = select_top_positions(csv.DictReader(fh, delimiter="\t"), args.top)
+    _write_tsv(out_dir / "top_positions.tsv", TOP_COLUMNS,
+               [{"gene": g, "position": p, "CAAS_score": repr(i["score"]),
+                 "p.emp": "NA" if i["p_emp"] is None else repr(i["p_emp"])} for g, p, i in chosen])
+    evidence_path = out_dir / f"evidence_top{args.top}.tsv"
+    if not chosen:
+        _write_tsv(evidence_path, EVIDENCE_COLUMNS, [])
+        return
+
+    wanted = {}
+    for gene, pos, _ in chosen:
+        wanted.setdefault(gene, set()).add(pos)
+    by_gene = read_b0_rows(args.discovery)
+    rows_of = {g: [r for r in by_gene.get(g, []) if str(r["position"]) in pos] for g, pos in wanted.items()}
+    for gene, pos in sorted(wanted.items()):
+        absent = sorted(pos - {str(r["position"]) for r in rows_of[gene]}, key=int)
+        if absent:
+            logger.warning(f"[evidence] {gene}: no discovery rows at position(s) {','.join(absent)}")
+
+    trait_pairs = read_trait_pairs(Path(args.design))
+    ensembl = (load_ensembl_genes(Path(args.ensembl_genes_file)) or set()) if args.ensembl_genes_file else None
+    jobs = [(g, rows_of[g], args.alignment_dir, args.tree, args.taxid_mapping, args.asr_model, args.asr_cache_dir,
+             args.posterior_threshold, ensembl, trait_pairs) for g in sorted(rows_of) if rows_of[g]]
+    workers, _ = plan_concurrency(args.workers, 1, logger)
+    t0 = time.time()
+    by_gene_evidence, skipped = {}, []
+    with mp.Pool(processes=workers, initializer=init_worker, initargs=(1, None)) as pool:
+        for gene, rows in pool.imap_unordered(_explain_gene, jobs, chunksize=1):
+            if rows is None:
+                skipped.append(gene)
+            else:
+                by_gene_evidence[gene] = rows
+    skipped += sorted(g for g in wanted if not rows_of[g])
+    logger.info(f"[evidence] {len(by_gene_evidence)} genes explained in {time.time() - t0:.1f}s; {len(skipped)} left out"
+                + (f" (no alignment, ASR or discovery rows): {sorted(skipped)[:10]}" if skipped else ""))
+
+    # rank order, not arrival order: the rows of a position keep the order evidence_rows gave them
+    rank = {(g, p): k for k, (g, p, _) in enumerate(chosen)}
+    flat = [r for rows in by_gene_evidence.values() for r in rows]
+    flat.sort(key=lambda r: rank[(r["gene"], r["msa_pos"])])
+    _write_tsv(evidence_path, EVIDENCE_COLUMNS, flat)
+
+
+if __name__ == "__main__":
+    main()
