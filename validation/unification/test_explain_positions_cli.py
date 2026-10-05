@@ -95,7 +95,7 @@ def test_the_output_does_not_depend_on_the_number_of_workers_and_follows_the_ran
     assert list(dict.fromkeys(shown)) == chosen
 
 
-def test_a_chosen_gene_without_alignment_is_left_out_and_reported_but_stays_in_the_ranking(inp, tmp_path):
+def test_a_chosen_gene_without_alignment_fails_the_run_but_the_rest_is_written(inp, tmp_path):
     disc = (inp / "b0/PEPC.b0.discovery.tsv").read_text().splitlines()
     (tmp_path / "disc.tab").write_text("\n".join(disc + [r.replace("PEPC\t", "GHOST\t", 1) for r in disc[1:20]]) + "\n")
     rows = _scores()
@@ -107,39 +107,40 @@ def test_a_chosen_gene_without_alignment_is_left_out_and_reported_but_stays_in_t
     i = inp / "observed_inputs"
     (tmp_path / "ens.tsv").write_text((i / "gene_ensembl.tsv").read_text() + "GHOST\tchr1\t1\t2\t+\t970\tP04711\n")
     p = _run(inp, tmp_path / "out", "--top", "2", scores=tmp_path / "scores.tsv", discovery=tmp_path / "disc.tab", ensembl=tmp_path / "ens.tsv")
-    assert p.returncode == 0, p.stdout[-1500:] + p.stderr[-1500:]
+    assert p.returncode == 1, p.stdout[-1500:] + p.stderr[-1500:]
     assert "1 left out" in p.stderr + p.stdout and "GHOST" in p.stderr + p.stdout
     assert _table(tmp_path / "out/top_positions.tsv").gene.tolist()[0] == "GHOST"
+    assert "incomplete" in p.stderr + p.stdout
     assert set(_table(tmp_path / "out/evidence_top2.tsv").gene) == {"PEPC"}
 
 
-def test_a_chosen_position_without_discovery_rows_is_reported(inp, tmp_path):
+def test_a_chosen_position_without_discovery_rows_fails_the_run_and_is_reported(inp, tmp_path):
     rows = _scores()
     with open(tmp_path / "scores.tsv", "w") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]), delimiter="\t")
         w.writeheader()
         w.writerows([{**rows[0], "Position": "99999", "CAAS_score": "9.0"}] + rows)
     p = _run(inp, tmp_path / "out", "--top", "2", scores=tmp_path / "scores.tsv")
-    assert p.returncode == 0, p.stdout[-1500:] + p.stderr[-1500:]
+    assert p.returncode == 1, p.stdout[-1500:] + p.stderr[-1500:]
     assert "99999" in p.stderr + p.stdout
     assert "99999" not in set(_table(tmp_path / "out/evidence_top2.tsv").msa_pos)
 
 
-def test_a_chosen_gene_with_no_discovery_rows_is_left_out(inp, tmp_path):
+def test_a_chosen_gene_with_no_discovery_rows_fails_the_run(inp, tmp_path):
     rows = _scores()
     with open(tmp_path / "scores.tsv", "w") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]), delimiter="\t")
         w.writeheader()
         w.writerows([{**rows[0], "Gene": "NODISC", "CAAS_score": "9.0"}] + rows)
     p = _run(inp, tmp_path / "out", "--top", "2", scores=tmp_path / "scores.tsv")
-    assert p.returncode == 0, p.stdout[-1500:] + p.stderr[-1500:]
+    assert p.returncode == 1, p.stdout[-1500:] + p.stderr[-1500:]
     assert "1 left out" in p.stderr + p.stdout and "NODISC" in p.stderr + p.stdout
 
 
-def test_a_gene_outside_the_ensembl_list_is_left_out(inp, tmp_path):
+def test_a_gene_outside_the_ensembl_list_fails_the_run(inp, tmp_path):
     (tmp_path / "ens.tsv").write_text("gene\tchr\tstart\tend\tstrand\tlength\thuman_protein_id\nOTHER\tchr1\t1\t2\t+\t970\tP04711\n")
     p = _run(inp, tmp_path / "out", "--top", "2", ensembl=tmp_path / "ens.tsv")
-    assert p.returncode == 0, p.stdout[-1500:] + p.stderr[-1500:]
+    assert p.returncode == 1, p.stdout[-1500:] + p.stderr[-1500:]
     assert "1 left out" in p.stderr + p.stdout and "PEPC" in p.stderr + p.stdout
     assert len(_table(tmp_path / "out/evidence_top2.tsv")) == 0
 

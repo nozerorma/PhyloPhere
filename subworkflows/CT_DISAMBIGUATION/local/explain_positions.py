@@ -7,8 +7,9 @@ discovery.tab, scores them again through `core.observed` with the unpooled rows 
 (gene, position, CAAS_score, p.emp in rank order). The scoring is the one of observed_b0_main.py, so the numbers
 are those of the master before the hypotheses of a position are pooled. Only the schemes a position was scored with
 are explained (`scheme_set` of position_scores.tsv, union over its sides; discovery.tab can hold more). The PSS
-weights act only in the pooling, so they are not an input. A gene with no alignment or ASR is left out with a
-warning; a chosen position with no discovery row is reported.
+weights act only in the pooling, so they are not an input. The tables are written with whatever could be explained;
+a chosen gene with no alignment, ASR or discovery rows, or a chosen position with no discovery row, makes the run
+exit 1 after writing them, so that missing evidence never goes unnoticed.
 """
 import argparse
 import csv
@@ -107,10 +108,12 @@ def main():
         wanted.setdefault(gene, set()).add(pos)
     by_gene = read_b0_rows(args.discovery)
     rows_of = {g: [r for r in by_gene.get(g, []) if str(r["position"]) in pos] for g, pos in wanted.items()}
+    absent_positions = []
     for gene, pos in sorted(wanted.items()):
         absent = sorted(pos - {str(r["position"]) for r in rows_of[gene]}, key=int)
         if absent:
-            logger.warning(f"[evidence] {gene}: no discovery rows at position(s) {','.join(absent)}")
+            absent_positions.append(f"{gene}:{','.join(absent)}")
+            logger.error(f"[evidence] {gene}: no discovery rows at position(s) {','.join(absent)}")
 
     trait_pairs = read_trait_pairs(Path(args.design))
     ensembl = (load_ensembl_genes(Path(args.ensembl_genes_file)) or set()) if args.ensembl_genes_file else None
@@ -136,6 +139,9 @@ def main():
             if (r["gene"], r["msa_pos"]) not in schemes or r["caap_group"] in schemes[(r["gene"], r["msa_pos"])]]
     flat.sort(key=lambda r: rank[(r["gene"], r["msa_pos"])])
     _write_tsv(evidence_path, EVIDENCE_COLUMNS, flat)
+    if skipped or absent_positions:
+        logger.error(f"[evidence] incomplete: genes left out {sorted(skipped)}; positions without discovery rows {absent_positions}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
