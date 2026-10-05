@@ -93,3 +93,22 @@ def test_the_runtime_tab_has_the_field_next_to_the_toy_sample_size_and_the_label
     assert src.index("self.toy_n = QLineEdit") < src.index("self.toy_perms = QLineEdit") < src.index("def _build_execution_group")
     label = next(k for k in TRANSLATIONS if k.startswith(LABEL))
     assert set(TRANSLATIONS[label]) >= {"en", "es", "ca", "fr", "it", "de"}
+
+
+@pytest.mark.parametrize("bad", ["", " ", "abc", "-5", "2.5", "0"])
+def test_a_toy_run_needs_a_positive_integer_sample_size(bad):
+    """The pipeline reads a blank or zero toy_n as 50 alignments, so the validator refuses what would silently shrink a run."""
+    proj = _project()
+    proj.runtime.toy_n = bad
+    errors = validate(proj)
+    assert any("toy" in e.lower() and "sample" in e.lower() for e in errors), errors
+    proj.runtime.toy_mode = False
+    assert not any("sample" in e.lower() for e in validate(proj))
+
+
+def test_every_saved_template_with_toy_mode_names_its_sample_size():
+    import glob
+    for f in glob.glob(str(ROOT / "gui/templates/*.json")):
+        proj = load_project(Path(f))
+        if proj.runtime.toy_mode:
+            assert not any("sample" in e.lower() for e in validate(proj)), f

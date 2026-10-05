@@ -13,7 +13,7 @@
   "runtime": {
     "resume": false,
     "toy_mode": true,
-    "toy_n": "",
+    "toy_n": "1000",
     "runtime_type": "slurm",
     "script_base_name": "cancer_b0_toy",
     "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_cancer_b0_toy",

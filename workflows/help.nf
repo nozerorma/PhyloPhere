@@ -146,7 +146,7 @@ Usage:
 --prune_list                         <"species_list">               null
 --prune_list_secondary                 <"species_list">               null
 --toy_mode                           <true|false>                    false  (smoke test on a random subset of alignments; species are never subsampled)
---toy_n                               <INTEGER>                      200    (alignments kept in --toy_mode: the first N of a shuffle seeded by --seed; an empty value or 0 falls back to 50)
+--toy_n                               <INTEGER>                      1000   (alignments kept in --toy_mode: the first N of a shuffle seeded by --seed; an empty value or 0 falls back to 50)
 '''
 }
 
@@ -345,7 +345,7 @@ Usage:
 --enrichment                        <true|false>          false
 --gmt_dir                            <"gmt_dir">              null
 --fcs_min_genes                        <INTEGER>                5
---fcs_max_genes                        <INTEGER>                500   (0 = no cap)
+--fcs_max_genes                        <INTEGER>                1000  (0 = no cap)
 --fcs_fdr                                <FLOAT 0-1>              0.15
 --fcs_pperm_thr                            <FLOAT 0-1>              0.025
 --fcs_top_n                                  <INTEGER>                20

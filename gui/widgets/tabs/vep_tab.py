@@ -5,13 +5,10 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-cosmic_db (conf/vep.config) is VEP's own COSMIC database path — workflows/vep.nf
-reads params.cosmic_db directly to build its cosmic_db_file channel. An earlier
-version of this tab instead exposed scoring_vep_cosmic here (Scoring's *own*
-standalone fallback for a precomputed COSMIC *scores* TSV, conf/scoring.config),
-which VEP never reads — so filling in "COSMIC database" on this tab silently did
-nothing for VEP's actual COSMIC annotation. scoring_vep_cosmic now lives on the
-Precomputed Run tab where it belongs, alongside the rest of Scoring's fallbacks.
+cosmic_db (conf/vep.config) is the COSMIC database path. It is one pipeline parameter with two readers: workflows/vep.nf builds
+its COSMIC channel from it, and workflows/enrichment.nf hands it to POSENRICH. Its only GUI field is on this tab, so it is
+editable only while the VEP module is enabled. scoring_vep_cosmic (Scoring's standalone fallback for a precomputed COSMIC
+scores TSV, conf/scoring.config) is a different parameter and lives on the Precomputed Run tab.
 """
 
 # ── Local ─────────────────────────────────────────────────────────────────────

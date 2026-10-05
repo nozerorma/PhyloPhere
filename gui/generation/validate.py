@@ -48,6 +48,9 @@ def validate(project: ProjectConfig) -> list[str]:
     if rt.toy_mode and not (rt.toy_perms.strip().isascii() and rt.toy_perms.strip().isdigit() and int(rt.toy_perms) >= 0):
         errors.append(f"Runtime: toy permulation cycles must be a non-negative integer (0 replays only the real labeling) (got {rt.toy_perms!r}).")
 
+    if rt.toy_mode and not (rt.toy_n.strip().isascii() and rt.toy_n.strip().isdigit() and int(rt.toy_n) > 0):
+        errors.append(f"Runtime: the toy sample size must be a positive integer; a blank or zero value makes the pipeline sample 50 alignments (got {rt.toy_n!r}).")
+
     if not rt.phenotype_rows:
         errors.append("Runtime: the phenotype catalogue must have at least one row.")
 

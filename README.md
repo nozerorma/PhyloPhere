@@ -14,6 +14,7 @@ Seqera Platform.
 - **Repository:** https://github.com/nozerorma/PhyloPhere
 - **License:** GNU GPL v3 ([LICENSE](LICENSE))
 - **Requires:** Nextflow ≥ 22.10 (DSL2), a container engine (Singularity/Apptainer) or the bundled conda environment
+- **Execution profiles:** the Desktop GUI generates runs for the `local` and `slurm` profiles only. The `singularity` and `apptainer` profiles are defined in `nextflow.config` and have not been verified.
 
 ---
 
@@ -340,7 +341,7 @@ These parameters define the primary input data files, phenotype target, and modu
 | `ali_sp_names` | `""` | Precomputed flat file listing species names present across alignments (speeds startup). |
 | `gene_ensembl_file` | `""` | Mapping file from Ensembl gene IDs to gene symbols. |
 | `seed` | `"1998"` | Random seed for reproducible permutations and sampling. |
-| `toy_mode` / `toy_n` | `false` / `200` | Subsamples `N` random alignments for quick end-to-end smoke testing. The GUI-generated scripts also set the permulation cycles of a toy run (`caas_full_perms`, Runtime tab, default 100) with the draw budget `max_tries` at 200 per cycle. |
+| `toy_mode` / `toy_n` | `false` / `1000` | Subsamples `N` random alignments for quick end-to-end smoke testing. The GUI-generated scripts also set the permulation cycles of a toy run (`caas_full_perms`, Runtime tab, default 100) with the draw budget `max_tries` at 200 per cycle. |
 | `n_trait` / `c_trait` | `""` | Total sample size (`n_trait`) and case count (`c_trait`) for prevalence/frequency phenotypes. |
 | `secondary_trait` / `branch_trait` | `""` | Optional secondary trait column for reports / trait column for branch coloring. |
 | `trait_type` | `""` | `""`/`auto` infers; `continuous` forces the Phylogenetic Shift Score (PSS, OU/BM) pair-selection path; `ordinal` treats the trait as a foreground/background code (highest level = foreground, lowest = background, any middle level = intermediate and excluded from contrasts) — use for binary presence/absence or ordinal category phenotypes. Auto-inference flags a trait as ordinal when it has 2–5 distinct integer values. The foreground/background partition is produced by `4.Independent_contrasts.Rmd` from the phylogenetically-independent selected pairs. |
@@ -444,7 +445,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `domino_network_score_thr` | `700` | STRING combined-score threshold for edges included in DOMINO network construction. |
 | `domino_slice_thr` | `0.3` | Relevance threshold for DOMINO network slicing. |
 | `domino_module_thr` | `0.05` | Bonferroni-corrected p-value cutoff for accepting DOMINO active modules. |
-| `fcs_min_genes` / `fcs_max_genes` | `5` / `500` | Minimum / maximum gene set size required for FCS enrichment evaluation (`0` = no upper limit). |
+| `fcs_min_genes` / `fcs_max_genes` | `5` / `1000` | Minimum / maximum gene set size required for FCS enrichment evaluation (`0` = no upper limit). |
 | `fcs_fdr` | `0.15` | Benjamini-Hochberg FDR threshold for FCS gene-set significance. |
 | `fcs_pperm_thr` | `0.025` | Permulation p-value threshold for filtering phylogenetic non-independence. |
 | `fcs_top_n` | `20` | Number of top-ranked gene sets highlighted in report tables. |

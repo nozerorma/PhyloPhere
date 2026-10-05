@@ -277,7 +277,7 @@ class EnrichmentConfig(ModuleConfigBase):
 
     # FCS (ranked-Wilcoxon) enrichment
     fcs_min_genes: str = "5"  # --fcs_min_genes
-    fcs_max_genes: str = "500"  # --fcs_max_genes (0 = no limit)
+    fcs_max_genes: str = "1000"  # --fcs_max_genes (0 = no limit)
     fcs_fdr: str = "0.15"  # --fcs_fdr
     fcs_fdr_wilcoxon: str = ""  # --fcs_fdr_wilcoxon (blank -> the FCS FDR)
     fcs_fdr_lachenbruch: str = ""  # --fcs_fdr_lachenbruch (blank -> the FCS FDR)
