@@ -16,7 +16,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.convergence.disambiguate_single import analyze_gene_disambiguation
 from src.core.meta import row_id
-from src.data.loaders import _parse_conserved_pair, as_bool, normalize_amino_list
+from src.data.loaders import _parse_conserved_pair, as_bool
+from src.utils.amino import normalize_amino_list
 from src.data.models import CAASPosition
 
 
@@ -84,7 +85,6 @@ def score_observed(
         gene=gene,
         alignment_data=ctx["alignment_data"],
         tree_data=ctx["tree_data"],
-        caas_positions=sorted({e.position for e in entries}),
         caas_entries=entries,
         trait_pairs=trait_pairs,
         taxid_mapping=ctx["alignment_data"].species_to_taxid,

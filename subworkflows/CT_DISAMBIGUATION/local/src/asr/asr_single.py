@@ -54,7 +54,6 @@ class SingleGeneASRConfig:
     model: str = "lg"
     posterior_threshold: float = 0.7
     threads: int = 1
-    run_diagnostics: bool = False
 
 
 @dataclass
@@ -376,14 +375,8 @@ def run_asr_pipeline(
         posteriors_node = None
         node_id_map = None
 
-    # `posteriors_site` (parse_paml_rst) is set on ASRResults below but has no
-    # reader anywhere in the codebase (confirmed by a full-repo grep for
-    # `.posteriors_site` -- only ever assigned, never read). It re-parses the
-    # WHOLE rst file a second time (parse_paml_rst_node_level above already
-    # parsed it, node-aware) with a pure-Python per-site/per-token loop that
-    # measured ~85-100s per call in production (docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md,
-    # 2026-09-17 rework) -- paid on EVERY chunked replay call since Stage 2, the
-    # dominant cost behind the "workers blocked, ~0% CPU" symptom. Skipped.
+    # `posteriors_site` has no reader anywhere in the codebase (it is only ever assigned), so it stays empty: filling it
+    # would parse the whole rst file a second time, which parse_paml_rst_node_level already did.
     posteriors_site: Dict[int, Dict[str, float]] = {}
 
     logger.debug(
@@ -475,35 +468,3 @@ def load_precomputed_asr(
     )
 
 
-def validate_asr_inputs(config: SingleGeneASRConfig) -> bool:
-    """
-    Validate that all required inputs for ASR are present.
-
-    Args:
-        config: ASR configuration
-
-    Returns:
-        True if all inputs are valid
-
-    Raises:
-        FileNotFoundError: If required files don't exist
-        ValueError: If configuration is invalid
-    """
-    required_files = [
-        ("alignment_path", config.alignment_path),
-        ("tree_path", config.tree_path),
-    ]
-
-    if config.taxid_path:
-        required_files.append(("taxid_path", config.taxid_path))
-
-    for name, path in required_files:
-        if not path.exists():
-            raise FileNotFoundError(f"Required {name} not found: {path}")
-
-    if config.posterior_threshold < 0 or config.posterior_threshold > 1:
-        raise ValueError(
-            f"Invalid posterior threshold: {config.posterior_threshold} (must be 0-1)"
-        )
-
-    return True

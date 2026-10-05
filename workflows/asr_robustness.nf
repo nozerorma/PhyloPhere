@@ -81,13 +81,6 @@ workflow ASR_ROBUSTNESS {
             }
         }
 
-        // Require diagnostics JSONL files to be present (ct_disambig_run_diagnostics must be true)
-        // This is the default; warn if it may have been disabled.
-        if (params.containsKey('ct_disambig_run_diagnostics') && !params.ct_disambig_run_diagnostics) {
-            log.warn "[asr_robustness] ct_disambig_run_diagnostics=false — posterior JSONL files will be absent; " +
-                     "global/per-gene MAP distributions will be skipped. Enable ct_disambig_run_diagnostics for full output."
-        }
-
         def threshold_ch = Channel.value(params.ct_disambig_posterior_threshold)
 
         log.info "🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): ${params.ct_disambig_posterior_threshold}"

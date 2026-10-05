@@ -22,7 +22,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
 from src.utils.concurrency import plan_concurrency, init_worker
-from src.data.loaders import normalize_amino_list
+from src.utils.amino import normalize_amino_list
 from src.core.driver import load_gene_context, pool_labelings, score_labelings
 from src.core.scores import DIRECTIONS, collapse_sides, direction_values, gene_scores, position_score
 from src.data.models import CAASPosition
@@ -1259,4 +1259,3 @@ def process_all_genes_perms(
 
 
 # Backward-compatible alias
-convert_biochem_result_to_dict = convert_convergence_result_to_dict

@@ -33,7 +33,6 @@ from src.convergence.convergence import (
 )
 from src.asr.tree_parser import get_mrca, build_name_taxid_index
 from src.data.models import CAASPosition, ConvergenceResult
-from src.data.loaders import list_gene_caas_entries, parse_trait_pairs
 from src.biochem.grouping import get_grouping_scheme
 from src.convergence.path_scores import build_node_index, compute_domain_scores
 from src.convergence.fop_pool import pool_domains
@@ -288,12 +287,8 @@ def analyze_caas_position_disambiguation(
 
     ``build_node_posteriors`` (default False): populate the heavy
     ``node_posteriors["per_node"]`` map — the modal AA + full 20-AA distribution
-    for *every* tree node at the focal site. This field is NOT in the master CSV,
-    the aggregation DB, or the per-gene JSON summary, and the tree plots reload
-    node posteriors from the separately-dumped ASR object (see
-    ``gene_wrapper.export_posteriors_to_jsonl``), overwriting whatever is here.
-    It is therefore redundant, so it is skipped by default; pass True only if an
-    in-memory consumer genuinely needs it.
+    for *every* tree node at the focal site. This field is not in the master CSV,
+    so it is skipped by default; pass True only if an in-memory consumer needs it.
 
     Args:
         gene: Gene name
@@ -595,35 +590,27 @@ def analyze_gene_disambiguation(
     gene: str,
     alignment_data,
     tree_data,
-    caas_positions: List[int],
-    caas_entries: Optional[List[CAASPosition]] = None,
-    caas_metadata_path: Optional[Path] = None,
-    trait_file_path: Optional[Path] = None,
-    trait_pairs: Optional[Dict[int, List[Tuple[str, str]]]] = None,
+    caas_entries: List[CAASPosition],
+    trait_pairs: Dict[int, List[Tuple[str, str]]],
     taxid_mapping: Optional[Dict[str, str]] = None,
     posterior_data: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     posterior_threshold: float = 0.7,
-    diagnostics_dir: Optional[Path] = None,
-    asr_mode: str = "precomputed",
     axes_only: bool = False,
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     build_node_posteriors: bool = False,
     hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]] = None,
 ) -> Tuple[List[ConvergenceResult], Dict[str, Any]]:
     """
-    Perform complete convergence/disambiguation analysis for a gene's CAAS positions.
+    Perform complete convergence/disambiguation analysis for a gene's CAAS entries.
 
     Args:
         gene: Gene name
         alignment_data: Alignment and lookup data
         tree_data: Tree structure data
-        caas_positions: List of CAAS positions to analyze
-        caas_metadata_path: Optional path to CAAS metadata
-        trait_file_path: Optional path to trait file
-        trait_pairs: Optional pre-parsed {contrast: [(high_species, low_species), ...]},
-            the exact return shape of parse_trait_pairs. Takes precedence over
-            trait_file_path when given, skipping the file write+reparse round-trip
-            the permulation-null replay would otherwise do per cycle.
+        caas_entries: The CAAS rows to score (one per position, scheme and discovering hypothesis)
+        trait_pairs: {contrast: [(high_species, low_species), ...]}, the return shape of
+            core.labelings.read_trait_pairs; each entry is scored against the pairs of the contrast its
+            `trait` names
         taxid_mapping: Optional species to taxid mapping
         posterior_data: Optional ASR posterior data
         posterior_threshold: Posterior probability threshold for node state extraction
@@ -641,7 +628,7 @@ def analyze_gene_disambiguation(
         :class:`PositionAxes` records instead of :class:`ConvergenceResult`.
     """
     logger.info(
-        f"Starting convergence disambiguation for {gene} ({len(caas_positions)} positions)"
+        f"Starting convergence disambiguation for {gene} ({len(caas_entries)} entries)"
     )
     logger.debug(
         f"Using posterior threshold {posterior_threshold:.3f} for node state extraction"
@@ -654,37 +641,10 @@ def analyze_gene_disambiguation(
     diagnostics: Dict[str, Any] = {
         "skipped_positions": 0,
         "skip_reasons": Counter(),
-        "tip_dump_file": None,
     }
-    # Prepare a streaming JSONL file for tip diagnostics if requested
-    tip_file_handle = None
-    tip_file_path = None
-    if diagnostics_dir:
-        tip_dir = Path(diagnostics_dir) / "tip_details"
-        tip_dir.mkdir(parents=True, exist_ok=True)
-        tip_file_path = tip_dir / f"{gene.lower()}_tip_details.jsonl"
-        # We open lazily when the first record is ready so we avoid creating empty files
-
-    # Load row-wise CAAS metadata entries
-    if caas_entries is None:
-        caas_entries = []
-        if caas_metadata_path:
-            caas_entries = list_gene_caas_entries(Path(caas_metadata_path), gene)
-        if not caas_entries:
-            caas_entries = [
-                CAASPosition(
-                    position=pos,
-                    position_one_based=pos + 1,
-                    tag=f"POS{pos}",
-                    caas="",
-                    trait1_aa=[],
-                    trait0_aa=[],
-                )
-                for pos in caas_positions
-            ]
 
     # ── Trait pairs, grouped by contrast ──────────────────────────────────────
-    # parse_trait_pairs returns {contrast -> pairs}: one contrast per FOP
+    # trait_pairs is {contrast -> pairs}: one contrast per FOP
     # hypothesis (traitfile_H<n>.tab -> n), or a single contrast for a plain
     # non-FOP traitfile. Each CAAS metadata row belongs to the hypothesis that
     # discovered it (its `trait` field); it is disambiguated against THAT
@@ -693,11 +653,7 @@ def analyze_gene_disambiguation(
     # LCA merge points, independence, mrca_diversity — with contrasts from
     # unrelated hypotheses, and discarded the per-hypothesis Dunn independence
     # the FOP harvest enforces.
-    trait_pairs_all: Dict[int, List[Tuple[str, str]]] = {}
-    if trait_pairs is not None:
-        trait_pairs_all = trait_pairs
-    elif trait_file_path:
-        trait_pairs_all = parse_trait_pairs(Path(trait_file_path))
+    trait_pairs_all: Dict[int, List[Tuple[str, str]]] = trait_pairs
 
     def _dedup_pairs(pairs: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
         seen: set = set()
@@ -811,10 +767,7 @@ def analyze_gene_disambiguation(
             if posterior_data is None:
                 diagnostics["skip_reasons"]["no_asr"] += 1
                 diagnostics["skipped_positions"] += 1
-                if asr_mode != "skip":
-                    logger.debug(
-                        f"Skipping position {pos} - ASR posterior data missing (asr_mode={asr_mode})"
-                    )
+                logger.debug(f"Skipping position {pos} - ASR posterior data missing")
                 continue
 
             # Perform tip-level convergence analysis across ALL pairs from trait file
@@ -908,30 +861,6 @@ def analyze_gene_disambiguation(
             except Exception as e:
                 logger.warning(f"Tip-level analysis failed for position {pos}: {e}")
 
-            if diagnostics_dir and tip_diagnostics.get("pair_details"):
-                # Stream tip diagnostic record to JSONL, don't accumulate in memory
-                import json
-
-                record = {
-                    "gene": gene,
-                    "position": caas_pos.position,
-                    "position_one_based": caas_pos.position_one_based,
-                    "tag": caas_pos.tag,
-                    "pair_details": tip_diagnostics.get("pair_details"),
-                }
-                try:
-                    if tip_file_handle is None:
-                        if tip_file_path is None:
-                            raise ValueError("tip_file_path is None")
-                        tip_file_handle = open(tip_file_path, "a", encoding="utf-8")
-                        diagnostics["tip_dump_file"] = str(tip_file_path)
-                    tip_file_handle.write(json.dumps(record) + "\n")
-                    tip_file_handle.flush()
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to write tip diagnostic for {gene} pos {pos}: {e}"
-                    )
-
             # If no valid trait pairs overlap the alignment/taxid set, we cannot
             # build the focal node mapping needed for ASR node-level analysis.
             if not tip_diagnostics.get("pair_details"):
@@ -1015,92 +944,6 @@ def analyze_gene_disambiguation(
             diagnostics["skip_reasons"][str(e).split(":")[0]] += 1
             continue
 
-    if tip_file_handle is not None:
-        try:
-            tip_file_handle.close()
-        except Exception:
-            pass
-        logger.info(f"Tip details written to {diagnostics.get('tip_dump_file')}")
-
-    # Write unmerged ASR and domain node diagnostics to caas_hypothesis_domain_asr.tsv
-    # before hypothesis pooling if diagnostics_dir is provided.
-    if diagnostics_dir and not axes_only and results:
-        try:
-            asr_tsv_dir = Path(diagnostics_dir)
-            asr_tsv_dir.mkdir(parents=True, exist_ok=True)
-            asr_tsv_path = asr_tsv_dir / "caas_hypothesis_domain_asr.tsv"
-            write_header = not asr_tsv_path.exists() or asr_tsv_path.stat().st_size == 0
-            with open(asr_tsv_path, "a", encoding="utf-8") as f:
-                if write_header:
-                    f.write(
-                        "gene\tposition\thypothesis\tcaap_group\tdomain\t"
-                        "mrca_node\tmrca_state\tmrca_posterior\t"
-                        "top_species\tbottom_species\ttop_tip_aa\tbottom_tip_aa\t"
-                        "domain_score\tpairwise_lca\n"
-                    )
-                for r in results:
-                    r_gene = getattr(r, "gene", gene)
-                    r_pos = getattr(r, "position", "")
-                    r_hyp = getattr(r, "hypothesis", "") or ""
-                    r_group = getattr(r, "caap_group", "US") or "US"
-                    r_sides = getattr(r, "sides", None) or {}
-                    d_meta = r_sides.get("domain_meta") or {}
-                    top_side = r_sides.get("top") or {}
-                    bot_side = r_sides.get("bottom") or {}
-                    top_scores = top_side.get("domain_scores") or {}
-                    bot_scores = bot_side.get("domain_scores") or {}
-
-                    # Pair details from unpooled base row
-                    pair_map = {}
-                    for p in (getattr(r, "pair_details", None) or []):
-                        if isinstance(p, dict) and p.get("pair_id") is not None:
-                            pair_map[p["pair_id"]] = p
-
-                    # Pairwise LCA strings from top/bottom
-                    lca_parts = []
-                    for s in (top_side, bot_side):
-                        for a, b, lca_id, contrib in (s.get("pair_lca") or []):
-                            if lca_id is not None:
-                                lca_parts.append(f"{a}-{b}:{lca_id}:{contrib:.4f}")
-                    pairwise_lca_str = "|".join(lca_parts)
-
-                    # Determine all domains present
-                    all_domains = sorted(
-                        set(d_meta.keys()) | set(pair_map.keys()) | set(top_scores.keys()) | set(bot_scores.keys()),
-                        key=lambda x: int(x) if str(x).isdigit() else str(x),
-                    )
-                    for d in all_domains:
-                        m = d_meta.get(d) or {}
-                        p = pair_map.get(d) or {}
-                        mrca_node = m.get("mrca_id") if m.get("mrca_id") is not None else p.get("node_id", "")
-                        mrca_state = m.get("state") if m.get("state") is not None else p.get("focal_state", "")
-                        mrca_prob = m.get("posterior") if m.get("posterior") is not None else p.get("focal_prob", "")
-                        prob_str = f"{float(mrca_prob):.4f}" if mrca_prob not in (None, "") else ""
-
-                        top_sp = ",".join(str(x) for x in (p.get("top_species") or []))
-                        bot_sp = ",".join(str(x) for x in (p.get("bottom_species") or []))
-                        top_tip = p.get("top_tip_mode") or p.get("top_tip_residue") or ""
-                        bot_tip = p.get("bottom_tip_mode") or p.get("bottom_tip_residue") or ""
-
-                        # Domain score (max of top and bottom score for this domain, or empty if neither scored)
-                        d_score_val = None
-                        if d in top_scores and d in bot_scores:
-                            d_score_val = max(top_scores[d], bot_scores[d])
-                        elif d in top_scores:
-                            d_score_val = top_scores[d]
-                        elif d in bot_scores:
-                            d_score_val = bot_scores[d]
-                        score_str = f"{float(d_score_val):.4f}" if d_score_val is not None else ""
-
-                        f.write(
-                            f"{r_gene}\t{r_pos}\t{r_hyp}\t{r_group}\t{d}\t"
-                            f"{mrca_node}\t{mrca_state}\t{prob_str}\t"
-                            f"{top_sp}\t{bot_sp}\t{top_tip}\t{bot_tip}\t"
-                            f"{score_str}\t{pairwise_lca_str}\n"
-                        )
-        except Exception as e:
-            logger.warning(f"[{gene}] Failed to write caas_hypothesis_domain_asr.tsv: {e}")
-
     if not axes_only and results:
         # core v3: group the per-hypothesis base rows by (position, scheme) and
         # pool them onto <=2 per-side rows with the treeless mean-of-means pooler
@@ -1133,7 +976,3 @@ def analyze_gene_disambiguation(
     diagnostics["skip_reasons"] = dict(diagnostics["skip_reasons"])
     return results, diagnostics
 
-
-# Backward-compatible aliases
-analyze_caas_position_biochemistry = analyze_caas_position_disambiguation
-analyze_gene_biochemistry = analyze_gene_disambiguation

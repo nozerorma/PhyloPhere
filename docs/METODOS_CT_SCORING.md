@@ -264,7 +264,7 @@ tener efecto real en el scorer).
 
 ### F.2. Cada fila de metadata se desambigua SOLO contra los pares de SU hipótesis  (`disambiguate_single.py:630-730`)
 
-`parse_trait_pairs` devuelve `{contraste → pares}`: un contraste por hipótesis FOP
+`read_trait_pairs` (`core/labelings.py`) devuelve `{contraste → pares}`: un contraste por hipótesis FOP
 (`traitfile_H<n>.tab → n`). `_resolve_contrast(entry)` lee el campo `trait` de la fila
 CAAS; si contiene `H<n>`, la fila **pertenece a la hipótesis n** y se desambigua
 **exclusivamente contra los pares de esa hipótesis**.

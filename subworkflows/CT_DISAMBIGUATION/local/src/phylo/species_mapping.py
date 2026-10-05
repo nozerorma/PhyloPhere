@@ -85,43 +85,6 @@ def read_taxid_mapping(taxid_file: Path) -> Dict[str, str]:
     return mapping
 
 
-def validate_taxids_in_tree(
-    taxids: List[str], tree_tips: List[str], group_name: str = "species"
-) -> Tuple[List[str], List[str]]:
-    """
-    Validate that taxon IDs exist in the phylogenetic tree.
-
-    Args:
-        taxids: List of taxon IDs to validate
-        tree_tips: List of tip labels from the tree
-        group_name: Name of the group for logging (e.g., "TOP", "BOTTOM")
-
-    Returns:
-        Tuple of (found_taxids, missing_taxids)
-
-    Example:
-        >>> tree_tips = ['9606', '9598', '9544']
-        >>> taxids = ['9606', '9598', '9999']
-    >>> found, missing = validate_taxids_in_tree(taxids, tree_tips, "TOP")
-        >>> print(f"Found: {found}, Missing: {missing}")
-        Found: ['9606', '9598'], Missing: ['9999']
-    """
-    tree_tips_set = set(tree_tips)
-
-    found = [tid for tid in taxids if tid in tree_tips_set]
-    missing = [tid for tid in taxids if tid not in tree_tips_set]
-
-    logger.info(
-        f"Validated {group_name} taxon IDs: "
-        f"{len(found)}/{len(taxids)} found in tree"
-    )
-
-    if missing:
-        logger.warning(f"Missing {group_name} taxon IDs not in tree: {missing}")
-
-    return found, missing
-
-
 def match_tree_alignment_by_taxid(
     tree: Tree,
     alignment: MultipleSeqAlignment,

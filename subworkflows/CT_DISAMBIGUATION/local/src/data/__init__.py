@@ -1,19 +1,11 @@
 """Public exports for data models and data-loading helpers."""
 
 from .models import BiochemResults, CAASPosition, ConvergenceResult
-from .loaders import (
-    list_gene_caas_entries,
-    load_ensembl_genes,
-    parse_trait_pairs,
-    read_caas_metadata_table,
-)
+from .loaders import load_ensembl_genes
 
 __all__ = [
     "BiochemResults",
     "CAASPosition",
     "ConvergenceResult",
-    "list_gene_caas_entries",
     "load_ensembl_genes",
-    "parse_trait_pairs",
-    "read_caas_metadata_table",
 ]

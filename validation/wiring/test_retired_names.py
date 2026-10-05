@@ -68,3 +68,29 @@ def test_no_tracked_file_names_the_scalar_discovery_or_the_perm_replay_counts_pa
             continue
         hits += [f"{name}:{n}: {line.strip()[:100]}" for n, line in enumerate(text.splitlines(), 1) if RETIRED_KERNEL.search(line)]
     assert not hits, "\n".join(hits)
+
+
+# the scorer's legacy inputs (metadata read from a file, trait file, diagnostics dump) and the modules nothing reaches;
+# the replay-performance record and the frozen artifacts keep their history
+ALLOWED_SCORER = ("archive/", "validation/", "style/", "docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md")
+RETIRED_SCORER = re.compile(r"\bcaas_metadata_path\b|\bdiagnostics_dir\b|\bcaas_hypothesis_domain_asr\b|\btip_dump_file\b"
+                            r"|list_gene_caas_entries|read_caas_metadata_table|\bparse_trait_pairs\b"
+                            r"|analyze_(?:gene|caas_position)_biochemistry|convert_biochem_result_to_dict"
+                            r"|node_identification|\basr_only\b|identify_convergence_nodes|validate_node_mapping|\bget_descendants\b"
+                            r"|export_posteriors_to_jsonl|\bparse_paml_rst\b|build_consolidated_multiset|validate_taxids_in_tree"
+                            r"|\blabel_nodes\b|\bhas_polytomies\b|get_root_to_tip_paths|build_tip_node_lookup|build_node_path_from_mapping"
+                            r"|ct_disambig_run_diagnostics|\brun_diagnostics\b|\bvalidate_asr_inputs\b")
+
+
+def test_no_tracked_file_names_a_legacy_input_of_the_scorer_or_an_unreachable_module():
+    files = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split("\0")
+    hits = []
+    for name in filter(None, files):
+        if name.startswith(ALLOWED_SCORER):
+            continue
+        try:
+            text = (ROOT / name).read_text()
+        except (UnicodeDecodeError, FileNotFoundError, IsADirectoryError):
+            continue
+        hits += [f"{name}:{n}: {line.strip()[:100]}" for n, line in enumerate(text.splitlines(), 1) if RETIRED_SCORER.search(line)]
+    assert not hits, "\n".join(hits)

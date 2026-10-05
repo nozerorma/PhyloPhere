@@ -5,8 +5,7 @@ docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md: `get_mrca`'s tip lookups
 tip name on every call. `build_name_taxid_index` now builds an O(1) lookup once
 per tree, and `get_mrca` uses it when given via the new `name_index`/
 `taxid_index` params — falling back to the original recursive search when they
-are omitted, so any caller that doesn't opt in (e.g. `node_identification.py`)
-is unaffected.
+are omitted, so any caller that doesn't opt in is unaffected.
 
 This test proves the indexed and unindexed paths agree on the same MRCA,
 across name-matching, taxid-matching, and mixed-matching queries, plus the

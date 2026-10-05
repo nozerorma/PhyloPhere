@@ -49,14 +49,10 @@ def test_read_design_orders_pairs_numerically_and_hypotheses_by_file_name(tmp_pa
     assert list(single) == ["b_0"] and single["b_0"].fg == ("g1",)
 
 
-def test_parse_trait_pairs_is_the_core_reader(tmp_path):
-    from src.data.loaders import parse_trait_pairs
+def test_read_trait_pairs_groups_the_pairs_by_hypothesis_in_file_name_order(tmp_path):
     _traitfile(tmp_path / "traitfile_H1.tab", [(1, ("f1", "b1")), (2, ("f2", "b2"))])
     _traitfile(tmp_path / "traitfile_H3.tab", [(1, ("g1", "c1"))])
-    assert parse_trait_pairs(tmp_path) == L.read_trait_pairs(tmp_path) == {
-        1: [("f1", "b1"), ("f2", "b2")], 3: [("g1", "c1")]}
-    with pytest.raises(FileNotFoundError):
-        parse_trait_pairs(tmp_path / "missing")
+    assert L.read_trait_pairs(tmp_path) == {1: [("f1", "b1"), ("f2", "b2")], 3: [("g1", "c1")]}
 
 
 def test_read_pss_both_formats_and_sentinels(tmp_path):
