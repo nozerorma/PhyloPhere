@@ -44,8 +44,8 @@ suppressPackageStartupMessages({
 # fcs_percentile_flags() lives in percentile_flags.R, shared verbatim with
 # 15.Comparison_report.Rmd, which sources it directly to avoid this file's
 # library() calls above. Skipped if a caller already sourced it (e.g.
-# fcs_enrich_equivtest.R, which resolves its own directory independently of
-# cwd via commandArgs and sources percentile_flags.R itself before this file).
+# validation/unification/check_fcs_null_equivalence.R, which resolves its own
+# directory and sources percentile_flags.R itself before this file).
 # Otherwise falls back to cwd-relative candidates matching how every Rmd
 # caller stages/finds this very file (see 12.FCS_general_report.Rmd's
 # src_candidates); stack-frame introspection (sys.frame()$ofile) is not
@@ -388,11 +388,13 @@ fcs_membership_matrix <- function(genesets_named, set_names, genes) {
 # ── Vectorized permulation null statistics ────────────────────────────────────
 # Reproduces fastwilcoxGMTall(corStat[,j], gmts)$stat for EVERY permulation column
 # j in ONE sparse matrix multiply per GMT, replacing N x fastwilcoxGMTall calls.
-# Faithful to fastwilcoxGMT: background = the GMT's own annotated genes; ranks are
+# Faithful to fastwilcoxGMT: background = the annotated genes of the GMT it is given (the observed side drops
+# the sets over max_g first, and so does this); ranks are
 # per-GMT, per-column, average-tie; sets failing num.g (or bkgenes<=2) in a column
 # become NA for that column. Output: named list db -> (sets x N) AUC-0.5 matrix,
-# rows aligned to rownames(realenrich[[db]]). Equivalence to fastwilcoxGMT is
-# proven numerically by fcs_enrich_equivtest.R.
+# rows aligned to rownames(realenrich[[db]]). Equivalence is checked against the
+# definition (AUC - 0.5, validation/unification/test_fcs_null_statistic.py) and
+# against fastwilcoxGMTall itself (validation/unification/check_fcs_null_equivalence.R).
 fcs_null_enrichstat_vectorized <- function(corStat, gmts, realenrich, num_g = 10, max_g = 500) {
   enrichStat <- list()
   genes_all  <- rownames(corStat)
@@ -405,6 +407,12 @@ fcs_null_enrichstat_vectorized <- function(corStat, gmts, realenrich, num_g = 10
       next
     }
     gs <- gmt$genesets; names(gs) <- gmt$geneset.names
+    # The observed side (fcs_run_ranking) hands fastwilcoxGMT the GMT without its sets over max_g, and fastwilcoxGMT takes
+    # as background the genes of the sets it is given: so the genes that only the dropped sets hold are not in it. The
+    # null uses the same background; a dropped set has no member left here and is NA below.
+    if (!is.null(max_g) && is.finite(max_g) && max_g > 0) {
+      gs <- gs[vapply(gs, function(set) length(intersect(set, genes_all)) <= max_g, logical(1))]
+    }
     genes_db <- intersect(unique(unlist(gs)), genes_all)
     if (length(genes_db) < 3) {
       enrichStat[[db]] <- matrix(NA_real_, nrow = length(set_names), ncol = ncol(corStat),
