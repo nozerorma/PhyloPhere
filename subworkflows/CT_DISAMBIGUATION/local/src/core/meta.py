@@ -6,11 +6,9 @@ CAAS gets the same id in every run, every file and every process, and it does no
 or on their order.
 
 The id is `CAAS_` plus the first `ID_HEX_CHARS` hexadecimal characters of the SHA-256 of the fields. With 16
-characters (64 bits) a table of 4.4 million rows has a collision probability of about 5e-7; `assign_ids` still
-raises if two different rows share an id.
+characters (64 bits) a table of 4.4 million rows has a collision probability of about 5e-7.
 """
 import hashlib
-from typing import Iterable, List, Tuple
 
 from src.core.labelings import hyp_id
 
@@ -32,19 +30,3 @@ def row_id(gene, row) -> str:
     pattern = row.get("pattern")
     return caas_id(gene, row["position"], row.get("trait") or "", row.get("caap_group") or "US",
                    row.get("caas") or "", row.get("amino_encoded") or "", "" if pattern is None else pattern)
-
-
-def assign_ids(rows: Iterable[Tuple], hex_chars: int = ID_HEX_CHARS) -> List[str]:
-    """Ids of (gene, position, hypothesis, caap_group, caas, amino_encoded, pattern) rows, in the order given.
-
-    Identical rows share their id; two different rows with the same id raise ValueError.
-    """
-    ids: List[str] = []
-    seen = {}
-    for row in rows:
-        key = (str(row[0]), int(row[1]), hyp_id(row[2])) + tuple(str(v) for v in row[3:7])
-        cid = caas_id(*row[:7], hex_chars=hex_chars)
-        if seen.setdefault(cid, key) != key:
-            raise ValueError(f"CAAS id collision: {seen[cid]} and {key} both give {cid}")
-        ids.append(cid)
-    return ids
