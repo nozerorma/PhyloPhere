@@ -21,8 +21,8 @@ Strategy:
 
 Called by:  COSMIC_MAP Nextflow process (cosmic.nf → map_to_cosmic.py)
 Inputs:     caas_file     position_scores.tsv, with Gene, Position and, when present, tag,
-                          caas, side, amino_encoded and caap_group; the ancestral and
-                          derived residues come from caas and side
+                          caas, side, amino_encoded, caap_group, ancestral_aa and derived_aa; the ancestral and
+                          derived residues are those of the ASR, or the caas pattern read by side when absent
             vep_map_dir   directory of the per-gene MAP files
             cosmic_gz     COSMIC Mutant Census GRCh38 table (gzip TSV)
             output_tsv    path of the output table
@@ -45,7 +45,7 @@ from pathlib import Path
 # ── Package-internal ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 from vep_common import (  # noqa: E402
-    anc_der_from_caas,
+    anc_der_from_row,
     load_convergence_skip,
     load_map_file,
 )
@@ -100,6 +100,8 @@ def main():
         gene_col = col_lc.get('gene')
         pos_col = col_lc.get('position')
         cside_col = col.get("side") or col_lc.get("side")
+        anc_col = col_lc.get('ancestral_aa')
+        der_col = col_lc.get('derived_aa')
         amino_col = col_lc.get('amino_encoded')
         caap_col = col.get('caap_group') or col_lc.get('caap_group')
         dres_col = col_lc.get('derived_residues')
@@ -129,12 +131,14 @@ def main():
             tag = fields[tag_col] if tag_col is not None else f"{gene}_{position}"
             caas_pat = fields[caas_col] if caas_col is not None else ''
             cside = fields[cside_col] if cside_col is not None else ''
+            anc_val = fields[anc_col] if anc_col is not None else ''
+            der_val = fields[der_col] if der_col is not None else ''
             amino_enc = fields[amino_col] if amino_col is not None else ''
             caas_change = amino_enc if amino_enc else caas_pat
             weight = SCHEME_WEIGHTS.get(caap_grp, 1.0)
 
 
-            anc_aas, der_aas = anc_der_from_caas(caas_pat, cside)
+            anc_aas, der_aas = anc_der_from_row(anc_val, der_val, caas_pat, cside)
 
             key = (gene, position)
             if key not in caas_targets:

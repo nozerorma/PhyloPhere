@@ -257,10 +257,43 @@ if (anyNA(.hit) || nrow(core_pos) != nrow(pos_scores)) {
 pos_scores$CAAS_score <- core_pos$CAAS_score[.hit]
 rm(core_pos, .hit)
 
-# `side` (top / bottom / none) is the only direction descriptor downstream. The asr_path_score of a
-# position row is the mean over its schemes for that side, which is CAAS_score itself (caas_row is the
-# row's asr_path_score).
+# The asr_path_score of a position row is the mean over its schemes for that side, which is CAAS_score
+# itself (caas_row is the row's asr_path_score).
 pos_scores <- pos_scores %>% mutate(asr_path_score = CAAS_score)
+
+# Ancestral and derived residues of each (Gene, Position, side), as the ASR inferred them. They are read from
+# the K fixed domains of the US scheme row: domain_<d>_anc_aa is the ancestral residue of domain d and
+# domain_<d>_top_aa / domain_<d>_bot_aa the derived one on the side that carries the change. Residues are pooled
+# over the domains, most frequent first, comma-separated. Empty text when the position has no US row, no
+# resolved domain, or side "none" for the derived set. The `caas` pattern (top/bottom residues) has no direction.
+.anc_cols <- sort(grep("^domain_\\d+_anc_aa$", names(df), value = TRUE))
+.pool_aa <- function(m) {
+  vapply(seq_len(nrow(m)), function(i) {
+    v <- m[i, ]
+    v <- v[!is.na(v) & nzchar(v)]
+    if (!length(v)) return("")
+    n <- table(v)
+    paste(names(n)[order(-as.integer(n), names(n))], collapse = ",")
+  }, character(1))
+}
+.rep_us <- df %>%
+  filter(caap_group == "US", !duplicated(paste(Gene, Position, side, sep = "\r"))) %>%
+  select(Gene, Position, side, any_of(c(.anc_cols, sub("_anc_aa$", "_top_aa", .anc_cols), sub("_anc_aa$", "_bot_aa", .anc_cols))))
+if (length(.anc_cols) && nrow(.rep_us)) {
+  .mat <- function(cols) as.matrix(.rep_us[, cols, drop = FALSE])
+  .der <- .mat(sub("_anc_aa$", "_top_aa", .anc_cols))
+  .bot <- .mat(sub("_anc_aa$", "_bot_aa", .anc_cols))
+  .der[.rep_us$side == "bottom", ] <- .bot[.rep_us$side == "bottom", ]
+  .der[!.rep_us$side %in% c("top", "bottom"), ] <- NA_character_
+  .rep_us <- .rep_us %>% transmute(Gene, Position, side, ancestral_aa = .pool_aa(.mat(.anc_cols)), derived_aa = .pool_aa(.der))
+  pos_scores <- pos_scores %>% left_join(.rep_us, by = c("Gene", "Position", "side"))
+  pos_scores$ancestral_aa[is.na(pos_scores$ancestral_aa)] <- ""
+  pos_scores$derived_aa[is.na(pos_scores$derived_aa)] <- ""
+} else {
+  pos_scores$ancestral_aa <- ""
+  pos_scores$derived_aa <- ""
+}
+rm(.rep_us, .anc_cols)
 
 cat(sprintf("  %d unique positions after aggregation\n", nrow(pos_scores)))
 
@@ -1013,7 +1046,7 @@ pos_out <- pos_scores %>%
                   "top_species_residues", "bottom_species_residues",
                   "n_top_species", "n_bottom_species")), CAAS_score,
          side,
-         any_of("caas"),
+         any_of("caas"), any_of(c("ancestral_aa", "derived_aa")),
          # p.emp: the pooled "detects AND exceeds" position p; p.adj_bh and
          # p.adj_sam: its BH and permutation-FDR adjustments (§2h).
          any_of(c("p.emp", "p.adj_bh", "p.adj_sam"))) %>%

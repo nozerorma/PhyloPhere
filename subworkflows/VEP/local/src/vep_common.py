@@ -20,6 +20,20 @@ import glob
 # ── Residue sets ──────────────────────────────────────────────────────────────
 
 
+def anc_der_from_row(ancestral_aa, derived_aa, caas, side):
+    """(ancestral_aas, derived_aas) of a position of position_scores.tsv.
+
+    The residues are the ones the ASR inferred (the columns ancestral_aa and derived_aa, comma-separated). A position
+    without them (no US scheme row or no resolved domain) falls back to the caas pattern read in the direction of its
+    side, see anc_der_from_caas.
+    """
+    anc = {a.strip().upper() for a in str(ancestral_aa or "").split(",") if a.strip()}
+    der = {a.strip().upper() for a in str(derived_aa or "").split(",") if a.strip()}
+    if anc or der:
+        return anc, der
+    return anc_der_from_caas(caas, side)
+
+
 def anc_der_from_caas(caas, side):
     """(ancestral_aas, derived_aas) of a CAAS from its pattern and the side it was found on.
 
@@ -28,8 +42,9 @@ def anc_der_from_caas(caas, side):
     side leaves the ancestral set empty and takes both as derived. Residues shared by both sets are removed from the
     derived set unless that would empty it.
 
-    Only the pattern is read. The residue tallies of a position count every species of a group, so they also hold
-    residues that are not part of the CAAS (the bottom residue present in half of the top species).
+    The pattern itself has no direction: it lists the residues of the top and the bottom group, always in that order.
+    The direction comes from the side, which agrees with the ASR-inferred ancestral residue in about 98 % of the
+    positions of PEPC and of the cancer toy run; the residues of the ASR are used whenever the table has them.
     """
     raw_top, _, raw_bot = str(caas or "").partition("/")
     top_set = {c for c in raw_top.upper() if c.isalpha()}

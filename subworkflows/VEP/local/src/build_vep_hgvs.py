@@ -7,14 +7,15 @@ BuildVepHgvs: writes the HGVS protein identifier (VEP's --format hgvs input) of 
 ancestral→derived amino-acid change at every position of a scored table, and the table
 that rejoins VEP's output to the rows.
 
-The ancestral and derived residues come from the caas pattern and the side of each position
-(vep_common.anc_der_from_caas). No reference proteome is needed.
+The ancestral and derived residues are the ones the ASR inferred for each position (the columns
+ancestral_aa and derived_aa of position_scores.tsv); a position without them uses the caas pattern read
+in the direction of its side (vep_common.anc_der_from_row). No reference proteome is needed.
 Translating an alignment column to a protein position needs the vep_map_dir MAP files,
 which this pipeline cannot derive. human_protein_id must be an Ensembl protein ID (ENSP...)
 for VEP's cache lookup; a gene with another ID system is skipped without a message.
 
 Called by:  ENSEMBL_VEP_ANNOTATE Nextflow process (ensembl_vep.nf → build_vep_hgvs.py)
-Inputs:     caas_file          position_scores.tsv, with Gene, Position, side and caas
+Inputs:     caas_file          position_scores.tsv, with Gene, Position, side, caas, ancestral_aa and derived_aa
             vep_map_dir        directory of the per-gene MAP files (alignment column → hg38 position)
             gene_ensembl_file  TSV with gene and human_protein_id (ENSP...)
 Outputs:    output_hgvs.txt    one identifier per line, e.g. ENSP00000234875.4:p.Trp24Cys
@@ -28,7 +29,7 @@ from pathlib import Path
 
 # ── Package-internal ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
-from vep_common import anc_der_from_caas, load_map_file  # noqa: E402
+from vep_common import anc_der_from_row, load_map_file  # noqa: E402
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -75,6 +76,8 @@ def load_caas_targets(caas_file: str) -> dict:
             )
         side_col = col_lc.get("side")
         caas_col = col_lc.get("caas")
+        anc_col = col_lc.get("ancestral_aa")
+        der_col = col_lc.get("derived_aa")
         caap_col = col_lc.get("caap_group")
 
         for row in reader:
@@ -88,7 +91,7 @@ def load_caas_targets(caas_file: str) -> dict:
                 continue
             side = row.get(side_col, "") if side_col else ""
             caas = row.get(caas_col, "") if caas_col else ""
-            anc_aas, der_aas = anc_der_from_caas(caas, side)
+            anc_aas, der_aas = anc_der_from_row(row.get(anc_col, "") if anc_col else "", row.get(der_col, "") if der_col else "", caas, side)
             if not anc_aas or not der_aas:
                 continue
             targets.setdefault((gene, position), []).append({
