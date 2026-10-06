@@ -146,8 +146,6 @@ process POSENRICH_RUN {
         --position-lists-dir ${position_lists_dir} \
         --min-size ${min_size} \
         --max-size ${max_size} \
-        --n-perms ${params.posenrich_n_perms ?: 10000} \
-        --perm-chunk-size ${params.posenrich_perm_chunk_size ?: 1000} \
         ${caas_null_arg} \
         --seed ${params.seed ?: 1998} \
         --padj-thr ${params.posenrich_padj_thr} \
@@ -231,8 +229,6 @@ process POSENRICH_RUN_BATCHED {
         --position-lists-dir ${position_lists_dir} \
         --min-size ${min_size} \
         --max-size ${max_size} \
-        --n-perms ${params.posenrich_n_perms ?: 10000} \
-        --perm-chunk-size ${params.posenrich_perm_chunk_size ?: 1000} \
         ${caas_null_arg} \
         --seed ${params.seed ?: 1998} \
         --padj-thr ${params.posenrich_padj_thr} \
