@@ -257,7 +257,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         def pp_cleaned_bg     = null   // cleaned_background_main (single file, value channel)
 
         def scoring_caas_perms_ch = null
-        def scoring_caas_perm_scores_ch = null
         def scoring_caas_pos_cycle_caas_ch = null   // perm_pos_cycle_caas.tsv.gz — p.emp numerator/denominator
         def scoring_caas_pos_sample_ch = null
         def scoring_caas_pos_quantiles_ch = null
@@ -508,7 +507,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
             def caas_perm_out = CAAS_CORE_MERGE(core.pos_detail.collect(), caas_universe_ch, caas_gene_lengths_ch.collect().map { items -> items[0] }, core.labelings)
             scoring_caas_perms_ch = caas_perm_out.perms
-            scoring_caas_perm_scores_ch = Channel.empty()
             scoring_caas_pos_cycle_caas_ch = caas_perm_out.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))  // per (gene,position,side,cycle) caas_score -> p.emp
             scoring_caas_pos_sample_ch = caas_perm_out.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))  // cycle-stratified sample for distribution plots
             scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))  // per (cycle,scheme) distribution shape
@@ -888,7 +886,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     pp_cleaned_bg,
                     scoring_rer_perms_ch,
                     caas_perms_for_enrich,
-                    scoring_caas_perm_scores_ch,
                     scoring_caas_pos_sample_ch,
                     scoring_caas_pos_cycle_caas_ch,
                     position_scores_ch,

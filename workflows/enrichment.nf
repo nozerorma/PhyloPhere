@@ -118,7 +118,6 @@ workflow ENRICHMENT {
         cleaned_background_ch
         rer_perms_ch
         caas_perms_ch
-        caas_perm_scores_ch
         caas_pos_sample_ch
         caas_pos_cycle_caas_ch  // perm_pos_cycle_caas.tsv.gz (Gene,Position,side,cycle,caas_score,n_schemes) -> POSENRICH's p.perm
         position_scores
@@ -165,11 +164,6 @@ workflow ENRICHMENT {
 
         def caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
             .ifEmpty { file(params.caas_perms_file ?: 'NO_FILE') }
-            .collect()
-            .map { it[0] }
-
-        def caas_perm_scores_resolved = (caas_perm_scores_ch ?: Channel.empty())
-            .ifEmpty { file('NO_FILE') }
             .collect()
             .map { it[0] }
 
