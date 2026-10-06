@@ -970,6 +970,12 @@ def process_all_genes_perms(
             logger.warning(f"[perms] failed to load ensembl genes: {exc}")
 
     if ensembl_genes is not None:
+        outside = [g for g in genes if g not in ensembl_genes]
+        if outside:
+            logger.warning(
+                f"[perms] {len(outside)} of {len(genes)} genes with null hits are not in the Ensembl "
+                f"list and are left out of the null, e.g. {sorted(outside)[:5]}"
+            )
         genes = [g for g in genes if g in ensembl_genes]
 
     # FOP mirror: with a fop_pairs_file the resample directory carries "<base>~H<m>"
