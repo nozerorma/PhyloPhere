@@ -1478,6 +1478,7 @@ build_interesting_positions <- function(direction) {
       `FADE AMI desc(s)`    = .collapsible_list(fade_ami_desc),
       `PE term(s)`          = .collapsible_list(pe_terms),
       `CAAS evidence`       = .evidence_badge(evidence_label_caas),
+      `RER evidence`        = .evidence_badge(evidence_label_rer),
       `CAAS`                = if ("caas" %in% names(.)) caas else NA_character_,
       `Top species residues`    = {
         .ts <- if ("top_species_residues" %in% names(.)) top_species_residues else NA_character_
