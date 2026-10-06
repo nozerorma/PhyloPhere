@@ -62,7 +62,6 @@ class Namespace:  # noqa: vulture whitelist stub
 # ── Module-level singletons accessed via import ───────────────────────────────
 
 def logger(): pass          # module-level logger, accessed as `logger.info(...)` etc.
-def get_logger(): pass      # factory used in package __init__ files
 
 # ── Entry points called by Nextflow via subprocess ────────────────────────────
 

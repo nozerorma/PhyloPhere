@@ -4,10 +4,7 @@ from .io_utils import (
     find_gene_alignment,
     read_alignment,
 )
-from .logger import (
-    configure_logging,
-    get_logger,
-)
+from .logger import configure_logging
 from .concurrency import (
     plan_concurrency,
     init_worker,
@@ -18,7 +15,6 @@ __all__ = [
     "find_gene_alignment",
     "read_alignment",
     "configure_logging",
-    "get_logger",
     "plan_concurrency",
     "init_worker",
     "codeml_slot",

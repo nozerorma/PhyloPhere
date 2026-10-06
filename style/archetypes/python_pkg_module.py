@@ -11,6 +11,7 @@ Imported by: src/convergence/convergence.py, src/asr/reconstruct.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -18,10 +19,7 @@ from typing import Optional
 import pandas as pd
 from Bio import Phylo
 
-# ── Package-internal ──────────────────────────────────────────────────────────
-from ..utils.logger import get_logger
-
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

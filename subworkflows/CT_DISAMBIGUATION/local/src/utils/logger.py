@@ -10,10 +10,11 @@ Usage Example
 -------------
 ::
 
-    from src.utils.logger import configure_logging, get_logger
+    import logging
+    from src.utils.logger import configure_logging
 
     configure_logging(verbose=True)
-    log = get_logger("my.module")
+    log = logging.getLogger("my.module")
     log.debug("Hello world")
 
 Author
@@ -97,18 +98,3 @@ def configure_logging(
             },
         }
     )
-
-
-def get_logger(name: str) -> logging.Logger:
-    """Get a namespaced logger.
-
-    :param name: Logger namespace to fetch (e.g., 'src.utils').
-    :type name: str
-    :returns: Logger instance with the requested name.
-    :rtype: logging.Logger
-    :example: ::
-
-        log = get_logger('src.utils')
-        log.info('message')
-    """
-    return logging.getLogger(name)
