@@ -212,10 +212,9 @@ def validate(project: ProjectConfig) -> list[str]:
         # and subworkflows/ENRICHMENT/posenrich.nf both fall back to NO_FILE sentinels
         # and skip those layers gracefully when absent.
         pass
-        # egg_members_file / egg_annotations_file are no longer required either:
-        # leaving both blank auto-fetches the eggNOG5 Primates orthogroup pair,
-        # falling back to the vendored copy in assets/eggnog/ if offline
-        # (subworkflows/ENRICHMENT/eggnog_resolution.nf).
+        # egg_members_file / egg_annotations_file are not required either: leaving
+        # both blank uses the pair versioned in subworkflows/ENRICHMENT/dat/, or
+        # downloads it when auto_fetch_eggnog is set (subworkflows/ENRICHMENT/eggnog_resolution.nf).
         # ucr_positions_file / domain_variability_file are no longer required:
         # leaving either blank auto-generates it from the alignment
         # (subworkflows/ENRICHMENT/{ucr_generation,domain_variability_generation}.nf)

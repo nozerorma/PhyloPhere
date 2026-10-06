@@ -195,6 +195,7 @@
       "fcs_enabled": false,
       "gmt_dir": "",
       "auto_fetch_gmt": false,
+      "auto_fetch_eggnog": false,
       "fcs_min_genes": "5",
       "fcs_max_genes": "1000",
       "fcs_fdr": "0.15",

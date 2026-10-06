@@ -591,6 +591,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "enrichment": $_RUN_ENRICHMENT,
   "fcs_enabled": ${FCS_ENABLED:-true},
   "auto_fetch_gmt": ${AUTO_FETCH_GMT:-false},
+  "auto_fetch_eggnog": ${AUTO_FETCH_EGGNOG:-false},
   "gmt_dir": "${GMT_DIR:-$REPO_DIR/subworkflows/ENRICHMENT/dat}",
   "fcs_min_genes": "${FCS_MIN_GENES:-5}",
   "fcs_max_genes": "${FCS_MAX_GENES:-500}",

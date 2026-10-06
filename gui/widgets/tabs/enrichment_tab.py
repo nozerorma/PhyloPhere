@@ -152,14 +152,24 @@ SPEC = ModuleTabSpec(
             importance="optional",
         ),
         FieldSpec(
+            name="auto_fetch_eggnog",
+            label="Download eggNOG orthogroups instead of the versioned copy",
+            kind="bool",
+            importance="optional",
+            help=(
+                "Blank eggNOG files use the human Primates (taxid 9443) pair versioned in "
+                "subworkflows/ENRICHMENT/dat/. Any other clade or reference species needs this option "
+                "(network required); the run records the source and checksums in eggnog_source.json."
+            ),
+        ),
+        FieldSpec(
             name="egg_members_file",
             label="eggNOG members file (optional)",
             kind="path_file",
             importance="optional",
             help=(
-                "eggNOG orthogroup members. Leave blank to auto-fetch "
-                "(falls back to vendored copy in assets/eggnog/ "
-                "if offline)."
+                "eggNOG orthogroup members. Leave blank to use the versioned "
+                "copy (or the download, with the option above)."
             ),
         ),
         FieldSpec(
@@ -169,7 +179,7 @@ SPEC = ModuleTabSpec(
             importance="optional",
             help=(
                 "eggNOG orthogroup annotations, paired with the members "
-                "file above. Leave blank to auto-fetch alongside it."
+                "file above. Leave blank to resolve it together with it."
             ),
         ),
         FieldSpec(

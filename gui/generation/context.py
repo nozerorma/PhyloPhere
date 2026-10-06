@@ -103,6 +103,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "auto_generate_ensembl": _bool_str(scoring.auto_generate_ensembl),
         "fcs_enabled": _bool_str(enrichment.fcs_enabled),
         "auto_fetch_gmt": _bool_str(enrichment.auto_fetch_gmt),
+        "auto_fetch_eggnog": _bool_str(enrichment.auto_fetch_eggnog),
         "posenrich_domains": _bool_str(enrichment.posenrich_domains),
         "posenrich_ucr": _bool_str(enrichment.posenrich_ucr),
         "posenrich_eggnog": _bool_str(enrichment.posenrich_eggnog),

@@ -274,6 +274,7 @@ class EnrichmentConfig(ModuleConfigBase):
     fcs_enabled: bool = True  # Gate FCS (ranked-Wilcoxon) enrichment
     gmt_dir: str = ""  # --gmt_dir
     auto_fetch_gmt: bool = False  # Auto-download WikiPathways GMTs if gmt_dir is unset
+    auto_fetch_eggnog: bool = False  # Download the eggNOG pair instead of using the versioned copy
 
     # FCS (ranked-Wilcoxon) enrichment
     fcs_min_genes: str = "5"  # --fcs_min_genes

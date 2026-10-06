@@ -1,67 +1,74 @@
 #!/usr/bin/env python3
 """
-resolve_eggnog.py  —  Resolve --egg_members_file / --egg_annotations_file
-before invoking Nextflow, when either is left blank: fetch a fresh copy of
-the eggNOG5 Primates-level (taxid 9443) orthogroup members/annotations pair,
-filtered down to the human-relevant subset build_position_gmt.py actually
-reads, falling back to the vendored copies (assets/eggnog/) when the fetch
-fails (offline node, no network, upstream host down).
+resolve_eggnog.py  --  Resolve the eggNOG orthogroup pair (members, annotations) that POSENRICH reads when
+--egg_members_file / --egg_annotations_file are left blank.
 
-Fetching is tried first deliberately — offline safety is what the vendored
-copies are for, not staleness avoidance, so a live run should always get the
-current upstream orthogroups when it can.
+Two sources, chosen explicitly:
 
-Why this runs outside main.nf, same reasoning as bin/resolve_core_inputs.py /
-bin/resolve_gmts.py: params.egg_members_file / params.egg_annotations_file
-are read directly by subworkflows/ENRICHMENT/posenrich.nf's process inputs,
-and Nextflow (25.x) enforces single-assignment on params keys, so a
-params.egg_members_file = ... set inside workflow{} after
-conf/enrichment.config's own default has already run would be silently
-ignored.
+  default   the copy versioned in subworkflows/ENRICHMENT/dat/ (eggNOG 5.0, Primates level 9443, human members only).
+            It exists for tax level 9443 with reference species 9606; any other pair is an error unless --fetch is given.
+  --fetch   download the pair of the requested tax level from eggnog5.embl.de, keep the rows with a member of the
+            reference species, and write them. A failed download is an error: the versioned copy is never substituted
+            silently, because the two can hold different orthogroups.
 
-Filtering (why): build_position_gmt.py:586-605 only ever reads the
-orthogroup id (members col 2 / annotations col 2), the description
-(annotations col 4), and members whose taxon prefix is "9606.ENSP" (human) —
-every other member and annotation row is discarded on load. Of the 23,677
-Primates-level orthogroups in the full upstream files, only the ones with at
-least one human member matter; keeping only those rows (and only the human
-members within each row) shrinks the pair from ~1.8MB to ~470KB compressed
-without changing what the pipeline actually uses.
+Both modes write `eggnog_source.json` next to the pair: mode, tax level, reference species, the SHA-256 of each output
+file and, for --fetch, the source URLs, the UTC retrieval time and the SHA-256 of each download.
+
+Why this runs outside main.nf: params.egg_members_file / params.egg_annotations_file are read by the process inputs of
+subworkflows/ENRICHMENT/posenrich.nf, and Nextflow enforces single assignment on params keys, so a value set inside
+workflow {} after conf/enrichment.config would be ignored.
+
+Filtering: build_position_gmt.py reads the orthogroup id (members column 2, annotations column 2), the description
+(annotations column 4) and the members whose taxon prefix is "<ref_taxid>." (human: "9606.ENSP"). Every other member
+and annotation row is discarded on load, so only orthogroups with at least one reference member are kept, with only
+those members in each row. For Primates this reduces ~1.8 MB to ~470 KB compressed and changes nothing the pipeline uses.
 
 Usage
 -----
-    resolve_eggnog.py --output-dir <dir> [--vendored-dir <assets/eggnog>] \
-        [--egg-members-file <existing --egg_members_file value>] \
-        [--egg-annotations-file <existing --egg_annotations_file value>] \
-        [--timeout 30]
+    resolve_eggnog.py --output-dir <dir> [--tax-level 9443] [--ref-taxid 9606] [--fetch] [--timeout 30] \
+        [--versioned-dir <dir>] [--egg-members-file F --egg-annotations-file F]
 
-Prints two lines to stdout, shell-sourceable:
+Prints two shell-sourceable lines on stdout:
     EGG_MEMBERS_FILE=<path>
     EGG_ANNOTATIONS_FILE=<path>
 
-If both --egg-members-file and --egg-annotations-file are already set, they
-are echoed back unchanged (no fetch attempted — an explicit override always
-wins). Resolution otherwise always regenerates both together: the members and
-annotations files are paired by orthogroup id, so resolving only one of them
-if the other is blank would silently mismatch releases.
+When both --egg-members-file and --egg-annotations-file are given they are echoed back unchanged. Resolution always
+produces both files together: the pair is joined by orthogroup id, and one file of each release would mismatch.
 """
 
 import argparse
+import datetime
 import gzip
+import hashlib
+import json
 import os
 import shutil
 import sys
 import urllib.request
 
-_MEMBERS_URL = "http://eggnog5.embl.de/download/eggnog_5.0/per_tax_level/9443/9443_members.tsv.gz"
-_ANNOTATIONS_URL = "http://eggnog5.embl.de/download/eggnog_5.0/per_tax_level/9443/9443_annotations.tsv.gz"
+_EGGNOG_URL = "http://eggnog5.embl.de/download/eggnog_5.0/per_tax_level/{tax}/{tax}_{kind}.tsv.gz"
 
-_MEMBERS_FNAME = "9443_members_human.tsv.gz"
-_ANNOTATIONS_FNAME = "9443_annotations_human.tsv.gz"
+# The versioned pair covers one (tax level, reference species) combination.
+_VERSIONED_TAX_LEVEL = "9443"
+_VERSIONED_REF_TAXID = "9606"
+_VERSIONED_MEMBERS = "9443_members_human.tsv.gz"
+_VERSIONED_ANNOTATIONS = "9443_annotations_human.tsv.gz"
 
-_DEFAULT_VENDORED_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "eggnog"
+_DEFAULT_VERSIONED_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "subworkflows", "ENRICHMENT", "dat"
 )
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _fetch(url: str, timeout: int) -> bytes:
@@ -70,8 +77,9 @@ def _fetch(url: str, timeout: int) -> bytes:
 
 
 def _filter_and_write(members_raw: bytes, annotations_raw: bytes,
-                       members_dest: str, annotations_dest: str,
-                       ref_taxid: str = "9606") -> None:
+                      members_dest: str, annotations_dest: str,
+                      ref_taxid: str = "9606") -> None:
+    """Keep the orthogroups with a member of `ref_taxid`, and only those members, in both files."""
     matched_ogs = set()
     members_lines = []
     prefix = f"{ref_taxid}."
@@ -82,8 +90,7 @@ def _filter_and_write(members_raw: bytes, annotations_raw: bytes,
         matched_members = [m for m in fields[4].split(",") if m.startswith(prefix)]
         if matched_members:
             matched_ogs.add(fields[1])
-            members_lines.append("\t".join([fields[0], fields[1], fields[2], fields[3],
-                                             ",".join(matched_members)]))
+            members_lines.append("\t".join([fields[0], fields[1], fields[2], fields[3], ",".join(matched_members)]))
 
     annotations_lines = []
     for line in gzip.decompress(annotations_raw).decode("utf-8", errors="replace").splitlines():
@@ -99,59 +106,54 @@ def _filter_and_write(members_raw: bytes, annotations_raw: bytes,
         fh.write("\n".join(annotations_lines) + "\n")
 
 
-def resolve_eggnog(output_dir: str, vendored_dir: str, timeout: int,
-                   tax_level: str = "9443", ref_taxid: str = "9606") -> tuple:
+def resolve_eggnog(output_dir: str, versioned_dir: str, timeout: int, tax_level: str = "9443",
+                   ref_taxid: str = "9606", fetch: bool = False) -> tuple:
+    """Write the pair and `eggnog_source.json` into `output_dir`; return the two paths. Raises RuntimeError."""
     os.makedirs(output_dir, exist_ok=True)
-    members_fname = f"{tax_level}_members_{ref_taxid}.tsv.gz"
-    annotations_fname = f"{tax_level}_annotations_{ref_taxid}.tsv.gz"
-    members_dest = os.path.join(output_dir, members_fname)
-    annotations_dest = os.path.join(output_dir, annotations_fname)
+    members_dest = os.path.join(output_dir, f"{tax_level}_members_{ref_taxid}.tsv.gz")
+    annotations_dest = os.path.join(output_dir, f"{tax_level}_annotations_{ref_taxid}.tsv.gz")
+    source = {"tax_level": tax_level, "ref_taxid": ref_taxid}
 
-    members_url = f"http://eggnog5.embl.de/download/eggnog_5.0/per_tax_level/{tax_level}/{tax_level}_members.tsv.gz"
-    annotations_url = f"http://eggnog5.embl.de/download/eggnog_5.0/per_tax_level/{tax_level}/{tax_level}_annotations.tsv.gz"
+    if fetch:
+        urls = {kind: _EGGNOG_URL.format(tax=tax_level, kind=kind) for kind in ("members", "annotations")}
+        try:
+            raw = {kind: _fetch(url, timeout) for kind, url in urls.items()}
+            _filter_and_write(raw["members"], raw["annotations"], members_dest, annotations_dest, ref_taxid=ref_taxid)
+        except Exception as exc:
+            raise RuntimeError(f"eggNOG download or filtering failed ({exc}); the versioned copy is not substituted. "
+                               "Fix the network or set auto_fetch_eggnog=false.") from exc
+        source.update(mode="fetched", urls=urls, retrieved_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+                      download_sha256={kind: _sha256_bytes(data) for kind, data in raw.items()})
+    else:
+        if (tax_level, ref_taxid) != (_VERSIONED_TAX_LEVEL, _VERSIONED_REF_TAXID):
+            raise RuntimeError(f"no versioned eggNOG copy for tax level {tax_level} and reference species {ref_taxid} "
+                               f"(only {_VERSIONED_TAX_LEVEL} and {_VERSIONED_REF_TAXID}). Set auto_fetch_eggnog=true "
+                               "(needs network) or give egg_members_file and egg_annotations_file.")
+        members_src = os.path.join(versioned_dir, _VERSIONED_MEMBERS)
+        annotations_src = os.path.join(versioned_dir, _VERSIONED_ANNOTATIONS)
+        for path in (members_src, annotations_src):
+            if not os.path.isfile(path):
+                raise RuntimeError(f"versioned eggNOG file missing: {path}")
+        shutil.copy(members_src, members_dest)
+        shutil.copy(annotations_src, annotations_dest)
+        source.update(mode="versioned", versioned_dir=versioned_dir)
 
-    fetched = False
-    try:
-        members_raw = _fetch(members_url, timeout)
-        annotations_raw = _fetch(annotations_url, timeout)
-        _filter_and_write(members_raw, annotations_raw, members_dest, annotations_dest, ref_taxid=ref_taxid)
-        fetched = True
-        print(f"Fetched and filtered eggNOG {tax_level} members/annotations from {members_url}",
-              file=sys.stderr)
-    except Exception as exc:
-        print(f"WARN: eggNOG fetch/filter failed ({exc}); "
-              "falling back to vendored copy.", file=sys.stderr)
-
-    if not fetched:
-        vendored_members = os.path.join(vendored_dir, members_fname)
-        vendored_annotations = os.path.join(vendored_dir, annotations_fname)
-        if not (os.path.isfile(vendored_members) and os.path.isfile(vendored_annotations)):
-            # Check legacy primate fallback
-            if tax_level == "9443" and ref_taxid == "9606":
-                vendored_members = os.path.join(vendored_dir, _MEMBERS_FNAME)
-                vendored_annotations = os.path.join(vendored_dir, _ANNOTATIONS_FNAME)
-
-        if os.path.isfile(vendored_members) and os.path.isfile(vendored_annotations):
-            shutil.copy(vendored_members, members_dest)
-            shutil.copy(vendored_annotations, annotations_dest)
-            print(f"Using vendored copy of eggNOG {tax_level} members/annotations", file=sys.stderr)
-        else:
-            print("WARN: no vendored eggNOG fallback found; leaving files unresolved.",
-                  file=sys.stderr)
-            return "", ""
-
+    source["output_sha256"] = {"members": _sha256_file(members_dest), "annotations": _sha256_file(annotations_dest)}
+    with open(os.path.join(output_dir, "eggnog_source.json"), "w") as fh:
+        json.dump(source, fh, indent=2, sort_keys=True)
+        fh.write("\n")
     return members_dest, annotations_dest
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--vendored-dir", default=_DEFAULT_VENDORED_DIR)
-    parser.add_argument("--tax-level", default="9443", help="eggNOG clade taxon ID (default: 9443)")
-    parser.add_argument("--ref-taxid", default="9606", help="Reference species NCBI taxon ID (default: 9606)")
-    parser.add_argument("--egg-members-file", default="", help="Existing --egg_members_file value, if any")
-    parser.add_argument("--egg-annotations-file", default="", help="Existing --egg_annotations_file value, if any")
+    parser.add_argument("--versioned-dir", default=_DEFAULT_VERSIONED_DIR)
+    parser.add_argument("--tax-level", default=_VERSIONED_TAX_LEVEL, help="eggNOG clade taxon ID")
+    parser.add_argument("--ref-taxid", default=_VERSIONED_REF_TAXID, help="reference species NCBI taxon ID")
+    parser.add_argument("--fetch", action="store_true", help="download instead of using the versioned copy")
+    parser.add_argument("--egg-members-file", default="", help="existing --egg_members_file value, if any")
+    parser.add_argument("--egg-annotations-file", default="", help="existing --egg_annotations_file value, if any")
     parser.add_argument("--timeout", type=int, default=30)
     args = parser.parse_args()
 
@@ -160,8 +162,12 @@ def main():
         print(f"EGG_ANNOTATIONS_FILE={args.egg_annotations_file}")
         return
 
-    members_file, annotations_file = resolve_eggnog(args.output_dir, args.vendored_dir, args.timeout,
-                                                    tax_level=args.tax_level, ref_taxid=args.ref_taxid)
+    try:
+        members_file, annotations_file = resolve_eggnog(args.output_dir, args.versioned_dir, args.timeout,
+                                                        tax_level=args.tax_level, ref_taxid=args.ref_taxid, fetch=args.fetch)
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(2)
     print(f"EGG_MEMBERS_FILE={members_file}")
     print(f"EGG_ANNOTATIONS_FILE={annotations_file}")
 

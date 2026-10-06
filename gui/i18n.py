@@ -2187,6 +2187,22 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "it": "Esegui mappatura delle posizioni degli ortologhi eggNOG",
         "de": "eggNOG-Orthologen-Positionszuordnung ausführen",
     },
+    "Download eggNOG orthogroups instead of the versioned copy": {
+        "en": "Download eggNOG orthogroups instead of the versioned copy",
+        "es": "Descargar los ortogrupos de eggNOG en lugar de la copia versionada",
+        "ca": "Descarrega els ortogrups d'eggNOG en lloc de la còpia versionada",
+        "fr": "Télécharger les orthogroupes eggNOG au lieu de la copie versionnée",
+        "it": "Scarica gli ortogruppi eggNOG invece della copia versionata",
+        "de": "eggNOG-Orthogruppen herunterladen statt der versionierten Kopie",
+    },
+    "Blank eggNOG files use the human Primates (taxid 9443) pair versioned in subworkflows/ENRICHMENT/dat/. Any other clade or reference species needs this option (network required); the run records the source and checksums in eggnog_source.json.": {
+        "en": "Blank eggNOG files use the human Primates (taxid 9443) pair versioned in subworkflows/ENRICHMENT/dat/. Any other clade or reference species needs this option (network required); the run records the source and checksums in eggnog_source.json.",
+        "es": "Si los ficheros de eggNOG se dejan en blanco se usa el par de Primates humano (taxid 9443) versionado en subworkflows/ENRICHMENT/dat/. Cualquier otro clado o especie de referencia necesita esta opción (requiere red); la ejecución registra el origen y las sumas de control en eggnog_source.json.",
+        "ca": "Si els fitxers d'eggNOG es deixen en blanc s'usa el parell de Primats humà (taxid 9443) versionat a subworkflows/ENRICHMENT/dat/. Qualsevol altre clad o espècie de referència necessita aquesta opció (requereix xarxa); l'execució registra l'origen i les sumes de control a eggnog_source.json.",
+        "fr": "Si les fichiers eggNOG sont laissés vides, la paire Primates humaine (taxid 9443) versionnée dans subworkflows/ENRICHMENT/dat/ est utilisée. Tout autre clade ou espèce de référence exige cette option (réseau requis) ; l'exécution consigne l'origine et les sommes de contrôle dans eggnog_source.json.",
+        "it": "Se i file eggNOG sono lasciati vuoti si usa la coppia Primati umana (taxid 9443) versionata in subworkflows/ENRICHMENT/dat/. Qualsiasi altro clade o specie di riferimento richiede questa opzione (serve la rete); l'esecuzione registra l'origine e i checksum in eggnog_source.json.",
+        "de": "Bleiben die eggNOG-Dateien leer, wird das in subworkflows/ENRICHMENT/dat/ versionierte menschliche Primatenpaar (Taxid 9443) verwendet. Jede andere Klade oder Referenzart erfordert diese Option (Netzwerk nötig); der Lauf protokolliert Herkunft und Prüfsummen in eggnog_source.json.",
+    },
     "eggNOG clade TaxID (blank = clade TaxID)": {
         "en": "eggNOG clade TaxID (blank = clade TaxID)",
         "es": "TaxID del clado eggNOG (en blanco = TaxID del clado)",
