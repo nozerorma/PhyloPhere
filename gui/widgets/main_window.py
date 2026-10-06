@@ -331,11 +331,8 @@ class MainWindow(QMainWindow):
         self._write_autosave()
 
     def save_template(self) -> None:
-        """Always prompts for a filename — a real "Save As", not a silent in-place
-        overwrite (see the toolbar's New Project + this dialog's own prior
-        confirmation-on-overwrite for the incident that motivated this: loading
-        "primates_full_run", tweaking it for a one-off trait, and saving clobbered
-        the original template with no warning). Pre-fills the suggested filename
+        """Always prompts for a filename — a real "Save As", never a silent in-place
+        overwrite of the loaded template. Pre-fills the suggested filename
         from General > Project name when set, so naming the project once feeds
         straight into where it gets saved. The native save dialog's own "file
         exists, overwrite?" prompt covers the case where you deliberately pick an
