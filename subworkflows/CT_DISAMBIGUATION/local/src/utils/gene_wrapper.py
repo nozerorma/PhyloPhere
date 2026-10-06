@@ -645,7 +645,7 @@ def _cycle_gene_removal_from_detail(
 
 def write_removed_units(path: Path, removed: Set[Tuple[str, str, str]]) -> None:
     """Persist the (cycle, caap_group, Gene) units dropped by gene removal, so a
-    labeling's removal can be audited (compare_b0.py checkpoint B)."""
+    labeling's removal can be audited."""
     import csv as _csv
 
     with open(path, "w", newline="") as f_rm:

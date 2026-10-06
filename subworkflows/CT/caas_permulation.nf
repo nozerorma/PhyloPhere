@@ -423,7 +423,7 @@ process CAAS_CORE_MERGE {
             --detail "\$DETAIL/b0" \\
             --output-dir b0 \\
             --seed ${params.seed ?: 1998} ${removal_args}
-        # keep b_0's own per-gene shards next to its scores: compare_b0.py reads them (checkpoints B, C)
+        # keep b_0's own per-gene shards next to its scores so the b_0 labeling can be compared with a direct run
         cp -RL "\$DETAIL/b0" b0/perm_pos_detail
     fi
 

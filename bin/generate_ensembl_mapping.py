@@ -12,7 +12,7 @@ external_gene_name are returned; genes with no BioMart hit are reported to
 Model: extract_bg.py (Malignancy_Primates/Scripts/AdHoc-Scripts), using direct
 Ensembl BioMart XML queries via requests.
 
-Output (--output) schema, per validation/fixtures/tier1/pepc/build.py:
+Output (--output) schema:
     gene  chr  start  end  strand  length  human_protein_id
 Coordinate length (end - start + 1) is used as 'length', since this file
 supplies per-gene genomic length, not alignment-column length.

@@ -44,8 +44,8 @@ suppressPackageStartupMessages({
 # fcs_percentile_flags() lives in percentile_flags.R, shared verbatim with
 # 15.Comparison_report.Rmd, which sources it directly to avoid this file's
 # library() calls above. Skipped if a caller already sourced it (e.g.
-# validation/unification/check_fcs_null_equivalence.R, which resolves its own
-# directory and sources percentile_flags.R itself before this file).
+# a standalone check that resolves its own directory and sources
+# percentile_flags.R itself before this file).
 # Otherwise falls back to cwd-relative candidates matching how every Rmd
 # caller stages/finds this very file (see 12.FCS_general_report.Rmd's
 # src_candidates); stack-frame introspection (sys.frame()$ofile) is not
@@ -393,8 +393,7 @@ fcs_membership_matrix <- function(genesets_named, set_names, genes) {
 # per-GMT, per-column, average-tie; sets failing num.g (or bkgenes<=2) in a column
 # become NA for that column. Output: named list db -> (sets x N) AUC-0.5 matrix,
 # rows aligned to rownames(realenrich[[db]]). Equivalence is checked against the
-# definition (AUC - 0.5, validation/unification/test_fcs_null_statistic.py) and
-# against fastwilcoxGMTall itself (validation/unification/check_fcs_null_equivalence.R).
+# definition (AUC - 0.5) and against fastwilcoxGMTall itself.
 fcs_null_enrichstat_vectorized <- function(corStat, gmts, realenrich, num_g = 10, max_g = 500) {
   enrichStat <- list()
   genes_all  <- rownames(corStat)
