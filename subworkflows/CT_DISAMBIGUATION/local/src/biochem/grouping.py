@@ -1,13 +1,22 @@
-"""Amino-acid grouping schemes used for convergence typing.
+# grouping.py — Amino acid grouping schemes (US, GS1 to GS4) used to encode residues.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/biochem/
 
-Definitions are aligned with the paired CAAP implementation in
-``subworkflows/CT/local/modules/caas_id.py`` and include:
-US, GS1, GS2, GS3, GS4.
+"""
+Amino-acid grouping schemes used for convergence typing: US, GS1, GS2, GS3, GS4.
+
+The tables are identical to the ones of the discovery step in
+``subworkflows/CT/local/modules/caas_id.py``, so a residue is encoded the same way when a CAAS is
+found and when it is scored. Each scheme maps a residue to a group label; the comment above a
+table lists its groups.
+
+Imported by: src/convergence/path_scores.py, src/convergence/disambiguate_single.py
+Inputs: none (constant tables)
+Outputs: `get_grouping_scheme(aa, scheme)`, the group label of a residue
 """
 
 from typing import Dict, Optional
 
-# US: identity mapping (classical CAAS)
+# US: identity mapping (each residue is its own group)
 US: Dict[str, str] = {
     "A": "A",
     "C": "C",

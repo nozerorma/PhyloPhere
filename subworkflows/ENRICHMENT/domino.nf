@@ -1,30 +1,35 @@
 #!/usr/bin/env nextflow
+// domino.nf — Active module identification with DOMINO on a STRING network restricted to the background.
+// PhyloPhere | subworkflows/ENRICHMENT/
 
 /*
- * DOMINO — active module identification
- * ────────────────────────────────────────────────────────────────────
- * Replaces STRING's walktrap clustering (get_clusters()) and both its
- * PPI-density significance tests (per-cluster inside describe_clusters(), and
- * the whole-gene-list test in run_single_string()) with DOMINO
- * (Shamir-Lab/DOMINO): its module-finding recovers known complexes more fully
- * than walktrap at our list sizes (10-40 genes), and its significance test
- * accepts an arbitrary background where STRING's get_ppi_enrichment() cannot
- * (STRING hard-caps foreground+background at 2000 proteins combined; our
- * cleaned_background is ~10,447). STRING's functional/term enrichment
- * (get_enrichment_local()/get_enrichment()) is untouched and lives entirely in
- * 13.AMI_analysis.Rmd.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  DOMINO_MODULES: finds the active modules of gene lists with DOMINO (Shamir-Lab/DOMINO).
+ *  They replace the walktrap clustering of STRING (get_clusters()) and its PPI-density
+ *  significance tests (per cluster in describe_clusters(), and for the whole gene list in
+ *  run_single_string()), because the significance test of DOMINO accepts the full analysis
+ *  background, which get_ppi_enrichment() of STRING does not take at that size. The functional and term enrichment of STRING
+ *  (get_enrichment_local() / get_enrichment()) is not replaced and lives in
+ *  13.AMI_analysis.Rmd. Called from workflows/enrichment.nf, once per consumer
+ *  (caas, fade, rer).
  *
- * DOMINO_BUILD_NETWORK filters STRING v12.0's raw links file (cached once,
- * unfiltered) to domino_network_score_thr and both-endpoints-in-background.
- * This has to be rebuilt per report, not shared globally, because the
- * background varies by consumer (e.g. RER's universe differs from FADE's —
- * see bugfix_fcs_universe_wrong_background.md).
+ *  DOMINO_BUILD_NETWORK filters the STRING links file (cached once, unfiltered) to
+ *  the edges above domino_network_score_thr whose two endpoints are in the background.
+ *  It runs per consumer and not once, because the background differs between consumers
+ *  (the universe of RER is not that of FADE).
  *
- * DOMINO_RUN_MODULES finds + scores modules per gene list via DOMINO's own
- * Python API (run_domino_modules.py calls src.core.domino directly, not the
- * `domino` CLI, so the Bonferroni-corrected hypergeometric p-value per module
- * survives instead of being discarded the way modules.out is).
+ *  DOMINO_RUN_MODULES finds and scores the modules of every gene list through the Python
+ *  API of DOMINO (run_domino_modules.py calls src.core.domino directly, not the `domino`
+ *  CLI), which keeps the Bonferroni-corrected hypergeometric p-value of each module.
+ *
+ *  Consumes:  background gene list, gene lists, STRING files (string_db_dir or the cache)
+ *  Produces:  network.sif, network_edge_scores.tsv, domino_modules/ (published under
+ *             ami/domino/<consumer> only with params.publish_domino_intermediates)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Network ──────────────────────────────────────────────────────────────────
 
 process DOMINO_BUILD_NETWORK {
     label 'process_medium'
@@ -33,10 +38,10 @@ process DOMINO_BUILD_NETWORK {
 
     input:
     path background_file
-    path gene_list_files  // Trigger dependency: guarantees DOMINO network building waits for upstream scoring/gene lists
+    path gene_list_files  // Not read by the script; it makes the network build wait for the upstream gene lists
     val  score_threshold
     val  string_db_dir
-    val  consumer_label   // 'caas' | 'fade' | 'rer' -- only used to namespace the optional publishDir above
+    val  consumer_label   // 'caas' | 'fade' | 'rer'; only names the optional publishDir above
 
     output:
     path "network.sif",              emit: network_sif
@@ -45,12 +50,9 @@ process DOMINO_BUILD_NETWORK {
 
     script:
     def db_dir_arg = string_db_dir ? "--string-db-dir ${string_db_dir}" : ""
-    // build_domino_network.py's own --cache-dir default ("string_cache", relative
-    // to the process's own work dir) is NOT persistent across runs -- every task
-    // gets a fresh Nextflow work dir, so without an explicit override this
-    // silently re-downloads STRING's links/info files on every single run,
-    // defeating "cache once, reuse" entirely. Point it at a real persistent
-    // location instead, same pattern as the Pfam-A/VEP caches.
+    // The default --cache-dir of build_domino_network.py ("string_cache") is relative to the
+    // work directory of the task, which is new for every task, so the STRING files would be
+    // downloaded again on every run. A persistent directory is passed instead.
     def string_cache_dir = params.string_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/string"
     """
     bg_name=\$(basename ${background_file})
@@ -70,6 +72,8 @@ process DOMINO_BUILD_NETWORK {
     """
 }
 
+// ── Modules ──────────────────────────────────────────────────────────────────
+
 process DOMINO_RUN_MODULES {
     label 'process_medium'
     publishDir path: "${params.outdir}/ami/domino/${consumer_label}", mode: 'copy', overwrite: true,
@@ -81,7 +85,7 @@ process DOMINO_RUN_MODULES {
     path gene_lists
     val  slice_threshold
     val  module_threshold
-    val  consumer_label   // 'caas' | 'fade' | 'rer' -- only used to namespace the optional publishDir above
+    val  consumer_label   // 'caas' | 'fade' | 'rer'; only names the optional publishDir above
 
     output:
     path "domino_modules", emit: modules_dir
@@ -95,7 +99,7 @@ process DOMINO_RUN_MODULES {
         exit 0
     fi
 
-    # SCORING call site: gene_lists is a directory of slice_*.tsv (Gene column + header)
+    # The CAAS call site passes a directory of slice_*.tsv files (a header and the gene in column 1)
     if [ -d "${gene_lists}" ]; then
         for f in "${gene_lists}"/slice_*.tsv; do
             [ -f "\$f" ] || continue
@@ -103,7 +107,7 @@ process DOMINO_RUN_MODULES {
             tail -n +2 "\$f" | cut -f1 | { grep -v '^[[:space:]]*\$' || true; } > "domino_gene_lists/\${name}.txt"
         done
     fi
-    # TOOL_* call sites: gene_lists are already flat, plain active-gene .txt files
+    # The FADE and RER call sites pass plain .txt files of active genes, one gene per line
     for f in *.txt; do
         [ -f "\$f" ] || continue
         cp "\$f" domino_gene_lists/ 2>/dev/null || true
@@ -119,6 +123,8 @@ process DOMINO_RUN_MODULES {
         --output-dir domino_modules
     """
 }
+
+// ── Workflow ─────────────────────────────────────────────────────────────────
 
 workflow DOMINO_MODULES {
     take:

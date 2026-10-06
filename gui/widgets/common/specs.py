@@ -5,9 +5,14 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Each of the 9 module tab files instantiates one ModuleTabSpec with its curated
-field list (see implementation plan §5) rather than hand-rolling a QVBoxLayout —
-this is the mechanism that keeps ~90% of module-tab structure shared.
+FieldSpec and ModuleTabSpec: declarative description of a module tab.
+
+Each module tab file declares one ModuleTabSpec holding its FieldSpec lists, and
+ModuleTabWidget builds the layout from it, so the structure shared by all module
+tabs lives in one place instead of in per-tab layout code.
+
+Imported by: gui/widgets/common/module_tab.py and the module tab files in
+gui/widgets/tabs/
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -16,8 +21,8 @@ from typing import Literal
 
 FieldKind = str  # "bool" | "str" | "path_file" | "path_dir" | "choice" | "multichoice" | "choice_with_other" | "section"
 
-# required: no graceful default exists downstream and the pipeline hard-fails
-#   without it (validate.py is the ground truth for this tier).
+# required: no usable default exists downstream and the pipeline fails without it
+#   (gui/generation/validate.py is the reference for this tier).
 # default: has a working default, but changing it affects statistical/scientific
 #   validity in a way that needs real understanding (seed, FDR thresholds,
 #   permulation counts, model-selection parameters, ...).
@@ -31,7 +36,7 @@ class FieldSpec:
     name: str = ""  # attribute name on the module's config dataclass (empty for sections)
     label: str
     kind: FieldKind = "str"
-    importance: Importance = "optional"  # see Importance above; default keeps existing tabs compiling
+    importance: Importance = "optional"  # see Importance above
     choices: tuple[str, ...] = ()  # "choice"/"multichoice": raw stored values. "choice_with_other":
     # display labels, with the LAST entry being the free-text "other" sentinel (see choice_other_values).
     choice_other_values: tuple[str, ...] = ()  # "choice_with_other" only: stored value for each of
@@ -45,7 +50,7 @@ class FieldSpec:
 
 
 def Section(label: str) -> FieldSpec:
-    """Convenience constructor for visual section sub-headers matching conf/*.config comment blocks."""
+    """Build a section sub-header entry, mirroring the comment blocks of conf/*.config."""
     return FieldSpec(name="", label=label, kind="section")
 
 
@@ -55,9 +60,9 @@ class ModuleTabSpec:
     blurb: str
     disclaimer: str  # shown when the module is disabled — what downstream needs
     essential_fields: tuple[FieldSpec, ...] = field(default_factory=tuple)
-    # Fine-tuning knobs most runs leave at their conf/*.config default — tucked
-    # behind a collapsed-by-default "Advanced parameters" disclosure instead of
-    # sitting flat alongside essential_fields (see gui/widgets/common/collapsible.py).
+    # Fine-tuning parameters most runs leave at their conf/*.config default, shown
+    # in a collapsed "Advanced parameters" disclosure rather than next to
+    # essential_fields (see gui/widgets/common/collapsible.py).
     advanced_fields: tuple[FieldSpec, ...] = field(default_factory=tuple)
     fallback_fields: tuple[FieldSpec, ...] = field(default_factory=tuple)
     enabled_field: str = "enabled"  # attribute name for the top enable toggle

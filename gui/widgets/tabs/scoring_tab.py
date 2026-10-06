@@ -4,6 +4,14 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+ScoringTab: field specification of the Scoring module (conf/scoring.config).
+
+Declares the ModuleTabSpec and binds it to ScoringConfig through ModuleTabWidget.
+
+Imported by: gui/widgets/main_window.py
+"""
+
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import ScoringConfig
 from gui.widgets.common.module_tab import ModuleTabWidget

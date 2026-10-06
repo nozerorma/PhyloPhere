@@ -1,9 +1,27 @@
 #!/usr/bin/env nextflow
+// ctacc_run.nf — Alignment variability, position aggregation and randomization for CAAS accumulation.
+// PhyloPhere | subworkflows/CT_ACCUMULATION/
 
 /*
-#  CT Accumulation: Aggregate and Randomize processes
-*/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  CT_ACCUMULATION_AGGREGATE and CT_ACCUMULATION_RANDOMIZE: the two phases of
+ *  local/main.py, and COMPUTE_ALIGNMENT_ENTROPY, which prepares the conservation input
+ *  of the first one. Each script block has a container branch (entrypoint wrapper) and
+ *  a plain branch that run the same command.
+ *
+ *  Consumes:  alignment directory, genomic-info TSV, traitfile, filtered_discovery.tsv
+ *             and cleaned background list (CT_POSTPROC); for the randomization also
+ *             the tested positions (background.output) and, for the permulation type,
+ *             perm_pos_detail/ and gene_cycle_scores.tsv of one CAAS_CORE_MERGE run
+ *  Produces:  entropy_dir/ (<gene>.entropy.tsv), accumulation_global.csv,
+ *             accumulation_<direction>_<scheme>_aggregated_results.csv
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
 
+
+// ── Alignment variability ────────────────────────────────────────────────────
+
+// Valdar variability per column and gene (compute_alignment_entropy.py); feeds the conservation value of the aggregation
 process COMPUTE_ALIGNMENT_ENTROPY {
     tag "auto-generate accumulation entropy"
     label 'process_medium'
@@ -26,6 +44,9 @@ process COMPUTE_ALIGNMENT_ENTROPY {
     """
 }
 
+// ── Aggregation ──────────────────────────────────────────────────────────────
+
+// One global position table (<prefix>_global.csv) for all directions
 process CT_ACCUMULATION_AGGREGATE {
     tag "ct_accumulation_aggregate"
     label 'process_long_compute'
@@ -89,6 +110,9 @@ process CT_ACCUMULATION_AGGREGATE {
     }
 }
 
+// ── Randomization ────────────────────────────────────────────────────────────
+
+// One run per direction ('top', 'bottom', 'all'): the null and the per-gene empirical p-values of the five grouping schemes
 process CT_ACCUMULATION_RANDOMIZE {
     tag "ct_accumulation_randomize|${direction}"
     label 'process_long_compute'
@@ -103,9 +127,9 @@ process CT_ACCUMULATION_RANDOMIZE {
     path caas_csv
     path background_positions   // caastools background.output (tested positions)
     path bg_caas_universe       // cleaned_background_main.txt (surviving genes)
-    path perm_pos_detail        // sharded perm_pos_detail/ dir from CAAS_CORE_MERGE (NO_ sentinel when absent)
-    path gene_cycle_scores      // gene_cycle_scores.tsv from the SAME run (NO_ sentinel when absent) —
-                                 // authoritative cycle count for the permulation null (see randomize.py)
+    path perm_pos_detail        // perm_pos_detail/ shard directory from CAAS_CORE_MERGE (NO_ sentinel when absent)
+    path gene_cycle_scores      // gene_cycle_scores.tsv of the same run (NO_ sentinel when absent):
+                                 // the exact cycle count of the permulation null (see randomize.py)
 
     output:
     val  direction,                           emit: direction
@@ -114,31 +138,31 @@ process CT_ACCUMULATION_RANDOMIZE {
     script:
     def local_dir    = "${baseDir}/subworkflows/CT_ACCUMULATION/local"
     def out_pfx        = "accumulation_${direction}"
-    // Eligible null pool = tested positions ∩ surviving genes. Both are optional at
-    // the channel level (sentinel names when absent); randomize.py falls back to the
-    // ungapped-column pool with a loud warning if the tested positions are missing.
+    // The eligible null pool is the tested positions of the surviving genes. Both inputs
+    // are optional at the channel level (a NO_ sentinel file when absent); randomize.py
+    // falls back to the ungapped-column pool, with a warning, when the tested positions are missing.
     def bgpos_flag = (background_positions.name =~ /^NO_/) ? '' : "--background-positions '${background_positions}'"
     def bgcaas_flag = (bg_caas_universe.name =~ /^NO_/) ? '' : "--bg-caas '${bg_caas_universe}'"
-    // Only relevant when accumulation_randomization_type == permulation; harmless
-    // to omit otherwise (randomize.py ignores it for naive/cons_decile).
+    // Used only when accumulation_randomization_type is permulation; randomize.py ignores
+    // both files for naive and cons_decile.
     def permdetail_flag = (perm_pos_detail.name =~ /^NO_/) ? '' : "--perm-pos-detail '${perm_pos_detail}'"
     def genecyclescores_flag = (gene_cycle_scores.name =~ /^NO_/) ? '' : "--gene-cycle-scores '${gene_cycle_scores}'"
-    // 'all' direction uses --change-side both: retains all non-none positions
+    // 'all' maps to --change-side both, which keeps every row with a side other than 'none'
     def change_side_arg = (direction == 'all') ? 'both' : direction
     def rand_type    = params.accumulation_randomization_type ?: 'naive'
     def n_rands      = params.accumulation_n_randomizations   ?: 10000
     def log_level    = 'INFO'
-    // Fall back to task.cpus so the process never defaults to os.cpu_count()
-    // (which reads the full hardware CPU count of the node, not the Slurm allocation).
+    // Always pass task.cpus: without --workers randomize.py uses os.cpu_count(), which is
+    // the core count of the node, not of the Slurm allocation.
     def workers_flag = "--workers ${task.cpus}"
     def seed_flag    = params.seed ? "--global-seed ${params.seed}" : '--global-seed 1998'
 
     if (params.use_singularity || params.use_apptainer) {
         """
-        # Randomization fans draws across a ProcessPoolExecutor of numpy workers
-        # (np.random + bincount; no Level-3 BLAS). Pin math-library threads to 1
-        # per worker so no auto-threading bloom multiplies by the worker count.
-        # Per-stage only (never global env{}) — RERConverge needs multithread BLAS.
+        # The randomizations are split across a ProcessPoolExecutor of numpy workers
+        # (random draws and bincount, no BLAS-heavy work). Math-library threads are pinned
+        # to 1 per worker so that library threading does not multiply by the worker count.
+        # Set in this process only, not in a global env scope.
         export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
         cp -R ${local_dir}/* .
         find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true

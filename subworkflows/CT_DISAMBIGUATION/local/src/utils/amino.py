@@ -1,7 +1,13 @@
-"""Amino-acid utility helpers shared across pipeline layers.
+# amino.py — Normalization of amino-acid code lists.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/utils/
 
-This module intentionally sits outside the ``data`` and ``convergence``
-packages so both can depend on it without creating circular imports.
+"""
+Amino-acid helpers shared by the disambiguation layers.
+
+The module sits outside the ``data`` and ``convergence`` packages so that both can
+depend on it without a circular import.
+
+Imported by: src/core/observed.py, src/utils/gene_wrapper.py
 """
 
 from typing import List, Optional

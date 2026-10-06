@@ -1,13 +1,23 @@
 #!/usr/bin/env nextflow
+// eggnog_resolution.nf — Provide the eggNOG members and annotations files of POSENRICH when none is supplied.
+// PhyloPhere | subworkflows/ENRICHMENT/
 
 /*
- * EGGNOG_RESOLUTION subworkflow
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  EGGNOG_RESOLUTION: provides the --egg_members_file / --egg_annotations_file pair when
+ *  either is left blank (bin/resolve_eggnog.py). By default it copies the eggNOG 5.0
+ *  Primates-level (taxid 9443) human-member pair versioned in subworkflows/ENRICHMENT/dat/.
+ *  With params.auto_fetch_eggnog it downloads the pair of params.eggnog_taxid instead.
+ *  Called from workflows/enrichment.nf.
  *
- * Provides POSENRICH's --egg_members_file / --egg_annotations_file pair when either is left blank. By default it
- * copies the eggNOG 5.0 Primates-level (taxid 9443) human-member pair versioned in subworkflows/ENRICHMENT/dat/.
- * With params.auto_fetch_eggnog it downloads the pair of params.eggnog_taxid instead. Either way it publishes
- * eggnog_source.json with the origin and the checksums of the files used (bin/resolve_eggnog.py).
+ *  Consumes:  no channel input (params.eggnog_taxid or params.clade_taxid, params.ref_species_taxid)
+ *  Produces:  core_inputs/eggnog/ with the members and annotations files and eggnog_source.json,
+ *             which records the origin and the checksums of the files used
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── eggNOG pair ──────────────────────────────────────────────────────────────
 
 process RESOLVE_EGGNOG {
     tag "egg_members_file/egg_annotations_file"
@@ -35,6 +45,8 @@ process RESOLVE_EGGNOG {
     echo '{}' > eggnog_source.json
     """
 }
+
+// ── Workflow ─────────────────────────────────────────────────────────────────
 
 workflow EGGNOG_RESOLUTION {
     main:

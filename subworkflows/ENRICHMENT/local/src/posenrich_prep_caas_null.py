@@ -1,30 +1,39 @@
 #!/usr/bin/env python3
-# =============================================================================
-# posenrich_prep_caas_null.py - one-time reduction of the CAAS permulation
-# null for POSENRICH_RUN_BATCHED
-# =============================================================================
-# perm_pos_cycle_caas.tsv.gz is broadcast identically to every
-# POSENRICH_RUN_BATCHED task (same CAAS permulation null; only the GMT term
-# sets differ per batch). Parsing the raw long-format file independently in
-# every batch task means re-reading a tens-of-millions-row table, rebuilding
-# a string pos_id column, and re-deriving the same per-direction
-# (global/top/bottom) subsets once per batch, for no benefit -- none of that
-# depends on which GMTs a batch is testing.
-#
-# This script does that parse + derivation exactly ONCE and writes a compact
-# pickle (categorical Gene/pos_id, int32 cycle, float32 score) that every
-# batch task then just loads. The per-direction subsetting mirrors
-# posenrich_enrich.py's load_caas_cycle_null()/null_direction_subset() exactly
-# (same side-handling, one score per (pos_id, cycle) = max over sides) -- this
-# is a reduction of redundant work, not a change in what is computed.
-# =============================================================================
+# posenrich_prep_caas_null.py — Reduces the CAAS permulation null once, for all position-enrichment batches.
+# PhyloPhere | subworkflows/ENRICHMENT/local/src/
 
+"""
+PosenrichPrepCaasNull: parses the long-format CAAS permulation null once and stores, per
+direction (global, top, bottom), one score per (position, cycle) in a compact pickle.
+
+Every POSENRICH_RUN_BATCHED task uses the same null (only the gene-set files differ
+between batches). Parsing a table of tens of millions of rows, building the position ID
+and splitting it by direction in every task would repeat identical work, so it is done
+here and each task loads the result (posenrich_enrich.py --caas-null-prepped).
+
+The per-direction reduction is the one of posenrich_enrich.py (load_caas_cycle_null,
+null_direction_subset): "top" and "bottom" keep that side, "global" keeps the maximum
+over sides, and each (pos_id, cycle) pair has a single score.
+
+Called by:  POSENRICH_PREP_NULL Nextflow process (posenrich.nf → posenrich_prep_caas_null.py)
+Inputs:     --caas-cycle-null  perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_score, n_schemes);
+                               absent or a NO_FILE* sentinel gives an empty artifact
+Outputs:    caas_null_prepped.pkl  dict with cycle_levels (sorted array of every cycle in the file)
+                                   and global/top/bottom (DataFrames pos_id, cycle, score; pos_id categorical);
+                                   all four entries are None for an empty artifact
+"""
+
+# ── Standard library ──────────────────────────────────────────────────────────
 import argparse
 import os
 import pickle
 
+# ── Third-party ───────────────────────────────────────────────────────────────
 import numpy as np
 import pandas as pd
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
 
 
 def parse_args():
@@ -37,12 +46,17 @@ def parse_args():
     return p.parse_args()
 
 
+# ── Reduction ─────────────────────────────────────────────────────────────────
+
+
 def write_empty(path):
+    """Write the artifact that means "no CAAS null": every entry None (p-values stay NA downstream)."""
     with open(path, "wb") as fh:
         pickle.dump({"cycle_levels": None, "global": None, "top": None, "bottom": None}, fh)
 
 
 def main():
+    """Parse the null, reduce it per direction and pickle it."""
     args = parse_args()
     path = args.caas_cycle_null
 
@@ -51,12 +65,10 @@ def main():
         print(f"[posenrich_prep] no CAAS null supplied -> wrote empty {args.output}", flush=True)
         return
 
-    # `cycle` is a tag, not necessarily numeric (e.g. base-cycle labels like
-    # "b_1000" from the FOP-mirror replay-tag collapse -- see gene_wrapper.py),
-    # so it's read as category rather than coerced to a numeric dtype.
-    # caas_score is read exactly (round_trip); only the repetitive string columns
-    # (Gene, side, cycle, pos_id) are switched to category, which is where the actual
-    # memory cost was.
+    # `cycle` is a label, not necessarily numeric (e.g. "b_1000"), so it is read as a
+    # category rather than coerced to a number. caas_score is read exactly (round_trip);
+    # only the repetitive string columns (Gene, side, cycle, pos_id) become categories,
+    # which is where the memory goes.
     header = pd.read_csv(path, sep="\t", nrows=0).columns
     if "caas_score" not in header:
         raise ValueError(f"{path} has no caas_score column: it predates the shared position score. "
@@ -72,15 +84,13 @@ def main():
         print(f"[posenrich_prep] empty CAAS null file -> wrote empty {args.output}", flush=True)
         return
 
-    # pos_id is built once here instead of once per batch task; immediately
-    # cast to category so the ~27M-row string column collapses to integer
-    # codes over its (much smaller) set of distinct positions.
+    # pos_id is cast to category at once, so the string column of every row collapses to
+    # integer codes over the (much smaller) set of distinct positions.
     pos_id = (df["Gene"].astype(str) + ":" + df["Position"].astype(str)).astype("category")
     df["pos_id"] = pos_id
     df["score"] = df["caas_score"].fillna(0.0)
-    # cycle's category codes already are exactly its unique values (built from
-    # what read_csv observed), so this is a lookup over the categories, not a
-    # pass over all ~27M rows.
+    # The categories of cycle are exactly its distinct values, so this reads the category
+    # list instead of scanning every row.
     cycle_levels = np.sort(np.asarray(df["cycle"].cat.categories, dtype=object))
 
     long_df = df[["pos_id", "side", "cycle", "score"]]

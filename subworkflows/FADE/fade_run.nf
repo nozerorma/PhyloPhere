@@ -1,23 +1,25 @@
 #!/usr/bin/env nextflow
+// fade_run.nf — HyPhy FADE (directional amino-acid selection) on foreground-annotated gene trees.
+// PhyloPhere | subworkflows/FADE/
 
 /*
- * FADE_RUN
- * ────────
- * Run HyPhy FADE (FUBAR Approach to Directional Evolution) on a single gene
- * alignment + annotated tree, testing foreground branches for directional
- * amino-acid selection.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  FADE_RUN, FADE_BATCHED: run HyPhy FADE (FUBAR Approach to Directional Evolution) on
+ *  a protein alignment and a tree whose foreground branches are labeled {Foreground}
+ *  (from ANNOTATE_TREE_FG), testing the foreground branches for directional selection
+ *  toward each amino acid. FADE_RUN handles one gene; FADE_BATCHED handles
+ *  fade_batch_size genes per task through run_hyphy_fade_batch.sh. A gene whose FADE
+ *  run fails is skipped and produces no JSON.
  *
- * Inputs
- * ──────
- *   gene_id        : string — gene identifier (used for file naming/tagging)
- *   direction      : string — 'top' or 'bottom'
- *   fasta          : protein FASTA alignment (taxa names must match tree labels)
- *   annotated_tree : Newick tree with {Foreground} leaf labels (from ANNOTATE_TREE_FG)
- *
- * Outputs
- * ───────
- *   fade_json : FADE results JSON (HyPhy standard output)
+ *  Consumes:  gene id, direction ('top' or 'bottom'), protein alignment (taxa names
+ *             equal to the tree labels), annotated tree, lg_dat (model .dat file
+ *             staged in the task directory)
+ *  Produces:  <gene>.<direction>.FADE.json (HyPhy standard output)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Batched run ────────────────────────────────────────────────────────────────
 
 process FADE_BATCHED {
     tag "$batchID (${batchSize} genes, ${direction})"
@@ -27,8 +29,7 @@ process FADE_BATCHED {
                mode: 'copy', overwrite: true,
                pattern: '*.FADE.json'
 
-    // Batch-level success is independent of individual gene failures —
-    // the batch script logs failures and continues.
+    // A failed gene does not fail the task: the batch script logs it and continues.
 
     input:
     tuple val(batchID), val(direction), val(batchSize), val(batchManifestText),
@@ -45,9 +46,8 @@ process FADE_BATCHED {
     def conc         = params.fade_concentration ?: 0.5
     def runnerMode   = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
     def nWorkers     = (task.cpus ?: 8) as int
-    // Each HyPhy call gets a fair share of the task's allocated CPUs.
-    // floor(task.cpus / workers), minimum 1 — prevents HyPhy from reading
-    // the full hardware CPU count of the node and oversubscribing it.
+    // Each HyPhy call gets floor(task.cpus / workers) CPUs, at least 1, so that it does
+    // not read the CPU count of the whole node and oversubscribe it.
     def cpuPerWorker = Math.max(1, (task.cpus as int).intdiv(nWorkers))
 
     def mcmc_args = (method == 'Variational-Bayes') ? "" :
@@ -75,6 +75,9 @@ bash ${baseDir}/subworkflows/FADE/local/src/run_hyphy_fade_batch.sh \\
 """
 }
 
+
+// ── Single-gene run ────────────────────────────────────────────────────────────
+
 process FADE_RUN {
     tag "${gene_id}|${direction}"
     label 'process_long_compute'
@@ -83,7 +86,7 @@ process FADE_RUN {
                mode: 'copy', overwrite: true,
                pattern: '*.FADE.json'
 
-    errorStrategy 'ignore'  // Skip genes that fail (e.g., too few FG branches)
+    errorStrategy 'ignore'  // a gene that fails (e.g. too few foreground branches) is skipped
 
     input:
     tuple val(gene_id), val(direction), path(fasta), path(annotated_tree)
@@ -98,7 +101,7 @@ process FADE_RUN {
     def grid    = params.fade_grid    ?: 20
     def conc    = params.fade_concentration ?: 0.5
 
-    // MCMC-specific args (only meaningful when method != Variational-Bayes)
+    // MCMC options apply only when the method is not Variational-Bayes
     def mcmc_args = (method == 'Variational-Bayes') ? "" :
         """--chains ${params.fade_chains ?: 5} \\
            --chain-length ${params.fade_chain_length ?: 2000000} \\

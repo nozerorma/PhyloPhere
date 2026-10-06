@@ -1,46 +1,32 @@
 #!/usr/bin/env nextflow
+// ta_name_curation.nf — Rename or prune species-tree tips to match the alignment species names.
+// PhyloPhere | subworkflows/TRAIT_ANALYSIS/
 
 /*
- * NAME_CURATION subworkflow
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  NAME_CURATION: curates the input species tree so that its tip labels match the
+ *  species names of the alignment FASTA headers, which the traitfile and the
+ *  alignments are joined on downstream. Tips are translated through a shared NCBI
+ *  tax_id (taxonomic synonyms, genus renames) and tips with no counterpart in the
+ *  alignments are pruned. The callers (CONTRAST_SELECTION, REPORTING) use the
+ *  curated tree in place of params.tree.
  *
- * Curates the input species tree so that all tip labels match the naming
- * convention used in the alignment files. This is a prerequisite for
- * downstream CT, RERConverge, and FADE analyses that join tree-derived
- * species names (traitfile) with alignment FASTA headers.
+ *  Species names of the alignments come from:
+ *    - params.ali_sp_names, a precomputed flat file (fast path), or
+ *    - DERIVE_ALI_SP_NAMES, which scans every FASTA header of params.alignment
+ *      (slow path: it reads every alignment file, minutes for thousands of genes).
+ *  To avoid the slow path, generate the file once and set params.ali_sp_names:
  *
- * Strategy
- * --------
- * 1. Obtain the canonical set of species names present in the alignments:
- *      a. If params.ali_sp_names is provided: use it directly (fast path).
- *      b. Otherwise: scan all FASTA files in the alignment directory to
- *         extract unique header labels (slow path — reads every alignment
- *         file; see warning below).
- * 2. Use params.tax_id as a shared NCBI taxon-ID key to translate tree tip
- *    labels that differ from alignment names (e.g. taxonomic synonyms).
- * 3. Prune tree tips that have no match in the alignment species set after
- *    translation.
+ *    grep -rh '^>' <alignment_dir> | sed 's/^>//' | sort -u > ali_sp_names.txt
  *
- * Output
- * ------
- *   curated_tree  —  Newick tree whose tip labels exactly match alignment
- *                    headers; passed downstream as the canonical tree,
- *                    replacing params.tree everywhere.
- *   report        —  TSV summarising each tip: kept / renamed / pruned.
- *
- * WARNING (slow path)
- * -------------------
- * When ali_sp_names is NOT provided, this subworkflow scans every alignment
- * file in the alignment directory to build the species list. For large
- * datasets (thousands of genes × hundreds of species) this can take several
- * minutes. It is strongly recommended to pre-generate the file once with:
- *
- *   grep -rh '^>' <alignment_dir> | sed 's/^>//' | sort -u > ali_sp_names.txt
- *
- * and set params.ali_sp_names in your config to avoid this overhead on every
- * run.
+ *  Consumes:  species tree (Newick), tax_id file (TSV/CSV with tax_id and species,
+ *             or a NO_FILE sentinel: tips are then matched by exact name only)
+ *  Produces:  curated_tree (Newick) and report (TSV: original_name, curated_name,
+ *             fate = kept, renamed or pruned, per tip), published in name_curation/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
-// ─── Processes ────────────────────────────────────────────────────────────────
+// ── Processes ────────────────────────────────────────────────────────────────
 
 process DERIVE_ALI_SP_NAMES {
     tag "derive species names from alignments"
@@ -92,7 +78,7 @@ process TREE_CLEANUP {
     """
 }
 
-// ─── Workflow ─────────────────────────────────────────────────────────────────
+// ── Workflow ─────────────────────────────────────────────────────────────────
 
 workflow NAME_CURATION {
     take:

@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-# project.py — ProjectConfig: the single source-of-truth container for the whole GUI.
+# project.py — ProjectConfig: the container that holds the whole state of the GUI.
 # PhyloPhere | gui/models/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Every tab reads/writes a slice of this object; gui/generation/ renders it to the two
-shell scripts; gui/project_io.py (de)serializes it to a JSON project file.
+ProjectConfig: every tab reads and writes one slice of this object, gui/generation/
+renders it into the two shell scripts, and gui/project_io.py (de)serializes it to a
+JSON project file.
 
-`schema_version` and `flavor` exist from day one even though there is currently only
-one schema version and one flavor ("primates") — this keeps a future TOGA-style
-env-var-only pathway (explicitly deferred, see implementation plan) an additive
-change rather than a breaking migration.
+`schema_version` identifies the layout of the JSON file (checked by
+serialization.migrate). `flavor` names the dataset family of the project; "primates"
+is the only value.
+
+Imported by: gui/project_io.py, gui/autosave_io.py, gui/generation/, gui/widgets/main_window.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────

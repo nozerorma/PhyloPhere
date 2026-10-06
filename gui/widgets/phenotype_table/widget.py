@@ -4,6 +4,15 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+PhenotypeTableWidget: the phenotype catalogue table with Add row / Remove selected buttons.
+
+Emits `changed` on any edit, insertion or removal of rows, so the Runtime tab can
+mark the project dirty.
+
+Imported by: gui/widgets/tabs/runtime_tab.py
+"""
+
 # ── Third-party ───────────────────────────────────────────────────────────────
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QTableView, QVBoxLayout, QWidget

@@ -1,27 +1,61 @@
 #!/usr/bin/env python3
+#
+#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
+#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
+#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
+#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
+#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
+#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
+#
+# PHYLOPHERE: A Nextflow pipeline including a complete set
+# of phylogenetic comparative tools and analyses for Phenome-Genome studies
+#
+# Github: https://github.com/nozerorma/caastools/nf-phylophere
+#
+# Author:         Miguel Ramon (miguel.ramon@upf.edu)
+#
+# File: main.py
+#
+
 """
-CT_ACCUMULATION entry point — adapted for PhyloPhere CT_ACCUMULATION module.
+CT_ACCUMULATION: Entry point for the CAAS gene-level accumulation pipeline.
 
-Orchestrates two phases:
-  1. aggregate  — build global position matrix and per-group position CSVs
-  2. randomize  — permutation test for per-gene CAAS accumulation
+Runs two phases, selected with --tool:
+  1. aggregate  builds the global position table (<prefix>_global.csv) from the alignments,
+                the genomic-info table, the traitfile and the filtered discovery table
+                (src/aggregation/concatenate.py).
+  2. randomize  tests, for each gene and grouping scheme (us, gs1 to gs4), whether it
+                accumulates more CAAS than a null predicts and writes the empirical
+                p-values (src/randomization/randomize.py).
+With --tool both the two phases run in sequence on the same arguments.
 
-Changes vs. original:
-  - Randomize phase exports five independent per-group outputs (us, gs1-gs4).
-  - No FDR/gene-list outputs in randomize phase.
+Called by:  CT_ACCUMULATION Nextflow processes (ctacc_run.nf CT_ACCUMULATION_AGGREGATE and
+            CT_ACCUMULATION_RANDOMIZE → python main.py --tool aggregate | randomize)
+Usage:
+    python main.py --tool [aggregate|randomize|both] [OPTIONS]
+
+Run `python main.py --help` for the full option list.
 """
 
+# ── Standard library ──────────────────────────────────────────────────────────
 import argparse
 import os
 import time
 import logging
+
+# ── Third-party ───────────────────────────────────────────────────────────────
 from tqdm import tqdm
 
+# ── Package ───────────────────────────────────────────────────────────────────
 from src.aggregation.concatenate import aggregate as aggregate_fn
 from src.randomization.randomize import main as randomize_fn
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
 def timed_execution(func, args, description):
+    """Run func(args) under a banner, a progress bar and an elapsed-time report."""
     print(f"\n=== {description.upper()} ===")
     start_time = time.time()
     with tqdm(total=1, desc=description, bar_format="{l_bar}{bar} [elapsed: {elapsed}]") as pbar:
@@ -30,7 +64,11 @@ def timed_execution(func, args, description):
     print(f"{description} completed in {time.time() - start_time:.2f} seconds.\n")
 
 
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+
 def main():
+    """Parse the arguments, check that each selected phase has what it needs, and run it."""
     parser = argparse.ArgumentParser(
         description="CT_ACCUMULATION: CAAS gene accumulation randomization pipeline",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -43,7 +81,7 @@ def main():
     parser.add_argument("--output-prefix", default="accumulation",
                         help="Prefix for output files (default: 'accumulation')")
 
-    # Aggregation args
+    # Aggregation arguments
     parser.add_argument("--alignment-dir",    help="Directory containing alignment files")
     parser.add_argument("--genomic-info",     help="TSV: gene, chr, start, end, length")
     parser.add_argument("--species-list",     help="Traitfile (3-col, no header: species trait pair)")
@@ -52,7 +90,7 @@ def main():
     parser.add_argument("--alignment-format", default="phylip-relaxed")
     parser.add_argument("--entropy-dir",      help="Directory containing Valdar entropy (.entropy.tsv) files")
 
-    # Randomization args
+    # Randomization arguments
     parser.add_argument("--global-csv",                 help="Path to _global.csv from aggregation (contains masked + iscaas)")
     parser.add_argument("--background-positions", dest="background_positions",
                         help="caastools background.output (gene<TAB>tested msa positions). "
@@ -123,7 +161,7 @@ def main():
             rand_args = argparse.Namespace(
                 global_csv=args.global_csv,
                 caas_csv=args.caas_csv,
-                # Eligible null pool = tested positions ∩ cleaned-background genes.
+                # The eligible null pool is the tested positions of the cleaned-background genes
                 background_positions=args.background_positions,
                 bg_caas=args.bg_caas,
                 output_prefix=args.output_prefix,

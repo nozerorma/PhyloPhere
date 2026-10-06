@@ -1,15 +1,27 @@
 #!/usr/bin/env nextflow
+// cosmic.nf — Map CAAS positions to COSMIC Mutant Census somatic mutations.
+// PhyloPhere | subworkflows/VEP/
 
 /*
- * COSMIC_MAP
- * ──────────
- * Maps CAAS variants to COSMIC Mutant Census somatic mutations.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  COSMIC_MAP: converts each CAAS position to its hg38 codon through the per-gene
+ *  MAP files and keeps the COSMIC missense mutations of that codon whose
+ *  ancestral→derived amino-acid change matches the CAAS (map_to_cosmic.py).
+ *
+ *  Consumes:  position_scores.tsv (SCORING), directory of per-gene MAP files,
+ *             COSMIC Mutant Census GRCh38 table (gzip TSV)
+ *  Produces:  vep/cosmic_scores.tsv (header only when nothing matches; empty when
+ *             the database file is missing)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── COSMIC mapping ───────────────────────────────────────────────────────────
 
 process COSMIC_MAP {
     tag "cosmic"
     label 'process_long_compute'
-    errorStrategy 'ignore'
+    errorStrategy 'ignore'   // a failed annotation never stops the run
 
     publishDir path: "${params.outdir}/vep",
                mode: 'copy', overwrite: true,

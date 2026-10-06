@@ -1,4 +1,13 @@
-"""Public exports for convergence classification and disambiguation."""
+# __init__.py — Package exports of the convergence classification and disambiguation functions.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/convergence/
+
+"""
+Public exports for convergence classification and disambiguation: the node-state helpers of convergence.py and the
+per-gene and per-position entry points of disambiguate_single.py.
+
+Imported by: the submodules are imported directly (`src.convergence.<module>`) by src/core/driver.py,
+src/core/observed.py and src/utils/gene_wrapper.py
+"""
 
 from .convergence import (
     NodeStates,

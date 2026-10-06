@@ -1,4 +1,12 @@
-"""Per-gene replay of labelings: the code the observed labeling (b_0) and the permuted ones share.
+# driver.py — Load a gene's ASR context once and score and pool labelings against it.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/core/
+
+"""
+Per-gene replay of labelings: the code the observed labeling (b_0) and the permuted ones share.
+
+Imported by: observed_b0_main.py, explain_positions.py, src/utils/gene_wrapper.py
+Inputs: per-gene alignment, species tree, taxid mapping and the ASR cache directory (PAML is run when a gene is absent)
+Outputs: in-memory gene contexts, scored labelings and pooled per-side records
 
 One gene's ASR is loaded once (`load_gene_context`), every labeling is scored against it through
 `analyze_gene_disambiguation` (`score_labelings`), and the hypotheses of a cycle are collapsed into one
@@ -41,8 +49,8 @@ def _cached_asr(gene: str, config: SingleGeneASRConfig, alignment_data) -> Optio
 
 
 def _read_cached(gene: str, config: SingleGeneASRConfig, alignment_data) -> Tuple[Optional[Any], str]:
-    """(result, state) of a gene's cache entry: 'hit', 'miss' (no entry or no posteriors) or 'corrupt' (an entry that does not parse,
-    as one left half-written by a crashed run or still being written by another process)."""
+    """(result, state) of a gene's cache entry: 'hit', 'miss' (no entry or no posteriors) or 'corrupt' (an entry
+    that does not parse, as one left half-written by a crashed run or still being written by another process)."""
     try:
         found = _cached_asr(gene, config, alignment_data)
     except Exception as exc:  # noqa: BLE001 - any parse failure of a partial entry
@@ -55,8 +63,9 @@ def _read_cached(gene: str, config: SingleGeneASRConfig, alignment_data) -> Tupl
 def _gene_cache_lock(cache_dir: str, gene: str):
     """Exclusive lock, across processes, on one gene's cache entry.
 
-    The workers of a pool replay chunks of the same gene and every chunk loads its context. On a cold cache the entry is written by
-    PAML while the others read it: whoever holds this lock computes, the rest wait and then find the entry complete."""
+    The workers of a pool replay chunks of the same gene and every chunk loads its context. On a cold cache the
+    entry is written by PAML while the others read it: whoever holds this lock computes, the rest wait and then
+    find the entry complete."""
     directory = Path(cache_dir)
     directory.mkdir(parents=True, exist_ok=True)
     with open(directory / f".{re.sub(r'[^A-Za-z0-9_.-]', '_', gene)}.lock", "a") as handle:
@@ -83,7 +92,8 @@ def load_gene_context(
     The ASR comes from `asr_cache_dir` when the gene is there; otherwise PAML runs (inside `codeml_slot`, with
     `threads` threads) and writes it to the cache. A gene is not always cached: one that only a permuted labeling
     hits is never in a cache made from the observed run, and leaving it out would bias the null. Only one process
-    computes a given gene (`_gene_cache_lock`); the others wait for it, and an entry that does not parse is computed again.
+    computes a given gene (`_gene_cache_lock`); the others wait for it, and an entry that does not parse is
+    computed again.
     The tree is rebuilt from the PAML tree so that node ids align with the posteriors.
     Returns a context dict, or None if the alignment or the ASR is unavailable.
     """
@@ -166,7 +176,7 @@ def score_labelings(
 ) -> List[Tuple[str, List[Any]]]:
     """Score every labeling of `tags` that has discovery entries: [(tag, per-position records)].
 
-    A labeling whose scoring raises is skipped (logged at debug), as the null has always done.
+    A labeling whose scoring raises is skipped (logged at debug).
     """
     alignment_data = ctx["alignment_data"]
     tree_data = ctx["tree_data"]
@@ -237,7 +247,7 @@ def pool_labelings(
     Every axes-only record carries `.sides`, the raw compute_domain_scores return
     {"top": {...}, "bottom": {...}, "domain_meta": {...}} for one (position, scheme, hypothesis).
     fop_pool.pool_domains reduces M >= 1 such records to one score per phenotype side (M == 1 is
-    the plain PSS-weighted mean over the K fixed Voronoi domains), the same statistic the observed
+    the plain PSS-weighted mean over the fixed Voronoi domains), the same statistic the observed
     path emits through disambiguate_single._emit_pooled_side_rows.
 
     With `fop_pairs` the "<base>~H<m>" hypotheses of a base cycle are pooled together, weighted by
@@ -266,7 +276,7 @@ def pool_labelings(
             pooled_by_cycle.setdefault(base, []).extend(_expand_pooled(pos, grp, None, pooled))
         return list(pooled_by_cycle.items())
 
-    # Non-FOP: one hypothesis per record. pool_domains still runs (M == 1) so the observed and
+    # Without fop_pairs: one hypothesis per record. pool_domains still runs (M == 1) so the observed and
     # the null go through the exact same reducer.
     expanded = []
     for cyc, recs in results:

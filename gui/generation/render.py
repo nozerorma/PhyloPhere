@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-# render.py — Jinja2 rendering: ProjectConfig -> the two generated shell scripts.
+# render.py — Jinja2 rendering: ProjectConfig → the batch and single-phenotype shell scripts.
 # PhyloPhere | gui/generation/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Pure functions, no PySide6 import — reusable headless (tests, a future CLI) without
-pulling in Qt. See gui/generation/context.py for the shared env-var naming contract
-between the two templates.
+Pure functions, no PySide6 import, so scripts can be rendered without Qt. The batch
+script (sbatch_array.sh.j2) exports the run configuration and dispatches one
+phenotype row per call to the single-phenotype script (run_single.sh.j2). The
+environment uses StrictUndefined: a template variable missing from the context
+raises instead of rendering empty. See gui/generation/context.py for the context
+and the variable-name contract between the two templates.
+
+Imported by: gui/widgets/main_window.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -23,6 +28,8 @@ from gui.models.project import ProjectConfig
 
 @lru_cache(maxsize=1)
 def _environment() -> jinja2.Environment:
+    # Built once; trim_blocks and lstrip_blocks keep the {% %} control lines out of
+    # the generated shell, and keep_trailing_newline preserves the final newline.
     return jinja2.Environment(
         loader=jinja2.PackageLoader("gui.generation", "templates"),
         trim_blocks=True,
@@ -40,11 +47,15 @@ def render_batch(
 ) -> str:
     """Render the batch-runner script for the given project.
 
-    single_runner_filename overrides the auto-computed name of the companion
-    per-phenotype script this one dispatches to (SINGLE_RUNNER=...) — must match
-    whatever filename that script is actually saved as (see
-    MainWindow.generate_scripts, which overrides RuntimeConfig.script_base_name),
-    or the generated batch script looks for a file that doesn't exist.
+    postproc_mode ("exploratory" or "filter") selects the post-processing pass the
+    pair of scripts runs; reuse_exploratory makes the "filter" pass read the output
+    of the exploratory pass instead of recomputing it.
+
+    single_runner_filename overrides the derived name of the per-phenotype script
+    this one dispatches to (SINGLE_RUNNER). It must match the filename under which
+    that script is saved (MainWindow.generate_scripts applies
+    RuntimeConfig.script_base_name to both), or the batch script points at a file
+    that does not exist.
     """
     ctx = build_context(project)
     ctx["reuse_exploratory"] = reuse_exploratory

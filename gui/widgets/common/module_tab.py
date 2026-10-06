@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
-# module_tab.py — ModuleTabWidget: reusable base class for all 9 module tabs.
+# module_tab.py — ModuleTabWidget: the shared widget behind every module tab.
 # PhyloPhere | gui/widgets/common/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Enable toggle + blurb + disclaimer + essential-fields group + collapsed-by-
-default advanced-fields disclosure + free-text raw-flags box — built once from a
-ModuleTabSpec + FieldSpec list (see gui/widgets/common/specs.py) rather than 9
-separately hand-rolled layouts.
+ModuleTabWidget: enable toggle, blurb, disclaimer, essential fields, collapsed
+advanced fields and a raw-flags box, built from a ModuleTabSpec.
 
-Enable-toggle behavior: the essential-fields group (and the advanced-fields
-disclosure, if the spec has any) is disabled when the module is off. The tab
-itself is never hidden or tab-disabled — the disclaimer is exactly what a user
-needs to read when a module is off, pointing at the Precomputed Run tab
-(gui/widgets/tabs/precomputed_tab.py) for the standalone/resume input that
-substitutes for this module's output.
+One widget class serves every module tab: each tab file declares a ModuleTabSpec
+(see gui/widgets/common/specs.py) and this class builds the layout and binds each
+field to the module's config dataclass.
 
-No tab currently populates its own `fallback_fields` (every standalone/resume
-input now lives on the Precomputed Run tab instead) — the mechanism stays
-available for a future module-specific case, but the group box housing it is
-only built when a spec's `fallback_fields` is actually non-empty, so today no
-tab shows an empty, confusingly-enabled box for it.
+Enable toggle: when the module is off, the essential-fields group (and the
+advanced disclosure, if the spec has one) is disabled and the disclaimer is shown.
+The tab itself is never hidden, because the disclaimer is what the user needs to
+read when a module is off: it points at the Precomputed Run tab
+(gui/widgets/tabs/precomputed_tab.py) for the input that substitutes for the
+module's output.
+
+`fallback_fields` (inputs used only while the module is off) are supported, but no
+tab populates them, since those inputs live on the Precomputed Run tab. The group
+box is built only when a spec lists some, so no tab shows an empty box.
+
+Imported by: gui/widgets/tabs/{accumulation,caas,disambiguation,enrichment,fade,
+rerconverge,scoring,vep}_tab.py
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────
@@ -46,9 +49,9 @@ from gui.widgets.common.choice_with_other_field import ChoiceWithOtherField
 from gui.widgets.common.path_field import PathField
 from gui.widgets.common.specs import FieldSpec, ModuleTabSpec
 
-# Label decoration per FieldSpec.importance tier (see specs.py's Importance docstring).
-# "required" gets a red asterisk + bold label; "default" gets a tooltip nudge only
-# (no visual noise on every fine-tuning knob); "optional" gets a muted label color.
+# Label decoration per FieldSpec.importance tier (see Importance in specs.py).
+# "required": bold red label with an asterisk; "default": tooltip only, to avoid
+# visual noise on every fine-tuning parameter; "optional": muted label color.
 _IMPORTANCE_LABEL_STYLE = {
     "required": "QLabel { font-weight: 600; color: #b91c1c; }",
     "default": "",
@@ -110,10 +113,9 @@ class ModuleTabWidget(QWidget):
         self._essential_form = QFormLayout(self.essential_group)
         layout.addWidget(self.essential_group)
 
-        # Fine-tuning knobs most runs leave at their conf/*.config default, tucked
-        # behind a collapsed-by-default disclosure so they don't read as equally
-        # important to the essential fields above. Only built when the spec
-        # actually lists some (a few small tabs — e.g. VEP — have none).
+        # Fine-tuning parameters most runs leave at their conf/*.config default,
+        # kept behind a collapsed disclosure so they do not compete with the
+        # essential fields above. Built only when the spec lists some.
         self.advanced_section: CollapsibleSection | None = None
         self._advanced_form: QFormLayout | None = None
         if spec.advanced_fields:
@@ -126,9 +128,8 @@ class ModuleTabWidget(QWidget):
             )
             layout.addWidget(self.advanced_section)
 
-        # Only built when the spec actually lists module-specific fallback fields
-        # (none do today — see this file's module docstring); avoids an empty,
-        # always-enabled-when-disabled box with nothing in it.
+        # Built only when the spec lists fallback fields (see the module docstring),
+        # so no empty box appears.
         self.fallback_group: QGroupBox | None = None
         self._fallback_form: QFormLayout | None = None
         if spec.fallback_fields:
@@ -249,8 +250,8 @@ class ModuleTabWidget(QWidget):
             if f.importance == "required":
                 translated_label = f"{translated_label} *"
             label_widget.setText(translated_label)
-            # Note: the importance-tier prefix (see _IMPORTANCE_TOOLTIP_PREFIX) stays in
-            # English regardless of `lang` — only the field's own help text is translated.
+            # The importance-tier prefix (_IMPORTANCE_TOOLTIP_PREFIX) stays in
+            # English regardless of `lang`; only the field's own help text is translated.
             prefix = _IMPORTANCE_TOOLTIP_PREFIX.get(f.importance, "")
             translated_help = tr(f.help, lang) if f.help else ""
             tooltip = prefix + translated_help if prefix else translated_help

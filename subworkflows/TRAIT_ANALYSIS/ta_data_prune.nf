@@ -1,8 +1,24 @@
 #!/usr/bin/env nextflow
+// ta_data_prune.nf — Remove listed and phenotype-less species from the trait table and tree.
+// PhyloPhere | subworkflows/TRAIT_ANALYSIS/
 
 /*
-#  Trait analysis: optional data pruning (Rmarkdown)
-*/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  DATASET_PRUNE: renders 0.Data_pruning.Rmd, which drops the species of
+ *  params.prune_list (required) and the species with a missing phenotype or
+ *  count value from the trait table, the tree and the per-species statistics.
+ *  Species of params.prune_list_secondary only lose their secondary-trait value
+ *  in the plots. Runs only when params.prune_data is set.
+ *
+ *  Consumes:  trait file, species tree
+ *  Produces:  data_exploration/0.Data-pruning/ (pruned_trait_file.tsv,
+ *             pruned_tree_file.nwk, pruned_trait_stats.csv), the report figures
+ *             and tables under data_exploration/, and the HTML report
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+
+
+// ── Pruning report ───────────────────────────────────────────────────────────
 
 process DATASET_PRUNE {
     tag "dataset_prune"
@@ -40,6 +56,7 @@ process DATASET_PRUNE {
     def trait_type = params.trait_type ?: ''
     def max_contrasts = params.max_contrasts ?: '0'
 
+    // The two branches are identical except that the container one runs Rscript through the image entrypoint.
     if (params.use_singularity | params.use_apptainer) {
         """
         cp -R ${local_dir}/* .

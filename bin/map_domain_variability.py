@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
+# map_domain_variability.py — Map Pfam domain hits onto per-position Valdar variability.
+# PhyloPhere | bin/
+
 """
-Map Pfam domain hits (from hmmscan) onto per-position Valdar variability data.
+MapDomainVariability: for every hmmscan domain hit on the reference sequence of a gene,
+summarizes the variability of the alignment columns that the domain covers.
 
-Prerequisite: run hmmscan on reference sequences extracted from PROT_RAW/:
-  # Extract Homo_sapiens sequences from all PROT_RAW/*.fa files
-  for f in PROT_RAW/*.fa; do
-      gene=$(basename $f .fa)
-      awk -v gene="$gene" '/^>Homo_sapiens/{found=1; print ">"gene; next}
-           found && /^>/{exit} found{print}' "$f"
-  done > ref_seqs.fa
+Also provides the helpers imported by compute_domain_variability.py (read_fasta,
+parse_domtblout, get_ref_seq).
 
-  hmmscan --domtblout hmmscan.domtblout --cpu 8 /path/to/Pfam-A.hmm ref_seqs.fa
+Called by:  run directly; imported by compute_domain_variability.py
+Inputs:     --var_dir            directory of <gene>.entropy.tsv (compute_variability.py)
+            --prot_raw_dir       directory of <gene>.fa protein alignments
+            --hmmscan_domtblout  hmmscan --domtblout output run on the ungapped reference sequences,
+                                 one FASTA record per gene named as the gene (e.g. the Homo_sapiens
+                                 record of each alignment)
+            --ref_species        substring of the reference header (default Homo_sapiens)
+            --evalue_threshold   maximum i-evalue of a hit (default 0.01)
+Outputs:    --out_tsv  gene, pfam_id, domain_instance, ali_start, ali_end, n_positions, n_analyzed,
+                       mean_variability, max_variability, mean_gap_fraction
 
-Output: domain_variability.tsv
-  gene, pfam_id, domain_instance, ali_start, ali_end, n_positions, n_analyzed,
-  mean_variability, max_variability, mean_gap_fraction
-
-Coordinate system:
-  - hmmscan ali_from/ali_to = 1-based ungapped sequence positions in the reference protein
-  - seq_pos_to_ali_col maps those → 0-based MSA alignment columns
-  - entropy.tsv position column = 1-based MSA column (0-based + 1)
+Coordinates: hmmscan ali_from / ali_to are 1-based positions in the ungapped reference
+sequence; seq_pos_to_ali_col maps them to 0-based alignment columns, and the position column
+of entropy.tsv is the 1-based alignment column (0-based + 1).
 """
 
 import argparse
@@ -30,11 +33,11 @@ import sys
 from collections import defaultdict
 
 
-# ---------------------------------------------------------------------------
-# I/O
-# ---------------------------------------------------------------------------
+# ── I/O ───────────────────────────────────────────────────────────────────────
+
 
 def read_fasta(path):
+    """Read a FASTA file into [(header, upper-cased sequence)]."""
     seqs = []
     header, buf = None, []
     with open(path) as fh:
@@ -52,24 +55,22 @@ def read_fasta(path):
     return seqs
 
 
-# ---------------------------------------------------------------------------
-# hmmscan domtblout parser
-# ---------------------------------------------------------------------------
+# ── hmmscan domtblout parser ──────────────────────────────────────────────────
+
 
 def parse_domtblout(domtblout_path, evalue_threshold=0.01):
-    """
-    Parse hmmscan --domtblout output.
-    Relevant columns (0-indexed, space-separated):
-      0:  target_name  (HMM NAME field, e.g. 'Ig_2' — human-readable but not stable)
-      1:  accession    (HMM ACC field, e.g. 'PF13895.13' → strip to 'PF13895')
-      3:  query_name   (gene name)
-      17: ali_from     (1-based start in query sequence)
-      18: ali_to       (1-based end in query sequence)
+    """Parse hmmscan --domtblout output into one dict per domain hit with i-evalue <= evalue_threshold.
+
+    Columns used (0-indexed, whitespace-separated):
+      1:  accession    HMM ACC, e.g. 'PF13895.13'; the version is dropped
+      3:  query_name   gene name
       11: i-evalue
-    Returns list of dicts; domain_instance is per-(gene, pfam_id) counter.
+      17: ali_from     1-based start in the query sequence
+      18: ali_to       1-based end in the query sequence
+    domain_instance numbers the hits of each (gene, pfam_id) in file order, from 1.
     """
     hits = []
-    domain_counter = defaultdict(int)  # (gene, pfam_id) → instance count
+    domain_counter = defaultdict(int)  # (gene, pfam_id) → hits so far
 
     with open(domtblout_path) as fh:
         for line in fh:
@@ -108,15 +109,11 @@ def parse_domtblout(domtblout_path, evalue_threshold=0.01):
     return hits
 
 
-# ---------------------------------------------------------------------------
-# Reference sequence helpers
-# ---------------------------------------------------------------------------
+# ── Reference sequence helpers ────────────────────────────────────────────────
+
 
 def get_ref_seq(fasta_path, ref_species='Homo_sapiens'):
-    """
-    Find the sequence whose header contains ref_species (case-insensitive substring).
-    Returns (header, seq) or None.
-    """
+    """(header, sequence) of the first record whose header contains ref_species (case-insensitive), or None."""
     seqs = read_fasta(fasta_path)
     pattern = ref_species.lower()
     for header, seq in seqs:
@@ -126,10 +123,9 @@ def get_ref_seq(fasta_path, ref_species='Homo_sapiens'):
 
 
 def seq_pos_to_ali_col(prot_seq):
-    """
-    Build mapping: 1-based sequence position (non-gap char count) → 0-based alignment column.
-    Gap characters: '-', 'X'.
-    E.g. for 'A-BC': {1: 0, 2: 2, 3: 3}
+    """Map the 1-based position in the ungapped sequence to the 0-based alignment column.
+
+    '-' and 'X' do not count as residues. E.g. for 'A-BC': {1: 0, 2: 2, 3: 3}.
     """
     mapping = {}
     seq_pos = 0
@@ -140,16 +136,13 @@ def seq_pos_to_ali_col(prot_seq):
     return mapping
 
 
-# ---------------------------------------------------------------------------
-# Entropy TSV loader
-# ---------------------------------------------------------------------------
+# ── Entropy TSV loader ────────────────────────────────────────────────────────
+
 
 def load_entropy_tsv(tsv_path):
-    """
-    Read <gene>.entropy.tsv.
-    Returns dict: {position_1based: {'t': float, 'r': float, 'g': float,
-                                      'C_trident': float, 'variability': float}}
-    position is the 1-based MSA column as written by compute_variability.py.
+    """Read <gene>.entropy.tsv into {position: {'t', 'r', 'g', 'C_trident', 'variability'}}.
+
+    position is the 1-based alignment column, as written by compute_variability.py.
     """
     data = {}
     with open(tsv_path) as fh:
@@ -172,16 +165,14 @@ def load_entropy_tsv(tsv_path):
     return data
 
 
-# ---------------------------------------------------------------------------
-# Domain statistics
-# ---------------------------------------------------------------------------
+# ── Domain statistics ─────────────────────────────────────────────────────────
+
 
 def compute_domain_stats(ali_cols_0based, entropy_data):
-    """
-    Collect entropy rows for the given 0-based alignment columns.
-    entropy_data uses 1-based keys → convert: key = ali_col_0based + 1.
-    Returns dict with n_positions, n_analyzed, mean_variability,
-    max_variability, mean_gap_fraction.
+    """Variability statistics over 0-based alignment columns (entropy_data is keyed by column + 1).
+
+    Returns n_positions (columns requested), n_analyzed (columns found in entropy_data),
+    mean_variability, max_variability and mean_gap_fraction (NaN when no column was found).
     """
     variabilities = []
     gap_fracs = []
@@ -209,9 +200,8 @@ def compute_domain_stats(ali_cols_0based, entropy_data):
     }
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -236,7 +226,7 @@ def main():
     if not hits:
         print(f'WARNING: no domain hits found in {args.hmmscan_domtblout}', file=sys.stderr)
 
-    # Group hits by gene for efficient processing
+    # one pass per gene, so each alignment and entropy table is read once
     hits_by_gene = defaultdict(list)
     for h in hits:
         hits_by_gene[h['gene']].append(h)
@@ -260,13 +250,13 @@ def main():
             continue
         _, ref_seq = ref
 
-        pos_map = seq_pos_to_ali_col(ref_seq)  # 1-based seq pos → 0-based ali col
+        pos_map = seq_pos_to_ali_col(ref_seq)  # 1-based sequence position → 0-based alignment column
         entropy_data = load_entropy_tsv(ent_tsv)
 
         for hit in gene_hits:
             ali_start = hit['ali_start']
             ali_end = hit['ali_end']
-            # Collect 0-based alignment columns for this domain range
+            # alignment columns covered by the domain
             ali_cols = [pos_map[p] for p in range(ali_start, ali_end + 1) if p in pos_map]
             if not ali_cols:
                 print(f'WARN {gene} {hit["pfam_id"]}: no alignment columns for '

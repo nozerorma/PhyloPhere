@@ -1,7 +1,16 @@
-# Palettes
+# palettes.R — Colorblind-friendly taxon palettes for the trait-analysis plots.
+# PhyloPhere | subworkflows/TRAIT_ANALYSIS/local/src/
+# =============================================================================
+# Sourced by: commons.R (itself sourced by the trait-analysis Rmd reports)
+#
+# The reports pick a palette by name: `<clade_name>_palette` (and its darkened
+# version `dark_<clade_name>_palette`) are resolved by get_palette_values() in
+# plotting_fun.R. Palette entries are named by the values of the taxon column
+# (`taxon_of_interest`). Taxa absent from the palette get a color from
+# `fallback_palette`. To support a new clade, add a `<clade>_palette` here.
+# =============================================================================
 
-# Comment, uncomment and add families as needed depending on the scope of the analysis.
-
+# Fallback logger, used only when commons.R has not defined debug_log().
 if (!exists("debug_log", inherits = TRUE)) {
   debug_log <- function(...) {
     msg <- sprintf(...)
@@ -9,27 +18,30 @@ if (!exists("debug_log", inherits = TRUE)) {
   }
 }
 
-# Load paletteer for colorblind-friendly palettes
 suppressPackageStartupMessages({
   library(paletteer)
 })
 
-# Tableau 10 colorblind-friendly palette as base
+# ── Base colors ───────────────────────────────────────────────────────────────
+
+# Tableau 10, the base of the palettes below.
 tableau_10_cb <- paletteer_d("ggthemes::Tableau_10")
 
-# Helper function to darken colors
+# Multiply the RGB channels of `hex` by `factor` (<1 darkens), keeping the hue.
 darken_color <- function(hex, factor = 0.6) {
   rgb_vals <- col2rgb(hex) / 255
   darkened <- rgb_vals * factor
   rgb(darkened[1], darkened[2], darkened[3])
 }
 
-## Colorblind-friendly primate color palette
-## Using Tableau 10 and Paul Tol palettes for maximum accessibility
-## Removed Callitrichidae as NCBI has collapsed it into Cebidae, but can be added back if needed with a distinct color
+# ── Primates, colored by family ───────────────────────────────────────────────
+
+# Family colors drawn mostly from Tableau 10. Callitrichidae shares the Cebidae
+# color because NCBI taxonomy places it in Cebidae; give it its own color if a
+# trait file lists it separately.
 primates_palette <- c(
   "Aotidae"           = "#4E79A7",  # Blue (Tableau)
-  "Callitrichidae"    = "#E15759",  # Vermillion (Tableau), legacy color for compatibility, but not used in NCBI taxonomy
+  "Callitrichidae"    = "#E15759",  # Vermillion (Tableau), same as Cebidae
   "Cebidae"           = "#E15759",  # Vermillion (Tableau)
   "Atelidae"          = "#76B7B2",  # Bluish_green (Tableau)
   "Cercopithecidae"   = "#EDC948",  # Yellow (Tableau)
@@ -47,10 +59,11 @@ primates_palette <- c(
   "Palaeopropithecidae" = "#499894" # Teal
 )
 
-## Darkened primate color palette (60% darker for contrast)
+# Each family color scaled to 60% brightness; the darker variant that
+# violin_extremes.f (reports 0 and 2) looks up as `dark_<clade_name>_palette`.
 dark_primates_palette <- c(
   "Aotidae"         = darken_color("#4E79A7", 0.6),
-  "Callitrichidae"  = darken_color("#E15759", 0.6), # Legacy color for compatibility, but not used in NCBI taxonomy
+  "Callitrichidae"  = darken_color("#E15759", 0.6), # Same as Cebidae
   "Cebidae"         = darken_color("#E15759", 0.6),
   "Atelidae"        = darken_color("#76B7B2", 0.6),
   "Cercopithecidae" = darken_color("#EDC948", 0.6),
@@ -68,7 +81,8 @@ dark_primates_palette <- c(
   "Palaeopropithecidae" = darken_color("#499894", 0.6)
 )
 
-# Colorblind-friendly mammalian order color palette
+# ── Mammals, colored by order ─────────────────────────────────────────────────
+
 mammals_palette <- c(
   "Carnivora"        = "#4E79A7",  # Blue
   "Perissodactyla"   = "#E15759",  # Vermillion
@@ -89,12 +103,16 @@ mammals_palette <- c(
   "Dermoptera"       = "#5F5F5F"   # Dark gray
 )
 
-## Compatibility aliases
+# ── Alternative names for the palettes above ──────────────────────────────────
+
 primate_family_colors <- primates_palette
 dark_family_palette <- dark_primates_palette
 mammal_order_colors <- mammals_palette
 
-## Colorblind-friendly fallback palette using Tableau 20
+# ── Fallback ──────────────────────────────────────────────────────────────────
+
+# Tableau 20 colors, assigned to taxa that have no entry in the clade palette
+# (resolve_taxa_palette() in plotting_fun.R picks one per taxon name).
 fallback_palette <- c(
   "Category1"  = "#4E79A7",  # Blue
   "Category2"  = "#F28E2B",  # Orange

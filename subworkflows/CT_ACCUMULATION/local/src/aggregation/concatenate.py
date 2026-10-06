@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
-"""
-Aggregator — adapted for CT_ACCUMULATION in PhyloPhere.
+# concatenate.py — Build the global position table (one row per alignment column) for the accumulation null.
+# PhyloPhere | subworkflows/CT_ACCUMULATION/local/src/aggregation/
 
-Changes vs. original to_integrate version:
-  - read_species_list(): reads 3-col headerless traitfile (species, trait, pair);
-    assigns contrast = 1 for every entry (single group accumulation mode).
-  - read_metadata_caas(): reads filtered_discovery.tsv produced by CT_POSTPROC.
-    Only the (group, gene, msa_pos) keys are consumed downstream (position
-    membership → iscaas flag); no per-position metadata values are read.
-    No fallback to legacy formats.
+"""
+Aggregator: writes <prefix>_global.csv, the table the randomization phase samples from.
+
+Every alignment column of every background gene gets one row with a global integer
+position, a conservation value, a mask flag (column gapped in any species of the
+traitfile) and an iscaas flag (the column is a CAAS of the filtered discovery table in
+any group). Only the keys (group, gene, msa_pos) of the discovery table are used, never
+its per-position values.
+
+Called by:  CT_ACCUMULATION Nextflow process (ctacc_run.nf CT_ACCUMULATION_AGGREGATE → main.py --tool aggregate)
+Inputs:     alignment directory, genomic-info TSV (gene, chr, start, end, length), traitfile
+            (file or directory), filtered_discovery.tsv from CT_POSTPROC, cleaned background
+            gene list, optional directory of Valdar <gene>.entropy.tsv files
+Outputs:    <output-prefix>_global.csv with columns gene, position, chr, start, end, msa_pos,
+            cons_idx, masked, iscaas
 """
 
+# ── Standard library ──────────────────────────────────────────────────────────
 import argparse
 import os
 import glob
@@ -18,17 +27,21 @@ import gc
 import csv
 from pathlib import Path
 
+# ── Third-party ───────────────────────────────────────────────────────────────
 import numpy as np
 import logging
 from Bio import AlignIO
 from collections import defaultdict
 
 
-# --------------------------
-# Helpers
-# --------------------------
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def natural_sort_key(chromosome):
+    """Sort key for chromosome names: numeric first, then X, Y, M/MT, then anything else.
+
+    Accepts names with or without a 'chr' prefix; empty names sort last.
+    """
     if not chromosome:
         return (9999, '')
     s = str(chromosome).strip()
@@ -49,14 +62,15 @@ def natural_sort_key(chromosome):
     return (1000, key)
 
 
-# --------------------------
-# Core I/O and Aggregation
-# --------------------------
+# ── Core I/O and aggregation ──────────────────────────────────────────────────
+
 
 def read_species_list(species_file):
     """Read the CT traitfile or directory of traitfiles (3-col, no header): species, trait, pair.
 
-    All species are assigned to contrast group 1 (single-group accumulation mode).
+    Returns a dict keyed by species. Only the keys are used downstream (the species whose
+    gaps mask a column); every species is assigned to contrast group 1. A directory is read as
+    its traitfile_H*.tab files, else its *.tab files except traitfile_fop.tab, else all of its files.
     """
     logging.info(f"Reading species list from {species_file} (3-col, no header expected)")
     def _default_species_entry():
@@ -97,7 +111,7 @@ def read_species_list(species_file):
                     except ValueError:
                         logging.warning(f"Skipping malformed traitfile line in {fpath}: {line[:100]}")
                         continue
-                    contrast = 1  # fixed — single accumulation group
+                    contrast = 1  # one accumulation group: every species counts
                     entry = species_data[species]
                     entry['contrast'].add(contrast)
                     entry['trait'].add(trait)
@@ -107,6 +121,11 @@ def read_species_list(species_file):
 
 
 def read_genomic_info(genomic_file):
+    """Read the genomic-info TSV (columns gene, chr, start, end, length; located by header name).
+
+    Returns the genes with coordinates as dicts, sorted by chromosome (natural order) and start.
+    Genes without start or end are dropped: they have no genomic position to order them by.
+    """
     logging.info(f"Reading genomic info from {genomic_file}")
     genes = []
     with open(genomic_file) as f:
@@ -145,6 +164,7 @@ def read_genomic_info(genomic_file):
 
 
 def read_bg_info(bg_file):
+    """Read the background gene list (one gene per line, no header)."""
     logging.info(f"Reading CAAS background from {bg_file}")
     genes = []
     with open(bg_file) as f:
@@ -157,14 +177,15 @@ def read_bg_info(bg_file):
 
 
 def read_metadata_caas(metadata_file):
-    """Read CAAS metadata from a filtered_discovery.tsv file.
+    """Read the CAAS positions of a filtered_discovery.tsv (tab or comma separated).
 
-    Reads the disambiguation-canonical columns Gene, Position, tag (or tag_support),
-    caas, convergence_type, caap_group, amino_encoded.
-    Robust to missing or alternate column names.
+    Columns are matched case-insensitively: Gene, Position (or msa_pos), caap_group (or caap,
+    group), and optionally tag (or tag_support), convergence_type and amino_encoded. A row with
+    no group value goes to group '1'. A file without a Gene or Position column is skipped with
+    a warning and yields an empty table.
 
-    Returns: dict[group][gene][msa_pos] = {tag, convergence_type, caas}
-    Only the (group, gene, msa_pos) keys are consumed downstream.
+    Returns: dict[group][gene][msa_pos] = {tag, convergence_type, caas}, where caas holds the
+    amino_encoded value. Only the (group, gene, msa_pos) keys are consumed downstream.
     """
     logging.info(f"Reading metadata CAAS from {metadata_file if metadata_file else 'None'}")
     metadata = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
@@ -234,18 +255,23 @@ def read_metadata_caas(metadata_file):
     return metadata
 
 
-# Alignment ops
+# ── Alignment operations ──────────────────────────────────────────────────────
 
 
 def calculate_conservation(alignment, group_species=None):
+    """Per-column conservation: percentage of the non-gap residues that are the majority residue.
+
+    Returns {column index (0-based): {'cons_idx': value}}; a column of gaps only, or an empty
+    alignment, gets 0.0. group_species is accepted for call compatibility and is not used.
+    """
     seq_len = alignment.get_alignment_length()
     if len(alignment) == 0:
         return {pos: {'cons_idx': 0.0} for pos in range(seq_len)}
 
-    # Load alignment sequences into a 2D uint8 NumPy array
+    # One row per sequence, one uint8 ASCII code per column
     seqs = np.array([list(str(rec.seq).encode('ascii')) for rec in alignment], dtype=np.uint8)
 
-    # Gap is ASCII 45
+    # Gap is '-' (ASCII 45)
     gap_char = 45
     results = {}
     for pos in range(seq_len):
@@ -263,6 +289,7 @@ def calculate_conservation(alignment, group_species=None):
 
 
 def calculate_masked_positions(alignment, target_species):
+    """Set of 0-based columns with a gap in at least one of the target species."""
     target_set = set(target_species)
     seq_len = alignment.get_alignment_length()
     target_recs = [rec for rec in alignment if rec.id in target_set]
@@ -274,7 +301,17 @@ def calculate_masked_positions(alignment, target_species):
     return set(np.where(masked_cols)[0])
 
 
+# ── Aggregation ───────────────────────────────────────────────────────────────
+
+
 def aggregate(args):
+    """Write <output_prefix>_global.csv for the genes of the genomic-info table.
+
+    Global positions are assigned to every background gene in genomic order before the
+    alignments are read, so a gene without an alignment file leaves a gap in the numbering.
+    Reads from args: alignment_dir, alignment_format, genomic_info, species_list, bg_caas,
+    metadata_caas, entropy_dir (optional), output_prefix.
+    """
     logging.info("Starting background aggregation for CT accumulation randomizations...")
 
     species_data   = read_species_list(args.species_list)
@@ -282,7 +319,7 @@ def aggregate(args):
     bg_list        = read_bg_info(args.bg_caas)
     metadata_dict  = read_metadata_caas(args.metadata_caas) if args.metadata_caas else {}
 
-    # Map gene names to entropy TSV file paths if entropy_dir is provided
+    # Map gene names to their <gene>.entropy.tsv (the per-clade tables are not used)
     entropy_files = {}
     if getattr(args, 'entropy_dir', None) and os.path.isdir(args.entropy_dir):
         logging.info(f"Scanning entropy directory: {args.entropy_dir}")
@@ -292,13 +329,13 @@ def aggregate(args):
                 entropy_files[gene] = os.path.join(args.entropy_dir, f)
         logging.info(f"Found {len(entropy_files)} matching entropy files")
 
-    # Filter gene_info_list to background genes only
+    # Keep the background genes only (an empty list keeps all genes)
     if bg_list:
         bg_set = set(bg_list)
         gene_info_list = [g for g in gene_info_list if g['gene'] in bg_set]
         logging.info(f"Filtered to {len(gene_info_list)} genes present in background list")
 
-    # Assign global integer positions
+    # Global positions: each gene starts where the previous one ends
     gene_offsets = {}
     accumulated_position = 0
     for gene_info in gene_info_list:
@@ -306,21 +343,19 @@ def aggregate(args):
         accumulated_position += gene_info['msa_length']
     logging.info(f"Global positions assigned. Total positions: {accumulated_position}")
 
-    # All species treated as one accumulation group (single-group mode)
+    # Every species of the traitfile belongs to the one accumulation group
     all_species = set(species_data.keys())
     logging.info(f"Total species for accumulation: {len(all_species)}")
 
-    # Output: single enriched global CSV
-    # Columns: gene, position, chr, start, end, msa_pos, cons_idx, masked, iscaas
+    # Output columns: gene, position (global), chr, start, end, msa_pos (0-based column in the gene), cons_idx, masked, iscaas
     aggregated_filename = f"{args.output_prefix}_global.csv"
     aggregated_fieldnames = ['gene', 'position', 'chr', 'start', 'end', 'msa_pos', 'cons_idx', 'masked', 'iscaas']
     aggregated_file = open(aggregated_filename, 'w', newline='')
     aggregated_writer = csv.DictWriter(aggregated_file, fieldnames=aggregated_fieldnames)
     aggregated_writer.writeheader()
 
-    # Use '*' (no extension filter) to match flat alignment directory — same as CT discovery
-    # Split on the first '.' to extract the gene symbol, handling multi-dot names like
-    # GENE.Species.filter2.phy produced by the CT discovery step.
+    # No extension filter: the alignment directory is flat. The gene symbol is the text before
+    # the first '.', so multi-dot names such as GENE.Species.filter2.phy map to GENE.
     alignment_files = {
         os.path.basename(f).split('.')[0]: f
         for f in glob.glob(os.path.join(args.alignment_dir, '*'))
@@ -348,7 +383,7 @@ def aggregate(args):
                     f"vs metadata {gene_info['msa_length']}"
                 )
 
-            # Load entropy values if entropy file is available
+            # Valdar variability per column (the file's position is 1-based)
             entropy_vals = {}
             entropy_loaded = False
             if getattr(args, 'entropy_dir', None):
@@ -376,15 +411,15 @@ def aggregate(args):
                     for g in metadata_dict
                 ) if metadata_dict else False
 
-                # Determine conservation value and masking
+                # Conservation value and mask
                 is_masked = (msa_pos in masked_pos)
                 if getattr(args, 'entropy_dir', None):
-                    # In entropy mode, if the position (or file) is missing, we nullify it
+                    # Variability mode: a column without a value gets an empty cons_idx
                     if entropy_loaded and msa_pos in entropy_vals:
                         cons_val = entropy_vals[msa_pos]
                     else:
-                        cons_val = "" # Write empty/null value
-                        is_masked = True # Nullified positions must be masked out to exclude from permutations
+                        cons_val = "" # empty value
+                        is_masked = True # a column without a value is masked so the null excludes it
                 else:
                     cons_val = general_cons[msa_pos]['cons_idx']
 

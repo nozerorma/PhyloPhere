@@ -1,24 +1,26 @@
 #!/usr/bin/env nextflow
+// scoring_report.nf — Render the HTML report of the position-level and gene-level CAAS scores.
+// PhyloPhere | subworkflows/SCORING/
 
 /*
- * SCORING_REPORT
- * ──────────────
- * Render an HTML summary report for position-level and gene-level
- * CAAS scores.  Calls 11.Scoring_report.Rmd.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  SCORING_REPORT: renders 11.Scoring_report.Rmd for one trait from the tables of
+ *  SCORING_COMPUTE and the optional evidence files.
  *
- * Inputs
- * ──────
- *   position_scores      : path — position_scores.tsv
- *   gene_scores          : path — gene_scores.tsv
- *   gene_correlations    : path — gene_correlations.tsv
- *   fade_site_top_file   : path — per-site FADE BF TSV top direction (or NO_FADE_SITE_TOP sentinel)
- *   fade_site_bot_file   : path — per-site FADE BF TSV bottom direction (or NO_FADE_SITE_BOT sentinel)
- *   genomic_info         : path — gene genomic coords TSV (or NO_GENOMIC_INFO sentinel)
- *
- * Outputs
- * ───────
- *   report : HTML report
+ *  Consumes:  position_scores.tsv, gene_scores.tsv, gene_correlations.tsv; optional
+ *             per-site FADE tables (top and bottom), gene coordinates, the CAAS
+ *             permulation null (caas_perms.rds), filtered_discovery.tsv. The
+ *             optional inputs are NO_* sentinel files when absent and reach the report
+ *             as NULL; caas_pos_sample, caas_pos_quantiles and background_file are
+ *             passed to the report but its body does not read them.
+ *  Produces:  11.Scoring_report_<trait>.html, published to scoring/ and html_reports/
+ *             (the report also writes position_scores_annotated.tsv and the genomic
+ *             window tables into scoring/)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Scoring report ─────────────────────────────────────────────────────────────
 
 process SCORING_REPORT {
     tag "scoring_report|${params.traitname ?: 'unknown_trait'}"
@@ -35,14 +37,14 @@ process SCORING_REPORT {
     path position_scores
     path gene_scores
     path gene_correlations
-    path fade_site_top_file  // optional: per-site FADE BF TSV top direction  (NO_FADE_SITE sentinel when absent)
-    path fade_site_bot_file  // optional: per-site FADE BF TSV bottom direction (NO_FADE_SITE sentinel when absent)
+    path fade_site_top_file  // optional: per-site FADE table, top direction (NO_FADE_SITE_TOP sentinel when absent)
+    path fade_site_bot_file  // optional: per-site FADE table, bottom direction (NO_FADE_SITE_BOT sentinel when absent)
     path genomic_info        // optional: gene genomic coords TSV (NO_GENOMIC_INFO sentinel when absent)
-    path caas_perms          // optional: CAAS permulation RDS (asr + caas null) (NO_FILE/NO_CAAS_PERMS sentinel when absent)
-    path caas_pos_sample     // optional: cycle-stratified per-scheme sample for distribution plots (NO_CAAS_POS_SAMPLE sentinel)
-    path caas_pos_quantiles  // optional: per (cycle,scheme) null distribution shape (NO_CAAS_POS_QUANTILES sentinel)
-    path filtered_discovery  // observed per-(gene,position,scheme) asr_path_score (filtered_discovery.tsv) for the null overlay
-    path background_file
+    path caas_perms          // optional: caas_perms.rds, the ASR and CAAS permulation null (NO_CAAS_PERMS or NO_FILE sentinel when absent)
+    path caas_pos_sample     // optional: per-scheme null sample (NO_CAAS_POS_SAMPLE sentinel); passed to the report, which does not read it
+    path caas_pos_quantiles  // optional: per (cycle, scheme) null quantiles (NO_CAAS_POS_QUANTILES sentinel); passed to the report, which does not read it
+    path filtered_discovery  // filtered_discovery.tsv: observed asr_path_score per (gene, position, scheme), read by the report for the biochemistry and convergence-type panels
+    path background_file     // background gene list (NO_BACKGROUND or NO_FILE sentinel when absent); passed to the report, which does not read it
 
     output:
     path "11.Scoring_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -53,7 +55,7 @@ process SCORING_REPORT {
     def traitname      = params.traitname ?: 'unknown_trait'
     def top_pct        = params.scoring_position_top_pct   ?: 0.10
     def g_top_pct      = params.scoring_gene_top_pct       ?: 0.10
-    // Resolve optional sentinel files: pass 'NULL' (R NULL) when no real file is staged
+    // Optional inputs: a sentinel file becomes the R literal NULL, a real file its quoted name
     def fs_top_arg = (fade_site_top_file.name =~ /^NO_FADE_SITE_TOP/) ? 'NULL' : "'${fade_site_top_file}'"
     def fs_bot_arg = (fade_site_bot_file.name =~ /^NO_FADE_SITE_BOT/) ? 'NULL' : "'${fade_site_bot_file}'"
 

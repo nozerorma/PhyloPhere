@@ -5,17 +5,17 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-POSENRICH is bundled here rather than its own tab, matching the reference scripts'
-RUN_ENRICHMENT / RUN_POSENRICH pairing and conf/enrichment.config, which covers
-both FCS/STRING gene-set enrichment and position-wise enrichment in one file.
+EnrichmentTab: field specification of the Enrichment module (conf/enrichment.config).
 
-scoring_string (alias scoring_ami) is the single AMI toggle: the centralized
-DOMINO-based AMI run + cross-module COMPARE report, driven from
-workflows/enrichment.nf, covering CAAS/FADE/RER in one unified
-13.AMI_analysis.Rmd. RER/FADE/Accumulation's own gene lists are always computed
-automatically whenever those tools run — no separate --ami flag; the old
-standalone per-module AMI reports (one HTML per tool) were retired since they
-never produced usable output.
+One tab covers gene-set enrichment (FCS, STRING/DOMINO, COMPARE) and the
+position-wise POSENRICH analysis, because conf/enrichment.config holds the
+parameters of both and workflows/enrichment.nf runs them together.
+
+scoring_string (with its alias scoring_ami) is the single toggle for the
+DOMINO-based active-module identification (AMI) run, which workflows/enrichment.nf
+enables when either parameter is set; its report is 13.AMI_analysis.Rmd.
+
+Imported by: gui/widgets/main_window.py
 """
 
 # ── Local ─────────────────────────────────────────────────────────────────────
@@ -110,10 +110,10 @@ SPEC = ModuleTabSpec(
         ),
         FieldSpec(name="scoring_compare_fdr", label="COMPARE report FDR threshold", importance="default"),
         FieldSpec(name="scoring_compare_top_n", label="COMPARE report top-N", importance="optional"),
-        # Borderline default/optional: gates whether the concordance null chunk is
-        # computed at all, but disabling it doesn't change any existing result's
-        # validity — it just skips an extra corroborating statistical test, same
-        # spirit as the other optional report switches.
+        # Rated "optional" although borderline: it gates whether the concordance
+        # null chunk is computed, but disabling it leaves the other results valid;
+        # it only skips an additional corroborating test, like the other optional
+        # report switches.
         FieldSpec(
             name="comparison_perm_null",
             label="COMPARE: CAAS x RER concordance null",

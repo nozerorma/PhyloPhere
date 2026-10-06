@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Evidence of the N best positions of a run: what each domain of each hypothesis saw.
+# explain_positions.py — Evidence of the best-scored positions: what each domain of each hypothesis saw.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/
+
+"""
+CAAS_EVIDENCE: Evidence of the N best positions of a run: what each domain of each hypothesis saw.
 
 Picks the N best positions of position_scores.tsv (`core.evidence.select_top_positions`), takes their rows from
 discovery.tab, scores them again through `core.observed` with the unpooled rows kept and writes
@@ -10,7 +14,17 @@ are explained (`scheme_set` of position_scores.tsv, union over its sides; discov
 weights act only in the pooling, so they are not an input. The tables are written with whatever could be explained;
 a chosen gene with no alignment, ASR or discovery rows, or a chosen position with no discovery row, makes the run
 exit 1 after writing them, so that missing evidence never goes unnoticed.
+
+Called by:  CAAS_EVIDENCE (subworkflows/CT_DISAMBIGUATION/ct_evidence.nf) → explain_positions.py
+Inputs:     --discovery        discovery.tab of the run
+            --position-scores  position_scores.tsv of the run
+            --design           observed design (trait file, or directory of traitfile_H*.tab)
+            --alignment-dir, --tree, --asr-cache-dir   alignments, species tree and ASR cache
+            --top              number of positions to explain (0 writes empty tables)
+Outputs:    <output-dir>/evidence_top<N>.tsv and <output-dir>/top_positions.tsv
 """
+
+# ── Standard library ──────────────────────────────────────────────────────────
 import argparse
 import csv
 import logging
@@ -19,6 +33,7 @@ import sys
 import time
 from pathlib import Path
 
+# ── Package-internal ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from observed_b0_main import read_b0_rows
@@ -32,7 +47,10 @@ from src.utils.logger import configure_logging
 
 logger = logging.getLogger(__name__)
 
-TOP_COLUMNS = ["gene", "position", "CAAS_score", "p.emp"]
+TOP_COLUMNS = ["gene", "position", "CAAS_score", "p.emp"]  # columns of top_positions.tsv
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
 
 
 def parse_arguments():
@@ -55,7 +73,11 @@ def parse_arguments():
     return p.parse_args()
 
 
+# ── Evidence ──────────────────────────────────────────────────────────────────
+
+
 def _explain_gene(job):
+    """Pool worker: unpooled evidence rows of one gene (job is the tuple built in main), or (gene, None) when it cannot be scored."""
     (gene, rows, alignment_dir, tree, taxid, model, cache, threshold, ensembl, trait_pairs) = job
     try:
         ctx = load_gene_context(gene, alignment_dir, tree, taxid, model, cache, threshold, ensembl)
@@ -87,6 +109,7 @@ def _write_tsv(path, columns, rows):
 
 
 def main():
+    """Select the top positions, explain them gene by gene and write the evidence and top-position tables."""
     args = parse_arguments()
     configure_logging(verbose=args.verbose, log_file=args.log_file)
     out_dir = Path(args.output_dir)

@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
-# remote.py — SSH-based path existence checks + directory listing for remote hosts.
+# remote.py — Path checks, directory listings and file writes on a remote host over SSH.
 # PhyloPhere | gui/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Dataset paths often live on a remote HPC cluster (reached over SSH) while the GUI
-itself runs on a laptop. This module lets "Validate Paths" and the PathField
-"Browse..." button work against a remote host instead of the local filesystem.
+Remote: SSH helpers for "Validate Paths", the PathField "Browse..." dialog, the
+Regenerate HTML Reports dialog, and writing run scripts and the Tower token on the
+remote host.
 
-Deliberately separate from gui/generation/ (which must stay network-call-free —
-its tests are hermetic and fast) and has no PySide6 import, so it's independently
-unit-testable by mocking subprocess.run.
+Dataset paths often live on a remote HPC cluster while the GUI runs on a laptop. The
+module is kept apart from gui/generation/, which makes no network calls, and imports no
+PySide6, so subprocess.run can be mocked to test it alone.
 
-Assumes passwordless SSH key-based auth is already configured for the target host
-(the norm for HPC cluster access) — runs ssh in BatchMode so a misconfigured host
-fails fast with a clear error instead of hanging on a password prompt.
+Authentication must be key-based and already configured for the host. ssh runs in
+BatchMode, so a misconfigured host fails at once with an error instead of waiting at a
+password prompt. Every failure of ssh itself raises RemoteCheckError.
+
+Imported by: gui/secrets_io.py, gui/widgets/main_window.py,
+gui/widgets/common/remote_browse_dialog.py, gui/widgets/common/regenerate_dialog.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -26,11 +29,14 @@ DEFAULT_TIMEOUT = 15
 
 
 class RemoteCheckError(Exception):
-    """SSH itself failed (unreachable host, auth failure, timeout) — distinct from
-    a path simply not existing, which is a normal (non-exceptional) result."""
+    """ssh itself failed (unreachable host, authentication failure, timeout).
+
+    A path that does not exist is not an error: it is reported in the return value.
+    """
 
 
 def _run_ssh(host: str, remote_command: str, *, stdin: str | None, timeout: int) -> str:
+    """Run `remote_command` on `host` and return its stdout; raise RemoteCheckError on failure."""
     try:
         result = subprocess.run(
             [
@@ -63,8 +69,11 @@ def _run_ssh(host: str, remote_command: str, *, stdin: str | None, timeout: int)
 def check_remote_paths(
     host: str, entries: list[tuple[str, str, str]], timeout: int = DEFAULT_TIMEOUT
 ) -> list[str]:
-    """Like gui.generation.validate.validate_paths, but checks existence on `host`
-    over SSH in a single round-trip instead of the local filesystem."""
+    """Check that each (label, path, kind) entry exists on `host`, in one SSH round trip.
+
+    Counterpart of gui.generation.validate.validate_paths for a remote filesystem.
+    Entries with a blank path are skipped. Returns one message per missing path.
+    """
     filled = [(label, path, kind) for label, path, kind in entries if path.strip()]
     if not filled:
         return []
@@ -93,30 +102,31 @@ def check_remote_paths(
 def write_remote_file(
     host: str, path: str, content: str, mode: str = "600", timeout: int = DEFAULT_TIMEOUT
 ) -> None:
-    """Writes `content` to `path` on `host` over SSH and chmods it `mode`.
-    Default 600 suits secrets (see gui/secrets_io.py); generated run scripts
-    pass mode="755" (see MainWindow._save_generated_scripts)."""
+    """Write `content` to `path` on `host` and set its permissions to `mode`.
+
+    The default 600 suits secrets (gui/secrets_io.py); the generated run scripts
+    use mode="755" (MainWindow._save_generated_scripts).
+    """
     remote_command = f"cat > {shlex.quote(path)} && chmod {mode} {shlex.quote(path)}"
     _run_ssh(host, remote_command, stdin=content, timeout=timeout)
 
 
 def remove_remote_file(host: str, path: str, timeout: int = DEFAULT_TIMEOUT) -> None:
+    """Remove `path` on `host`; a file that is already absent is not an error."""
     remote_command = f"rm -f {shlex.quote(path)}"
     _run_ssh(host, remote_command, stdin=None, timeout=timeout)
 
 
 def list_all_remote(host: str, root: str, timeout: int = DEFAULT_TIMEOUT) -> dict[str, bool]:
-    """Recursively lists everything under `root` on `host` in a single SSH round
-    trip, returning {relative_posix_path: is_dir}. Used by the Regenerate HTML
-    Reports dialog (gui/widgets/common/regenerate_dialog.py) to build an
-    in-memory stand-in for gui.generation.report_registry's local glob search
-    when the pipeline output directory lives on a remote host — report_registry
-    itself stays network-call-free (see its own module docstring); this is the
-    one round trip its caller does up front to feed it a fnmatch-able listing.
+    """List everything under `root` on `host` recursively, as {relative_posix_path: is_dir}.
 
-    Uses `find -L` (follows symlinks, matching list_remote_directory's choice)
-    with `%y`/`%P` (type char / path relative to root) so no client-side path
-    surgery is needed on the results.
+    One SSH round trip. The Regenerate HTML Reports dialog
+    (gui/widgets/common/regenerate_dialog.py) uses the listing as a stand-in for the
+    local glob search of gui.generation.report_registry when the output directory is
+    remote, so that report_registry itself makes no network calls.
+
+    Runs `find -L` (follows symlinks, as list_remote_directory does) with `%y` (type)
+    and `%P` (path relative to root), so the results need no path handling here.
     """
     remote_command = (
         f"find -L {shlex.quote(root)} -mindepth 1 -printf '%y\\t%P\\n' 2>/dev/null"
@@ -134,10 +144,10 @@ def list_all_remote(host: str, root: str, timeout: int = DEFAULT_TIMEOUT) -> dic
 def list_remote_directory(
     host: str, path: str, timeout: int = DEFAULT_TIMEOUT
 ) -> list[tuple[str, bool]]:
-    """Returns [(name, is_dir), ...] for `path` on `host`, sorted directories-first.
+    """List the entries of `path` on `host` as [(name, is_dir), ...], directories first.
 
-    Uses `find -L` (follows symlinks) so symlinked data mounts — common on cluster
-    filesystems — are classified as navigable directories rather than opaque files.
+    Runs `find -L` (follows symlinks), so symlinked data mounts, common on cluster
+    filesystems, are listed as directories that can be entered.
     """
     remote_command = (
         f"find -L {shlex.quote(path)} -mindepth 1 -maxdepth 1 "

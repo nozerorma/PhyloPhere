@@ -1,4 +1,12 @@
-"""The files the rest of the pipeline reads about the observed labeling, written from the b_0 slice of the core.
+# contract.py — Write the observed-labeling tables (discovery, background, meta CAAS, master) from the b_0 batches.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/core/
+
+"""
+The files the rest of the pipeline reads about the observed labeling, written from the b_0 slice of the core.
+
+Imported by: contract_main.py
+Inputs: per-batch `<id>.b0.discovery.tsv`, `<id>.b0.background` and `<gene>.master.csv.gz` files
+Outputs: discovery.tab, background.output, background_genes.output, meta_caas/*.tsv, caas_convergence_master.csv
 
 A perm-replay batch leaves, per gene, `<id>.b0.discovery.tsv` (the discovery.tab rows of b_0, only when it has a
 hit), `<id>.b0.background` (`<gene>\\t<positions tested | NULL>`) and, from the ASR scoring, `<gene>.master.csv.gz`
@@ -26,7 +34,7 @@ DISCOVERY_SUFFIX = ".b0.discovery.tsv"
 BACKGROUND_SUFFIX = ".b0.background"
 MASTER_SUFFIX = ".master.csv.gz"
 
-# the columns of discovery.tab, with the two conserved-pair columns: what an empty discovery.tab carries
+# Header of an empty discovery.tab: the columns of discovery.tab, including the two conserved-pair columns.
 EMPTY_DISCOVERY_HEADER = ["gene", "mode", "caap_group", "trait", "position", "caas", "amino_encoded", "pattern",
                           "ffgn", "fbgn", "gfg", "gbg", "mfg", "mbg", "ffg", "fbg", "ms", "is_conserved_meta", "conserved_pair"]
 
@@ -53,7 +61,7 @@ def write_discovery(files: Sequence[Path], out: Path) -> int:
                 header = head
             for line in fh:
                 rows.append((line.split("\t", 1)[0], line))
-    rows.sort(key=lambda r: r[0])  # stable
+    rows.sort(key=lambda r: r[0])  # stable: rows of one gene keep their written order
     with open(out, "w") as fh:
         fh.write(header if header is not None else "\t".join(EMPTY_DISCOVERY_HEADER) + "\n")
         fh.writelines(line for _, line in rows)
@@ -81,6 +89,7 @@ def write_background(files: Sequence[Path], out: Path, out_genes: Path) -> int:
 
 
 def _na(value: Optional[str]) -> str:
+    # readr convention: an empty cell is NA
     return "NA" if value is None or value == "" else value
 
 

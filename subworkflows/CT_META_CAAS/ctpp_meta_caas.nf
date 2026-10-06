@@ -1,7 +1,23 @@
-// CT Meta-CAAS Processes
-// Pattern/caap_group annotation report of the discovered CAAS (the meta_caas tables themselves are written by
-// CAAS_CORE_OBSERVED / CAAS_OBSERVED), plus the later join against SCORING's permulation-null significance.
+// ctpp_meta_caas.nf — Reports on the pattern/caap_group annotation of the CAAS and on its permulation significance.
+// PhyloPhere | subworkflows/CT_META_CAAS/
 
+/*
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  CT_META_CAAS: two R Markdown reports. The meta_caas tables themselves are written by
+ *  CAAS_CORE_OBSERVED / CAAS_OBSERVED, not here.
+ *
+ *  Consumes:  CAAS_META_CAAS_REPORT: discovery file and background gene list
+ *             CAAS_SIGNIFICANCE_REPORT: per-position CAAS table (global_meta_caas.tsv or the
+ *             post-processed discovery), position_scores.tsv and gene_scores.tsv of SCORING
+ *  Produces:  HTML reports (html_reports/), meta_caas/CAAS_pattern_annotation_files/ and
+ *             meta_caas/significance/ (meta_caas_significance.tsv, pattern_significance_summary.tsv)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+
+
+// ── Pattern annotation report ────────────────────────────────────────────────
+
+// Renders 7.CAAS_pattern_annotation.Rmd; called from workflows/ct_meta_caas.nf.
 process CAAS_META_CAAS_REPORT {
     label 'process_reporting'
     publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: 'CAAS_pattern_annotation_files/**'
@@ -55,16 +71,13 @@ process CAAS_META_CAAS_REPORT {
     }
 }
 
-// CAAS_SIGNIFICANCE_REPORT (note: SIGNIFICANCE, not the CT_META_CAAS process
-// above -- do not confuse the two).
-//
-// A distinct, LATER pipeline stage than CAAS_META_CAAS_REPORT. It must
-// run AFTER SCORING: it joins CT_META_CAAS's already-published
-// global_meta_caas.tsv/meta_caas.tsv (pattern/caap_group breakdown, written
-// upstream of SCORING in the live DAG) against SCORING's published
-// position_scores.tsv (p.emp/p.adj_bh/p.adj_sam) and gene_scores.tsv
-// (gene_caas_pperm/gene_caas_pperm_adj) to annotate that breakdown with the
-// permulation-null significance. See 16.CAAS_significance_report.Rmd for the join logic.
+
+// ── Significance report ──────────────────────────────────────────────────────
+
+// Renders 16.CAAS_significance_report.Rmd; called from main.nf. It runs after SCORING, because it joins the
+// p.emp / p.adj_bh / p.adj_sam of position_scores.tsv and the gene_caas_pperm / gene_caas_pperm_adj of
+// gene_scores.tsv onto the CAAS table; the join logic is in the Rmd. Not to be confused with
+// CAAS_META_CAAS_REPORT, which runs upstream of SCORING.
 process CAAS_SIGNIFICANCE_REPORT {
     label 'process_reporting'
     publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: '{significance/**}'

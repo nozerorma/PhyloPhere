@@ -1,29 +1,23 @@
 #!/usr/bin/env nextflow
+// fade_json_to_csv.nf — Site-level FADE table (gene, position, max_bf, target_aa) from the raw JSON files.
+// PhyloPhere | subworkflows/FADE/
 
 /*
- * FADE_JSON_TO_CSV
- * ─────────────────
- * Parses the raw *.FADE.json output directly into a simple per-site CSV
- * (gene, position, max_bf, target_aa) for one direction. HyPhy FADE's
- * gene-level report no longer keeps site-level detail (dropped as a memory
- * optimisation once nothing downstream consumed it) — this restores exactly
- * the piece posenrich needs: a position-keyed ((Gene,Position)) evidence
- * layer, analogous to UCR core/flank and FUBAR positive/purifying, built
- * from the classic FADE significance criterion (BF >= fade_bf_threshold).
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  FADE_JSON_TO_CSV: parses the *.FADE.json files of one direction into one CSV with a
+ *  row per site whose maximum Bayes factor over the target amino acids reaches
+ *  fade_bf_threshold. The gene-level FADE report keeps no site-level table, so this
+ *  is the position-keyed ((Gene, Position)) FADE evidence that POSENRICH uses, like
+ *  the UCR and FUBAR layers. It is not gated behind --enrichment.
  *
- * Runs unconditionally (not gated behind --enrichment) so the position-level
- * FADE evidence is always available for posenrich.
- *
- * Inputs
- * ──────
- *   direction   : val  — 'top' or 'bottom'
- *   json_files  : collected list of *.FADE.json paths
- *
- * Outputs
- * ───────
- *   sites_csv   : gene,position,max_bf,target_aa (header row always present,
- *                 even when zero sites clear the threshold)
+ *  Consumes:  direction ('top' or 'bottom'), the collected *.FADE.json files
+ *  Produces:  fade_sites_<direction>.csv (gene, position, max_bf, target_aa; the
+ *             header row is written even when no site reaches the threshold)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── JSON to site table ─────────────────────────────────────────────────────────
 
 process FADE_JSON_TO_CSV {
     tag "fade_json_to_csv|${direction}"

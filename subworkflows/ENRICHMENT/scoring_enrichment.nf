@@ -1,23 +1,31 @@
 #!/usr/bin/env nextflow
+// scoring_enrichment.nf — DOMINO module report and top-versus-bottom comparison report of SCORING.
+// PhyloPhere | subworkflows/ENRICHMENT/
 
 /*
- * SCORING_AMI / SCORING_COMPARE
- * ────────────────────────────────────────────
- * DOMINO active-module identification (AMI) runs on the gated directional
- * 9-slice gene lists produced by SCORING_COMPUTE, with STRING used only for ID
- * mapping + per-module functional labelling. Ranked enrichment is handled by
- * SCORING_FCS_REPORT (subworkflows/ENRICHMENT/fcs.nf).
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  SCORING_AMI_REPORT, SCORING_COMPARE_REPORT: reports that sit on top of the SCORING
+ *  gene lists and the FCS results.
  *
- *   SCORING_AMI_REPORT     → ami_results/**, HTML (13.AMI_analysis - DOMINO modules)
- *   SCORING_COMPARE_REPORT → compare_results/**, HTML (top vs bottom: FCS only)
+ *  SCORING_AMI_REPORT renders 13.AMI_analysis.Rmd: DOMINO active-module identification
+ *  on the SCORING slice gene lists, with STRING used only for ID mapping and for the
+ *  functional label of each module. FADE and RER enter with their own gene lists,
+ *  background and DOMINO network. Ranked enrichment is in SCORING_FCS_REPORT (fcs.nf).
+ *
+ *  SCORING_COMPARE_REPORT renders 15.Comparison_report.Rmd: top versus bottom
+ *  comparison of the FCS outputs (CAAS and RER) with the posenrich, AMI and
+ *  gene/position-level evidence tables.
+ *
+ *  Consumes:  SCORING gene_lists/ and position_lists/, FCS and posenrich results,
+ *             DOMINO networks and modules
+ *  Produces:  ami/ (HTML, ami_results/, ami_summary/, ami_plots/, ami_networks/),
+ *             compare/ (HTML, compare_results/)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SCORING_AMI_REPORT
-// Runs 13.AMI_analysis.Rmd (DOMINO active-module identification, STRING used
-// only for ID mapping + per-module functional labels) on the 9 ranked slices.
-// ─────────────────────────────────────────────────────────────────────────────
+// ── DOMINO module report ───────────────────────────────────────────────────────
+
 process SCORING_AMI_REPORT {
     tag "scoring_ami|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
@@ -51,21 +59,17 @@ process SCORING_AMI_REPORT {
     path domino_network_sif
     path domino_modules_dir
     path domino_edge_scores
-    // FADE and RER each get their own DOMINO network/gene lists, built
-    // against their own gene universe (see ENRICHMENT workflow) -- NO_-
-    // prefixed sentinel paths when that tool didn't run this invocation.
-    // DOMINO_BUILD_NETWORK/DOMINO_RUN_MODULES always emit fixed filenames
-    // (network.sif / network_edge_scores.tsv / domino_modules) regardless of
-    // which tool's DOMINO_MODULES call produced them -- CAAS's own 3 inputs
-    // above, staged under those literal names, would otherwise collide with
-    // FADE's and RER's copies the moment more than one tool actually runs in
-    // the same invocation. stageAs gives FADE's and RER's copies distinct names.
+    // FADE and RER each have their own DOMINO network and gene lists, built on their
+    // own gene universe; NO_* sentinel paths arrive when the tool did not run.
+    // DOMINO_BUILD_NETWORK and DOMINO_RUN_MODULES always write network.sif,
+    // network_edge_scores.tsv and domino_modules, whichever tool they ran for. The
+    // CAAS inputs above keep those names, so stageAs gives the FADE and RER copies
+    // distinct names to avoid a name collision when several tools run together.
     path fade_gene_lists
-    // stageAs uses a non-'.txt' extension deliberately: CAAS's own gene-list
-    // files are auto-detected in the Rmd via list.files(pattern="\\.txt$") at
-    // the task's cwd root (minus only CAAS's own background file by name) --
-    // a stray "*.txt" background file sitting at cwd root from FADE/RER would
-    // otherwise be silently swept in as a phantom extra CAAS gene list.
+    // The staged background has a '.universe' extension, not '.txt': 13.AMI_analysis.Rmd
+    // detects the CAAS gene lists as every *.txt in the task root (excluding the CAAS
+    // background by name), so a FADE or RER background staged as *.txt would be read
+    // as an extra CAAS gene list.
     path fade_background, stageAs: 'fade_background.universe'
     path fade_domino_network_sif, stageAs: 'fade_network.sif'
     path fade_domino_modules_dir, stageAs: 'fade_domino_modules'
@@ -75,11 +79,9 @@ process SCORING_AMI_REPORT {
     path rer_domino_network_sif, stageAs: 'rer_network.sif'
     path rer_domino_modules_dir, stageAs: 'rer_domino_modules'
     path rer_domino_edge_scores, stageAs: 'rer_network_edge_scores.tsv'
-    // Explicit booleans rather than sniffing a NO_-prefixed sentinel filename:
-    // stageAs above renames every FADE/RER path input to a fixed name
-    // regardless of whether the real file or its sentinel arrived, so name-
-    // based detection (still used for gs_arg above, whose input has no
-    // stageAs) would no longer work here.
+    // Explicit flags instead of sentinel-name detection: stageAs renames every FADE and
+    // RER input, so a NO_* name never reaches the script (gene_scores has no stageAs
+    // and is still detected by name, see gs_arg).
     val fade_ran
     val rer_ran
 
@@ -100,11 +102,8 @@ process SCORING_AMI_REPORT {
     def bg_name   = background.getName().replace("'", "\\'")
     def gs_arg    = (gene_scores.name =~ /^NO_GENE_SCORES/) ? 'NULL' : "'${gene_scores}'"
 
-    // FADE/RER each get their own DOMINO network + gene lists (own universe,
-    // see ENRICHMENT workflow) -- NO_-prefixed sentinel names mean that tool
-    // didn't run this invocation, degrading every one of its params to NULL
-    // so 13.AMI_analysis.Rmd skips that tool's section gracefully (same
-    // pattern as gs_arg above).
+    // A tool that did not run gets NULL for all its parameters, so that
+    // 13.AMI_analysis.Rmd skips its section.
     def fade_ok    = fade_ran
     def rer_ok     = rer_ran
     def fade_bg_arg      = fade_ok ? "'${fade_background}'"          : 'NULL'
@@ -121,20 +120,19 @@ process SCORING_AMI_REPORT {
     def stage_cmd = """
         cp -R ${local_dir}/* .
 
-        # Convert slice_*.tsv to *.txt in the current directory
+        # One gene list per slice: the Gene column of slice_<name>.tsv becomes <name>.txt
         for f in ${gene_lists}/slice_*.tsv; do
             if [ -f "\$f" ]; then
                 basename=\$(basename "\$f" .tsv)
                 name=\${basename#slice_}
-                # Extract first column (Gene) except header (1st line)
+                # First column without the header line, blank lines dropped
                 tail -n +2 "\$f" | cut -f1 | { grep -v "^[[:space:]]*\$" || true; } > "\${name}.txt"
             fi
         done
 
-        # FADE/RER's own gene-list .txt files are staged flat by Nextflow
-        # alongside CAAS's own derived *.txt files above -- move them into
-        # their own subdirectories so the Rmd's per-tool sections don't pick
-        # up each other's lists (each tool's list-file names are fixed/known).
+        # The FADE and RER gene lists are staged flat next to the CAAS lists above;
+        # moving them to their own directories keeps each tool's section of the Rmd
+        # from reading the other lists (their file names are fixed).
         mkdir -p fade_lists rer_lists
         mv fade_top_significant.txt fade_bottom_significant.txt fade_global_significant.txt fade_lists/ 2>/dev/null || true
         mv rer_significant.txt rer_accelerating.txt rer_decelerating.txt rer_lists/ 2>/dev/null || true
@@ -187,18 +185,9 @@ process SCORING_AMI_REPORT {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SCORING_COMPARE_REPORT
-// Comparative top-vs-bottom analysis across FCS outputs (CAAS + RER). DOMINO/AMI
-// module output is not gene-set-ranked in the same way and is not part of this
-// comparison - see 13.AMI_analysis.Rmd for module-level results.
-//
-// Inputs (all staged flat in work dir by Nextflow):
-//   fcs_all_results : fcs_results/fcs_all_results.tsv  (single file)
-//
-// The script sorts staged files into cmp_fcs/ before invoking
-// 15.Comparison_report.Rmd.
-// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Top-versus-bottom comparison report ────────────────────────────────────────
+
 process SCORING_COMPARE_REPORT {
     tag "scoring_compare|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
@@ -214,64 +203,59 @@ process SCORING_COMPARE_REPORT {
                pattern: 'compare_results/**'
 
     input:
-    // One fcs_all_results.tsv per module -- stageAs distinct names to avoid the
-    // same-filename collision; absent modules arrive as the NO_FCS_ALL sentinel and
-    // are filtered by the non-empty (-s) guard below + column validation in the Rmd.
-    // FADE and Accumulation do not run their own FCS ranking (see fcs.nf); they
-    // contribute as cross-module corroboration flags on CAAS's own leading edge.
+    // One fcs_all_results.tsv per module, staged under distinct names. A module that
+    // did not run arrives as the NO_FCS_ALL sentinel, which the non-empty (-s) test
+    // below drops. FADE and Accumulation have no FCS ranking of their own (see fcs.nf);
+    // they enter as corroboration flags on the leading edge.
     path caas_fcs,  stageAs: 'caas_fcs_all.tsv'    // CAAS (composite) FCS results
     path rer_fcs,   stageAs: 'rer_fcs_all.tsv'     // RER FCS results
-    // Leading-edge tables feed the orthogonal composite score (percentile
-    // concentration + cross-module corroboration) that orders every table/plot
-    // in the Cross-module convergence section. NO_LEADING_EDGE sentinel when a
-    // module's report didn't run.
+    // Leading-edge tables feed the composite score (percentile concentration and
+    // cross-module corroboration) that orders the tables and plots of the Cross-module
+    // convergence section. NO_LEADING_EDGE sentinel when the module's report did not run.
     path caas_le,   stageAs: 'caas_leading_edge.tsv'
     path rer_le,    stageAs: 'rer_leading_edge.tsv'
-    // Exact leading-edge composition tables as rendered/exported by each
-    // module's own 12.FCS_general_report.Rmd.
+    // Leading-edge composition tables exported by each module's 12.FCS_general_report.Rmd.
     path caas_le_comp, stageAs: 'caas_leading_edge_composition.tsv'
     path rer_le_comp,  stageAs: 'rer_leading_edge_composition.tsv'
-    // Optional cross-angle inputs (AMI network modules, posenrich position-level
-    // results) -- NO_FILE-prefixed sentinels tolerated when their module didn't run.
+    // Optional inputs from the AMI and posenrich modules; NO_* sentinels when the
+    // module did not run.
     path ami_module_desc,     stageAs: 'ami_module_descriptions.tsv'
     path ami_term_membership, stageAs: 'ami_term_membership.tsv'
     path posenrich_dotplot,   stageAs: 'posenrich_overall_dotplot.tsv'
-    // posenrich_leading_edge.tsv (gene:position members of significant posenrich
-    // terms, already position-granular) drives both the Integrated gene scorecard's
-    // posenrich angle AND the Interesting Genes/Interesting Positions tables below.
+    // posenrich_leading_edge.tsv (gene:position members of the significant terms) feeds
+    // the posenrich evidence of the Integrated gene scorecard and the Interesting
+    // Genes and Interesting Positions tables.
     path posenrich_le,        stageAs: 'posenrich_leading_edge.tsv'
-    // posenrich's own pooled-per-term Leading edge table (one row per
-    // significant term, not per cutoff) -- 14.Position_enrichment_report.Rmd's
-    // export, imported directly for the Posenrich section's Leading edge sub-tab.
+    // Leading edge table of posenrich, one row per significant term (not per cutoff),
+    // exported by 14.Position_enrichment_report.Rmd for the Leading edge sub-tab of the
+    // Posenrich section.
     path posenrich_le_summary, stageAs: 'posenrich_leading_edge_summary.tsv'
-    // SCORING's own gene-level table (percentile flags + FADE/RER/Accumulation
-    // significance) -- same file 12.FCS_general_report.Rmd/14.Position_enrichment_report.Rmd
-    // already consume, reused here for the Interesting Genes/Positions tables.
+    // SCORING's gene-level table (percentile flags and FADE, RER and Accumulation
+    // significance) for the Interesting Genes and Positions tables.
     path fcs_stats,           stageAs: 'fcs_stats.tsv'
-    // Position-level CAAS scores + FADE-site/VEP annotations -- same optional
-    // inputs 14.Position_enrichment_report.Rmd's Position Characterisation section
-    // already consumes, reused here for the Interesting Positions table.
+    // Position-level CAAS scores with FADE-site and VEP annotations, for the
+    // Interesting Positions table (the inputs of the Position Characterisation
+    // section of 14.Position_enrichment_report.Rmd).
     path position_scores,     stageAs: 'position_scores.tsv'
     path vep_primateai,       stageAs: 'vep_primateai.tsv'
     path vep_cosmic,          stageAs: 'vep_cosmic.tsv'
     path fade_sites_top,      stageAs: 'fade_sites_top.csv'
     path fade_sites_bottom,   stageAs: 'fade_sites_bottom.csv'
-    // posenrich's own per-position PFAM domain/clan, UCR core/flank region +
-    // per-position variability, and FUBAR selection call (build_position_gmt.py's
-    // position_characterization.tsv) -- same layers posenrich tests as GMTs,
-    // flattened for a direct Gene/Position join onto the Interesting Positions
-    // table below.
+    // Per-position Pfam domain/clan, UCR core/flank region and variability, and FUBAR
+    // selection call (position_characterization.tsv from build_position_gmt.py): the
+    // layers posenrich tests as GMTs, flattened for a Gene/Position join onto the
+    // Interesting Positions table.
     path position_char,       stageAs: 'position_characterization.tsv'
-    // SCORING's published percentile slices (scoring_compute.R) -- canonical
-    // gene/position 10/5/1% membership, read directly rather than re-derived
-    // by this report (see 15.Comparison_report.Rmd's gene_lists_dir/
-    // position_lists_dir params).
+    // SCORING's percentile slices (scoring_compute.R): the gene and position
+    // membership of each cutoff, read by the report (gene_lists_dir and
+    // position_lists_dir) instead of recomputed.
     path gene_lists,          stageAs: 'gene_lists'
     path position_lists,      stageAs: 'position_lists'
-    // Tier 4D -- unpaired CAAS x RER gene-score concordance null. caas_perms is
-    // SCORING's caas_perms.rds (caas_corStat_byrank), rer_perms is RERconverge's
-    // *.perms.rds (corStat/corRho), gene_scores_cmp is SCORING's gene_scores.tsv
-    // (observed gene_caas_score + rer_rho). NO_FILE sentinels when unavailable.
+    // Inputs of the unpaired randomization null for the CAAS and RER gene-score
+    // concordance: caas_perms is SCORING's caas_perms.rds (caas_corStat_byrank),
+    // rer_perms is the RERconverge *.perms.rds (corStat, corRho) and gene_scores_cmp is
+    // SCORING's gene_scores.tsv (observed gene_caas_score and rer_rho). NO_* sentinels
+    // when unavailable.
     path caas_perms,          stageAs: 'caas_perms_cmp.rds'
     path rer_perms,           stageAs: 'rer_perms_cmp.rds'
     path gene_scores_cmp,     stageAs: 'gene_scores_cmp.tsv'
@@ -353,8 +337,8 @@ process SCORING_COMPARE_REPORT {
 
         mkdir -p cmp_fcs cmp_fcs_le
 
-        # Per-module FCS all-results tables (skip empty/sentinel files via -s).
-        # 15.Comparison_report.Rmd derives the module from the <module>_fcs_all.tsv name.
+        # Per-module FCS tables; empty or sentinel files are skipped (-s). The Rmd
+        # reads the module name from the <module>_fcs_all.tsv file name.
         for m in caas rer; do
             [ -s "\${m}_fcs_all.tsv" ] && cp "\${m}_fcs_all.tsv" "cmp_fcs/\${m}_fcs_all.tsv" || true
             [ -s "\${m}_leading_edge.tsv" ] && cp "\${m}_leading_edge.tsv" "cmp_fcs_le/\${m}_leading_edge.tsv" || true

@@ -1,4 +1,12 @@
-"""Post-processing filters shared by the observed chain and the permulation null.
+# postproc.py — Cluster-train and gene-removal filters shared by the observed chain and the null.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/core/
+
+"""
+Post-processing filters shared by the observed chain and the permulation null.
+
+Imported by: src/utils/gene_wrapper.py, reaggregate_perm_scores.py (`load_gene_lengths`)
+Inputs: positions per labeling and caap_group, an optional position -> column map, gene lengths (TSV)
+Outputs: flagged positions and units to remove (in memory)
 
 One implementation of the two CT_POSTPROC filters, applied per labeling to the pooled
 scored rows (observed = labeling ``b_0``):
@@ -25,7 +33,7 @@ __all__ = ["ctrain", "train_flags", "GeneUnit", "gene_unit_stats", "gene_removal
 Unit = Tuple[str, str, str]  # (labeling, caap_group, gene)
 
 
-# ── Cluster trains ───────────────────────────────────────────────────────────
+# ── Cluster trains ────────────────────────────────────────────────────────────
 
 def ctrain(
     positions: Sequence[int],
@@ -82,7 +90,7 @@ def train_flags(
     return {key: set(ctrain(list(pos), maxcaas, minlen, columns)) for key, pos in pos_by_key.items()}
 
 
-# ── Gene removal ─────────────────────────────────────────────────────────────
+# ── Gene removal ──────────────────────────────────────────────────────────────
 
 class GeneUnit(NamedTuple):
     """One (labeling, caap_group, gene) unit: its distinct scored positions and whether

@@ -52,14 +52,14 @@ params:
   }
 </style>
 
+<!-- 9.ASR_robustness.Rmd — Distribution of asr_path_score and derived_agreement over the scored CAAS positions. -->
+<!-- PhyloPhere | subworkflows/ASR_ROBUSTNESS/local/ -->
 <!--
-  ASR Path Robustness Characterisation — PhyloPhere Pipeline
-  ======================================================
-  Evaluates the continuous `asr_path_score` assigned to sites during ASR
-  evaluation. Core v3: asr_path_score == core (the Voronoi-domain convergence
-  score); `derived_agreement` is a retained descriptor, not a score factor.
-
-  Author: Miguel Ramon (miguel.ramon@upf.edu)
+  Called by: ASR_ROBUSTNESS_REPORT (asr_robustness.nf), through rmarkdown::render().
+  Params:    disambig_dir (ct_disambiguation/ with caas_convergence_master.csv),
+             posterior_threshold (shown in the report, not applied), output_dir.
+  asr_path_score is the convergence score of the position on its Voronoi domains
+  (fop_pool.py, "core"); derived_agreement is a descriptor and does not enter the score.
 -->
 
 ```{r setup, include=FALSE}
@@ -93,7 +93,7 @@ theme_set(
   )
 )
 
-# ── Parameter validation ──────────────────────────────────────────────────────
+# ── Parameters ────────────────────────────────────────────────────────────────
 disambig_dir        <- params$disambig_dir
 posterior_threshold <- as.numeric(params$posterior_threshold)
 output_dir          <- params$output_dir
@@ -103,6 +103,7 @@ stopifnot(
 )
 
 # ── Output directories ────────────────────────────────────────────────────────
+# Tables go to tsv/ and figures to plots/, both published by ASR_ROBUSTNESS_REPORT.
 tsv_dir   <- file.path(output_dir, "tsv")
 plots_dir <- file.path(output_dir, "plots")
 dir.create(tsv_dir,   recursive = TRUE, showWarnings = FALSE)
@@ -120,7 +121,7 @@ save_plot <- function(p, fname, width = 11, height = 6) {
   invisible(path)
 }
 
-# Color palette definition
+# Categorical palette (Tableau 10)
 .tableau10 <- c(
   "#1F77B4", "#AEC7E8", "#FF7F0E", "#FFBB78",
   "#2CA02C", "#98DF8A", "#D62728", "#FF9896",
@@ -147,14 +148,14 @@ if (!file.exists(master_csv)) {
 
 master_df <- readr::read_csv(master_csv, show_col_types = FALSE, guess_max = 5000)
 
-# Normalize column names if necessary
+# Column names are normalized to gene and site (the master CSV may name them Gene, msa_pos or Position)
 if ("msa_pos" %in% names(master_df)) master_df <- dplyr::rename(master_df, site = msa_pos)
 if (!("gene" %in% names(master_df)) && "Gene" %in% names(master_df))
   master_df <- dplyr::rename(master_df, gene = Gene)
 if (!("site" %in% names(master_df)) && "Position" %in% names(master_df))
   master_df <- dplyr::rename(master_df, site = Position)
 
-# Isolate scored rows
+# Rows without an asr_path_score are not scored and are left out
 score_df <- master_df %>% filter(!is.na(asr_path_score))
 
 if (nrow(score_df) == 0) {

@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
+# run_ucr_detection.py — Batch driver running detect_ucr.py on every per-gene entropy table of a directory.
+# PhyloPhere | bin/
+
 """
-run_ucr_detection.py  —  Batch driver running bin/detect_ucr.py (a verbatim
-copy of ortholog_characterizator's detect_ucr.py) over every <gene>.entropy.tsv
-in a directory.
+RunUcrDetection: loops detect_ucr.py (one gene per call) over the <gene>.entropy.tsv files of
+a directory; the detection logic is entirely in detect_ucr.py.
 
-The reference implementation computes one gene per invocation, driven by a
-manifest + shell loop elsewhere in that pipeline; this loops over a directory
-instead, matching this pipeline's usual bulk-script convention. All detection
-logic lives in bin/detect_ucr.py, unchanged.
+Called by:  RUN_UCR_DETECTION Nextflow process (subworkflows/ENRICHMENT/ucr_generation.nf → run_ucr_detection.py)
+Inputs:     --entropy-dir   directory of <gene>.entropy.tsv (compute_alignment_entropy.py);
+                            <gene>.clade_entropy.tsv files are ignored
+            any other argument is forwarded to detect_ucr.py for every gene
+            (--abs_threshold, --rel_zscore, --window_size ...; see its --help)
+Outputs:    <output-dir>/<gene>.ucr.tsv for the genes with at least one region (detect_ucr.py writes
+            no file otherwise); a count of the genes processed on stderr. A failure of one gene
+            is reported on stderr and the loop continues.
 
-Usage
------
+Usage:
     run_ucr_detection.py --entropy-dir <dir> --output-dir <dir> [detect_ucr.py options...]
-
-Any additional CLI arguments are forwarded verbatim to detect_ucr.py for
-every gene (e.g. --abs_threshold, --rel_zscore, --window_size — see its
---help for the full list).
 """
 
 import argparse

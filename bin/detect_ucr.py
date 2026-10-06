@@ -1,29 +1,26 @@
 #!/usr/bin/env python3
+# detect_ucr.py — Detect ultra-conserved regions (UCRs) in one gene from per-position Valdar C_trident.
+# PhyloPhere | bin/
+
 """
-Detect Ultra-Conserved Regions (UCRs) in a protein alignment from per-position
-Valdar C_trident scores (computed by compute_variability.py).
+DetectUcr: finds runs of highly conserved alignment columns with three complementary methods.
 
-Three complementary detection methods are applied:
+  absolute  consecutive positions with C_trident >= threshold and g <= max_gap: conserved
+            across the whole phylogeny in absolute terms.
+  relative  consecutive positions whose within-gene C_trident z-score >= threshold: unusually
+            conserved for this gene. A gene with uniform C_trident has no contrast and no hits.
+  sliding   windows of k positions with mean C_trident >= threshold and every position
+            g <= max_pos_gap; overlapping windows are merged. Tolerates isolated gappy
+            positions inside a conserved stretch.
 
-  absolute  -- consecutive positions with C_trident >= threshold and g <= max_gap.
-               Answers: "what is absolutely conserved across the full phylogeny?"
+Each region gets flank_size positions on both sides (clamped to the alignment), stored as
+flank_start / flank_end.
 
-  relative  -- consecutive positions whose within-gene C_trident z-score >= threshold.
-               Answers: "what is unusually conserved for this specific gene?"
-               Uniformly conserved genes yield no hits (no within-gene contrast).
-
-  sliding   -- sliding window of k positions where mean C_trident >= threshold and
-               every position has g <= max_pos_gap; overlapping windows are merged.
-               Answers: "are there structurally interesting stretches with locally
-               elevated conservation, tolerant of isolated gappy positions?"
-
-Each detected region gains ±flank_size flanking positions (clamped to alignment
-boundaries), stored as flank_start / flank_end.
-
-Output: <gene>.ucr.tsv  (file is not written when no regions are detected, so that
-Nextflow's `optional: true` can suppress empty per-gene jobs downstream)
-
-Stdout: one summary line per gene  gene<TAB>n_absolute<TAB>n_relative<TAB>n_sliding
+Called by:  run_ucr_detection.py (one call per gene; RUN_UCR_DETECTION in subworkflows/ENRICHMENT/ucr_generation.nf)
+Inputs:     --entropy_tsv  <gene>.entropy.tsv (compute_variability.py): position, C_trident,
+                           variability, g
+Outputs:    --out_tsv      <gene>.ucr.tsv, one row per region; not written when the gene has none
+            stdout         one line: gene, n_absolute, n_relative, n_sliding (tab-separated)
 """
 
 import argparse
@@ -32,11 +29,11 @@ import os
 import sys
 
 
-# ---------------------------------------------------------------------------
-# I/O helpers
-# ---------------------------------------------------------------------------
+# ── I/O helpers ───────────────────────────────────────────────────────────────
+
 
 def load_entropy_tsv(path):
+    """Read an entropy table into a list of {position, C_trident, variability, g}, in file order."""
     rows = []
     with open(path) as fh:
         header = fh.readline().rstrip().split('\t')
@@ -54,11 +51,11 @@ def load_entropy_tsv(path):
     return rows
 
 
-# ---------------------------------------------------------------------------
-# Record helpers
-# ---------------------------------------------------------------------------
+# ── Record helpers ────────────────────────────────────────────────────────────
+
 
 def _stats(positions):
+    """Mean C_trident, minimum C_trident, mean variability and mean gap fraction of a run."""
     n        = len(positions)
     mean_C   = sum(p['C_trident']   for p in positions) / n
     min_C    = min(p['C_trident']   for p in positions)
@@ -68,6 +65,7 @@ def _stats(positions):
 
 
 def _make(gene, method, counter, positions, n_total, flank_size):
+    """UCR record for a run of positions; ucr_id is <gene>_<method>_<counter>, flanks are clamped to 1..n_total."""
     start_pos  = positions[0]['position']
     end_pos    = positions[-1]['position']
     mean_C, min_C, mean_var, mean_g = _stats(positions)
@@ -87,9 +85,8 @@ def _make(gene, method, counter, positions, n_total, flank_size):
     }
 
 
-# ---------------------------------------------------------------------------
-# Detection methods
-# ---------------------------------------------------------------------------
+# ── Detection methods ─────────────────────────────────────────────────────────
+
 
 def detect_absolute(gene, rows, threshold, min_len, max_gap, flank_size):
     """Consecutive positions with C_trident >= threshold and g <= max_gap."""
@@ -108,9 +105,10 @@ def detect_absolute(gene, rows, threshold, min_len, max_gap, flank_size):
 
 
 def detect_relative(gene, rows, zscore_thresh, min_len, flank_size):
-    """
-    Consecutive positions with C_trident z-score >= zscore_thresh (within-gene).
-    Returns empty list for uniformly conserved genes (std < 1e-10).
+    """Consecutive positions with within-gene C_trident z-score >= zscore_thresh.
+
+    The z-score uses the population standard deviation. Returns no region for genes
+    with fewer than 3 positions or a uniform C_trident (std < 1e-10).
     """
     if len(rows) < 3:
         return []
@@ -134,10 +132,9 @@ def detect_relative(gene, rows, zscore_thresh, min_len, flank_size):
 
 
 def detect_sliding(gene, rows, window_size, threshold, max_pos_gap, flank_size):
-    """
-    Sliding window: qualify windows with mean C_trident >= threshold and all
-    positions having g <= max_pos_gap.  Overlapping windows are merged into
-    contiguous spans.
+    """Windows of window_size positions with mean C_trident >= threshold and every g <= max_pos_gap.
+
+    Qualifying windows that overlap or touch are merged into one contiguous span.
     """
     n = len(rows)
     if n < window_size:
@@ -163,9 +160,7 @@ def detect_sliding(gene, rows, window_size, threshold, max_pos_gap, flank_size):
     return ucrs
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 COLUMNS = [
     'gene', 'ucr_id', 'method',
@@ -225,7 +220,7 @@ def main():
     print(f'{args.gene}\t{n_abs}\t{n_rel}\t{n_sli}', flush=True)
 
     if not ucrs:
-        return  # no file → Nextflow optional: true handles absence
+        return  # a gene without regions leaves no file
 
     with open(args.out_tsv, 'w') as fh:
         fh.write('\t'.join(COLUMNS) + '\n')

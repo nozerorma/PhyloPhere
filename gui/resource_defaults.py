@@ -1,36 +1,35 @@
 #!/usr/bin/env python3
-# resource_defaults.py — Parses conf/resources.config into ProcessResourceOverride
-# rows for the Resources tab's "load conf defaults" button.
+# resource_defaults.py — Reads conf/resources.config into ProcessResourceOverride rows
+# for the "load conf defaults" button of the Resources tab.
 # PhyloPhere | gui/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-No PySide6 import — hermetic and unit-testable like gui/generation/, even though
-it lives one level up (it's shared by both the Resources tab widget and, in
-principle, script generation, not generation-specific).
+Resource defaults: parse the per-process cpus and memory of conf/resources.config into
+override rows.
 
-Regex-based, not a real Groovy parser: relies on conf/resources.config's existing
-regularity (one `withName:`/`withLabel:` selector per block, `cpus = { N }` and
-`memory = { N.GB }` as single-line assignments, no nested braces inside a
-selector block) — see gui/generation/templates' own comment about keeping these
-files' shape in sync. Brace-depth tracked explicitly rather than assumed, so a
-selector block closes when depth returns to where it opened, not on the first
-bare "}" line.
+The module imports no PySide6, so it can be tested without a display like
+gui/generation/.
 
-conf/resources.config is the only source of per-process defaults. The override
-table starts empty and a row is a deliberate deviation from it; this parser only
-fills the table with the current defaults as a starting point to edit. A block
-whose selector is an alternation (`withName: 'A|B'`) is not a row and is skipped.
+The parser is regex-based, not a Groovy parser. It relies on the regular shape of
+conf/resources.config: one `withName:` or `withLabel:` selector per block, `cpus = { N }`
+and `memory = { ... }` as single-line assignments, and no nested braces inside a selector
+block. Brace depth is tracked, so a block closes when the depth returns to where it opened
+and not at the first bare "}" line. A block whose selector is an alternation
+(`withName: 'A|B'`) is not a row and is skipped, as is a block with neither cpus nor memory
+(errorStrategy-only labels).
 
-`memory` captures the FULL closure body, not just the leading `N.GB` — several
-entries use `memory = { N.GB * task.attempt }` so a retry (see errorStrategy in
-conf/resources.config) gets more memory on each attempt. An earlier version of
-this regex captured only the numeric+unit prefix, silently truncating
-`* task.attempt` off every scaled entry; since these rows get rendered verbatim
-into a `-c`-loaded override config that is generated once per run and never
-revisited, that truncation permanently pinned every overridden process at its
-attempt-1 memory, defeating retry-with-more-memory without any error or warning.
+conf/resources.config is the only source of per-process defaults. The override table starts
+empty, and a row there is a deliberate deviation from it; this parser only fills the table
+with the current defaults as a starting point to edit.
+
+`memory` keeps the whole closure body, not only the leading `N.GB`: several entries are
+`memory = { N.GB * task.attempt }`, which gives a retry more memory on each attempt. The rows
+are rendered verbatim into the `-c` override config (run_single.sh.j2), so cutting the
+`* task.attempt` would pin the process at its first-attempt memory and defeat the retry.
+
+Imported by: gui/widgets/resource_table/widget.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -46,13 +45,12 @@ DEFAULTS_FILE = CONF_DIR / "resources.config"
 
 _SELECTOR_RE = re.compile(r"with(Name|Label):?\s*'?([A-Za-z0-9_]+)'?\s*\{")
 _CPUS_RE = re.compile(r"cpus\s*=\s*\{\s*(\d+)\s*\}")
-# Full closure body (e.g. "16.GB * task.attempt"), not just the leading
-# numeric+unit — see module docstring.
+# Whole closure body (e.g. "16.GB * task.attempt"), not only the leading number and unit.
 _MEM_RE = re.compile(r"memory\s*=\s*\{\s*([^}]+?)\s*\}")
 
 
 def load_defaults(path: Path = DEFAULTS_FILE) -> list[ProcessResourceOverride]:
-    """Parses conf/resources.config into a fresh list of override rows."""
+    """Parse `path` (default conf/resources.config) into a new list of override rows."""
     rows: list[ProcessResourceOverride] = []
     current: ProcessResourceOverride | None = None
     depth = 0

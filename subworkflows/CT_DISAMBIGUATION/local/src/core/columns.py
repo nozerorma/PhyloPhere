@@ -1,4 +1,12 @@
-"""Untrimmed alignment columns of the trimmed-alignment positions, read from the trimmer's MAP tables.
+# columns.py — Map trimmed-alignment positions to untrimmed columns from the trimmer's MAP tables.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/core/
+
+"""
+Untrimmed alignment columns of the trimmed-alignment positions, read from the trimmer's MAP tables.
+
+Imported by: src/utils/gene_wrapper.py (`index_files`, `gene_columns`)
+Inputs: one MAP TSV per gene (columns ori_codon_col, status, prot_ali_col)
+Outputs: in-memory dicts only
 
 Discovery positions are 0-based columns of the trimmed alignment. The MAP table of a gene has one row per
 column of the untrimmed alignment (``ori_codon_col``, 1-based) with ``status`` (``selected`` | ``removed``) and,

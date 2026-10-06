@@ -54,6 +54,9 @@ params:
   }
 </style>
 
+<!-- 10.Accumulation_report.Rmd — Per-gene CAAS accumulation results by direction and grouping scheme. -->
+<!-- PhyloPhere | subworkflows/CT_ACCUMULATION/local/ -->
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, out.width = "100%")
 
@@ -84,6 +87,7 @@ theme_set(
     plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
   )
 )
+# Order of the schemes in tables and plots; 'cct' is the combined scheme computed below
 scheme_order <- c("us", "gs1", "gs2", "gs3", "gs4", "cct")
 
 fdr_thr   <- params$fdr_threshold
@@ -101,7 +105,7 @@ load_scheme_csv <- function(direction, scheme) {
                     sprintf("accumulation_%s_%s_aggregated_results.csv", direction, scheme))
   if (!file.exists(path)) return(NULL)
   df <- read_csv(path, show_col_types = FALSE)
-  # Rename scheme-suffixed columns to generic names
+  # Drop the _<scheme> suffix of the columns (ActualCount_us becomes ActualCount)
   df <- df %>%
     rename_with(~ str_remove(.x, paste0("_", scheme, "$"))) %>%
     mutate(direction = direction, scheme = scheme)
@@ -113,29 +117,30 @@ raw <- map_dfr(directions, function(d) map_dfr(schemes, ~ load_scheme_csv(d, .x)
 has_data <- nrow(raw) > 0
 if (!has_data) stop("No accumulation CSVs found under: ", accum_dir)
 
-# Standardise column names (Gene / gene)
+# Standardize the gene column name (Gene / gene)
 if ("Gene" %in% names(raw) && !"gene" %in% names(raw)) raw <- rename(raw, gene = Gene)
 
 # ── Combined p-value across the 5 group schemes (Cauchy Combination Test) ────
 # Produces a single per-(gene, direction) p-value from the five per-scheme ones.
-# The same combiner runs in scoring_compute.R and accum_gene_lists.nf on these
-# same inputs; all three must agree, since they feed the scoring table, the AMI
-# gene lists and this report respectively.
+# The same combiner runs in scoring_compute.R and accum_gene_lists.nf on the same
+# inputs; the three must agree, since they feed the scoring table, the gene lists
+# and this report.
 #
-# Why CCT and not an independence-based combiner: a single physical position can
-# be a CAAS under several nested grouping schemes, so the per-scheme counts —
-# and therefore their p-values — are positively correlated. Drawing each group's
-# null separately calibrates each p-value marginally but does nothing to that
-# correlation, which lives in the observed data. CCT's Cauchy tail keeps its null
-# valid under arbitrary dependence between the combined p-values; a combiner
-# assuming independence inflates the type-I rate several-fold at this level of
-# correlation.
+# CCT is used instead of an independence-based combiner: a single physical
+# position can be a CAAS under several nested grouping schemes, so the per-scheme
+# counts, and therefore their p-values, are positively correlated. Drawing each
+# group's null separately calibrates each p-value marginally but does nothing to
+# that correlation, which lives in the observed data. The heavy Cauchy tail of CCT
+# keeps its null valid under arbitrary dependence between the combined p-values,
+# whereas a combiner that assumes independence inflates the type-I rate.
 .cct_combine <- function(ps) {
   ps <- ps[!is.na(ps)]
   if (length(ps) == 0) return(NA_real_)
-  # Groups reporting exactly p=1 are short-circuited: tan((0.5-1)*pi) diverges to
-  # a large negative value, so including them would drag the statistic down and
-  # cancel signal contributed by the other groups.
+  # Missing p-values are dropped (an absent group is not a p of 1). When every
+  # remaining group reports p = 1 the result is 1. Otherwise the p-values are
+  # clamped to [1e-15, 1 - 1e-15] to keep tan() finite, which makes a group with
+  # p = 1 contribute a very large negative term: one such group pulls the combined
+  # p towards 1 whatever the other groups report.
   if (all(ps >= 1)) return(1.0)
   ps   <- pmin(pmax(ps, 1e-15), 1 - 1e-15)
   stat <- sum((1 / length(ps)) * tan((0.5 - ps) * pi))
@@ -150,11 +155,10 @@ cct_df <- raw %>%
   summarise(
     PValueEmpirical = .cct_combine(PValueEmpirical),
     ActualCount     = sum(ActualCount, na.rm = TRUE),
-    # MeanSim/SD are pooled as if independent — adequate as a descriptive summary
-    # of the combined draw sizes, but note it is NOT the basis of the p-value above
-    # (CCT works on the p-values directly and makes no independence assumption).
-    # RandsAbove/RandsBelow are order statistics of one group's own null draws and
-    # carry no pooled meaning, so they are omitted.
+    # MeanSim and SD are pooled as if the groups were independent: a descriptive
+    # summary only, not the basis of the p-value above (CCT works on the p-values
+    # directly and makes no independence assumption). RandsAbove and RandsBelow are
+    # counts of one group's own null draws and carry no pooled meaning, so they are NA.
     MeanSim         = sum(MeanSim, na.rm = TRUE),
     SD              = sqrt(sum(SD^2, na.rm = TRUE)),
     RandsAbove      = NA_integer_,
@@ -164,14 +168,13 @@ cct_df <- raw %>%
     .groups         = "drop"
   )
 
-# Keep only the five per-group schemes and append the combined one. A `full_pool`
-# scheme is dropped if the input carries one: it sums counts across groups, which
-# double-counts any position satisfying more than one grouping scheme.
+# Append the combined scheme. A `full_pool` row is excluded if present: it would sum
+# counts across groups and so count a position once per grouping scheme it satisfies.
 raw <- bind_rows(raw %>% filter(scheme != "full_pool"), cct_df)
 
-# ── BH FDR — applied per direction × scheme, excluding ActualCount=0 genes ───
-# Genes with ActualCount=0 have p=1 by construction (not by test) and must not
-# enter the FDR denominator — they would inflate it and reduce power.
+# ── BH FDR per direction × scheme, excluding genes with ActualCount = 0 ───────
+# Genes with ActualCount = 0 have p = 1 by construction, not by test, and must not
+# enter the FDR denominator: they would inflate it and reduce power.
 accum <- raw %>%
   mutate(
     scheme    = factor(scheme, levels = scheme_order),
@@ -190,7 +193,7 @@ accum <- raw %>%
   ungroup() %>%
   mutate(significant = !is.na(FDR) & FDR < pval_thr)
 
-# Load aggregation-level files if present
+# Global position table of the aggregation, if present
 global_path  <- file.path(accum_dir, "aggregation", "accumulation_global.csv")
 has_global   <- file.exists(global_path)
 if (has_global)  global_df  <- read_csv(global_path,  show_col_types = FALSE)
@@ -405,7 +408,7 @@ for (dir in directions) {
 
 
 ```{r write-summary}
-# Write summary TSV (union of significant genes across all schemes per direction)
+# Summary TSV: one row per significant (gene, direction) with the schemes that call it
 sig_summary <- accum %>%
   filter(significant) %>%
   group_by(gene, direction) %>%
@@ -421,7 +424,7 @@ sig_summary <- accum %>%
 out_tsv <- file.path(params$output_dir, paste0("accumulation_summary_", params$traitname, ".tsv"))
 write_tsv(sig_summary, out_tsv)
 
-# Write the combined-scheme file (all tested genes, sorted by FDR)
+# Combined-scheme TSV: every gene of the cct scheme, sorted by direction and FDR
 cct_export <- accum %>%
   filter(scheme == "cct") %>%
   select(gene, direction, ActualCount, PValueEmpirical, FDR, significant) %>%

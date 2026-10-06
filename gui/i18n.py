@@ -26,7 +26,7 @@ LANGUAGES: Dict[str, str] = {
 }
 
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
-    # --- Tab Titles ---
+    # ── Tab titles ────────────────────────────────────────────────────────────
     "Tab: General": {
         "en": "General",
         "es": "General",
@@ -132,7 +132,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "de": "Über",
     },
 
-    # --- Actions & Menu Buttons ---
+    # ── Actions and menu buttons ──────────────────────────────────────────────
     "File": {
         "en": "File",
         "es": "Archivo",
@@ -182,7 +182,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "de": "Pfade validieren...",
     },
 
-    # --- Common UI Terms & Section Titles ---
+    # ── Common UI terms and section titles ────────────────────────────────────
     "Essential fields": {
         "en": "Essential fields",
         "es": "Campos esenciales",
@@ -312,7 +312,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "de": "SLURM-Standards",
     },
 
-    # --- Buttons & Tables ---
+    # ── Buttons and tables ────────────────────────────────────────────────────
     "Add row": {
         "en": "Add row",
         "es": "Añadir fila",
@@ -338,7 +338,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "de": "In token.tk speichern",
     },
 
-    # --- About Tab ---
+    # ── About tab ─────────────────────────────────────────────────────────────
     "Repository": {
         "en": "Repository",
         "es": "Repositorio",
@@ -476,7 +476,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "de": "Liesmich",
     },
 
-    # --- Field Labels ---
+    # ── Field labels ──────────────────────────────────────────────────────────
     "Repo directory": {
         "en": "Repo directory",
         "es": "Directorio del repositorio",
@@ -669,7 +669,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "it": "ricampionamento",
         "de": "Neuabtastung",
     },
-    # --- Module Tab Content (auto-added: titles, blurbs, disclaimers, field labels) ---
+    # ── Module tabs: titles, blurbs, disclaimers, field labels ────────────────
     # CAAS / Contrast Selection Tab
     'CAAS / Contrast Selection': {
         'en': 'CAAS / Contrast Selection',
@@ -1742,7 +1742,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'de': 'POSENRICH-adjustierter-P-Schwellenwert',
     },
 
-    # --- Remaining GUI Text (auto-added: general/precomputed/resources/runtime tab notes & fields) ---
+    # ── General, Precomputed, Resources, Runtime tabs ─────────────────────────
     # General Tab
     "This GUI runs inside the <code>phylophere</code> conda environment, so it can't install that environment itself (nothing to launch it with beforehand). If you haven't set it up yet, run this once from a terminal:<br><code>./environment/install_env.sh</code>": {
         'en': "This GUI runs inside the <code>phylophere</code> conda environment, so it can't install that environment itself (nothing to launch it with beforehand). If you haven't set it up yet, run this once from a terminal:<br><code>./environment/install_env.sh</code>",
@@ -1967,8 +1967,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'de': 'CAAS-Permulation-RDS',
     },
 
-    # --- Precomputed Run tab redesign (auto-added) ---
-    # Precomputed Run tab redesign
+    # ── Precomputed Run tab ───────────────────────────────────────────────────
     "Accumulation and Scoring need this module's output. Check 'Use precomputed Disambiguation output' on the Precomputed Run tab instead.": {
         'en': "Accumulation and Scoring need this module's output. Check 'Use precomputed Disambiguation output' on the Precomputed Run tab instead.",
         'es': "Acumulación y Puntuación necesitan la salida de este módulo. Marque 'Usar salida precomputada de Disambiguation' en la pestaña Ejecución Precomputada.",
@@ -2066,7 +2065,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'de': 'Ein einziger Basispfad, wiederverwendet für jede unten aktivierte Checkbox: base_path/<TRAIT>/... (das eigene Unterverzeichnis jedes Phänotyps, passend zur Ausgabestruktur eines zuvor abgeschlossenen Laufs). Aktivieren Sie eine Checkbox, um die bereits berechnete Ausgabe dieser Stufe einzuspeisen, statt sie neu zu berechnen — dies schaltet diese Stufe auch ab.',
     },
 
-    # --- Precomputed tab CT sub-checkboxes (capitalized, distinct from caas_tab's lowercase discovery/resample keys) ---
+    # ── Precomputed tab: CT sub-checkboxes ────────────────────────────────────
+    # The capitalized keys differ from the lowercase discovery/resample keys of the CAAS tab.
     "Discovery": {
         "en": "Discovery",
         "es": "Descubrimiento",

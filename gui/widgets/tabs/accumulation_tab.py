@@ -4,6 +4,14 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+AccumulationTab: field specification of the Accumulation module (conf/accumulation.config).
+
+Declares the ModuleTabSpec and binds it to AccumulationConfig through ModuleTabWidget.
+
+Imported by: gui/widgets/main_window.py
+"""
+
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import AccumulationConfig
 from gui.widgets.common.module_tab import ModuleTabWidget
@@ -30,9 +38,9 @@ SPEC = ModuleTabSpec(
     ),
     essential_fields=(
         Section("Randomization and burden parameters"),
-        # Choice of null model for the burden test — directly determines what
-        # the accumulation p-values mean (uniform vs conservation-matched vs
-        # permulation-derived null); a model-selection parameter.
+        # The randomization type sets the null model of the burden test, so it
+        # determines what the accumulation p-values mean (uniform,
+        # conservation-matched or permulation-derived null).
         FieldSpec(
             name="accumulation_randomization_type",
             label="Randomization type",

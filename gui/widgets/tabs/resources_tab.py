@@ -4,6 +4,18 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+ResourcesTab: resource ceilings of the local and slurm profiles, SLURM executor
+settings and the table of per-process resource overrides.
+
+The ceilings are passed to the generated `nextflow run` command as --max_cpus,
+--max_memory and --max_time; the SLURM executor fields as --slurm_queue_size,
+--slurm_submit_rate_limit and --slurm_exit_read_timeout. Edits write straight into
+ResourcesConfig (gui/models/resources.py).
+
+Imported by: gui/widgets/main_window.py
+"""
+
 # ── Third-party ───────────────────────────────────────────────────────────────
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (

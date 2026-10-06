@@ -1,21 +1,43 @@
 #!/usr/bin/env Rscript
+# permulations.R — Harvest a pool of permulated FG/BG labelings that match the observed contrast design.
+# PhyloPhere | subworkflows/CT/local/scripts/
 # =============================================================================
-# PHYLOPHERE: A Nextflow pipeline for Phenome-Genome studies
-# File: subworkflows/CT/local/scripts/permulations.R
-# =============================================================================
-# Generates null trait permulations for CAAS significance calibration.
+# Called by:  RESAMPLE Nextflow process (ct_resample.nf → Rscript permulations.R ...)
 #
-# Strategies (--perm_strategy):
-#   OU : (Default) Fits an Ornstein-Uhlenbeck evolutionary model (alpha, sigsq),
-#        simulates traits under OU on the tree, and selects candidate pairs
-#        using Global Top 1% PSS (or non-overlapping Bayesian CIs for count data).
-#   BM : Brownian Motion simulation on the real tree, rank-matched back onto
-#        observed values (simpermvec).
+# Args (positional, from task.script; the first six are required):
+#   args[1]  tree                 species tree (Newick)
+#   args[2]  config               observed traitfile (V1 species, V2 label 0/1, V3 pair id): sets
+#                                 N_pairs_obs and, with multi_hypothesis, locates
+#                                 contrast_hypotheses_pairs.tsv next to it
+#   args[3]  cycles               size of the pool to harvest (params.caas_full_perms)
+#   args[4]  strategy             auto | OU | BM (params.perm_strategy)
+#   args[5]  phenotypes           trait table (species + value, optionally n and c count columns)
+#   args[6]  outdir               output directory
+#   args[7]  chunk_size           permulations per resample_NNN.tab (default 500)
+#   args[8]  pss_top_pct          fraction of candidate pairs kept by PSS (default 0.01)
+#   args[9]  max_tries            initial draw budget (default 1e6)
+#   args[10] pheno_col            value column of the trait table ("" = first numeric)
+#   args[11] n_col, args[12] c_col   count columns for Jeffreys intervals ("" = auto-detect)
+#   args[13] resample_use_n       use the count columns when present
+#   args[14] trait_type           auto | continuous | ordinal
+#   args[15] multi_hypothesis     also harvest FOP hypotheses for every accepted cycle
+#   args[16] max_fop              maximum FOP hypotheses (H1..Hn) per cycle (default 100)
+#   args[17] n_cpus               workers of the FOP harvest (default: SLURM allocation, else cores)
+#   args[18] seed                 RNG seed; required with multi_hypothesis
 #
-# Pool harvesting:
-# Every accepted permulation carries EXACTLY N_pairs_obs pairs with Dunn validation:
-#   Tier 1 : all N_pairs_obs pairs have mod_dunn >= 1 (fully independent)
-#   Tier 2 : exactly one pair falls below mod_dunn 1 (fallback)
+# Method: the trait is simulated under BM on the species tree (rescaled to the fitted OU
+# when OU is the selected model), and the simulated ranks are mapped back onto the observed
+# values, so each permulation has the observed marginal distribution. Strategy auto
+# selects BM or OU by AIC, as the observed selector does.
+#
+# Pool harvesting: every accepted permulation carries exactly N_pairs_obs pairs, graded by
+# the modified Dunn index (the contrast selection is lean_contrast_selector.R):
+#   Tier 1 : all pairs have mod_dunn >= 1 (fully independent)
+#   Tier 2 : exactly one pair falls below mod_dunn 1 (only used to fill a shortfall)
+#
+# Outputs (outdir): resample_NNN.tab (cycle, fg, bg; no header), permulation_manifest.tsv
+# (one row per cycle: tier, pair count, Dunn, trait values), and with multi_hypothesis
+# fop_labelings.tab and fop_pairs.tsv.
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -24,26 +46,28 @@ suppressPackageStartupMessages({
   library(parallel)
 })
 
-# Parallel-safe RNG for the forked FOP-mirror workers (section far below). Set
-# unconditionally so the substream kind is consistent whether or not a seed is
-# passed; the seed itself is applied after CLI parsing.
+# Parallel-safe RNG for the forked workers of the FOP mirror. The generator kind is set
+# unconditionally, so that it is the same with or without a seed; the seed itself is
+# applied after the arguments are parsed.
 RNGkind("L'Ecuyer-CMRG")
 
 log_msg <- function(tag, ...) write(paste0("[", tag, "] ", format(Sys.time()), " ", paste0(...)), stdout())
 
-# Evolutionary model fit + BM/OU covariances + AIC model selection come from the
-# vendored phyloq engine (pss_core.R), sourced below once script_dir is known.
+# The evolutionary model fit, the BM/OU covariances and the AIC model selection come from
+# the vendored phyloq engine (pss_core.R), sourced below once script_dir is known.
 
-# ── RERconverge permulation primitives ───────────────────────────────────────
+# ── Permulation primitives (RERconverge) ──────────────────────────────────────
+
+# One BM simulation of the trait on the tree, with the rate matrix estimated from `namedvec`.
 simulatevec <- function(namedvec, treewithbranchlengths) {
   rm   <- ratematrix(treewithbranchlengths, namedvec)
   sims <- sim.char(treewithbranchlengths, rm, nsim = 1)
   setNames(as.data.frame(sims)[, 1], rownames(sims))
 }
 
-# Rank-matching: the simulated vector supplies the ORDERING, the observed vector
-# supplies the VALUES. The permulated marginal distribution is therefore
-# identical to the real one by construction.
+# Rank matching: the simulated vector supplies the ordering, the observed vector supplies
+# the values. The permulated marginal distribution is therefore identical to the observed
+# one by construction.
 simpermvec <- function(namedvec, treewithbranchlengths) {
   vec       <- simulatevec(namedvec, treewithbranchlengths)
   simsorted <- sort(vec)
@@ -51,7 +75,7 @@ simpermvec <- function(namedvec, treewithbranchlengths) {
   simsorted
 }
 
-# ── CLI ──────────────────────────────────────────────────────────────────────
+# ── CLI ───────────────────────────────────────────────────────────────────────
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 6) {
   stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
@@ -79,14 +103,14 @@ c_col              <- arg_or(12, "")   # numerator column   (e.g. malignant_coun
 resample_use_n     <- tolower(arg_or(13, "true")) %in% c("1", "true", "t", "yes", "y")
 trait_type         <- tolower(arg_or(14, "auto"))
 # The null mirrors the observed design: with multi_hypothesis every accepted cycle also gets a FOP
-# hypothesis harvest (fop_labelings.tab / fop_pairs.tsv) so it is pooled like the observed data.
+# hypothesis harvest (fop_labelings.tab, fop_pairs.tsv), so that it is pooled like the observed data.
 fop_null           <- tolower(arg_or(15, "false")) %in% c("1", "true", "t", "yes", "y")
 max_fop            <- arg_or(16, 100L, as.integer)
 
-# ── Parallelism + RNG seed ──────────────────────────────────────────────────
-# n_cpus drives the forked FOP-mirror harvest only (the pool harvest stays
-# serial). Fall back to the SLURM allocation, then to a single core; never
-# exceed the physically available cores.
+# ── Parallelism and RNG seed ──────────────────────────────────────────────────
+# n_cpus drives the forked FOP-mirror harvest only (the pool harvest is serial). Without
+# the argument it falls back to the SLURM allocation, then to the detected cores, and it
+# never exceeds the cores that are available.
 .detected_cores <- tryCatch(parallel::detectCores(), error = function(e) 1L)
 if (!is.finite(.detected_cores) || .detected_cores < 1L) .detected_cores <- 1L
 n_cpus <- arg_or(17, NA_integer_, as.integer)
@@ -96,8 +120,8 @@ if (is.na(n_cpus)) {
 }
 n_cpus <- max(1L, min(as.integer(n_cpus), .detected_cores))
 
-# Seed: reproducible parallel streams when supplied (Nextflow passes params.seed,
-# default 1998). Absent -> RNG is left unseeded, matching historical behaviour.
+# With a seed (the pipeline passes params.seed, 1998 by default) the parallel streams are
+# reproducible; without one the RNG is left unseeded.
 seed_arg <- arg_or(18, NA_integer_, as.integer)
 if (!is.na(seed_arg)) {
   set.seed(seed_arg)
@@ -111,8 +135,9 @@ if (fop_null && is.na(seed_arg)) {
   stop("permulations.R: the FOP harvest needs the pipeline seed (argument 18, params.seed).")
 }
 
-# Design matching: keep only null cycles whose FOP harvest yields at least as many
-# hypotheses as the observed harvest (see "Design matching" below). Always on.
+# Design matching keeps only null cycles whose FOP harvest yields at least as many
+# hypotheses as the observed harvest (see "Design matching" below). It is requested here
+# and takes effect only when the FOP harvest is on and the observed count is known.
 match_fop <- TRUE
 
 if (!selection.strategy %in% c("auto", "best_model", "ou", "bm")) {
@@ -125,7 +150,7 @@ if (!dir.exists(outdir)) {
   log_msg("INFO", "Created output directory: ", outdir)
 }
 
-# ── Locate the lean selector next to this script ─────────────────────────────
+# ── Locate the selector and the PSS engine next to this script ────────────────
 script_dir <- {
   full <- commandArgs(trailingOnly = FALSE)
   hit  <- grep("^--file=", full, value = TRUE)
@@ -133,7 +158,7 @@ script_dir <- {
 }
 lean_script <- file.path(script_dir, "lean_contrast_selector.R")
 
-# ── Config: species | binary label | pair (cluster) id ───────────────────────
+# ── Config: species | binary label | pair (cluster) id ────────────────────────
 cfg <- read.table(config.file, sep = "\t", header = FALSE, stringsAsFactors = FALSE)
 foreground.species <- cfg$V1[cfg$V2 == "1"]
 background.species <- cfg$V1[cfg$V2 == "0"]
@@ -155,9 +180,9 @@ if (n_fg != target_pairs || n_bg != target_pairs) {
 }
 log_msg("INFO", sprintf("Observed independent pair count from config V3: N_pairs_obs = %d", target_pairs))
 
-# Observed FOP hypothesis count: the number of hypotheses the observed harvest
-# actually produced (<= max_fop), read from contrast_hypotheses_pairs.tsv next to
-# the discovery config. It is the design size every null cycle is matched to.
+# Observed FOP hypothesis count: the number of hypotheses the observed harvest produced
+# (at most max_fop), read from contrast_hypotheses_pairs.tsv next to the discovery config.
+# It is the design size to which every null cycle is matched.
 n_hyp_obs <- 0L
 if (fop_null) {
   .cfg_dir <- if (dir.exists(config.file)) config.file else dirname(config.file)
@@ -200,7 +225,7 @@ phenotype.df <- data.frame(
   stringsAsFactors = FALSE
 )
 
-# ── Count data → Jeffreys CIs ────────────────────────────────────────────────
+# ── Count data → Jeffreys CIs ─────────────────────────────────────────────────
 if (resample_use_n) {
   if (!nzchar(n_col) || !n_col %in% names(pheno_raw)) {
     cand_n <- c("n_trait", "n", "n_population", "sample_size", "total_count", "N")
@@ -239,7 +264,7 @@ if (use_ci) keep <- keep & is.finite(phenotype.df$ci_lb) & is.finite(phenotype.d
 phenotype.df <- phenotype.df[keep, , drop = FALSE]
 if (nrow(phenotype.df) == 0) stop("No valid phenotype rows remain after NA filtering")
 
-# ── Vendored phyloq engine + shared selector ────────────────────────────────
+# ── Vendored phyloq engine and shared selector ────────────────────────────────
 pss_core_script <- file.path(script_dir, "pss_core.R")
 for (.f in c(lean_script, pss_core_script)) {
   if (!file.exists(.f)) stop(basename(.f), " not found next to permulations.R (looked in '", script_dir, "').")
@@ -248,9 +273,10 @@ source(pss_core_script)   # fit_models / covariances_from_fits / select_model / 
 source(lean_script)       # selection_context + shared selection core
 log_msg("INFO", "Shared contrast selector + phyloq PSS loaded from ", script_dir)
 
-# ── Selection context: tree, distances and evolutionary model, fitted once on
-#    the observed trait by the same selection_context() the observed selector
-#    uses. Covariances are held fixed across all permulation draws.
+# ── Selection context ─────────────────────────────────────────────────────────
+# Tree, distances and evolutionary model, fitted once on the observed trait by the same
+# selection_context() that the observed selector uses. The covariances stay fixed across
+# all permulation draws.
 .force_model <- if (selection.strategy %in% c("bm", "ou")) toupper(selection.strategy) else NULL
 ctx <- selection_context(setNames(phenotype.df$value, phenotype.df$species),
                          read.tree(tree.path), force_model = .force_model)
@@ -265,12 +291,12 @@ log_msg("INFO", sprintf("Evolutionary model: %s (AIC BM = %.3f, OU = %.3f; delta
                         selected_model, fit_aic(obs_fits$BM), fit_aic(obs_fits$OU),
                         fit_aic(obs_fits$BM) - fit_aic(obs_fits$OU)))
 
-# ── Ultrametric check (warn-only) ───────────────────────────────────────────
-# KEEP IN SYNC with subworkflows/TRAIT_ANALYSIS/local/src/commons.R. Contrast
-# independence (Dunn) and the OU/BM PSS assume a time tree; an ML phylogram lets
-# a long terminal branch (rate, not time) inflate a species' contrast-pair
-# diameter and wrongly fail otherwise-independent pairs. PhyloPhere expects a
-# dated species tree — warn rather than rate-smooth an arbitrary phylogram here.
+# ── Ultrametric check (warn-only) ─────────────────────────────────────────────
+# Same check as in subworkflows/TRAIT_ANALYSIS/local/src/commons.R; keep the two in sync.
+# Contrast independence (Dunn) and the OU/BM PSS assume a time tree: on an ML phylogram a
+# long terminal branch (rate, not time) inflates the diameter of a species' contrast pair
+# and wrongly fails otherwise-independent pairs. PhyloPhere expects a dated species tree,
+# so the script warns instead of rate-smoothing an arbitrary phylogram.
 if (!is.ultrametric(pruned.tree, tol = 1e-6)) {
   log_msg("WARN", "permulation tree is NOT ultrametric (phylogram); contrast ",
           "independence assumes a time tree. Supply a dated species tree.")
@@ -284,7 +310,10 @@ if (selected_model == "OU") {
   simulation_tree <- pruned.tree
 }
 
-# ── Harvest ──────────────────────────────────────────────────────────────────
+# ── Harvest ───────────────────────────────────────────────────────────────────
+# Draws are permulations of the observed trait: each is graded by
+# evaluate_lean_contrast_selection() into Tier 1, Tier 2 or a rejection. The pool is the
+# first `number.of.cycles` Tier-1 draws, completed with Tier 2 only when Tier 1 falls short.
 start.time <- Sys.time()
 log_msg("START", sprintf("Harvesting pool (strategy: %s, pool_size: %d, max_tries: %d)",
                          selection.strategy, number.of.cycles, max_tries))
@@ -309,16 +338,16 @@ n1 <- 0L; n2 <- 0L
 total_draws <- 0L
 reject_reasons <- character(0)
 
-# Escalation is TARGET-AWARE. `max_tries` exists to abort a trait whose Dunn
-# geometry makes a full pool essentially unreachable (low Tier-1 acceptance),
-# NOT to cap a run that is merely draw-starved because the pool is large and the
-# starting budget small. So when the inner loop stalls short of the pool:
+# Budget escalation is target-aware. `max_tries` is meant to abort a trait whose Dunn
+# geometry makes a full pool essentially unreachable (low Tier-1 acceptance), not to cap a
+# run that is merely draw-starved because the pool is large and the starting budget small.
+# When the inner loop stalls short of the pool:
 #   * estimate the Tier-1 acceptance rate from the draws so far;
 #   * if it is healthy, project the budget needed to finish (+ headroom) and keep
 #     going, bounded only by HARVEST_HARD_CAP x pool_size;
 #   * if it is genuinely poor, bump modestly, count it, and give up after
 #     MAX_LOWRATE_ESCALATIONS with a diagnostic that names the acceptance rate.
-HARVEST_HARD_CAP        <- 50L    # x candidate target — absolute draw ceiling
+HARVEST_HARD_CAP        <- 50L    # x candidate target: absolute draw ceiling
 MIN_VIABLE_TIER1_RATE   <- 0.05   # below this the trait cannot realistically fill the pool
 MAX_LOWRATE_ESCALATIONS <- 3L
 LOWRATE_FACTOR          <- 1.5
@@ -328,11 +357,11 @@ budget              <- max_tries
 lowrate_escalations <- 0L
 escalations         <- 0L         # kept for the "filled after N escalation(s)" log below
 
-# ── FOP harvest helpers (design matching + FOP mirror) ──────────────────────
-# `lean_fop_harvest` seeds its draws with the pipeline seed (restoring the
-# caller's RNG state afterwards) and `evaluate_lean_contrast_selection` is
-# RNG-free, so a cycle's harvest is a pure function of its own inputs: counting
-# it here and re-harvesting it in the FOP mirror below yields the same hypotheses.
+# ── FOP harvest helpers (design matching and FOP mirror) ──────────────────────
+# `lean_fop_harvest` seeds its draws with the pipeline seed (restoring the caller's RNG
+# state afterwards) and `evaluate_lean_contrast_selection` is RNG-free, so the harvest of
+# a cycle is a pure function of its own inputs: counting it here and re-harvesting it in
+# the FOP mirror below yields the same hypotheses.
 fop_hypotheses <- function(e, label) {
   if (is.null(e$pvec) || is.null(e$fg) || is.null(e$bg)) return(NULL)
   tryCatch(
@@ -354,18 +383,17 @@ fop_count <- function(e) {
   if (is.null(hv)) 1L else max(1L, length(hv$hypotheses))
 }
 
-# ── Design matching ─────────────────────────────────────────────────────────
-# The observed statistic is pooled over the observed FOP harvest (n_hyp_obs
-# hypotheses). A null cycle with fewer hypotheses has fewer chances to re-detect
-# a position (p.emp biased low); one with more has more chances (biased high).
-# With match_fop, each candidate is harvested with the same max_fop (hence the
-# same search budget) as the observed harvest, the pool keeps only candidates
-# whose harvest reaches n_hyp_obs, in draw order, and the FOP mirror below keeps
-# each kept cycle's top n_hyp_obs hypotheses;
-# when too few qualify, the candidate target is extended from the observed
-# match rate and harvesting resumes. If the rate is below MIN_MATCH_RATE or the
-# target reaches MATCH_HARD_CAP x pool size, the shortfall is filled with the
-# largest-harvest remaining candidates and the gap is logged.
+# ── Design matching ───────────────────────────────────────────────────────────
+# The observed statistic is pooled over the observed FOP harvest (n_hyp_obs hypotheses).
+# A null cycle with fewer hypotheses has fewer chances to re-detect a position (empirical
+# p biased low); one with more has more chances (biased high). With match_fop, each
+# candidate is harvested with the same max_fop (hence the same search budget) as the
+# observed harvest; the pool keeps, in draw order, only the candidates whose harvest
+# reaches n_hyp_obs, and the FOP mirror below keeps the top n_hyp_obs hypotheses of each
+# kept cycle. When too few candidates qualify, the candidate target is extended according
+# to the observed match rate and harvesting resumes. If the rate is below MIN_MATCH_RATE
+# or the target reaches MATCH_HARD_CAP x pool size, the shortfall is filled with the
+# remaining candidates of largest harvest and the gap is logged.
 MIN_MATCH_RATE <- 0.05
 MATCH_HARD_CAP <- 20L
 pool_target <- number.of.cycles
@@ -405,9 +433,8 @@ repeat {
                                    reason = paste0("error: ", conditionMessage(err)))
       )
 
-      # Retain the permuted vector (+ CI/n draws) on accepted cycles so the FOP
-      # mirror can harvest alternative hypotheses around this exact labeling after
-      # the pool is assembled.
+      # Accepted cycles keep their permuted vector (and CI/n draws), so that the FOP mirror
+      # can harvest alternative hypotheses around this exact labeling once the pool is assembled.
       if (fop_null && e$tier %in% c(1L, 2L)) {
         e$draw_id <- total_draws
         e$pvec <- pvec
@@ -435,8 +462,8 @@ repeat {
     tier1_rate <- (n1 + 1) / (total_draws + 1)
 
     if (tier1_rate >= MIN_VIABLE_TIER1_RATE) {
-      # Draw-starved, not rejection-bound: extend the budget toward the projected
-      # finish. Does NOT count against the low-acceptance abort counter.
+      # Draw-starved, not rejection-bound: the budget is extended toward the projected
+      # finish. This does not count against the low-acceptance abort counter.
       proj       <- total_draws + ceiling((pool_target - n1) / tier1_rate * BUDGET_HEADROOM)
       new_budget <- min(max(proj, ceiling(budget * 1.25)), hard_cap)
       if (new_budget <= budget) break   # already at the hard cap and still short
@@ -461,7 +488,7 @@ repeat {
     }
   }
 
-  # ── Assemble the candidate pool: Tier 1 first, Tier 2 only to fill a shortfall
+  # ── Assemble the candidate pool: Tier 1 first, Tier 2 to fill a shortfall ───
   if (n1 >= pool_target) {
     cands <- tier1[seq_len(pool_target)]
     log_msg("INFO", sprintf("Pool filled entirely from Tier 1 (%d/%d) in %d draws%s",
@@ -483,7 +510,7 @@ repeat {
     tab <- sort(table(reject_reasons), decreasing = TRUE)
     top <- seq_len(min(3, length(tab)))
     final_rate <- (n1 + 1) / (total_draws + 1)
-    # Name the failure mode so the fix is obvious from the log alone.
+    # The message names the failure mode, so the remedy is clear from the log alone.
     diag <- if (final_rate >= MIN_VIABLE_TIER1_RATE) sprintf(
         paste0("Tier-1 acceptance was healthy (%.1f%%) — the run was DRAW-STARVED and hit ",
                "the hard cap (%d). Raise --max_tries / MAX_TRIES (>= ~%d for this pool) or ",
@@ -510,7 +537,7 @@ repeat {
     break
   }
 
-  # ── Design matching: count each new candidate's FOP harvest ────────────────
+  # ── Design matching: count each new candidate's FOP harvest ─────────────────
   cand_ids <- vapply(cands, function(e) as.integer(e$draw_id), integer(1))
   new_i <- which(!(as.character(cand_ids) %in% names(nhyp_cache)))
   if (length(new_i)) {
@@ -549,10 +576,10 @@ repeat {
   log_msg("INFO", sprintf("Design matching: extending the candidate target to %d", pool_target))
 }
 
-# ── Write resample chunks + a tier/Dunn manifest ─────────────────────────────
-# O(n) row-binding: do.call(rbind, <list of n 1-row data.frames>) is O(n^2) and
-# becomes the wall-clock bottleneck once the pool is ~1e5 (and the FOP mirror
-# below produces up to max_fop x that many rows). data.table::rbindlist is linear.
+# ── Write resample chunks + a tier/Dunn manifest ──────────────────────────────
+# Linear row binding: do.call(rbind, <list of n 1-row data.frames>) is quadratic and
+# becomes the wall-clock bottleneck for pools of ~1e5 rows (the FOP mirror below produces
+# up to max_fop times as many). data.table::rbindlist is linear.
 rbind_fast <- function(lst) {
   lst <- lst[!vapply(lst, is.null, logical(1))]
   if (!length(lst)) return(NULL)
@@ -560,9 +587,9 @@ rbind_fast <- function(lst) {
                 stringsAsFactors = FALSE)
 }
 
-# Streamed writers: only the current chunk is held in memory, never the whole
-# pool. The resample chunks stay one-file-per-`chunk.size` cycles; the manifest
-# is appended chunk-by-chunk to a single open connection (header written once).
+# Streamed writers: only the current chunk is held in memory, never the whole pool. Each
+# resample file holds `chunk.size` cycles; the manifest is appended chunk by chunk to a
+# single open connection, with its header written once.
 file.counter <- 1L; chunk.start <- 1L
 chunk_rows     <- list()
 chunk_manifest <- list()
@@ -605,23 +632,21 @@ for (b in seq_along(pool)) {
 }
 close(man_con)
 
-# ── FOP mirror: per-cycle alternative-hypothesis harvest ─────────────────────
-# Mirrors the observed FOP harvest (selection_algorithm.R::fop_pair_sel.f) for
-# every accepted permulation cycle, so the null holds the SAME domain-pooled
-# statistic scoring_compute.R §2b builds on the observed data. H1 is the cycle's
-# already-accepted canonical contrast; H2..Hn are Dunn-independent alternatives
-# drawn from the same Voronoi domains, ranked by min/mean PSS then Dunn, capped at max_fop.
-#   fop_labelings.tab         : "<cycle>~H<m>" \t fg_csv \t bg_csv   (fanned discovery input)
-#   fop_pairs.tsv   : cycle, hypothesis_id, pair(domain), species1, species2, pss_score
+# ── FOP mirror: per-cycle alternative-hypothesis harvest ──────────────────────
+# Mirrors the observed FOP harvest (selection_algorithm.R::fop_pair_sel.f) for every
+# accepted permulation cycle, so that the null is pooled over hypotheses like the observed
+# data (fop_pool.py pools the hypotheses of a position). H1 is the already-accepted canonical
+# contrast of the cycle; H2..Hn are Dunn-independent alternatives drawn from the same
+# Voronoi domains, ranked by minimum and mean PSS and then by Dunn, and capped at max_fop.
+#   fop_labelings.tab : "<cycle>~H<m>" \t fg_csv \t bg_csv   (labelings of the fanned discovery)
+#   fop_pairs.tsv     : cycle, hypothesis_id, pair (domain), species1, species2, pss_score
 #
-# Parallel + streamed: `lean_fop_harvest` seeds its draws with the pipeline seed
-# (lean_contrast_selector.R) and `evaluate_lean_contrast_selection` is RNG-free,
-# so a cycle's harvest is a pure function of its own inputs — forking
-# the loop cannot change any cycle's output, only the interleaving of cycles,
-# which we preserve by consuming worker results in strict pool order. Output is
-# therefore byte-identical to the serial version. Each batch of cycles is
-# harvested with mclapply and its rows appended to open connections, so peak
-# memory is one batch, not the whole (up to max_fop x pool_size) row set.
+# Parallel and streamed: the harvest of a cycle is a pure function of its own inputs (see
+# the helpers above), so forking the loop changes only the interleaving of cycles, which is
+# kept by consuming the worker results in pool order. The output therefore does not depend
+# on the number of workers. Each batch of cycles is harvested with mclapply and its rows are
+# appended to open connections, so peak memory is one batch, not the whole row set (up to
+# max_fop x pool size).
 if (fop_null) {
   FOP_BATCH <- 1000L
   n_workers <- max(1L, min(n_cpus, length(pool)))
@@ -643,12 +668,12 @@ if (fop_null) {
     if (is.null(e$pvec) || is.null(e$fg) || is.null(e$bg))
       return(list(lab = NULL, pair = NULL, n_hyp = 0L))
     hv <- fop_hypotheses(e, cyc)
-    # Design matching: a matched cycle carries exactly the observed number of
-    # hypotheses, its top n_hyp_obs in harvest order (H1, then by min-PSS).
+    # Design matching: a matched cycle carries exactly the observed number of hypotheses,
+    # its top n_hyp_obs in harvest order (H1, then by minimum PSS).
     if (match_fop && !is.null(hv) && length(hv$hypotheses) > n_hyp_obs)
       hv$hypotheses <- hv$hypotheses[seq_len(n_hyp_obs)]
     if (is.null(hv) || length(hv$hypotheses) == 0L) {
-      # fall back to H1-only so the cycle still enters the fanned discovery
+      # Fallback to H1 only, so that the cycle still enters the fanned discovery
       return(list(
         lab = data.frame(cycle = paste0(cyc, "~H1"),
                          fg = paste(e$fg, collapse = ","),
@@ -715,7 +740,7 @@ if (fop_null) {
     rm(res, lab_batch, pair_batch, lab_df, pair_df)
   }
   close(lab_con); close(pair_con)
-  # Match the old "only write if there were rows" contract.
+  # The files exist only when they received rows.
   if (!any_lab)  unlink(lab_path)
   if (!any_pair) unlink(pair_path)
 
@@ -724,7 +749,7 @@ if (fop_null) {
                               if (length(pool)) n_hyp_tot / length(pool) else 0))
 }
 
-# ── Summary ──────────────────────────────────────────────────────────────────
+# ── Summary ───────────────────────────────────────────────────────────────────
 tiers <- vapply(pool, function(e) e$tier, integer(1))
 dunns <- vapply(pool, function(e) e$dunn_min, numeric(1))
 elapsed <- as.numeric(difftime(Sys.time(), start.time, units = "mins"))

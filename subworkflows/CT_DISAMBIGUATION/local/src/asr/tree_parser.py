@@ -1,3 +1,6 @@
+# tree_parser.py — Parse Newick trees with the node ids PAML assigns, and basic tree queries (MRCA, tip lookup).
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/asr/
+
 """
 Tree parsing utilities for PAML RST file interpretation.
 
@@ -5,6 +8,11 @@ This module provides functions to parse Newick tree files with PAML node labels
 from RST output files. PAML assigns specific node IDs (visible in the 'tree with
 node labels for Rod Page's TreeView' section) that must be preserved for correct
 posterior-to-node mapping.
+
+Imported by: src/asr/asr_single.py, src/asr/posterior.py, src/convergence/disambiguate_single.py,
+src/phylo/tree_utils.py
+Inputs: a PAML RST file (labeled tree and node range) or a Newick string
+Outputs: TreeNode trees and node id mappings (in memory)
 """
 
 from pathlib import Path
@@ -51,8 +59,7 @@ def parse_newick(tree_string: str) -> TreeNode:
     Returns:
         Root node of the parsed tree
     """
-    # Preprocess: remove spaces to simplify parsing
-    # PAML trees have spaces like ") 187 ," which we convert to ")187,"
+    # Remove spaces: PAML trees have them around node labels (") 187 ,"), which become ")187,"
     tree_string = tree_string.replace(" ", "")
     tree_string = tree_string.strip()
     if tree_string.endswith(";"):
@@ -67,7 +74,7 @@ def parse_newick(tree_string: str) -> TreeNode:
 
     for char in tree_string:
         if char == "(":
-            # Before starting new internal node, finalize any pending label
+            # Close the pending label of the previous node before opening a new one
             if reading_node_label and current_node and current_label:
                 current_node.paml_label = current_label
                 current_label = ""
@@ -85,7 +92,7 @@ def parse_newick(tree_string: str) -> TreeNode:
             reading_length = False
 
         elif char == ")":
-            # Before finalizing, check if we need to assign a pending label
+            # Assign a pending node label before closing
             if reading_node_label and current_node and current_label:
                 current_node.paml_label = current_label
                 current_label = ""
@@ -151,11 +158,11 @@ def parse_newick(tree_string: str) -> TreeNode:
             else:
                 current_label += char
 
-    # Handle final label (root node label after last ')')
+    # Final label: the root's label after the last ')'
     if reading_node_label and current_node and current_label:
         current_node.paml_label = current_label
     elif current_label or current_length:
-        # Trailing content - log debug (common in some tree formats)
+        # Trailing content after the tree
         logger.debug(
             f"Unexpected trailing content after tree: label='{current_label}', length='{current_length}'"
         )
@@ -235,7 +242,7 @@ def extract_paml_node_range(rst_file: Path) -> Tuple[int, int]:
     with open(rst_file, "r") as f:
         content = f.read()
 
-    # Find the node range declaration
+    # Node range declaration
     match = re.search(r"Nodes\s+(\d+)\s+to\s+(\d+)\s+are\s+ancestral", content)
     if not match:
         raise ValueError(f"Could not find 'Nodes X to Y are ancestral' in {rst_file}")
@@ -300,7 +307,7 @@ def build_node_mapping(
     Parses the labeled Newick tree and assigns PAML node IDs to internal nodes.
 
     Args:
-        tree_file: Path to Newick tree file (ignored, kept for API compatibility)
+        tree_file: Unused; the tree is read from the RST file
         rst_file: Path to RST file (required - contains labeled tree)
 
     Returns:
@@ -315,7 +322,7 @@ def build_node_mapping(
 
     logger.info(f"Building tree from RST labeled tree: {rst_file}")
 
-    # Extract node range
+    # Node range
     min_node, max_node = extract_paml_node_range(rst_file)
     expected_internal = max_node - min_node + 1
     logger.debug(
@@ -326,19 +333,17 @@ def build_node_mapping(
     tree_string = extract_rst_labeled_tree(rst_file)
     root = parse_newick(tree_string)
 
-    # Assign IDs from PAML labels
-    # Tips have format "pamlid_taxid" (with underscore)
-    # Internal nodes have just the numeric ID (no underscore)
+    # Assign ids from PAML labels: tips are labeled "pamlid_taxid" (with underscore),
+    # internal nodes carry only their numeric id
     def assign_ids_from_labels(node: TreeNode):
         """Recursively assign node_id from paml_label."""
-        # Check if this is a tip (has underscore) or internal node (no underscore)
         if node.paml_label:
             if "_" in node.paml_label:
                 # Tip: copy paml_label into name so downstream tip lookups work
                 if node.name is None:
                     node.name = node.paml_label
             elif node.paml_label.isdigit():
-                # This is an internal node - assign the ID
+                # Internal node: assign the id
                 node.node_id = int(node.paml_label)
 
         for child in node.children:
@@ -442,19 +447,17 @@ def find_node_by_taxid(root: TreeNode, taxid: str) -> Optional[TreeNode]:
 def build_name_taxid_index(
     root: TreeNode,
 ) -> Tuple[Dict[str, TreeNode], Dict[str, TreeNode]]:
-    """One DFS pass building the two lookups `find_node_by_name`/`find_node_by_taxid`
-    otherwise re-derive by re-walking the whole tree on every call.
+    """One DFS pass building the two lookups that `find_node_by_name` and `find_node_by_taxid`
+    otherwise re-derive by walking the whole tree on every call.
 
-    `name_index` covers every node (matching `find_node_by_name`'s search-all
-    semantics); `taxid_index` covers only leaves, keyed by the taxid suffix of a
-    'lineage_taxid'-formatted tip label (matching `find_node_by_taxid`'s
-    leaf-only, split-on-last-underscore semantics). The tree is fixed once a
-    gene's ASR context is loaded, so this index is safe to build once and reuse
-    across every cycle's MRCA lookups (see `get_mrca`'s `name_index`/
-    `taxid_index` params) instead of walking the tree per lookup.
+    `name_index` covers every node (as `find_node_by_name` does); `taxid_index` covers only
+    leaves, keyed by the taxid suffix of a 'lineage_taxid' tip label (as `find_node_by_taxid`
+    does, splitting on the last underscore). The tree is fixed once a gene's ASR context is
+    loaded, so the index can be built once and reused across every cycle's MRCA lookups (see
+    the `name_index` and `taxid_index` parameters of `get_mrca`).
 
-    On a name/taxid collision, first DFS visit wins — same as the recursive
-    search's first-match order.
+    On a name or taxid collision the first DFS visit wins, the same node the recursive search
+    returns first.
     """
     name_index: Dict[str, TreeNode] = {}
     taxid_index: Dict[str, TreeNode] = {}
@@ -489,27 +492,25 @@ def get_mrca(
         tip_names: List of tip labels or taxids to find MRCA for
         name_index: Optional pre-built `{name: node}` index from
             `build_name_taxid_index(root)`. When given, used instead of
-            `find_node_by_name`'s O(tree size) recursive search — the
-            permulation-null replay calls `get_mrca` many times per cycle over
-            the same fixed tree, so an O(1) dict lookup instead of re-walking
-            the whole tree per tip name is the dominant real-data cost this
-            avoids (see docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md, Tier 3).
+            `find_node_by_name`'s recursive search, which walks the whole tree. The
+            permulation-null replay calls `get_mrca` many times per cycle over the
+            same fixed tree, so a dict lookup per tip name avoids a full tree walk
+            each time (see docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md).
         taxid_index: Optional pre-built `{taxid: leaf node}` index, same source.
 
     Returns:
         MRCA node, or None if not found
     """
-    # Find all tip nodes - try exact match first, then taxid match
+    # Tip nodes: exact name first, then taxid
     tip_nodes = []
     for name in tip_names:
         name_str = str(name).strip()
         if name_index is not None or taxid_index is not None:
             node = (name_index or {}).get(name_str) or (taxid_index or {}).get(name_str)
         else:
-            # Try exact match first
             node = find_node_by_name(root, name_str)
             if not node:
-                # Try taxid match (for PAML trees with 'lineage_taxid' format)
+                # taxid match (PAML tips are labeled 'lineage_taxid')
                 node = find_node_by_taxid(root, name_str)
         if node:
             tip_nodes.append(node)

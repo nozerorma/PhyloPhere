@@ -1,8 +1,24 @@
 #!/usr/bin/env nextflow
+// ctpp_characterization.nf — Characterization report of the post-processed CAAS discovery.
+// PhyloPhere | subworkflows/CT_POSTPROC/
 
 /*
-#  CT Post-Processing: Characterization and reporting (Rmarkdown)
-*/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  CT_POSTPROC_REPORT: renders 8.Characterization_report.Rmd, which characterizes the
+ *  discovery (genes, patterns, clusters, outliers) and the effect of the post-processing
+ *  filters. Called from workflows/ct_postproc.nf.
+ *
+ *  Consumes:  prepared discovery, filter_summary.tsv, the directory of the published
+ *             cluster files of the filter mode, gene_ensembl_file (gene lengths), gene stats
+ *  Produces:  HTML report (html_reports/) and its files under postproc/ (CT_postproc_files,
+ *             outliers, clusters, summary_statistics, disambiguation_characterization,
+ *             postproc_inputs)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+
+
+// ── Characterization report ──────────────────────────────────────────────────
+
 
 process CT_POSTPROC_REPORT {
     tag "caas_postproc_report"
@@ -24,10 +40,9 @@ process CT_POSTPROC_REPORT {
     path "clusters/**", emit: clusters, optional: true
     path "summary_statistics/**", emit: summary_stats, optional: true
     path "disambiguation_characterization/**", emit: disambiguation_characterization, optional: true
-    // Regeneration copy of the raw --gene_ensembl_file input: this and
-    // genomic_info_file (SCORING/POSENRICH) are the same file
-    // (main.nf resolves genomic_info from params.gene_ensembl_file), so
-    // publishing it here also backs the "gene genomic coordinates" slot.
+    // Copy of the raw --gene_ensembl_file input. The genomic_info_file of SCORING and POSENRICH
+    // is the same file (scoring.nf resolves it from params.gene_ensembl_file), so publishing it
+    // here also provides the gene genomic coordinates.
     path "postproc_inputs/**", emit: gene_ensembl_input, optional: true
 
     script:

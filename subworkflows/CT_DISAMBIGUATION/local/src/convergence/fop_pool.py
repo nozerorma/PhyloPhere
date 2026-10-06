@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
-"""FOP multi-hypothesis -> domain-pooled position score (scoring_v2 core v3).
+# fop_pool.py — Pool the per-hypothesis domain records of a position and scheme into one score per side.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/convergence/
+
+"""
+Multi-hypothesis (FOP) pooling of domain scores into one position score per phenotype side.
 
 ``pool_domains`` collapses ``M >= 1`` per-hypothesis ``compute_domain_scores``
 records for one ``(Gene, Position, scheme)`` into one score per phenotype side.
-It is **treeless** — every tree lookup already happened in
+It is **treeless**: every tree lookup already happened in
 ``path_scores.compute_domain_scores``; here we only average scalars.
+
+Imported by: src/convergence/disambiguate_single.py, src/core/driver.py, disambiguation_perms_main.py and
+reaggregate_perm_scores.py (`base_cycle`)
+Inputs: lists of {"hyp", "sides"} records and an optional {(hyp, domain): pss} map (in memory)
+Outputs: the pooled per-side aggregates described in `pool_domains`
 
 Per side ``s`` over the universe of K fixed Voronoi domains
 (``⋃_h keys(sides["domain_meta"]) ∪ keys(pss)``):
@@ -15,15 +24,14 @@ Per side ``s`` over the universe of K fixed Voronoi domains
     core_s  = clamp01( Σ_d w̄_d·s̄_d / Σ_d w̄_d )      (0 if Σ w̄_d == 0)
 
 ``M = 1`` degenerates exactly to the plain PSS-weighted mean over the K domains
-(arithmetic mean when no PSS file). The harvest-wide ``agree_num`` / ``agree_den``
-/ ``convergence_type`` are recomputed here from the modal encoded derived residue
-per domain across the harvest (a domain that splits V/I/L between hypotheses
-scores low under US and high under a scheme that co-encodes them — the encoding
-is already baked into each ``domain_der_enc`` upstream, ``pool_domains`` never
-sees ``scheme``).
+(arithmetic mean when no PSS file). ``agree_num`` / ``agree_den`` and
+``convergence_type`` are computed here, across all the pooled hypotheses, from the
+modal encoded derived residue per domain (a domain that splits V/I/L between
+hypotheses scores low under US and high under a scheme that co-encodes them; the
+encoding is already applied in each ``domain_der_enc`` upstream, so ``pool_domains``
+never sees the scheme).
 
-See ``docs/scoring_v3_core.md`` section 3 and Appendix B for the contract and the
-hand-worked golden arithmetic.
+See ``docs/scoring_v3_core.md`` for the scoring contract.
 """
 
 from __future__ import annotations
@@ -74,7 +82,7 @@ def base_cycle(tag: str) -> str:
     return tag.split("~", 1)[0]
 
 
-# ── domain id matching (int vs str keys) ─────────────────────────────────────
+# ── Domain id matching (int vs str keys) ──────────────────────────────────────
 # ``compute_domain_scores`` keys everything by the int ``pair_id``; a fixture
 # round-tripped through JSON arrives str-keyed; the PSS map may be either. Match
 # tolerantly, but keep the representative id (int when available) in the output.
@@ -102,7 +110,7 @@ def pool_domains(
     hyp_records: List[Dict],
     pss_by_hyp_domain: Optional[Dict[Tuple[str, Any], float]] = None,
 ) -> Dict[str, Any]:
-    """Treeless mean-of-means pooler over the K fixed Voronoi domains.
+    """Treeless mean-of-means pooler over the fixed Voronoi domains.
 
     Args:
         hyp_records: ``list[{"hyp": str, "sides": <compute_domain_scores return>}]``,
@@ -114,12 +122,14 @@ def pool_domains(
         ``{asr_path_score, domain_scores, domain_weights, domain_der,
         domain_anc, agree_num, agree_den, n_participating, convergence_type}``.
         ``domain_der`` / ``domain_anc`` carry only domains changed in >= 1
-        hypothesis (modal residue); ``agree_den == n_participating``.
+        hypothesis (modal residue); ``agree_den == n_participating``; ``agreement_tie`` flags a changed
+        domain whose derived residue was tied; ``participating_hyps`` lists the
+        hypotheses that changed >= 1 domain on the side.
     """
     hyps = [r for r in hyp_records if r.get("hyp")]
     M = len(hyps)
 
-    # Canonical domain universe: domain_meta ids (all K) + any pss-only ids.
+    # Domain universe: the domain_meta ids (all K domains) plus any ids only the PSS map has.
     rep: Dict[str, Any] = {}
     for r in hyps:
         for d in ((r.get("sides") or {}).get("domain_meta") or {}):
@@ -158,7 +168,7 @@ def pool_domains(
         )
         core = max(0.0, min(1.0, core))
 
-        # Harvest-wide agreement over domains changed in >= 1 hypothesis.
+        # Agreement across the pooled hypotheses, over the domains changed in >= 1 of them.
         der_enc: Dict[str, List[str]] = {}
         der_raw: Dict[str, List[str]] = {}
         anc_raw: Dict[str, List[str]] = {}

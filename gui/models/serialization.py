@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-# serialization.py — Generic dataclass <-> dict (<-> JSON) round-trip for ProjectConfig.
+# serialization.py — Dataclass to dict conversion of ProjectConfig for its JSON file.
 # PhyloPhere | gui/models/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Field-declaration order gives stable, human-diffable JSON key ordering "for free"
-via dataclasses.asdict(). Reconstruction (`from_dict`) is type-hint-driven so nested
-dataclasses (GeneralConfig, RuntimeConfig, ModulesConfig, ResourcesConfig,
-list[PhenotypeRow], and each of the 8 module configs) round-trip without per-class
-boilerplate.
+Serialization: ProjectConfig to a JSON-ready dict (`to_dict`) and back (`from_dict`).
 
-`migrate()` is a no-op dispatch stub today (schema_version is always 1) but exists
-so a future schema change doesn't require a breaking rewrite of project_io.py.
+dataclasses.asdict() keeps the field-declaration order, so the JSON keys come out in a
+stable order that diffs cleanly. Reconstruction follows the type hints, which rebuilds
+the nested dataclasses (GeneralConfig, RuntimeConfig, ModulesConfig, ResourcesConfig,
+list[PhenotypeRow] and each module config) without per-class code. Keys absent from the
+dict take the dataclass default.
+
+`migrate()` runs first in `from_dict`: it rejects an unsupported schema_version, renames
+vep.vep_map_dir to disambiguation.caas_map_dir, and drops the parameters that no
+process reads, with a logged warning.
+
+Imported by: gui/project_io.py, gui/autosave_io.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -26,11 +31,11 @@ from gui.models.project import SCHEMA_VERSION, ProjectConfig
 
 logger = logging.getLogger(__name__)
 
-# Batch-size parameters of the permulation null that ct_core_batch_size replaced; their values are not carried over.
+# Batch-size parameters of the permulation null that ct_core_batch_size covers; the value of ct_core_batch_size is used instead.
 _RETIRED_CAAS_FIELDS = ("ct_perm_replay_batch_size", "ct_disambig_perms_batch_size")
 
-# Parameters of processes that no longer exist (the per-gene discovery task, the observed disambiguation chunking) or that
-# nothing reads (the ASR mode: a gene is read from the ASR cache when it is there and computed when it is not).
+# Parameters that no process reads: those of tasks the pipeline does not have (the per-gene discovery task, the chunking of
+# the observed disambiguation) and the ASR mode (a gene is read from the ASR cache when it is there and computed when not).
 _RETIRED_FIELDS = {
     "caas": ("ct_discovery_batch_size", "export_groups", "export_perm_discovery"),
     "disambiguation": ("ct_disambig_asr_mode", "ct_disambig_batch_size"),
@@ -41,7 +46,7 @@ _RETIRED_FIELDS = {
 
 
 def to_dict(project: ProjectConfig) -> dict[str, Any]:
-    """Serialize a ProjectConfig to a plain, JSON-ready, key-order-stable dict."""
+    """Convert a ProjectConfig to a plain dict of JSON types, with stable key order."""
     return dataclasses.asdict(project)
 
 
@@ -60,16 +65,16 @@ def _dataclass_from_dict(cls: type, data: dict[str, Any]) -> Any:
     kwargs = {}
     for f in dataclasses.fields(cls):
         if f.name not in data:
-            continue  # let the dataclass's own default/default_factory apply
+            continue  # the dataclass default or default_factory applies
         kwargs[f.name] = _reconstruct(hints[f.name], data[f.name])
     return cls(**kwargs)
 
 
 def migrate(data: dict[str, Any]) -> dict[str, Any]:
-    """Upgrade an older on-disk project dict to the current schema, if needed.
+    """Bring a project dict read from disk to the current layout.
 
-    No-op today (only schema_version 1 exists). Future migrations should branch on
-    data.get("schema_version") and mutate/return a new dict at the current version.
+    Raises ValueError when schema_version is not SCHEMA_VERSION. A missing
+    schema_version is taken as current. The dict is modified in place and returned.
     """
     version = data.get("schema_version", SCHEMA_VERSION)
     if version != SCHEMA_VERSION:
@@ -77,7 +82,8 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
             f"Unsupported project schema_version={version!r}; "
             f"this build only supports version {SCHEMA_VERSION}."
         )
-    # The per-gene MAP directory moved from the VEP module (vep_map_dir) to post-processing (caas_map_dir).
+    # Older project files hold the per-gene MAP directory as vep.vep_map_dir; it is
+    # copied to disambiguation.caas_map_dir unless that is already set.
     modules = data.get("modules")
     if isinstance(modules, dict):
         old = (modules.get("vep") or {}).pop("vep_map_dir", None)
@@ -101,6 +107,6 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def from_dict(data: dict[str, Any]) -> ProjectConfig:
-    """Deserialize a project dict (already parsed from JSON) into a ProjectConfig."""
+    """Build a ProjectConfig from a project dict already parsed from JSON."""
     data = migrate(data)
     return _dataclass_from_dict(ProjectConfig, data)

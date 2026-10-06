@@ -1,41 +1,38 @@
+# binary_rer.R — RERconverge correlation of gene RERs with a binary (0/1) trait.
+# PhyloPhere | subworkflows/RERCONVERGE/local/
+# =============================================================================
+# Called by:  RER_BIN Nextflow process (rer_bin.nf → Rscript binary_rer.R ...)
 #
+# Builds the foreground paths of the 0/1 trait on the master tree, correlates them with
+# the RER matrix (correlateWithBinaryPhenotype) and, when permutations are requested,
+# adds an empirical p-value (p.perm) and its BH adjustment (p.perm.adj) from the
+# RERconverge categorical (CC) permulation. The result carries the attributes
+# rer_type, fg_sp, clade and n_perms.
 #
-#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
-#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
-#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
-#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#
-# PHYLOPHERE: A Nextflow pipeline including a complete set
-# of phylogenetic comparative tools and analyses for Phenome-Genome studies
-#
-# Github: https://github.com/nozerorma/caastools/nf-phylophere
-#
-# Author:         Miguel Ramon (miguel.ramon@upf.edu)
-#
-# File: binary_rer.R
-#
-# Arguments
-# ---------
-#   args[1]  path to trait .polished.output (RData with trait_vector; 0/1 encoded)
-#   args[2]  path to master gene trees RDS
-#   args[3]  output path for foreground paths RDS  (char2path equivalent)
-#   args[4]  path to RER matrix RDS
-#   args[5]  output path for binary correlation RDS
-#   args[6]  min.sp     — minimum species per gene tree (integer)
-#   args[7]  min.pos    — minimum independent foreground lineages per gene (integer)
-#   args[8]  winsorizeRER — winsorization threshold for RER values (0 = off → NULL)
-#   args[9]  clade      — which branches to mark foreground: "all", "terminal", "ancestral"
-#   args[10] rer_perm_batches   — number of permutation batches (0 = skip)
-#   args[11] rer_perms_per_batch — permutations per batch
+# Args (positional, from task.script):
+#   args[1]  polished trait RData (trait_vector, named 0/1 numeric vector)
+#   args[2]  master gene-trees RDS (RER_TREES)
+#   args[3]  output: foreground paths RDS
+#   args[4]  RER matrix RDS (RER_MATRIX)
+#   args[5]  output: binary correlation RDS (the permutations go to the same name
+#            with .output replaced by .perms.rds)
+#   args[6]  min.sp: minimum species per gene (integer)
+#   args[7]  min.pos: minimum independent foreground lineages per gene (integer)
+#   args[8]  winsorizeRER: winsorization threshold of the RER values (0 = none)
+#   args[9]  clade: foreground branches, "all" | "terminal" | "ancestral"
+#   args[10] rer_perm_batches: permutation batches (0 = no permutations)
+#   args[11] rer_perms_per_batch: permutations per batch
+# =============================================================================
 
 args <- commandArgs(TRUE)
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
 
 library(dplyr)
 library(RERconverge)
 
 # ── Load trait vector ─────────────────────────────────────────────────────────
+
 traitPath <- args[1]
 load(traitPath)   # loads object: trait_vector  (named 0/1 numeric vector)
 
@@ -51,12 +48,14 @@ if (length(fg_sp) < 3) {
 
 # ── Load gene trees ───────────────────────────────────────────────────────────
 geneTrees <- readRDS(args[2])
-# ── Build foreground paths (binary equivalent of char2Paths) ─────────────────
-# foreground2Paths assigns branch-state weights using the master tree topology.
-# clade parameter controls which branches get foreground weight:
-#   "all"       – transition branch + all daughter branches (broadest signal)
-#   "ancestral" – only the inferred transition branch (convergence-focused)
-#   "terminal"  – only terminal branches leading to foreground species
+
+# ── Foreground paths ──────────────────────────────────────────────────────────
+
+# foreground2Paths() weights the branches of the master tree as foreground; `clade`
+# selects which ones:
+#   "all"       the transition branch and all its daughter branches (broadest)
+#   "ancestral" only the inferred transition branch
+#   "terminal"  only the terminal branches of the foreground species
 rer_clade <- args[9]
 message(sprintf("[RER_BIN] Building foreground paths (clade = '%s') ...", rer_clade))
 fg_paths <- foreground2Paths(fg_sp, geneTrees, clade = rer_clade)
@@ -66,12 +65,12 @@ message(sprintf("[RER_BIN] Foreground paths computed for %d branches.", length(f
 # ── Load RER matrix ───────────────────────────────────────────────────────────
 traitRERw <- readRDS(args[4])
 
-# ── Dimensional consistency guard ────────────────────────────────────────────
-# foreground2Paths() derives its length from the treesObj master tree; the RER
-# matrix columns were fixed against the SAME master tree at getAllResiduals()
-# time. A mismatch means the foreground paths and the RER columns are recycled
-# against each other during correlation — a hard error in some RERconverge
-# builds, silent nonsense in others. Fail loudly.
+# ── Dimension check ───────────────────────────────────────────────────────────
+
+# The number of foreground paths comes from the master tree of the treesObj, and the
+# RER matrix columns come from the master tree used in getAllResiduals(). If they
+# differ, the correlation recycles one against the other: an error in some RERconverge
+# builds and meaningless values in others. The script stops instead.
 if (length(fg_paths) != ncol(traitRERw)) {
   stop(sprintf(
     paste0("[RER_BIN] Path/RER dimension mismatch: foreground2Paths produced %d ",
@@ -82,11 +81,11 @@ if (length(fg_paths) != ncol(traitRERw)) {
 }
 
 # ── Binary RER correlation ─────────────────────────────────────────────────────
-# Uses Kendall rank correlation (unweighted when clade = "all" / "terminal" with
-# 0/1 branch lengths; weighted when fractional branch lengths are present).
-# winsorizeRER: pull the most extreme N RER values toward the (N+1)-th most
-#   extreme before correlating — mitigates leverage from outlier branches.
-#   Set to NULL (or 0 here) to skip.
+
+# weighted = "auto" lets RERconverge choose between the unweighted test (0/1 foreground
+# weights) and the weighted one (fractional weights). winsorizeRER pulls the most
+# extreme RER values toward the next most extreme one before correlating, which limits
+# the leverage of outlier branches; 0 or NA gives NULL (no winsorization).
 winR_raw <- as.numeric(args[8])
 winR     <- if (!is.na(winR_raw) && winR_raw > 0) winR_raw else NULL
 
@@ -108,17 +107,16 @@ res <- correlateWithBinaryPhenotype(
 )
 message(sprintf("[RER_BIN] Correlation done: %d genes tested.", nrow(res)))
 
-# ── Permutation statistics (RERconverge binary CC permulation) ────────────────
-# RERconverge::getPermsBinary(permmode = "cc") builds null foreground histories
-# with categoricalPermulations(): an Mk (equal-rates) transition matrix fit on
-# the observed 0/1 trait, then stochastically-mapped null tip/node states whose
-# likelihood is polished per tree. No Brownian-motion simulation and no tree
-# rooting are involved (that path belongs to the older simBinPhenoCC).
+# ── Permulation null (CC) ─────────────────────────────────────────────────────
+
+# getPermsBinary(permmode = "cc") builds the null foreground histories with
+# categoricalPermulations(): an Mk (equal-rates) transition matrix fitted on the
+# observed 0/1 trait, then stochastically mapped null tip and node states, polished
+# per tree. It needs no Brownian-motion simulation and no rooted tree.
 #
-# Requires RERconverge >= 0.3.0 (categoricalPermulations()). Older builds route
-# permmode = "cc" through simBinPhenoCC(), which needs a real `root_sp`
-# (outgroup) that this pipeline does not define — hence the explicit version
-# guard below.
+# This requires RERconverge >= 0.3.0. Earlier builds send permmode = "cc" to
+# simBinPhenoCC(), which needs an outgroup (`root_sp`) that the pipeline does not
+# define, so the checks below stop the script on those builds.
 num_batches     <- as.integer(args[10])
 perms_per_batch <- as.integer(args[11])
 
@@ -138,12 +136,11 @@ if (num_batches > 0 && perms_per_batch > 0) {
                 "(provides categoricalPermulations), or set rer_perm_batches = 0."))
   }
 
-  # getPermsBinary()'s CC branch scores every null with correlateWithBinaryPhenotype()
-  # at its defaults — clade = "all" foreground paths, weighted = "auto", NO RER
-  # winsorization, min.sp = 10, min.pos = 2. For permpvalcor() to compare like
-  # with like, the reference observed correlation must be computed the same way.
-  # `res` above (user's rer_binary_clade + winsorizeRER) still carries the
-  # reported Rho / P; only the p.perm reference uses these matched settings.
+  # getPermsBinary() scores every null with correlateWithBinaryPhenotype() at its
+  # defaults: clade = "all" foreground paths, weighted = "auto", no RER winsorization,
+  # min.sp = 10, min.pos = 2. permpvalcor() needs an observed reference computed the
+  # same way, so res_ref uses those settings. `res` (the requested clade and
+  # winsorizeRER) keeps the reported Rho and P; res_ref only serves p.perm.
   fg_paths_all <- foreground2Paths(fg_sp, geneTrees, clade = "all")
   res_ref      <- correlateWithBinaryPhenotype(traitRERw, fg_paths_all,
                                                weighted = "auto")
@@ -151,10 +148,10 @@ if (num_batches > 0 && perms_per_batch > 0) {
   run_bin_perm_batch <- function(n) getPermsBinary(
     numperms        = n,
     fg_vec          = fg_sp,
-    sisters_list    = NA,          # only consumed when calculateenrich = TRUE
-    root_sp         = NA,          # unused by the categoricalPermulations CC path
+    sisters_list    = NA,          # used only when calculateenrich = TRUE
+    root_sp         = NA,          # not used by the categoricalPermulations CC path
     RERmat          = traitRERw,
-    trees           = geneTrees,   # ORIGINAL treesObj — keeps path length == ncol(RERmat)
+    trees           = geneTrees,   # the original treesObj: path length equals ncol(RERmat)
     mastertree      = geneTrees$masterTree,
     permmode        = "cc",
     method          = "k",
@@ -175,12 +172,12 @@ if (num_batches > 0 && perms_per_batch > 0) {
 
   n_perms <- num_batches * perms_per_batch
 
-  # permpvalcor()'s return type changed across RERconverge builds:
-  #   * bioconda v0.3.0 tag  -> named numeric vector, raw proportion
-  #     sum(|null| > |obs|) / N. Needs the (x*N + 1)/(N + 1) pseudo-count here.
-  #   * install_env.sh pin (2bd328f7) -> data.frame(permpval, permstats), a
-  #     median-centred two-tailed empirical p with the (num + 1)/(denom + 1)
-  #     pseudo-count ALREADY applied internally. Take permpval as-is.
+  # The return type of permpvalcor() depends on the RERconverge build:
+  #   * bioconda v0.3.0 tag: named numeric vector with the raw proportion
+  #     sum(|null| > |obs|) / N, so the (x*N + 1)/(N + 1) pseudo-count is added here.
+  #   * the commit pinned in environment/install_env.sh (2bd328f7): data.frame(permpval,
+  #     permstats) with a median-centered two-tailed empirical p and the
+  #     (num + 1)/(denom + 1) pseudo-count already applied; permpval is used as is.
   ppc <- permpvalcor(res_ref, perms_combined)
   if (is.data.frame(ppc)) {
     permpvals <- setNames(ppc$permpval, rownames(ppc))
@@ -190,7 +187,7 @@ if (num_batches > 0 && perms_per_batch > 0) {
   }
 
   res$p.perm     <- permpvals[rownames(res)]
-  # BH-correct the permulation p-values for multiple testing across genes.
+  # BH adjustment across genes
   res$p.perm.adj <- p.adjust(res$p.perm, method = "BH")
   attr(res, "n_perms") <- n_perms
   message(sprintf(
@@ -198,7 +195,7 @@ if (num_batches > 0 && perms_per_batch > 0) {
     sum(!is.na(res$p.perm)), nrow(res), n_perms
   ))
   
-  # Save the raw permutations object containing null statistics matrices for pathway-level permulations downstream
+  # The raw permutations object (null statistics matrices) is kept for the FCS and comparison stages
   perms_path <- sub("\\.output$", ".perms.rds", args[5])
   saveRDS(perms_combined, file = perms_path)
   message("[RER_BIN] Saved raw null permutations RDS to: ", perms_path)

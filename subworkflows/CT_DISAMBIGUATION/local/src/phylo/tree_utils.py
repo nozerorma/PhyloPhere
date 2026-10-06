@@ -1,16 +1,14 @@
+# tree_utils.py — Load and prune phylogenetic trees; thin access to the ASR tree parser.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/phylo/
+
 """
-Tree Utilities
-===============
+Tree utilities: load a tree with Biopython, prune it to a species subset, and expose the node-mapping and tip-label
+helpers of src/asr/tree_parser.py through the phylo package.
 
-Phylogenetic tree manipulation and traversal utilities.
-
-Key features:
-- Load and parse Newick/Nexus trees
-- Prune to species subset
-- Node labeling (tax IDs for tips, auto-label or depth-based for internals)
-- Polytomy detection
-- Root-to-tip path traversal
-- MRCA finding
+Imported by: src/phylo/species_mapping.py (`prune_tree`), src/asr/asr_single.py (`load_tree`),
+src/core/driver.py (`build_tree_node_mapping`, `extract_tip_labels`)
+Inputs: a tree file (Newick by default)
+Outputs: Bio.Phylo trees (in memory)
 """
 
 import logging
@@ -40,7 +38,7 @@ def load_tree(tree_file: Path, format: str = "newick") -> Tree:
         FileNotFoundError: If tree file doesn't exist
         ValueError: If tree format is invalid
     """
-    # Convert to Path if input is string
+    # Accept a plain string path
     if isinstance(tree_file, str):
         tree_file = Path(tree_file)
 
@@ -71,10 +69,10 @@ def prune_tree(tree: Tree, species_to_keep: List[str]) -> Tree:
     """
     import copy
 
-    # Create a deep copy to avoid modifying original
+    # Work on a deep copy: the input tree is left unchanged
     pruned_tree = copy.deepcopy(tree)
 
-    # Get all terminal names
+    # All terminal names
     all_terminals = {term.name for term in pruned_tree.get_terminals()}
     species_set = set(species_to_keep)
 
@@ -110,7 +108,7 @@ def prune_tree(tree: Tree, species_to_keep: List[str]) -> Tree:
 
 def build_tree_node_mapping(tree_file: Path, rst_file: Path = None):
     """
-    Expose ASR tree parser build_node_mapping via phylo module.
+    PAML-aligned node order and id mapping of a tree (src.asr.tree_parser.build_node_mapping).
 
     Args:
         tree_file: Path to Newick tree file
@@ -123,5 +121,5 @@ def build_tree_node_mapping(tree_file: Path, rst_file: Path = None):
 
 
 def extract_tip_labels(root_node) -> List[str]:
-    """Expose get_tip_labels via phylo module for consistent access."""
+    """Tip labels of the tree below `root_node` (src.asr.tree_parser.get_tip_labels)."""
     return get_tip_labels(root_node)

@@ -5,12 +5,16 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Most module tabs now carry a "basic" field group plus a much longer "advanced"
-one (fine-tuning knobs most runs leave at their conf/*.config defaults — see
-ModuleTabWidget). Qt has no built-in disclosure-triangle widget, so this is a
-small QToolButton (arrow + checkable) paired with a content QWidget whose
-visibility follows the button — collapsed by default so a tab with 20 advanced
-fields doesn't read as 20 equally-important fields.
+CollapsibleSection: a disclosure-triangle toggle that shows or hides a content widget.
+
+Module tabs carry an essential field group plus a longer advanced one (fine-tuning
+parameters most runs leave at their conf/*.config defaults, see ModuleTabWidget).
+Qt has no built-in disclosure triangle, so this pairs a checkable QToolButton
+(with an arrow) with a content QWidget whose visibility follows the button. The
+section is collapsed by default, so a tab with many advanced fields does not
+present them all as equally important.
+
+Imported by: gui/widgets/common/module_tab.py
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────

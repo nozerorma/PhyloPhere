@@ -67,6 +67,9 @@ params:
   }
 </style>
 
+<!-- 4.Independent_contrasts.Rmd — Select independent contrast pairs and write the CT trait files. -->
+<!-- PhyloPhere | subworkflows/TRAIT_ANALYSIS/local/ -->
+
 ```{r header}
 
 #  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
@@ -82,7 +85,7 @@ params:
 ### Github: https://github.com/nozerorma/caastools/nf-phylophere
 ### Author: Miguel Ramon (miguel.ramon@upf.edu)
 
-#### File: Independent_contrasts.Rmd
+#### File: 4.Independent_contrasts.Rmd
 
 ```
 
@@ -106,7 +109,7 @@ if (exists("params")) {
 source("./src/commons.R")
 setup_rmd()
 
-# Debug helper (prints into HTML output)
+# Fallback logger, used only when commons.R has not defined debug_log().
 if (is.null(getOption("phylo_debug"))) {
   options(phylo_debug = TRUE)
 }
@@ -121,7 +124,8 @@ if (!exists("debug_log", inherits = TRUE)) {
   }
 }
 
-# Load additional libraries
+# ── Dependencies ──────────────────────────────────────────────────────────────
+
 library(dplyr)
 library(purrr)
 library(tibble)
@@ -141,13 +145,16 @@ library(geiger)
 library(rphylopic)
 library(paletteer)
 
-# Load selection algorithm
+# fop_pair_sel.f(), which sources the shared selection core (lean_contrast_selector.R).
 source("./src/selection_algorithm.R")
 
-color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
-capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name
-capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and deconvoluted trait name
-capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name)) # Capitalized and deconvoluted clade name
+
+# ── Labels and output directories ─────────────────────────────────────────────
+
+color_palette <- paste0(clade_name, "_palette") # name of the clade palette defined in palettes.R
+capitalized_taxon <- tools::toTitleCase(taxon_of_interest)
+capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # underscores shown as spaces
+capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name))
 
 createDir(traitfile_dir)
 createDir(permulation_traitfile_dir)
@@ -160,8 +167,8 @@ The tree is pruned to the species with a trait value and dichotomised (zero-leng
 
 ```{r selection_context, message=FALSE, warning=FALSE}
 
-# Per-species trait values, Jeffreys intervals and sample sizes from the
-# CI-composition step (pairwise_data.csv carries them per species1).
+# Per-species trait values, Jeffreys intervals and sample sizes written by
+# 3.CI-composition.Rmd; pairwise_data.csv carries them in the columns of species1.
 pairwise_path <- file.path(ci_dir, "pairwise_data.csv")
 if (!file.exists(pairwise_path)) {
   stop("Missing pairwise data file: ", pairwise_path)
@@ -194,14 +201,14 @@ Tie-breaking after the PSS (or distance) key: highest absolute trait difference 
 
 ```{r pair_selection, message=FALSE, warning=FALSE}
 
-# Load summary stats from Dataset Exploration
+# Per-species statistics written by 1.Dataset_exploration.Rmd.
 stats_path <- file.path(species_distribution_dir, "trait_stats.csv")
 if (!file.exists(stats_path)) {
   stop("Missing trait stats file: ", stats_path)
 }
 stats_df <- read.csv(stats_path, stringsAsFactors = FALSE)
 
-# Canonical greedy selection and FOP parallel hypotheses (shared core)
+# Canonical greedy selection (H1) and the FOP parallel hypotheses, from the shared core.
 if (is.na(suppressWarnings(as.integer(seed_val)))) {
   stop("4.Independent_contrasts.Rmd: params$seed is required (the FOP harvest draws are seeded with it).")
 }
@@ -223,7 +230,6 @@ species_domain <- fop_results$species_domain
 cat("Selected", nrow(selected_pairs), "canonical independent pairs\n")
 cat("Harvested", length(hypotheses), "FOP parallel independent hypotheses\n")
 
-# Display selected pairs
 print(selected_pairs)
 ```
 
@@ -236,7 +242,8 @@ This section generates trait files in the format required for CAAS discovery, as
 
 ```{r traitfile_generation, message=FALSE, warning=FALSE}
 
-# Function to generate trait files from selected pairs
+# Traitfile rows of a pair table (species1 = high extreme, species2 = low extreme):
+# species, contrast_group (1 = high, 0 = low) and pair (running pair number).
 gen_traitfiles <- function(df) {
   df <- df %>%
     tibble::rownames_to_column(var = "pair_id") %>%
@@ -254,7 +261,6 @@ gen_traitfiles <- function(df) {
       )
     )
   
-  # Assign contrast groups
   filtered_species <- df %>%
     dplyr::group_by(global_label) %>%
     dplyr::select(species, global_label) %>%
@@ -273,14 +279,14 @@ gen_traitfiles <- function(df) {
   return(filtered_species)
 }
 
-# Generate trait files for selected pairs
 traits_res <- gen_traitfiles(selected_pairs)
 
-# Save trait files directory
+# ── Trait files ───────────────────────────────────────────────────────────────
+
 trait_path <- file.path(traitfile_dir)
 createDir(trait_path)
 
-# Canonical baseline traitfile.tab
+# traitfile.tab: the canonical pairs (H1), without header.
 write.table(  
   traits_res, 
   file.path(trait_path, "traitfile.tab"), 
@@ -290,14 +296,14 @@ write.table(
   sep = "\t"
 )
 
-# Write individual traitfile_H{m}.tab files and build master traitfile_fop.tab matrix
+# One traitfile_H{m}.tab per hypothesis, plus traitfile_fop.tab (with header), which stacks
+# all of them with a hypothesis_id column.
 fop_master_rows <- list()
 
 for (h_id in names(hypotheses)) {
   h_df <- hypotheses[[h_id]]
   h_traits_res <- gen_traitfiles(h_df)
   
-  # Save individual hypothesis traitfile_H{m}.tab
   write.table(
     h_traits_res,
     file.path(trait_path, paste0("traitfile_", h_id, ".tab")),
@@ -307,7 +313,6 @@ for (h_id in names(hypotheses)) {
     sep = "\t"
   )
   
-  # Accumulate into master matrix
   h_traits_res$hypothesis_id <- h_id
   fop_master_rows[[h_id]] <- h_traits_res
 }
@@ -324,14 +329,13 @@ if (length(fop_master_rows) > 0) {
   )
 }
 
-# ── Per-pair hypothesis table (drives domain-pooled scoring downstream) ───────
-# One row per (hypothesis, Voronoi domain). `pair` == the domain id: the FOP
-# harvest draws exactly one pair per domain and numbers them in domain order
-# (selection_algorithm.R::fop_pair_sel.f, `hdf$cluster <- seq_len(K)`), and
-# disambiguation enumerates each traitfile_H{m}.tab's pairs in that same order.
-# So SCORING can key `mrca_<i>_path_score` (domain i's isolation score under
-# hypothesis h) back to this pair's PSS weight via (hypothesis_id, pair).
-# H1 is the canonical baseline; H2..Hn are PSS-ranked alternatives.
+# ── Pairs per hypothesis ──────────────────────────────────────────────────────
+
+# contrast_hypotheses_pairs.tsv has one row per (hypothesis, Voronoi domain). `pair` is the
+# domain id: the FOP harvest draws one pair per domain and numbers the pairs in domain order
+# (the `cluster` column of lean_contrast_selector.R). The scoring steps (CT_DISAMBIGUATION,
+# SCORING) read `pair` as the domain id and `pss_score` as the weight of that domain.
+# H1 is the canonical baseline; H2 to Hn are the PSS-ranked alternatives.
 pair_rows <- lapply(names(hypotheses), function(h_id) {
   hd <- hypotheses[[h_id]]
   if (is.null(hd) || nrow(hd) == 0) return(NULL)
@@ -360,7 +364,7 @@ if (!is.null(contrast_pairs_df) && nrow(contrast_pairs_df) > 0) {
               nrow(contrast_pairs_df)))
 }
 
-# Save metadata summary
+# Summary of the hypotheses (min_pss_score, mean_pss_score, Dunn index, ...).
 if (nrow(summary_df) > 0) {
   write.csv(
     summary_df,
@@ -388,18 +392,13 @@ This section places the selected contrast pairs onto the phylogeny, highlighting
 
 ```{r selected_pairs_tree, fig.height=15, fig.width=15, dev="png", dpi=320, message=FALSE, warning=FALSE}
 
-# Fan-layout tree with highlighted contrast species — mirrors the base fan
-# tree in 2.Phenotype_exploration.Rmd (ggtree(..., layout="fan", open.angle=15,
-# size=tree_line_width), square-sized via species_plot_profile()$diagnostic_size).
-# A rectangular tree with one tip label per species doesn't scale past a
-# handful of tips (labels overlap / the plot grows unreadably tall); the fan
-# layout fixes that, and only the SELECTED contrast species get a text label
-# (everyone else just gets a coloured tip point) to keep it legible.
+# Fan-layout tree. Only the selected contrast species carry a label and a tip point; a
+# rectangular tree with one label per species is unreadable beyond a few tips.
 n_tips <- length(pruned_tree$tip.label)
 tree_profile <- species_plot_profile(n_species = n_tips)$tree
 
 dyn_size <- tree_profile$diagnostic_size
-# Prune tree to trait exploration species for clear visualization
+# Tree reduced to the species of the trait table.
 viz_species <- intersect(pruned_tree$tip.label, trait_df$species)
 viz_tree <- if (length(viz_species) > 0) ape::keep.tip(pruned_tree, viz_species) else pruned_tree
 
@@ -442,11 +441,8 @@ selected_pairs_tree <- ggtree(contrast_tree_data, aes(color = contrast_label),
     na.value = "grey75"
   ) +
   labs(title = paste("Selected contrast pairs for trait:", capitalized_trait)) +
-  # Bumped from 0.35 -- the tree itself (not the tip labels/points) was eating
-  # too much of the canvas, leaving selected species' labels cramped against
-  # the panel edge. hexpand/vexpand pad the coordinate system around the
-  # tree's own bounding box; since only branches+tips are in that box, more
-  # padding shrinks just the branches' footprint, leaving more room for labels.
+  # hexpand/vexpand pad the coordinate system around the bounding box of the branches and
+  # tips, which shrinks the tree on the canvas and leaves room for the labels.
   hexpand(0.55) +
   vexpand(0.55) +
   theme(
@@ -465,7 +461,9 @@ ggsave(
 
 selected_pairs_tree
 
-# ── Multi-hypothesis tree plot: highlight ALL species selected across hypotheses ──
+# ── Species selected across all hypotheses ────────────────────────────────────
+
+# Labels give the number of hypotheses in which each species is selected.
 if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 0) {
   total_hypotheses <- length(unique(fop_master_df$hypothesis_id))
   
@@ -493,13 +491,10 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
       )
     )
     
-  # Building the base plot from a pre-joined treedata object (tidytree::as.treedata()
-  # on a full_join'd tip+internal-node tibble, as the first `selected_pairs_tree` plot
-  # above does) breaks ggtreeExtra::geom_fruit() later in this environment -- it throws
-  # "replacement has 1 row, data has 0" from deep inside ggtreeExtra:::set_mapping(),
-  # reproducibly, on the treedata object alone (bare, any layout, no other layers).
-  # ggtree's idiomatic %<+% data-attachment onto the plain phylo tree does not trigger
-  # it (verified against this same viz_tree/tree_tip_df_all), so use that instead.
+  # The data are attached to the plain phylo tree with %<+%. A treedata object built with
+  # tidytree::as.treedata() from a joined tibble, as in the plot above, breaks later
+  # ggtreeExtra::geom_fruit() layers ("replacement has 1 row, data has 0" in
+  # ggtreeExtra:::set_mapping()).
   selected_pairs_tree_all <- ggtree(viz_tree, layout = "fan", open.angle = 25,
                                    size = tree_line_size) %<+% tree_tip_df_all +
     aes(color = contrast_label) +
@@ -515,19 +510,13 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
       na.value = "grey75"
     )
 
-  # ── Voronoi domain highlight: which canonical-pair domain each species falls into ──
-  # `species_domain` (fop_pair_sel.f, selection_algorithm.R) assigns EVERY species
-  # to its nearest canonical pair by patristic distance — the partition that the
-  # FOP harvest draws H2..Hn from. Domains aren't guaranteed to be single clades, so
-  # one geom_hilight straight off each domain's MRCA could overshoot into whatever
-  # sits between two non-monophyletic members and swallow a neighboring domain's
-  # tips. Instead, decompose each domain into its maximal monophyletic sub-blocks
-  # (recursing from the tips up, stopping the moment a node's full descendant set
-  # would spill outside the domain) and highlight those individually as translucent
-  # "encircle" blobs -- native ggtree, so this sidesteps ggtreeExtra entirely.
-  # Blocks whose tips were never selected in any hypothesis are not drawn: the
-  # Voronoi assignment still places them in a domain, but they carry no contrast
-  # species, so shading them would suggest a domain presence the harvest never used.
+  # Voronoi domains: `species_domain` (from fop_pair_sel.f) assigns every species to its
+  # nearest canonical pair by patristic distance, the partition from which H2 to Hn are
+  # drawn. A domain is not always a single clade, so a highlight at its MRCA could cover
+  # the tips of a neighboring domain. Each domain is therefore split into its maximal
+  # monophyletic blocks (nodes whose descendant tips all belong to the domain, without a
+  # parent that also qualifies), and each block is highlighted separately with an
+  # "encircle" shape. Blocks with no species selected in any hypothesis are not drawn.
   if (exists("species_domain") && !is.null(species_domain) && length(species_domain) > 0) {
     domain_in_tree <- species_domain[names(species_domain) %in% viz_tree$tip.label]
 
@@ -618,12 +607,9 @@ This reproduces the trait-distribution plots from `2.Phenotype_exploration.Rmd`,
 
 ```{r contrast_violin_highlighted, fig.height=10, fig.width=15, message=FALSE, warning=FALSE, dev='png', dpi=320}
 
-# stats_df above stays in its raw (un-melted) column-name form for
-# fop_pair_sel.f / the trait-file generation in section 4 -- build a melted
-# copy here instead of mutating it in place, mirroring 2.Phenotype_
-# exploration.Rmd's own trait_import chunk, and join in this section's
-# contrast assignment (traits_res) so the highlight below shows WHERE the
-# selected pairs actually sit in the distribution.
+# stats_df keeps its original column names, which fop_pair_sel.f and the trait-file
+# generation use. The plots work on a copy with the value and taxa columns, joined to the
+# contrast assignment (traits_res) so the selected species can be highlighted.
 stats_df_hl <- stats_df %>%
   dplyr::mutate(
     value = .data[[trait]],
@@ -644,10 +630,9 @@ stats_df_hl <- stats_df %>%
 
 ordered_species_hl <- tidytree::as_tibble(pruned_tree) %>%
   dplyr::arrange(desc(.data$node)) %>%
-  # Tip nodes are numbered 1..Ntip (ape convention); `!is.na(label)` alone
-  # would also admit internal-node bootstrap-support labels, which repeat
-  # across nodes on a real ML tree and can hand factor(levels=) duplicates
-  # (see 2.Phenotype_exploration.Rmd's identical fix).
+  # Tip nodes are numbered 1..Ntip (ape convention). Filtering on `!is.na(label)` alone
+  # would also admit internal-node support labels, which repeat across nodes and give
+  # factor(levels =) duplicates.
   dplyr::filter(.data$node <= length(pruned_tree$tip.label)) %>%
   dplyr::pull(.data$label)
 stats_df_hl$species <- factor(stats_df_hl$species, levels = ordered_species_hl)
@@ -664,7 +649,10 @@ ordered_taxa_hl <- ordered_species_hl %>%
 
 contrast_fill_values <- c("Top/High" = "red", "Bottom/Low" = "forestgreen")
 
-### 1. Contrast plot, highlighted --------------------------------------------
+# ── Contrast plot, highlighted ────────────────────────────────────────────────
+
+# Trait values by taxon (faint points); the selected species are outlined and filled by
+# contrast group, and the global median is a dashed line.
 contrast_plot_highlighted.f <- function(df, ordered_taxa) {
   plot_profile <- species_plot_profile(
     n_species = dplyr::n_distinct(df$species),
@@ -716,7 +704,9 @@ contrast_hl_graph
 
 ```{r violin_highlighted, fig.height=10, fig.width=8, message=FALSE, warning=FALSE, dev='png', dpi=320}
 
-### 2. Violin plot, highlighted -----------------------------------------------
+# ── Violin plot, highlighted ──────────────────────────────────────────────────
+
+# Same as the contrast plot, over the violins of each taxon.
 violin_highlighted.f <- function(df, ordered_taxa) {
   plot_profile <- species_plot_profile(
     n_species = dplyr::n_distinct(df$species),
@@ -774,7 +764,9 @@ violin_hl_graph
 This section extracts species  for use in permulation testing.
 ```{r permulation_traitfiles, message=FALSE, warning=FALSE}
 
-# Extract permulation traitfile, retaining count columns (n_trait/c_trait) if present
+# ── Permulation trait file ────────────────────────────────────────────────────
+
+# Species with a trait value, keeping the count columns (n_trait, c_trait) when present.
 perm_cols <- c("species", trait)
 if (exists("n_trait", inherits = TRUE) && nzchar(n_trait) && n_trait %in% names(trait_df)) {
   perm_cols <- c(perm_cols, n_trait)
@@ -789,7 +781,7 @@ permulation_traitfile <- trait_df %>%
 
 cat("Removed", nrow(trait_df) - nrow(permulation_traitfile), "species with NA trait values from permulation traitfile\n")
 
-# Save permulation traitfile with headers so permulations.R can auto-detect count columns
+# Written with a header, so permulations.R can detect the count columns.
 perm_path <- file.path(permulation_traitfile_dir)
 createDir(perm_path)
 write.table(
@@ -801,10 +793,8 @@ write.table(
   sep = "\t"
 )
 
-# Display summary
 cat("Permulation traitfile:", nrow(permulation_traitfile), "species\n")
 
-# Preview
 head(permulation_traitfile)
 
 ```

@@ -1,19 +1,29 @@
 #!/usr/bin/env python3
+# compute_variability.py — Valdar (2002) C_trident positional conservation of one protein alignment.
+# PhyloPhere | bin/
+
 """
-Compute Valdar (2002) C_trident positional conservation on a protein alignment.
+ComputeVariability: scores every column of a protein alignment with the three-pronged Valdar
+conservation score and summarizes variability per clade.
 
-C_trident(x) = (1 - t(x))^α × (1 - r(x))^β × (1 - g(x))^γ   (Eq. 49)
-  t(x) : symbol diversity  — weighted Shannon entropy over 20 AAs + gap (Eq. 50–52)
-  r(x) : stereochem diversity — mean dist from consensus in BLOSUM62 20D space (Eq. 54–56)
-  g(x) : gap fraction
+C_trident(x) = (1 - t(x))^alpha * (1 - r(x))^beta * (1 - g(x))^gamma   (Valdar 2002, Eq. 49)
+  t(x): symbol diversity, weighted Shannon entropy over 20 amino acids + gap (Eq. 50-52)
+  r(x): stereochemical diversity, mean distance from the consensus in BLOSUM62 20D space (Eq. 54-56)
+  g(x): gap fraction
+Variability = 1 - C_trident. Sequence weights are those of Henikoff and Henikoff (1994).
 
-Variability = 1 - C_trident.
-
-Outputs:
-  <out_dir>/PROT_VAR/<gene>.fa               variable-columns-only FASTA
-  <out_dir>/PROT_VAR/<gene>.entropy.tsv      per-position table (t, r, g, C_trident, variability)
-  <out_dir>/PROT_VAR/<gene>.clade_entropy.tsv  per-clade mean variability
-  stdout: one tab-separated summary line (for aggregation)
+Called by:  compute_alignment_entropy.py (one call per gene); imported by aggregate_ucr.py
+            (clade_variability, load_taxonomy)
+Inputs:     --prot_ali         FASTA protein alignment; the gene name is basename.replace('.fa', '')
+            --taxid_tsv        taxonomy table: species in column 2, family in column 3, name class
+                               in column 5 (only "scientific name" rows are used)
+            --family_order_tsv optional family → order table (otherwise the order is "Unknown")
+Outputs:    <out_dir>/<var_subdir>/<gene>.entropy.tsv        per-position t, r, g, C_trident, variability
+            <out_dir>/<var_subdir>/<gene>.fa                 columns with variability > 0 only
+            <out_dir>/<var_subdir>/<gene>.clade_entropy.tsv  mean and max variability per order and
+                                                             family (clades with at least 3 sequences
+                                                             whose FASTA header matches a species)
+            stdout: gene, n_seqs, n_cols, n_variable, mean_var, max_var (tab-separated)
 """
 
 import argparse
@@ -22,10 +32,9 @@ import os
 import sys
 from collections import defaultdict
 
-# ---------------------------------------------------------------------------
-# BLOSUM62 — 20×20 symmetric matrix, canonical AA order
-# Source: NCBI/BLAST blosum62; rows/cols in BLOSUM_AAS order.
-# ---------------------------------------------------------------------------
+# ── BLOSUM62 coordinates ──────────────────────────────────────────────────────
+
+# 20x20 symmetric matrix, rows and columns in BLOSUM_AAS order (source: NCBI BLAST blosum62).
 BLOSUM_AAS = list('ARNDCQEGHILKMFPSTWYV')
 _BLOSUM62_RAW = [
 # A   R   N   D   C   Q   E   G   H   I   L   K   M   F   P   S   T   W   Y   V
@@ -53,14 +62,13 @@ _BLOSUM62_RAW = [
 
 AA_IDX = {aa: i for i, aa in enumerate(BLOSUM_AAS)}
 
-# Build normalized 20D coordinate vectors: subtract column means, divide by std
 import statistics as _stats
 
 def _build_blosum_coords():
+    """20D coordinate of each amino acid: its BLOSUM62 row with every column centered and divided by its std."""
     raw = _BLOSUM62_RAW
     n = len(BLOSUM_AAS)
     coords = {}
-    # center each column
     col_means = [sum(raw[i][j] for i in range(n)) / n for j in range(n)]
     col_vars  = [sum((raw[i][j] - col_means[j])**2 for i in range(n)) / n for j in range(n)]
     col_stds  = [v**0.5 if v > 0 else 1.0 for v in col_vars]
@@ -70,8 +78,7 @@ def _build_blosum_coords():
 
 BLOSUM_COORDS = _build_blosum_coords()
 
-# max possible mean distance (for normalization of r): empirical upper bound
-# computed once: mean over all pairs of blosum coords distances
+# Normalizer of r: mean Euclidean distance over all pairs of amino-acid coordinates.
 def _max_mean_dist():
     aas = BLOSUM_AAS
     n = len(aas)
@@ -87,11 +94,11 @@ def _max_mean_dist():
 
 _R_MAX = _max_mean_dist()
 
-# ---------------------------------------------------------------------------
-# I/O helpers
-# ---------------------------------------------------------------------------
+# ── I/O helpers ───────────────────────────────────────────────────────────────
+
 
 def read_fasta(path):
+    """Read a FASTA file into [(header, upper-cased sequence)]."""
     seqs = []
     header, buf = None, []
     with open(path) as fh:
@@ -116,6 +123,12 @@ def write_fasta(path, seqs):
 
 
 def load_taxonomy(taxid_tsv, family_order_tsv):
+    """Map lower-cased species name → {'order', 'family'} from the taxid table.
+
+    Rows with fewer than 5 columns or a name class other than "scientific name" are skipped,
+    so a 2-column tax_id file gives an empty map. The order comes from family_order_tsv
+    (family, order) and is 'Unknown' without it.
+    """
     family_to_order = {}
     if family_order_tsv and os.path.isfile(family_order_tsv):
         with open(family_order_tsv) as fh:
@@ -140,11 +153,11 @@ def load_taxonomy(taxid_tsv, family_order_tsv):
             tax[species.lower()] = {'order': order, 'family': family}
     return tax
 
-# ---------------------------------------------------------------------------
-# Henikoff & Henikoff (1994) sequence weights
-# ---------------------------------------------------------------------------
+# ── Henikoff & Henikoff (1994) sequence weights ───────────────────────────────
+
 
 def henikoff_weights(seqs_matrix):
+    """Henikoff and Henikoff sequence weights, normalized to sum to 1 (uniform for an invariant alignment)."""
     n_seqs = len(seqs_matrix)
     if n_seqs == 0:
         return []
@@ -166,25 +179,24 @@ def henikoff_weights(seqs_matrix):
         return [1.0 / n_seqs] * n_seqs
     return [w / total for w in weights]
 
-# ---------------------------------------------------------------------------
-# Three Valdar prongs
-# ---------------------------------------------------------------------------
+# ── Three Valdar prongs ───────────────────────────────────────────────────────
 
 _VALID_AAS = set(BLOSUM_AAS)
 _GAP_CHARS = set('-X')
 
 
 def symbol_diversity_t(col_residues, seq_weights):
-    """
-    Prong 1: weighted Shannon entropy over 20 AAs + gap as 21st symbol (Eq. 50–52).
-    Normalized by λ_t = 1 / log2(min(N, 21)).  Returns t in [0, 1].
+    """Prong 1: weighted Shannon entropy over 20 amino acids + gap as 21st symbol (Eq. 50-52).
+
+    Normalized by lambda_t = 1 / log2(min(N, 21)), N being the number of sequences. Returns t in [0, 1].
+    Characters outside the 20 amino acids count as gap.
     """
     freq = defaultdict(float)
     for aa, w in zip(col_residues, seq_weights):
         symbol = aa if (aa in _VALID_AAS or aa in _GAP_CHARS) else '-'
         freq[symbol] += w
 
-    # re-normalize (weights already sum to 1, but guard)
+    # renormalize: the weights of a sub-alignment need not sum to 1
     total = sum(freq.values())
     if total == 0:
         return 0.0
@@ -196,12 +208,11 @@ def symbol_diversity_t(col_residues, seq_weights):
 
 
 def stereochem_diversity_r(col_residues, seq_weights):
+    """Prong 2: mean weighted distance from the consensus point in BLOSUM62 20D space (Eq. 54-56).
+
+    Only the 20 amino acids contribute; gaps are excluded from this prong. Returns r in [0, 1].
     """
-    Prong 2: mean distance from consensus point in BLOSUM62 20D space (Eq. 54–56).
-    Only standard AAs contribute (gaps are excluded from this prong per Valdar).
-    Returns r in [0, 1].
-    """
-    # collect distinct AA types with their total weights
+    # total weight of each amino-acid type
     type_weight = defaultdict(float)
     for aa, w in zip(col_residues, seq_weights):
         if aa in _VALID_AAS:
@@ -213,7 +224,7 @@ def stereochem_diversity_r(col_residues, seq_weights):
     n_dim = len(BLOSUM_AAS)
     total_w = sum(type_weight.values())
 
-    # consensus = weighted mean point
+    # consensus: weighted mean point
     consensus = [0.0] * n_dim
     for aa, w in type_weight.items():
         v = BLOSUM_COORDS[aa]
@@ -221,7 +232,7 @@ def stereochem_diversity_r(col_residues, seq_weights):
         for k in range(n_dim):
             consensus[k] += frac * v[k]
 
-    # mean Euclidean distance of each type from consensus, weighted
+    # weighted mean Euclidean distance of the types from the consensus
     mean_dist = 0.0
     for aa, w in type_weight.items():
         v = BLOSUM_COORDS[aa]
@@ -232,28 +243,24 @@ def stereochem_diversity_r(col_residues, seq_weights):
 
 
 def gap_fraction_g(col_residues):
-    """Prong 3: fraction of gap/unknown characters."""
+    """Prong 3: fraction of gap or unknown characters (anything but the 20 amino acids)."""
     n_gaps = sum(1 for aa in col_residues if aa in _GAP_CHARS or aa not in _VALID_AAS)
     return n_gaps / len(col_residues) if col_residues else 0.0
 
 
 def valdar_column(col_residues, seq_weights, alpha=1.0, beta=1.0, gamma=1.0):
-    """
-    Returns (t, r, g, C_trident, variability) for one column.
-    variability = 1 - C_trident.
-    """
+    """(t, r, g, C_trident, variability) of one column; variability = 1 - C_trident."""
     t = symbol_diversity_t(col_residues, seq_weights)
     r = stereochem_diversity_r(col_residues, seq_weights)
     g = gap_fraction_g(col_residues)
     C = ((1 - t) ** alpha) * ((1 - r) ** beta) * ((1 - g) ** gamma)
     return t, r, g, C, 1.0 - C
 
-# ---------------------------------------------------------------------------
-# Per-column and clade computation
-# ---------------------------------------------------------------------------
+# ── Per-column and clade computation ──────────────────────────────────────────
+
 
 def compute_per_column(seqs, seq_weights, alpha=1.0, beta=1.0, gamma=1.0):
-    """Returns per_col list of (t, r, g, C, var) and variable_cols index list."""
+    """Per-column (t, r, g, C, var) tuples and the 0-based indices of the columns with variability > 0."""
     n_cols = len(seqs[0][1]) if seqs else 0
     per_col = []
     variable_cols = []
@@ -261,13 +268,16 @@ def compute_per_column(seqs, seq_weights, alpha=1.0, beta=1.0, gamma=1.0):
         col_res = [s[1][col] for s in seqs]
         row = valdar_column(col_res, seq_weights, alpha, beta, gamma)
         per_col.append(row)
-        if row[4] > 0.0:   # variability > 0
+        if row[4] > 0.0:
             variable_cols.append(col)
     return per_col, variable_cols
 
 
 def clade_variability(seqs, alpha=1.0, beta=1.0, gamma=1.0):
-    """Recompute Valdar score independently for a sub-alignment."""
+    """Mean and max variability over the variable columns of a sub-alignment.
+
+    Sequence weights and all three prongs are recomputed on the sub-alignment alone.
+    """
     seq_matrix = [s[1] for s in seqs]
     weights = henikoff_weights(seq_matrix)
     per_col, var_cols = compute_per_column(seqs, weights, alpha, beta, gamma)
@@ -276,9 +286,8 @@ def clade_variability(seqs, alpha=1.0, beta=1.0, gamma=1.0):
     max_v = max(vals) if vals else 0.0
     return mean_v, max_v
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -314,7 +323,7 @@ def main():
     per_col, variable_cols = compute_per_column(seqs, seq_weights,
                                                 args.alpha, args.beta, args.gamma)
 
-    # Per-position TSV
+    # per-position table (positions are 1-based alignment columns)
     ent_path = os.path.join(var_dir, f'{gene}.entropy.tsv')
     with open(ent_path, 'w') as fh:
         fh.write('gene\tposition\tt\tr\tg\tC_trident\tvariability\tn_seqs\n')
@@ -322,17 +331,17 @@ def main():
             fh.write(f'{gene}\t{col + 1}\t{t:.6f}\t{r:.6f}\t{g:.6f}'
                      f'\t{C:.6f}\t{var:.6f}\t{n_seqs}\n')
 
-    # Variable-positions FASTA
+    # alignment restricted to the variable columns
     var_seqs = [(h, ''.join(seq[c] for c in variable_cols)) for h, seq in seqs]
     write_fasta(os.path.join(var_dir, f'{gene}.fa'), var_seqs)
 
-    # Gene-level summary
+    # gene-level summary
     n_variable = len(variable_cols)
     vals = [per_col[c][4] for c in variable_cols]
     mean_var = sum(vals) / len(vals) if vals else 0.0
     max_var = max(vals) if vals else 0.0
 
-    # Taxonomy
+    # sequence headers are matched to species names with spaces written as underscores
     taxonomy = load_taxonomy(args.taxid_tsv, args.family_order_tsv)
 
     def norm_key(name):
@@ -344,7 +353,7 @@ def main():
         if info:
             header_to_tax[header] = info
 
-    # Per-clade variability
+    # per-clade variability at order and family level
     clade_rows = []
     for level in ('order', 'family'):
         clade_to_indices = defaultdict(list)

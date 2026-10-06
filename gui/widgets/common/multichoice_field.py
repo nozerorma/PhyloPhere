@@ -4,6 +4,15 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+MultiChoiceField: one checkbox per allowed value, stored as a comma-separated string.
+
+Exposes the same text()/set_text()/valueChanged interface as the other field
+widgets, so ModuleTabWidget treats it as a string field.
+
+Imported by: gui/widgets/common/module_tab.py (field kind "multichoice")
+"""
+
 # ── Third-party ───────────────────────────────────────────────────────────────
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QWidget

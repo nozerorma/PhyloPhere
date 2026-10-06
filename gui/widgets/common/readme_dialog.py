@@ -4,8 +4,23 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+ReadmeDialog: shows the repository README.md in a dialog with collapsible sections.
+
+Renders through QWebEngineView when PySide6's QtWebEngine is installed (every
+<details> section expanded) and falls back to a QTextBrowser otherwise, where
+sections are toggled through "toggle:<id>" anchors. The Markdown is converted to
+HTML by readme_html_builder.build_qtextbrowser_html in both cases. The README is
+looked up in the repo directory from the General tab, then in the checkout that
+contains this file, then in the working directory.
+
+Imported by: gui/widgets/main_window.py
+"""
+
+# ── Standard library ──────────────────────────────────────────────────────────
 from pathlib import Path
 
+# ── Third-party ───────────────────────────────────────────────────────────────
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -17,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+# QtWebEngine is optional: without it the dialog uses a QTextBrowser.
 try:
     from PySide6.QtWebEngineCore import QWebEnginePage
     from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -25,6 +41,7 @@ try:
 except ImportError:
     HAS_WEBENGINE = False
 
+# ── Local ─────────────────────────────────────────────────────────────────────
 from gui.widgets.common.readme_html_builder import build_qtextbrowser_html
 
 _REPO_DIR = Path(__file__).resolve().parents[3]  # .../gui/widgets/common -> repo root
@@ -43,11 +60,10 @@ class WebEngineNavPage(QWebEnginePage if HAS_WEBENGINE else object):
 
 
 class ReadmeDialog(QDialog):
-    """Dialog displaying README.md with interactive expandable details sections & compact logo:
-    - Small logo rendering (<img height="55">)
-    - Interactive toggle anchors (► / ▼ Click to view Advanced Parameters...)
-    - Clean parameter tables
-    - Works 100% in all Qt environments (including phylophere conda env / run_gui.sh)
+    """Dialog displaying README.md with expandable <details> sections.
+
+    The QTextBrowser fallback keeps the set of expanded section ids and re-renders
+    on each toggle, so the dialog works with or without QtWebEngine.
     """
 
     def __init__(
@@ -102,14 +118,14 @@ class ReadmeDialog(QDialog):
             self.web_view.setHtml(html_content, base_url)
             layout.addWidget(self.web_view, stretch=1)
         else:
-            # Custom QTextBrowser handler with interactive section toggles & small logo
+            # Fallback: QTextBrowser, with sections toggled through anchor clicks.
             self.browser = QTextBrowser(self)
             self.browser.setOpenLinks(False)
             self.browser.anchorClicked.connect(self._on_textbrowser_anchor_clicked)
             self._render_textbrowser_content()
             layout.addWidget(self.browser, stretch=1)
 
-        # Footer control bar
+        # Footer: open in the system browser, close
         footer_layout = QHBoxLayout()
         footer_layout.setContentsMargins(0, 8, 0, 0)
 

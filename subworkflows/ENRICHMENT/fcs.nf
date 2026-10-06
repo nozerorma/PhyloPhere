@@ -1,27 +1,34 @@
 #!/usr/bin/env nextflow
+// fcs.nf — FCS (Functional Class Scoring) report and batched-statistics processes.
+// PhyloPhere | subworkflows/ENRICHMENT/
 
 /*
- * FCS (Functional Class Scoring) report processes
- * ───────────────────────────────────────────────
- * Rank-based, threshold-free gene-set enrichment via the Wilcoxon-AUC test
- * (RERconverge::fastwilcoxGMTall) over the curated GMTs in subworkflows/ENRICHMENT/dat.
- * Each process renders 12.FCS_general_report.Rmd against a generic
- * stats TSV (gene + score_<ranking> + flag_<name> columns) and a universe file
- * (cleaned_background, no-signal genes floored to 0).
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  SCORING_FCS_REPORT, RER_FCS_REPORT, FCS_COMPUTE_BATCHED, FCS_CONCAT, FCS_COMPUTE:
+ *  rank-based, threshold-free gene-set enrichment (Wilcoxon-AUC through
+ *  RERconverge::fastwilcoxGMTall, plus the Lachenbruch and path-sum permulation
+ *  tests of fcs_enrich.R) over the GMT files of subworkflows/ENRICHMENT/dat.
  *
- *   SCORING_FCS_REPORT : CAAS scoring (global/top/bottom + full cross-module flags)
- *   RER_FCS_REPORT     : RERconverge-specific report process (takes perms_file)
+ *  The report processes render 12.FCS_general_report.Rmd against a generic stats TSV
+ *  (gene, score_<ranking> and flag_<name> columns) and a universe file (the
+ *  cleaned background, genes without signal floored to 0).
  *
- * FADE and Accumulation do not run their own FCS ranking: FADE's statistic is a
- * max over many sites and Accumulation has no permulation null, so neither
- * supports a reliable standalone significance test. They contribute as
- * cross-module corroboration flags on CAAS's/RER's leading edge instead, and
- * FADE additionally gets its own position-level group in posenrich.
+ *    SCORING_FCS_REPORT : CAAS report (global/top/bottom rankings, cross-module flags)
+ *    RER_FCS_REPORT     : RERconverge report (also takes the CAAS stats as annot_file)
+ *
+ *  FADE and Accumulation have no FCS ranking of their own: the FADE statistic is a
+ *  maximum over many sites and Accumulation has no permulation null, so neither
+ *  supports a reliable standalone significance test. They enter as cross-module
+ *  corroboration flags on the leading edge of the CAAS and RER rankings.
+ *
+ *  Consumes:  stats TSV, universe file, permutations file, GMT directory
+ *  Produces:  12.FCS_*.html, fcs_results/ (fcs_all_results.tsv, fcs_leading_edge.tsv,
+ *             fcs_leading_edge_composition.tsv), fcs_enrich_merged.tsv
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SCORING_FCS_REPORT
-// ─────────────────────────────────────────────────────────────────────────────
+
+// ── SCORING_FCS_REPORT: CAAS FCS report ──────────────────────────────────────
 process SCORING_FCS_REPORT {
     tag "scoring_fcs|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
@@ -59,9 +66,9 @@ process SCORING_FCS_REPORT {
     def fdr_permsum     = params.fcs_fdr_permsum     ?: params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
-    // SCORING's own published gene_lists/ -- this IS the CAAS report, so
-    // score_top/score_bottom here really are CAAS's gene_caas_score_top_all/
-    // bottom_all (see 12.FCS_general_report.Rmd's gene_lists_dir param doc).
+    // Published gene_lists/ of the scoring module. This is the CAAS report, so the
+    // score_top/score_bottom columns are the CAAS rankings (see the gene_lists_dir
+    // parameter of 12.FCS_general_report.Rmd); a NO_* sentinel means none was given.
     def gene_lists_arg = (gene_lists.name =~ /^NO_/) ? 'NULL' : "'${gene_lists}'"
     def enrich_file_arg = (enrich_file.name =~ /^NO_/) ? 'NULL' : "'${enrich_file}'"
     def render = """
@@ -102,9 +109,7 @@ process SCORING_FCS_REPORT {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RER_FCS_REPORT - RERconverge specific report process that takes perms_file
-// ─────────────────────────────────────────────────────────────────────────────
+// ── RER_FCS_REPORT: RERconverge FCS report ───────────────────────────────────
 process RER_FCS_REPORT {
     tag "rer_fcs|${report_label}"
     label 'process_reporting'
@@ -182,22 +187,16 @@ process RER_FCS_REPORT {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FCS_COMPUTE_BATCHED / FCS_CONCAT / FCS_COMPUTE
-// ─────────────────────────────────────────────────────────────────────────────
-// fcs_run_all() over every GMT database is the expensive step behind both
-// report processes above (Wilcoxon-AUC + Lachenbruch + Path-Sum-Permulation for
-// every score_<ranking> column, against every GMT). BH correction throughout
-// fcs_enrich.R is scoped per database (fastwilcoxGMTall's own per-GMT BH, plus
-// the explicit per-db p.adjust() calls for the one-sided recompute, Lachenbruch,
-// and Path-Sum-Permulation - see that file's header), so splitting the GMT set
-// across independent batched Nextflow tasks and row-concatenating their results
-// is exact, not an approximation: no batch's rows ever need reconciling against
-// another's. fcs_compute.R (subworkflows/ENRICHMENT/local/src/fcs_compute.R) is
-// the extracted, batchable entry point for this; 12.FCS_general_report.Rmd only
-// renders the merged result (evidence_score's percentile-rank step and the GMT
-// description join both need the FULL merged/cross-database table, so they stay
-// in the Rmd, downstream of this).
+// ── Batched FCS statistics ───────────────────────────────────────────────────
+// fcs_run_all() over every GMT database is the expensive step behind both report
+// processes (Wilcoxon-AUC, Lachenbruch and path-sum permulation for every
+// score_<ranking> column against every GMT). The BH correction of fcs_enrich.R is
+// scoped per database, so the GMT set can be split across independent tasks and the
+// partial tables row-concatenated without any reconciliation: the result is exact.
+// fcs_compute.R (subworkflows/ENRICHMENT/local/src/) is the batchable entry point.
+// 12.FCS_general_report.Rmd only renders the merged table: the evidence_score
+// percentile ranking and the GMT description join need the full cross-database
+// table, so they stay in the Rmd.
 process FCS_COMPUTE_BATCHED {
     tag "$batchID (${batchSize} GMTs)"
     label 'process_fcs_batched'
@@ -262,7 +261,7 @@ process FCS_CONCAT {
     mapfile -t files < <(find . -maxdepth 1 -name "partial_*" ! -name ".*" | sort)
 
     # Batches can write their columns in different orders (a zero-hit batch
-    # emits fcs_run_all()'s empty-result schema), so rows are merged by column
+    # emits the empty-result schema of fcs_run_all()), so rows are merged by column
     # name onto the header of the first batch that has data rows.
     ref="\${files[0]}"
     for f in "\${files[@]}"; do
@@ -296,10 +295,9 @@ process FCS_CONCAT {
     """
 }
 
-// GMT-batched replacement for calling fcs_run_all() inline inside the Rmd.
-// stats_file/universe_file/perms_file are the same inputs SCORING_FCS_REPORT
-// / RER_FCS_REPORT already take; params.gmt_dir is the same directory both
-// processes already resolve their own `gmt_dir` render param from.
+// ── FCS_COMPUTE: GMT-batched fcs_run_all() ───────────────────────────────────────
+// Takes the same stats, universe and permutations files as the report processes and
+// reads the GMT files of params.gmt_dir (the directory the reports use as gmt_dir).
 workflow FCS_COMPUTE {
     take:
     stats_file
@@ -318,14 +316,12 @@ workflow FCS_COMPUTE {
             tuple(batchID, batch.size(), batch)
         }
 
-    // stats_file/universe_file/perms_file are take: params -- each carries
-    // exactly one item, but crossing this subworkflow's take: boundary loses
-    // any value-channel inference Nextflow might have applied upstream (see
-    // caas_permulation.nf's CAAS_CORE workflow for the full
-    // mechanism). Paired positionally against the many-item batches channel,
-    // any one of them would silently truncate FCS_COMPUTE_BATCHED to its
-    // first batch once exhausted. .collect().map { it[0] } makes each reusable/
-    // broadcastable without .first()'s warning on value channels.
+    // The three inputs carry one item each but are queue channels once they cross a
+    // take: boundary. A process pairs its input channels positionally and stops when
+    // one runs out, so paired against the many-item batches channel each of them would
+    // end FCS_COMPUTE_BATCHED after its first batch (the same mechanism as in
+    // CAAS_CORE of subworkflows/CT/caas_permulation.nf). .collect().map { it[0] }
+    // turns each into a value channel that every batch can read.
     def stats_file_bc    = stats_file.collect().map { it[0] }
     def universe_file_bc = universe_file.collect().map { it[0] }
     def perms_file_bc    = perms_file.collect().map { it[0] }

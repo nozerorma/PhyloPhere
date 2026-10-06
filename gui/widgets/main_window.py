@@ -4,6 +4,19 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+MainWindow: the application window of the PhyloPhere Runner GUI.
+
+Assembles the project tabs (General, Runtime, one per module, Precomputed Run,
+Resources) plus the About tab, and provides the File menu and toolbar: new, open,
+save and load-template project actions, path validation, script generation with a
+preview-and-save window, regeneration of HTML reports, the README dialog, and the
+language selector. The live project is autosaved after every change
+(gui/autosave_io.py) and restored at the next launch.
+
+Called by: gui/app.py
+"""
+
 # ── Standard library ──────────────────────────────────────────────────────────
 from pathlib import Path
 
@@ -52,14 +65,13 @@ from gui.widgets.tabs.vep_tab import VepTab
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
-_SETTINGS_LANGUAGE_KEY = "gui/language"  # QSettings key — persists across restarts (see app.py's
-                                          # setOrganizationName/setApplicationName for where this is stored)
+_SETTINGS_LANGUAGE_KEY = "gui/language"  # QSettings key, kept across restarts (the store is
+                                          # named by setOrganizationName/setApplicationName in app.py)
 
 
 def _scrollable(widget: QWidget) -> QScrollArea:
-    """Wrap a tab's content in a QScrollArea — several module tabs now carry 20+
-    fields (see the ct.config/enrichment.config coverage pass) and shouldn't force
-    the main window to grow to fit the tallest one."""
+    """Wrap a tab's content in a QScrollArea, so that module tabs with many fields
+    do not force the main window to grow to fit the tallest one."""
     area = QScrollArea()
     area.setWidgetResizable(True)
     area.setWidget(widget)
@@ -80,7 +92,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget(self)
         self.setCentralWidget(self.tabs)
 
-        self.about_tab = AboutTab(AboutInfo())  # static, never rebuilt on New/Open
+        self.about_tab = AboutTab(AboutInfo())  # static: not rebuilt on New/Open
         self._build_project_tabs()
         self.tabs.addTab(self.about_tab, "About")
 
@@ -89,8 +101,8 @@ class MainWindow(QMainWindow):
         self._update_title()
 
     def _build_project_tabs(self) -> None:
-        """(Re)builds every tab bound to self.project, in display order, and inserts
-        them before the always-last About tab. Called on init and after New/Open."""
+        """(Re)build every tab bound to self.project, in display order, and insert
+        them before the About tab, which stays last. Called on init and after New/Open."""
         self.general_tab = GeneralTab(self.project.general)
         self.runtime_tab = RuntimeTab(
             self.project.runtime, repo_dir_getter=lambda: self.project.general.repo_dir
@@ -115,10 +127,9 @@ class MainWindow(QMainWindow):
         )
         self.resources_tab = ResourcesTab(self.project.resources)
 
-        # (inner widget, title) — the inner widget is what emits `changed` and what
-        # holds the actual model reference; each gets wrapped in a QScrollArea only
-        # for insertion into the QTabWidget (several module tabs now carry 20+
-        # fields and shouldn't force the window to grow to fit the tallest one).
+        # (inner widget, title): the inner widget emits `changed` and holds the
+        # model reference; it is wrapped in a QScrollArea only for insertion
+        # into the QTabWidget.
         self._project_tabs = [
             (self.general_tab, "General"),
             (self.runtime_tab, "Runtime"),
@@ -140,7 +151,7 @@ class MainWindow(QMainWindow):
             self.tabs.insertTab(index, wrapper, title)
             tab.changed.connect(self._mark_dirty)
 
-    # ── Menu ─────────────────────────────────────────────────────────────────
+    # ── Menu ──────────────────────────────────────────────────────────────────
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -196,13 +207,13 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
-        # Language selection combo box to the LEFT of Save Project As + Separator
+        # Language selector, placed first in the toolbar
         self.lang_combo = QComboBox(self)
         for code, label in LANGUAGES.items():
             self.lang_combo.addItem(label, userData=code)
 
-        # Restore the language picked in a previous run (falls back to "en" for a
-        # first-ever launch or an unrecognized/stale saved code).
+        # Restore the language chosen in a previous run ("en" on first launch or
+        # when the saved code is not a known language).
         saved_lang = QSettings().value(_SETTINGS_LANGUAGE_KEY, "en", type=str)
         restored_index = self.lang_combo.findData(saved_lang)
         current_lang = saved_lang if restored_index >= 0 else "en"
@@ -266,7 +277,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
 
-    # ── Dirty tracking ───────────────────────────────────────────────────────
+    # ── Dirty tracking ────────────────────────────────────────────────────────
 
     def _mark_dirty(self) -> None:
         self._dirty = True
@@ -274,10 +285,10 @@ class MainWindow(QMainWindow):
         self._write_autosave()
 
     def _write_autosave(self) -> None:
-        """Best-effort snapshot of the live project state, restored on next
-        launch by __init__ regardless of whether the user ever hit Save (see
-        gui/autosave_io.py) — called after every mutation to self.project,
-        self.project_path, or self._dirty."""
+        """Write a best-effort snapshot of the live project state (see
+        gui/autosave_io.py). __init__ restores it at the next launch whether or
+        not the user saved. Called after every change to self.project,
+        self.project_path or self._dirty."""
         autosave_io.write_autosave(self.project, self.project_path, self._dirty)
 
     def _update_title(self) -> None:
@@ -290,7 +301,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"PhyloPhere Runner GUI — {name}{star}")
 
     def _rebind_tabs_to_project(self) -> None:
-        """After New/Open replaces self.project, rebuild every tab bound to it."""
+        """After New/Open replaces self.project, rebuild every tab bound to it,
+        reapply the current language and keep the selected tab index."""
         index = self.tabs.currentIndex()
         for wrapper in self._project_tab_wrappers:
             self.tabs.removeTab(self.tabs.indexOf(wrapper))
@@ -301,7 +313,7 @@ class MainWindow(QMainWindow):
         self._apply_language(current_lang)
         self.tabs.setCurrentIndex(min(index, self.tabs.count() - 1))
 
-    # ── Project actions ──────────────────────────────────────────────────────
+    # ── Project actions ───────────────────────────────────────────────────────
 
     def new_project(self) -> None:
         self.project = ProjectConfig()
@@ -331,12 +343,10 @@ class MainWindow(QMainWindow):
         self._write_autosave()
 
     def save_template(self) -> None:
-        """Always prompts for a filename — a real "Save As", never a silent in-place
-        overwrite of the loaded template. Pre-fills the suggested filename
-        from General > Project name when set, so naming the project once feeds
-        straight into where it gets saved. The native save dialog's own "file
-        exists, overwrite?" prompt covers the case where you deliberately pick an
-        existing path again — no separate custom confirmation needed."""
+        """Always prompt for a filename (a true "Save As", never a silent in-place
+        overwrite). The suggested name comes from General > Project name when set.
+        The native dialog's own overwrite prompt covers the case of picking an
+        existing path, so no separate confirmation is needed."""
         start_dir = str(self.project_path.parent) if self.project_path else str(TEMPLATES_DIR)
         TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
         suggested_name = self.project.general.project_name.strip()
@@ -359,10 +369,8 @@ class MainWindow(QMainWindow):
         self._write_autosave()
 
     def load_template(self) -> None:
-        """Loads one of the bundled example projects under gui/templates/ (see
-        save_template) — same underlying JSON format as a regular project file,
-        just browsed from a fixed shared directory instead of wherever the user
-        last saved to."""
+        """Open a project file browsed from the bundled gui/templates/ directory.
+        Templates use the same JSON format as any saved project."""
         TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
         path_str, _ = QFileDialog.getOpenFileName(
             self, "Load template", str(TEMPLATES_DIR), "PhyloPhere GUI project (*.json)"
@@ -384,9 +392,9 @@ class MainWindow(QMainWindow):
 
         def script_names(tag: str) -> tuple[str, str]:
             """(batch_name, single_name) for one postproc-mode tag ("", "_exploratory",
-            "_complete") — base_name blank reproduces the exact default filenames;
-            set, it overrides the "phenotypes"/"phenotype" token everywhere so both
-            names change together (they must, see render_batch's single_runner_filename)."""
+            "_complete"). A blank base name gives the default filenames; otherwise it
+            replaces the "phenotypes"/"phenotype" token in both names, which must
+            change together (see render_batch's single_runner_filename)."""
             if not base:
                 plural = "phenotypes"
                 singular = "phenotype"
@@ -412,11 +420,11 @@ class MainWindow(QMainWindow):
                 scripts.append((single_name, single_text))
 
             if run_filt:
-                # reuse_exploratory=True (both selected) skips re-running CAAS/Disambiguation
-                # live in the _complete pass — it reads their output straight from the
-                # sibling _exploratory run's outdir instead (see run_single.sh.j2's
-                # POSTPROC_MODE="filter" branch). Standalone (run_expl off), everything
-                # in _complete stays live, same as before.
+                # With both modes selected (reuse_exploratory=True), the _complete pass
+                # does not rerun CAAS/Disambiguation: it reads their output from the
+                # sibling _exploratory run's outdir (see the POSTPROC_MODE="filter"
+                # branch of run_single.sh.j2). With the filter mode alone, every step
+                # runs live in the _complete scripts.
                 reuse_exploratory = run_expl
                 batch_name, single_name = script_names("_complete")
                 batch_text = render_batch(
@@ -465,11 +473,11 @@ class MainWindow(QMainWindow):
             self._show_preview(dialog.generated_scripts, default_dir=dialog.outdir_field.text().strip())
 
     def validate_paths_dialog(self) -> None:
-        """Checks every filled-in path field and reports which ones don't exist.
-        Complements Generate Scripts' validate() call, which only checks
-        required-ness, not actual existence. Checks the local filesystem, unless
-        General > Remote host is set, in which case it checks that host over SSH
-        (a single round-trip — see gui/remote.py) instead."""
+        """Check every filled-in path field and report those that do not exist.
+        Complements the validate() call of Generate Scripts, which checks only that
+        required fields are set. Checks the local filesystem, or, when General >
+        Remote host is set, that host over SSH in a single round trip (see
+        gui/remote.py)."""
         host = self.project.general.remote_host.strip()
         target = host or "this filesystem"
 
@@ -532,11 +540,10 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # default_dir (e.g. a regenerate-dialog output directory) only changes
-        # *where* scripts save — remote_host still comes from General > Remote
-        # host either way, since default_dir itself is a path on that same
-        # host when one's set (PathField's Browse opens the SSH-backed picker
-        # whenever remote_context has a host — see path_field.py).
+        # default_dir (e.g. the output directory of the regenerate dialog) changes
+        # only where the scripts are saved. The target host is always General >
+        # Remote host, because default_dir is a path on that host when one is set
+        # (PathField browses over SSH whenever remote_context has a host).
         remote_host = self.project.general.remote_host.strip()
         target = remote_host or "the local filesystem"
         filenames_str = ", ".join([f[0] for f in scripts])
@@ -572,8 +579,8 @@ class MainWindow(QMainWindow):
         self._close_preview()
 
     def _close_preview(self) -> None:
-        # The preview is a top-level window owned only by self._preview_window; once the scripts are on disk it has
-        # nothing left to offer, and dropping the reference lets Qt free it.
+        # The preview is a top-level window referenced only by self._preview_window;
+        # dropping the reference after saving lets Qt free it.
         preview = getattr(self, "_preview_window", None)
         if preview is not None:
             preview.close()

@@ -1,34 +1,34 @@
 #!/usr/bin/env nextflow
+// scoring_compute.nf — Position-level and gene-level CAAS scores, joined with FADE, RER and accumulation evidence.
+// PhyloPhere | subworkflows/SCORING/
 
 /*
- * SCORING_COMPUTE
- * ───────────────
- * Compute CAAS scores at position-level and gene-level.
- * Integrates outputs from CT_POSTPROC, FADE, RERConverge and CT_ACCUMULATION.
- * Runs once on the full postproc pool; directional characterisation is handled
- * post-scoring via the side column.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  SCORING_COMPUTE: scores the observed positions and genes of the filtered discovery
+ *  and integrates the other tools' evidence per gene.
  *
- * Inputs
- * ──────
- *   postproc_file         : path — filtered_discovery.tsv (mandatory)
- *   fade_summary_top      : path — fade_summary_top.tsv (or NO_FILE)
- *   fade_summary_bottom   : path — fade_summary_bottom.tsv (or NO_FILE)
- *   fade_site_top         : path — fade_site_bf_top.tsv (or NO_FADE_SITE_TOP sentinel)
- *   fade_site_bot         : path — fade_site_bf_bottom.tsv (or NO_FADE_SITE_BOT sentinel)
- *   rer_summary           : path — rerconverge_summary_{trait}.tsv (or NO_FILE)
- *   accum_files           : path — directory or collected CSVs (or NO_FILE)
+ *  observed_core_scores.py first computes the position and gene CAAS scores with the
+ *  code that also scores the permulation null (src/core/scores.py, copied from
+ *  CT_DISAMBIGUATION); scoring_compute.R then adds the position and gene permulation
+ *  p-values, joins FADE, RERConverge and accumulation, and writes the tables, the
+ *  ranked slices and the enrichment curves. It runs once on the full postproc pool;
+ *  direction is carried by the side column.
  *
- * Outputs
- * ───────
- *   position_scores    : TSV with per Gene×Position scores
- *   gene_scores        : TSV with per Gene scores + directional significance flags
- *   gene_correlations  : TSV with pairwise correlations
- *   gene_lists                : directory of 12 slice TSVs (Top/Bottom/Global × 25/10/5/1%) for AMI/reports
- *   position_lists            : directory of 12 slice TSVs (Top/Bottom/Global × 25/10/5/1%), position-level,
- *                               for posenrich/reports (Gene, Position, CAAS_score)
- *   gene_threshold_enrichment : TSV — gene-level enrichment curve across CAAS thresholds × tools
- *   pos_threshold_enrichment  : TSV — position-level FADE enrichment curve across CAAS thresholds
+ *  Consumes:  postproc_file (filtered_discovery.tsv, mandatory); optional FADE gene
+ *             summaries and per-site tables, RERConverge summary, accumulation results,
+ *             hypothesis pairs, CAAS permulation null (caas_perms.rds and
+ *             perm_pos_cycle_caas.tsv.gz). Each optional input is a staged
+ *             NO_* sentinel file when absent.
+ *  Produces:  position_scores.tsv, gene_scores.tsv, gene_correlations.tsv,
+ *             fcs_stats.tsv (plus fcs_stats_{rer,fade,accum}.tsv when that evidence
+ *             exists), gene_lists/ and position_lists/ (12 slice TSVs each: top,
+ *             bottom, global × 25, 10, 5, 1%; position slices keyed Gene, Position,
+ *             CAAS_score), gene_threshold_enrichment.tsv, pos_threshold_enrichment.tsv
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Scoring ────────────────────────────────────────────────────────────────────
 
 process SCORING_COMPUTE {
     tag "scoring_compute|${params.traitname ?: 'unknown_trait'}"
@@ -53,8 +53,8 @@ process SCORING_COMPUTE {
     path rer_summary
     path accum_files
     path hypotheses_pairs   // optional: contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS sentinel otherwise
-    path caas_perms         // optional: caas_perms.rds (CAAS permulation-excess null); NO_FILE sentinel otherwise
-    path caas_pos_cycle_caas // optional: perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE sentinel otherwise
+    path caas_perms         // optional: caas_perms.rds, the gene-level permulation null; NO_FILE sentinel otherwise
+    path caas_pos_cycle_caas // optional: perm_pos_cycle_caas.tsv.gz, the position-level null for p.emp; NO_FILE sentinel otherwise
 
     output:
     path "position_scores.tsv",                              emit: position_scores

@@ -5,10 +5,14 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Plain QLabel/QTextBrowser only — no QWebEngineView anywhere in this app (see
-implementation plan §7): nothing here needs a web view, and QtWebEngine is by far
-the biggest source of PyInstaller+AppImage packaging pain (sandboxed helper
-process, .pak resource files, --no-sandbox requirements under a read-only mount).
+AboutTab: logo, repository, authorship, license and attributions of the GUI.
+
+The content comes from AboutInfo (gui/models/about.py) and is rendered with a
+QLabel (logo) and a QTextBrowser (text), with no web view, because nothing here
+needs one. The tab holds no project state and is not rebuilt when a project is
+opened.
+
+Imported by: gui/widgets/main_window.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -22,7 +26,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QTextBrowser, QVBoxLayout, QW
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.about import AboutInfo
 
-_GUI_PACKAGE_ROOT = Path(__file__).resolve().parents[3]  # .../gui/widgets/tabs -> repo root
+_GUI_PACKAGE_ROOT = Path(__file__).resolve().parents[3]  # .../gui/widgets/tabs -> repo root (AboutInfo.logo_relpath is relative to it)
 
 
 class AboutTab(QWidget):

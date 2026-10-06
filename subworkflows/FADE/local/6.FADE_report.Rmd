@@ -56,6 +56,9 @@ params:
   }
 </style>
 
+<!-- 6.FADE_report.Rmd — Gene-level and site-level summary of the FADE results of one direction. -->
+<!-- PhyloPhere | subworkflows/FADE/local/ -->
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   echo    = FALSE,
@@ -75,7 +78,7 @@ suppressPackageStartupMessages({
   library(parallel)
 })
 
-# Tableau_10 colour swatch (10 named colours for pipeline-wide consistency)
+# Tableau_10 colors, shared with the other reports
 .tableau10 <- as.character(paletteer_d("ggthemes::Tableau_10"))
 
 theme_set(
@@ -132,8 +135,8 @@ if (has_fg) {
 ---
 
 ```{r load-jsons}
-# ── Locate all FADE JSON files in the working directory ──────────────────────
-# Check if json files are in a "json" subdirectory
+# ── FADE JSON files ──────────────────────────────────────────────────────────
+# The files are in json_dir or, when present, in its json/ subdirectory.
 json_search_dir <- params$json_dir
 if (dir.exists(file.path(params$json_dir, "json"))) {
   json_search_dir <- file.path(params$json_dir, "json")
@@ -156,8 +159,7 @@ cat(sprintf("Found %d FADE result files.\n", length(json_files)))
 ```
 
 ```{r fade-json-branch-detect, echo=FALSE, results='asis'}
-# Attempt to detect foreground branches from the first FADE JSON
-# (supplements fg_list_file if not provided)
+# Without fg_list_file, the foreground species are read from the first JSON file.
 if (!has_fg && length(json_files) > 0) {
   js_sample <- tryCatch(
     fromJSON(json_files[1], simplifyVector = FALSE),
@@ -188,25 +190,17 @@ if (!has_fg && length(json_files) > 0) {
 ```
 
 ```{r parse-fade, results='asis', message=TRUE}
-# ── Parse each JSON straight into a per-gene summary row ─────────────────────
+# ── Parse each JSON into a per-gene summary row ──────────────────────────────
 #
-# Expected FADE JSON structure:
+# Layout of the FADE JSON as read here:
 #   $MLE$headers  : list of [col_name, description] pairs (same for all sites)
-#   $MLE$content  : named list, each element = one site (0-indexed)
-#                   each site element = named list by amino acid (20 letters)
-#                   each AA element   = numeric vector matching headers
+#   $MLE$content  : named list by amino acid (20 letters); each element is keyed by
+#                   partition and holds one numeric vector per site, matching headers
 #
-# NOTE: this used to materialise one row per (gene, site, target_aa) into a
-# single fade_df — tens of millions of rows across a genome-wide 'all' mode
-# run (16k genes x hundreds of sites x 20 AAs), which is the only thing that
-# actually needs that much memory here (the raw per-file JSON parse itself is
-# cheap and transient). Nothing downstream of this report consumes site-level
-# detail — scoring_compute.R takes the per-gene fade_summary_{direction}.tsv
-# only, and the site-level fade_site_bf_{direction}.tsv this report used to
-# also emit isn't wired into any downstream consumer. So each worker now
-# reduces its file straight down to one gene-level summary row (plus a small
-# 20-entry per-AA significant-site tally for the AA-frequency plot below),
-# and the significant site x AA detail table is not retained at all.
+# Each worker reduces its file to one gene-level row (gene, sites tested, number of
+# significant site x AA pairs, maximum BF with its site and amino acid, per-AA counts)
+# and keeps the significant sites as an attribute, so the (gene, site, AA) table is
+# never materialized for all genes.
 
 AA_LETTERS <- strsplit("ACDEFGHIKLMNPQRSTVWY", "")[[1]]
 bf_thr <- params$bf_threshold
@@ -222,7 +216,7 @@ parse_fade_json <- function(path, bf_thr) {
       return(NULL)
     }
 
-    # Identify the column index of Bayes Factor in headers
+    # Column of the Bayes factor in the headers
     hdrs <- js[["MLE"]][["headers"]]
     bf_idx <- which(sapply(hdrs, function(h) {
       grepl("BayesFactor", h[[1]], ignore.case = TRUE)
@@ -231,20 +225,16 @@ parse_fade_json <- function(path, bf_thr) {
 
     content <- js[["MLE"]][["content"]]
 
-    # content[[aa]] is keyed by partition (in practice always one key, "0");
-    # the actual per-gene site index is the POSITION within that partition's
-    # list, not the key name — mirrors the original per-row expansion's
-    # `site = seq_along(all_site_rows)`, just without materialising the rows.
+    # content[[aa]] is keyed by partition (a single key in these runs); the site index
+    # is the position within that partition's list, not the key name.
     best_bf   <- -Inf
     best_site <- NA_integer_
     best_aa   <- NA_character_
     n_sig     <- 0L
     n_sites_tested <- 0L
     sig_aa_counts <- setNames(integer(length(AA_LETTERS)), AA_LETTERS)
-    # Per-site running max BF (across the 20 target AAs) for sites that clear
-    # bf_thr — this is the ALL-significant-sites detail, one entry per site.
-    # Bounded by the significant-site count (~1e3 genome-wide), not the
-    # site x AA product that the earlier full expansion blew memory on.
+    # Running maximum BF over the 20 target AAs for each site that reaches bf_thr
+    # (one entry per significant site, not per site x AA).
     sig_site_bf <- numeric(0)   # names = 1-based site index (character)
     sig_site_aa <- character(0)
 
@@ -299,14 +289,14 @@ parse_fade_json <- function(path, bf_thr) {
     )
     for (aa in AA_LETTERS) out[[paste0("sigcount_", aa)]] <- sig_aa_counts[[aa]]
 
-    # ALL significant sites for this gene (one row per site), carried alongside
-    # the gene-level row as an attribute so the single return type is unchanged.
+    # Significant sites of this gene (one row per site), attached to the gene-level row
+    # as the "sig_sites" attribute.
     if (length(sig_site_bf) > 0) {
       si_int <- as.integer(names(sig_site_bf))
       attr(out, "sig_sites") <- data.frame(
         gene      = gene_id,
         site      = si_int,            # 1-based FADE site index
-        position  = si_int - 1L,       # 0-based, matches CAAS/CT coordinates
+        position  = si_int - 1L,       # 0-based, as in the CAAS Position column
         max_bf    = as.numeric(sig_site_bf),
         target_aa = unname(sig_site_aa[names(sig_site_bf)]),
         stringsAsFactors = FALSE
@@ -320,8 +310,8 @@ parse_fade_json <- function(path, bf_thr) {
   })
 }
 
-# Parse all files in parallel across genes.
-# FADE_REPORT_CORES env var controls parallelism (set by the Nextflow process).
+# Files are parsed in parallel across genes; FADE_REPORT_CORES (set by the Nextflow
+# process) gives the number of workers.
 n_report_cores <- max(1L, as.integer(Sys.getenv("FADE_REPORT_CORES", unset = detectCores())))
 message(sprintf("Parsing %d FADE JSON files using %d core(s)...", length(json_files), n_report_cores))
 
@@ -341,8 +331,8 @@ if (length(all_results) == 0) {
 gene_summary <- bind_rows(all_results) %>%
   arrange(desc(n_sig_site_aa), desc(max_bf))
 
-# ALL significant sites across ALL genes (one row per (gene, site)), recovered
-# from the per-gene "sig_sites" attribute attached during parsing.
+# Significant sites of all genes (one row per (gene, site)), from the "sig_sites"
+# attribute of each gene-level row.
 sig_sites <- bind_rows(lapply(all_results, function(x) attr(x, "sig_sites"))) %>%
   { if (nrow(.) == 0) . else arrange(., desc(max_bf)) }
 
@@ -357,8 +347,7 @@ cat(sprintf(
 ## Gene-level Summary
 
 ```{r gene-summary}
-# gene_summary was already built (one row per gene) while parsing the JSONs
-# above — nothing left to aggregate here, just derive the significant subset.
+# Genes with at least one site x AA pair at or above bf_thr (gene_summary has one row per gene).
 sig_genes <- gene_summary %>% filter(n_sig_site_aa > 0)
 
 cat(sprintf(
@@ -392,10 +381,9 @@ DT::datatable(
 ```
 
 ```{r write-summary-tsv}
-# Write to the local (work) directory so Nextflow publishDir can stage it.
-# params$output_dir is informational only; do NOT write there directly.
+# The table is written to the working directory, where Nextflow publishDir collects it;
+# params$output_dir is not written to.
 
-# Check if gene_summary exists and has data
 if (!exists("gene_summary")) {
   stop("ERROR: gene_summary variable does not exist!")
 }
@@ -409,7 +397,7 @@ if (nrow(gene_summary_core) == 0) {
   out_tsv <- paste0("fade_summary_", params$direction, ".tsv")
   write.table(gene_summary_core, out_tsv, sep = "\t", row.names = FALSE, quote = FALSE)
 
-  # Verify file was written
+  # The file must exist after the write
   if (!file.exists(out_tsv)) {
     stop(sprintf("ERROR: Failed to create TSV file '%s'", out_tsv))
   }
@@ -450,10 +438,8 @@ if (nrow(sig_sites) == 0) {
 ```
 
 ```{r write-sites-tsv}
-# Per-significant-site table for downstream consumers (scoring_compute.R's
-# .load_fade_sites / position-level FADE enrichment). Same schema as
-# FADE_JSON_TO_CSV's fade_sites_<dir>.csv. Header always written so the
-# Nextflow output declaration is satisfied even with zero significant sites.
+# Significant-site table, tab-delimited, with the columns of FADE_JSON_TO_CSV's
+# fade_sites_<direction>.csv. The header is written even with no significant site.
 out_sites_tsv <- paste0("fade_site_bf_", params$direction, ".tsv")
 sites_core <- if (nrow(sig_sites) == 0) {
   data.frame(gene = character(), position = integer(),
@@ -493,9 +479,8 @@ ggplot(gene_summary, aes(x = max_bf)) +
 if (nrow(sig_genes) == 0) {
   cat("No significant genes to plot.\n")
 } else {
-  # Per-AA significant-site counts were tallied per gene while parsing
-  # (sigcount_<AA> columns) — sum across genes instead of re-scanning a
-  # per-site table we no longer keep.
+  # Per-AA counts of significant site x AA pairs come from the sigcount_<AA> columns,
+  # summed over genes.
   aa_freq <- gene_summary %>%
     select(starts_with("sigcount_")) %>%
     summarise(across(everything(), sum)) %>%

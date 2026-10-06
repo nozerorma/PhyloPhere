@@ -1,51 +1,64 @@
 #!/usr/bin/env python3
-# =============================================================================
-# posenrich_enrich.py - Position-wise enrichment via Path Sum Permulation Tests
-# =============================================================================
-# Rank-free, magnitude-aware position-level gene-set enrichment via sparse-matrix
-# vectorized label permutations over the full ~1.47M position background.
-#
-# Rationale:
-#   At the position level (honest testable background of ~1.47M alignment columns),
-#   <0.2% of positions carry a non-zero CAAS score. Fixed-cutoff Fisher tests
-#   suffer from extreme sample-size sensitivity (N=1.47M), assigning p < 0.001 to
-#   biologically meaningless deviations (e.g. fold = 1.01) while discarding continuous
-#   score magnitude.
-#
-#   Position-Level Path Sum Permulation solves this by summing raw CAAS score
-#   magnitudes for every position in a gene set:
-#     T_obs = sum_{p in term} s_p
-#   The ~99.8% zero-scoring positions contribute 0 to the pathway sum.
-#   Permuting the non-zero scores randomly across the ~1.47M background pool
-#   N_perms times yields an exact, magnitude-weighted empirical null distribution
-#   -- BUT that label shuffle is only run on request (--allow-label-shuffle): a naive
-#   label shuffle treats every position's score as an independent draw, ignoring
-#   the phylogenetic non-independence the CAAS null corrects for. The null is the
-#   CAAS permulation null (perm_pos_cycle_caas.tsv.gz): its real permulation cycles
-#   (same preference fcs_enrich.R's fcs_run_permulation gives FCS's own Permsum
-#   test). Without one, p_value, p_adj, perm_nes and the null columns are NA and
-#   nothing is significant; the observed sums are still written.
-#
-# Output:
-#   posenrich_characterization.tsv : ranking, database, pathway, description,
-#                                    layer_size, n_pos_with_score, obs_sum,
-#                                    null_mean, null_sd, perm_nes, p_value,
-#                                    p_adj, direction, background_n,
-#                                    n_scored, sig
-#   posenrich_leading_edge.tsv     : gene:position driver members for significant terms
-# =============================================================================
+# posenrich_enrich.py — Position-level gene-set enrichment by path-sum permulation.
+# PhyloPhere | subworkflows/ENRICHMENT/local/src/
 
+"""
+PosenrichEnrich: tests whether the CAAS scores of the alignment positions of a gene set
+exceed what the CAAS permulation null produces, for every gene set of the GMT files and
+of the characterization layers, in three directions (global, top, bottom).
+
+Statistic. The score of a term is the sum of the observed CAAS scores of its positions,
+T_obs = sum_{p in term} s_p. Most background positions score 0 and add nothing, so the sum
+is magnitude-weighted and needs no cutoff on the score. A fixed-cutoff test (Fisher) over
+a background of this size would call biologically trivial deviations significant and would
+discard the magnitude.
+
+Null. The null is the real permulation cycles of the CAAS null (perm_pos_cycle_caas.tsv.gz),
+the same preference fcs_enrich.R's fcs_run_permulation gives the FCS path-sum test: each
+cycle gives one null sum per term, and p = (1 + number of null sums >= T_obs) / (n_cycles + 1).
+perm_nes is (T_obs - mean) / sd of the null sums. A label shuffle of the nonzero scores
+over the background is run only with --allow-label-shuffle, because it treats the scores
+as independent draws and ignores the phylogenetic dependence the CAAS null accounts for
+(anticonservative, exploratory). Without a null, p_value, p_adj, perm_nes, null_mean and
+null_sd are NA and nothing is significant; the observed sums are still written.
+
+p_adj is the BH adjustment within each (ranking, database). A term is significant (sig)
+when p_adj < --padj-thr and perm_nes > 0.
+
+Background. The positions tested by caastools (--background) restricted to the genes of
+--universe, plus any scored position. For the cosmic_orthogroups and pai3d_orthogroups
+databases it is further restricted to the genes the source database can annotate
+(--cosmic-coverage, --pai3d-coverage from build_position_gmt.py).
+
+Called by:  POSENRICH_RUN, POSENRICH_RUN_BATCHED Nextflow processes (posenrich.nf → posenrich_enrich.py)
+Inputs:     --obs-scores        position_scores.tsv (Gene, Position, CAAS_score, side)
+            --gmt-dir           directory of *.gmt files (position IDs Gene:Position)
+            --characterization  characterization_layers.tsv, optional (name, description, members)
+            --universe, --background   gene universe and caastools background.output (gene, tested positions)
+            --caas-null-prepped | --caas-cycle-null   the CAAS null (prepped pickle takes precedence)
+Outputs:    posenrich_characterization.tsv  ranking, database, pathway, description, layer_size,
+                n_pos_with_score, obs_sum, null_mean, null_sd, perm_nes, p_value, p_adj,
+                direction (enriched or depleted by the sign of perm_nes; empty without a null),
+                background_n, pct_<flag> (one per flag_* column of --annot-file), n_scored, sig
+            posenrich_leading_edge.tsv      gene:position driver members of the significant terms
+"""
+
+# ── Standard library ──────────────────────────────────────────────────────────
 import os
 import sys
 import glob
 import pickle
 import argparse
+
+# ── Third-party ───────────────────────────────────────────────────────────────
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
 
-# ── args ─────────────────────────────────────────────────────────────────────
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Position-level Path Sum Permulation enrichment.")
     p.add_argument("--obs-scores", required=True,
@@ -112,8 +125,11 @@ def parse_args():
     return p.parse_args()
 
 
-# ── universe / background from MAP files ─────────────────────────────────────
+# ── Universe and background ───────────────────────────────────────────────────
+
+
 def load_universe_genes(path):
+    """Set of gene symbols of a one-per-line file, ignoring blank lines and a Gene header."""
     genes = set()
     with open(path) as f:
         for line in f:
@@ -124,8 +140,12 @@ def load_universe_genes(path):
 
 
 def build_background(background_file, universe_genes):
-    """Honest testable position background = positions CAAStools tested,
-    RESTRICTED to cleaned-background genes."""
+    """Position IDs (Gene:Position) that caastools tested, restricted to universe genes.
+
+    background_file is the caastools background.output (gene, comma-separated positions,
+    tab-separated). Exits with an error when it is absent, because without it the
+    background would be undefined.
+    """
     if not background_file or background_file.startswith("NO_FILE") or not os.path.exists(background_file):
         sys.exit(
             f"[posenrich] ERROR: background file is required but was not supplied or "
@@ -149,8 +169,15 @@ def build_background(background_file, universe_genes):
     return bg
 
 
-# ── GMT / characterization-layer loading ─────────────────────────────────────
+# ── Gene sets ─────────────────────────────────────────────────────────────────
+
+
 def load_gmts(gmt_dir):
+    """Read every non-empty *.gmt of gmt_dir into {database: (terms, descriptions)}.
+
+    terms maps the set name to its member position IDs (GMT columns 3 onward); the
+    description is GMT column 2, or the set name when empty. The database is the file name.
+    """
     gmts = {}
     for f in sorted(glob.glob(os.path.join(gmt_dir, "*.gmt"))):
         if os.path.getsize(f) == 0:
@@ -171,6 +198,7 @@ def load_gmts(gmt_dir):
 
 
 def read_charset(path):
+    """Characterization layers as {name: (description, set of members)}; empty when absent."""
     layers = {}
     if not path or not os.path.exists(path):
         return layers
@@ -184,7 +212,11 @@ def read_charset(path):
 
 
 def load_annot(path):
-    """Cross-module corroboration flags, per gene (SCORING's fcs_stats.tsv)."""
+    """Cross-module corroboration flags per gene, from SCORING's fcs_stats.tsv.
+
+    Returns ({gene: {flag_*: bool}}, flag column names); empty when the file is absent or
+    has no gene or flag_* column.
+    """
     if not path or not os.path.exists(path):
         return {}, []
     df = pd.read_csv(path, sep="\t")
@@ -200,12 +232,15 @@ def load_annot(path):
     return annot, flag_cols
 
 
-# ── observed scores ──────────────────────────────────────────────────────────
+# ── Observed scores and CAAS null ─────────────────────────────────────────────
+
+
 def direction_rows(df, direction):
-    """One row per pos_id for a direction (global/top/bottom). "top"/"bottom"
-    keep that side's row; "global" keeps the best side (max CAAS_score), the
-    same max-over-sides collapse SCORING uses for its undirected axis
-    (.pos_undirected, p.emp) and the CAAS null uses for its "all" pool."""
+    """One row per pos_id for a direction (global, top or bottom).
+
+    "top" and "bottom" keep the rows of that side; "global" keeps the better side (highest
+    CAAS_score), the same max-over-sides reduction SCORING applies to its undirected axis.
+    """
     if direction == "global":
         sub = df
     elif direction == "top":
@@ -218,26 +253,25 @@ def direction_rows(df, direction):
 
 
 def collapse_null_sides(sub):
-    """Reduce a (pos_id, side, cycle, score) null subset to one score per
-    (pos_id, cycle) = max over sides, mirroring direction_rows() on the
-    observed side."""
+    """Reduce a (pos_id, side, cycle, score) null subset to one score per (pos_id, cycle).
+
+    The score is the maximum over sides, as direction_rows() does for the observed scores.
+    """
     return (sub.groupby(["pos_id", "cycle"], observed=True, sort=False)["score"]
                .max().reset_index())
 
 
-# ── CAAS permulation-null (preferred as the PRIMARY null when supplied;
-# see run_permulation_for_terms) ──────────────────────────────────────────────
 def load_caas_cycle_null(path):
-    """Load perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_score,
-    n_schemes) once for the whole run. Returns (long_df, all_cycle_levels) with
-    long_df columns (pos_id, side, cycle, score) where score = caas_score (the
-    position's per-side CAAS score for that null cycle, in the same units as
-    position_scores.tsv's CAAS_score; 0 when no scheme scored it). all_cycle_levels is every
-    distinct cycle in the file, independent of side, so a cycle with zero hits
-    on one side still counts as a real null draw contributing 0 to that side's
-    term sums (not a missing cycle). Returns (None, None) if path is missing,
-    a NO_FILE* sentinel, or doesn't exist -- callers must treat that as "no
-    CAAS null available".
+    """Load perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_score, n_schemes).
+
+    Returns (long_df, all_cycle_levels). long_df has columns pos_id, side, cycle and score,
+    where score is the caas_score of the position on that side in that null cycle (the
+    units of CAAS_score in position_scores.tsv; 0 when unscored). all_cycle_levels is every
+    distinct cycle of the file regardless of side, so a cycle without hits on one side is
+    still a null draw that contributes 0 to the term sums of that side.
+
+    Returns (None, None) when the path is absent, a NO_FILE* sentinel, missing or empty:
+    callers treat it as "no CAAS null available".
     """
     if not path or os.path.basename(path).startswith("NO_FILE") or not os.path.exists(path):
         return None, None
@@ -256,16 +290,15 @@ def load_caas_cycle_null(path):
 
 
 def load_prepped_caas_null(path):
-    """Load caas_null_prepped.pkl from POSENRICH_PREP_NULL: the same CAAS
-    permulation null load_caas_cycle_null() reads, except the parse and the
-    per-direction split/dedup (null_direction_subset's job) were already done
-    once for the whole run instead of once per POSENRICH_RUN_BATCHED task.
-    Returns (by_direction, all_cycle_levels) where by_direction is a dict
-    {"global"/"top"/"bottom": DataFrame[pos_id, cycle, score]}, mirroring
-    what null_direction_subset(long_df, direction) would return for each
-    direction. Returns (None, None) if path is missing, a NO_FILE* sentinel,
-    doesn't exist, or the artifact itself is empty (no CAAS null was supplied
-    upstream) -- same contract as load_caas_cycle_null().
+    """Load caas_null_prepped.pkl (posenrich_prep_caas_null.py).
+
+    It holds the null of load_caas_cycle_null() already split by direction and reduced to
+    one score per (pos_id, cycle). Returns (by_direction, all_cycle_levels), where
+    by_direction is {"global"/"top"/"bottom": DataFrame[pos_id, cycle, score]}, equal to
+    null_direction_subset(long_df, direction) for each direction.
+
+    Returns (None, None) when the path is absent, a NO_FILE* sentinel, missing, or the
+    artifact is empty (same contract as load_caas_cycle_null).
     """
     if not path or os.path.basename(path).startswith("NO_FILE") or not os.path.exists(path):
         return None, None
@@ -278,9 +311,10 @@ def load_prepped_caas_null(path):
 
 
 def null_direction_subset(long_df, direction):
-    """Direction-filtered view of load_caas_cycle_null's long_df, with the
-    same side-handling direction_rows() uses for observed data: one score per
-    (pos_id, cycle), the max over sides for "global"."""
+    """Direction-filtered long_df of load_caas_cycle_null, one score per (pos_id, cycle).
+
+    Sides are handled as in direction_rows(): "global" takes the maximum over sides.
+    """
     if direction == "global":
         sub = long_df
     elif direction == "top":
@@ -291,14 +325,14 @@ def null_direction_subset(long_df, direction):
 
 
 def caas_null_term_sums(M_mat, bg_idx_map, N, null_sub, all_cycle_levels):
-    """Term sums under the real CAAS-permulation-cycle null, reusing the same
-    term indicator matrix M_mat the label-shuffle null uses. Cycle columns
-    span ALL_cycle_levels (every real null cycle from the whole file), not
-    just cycles with a nonzero row in this direction/background, so a cycle
-    with zero hits still counts as a real null draw contributing 0 rather
-    than being silently dropped. Returns None when no CAAS null was supplied;
-    the caller then leaves the null-based values undefined (or, only when asked
-    to, runs a private label shuffle).
+    """Term sums under the CAAS permulation null, as an (n_terms x n_cycles) array.
+
+    M_mat is the term indicator matrix (n_terms x N) shared with the label-shuffle null.
+    The columns span all_cycle_levels, every cycle of the file, not only cycles with a
+    nonzero row in this direction and background, so a cycle without hits is a null draw
+    contributing 0 instead of being dropped. Returns None when no CAAS null was supplied;
+    the caller then leaves the null-based values undefined (or, on request, runs a label
+    shuffle).
     """
     if null_sub is None or len(all_cycle_levels) == 0:
         return None
@@ -315,7 +349,10 @@ def caas_null_term_sums(M_mat, bg_idx_map, N, null_sub, all_cycle_levels):
 
 
 def annotate_overlap(overlap, annot, flag_names):
-    """Cross-module corroboration for distinct genes in overlap."""
+    """Percentage of the distinct genes of the overlap carrying each cross-module flag.
+
+    Returns {pct_<flag>: percent}, or {} when there are no flags.
+    """
     if not flag_names:
         return {}
     genes = {p.rsplit(":", 1)[0] for p in overlap}
@@ -329,11 +366,12 @@ def annotate_overlap(overlap, annot, flag_names):
 
 
 def restrict_background_to_coverage(bg_set, coverage_genes):
-    """Restrict background positions to genes in coverage_genes."""
+    """Positions of bg_set whose gene is in coverage_genes."""
     return {p for p in bg_set if p.rsplit(":", 1)[0] in coverage_genes}
 
 
 def bh_adjust(pvals):
+    """Benjamini-Hochberg adjusted p-values, in the order of the input."""
     p = np.asarray(pvals, dtype=float)
     n = len(p)
     if n == 0:
@@ -347,21 +385,23 @@ def bh_adjust(pvals):
     return out
 
 
-# ── Sparse Path Sum Permulation Engine ───────────────────────────────────────
+# ── Path-sum permulation ──────────────────────────────────────────────────────
+
+
 def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_size, max_size,
                              n_perms=10000, seed=1998, annot=None, flag_names=None,
                              perm_chunk_size=1000, caas_null_sub=None, caas_null_cycles=None, allow_label_shuffle=False):
-    """
-    Position-Level Path Sum Permulation test.
-    Vectorized sparse matrix multiplication over background pool (N positions).
+    """Path-sum permulation test of every term of one database in one direction.
 
-    Permutations are generated and multiplied in chunks of `perm_chunk_size`
-    rather than all `n_perms` at once, so peak memory scales with
-    perm_chunk_size rather than with n_perms or the background size N (up to
-    ~6.7M). The null mean/sd/empirical-p are accumulated incrementally (sum,
-    sum-of-squares, count) across chunks and are bit-identical to computing
-    them over the full unchunked permutation matrix (same RNG draw order, no
-    shortcuts on the statistics themselves).
+    Observed and null term sums are sparse matrix products of the term indicator matrix
+    (n_terms x N background positions) with the score vector or the null matrix. Returns
+    one dict per term (rows of the characterization table before p_adj, n_scored and sig;
+    "_overlap" holds the scored member positions) or [] when no term passes the size filters.
+
+    With the label shuffle, permutations are generated and multiplied in chunks of
+    perm_chunk_size, so peak memory scales with the chunk and not with n_perms or N. The
+    null mean, sd and exceedance count are accumulated across chunks (sum, sum of squares,
+    count), which gives the same values as one unchunked permutation matrix.
     """
     N = len(background)
     if N == 0:
@@ -405,17 +445,12 @@ def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_siz
 
     obs_sums = M_mat.dot(V_obs)
 
-    # 3. Null source. Prefer the shared CAAS/RER phylogenetic permulation null
-    # over a private label shuffle -- same preference fcs_run_permulation
-    # gives FCS's own Permsum test, and for the same reason: a naive
-    # position-label shuffle treats every position's score as an independent
-    # draw, ignoring the phylogenetic non-independence the CAAS null corrects
-    # for (see fcs_enrich.R's fcs_run_permulation docstring). When the CAAS
-    # null is available it REPLACES the private shuffle as the primary null
-    # rather than gating alongside it -- a label shuffle known to be
-    # anti-conservative isn't independent evidence to AND against, it's just
-    # a weaker test. No separate p.perm column: p_value/p_adj already reflect
-    # whichever null was used.
+    # 3. Null source. The CAAS permulation null is preferred over a label shuffle, as
+    # fcs_run_permulation does for the FCS path-sum test: a shuffle treats every position
+    # score as an independent draw and ignores the phylogenetic dependence the CAAS null
+    # accounts for. When the CAAS null is available it replaces the shuffle instead of
+    # being combined with it, because an anticonservative test adds no independent
+    # evidence. p_value and p_adj reflect whichever null was used.
     null_cycle_sums = caas_null_term_sums(M_mat, bg_idx_map, N, caas_null_sub, caas_null_cycles)
 
     if null_cycle_sums is None and not allow_label_shuffle:
@@ -443,8 +478,8 @@ def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_siz
         counts = np.sum(null_cycle_sums >= obs_sums[:, None], axis=1)
         pvals = (counts + 1.0) / (n_draws + 1.0)
     else:
-        # Fallback: private label shuffle of this direction's own nonzero
-        # scores across the background, chunked -- see docstring.
+        # Label shuffle: the nonzero scores of this direction are placed at random
+        # positions of the background (chunked, see the docstring).
         nz_idx = np.where(V_obs > 0)[0]
         nz_vals = V_obs[nz_idx]
         K = len(nz_idx)
@@ -466,10 +501,8 @@ def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_siz
 
         rng = np.random.default_rng(seed)
 
-        # Chunked sparse permutation matrix + multiply, folded into running
-        # accumulators -- see docstring. Each chunk is independent (its own
-        # p_rows/p_cols/p_vals/P_chunk/null_chunk), so peak memory is bounded
-        # by perm_chunk_size regardless of n_perms.
+        # Each chunk builds its own sparse permutation matrix and is folded into the
+        # running accumulators, so peak memory is bounded by perm_chunk_size.
         sum_null = np.zeros(n_terms, dtype=np.float64)
         sumsq_null = np.zeros(n_terms, dtype=np.float64)
         counts = np.zeros(n_terms, dtype=np.int64)
@@ -529,7 +562,9 @@ def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_siz
     return out
 
 
-# ── main ─────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+
 def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)

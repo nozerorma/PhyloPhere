@@ -1,24 +1,24 @@
 #!/usr/bin/env nextflow
 
+// accum_gene_lists.nf — Gene lists and a score table from the accumulation randomization output.
+// PhyloPhere | subworkflows/CT_ACCUMULATION/
+
 /*
- * ACCUMULATION_GENE_LISTS
- * ───────────────────────
- * Extract AMI-ready gene lists and stats from CT_ACCUMULATION randomization output:
- *   background.txt                  — all genes tested by accumulation for this direction
- *   accumulation_${direction}_significant.txt — genes with CCT-combined FDR < threshold
- *   fcs_stats.tsv                   — ranked by -log10(CCT combined p)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  ACCUMULATION_GENE_LISTS: combines the per-scheme empirical p-values of each gene into
+ *  one Cauchy-combined p-value (CCT), applies a BH FDR over the genes with at least one
+ *  observed CAAS and writes the background and significant gene lists of one direction.
  *
- * Inputs
- * ──────
- *   direction : val  — 'top', 'bottom', or 'all'
- *   csv_files : path — list of all scheme CSV files for this direction
- *
- * Outputs
- * ───────
- *   direction  : val  — passed through for downstream routing
- *   gene_lists : path — both .txt files
- *   fcs_stats  : path — fcs_stats.tsv
+ *  Consumes:  direction ('top', 'bottom' or 'all') and the accumulation_<direction>_<scheme>_aggregated_results.csv
+ *             files of that direction (CT_ACCUMULATION_RANDOMIZE)
+ *  Produces:  background.txt (all genes with a result for this direction),
+ *             accumulation_<direction>_significant.txt (genes with CCT FDR below params.accumulation_fdr),
+ *             fcs_stats.tsv (gene, score_accumulation = -log10 of the CCT p, accum_cct_p, fdr_q, flag_gate_sig)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Gene lists and CCT table ─────────────────────────────────────────────────
 
 process ACCUMULATION_GENE_LISTS {
     tag "accum_gene_lists|${direction}"
@@ -42,14 +42,14 @@ process ACCUMULATION_GENE_LISTS {
     def fdr_thr = params.accumulation_fdr ?: 0.1
     """
     Rscript -e "
-        # Load the per-group scheme CSVs and combine their p-values with the
-        # Cauchy Combination Test (CCT/ACAT), the same combiner scoring_compute.R
-        # and 10.Accumulation_report.Rmd use on these same inputs.
+        # Load the per-scheme CSVs and combine their p-values with the Cauchy
+        # Combination Test (CCT/ACAT), the same combiner that scoring_compute.R
+        # and 10.Accumulation_report.Rmd apply to these inputs.
         #
-        # CCT is required here rather than any combiner that assumes independence:
-        # one physical position can be a CAAS under several nested grouping
-        # schemes, so the per-scheme counts — and therefore their p-values — are
-        # positively correlated. CCT's Cauchy tail is heavy enough that its null
+        # CCT is used instead of a combiner that assumes independence: one
+        # physical position can be a CAAS under several nested grouping schemes,
+        # so the per-scheme counts, and therefore their p-values, are positively
+        # correlated. CCT's Cauchy tail is heavy enough that its null
         # holds under arbitrary dependence between the combined p-values, whereas
         # an independence-based combiner inflates the type-I rate several-fold in
         # this regime.
@@ -75,7 +75,7 @@ process ACCUMULATION_GENE_LISTS {
         if (length(all_dfs) == 0)
             stop('No per-group aggregated results CSV files found for direction ${direction}')
 
-        # Merge into wide format
+        # Merge into wide format (one row per gene, one p-value and count column per scheme)
         df_wide <- Reduce(
             function(a, b) merge(a, b, by = 'gene', all = TRUE),
             lapply(names(all_dfs), function(s)
@@ -101,7 +101,7 @@ process ACCUMULATION_GENE_LISTS {
         })
 
         # BH FDR only on genes with at least one observed CAAS (ActualCount > 0).
-        # Genes with ActualCount=0 have p=1 by construction, not by test — they
+        # Genes with ActualCount = 0 have p = 1 by construction, not by test: they
         # must not enter the FDR denominator or be reported as significant.
         tested  <- !is.na(act_total) & act_total > 0
         fdr_q   <- rep(NA_real_, length(cct_p))

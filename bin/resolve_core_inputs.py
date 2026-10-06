@@ -1,38 +1,38 @@
 #!/usr/bin/env python3
+# resolve_core_inputs.py — Resolve tax_id and gene_ensembl_file before Nextflow starts, generating the blank ones.
+# PhyloPhere | bin/
+
 """
-resolve_core_inputs.py  —  Resolve tax_id / gene_ensembl_file before invoking
-Nextflow, auto-generating whichever is left blank.
+ResolveCoreInputs: generates the tax_id table (generate_taxid_map.py) and the gene Ensembl table
+(generate_ensembl_mapping.py) that the user left blank, and prints the paths for the caller.
 
-Why this runs outside main.nf: Nextflow (25.x) enforces single-assignment on
-each params key — a params.tax_id = ... inside workflow{} that runs after
-conf/common.config's own params.tax_id = "" default is silently
-ignored ("`params.tax_id` is defined multiple times -- Assignments following
-the first are ignored"), confirmed empirically, not assumed. So auto-
-generation can't happen invisibly inside the pipeline for the ~15 places
-that read params.tax_id/params.gene_ensembl_file directly — it has to
-resolve to a real value BEFORE it reaches the `--tax_id`/`--gene_ensembl_file`
-CLI flags. This script is that step; the GUI's generated run scripts call it
-automatically, and a manual CLI run should too (see below).
+Why it runs outside main.nf: Nextflow keeps the first assignment of a params key and ignores
+later ones, so a params.tax_id set inside the workflow after conf/common.config has assigned its
+default would have no effect on the processes that read it. The value must exist before it
+reaches the --tax_id / --gene_ensembl_file flags.
 
-Usage
------
+Called by:  the generated run script (gui/generation/templates/run_single.sh.j2), before nextflow;
+            a manual run should do the same (see Usage)
+Inputs:     --outdir              results directory; files go to <outdir>/core_inputs/
+            --tree                species tree, for tax_id
+            --alignment           alignment directory (gene = file name without extension), for gene_ensembl_file
+            --tax-id, --gene-ensembl-file   values already given; they are returned unchanged
+            --auto-generate-ensembl         required to generate gene_ensembl_file; also --ensembl-dataset, --ref-species
+Outputs:    stdout, shell-sourceable:  TAX_ID=<path or empty>  and  GENE_ENSEMBL_FILE=<path or empty>
+            files: tax_id_generated.tsv, tax_id_unresolved.tsv, gene_list.txt,
+            gene_ensembl_generated.tsv, gene_ensembl_unresolved.txt
+
+A failed generation (missing ete3 or requests, network outage, no exact match) leaves its
+line empty instead of aborting; the pipeline's own checks of required files then report it as
+for a blank flag.
+
+Usage:
     resolve_core_inputs.py --outdir <outdir> \
-        [--tree <tree.nwk>] [--alignment <alignment_dir>] \
+        [--tree <tree.nwk>] [--alignment <alignment_dir>] [--auto-generate-ensembl] \
         [--tax-id <existing_tax_id_path>] [--gene-ensembl-file <existing_path>]
 
-Prints two lines to stdout, shell-sourceable:
-    TAX_ID=<path or empty>
-    GENE_ENSEMBL_FILE=<path or empty>
-
-Example (manual CLI use)
--------------------------
     eval "$(python3 bin/resolve_core_inputs.py --outdir out --tree tree.nwk --alignment align/)"
     nextflow main.nf ... --tax_id "$TAX_ID" --gene_ensembl_file "$GENE_ENSEMBL_FILE"
-
-A generation failure (missing ete3/requests, network outage, no exact
-matches) leaves the corresponding line empty rather than aborting — the
-pipeline's own required-file checks then report it the same as if the user
-had left the flag blank.
 """
 
 import argparse
@@ -44,6 +44,7 @@ BIN_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def resolve_tax_id(outdir: str, tree: str) -> str:
+    """Run generate_taxid_map.py on the tree; returns the table path, or "" on failure."""
     core_dir = os.path.join(outdir, "core_inputs")
     os.makedirs(core_dir, exist_ok=True)
     output = os.path.join(core_dir, "tax_id_generated.tsv")
@@ -63,6 +64,7 @@ def resolve_tax_id(outdir: str, tree: str) -> str:
 
 def resolve_gene_ensembl_file(outdir: str, alignment_dir: str,
                               dataset: str = "", ref_species: str = "") -> str:
+    """Run generate_ensembl_mapping.py on the genes of the alignment directory; returns the table path, or "" on failure."""
     core_dir = os.path.join(outdir, "core_inputs")
     os.makedirs(core_dir, exist_ok=True)
     genes = sorted({

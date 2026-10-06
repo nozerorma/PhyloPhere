@@ -1,42 +1,23 @@
 #!/usr/bin/env nextflow
+// rer_bin.nf — RERconverge correlation of gene RERs with a binary (0/1) trait.
+// PhyloPhere | subworkflows/RERCONVERGE/
 
 /*
-#
-#
-#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
-#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
-#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
-#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#
-# PHYLOPHERE: A Nextflow pipeline including a complete set
-# of phylogenetic comparative tools and analyses for Phenome-Genome studies
-#
-# Github: https://github.com/nozerorma/caastools/nf-phylophere
-#
-# Author:         Miguel Ramon (miguel.ramon@upf.edu)
-#
-# File: rer_bin.nf
-#
-*/
-
-/*
- * ────────────────────────────────────────────────────────────────────────────
- * RER_BIN — binary RERconverge correlation
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  RER_BIN: runs binary_rer.R, which builds the foreground paths of the 0/1 trait on
+ *  the master tree and correlates them with the RER matrix
+ *  (correlateWithBinaryPhenotype), with an optional permulation null
+ *  (rer_perm_batches > 0). A failed task is ignored.
  *
- * Inputs
- * ──────
- *   trait_file      : RData with trait_vector (0/1 named numeric vector)
- *   rer_master_tree : geneTrees RDS from RER_TREES
- *   rer_matrix      : RER matrix RDS from RER_MATRIX
- *
- * Outputs
- * ───────
- *   fg_paths        : foreground paths RDS  (char2path equivalent)
- *   binary_output   : binary correlation results RDS
- * ────────────────────────────────────────────────────────────────────────────
+ *  Consumes:  polished trait RData (trait_vector, 0/1), master gene-trees RDS (RER_TREES),
+ *             RER matrix RDS (RER_MATRIX)
+ *  Produces:  <trait>.fg_paths.output, <trait>.binary.output,
+ *             <trait>.binary.perms.rds (only with permutations)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Binary correlation ─────────────────────────────────────────────────────────
 
 process RER_BIN {
     tag "$rer_matrix"

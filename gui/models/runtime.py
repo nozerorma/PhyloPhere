@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-# runtime.py — Runtime tab config: local/slurm execution, phenotype catalogue, Tower.
+# runtime.py — Runtime tab config: execution target, phenotype catalogue, dataset paths, Tower.
 # PhyloPhere | gui/models/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Covers -resume/toy-mode toggles, local-vs-slurm execution, the SBATCH-array
-phenotype catalogue (mirrors SBATCH_run_phenotypes_primates.sh's CASE block), and
-the dataset paths shared across every phenotype in a batch ("COMMON THINGS" in the
-reference script's own comment).
+Runtime: -resume and toy-mode toggles, local or slurm execution, the phenotype
+catalogue (one row per task of the SBATCH array, rendered as the `case
+$SLURM_ARRAY_TASK_ID` block of sbatch_array.sh.j2), and the dataset paths shared by
+every phenotype of a batch (the "COMMON THINGS" block of that template).
 
-NOTE: the Seqera/Tower access token is intentionally NOT a field here. It must never
-be persisted into the human-diffable JSON project file. The GUI widget collects it as
-transient state and hands it straight to gui/secrets_io.py, which writes it to the
-repo's existing gitignored token.tk (see conf/common.config's tower{} block, which
-already reads that file automatically) — see implementation plan §4.
+The Seqera/Tower access token is deliberately not a field: it must never reach the
+human-readable JSON project file. The widget keeps it as transient state and passes it
+to gui/secrets_io.py, which writes it to the gitignored token.tk that the tower{} block
+of conf/common.config reads.
+
+Imported by: gui/models/project.py, gui/widgets/phenotype_table/model.py,
+gui/widgets/tabs/runtime_tab.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -36,10 +38,9 @@ class PhenotypeRow:
     # Phylogenetic Shift Score (PSS) pair-selection path. The fg/bg partition itself is
     # produced by 4.Independent_contrasts.Rmd, not by a quantile cut.
 
-    # Per-row Scoring fallback overrides (scoring_rer_input, scoring_rer_perms_input,
-    # scoring_fade_summary_top/bottom) moved to the Precomputed Run tab (see
-    # gui/models/precomputed.py) — auto-derived per phenotype as base_path/<trait>/...
-    # instead of hand-entered once per row.
+    # The precomputed inputs of Scoring (scoring_rer_input, scoring_rer_perms_input,
+    # scoring_fade_summary_top/bottom) are not row fields: gui/models/precomputed.py
+    # derives them per phenotype as base_path/<trait>/...
 
 
 @dataclass(kw_only=True)
@@ -48,19 +49,19 @@ class RuntimeConfig:
     resume: bool = True  # -resume
     toy_mode: bool = False  # --toy_mode
     toy_n: str = "1000"  # --toy_n
-    toy_perms: str = "100"  # permulation cycles of a toy run (CAAS_FULL_PERMS; MAX_TRIES follows it)
+    toy_perms: str = "100"  # permulation cycles of a toy run (CAAS_FULL_PERMS; the generated script sets MAX_TRIES from it)
 
     # --- Execution target ---
     runtime_type: str = "slurm"  # "local" | "slurm"
 
-    # Overrides the "phenotypes"/"phenotype" token in generated script filenames
+    # Replaces the "phenotypes"/"phenotype" token in the names of the generated scripts
     # (run_phenotypes_local.sh, SBATCH_run_phenotypes.sh, run_phenotype_single.sh,
-    # ..._exploratory.sh/..._complete.sh) — blank keeps the exact default names.
+    # ..._exploratory.sh/..._complete.sh). Blank keeps the default names.
     script_base_name: str = ""
 
     # --- Directories ---
-    work_dir: str = ""  # WORK_BASE — base for per-trait Nextflow work dirs
-    results_dir: str = ""  # CAAS_OUTBASE — base for per-trait results
+    work_dir: str = ""  # WORK_BASE: base for per-trait Nextflow work dirs
+    results_dir: str = ""  # CAAS_OUTBASE: base for per-trait results
 
     # --- Seqera Cloud / Tower ---
     use_tower: bool = True  # -with-tower

@@ -1,8 +1,21 @@
 #!/usr/bin/env nextflow
+// ta_phenotype_exploration.nf — Phylogenetic exploration of the phenotype (2.Phenotype_exploration.Rmd).
+// PhyloPhere | subworkflows/TRAIT_ANALYSIS/
 
 /*
-#  Trait analysis: phenotype exploration (Rmarkdown)
-*/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  PHENOTYPE_EXPLORATION: renders 2.Phenotype_exploration.Rmd, which places the
+ *  trait on the species tree (extreme-species plots, ancestral-state trees, fan
+ *  trees with annotation rings). It runs on top of the DATASET_EXPLORATION
+ *  results and extends the same data_exploration/ directory.
+ *
+ *  Consumes:  trait file, species tree, results directory of DATASET_EXPLORATION
+ *  Produces:  data_exploration/ (figures and tables) and the HTML report
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+
+
+// ── Phenotype exploration report ─────────────────────────────────────────────
 
 process PHENOTYPE_EXPLORATION {
     tag "phenotype_exploration"
@@ -39,6 +52,7 @@ process PHENOTYPE_EXPLORATION {
     def trait_type = params.trait_type ?: ''
     def max_contrasts = params.max_contrasts ?: '0'
 
+    // The two branches are identical except that the container one runs Rscript through the image entrypoint.
     if (params.use_singularity | params.use_apptainer) {
         """
         cp -R ${local_dir}/* .

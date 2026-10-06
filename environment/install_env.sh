@@ -1,9 +1,26 @@
 #!/usr/bin/env bash
+# install_env.sh — Create the phylophere conda environment and install the R packages that conda does not provide.
+# PhyloPhere | environment/
+#
+# Called by:  the user, once, from the repository root (./environment/install_env.sh)
+# Inputs:     $1  environment file (default: phylophere.yml in the current directory; the repository ships environment/phylophere.yml)
+# Outputs:    the conda environment "phylophere": created from the file, or updated when it exists
+#
+# The solver is the first of micromamba, mamba and conda found on the PATH (micromamba is also
+# searched at its usual install locations). The R packages installed afterwards are DT, the
+# Bioconductor dependencies of RERconverge, and RERconverge itself, taken from a pinned commit
+# and compiled with the C++17 standard (see the comments in the R block).
+
 set -euo pipefail
+
+# ── Settings ──────────────────────────────────────────────────────────────────
 
 ENV_YML="${1:-phylophere.yml}"
 ENV_NAME="phylophere"
 
+# ── Solver selection ──────────────────────────────────────────────────────────
+
+# Prints the path of a micromamba executable, or nothing.
 find_micromamba() {
   if command -v micromamba >/dev/null 2>&1; then
     command -v micromamba
@@ -18,6 +35,7 @@ find_micromamba() {
   fi
 }
 
+# Prints the solver to use (micromamba path, mamba, conda) or "none".
 choose_solver() {
   local mm
   mm="$(find_micromamba)"
@@ -31,6 +49,8 @@ choose_solver() {
     echo "none"
   fi
 }
+
+# ── Conda environment ─────────────────────────────────────────────────────────
 
 SOLVER="$(choose_solver)"
 if [[ "$SOLVER" == "none" ]]; then
@@ -66,6 +86,8 @@ elif [[ "$SOLVER" == "conda" ]]; then
   conda env update -n "$ENV_NAME" -f "$ENV_YML"
   RUN=(conda run -n "$ENV_NAME")
 fi
+
+# ── R packages ────────────────────────────────────────────────────────────────
 
 echo "Installing R packages (CRAN + Bioconductor + GitHub) into: $ENV_NAME"
 

@@ -1,7 +1,14 @@
-# ----------------------------------------
-# Directory Definitions
-# ----------------------------------------
+# directories.R — Output directory paths of the trait-analysis reports.
+# PhyloPhere | subworkflows/TRAIT_ANALYSIS/local/src/
+# =============================================================================
+# Sourced by: commons.R (itself sourced by the trait-analysis Rmd reports)
+#
+# Requires `workingDir` and `resultsDir`, which commons.R defines before sourcing
+# this file. Only the paths are defined here; each report creates the directories
+# it writes to with createDir() (io_utils.R).
+# =============================================================================
 
+# Fallback logger, used only when commons.R has not defined debug_log().
 if (!exists("debug_log", inherits = TRUE)) {
   debug_log <- function(...) {
     msg <- sprintf(...)
@@ -14,14 +21,8 @@ print(paste("Results Directory:", resultsDir))
 debug_log("Working Directory: %s", workingDir)
 debug_log("Results Directory: %s", resultsDir)
 
-# ----------------------------------------
-# Common Subdirectory Paths
-# ----------------------------------------
+# ── Data pruning and exploration ──────────────────────────────────────────────
 
-# Trait and CI directories
-
-
-# Results subdirectories
 data_pruning_dir <- file.path(resultsDir, "0.Data-pruning")
 data_exploration_dir <- file.path(resultsDir, "1.Data-exploration")
 species_distribution_dir <- file.path(data_exploration_dir, "1.Species_distribution")
@@ -30,7 +31,8 @@ asr_trees <- file.path(data_exploration_dir, "3.ASR_trees")
 phylo_distribution_dir <- file.path(data_exploration_dir, "4.Phylogenetic_distribution")
 ci_dir <- file.path(data_exploration_dir, "5.CI_overlaps")
 
-# CAAS directories
+# ── Contrast selection (trait files for the CAAS discovery) ───────────────────
+
 caas_dir <- file.path(resultsDir, "2.CT")
 traitfile_dir <- file.path(caas_dir, "1.Traitfiles")
 permulation_traitfile_dir <- file.path(caas_dir, "2.Permulation_traitfiles")

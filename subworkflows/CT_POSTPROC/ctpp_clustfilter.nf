@@ -1,8 +1,25 @@
 #!/usr/bin/env nextflow
+// ctpp_clustfilter.nf — Input preparation, cluster filter and gene filter of CT post-processing.
+// PhyloPhere | subworkflows/CT_POSTPROC/
 
 /*
-#  CT Post-Processing: Cluster filtering (parameter sweep or single filter)
-*/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  CT_POSTPROC filters: prepare the disambiguation table, flag clustered positions for
+ *  one (minlen, maxcaas) pair or for a sweep of pairs, summarize the sweep, remove
+ *  extreme and dubious genes, and clean the background gene list. Called from
+ *  workflows/ct_postproc.nf.
+ *
+ *  Consumes:  disambiguation master table, optional alignments and contrast species lists,
+ *             gene annotation (lengths), global background gene list
+ *  Produces:  postproc_disambiguation_input.tsv, per-pair cluster files
+ *             (*.filtered.minlen*.maxcaas*.tsv), filter_summary.tsv, discarded_summary.tsv,
+ *             filtered_discovery.tsv, removed_genes_summary.tsv, gene_stats.tsv and
+ *             cleaned_background_*.txt, under postproc/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+
+
+// ── Helper functions ─────────────────────────────────────────────────────────
 
 // (minlen, maxcaas) pairs of the exploratory sweep: minlen_values x maxcaas_values, plus the selected pair
 // (filter_minlen, filter_maxcaas) when the grid does not contain it, so the gene filter always has its cluster file.
@@ -27,6 +44,9 @@ def resolveSourceSpDir(json_dir) {
     return selection_dir ? selection_dir.resolve('species_sets') : null
 }
 
+// ── Processes ────────────────────────────────────────────────────────────────
+
+// Normalizes the disambiguation master table (prepare_postproc_input.py).
 process CAAS_PREPARE_POSTPROC_INPUT {
     tag "prepare_postproc_input"
     publishDir "${params.outdir}/postproc/preprocessed", mode: 'copy', overwrite: true
@@ -39,21 +59,17 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     path "removed_patterns_precluster.tsv", emit: removed_patterns
 
     script:
-    // Optional extant-species residue tally: needs the alignment dir + the full
-    // contrast species lists. params.alignment is a global; the species lists are
-    // read from selection's own publish path (same idiom as selection_prep.nf's
-    // candidate_species.tab fallback). All optional -- the script no-ops the
-    // top/bottom_species_residues + n_top/bottom_species columns when absent.
+    // Optional extant-species residue tally: it needs the alignment directory
+    // (params.alignment) and the contrast species lists, which are read from the
+    // species_sets/ directory that the selection step publishes.
     //
-    // Live --fade publishes species_sets/ under THIS run's own outdir (via
-    // SELECTION_PREP -> EXTRACT_EXTREME_SPECIES). The precomputed-FADE path
-    // (--fade_json_dir_top/_bottom, no live --fade) never runs SELECTION_PREP
-    // in this invocation, so species_sets/ only exists under the SOURCE run's
-    // outdir that the JSONs were read from. Derive that source dir the same
-    // way main.nf's resolve_fg_species does for FADE_REPORT_PRECOMP_*
-    // (.../selection/fade/<direction>/json -> .../selection/), falling back to
-    // this run's own dir when neither resolves (script.python side no-ops the
-    // species-tally columns when the files aren't there).
+    // A live --fade run publishes species_sets/ under this run's own outdir (via
+    // SELECTION_PREP -> EXTRACT_EXTREME_SPECIES). With precomputed FADE results
+    // (--fade_json_dir_top / _bottom, no live --fade) the directory exists only under the
+    // outdir of the source run of the JSON files. That directory is derived as
+    // main.nf's resolve_fg_species does (.../selection/fade/<direction>/json ->
+    // .../selection/species_sets), and this run's own directory is the fallback. Without
+    // the files, prepare_postproc_input.py leaves the tally columns empty.
     def own_sp_dir = file("${params.outdir}/selection/species_sets")
     def source_sp_dir = resolveSourceSpDir(params.fade_json_dir_top) ?:
                          resolveSourceSpDir(params.fade_json_dir_bottom)
@@ -77,6 +93,7 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     """
 }
 
+// Flags the clustered positions of one (minlen, maxcaas) pair (filter_caas_clusters-param.py).
 process CT_FILTER {
     tag "${mode}:${minlen}x${maxcaas_int}"
     publishDir(
@@ -105,6 +122,7 @@ process CT_FILTER {
     """
 }
 
+// Counts the discarded positions of every cluster file (summarize_cluster_filters.py).
 process CT_FILTER_SUMMARY {
     tag "filter_summary"
     publishDir "${params.outdir}/postproc/summary_statistics", mode: 'copy', overwrite: true, pattern: "filter_summary.tsv"
@@ -126,6 +144,7 @@ process CT_FILTER_SUMMARY {
     """
 }
 
+// Removes extreme and dubious genes, and the flagged positions when params.remove_caas_clusters is set (filter_caas_genes.py).
 process CAAS_FILTER_GENES {
     tag "gene_filter:${params.gene_filter_mode}"
     label 'CT_FILTER'
@@ -159,6 +178,7 @@ process CAAS_FILTER_GENES {
     """
 }
 
+// Drops the removed genes from the background gene list (cleanup_background.py).
 process CAAS_BACKGROUND_CLEANUP {
     tag "bg_cleanup"
     label 'CT_FILTER'

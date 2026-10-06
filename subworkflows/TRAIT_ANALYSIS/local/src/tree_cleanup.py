@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
+# tree_cleanup.py — Curate a species tree so its tip labels match the alignment species names.
+# PhyloPhere | subworkflows/TRAIT_ANALYSIS/local/src/
+
 """
-tree_cleanup.py  —  Curate a species tree to match alignment species names.
+TreeCleanup: Renames or prunes the tips of a species tree so that every
+remaining tip carries the species name used in the alignment FASTA headers.
 
-Uses NCBI taxonomy IDs as a shared key to translate tree tip labels that
-differ from alignment header names (e.g. taxonomic synonyms / genus renames).
-Tips with no match in the alignment species set are pruned.
+NCBI tax_ids are the shared key: a tip whose name is not among the alignment
+species is renamed to the alignment species that has the same tax_id (taxonomic
+synonyms, genus renames), and pruned when there is none. Without a tax_id map,
+tips are matched by exact name only. Labels are normalized (quotes stripped,
+whitespace to underscores) before comparison. The script exits with an error
+when no tip survives.
 
-Expected taxid file format (TSV or CSV):
-    tax_id  species  [other columns ignored]
-  where both tree tip names AND alignment species names appear under 'species',
-  each paired with their stable NCBI tax_id.
-
-Inputs
-------
-  --tree          Newick species tree
-  --ali-sp-names  Flat file: one alignment species name per line (\\n-separated)
-  --tax-id        TSV/CSV with columns 'tax_id' and 'species'
-  --output        Output newick (curated tree)
-  --report        Output TSV: original_name, curated_name, fate (kept/renamed/pruned)
+Called by:  TREE_CLEANUP Nextflow process (ta_name_curation.nf → tree_cleanup.py)
+Inputs:     --tree          Newick species tree
+            --ali-sp-names  Text file with one alignment species name per line
+            --tax-id        TSV/CSV with columns [tax_id, species] (other columns
+                            ignored); tree-side and alignment-side names both
+                            appear under `species`. The sentinel NO_FILE, or a
+                            missing file, means no map
+            --output        Path for the curated Newick tree
+            --report        Path for the per-tip report TSV
+Outputs:    Curated Newick tree; TSV [original_name, curated_name, fate] with
+            fate in {kept, renamed, pruned} (curated_name is empty for pruned)
 """
 
 import argparse
@@ -30,6 +36,7 @@ import dendropy
 
 
 def normalize_label(label: str) -> str:
+    """Strip whitespace and quotes and turn inner whitespace into underscores."""
     label = (label or "").strip()
     label = label.strip("'\"")
     label = re.sub(r"\s+", "_", label)
@@ -37,6 +44,7 @@ def normalize_label(label: str) -> str:
 
 
 def load_ali_sp_names(path: str) -> set:
+    """Return the set of normalized species names listed in `path`, one per line."""
     names = set()
     with open(path) as fh:
         for line in fh:
@@ -49,14 +57,10 @@ def load_ali_sp_names(path: str) -> set:
 def load_tax_id_map(path: str):
     """Return (name_to_taxid, taxid_to_names) from a TSV/CSV taxid file.
 
-    "NO_FILE" is the repo-wide Nextflow sentinel for an absent optional file
-    (see fcs_enrich.R/scoring_compute.R/scoring_caas_perms.R for the same
-    `path != "NO_FILE" && file.exists(path)` pattern) — tax_id is optional in
-    ta_name_curation.nf's own take (`tax_id_ch = tax_id_param ? ... : NO_FILE`),
-    but this loader never checked for it and crashed with a bare
-    FileNotFoundError whenever a run omitted --tax_id. Without a taxid map,
-    tips are still matched/pruned purely by exact name (see main(), tip in
-    ali_sp), just with no cross-naming-convention translation.
+    "NO_FILE" is the Nextflow sentinel for an absent optional file (the workflows
+    pass it when params.tax_id is unset). The sentinel, an empty path and a
+    missing file all give empty maps, so tips are then matched by exact name only,
+    with no translation between naming conventions.
     """
     if not path or path == "NO_FILE" or not Path(path).exists():
         return {}, {}
@@ -92,7 +96,7 @@ def main():
     ali_sp = load_ali_sp_names(args.ali_sp_names)
     name_to_taxid, taxid_to_names = load_tax_id_map(args.tax_id)
 
-    # Build taxid → alignment species name (for ali species that have a taxid entry)
+    # tax_id → alignment species name (first species wins when several share a tax_id).
     taxid_to_ali: dict[str, str] = {}
     for sp in ali_sp:
         taxid = name_to_taxid.get(sp)

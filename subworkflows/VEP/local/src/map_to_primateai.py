@@ -1,36 +1,40 @@
 #!/usr/bin/python3
-"""Map CAAS protein positions to PrimateAI-3D scores using upstream MAP files.
+# map_to_primateai.py — Map CAAS positions to PrimateAI-3D pathogenicity scores.
+# PhyloPhere | subworkflows/VEP/local/src/
 
-Strategy
---------
-For each CAAS position (Gene + Position):
+"""
+MapToPrimateai: For every CAAS position (Gene, Position), finds the PrimateAI-3D
+missense variants of its hg38 codon that reproduce the ancestral→derived change of
+the CAAS, and writes them with their scores.
 
-1. **MAP file lookup** — read the gene's MAP file from the upstream directory.
-   Match the 0-based CAAS position to `prot_ali_col - 1`.
-   Extract the 1-based protein position (`hg38_aa_pos`) and genomic coordinate (`hg38_nt_coord`).
+Strategy:
+  1. MAP file lookup. The gene's MAP file gives, for the 1-based alignment column
+     `prot_ali_col` (= Position + 1, since Position is 0-based), the protein position
+     `hg38_aa_pos` and the genomic coordinate `hg38_nt_coord`.
+  2. Strand inference. Coordinates that increase down the MAP file mean the plus
+     strand (codon nucleotides C, C+1, C+2); decreasing coordinates mean the minus
+     strand (C, C-1, C-2).
+  3. Database scan. The PrimateAI-3D table (gzip) is streamed once and the variants at
+     any of the three codon nucleotides are kept when `alt_aa` is a derived residue.
 
-2. **Strand inference** — compare adjacent valid codon coordinates in the MAP file.
-   - If coordinates increase: plus strand (+). Nucleotides are C, C+1, C+2.
-   - If coordinates decrease: minus strand (-). Nucleotides are C, C-1, C-2.
+Ancestral filter: the human reference residue of PrimateAI-3D (`ref_aa`) must belong
+to the ancestral set of the CAAS, when that set is known; a variant whose human residue is
+not ancestral does not describe the substitution of the CAAS and is dropped. The human residue is removed
+from the derived set (no missense variant leads to it) unless that would empty the
+set. Only rows of the `US` caap_group are used (rows without a caap_group column
+count as `US`).
 
-3. **PrimateAI Lookup**: stream through the PrimateAI gz database and keep variants at
-   any of the 3 nucleotide positions where the alternative amino acid matches the CAAS pattern.
-
-Directional Pathogenicity Interpretation & Filtering
-----------------------------------------------------
-The script enforces a directional constraint to align PrimateAI lookups with evolutionary medicine context:
-  `if anc_aas and ref_aa not in anc_aas: continue`
-- **TOP Direction (Ancestral Human / Derived in Top)**: We look at the pathogenicity of mutating the ancestral human allele into the derived, "high-cancer" susceptibility allele.
-- **BOTTOM Direction (Ancestral Human / Derived in Bottom)**: We look at the tolerance or pathogenicity of mutating the ancestral human allele (associated with the "high-cancer" susceptibility side) into the derived, "low-cancer" resistance allele.
-- **Filtering**: If the human reference allele is not in the ancestral set, the position is filtered out because the human reference background does not reflect the ancestral state under the scheme. Similarly, if the derived state matches the human reference, it is skipped as no missense variant can represent a mutation to it.
-
-Usage
------
-    map_to_primateai.py <caas_file> <vep_map_dir> <primateai_gz> <output_tsv> [position_scores_tsv]
-
-`position_scores_tsv` (SCORING output) is optional and, since scoring_v2 core v3
-(V3-4), IGNORED: the old `convergence_schemes`-empty skip-gate was retired with
-that column. The positional arg is still accepted for backward compatibility.
+Called by:  PRIMATEAI_MAP Nextflow process (primateai.nf → map_to_primateai.py)
+Inputs:     caas_file       position_scores.tsv, with Gene, Position and, when present, tag,
+                            caas, side, amino_encoded, caap_group and the residue tally
+                            columns (top_species_residues / bottom_species_residues)
+            vep_map_dir     directory of the per-gene MAP files
+            primateai_gz    PrimateAI-3D hg38 table (gzip TSV, with chr, pos, ref_aa, alt_aa)
+            output_tsv      path of the output table
+            [position_scores_tsv]  optional fifth argument, accepted and ignored
+Outputs:    output_tsv      Gene, Position, hg38_ref_aa, caas_alt_aas, caas_change,
+                            caap_group, scheme_weight, then every PrimateAI-3D column;
+                            header only when no CAAS row can be mapped
 """
 
 import sys
@@ -47,17 +51,16 @@ from vep_common import (  # noqa: E402
     load_map_file,
 )
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
+# Weight written for each caap_group (only US is processed).
 SCHEME_WEIGHTS = {
     "US":  1.0,
 }
 
 
 def write_header_only(primateai_gz, output_tsv):
-    """Emit a header-only output file and exit successfully."""
+    """Write the output header (and no rows), report it on stderr and exit with status 0."""
     with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
         pai_header = gz_in.readline().rstrip('\n')
         out.write(
@@ -70,9 +73,8 @@ def write_header_only(primateai_gz, output_tsv):
           file=sys.stderr)
     sys.exit(0)
 
-# ---------------------------------------------------------------------------
-# Argument parsing
-# ---------------------------------------------------------------------------
+
+# ── Arguments ─────────────────────────────────────────────────────────────────
 
 if len(sys.argv) not in (5, 6):
     sys.exit(
@@ -84,9 +86,9 @@ caas_file, vep_map_dir, primateai_gz, output_tsv = sys.argv[1:5]
 position_scores_tsv = sys.argv[5] if len(sys.argv) == 6 else None
 skip_positions = load_convergence_skip(position_scores_tsv)
 
-# ---------------------------------------------------------------------------
-# Step 1: Load CAAS file → group targets by (Gene, Position)
-# ---------------------------------------------------------------------------
+
+# ── Step 1: CAAS rows grouped by (Gene, Position) ─────────────────────────────
+
 print("Loading CAAS file ...", file=sys.stderr)
 
 caas_targets = {}  # (Gene, Position) -> list of tag dicts
@@ -131,7 +133,7 @@ with open(caas_file) as fh:
             continue
 
         if skip_positions is not None and (gene, position) in skip_positions:
-            continue  # fractional FOP rule: derived residues genuinely disagree
+            continue  # position excluded by load_convergence_skip()
 
         tag = fields[tag_col] if tag_col is not None else f"{gene}_{position}"
         caas_pat = fields[caas_col] if caas_col is not None else ''
@@ -167,13 +169,13 @@ print(f"  {len(caas_targets)} unique (Gene, Position) targets loaded.", file=sys
 if not caas_targets:
     write_header_only(primateai_gz, output_tsv)
 
-# ---------------------------------------------------------------------------
-# Step 2: Load MAP files and build genomic position lookup
-# ---------------------------------------------------------------------------
+
+# ── Step 2: genomic position lookup from the MAP files ────────────────────────
+
 print("Loading MAP files and building genomic lookup ...", file=sys.stderr)
 
 pos_lookup = {}  # (chrom, pos) -> list of (gene, caas_pos, hg38_aa_pos, tag_entries)
-loaded_maps = {}  # gene -> pos_map
+loaded_maps = {}  # gene -> (pos_map, strand)
 
 for (gene, caas_pos) in caas_targets:
     if gene not in loaded_maps:
@@ -185,15 +187,14 @@ for (gene, caas_pos) in caas_targets:
     if not pos_map:
         continue
 
-    # prot_ali_col in MAP file is 1-based alignment column.
-    # CAAS Position is 0-based.
+    # prot_ali_col of the MAP file is a 1-based alignment column; Position is 0-based.
     prot_ali_idx = caas_pos + 1
     if prot_ali_idx not in pos_map:
         continue
 
     hg38_aa_pos, chrom, coord = pos_map[prot_ali_idx]
 
-    # Generate the 3 nucleotide coordinates for this codon
+    # The three nucleotides of the codon, in the direction of the strand.
     if strand == '+':
         codon_positions = [coord, coord + 1, coord + 2]
     else:
@@ -212,9 +213,9 @@ print(f"  {len(pos_lookup)} genomic positions to scan.", file=sys.stderr)
 if not pos_lookup:
     write_header_only(primateai_gz, output_tsv)
 
-# ---------------------------------------------------------------------------
-# Step 3: Stream PrimateAI-3D and emit matching rows
-# ---------------------------------------------------------------------------
+
+# ── Step 3: stream PrimateAI-3D and write the matching rows ───────────────────
+
 print("Streaming PrimateAI-3D database ...", file=sys.stderr)
 
 matched = 0
@@ -232,7 +233,6 @@ with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
     except ValueError as exc:
         sys.exit(f"Missing expected column in PrimateAI header: {exc}")
 
-    # Output header
     out.write(
         "Gene\tPosition\t"
         "hg38_ref_aa\tcaas_alt_aas\tcaas_change\t"
@@ -276,12 +276,12 @@ with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
 
                 alt_aas = der_aas - {ref_aa}
                 if not alt_aas:
-                    alt_aas = der_aas   # safety: keep all if ref subtraction empties the set
+                    alt_aas = der_aas   # keep every derived residue when removing the human one empties the set
 
                 if alt_aa not in alt_aas:
                     continue
 
-                # Enforce ancestral constraints if ancestral state is known
+                # The human residue must be ancestral, when the ancestral set is known.
                 if anc_aas and ref_aa not in anc_aas:
                     continue
 

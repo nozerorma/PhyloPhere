@@ -1,36 +1,40 @@
 #!/usr/bin/env nextflow
+// ensembl_vep.nf — Annotate CAAS amino-acid changes with Ensembl VEP consequences.
+// PhyloPhere | subworkflows/VEP/
 
 /*
- * ENSEMBL_VEP_ANNOTATE
- * ────────────────────
- * Annotates CAAS ancestral->derived amino-acid changes with Ensembl VEP's own
- * consequence prediction — independent of PrimateAI-3D/COSMIC, so consequence
- * annotation is available even when neither pathogenicity database is
- * supplied. Not to be confused with this pipeline's own --vep toggle (which
- * gates this whole workflow); "Ensembl VEP" here means the official
- * variant_effect_predictor CLI tool.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  ENSEMBL_VEP_ANNOTATE: annotates the ancestral→derived amino-acid change of every
+ *  CAAS position with the consequence prediction of the Ensembl variant_effect_predictor
+ *  (the `vep` command line tool, not this pipeline's --vep toggle). It does not
+ *  depend on PrimateAI-3D or COSMIC.
  *
- * Unlike PRIMATEAI_MAP/COSMIC_MAP, the ancestral (reference) amino acid comes
- * from this pipeline's own ASR descriptor (build_vep_hgvs.py), not from an
- * external pathogenicity database's bundled reference annotation — so this
- * doesn't introduce a new external reference-proteome dependency.
+ *  Steps: build_vep_hgvs.py writes one protein-level HGVS identifier per change
+ *  (the ancestral residue comes from the CAAS residue tallies, so no reference
+ *  proteome is needed), `vep --offline` annotates them, and join_vep_output.py
+ *  attaches the result to Gene, Position and caap_group.
  *
- * Uses a local VEP cache (--vep_cache_dir): VEP's offline per-species/assembly
- * cache is multi-GB, the same "cache large, don't commit" pattern used for
- * STRING/eggNOG/Pfam-A elsewhere in this pipeline. Left empty/unset, it
- * defaults to a persistent, species/assembly-scoped location under
- * ~/.cache/phylophere/vep/ and is populated automatically on first use (fetch-
- * first, cache-once — mirrors ensure_string_cache() in 13.AMI_analysis.Rmd)
- * via:
- *   vep_install -a cf -s <species> -y <assembly> -c <vep_cache_dir> --NO_HTSLIB
- * Point --vep_cache_dir at an already-populated cache to reuse/share one
- * instead.
+ *  Offline cache: the VEP cache of a species and assembly is several GB, so it
+ *  lives in vep_cache_dir rather than in the work directory. An empty cache
+ *  directory is populated once, on first use, with
+ *    vep_install -a cf -s <species> -y <assembly> -c <vep_cache_dir> --NO_HTSLIB
+ *  Point --vep_cache_dir at a populated cache to reuse or share one. When it is
+ *  unset, the VEP workflow resolves it to ~/.cache/phylophere/vep/<species>_<assembly>.
+ *
+ *  Consumes:  position_scores.tsv (SCORING), directory of per-gene MAP files,
+ *             gene_ensembl_file (gene, human_protein_id), VEP cache directory
+ *  Produces:  vep/ensembl_vep_mapped.tsv (header only when the cache cannot be
+ *             installed or no HGVS identifier resolves)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Ensembl VEP annotation ───────────────────────────────────────────────────
 
 process ENSEMBL_VEP_ANNOTATE {
     tag "ensembl_vep"
     label 'process_medium'
-    errorStrategy 'ignore'
+    errorStrategy 'ignore'   // a failed annotation never stops the run
 
     publishDir path: "${params.outdir}/vep",
                mode: 'copy', overwrite: true,

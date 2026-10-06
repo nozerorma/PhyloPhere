@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Normalize ct_disambiguation output for CT post-processing."""
+# prepare_postproc_input.py — Normalize the ct_disambiguation master table for CT post-processing.
+# PhyloPhere | subworkflows/CT_POSTPROC/local/src/
+
+"""
+Input preparation of CT post-processing: standardizes the key columns of the disambiguation
+master table and, when the alignments and contrast species are given, adds the extant-species
+residue tally (residue_descriptors.py).
+
+Called by:  CAAS_PREPARE_POSTPROC_INPUT process (ctpp_clustfilter.nf)
+Inputs:     --input  disambiguation master CSV/TSV (the separator is detected from the header)
+            --alignment, --alignment-format, --fg-species, --bg-species  optional, for the tally
+Outputs:    --output  normalized TSV (Gene, Position, caap_group, ...)
+            --removed-output  TSV of precluster removals (header only: no row is removed)
+"""
 
 import argparse
 import os
@@ -11,10 +24,9 @@ from residue_descriptors import add_species_tally
 
 
 def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
-    # Structural-key normalization only (gene/msa_pos → Gene/Position, used pervasively
-    # downstream). Semantic concept columns (caap_group, convergence_type, pvalue, caas,
-    # amino_encoded) are kept in disambiguation's canonical lowercase form
-    # end-to-end -- no re-capitalization.
+    # Only the structural keys are renamed (gene/msa_pos → Gene/Position, the names the
+    # downstream steps read). The other columns (caap_group, convergence_type, pvalue, caas,
+    # amino_encoded) keep their lowercase names.
     rename_map = {}
     if "gene" in df.columns:
         rename_map["gene"] = "Gene"
@@ -44,9 +56,9 @@ def main() -> int:
         default="removed_patterns_precluster.tsv",
         help="Precluster removal output TSV",
     )
-    # Optional: extant-species residue tally (top/bottom_species_residues,
-    # n_top/bottom_species). Needs the alignment dir + the full contrast species
-    # lists. All four are optional -- absent -> the columns stay empty.
+    # Optional extant-species residue tally (top/bottom_species_residues, n_top/bottom_species).
+    # It needs the alignment directory and both contrast species lists; without them the
+    # columns stay empty.
     parser.add_argument("--alignment", default=None,
                         help="Alignment directory (flat, gene = basename up to first '.')")
     parser.add_argument("--alignment-format", default="fasta",
@@ -57,12 +69,12 @@ def main() -> int:
                         help="bottom_species.txt (background contrast species, one per line)")
     args = parser.parse_args()
 
-    # keep_default_na=False + na_values=[""]: the disambiguation master has
-    # categorical amino-acid columns (caas, amino_encoded, mrca_*_aa) that can
-    # equal NA-sentinel strings; only an empty cell means missing here.
+    # keep_default_na=False + na_values=[""]: the disambiguation master has categorical
+    # amino-acid columns (caas, amino_encoded, mrca_*_aa) that can equal NA-sentinel
+    # strings; only an empty cell is missing here.
     # The C engine with float_precision="round_trip" keeps every bit of the float columns
     # (asr_path_score feeds a gene score that compares values exactly); the python engine
-    # that autodetects the separator does not. The separator is read off the header line.
+    # that autodetects the separator does not. The separator is read from the header line.
     with open(args.input, newline="") as fh:
         header = fh.readline()
     sep = "\t" if header.count("\t") > header.count(",") else ","
@@ -77,8 +89,8 @@ def main() -> int:
     cleaned = df.copy()
     cleaned["Position"] = pd.to_numeric(cleaned["Position"], errors="raise").astype(int)
 
-    # Extant-species residue tally (no-op when the alignment / species lists are
-    # not supplied -- e.g. standalone --disambiguation_input runs).
+    # Extant-species residue tally: a no-op when the alignment or the species lists are not
+    # supplied (e.g. a standalone --disambiguation_input run).
     def _opt(p):
         return p if p and os.path.exists(p) else None
     cleaned = add_species_tally(

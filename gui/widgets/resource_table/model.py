@@ -5,10 +5,15 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Backed directly by ResourcesConfig.process_overrides: list[ProcessResourceOverride]
-— table edits flow straight into the serializable model, same pattern as
-gui/widgets/phenotype_table/model.py. selector_type is edited via a combo
-delegate set up by the widget, not free text (see widget.py).
+ResourceOverrideTableModel: Qt table model over the per-process resource overrides.
+
+Backed directly by ResourcesConfig.process_overrides (a list of
+ProcessResourceOverride): edits write straight into the serializable model, as in
+gui/widgets/phenotype_table/model.py. selector_type accepts only "withName" or
+"withLabel" (the two Nextflow process selectors); the widget edits it through a
+combo-box delegate rather than free text (see widget.py).
+
+Imported by: gui/widgets/resource_table/widget.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -33,7 +38,7 @@ class ResourceOverrideTableModel(QAbstractTableModel):
         super().__init__(parent)
         self._rows = rows  # shared reference into ResourcesConfig.process_overrides
 
-    # ── Required overrides ─────────────────────────────────────────────────
+    # ── Required overrides ────────────────────────────────────────────────────
 
     def rowCount(self, parent=QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._rows)
@@ -77,7 +82,7 @@ class ResourceOverrideTableModel(QAbstractTableModel):
             return Qt.ItemFlag.NoItemFlags
         return Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable
 
-    # ── Row add/remove/replace ──────────────────────────────────────────────
+    # ── Row add/remove/replace ────────────────────────────────────────────────
 
     def insertRows(self, row: int, count: int, parent=QModelIndex()) -> bool:
         self.beginInsertRows(parent, row, row + count - 1)
@@ -95,7 +100,7 @@ class ResourceOverrideTableModel(QAbstractTableModel):
         return True
 
     def replace_all(self, new_rows: list[ProcessResourceOverride]) -> None:
-        """Wholesale swap used by the load-defaults button."""
+        """Replace every row at once (used by the load-defaults button)."""
         self.beginResetModel()
         self._rows[:] = new_rows
         self.endResetModel()

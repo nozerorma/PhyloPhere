@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
-"""Rebuild gene_cycle_scores.tsv from an existing perm_pos_detail.tsv.gz.
+# reaggregate_perm_scores.py — Pass B of the permulation null: gene x cycle scores from the perm_pos_detail shards.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/
 
-Why this exists
----------------
-The gene-level and position-level null statistics must be computed with exactly
-the same formula as the observed side (scoring_compute.R), or the FCS p.perm in
-fcs_enrich.R compares two different quantities and silently goes wrong. So any
-change to the scoring formula obliges a rebuild of caas_perms.rds.
+"""
+CAAS_CORE_MERGE: Scores the permulation null (pass B) from the per-gene perm_pos_detail shards, with no ASR replay.
 
-Rebuilding it from scratch means re-running the ASR replay (CAAS_CORE_BATCHED), whose cost
-is the ASR replay across every gene x labeling -- hours. But perm_pos_detail/
-(one gz shard per gene; a legacy run may instead have a single concatenated
-perm_pos_detail.tsv.gz) already holds every (Gene, cycle, Position, caap_group,
-asr_path_score, n_detected, side) row the aggregation needs, so re-scoring
-needs no ASR at all (see caas_permulation.nf, which publishes the detail
-shards for exactly this). This script does that re-scoring in minutes.
+Why it exists
+-------------
+The gene-level and position-level null statistics must be computed with exactly the same formula as
+the observed side (scoring_compute.R), or the FCS p.perm of fcs_enrich.R compares two different
+quantities. The scoring pass is therefore the aggregation of gene_wrapper.py (_finalize_perm_scores),
+called here and not reimplemented: the gene score is F(max)^n over a pool of heavily tied values, so a
+difference of 1e-16 in how the per-position sum is accumulated can flip a tie boundary, and the ^n then
+amplifies it.
 
-Pipe the output back through scoring_caas_perms.R to regenerate caas_perms.rds:
+The detail is the output of pass A (disambiguation_perms_main.py --detail-only): one gz shard per gene in
+perm_pos_detail/ (or a single concatenated perm_pos_detail.tsv.gz), holding every (Gene, cycle, Position,
+caap_group, asr_path_score, n_detected, clust, side) row that pass B needs. Pass B takes minutes, whereas the
+ASR replay that produces the detail takes hours. It can also be run alone on the detail of an earlier run to
+rebuild its null tables, then followed by scoring_caas_perms.R for caas_perms.rds:
 
     python3 reaggregate_perm_scores.py \\
         --detail  <run>/caas_permulation/perm_pos_detail \\
@@ -25,20 +27,24 @@ Pipe the output back through scoring_caas_perms.R to regenerate caas_perms.rds:
         --gene-cycle-scores <run>/caas_permulation/gene_cycle_scores.tsv \\
         --output            <run>/caas_permulation/caas_perms.rds
 
-IMPORTANT: this deliberately calls gene_wrapper's own _finalize_perm_scores rather than reimplementing the aggregation. The gene
-score is F(max)^n over a pool of heavily tied values, so a difference of 1e-16 in
-how the per-position sum is accumulated can flip a tie boundary, and the ^n then
-amplifies it -- a pandas reimplementation was measured drifting up to 5.9e-3 from
-the streaming one. Same code path, or the null stops matching the observed side.
+Run from the CT_DISAMBIGUATION/local directory (the process copies it to the work directory first).
 
-Run from the CT_DISAMBIGUATION/local directory (as the Nextflow process does).
+Called by:  CAAS_CORE_MERGE (subworkflows/CT/caas_permulation.nf) → reaggregate_perm_scores.py
+Inputs:     --detail  perm_pos_detail/ shard directory or a concatenated perm_pos_detail.tsv.gz
+            --cycles-from  optional labelings file (resample_perms.tab) that fixes the cycle roster N
+            --gene-lengths, --gene-filter-mode  optional dubious/extreme gene removal
+Outputs:    <output-dir>/gene_cycle_scores.tsv, perm_pos_cycle_caas.tsv.gz, perm_pos_quantiles.tsv,
+            perm_pos_sample.tsv; cycle_roster.txt with --cycles-from; removed_units.tsv with gene removal
 """
+
+# ── Standard library ──────────────────────────────────────────────────────────
 import argparse
 import gzip
 import logging
 import sys
 from pathlib import Path
 
+# ── Package-internal ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src.convergence.fop_pool import base_cycle  # noqa: E402
@@ -51,6 +57,9 @@ from src.utils.gene_wrapper import (  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+
+# ── Detail scan and roster ────────────────────────────────────────────────────
 
 
 def scan_detail(detail_path: Path):
@@ -82,7 +91,11 @@ def read_roster(labelings_path: Path, by_labeling: bool = False):
     return sorted(tags)
 
 
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+
 def main() -> int:
+    """Run pass B over the detail and write the null tables; returns the process exit status."""
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--detail", required=True, type=Path,
@@ -177,9 +190,8 @@ def main() -> int:
         remove_clusters=not args.keep_clusters,
     )
     logger.info("[reaggregate] wrote %s", args.output_dir / "gene_cycle_scores.tsv")
-    # V3-4a: _finalize_perm_scores also emits perm_pos_cycle_caas.tsv.gz (the
-    # per-cycle CAAS numerator/denominator behind scoring_compute.R's p.emp) --
-    # a rebuild from an existing run's detail shards regenerates it for free.
+    # _finalize_perm_scores also writes perm_pos_cycle_caas.tsv.gz: the per-cycle position
+    # CAAS scores behind the position-level p.emp of scoring_compute.R.
     logger.info("[reaggregate] wrote %s", args.output_dir / "perm_pos_cycle_caas.tsv.gz")
     return 0
 

@@ -1,4 +1,40 @@
 #!/usr/bin/env python3
+# build_position_gmt.py — Position-level gene sets (GMT) and characterization tables for POSENRICH.
+# PhyloPhere | subworkflows/ENRICHMENT/local/src/
+
+"""
+BuildPositionGmt: builds the gene sets of alignment positions that posenrich_enrich.py
+tests, plus the position annotation tables of the position report.
+
+A position is identified as Gene:Column, where Column is the protein alignment column of
+the MAP file (status "selected" rows of <GENE>*.map.tsv; the column of CAAS's Position).
+A GMT line is term, description and the member position IDs, tab-separated. Sources:
+Pfam domains and clans, 1 Mbp genomic bins, eggNOG orthogroups (all positions of the
+member genes, and the subsets in UCR core or flank, under positive or purifying selection
+by FUBAR, at COSMIC mutation sites and at PrimateAI-3D pathogenic sites), and custom
+markers. Domains are mapped from ungapped reference residue numbers to columns through
+the MAP files. Genes outside the universe (--cleaned_background) are dropped; when no MAP
+file is available the active genes are the universe, or else the genes of the Ensembl map.
+
+Every input is optional: a missing, dangling or NO_FILE* input is skipped with a warning
+and the GMTs that need it are not written.
+
+Called by:  POSENRICH_BUILD_GMT Nextflow process (posenrich.nf → build_position_gmt.py)
+Inputs:     --gene_ensembl_file, --domain_variability_file, --ucr_positions_file, --fubar_sites_file,
+            --egg_members_file, --egg_annotations_file, --map_dir, --cosmic_db, --pai3d_db,
+            --cleaned_background, --custom_marker_file (a .gz sibling of a path is accepted)
+            --fade_sites_top_file, --fade_sites_bottom_file are accepted but not read
+Outputs:    <output_dir>/*.gmt  pfam_domains, pfam_clans, genomic_locations, orthogroups,
+                ucr_core_orthogroups, ucr_flank_orthogroups, selection_pos_orthogroups,
+                selection_neg_orthogroups, cosmic_orthogroups, pai3d_orthogroups, custom_features
+            characterization_layers.tsv  global position sets in GMT layout (UCR core and flank,
+                FUBAR positive and purifying, FADE top and bottom), tested by overlap and not ranked
+            position_characterization.tsv  Gene, Position, pfam_domain, pfam_clan, ucr_region,
+                position_variability, fubar_selection
+            cosmic_coverage_genes.txt, pai3d_coverage_genes.txt  genes the database could annotate
+"""
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
 import os
 import sys
 import argparse
@@ -8,12 +44,16 @@ import re
 import gzip
 
 
+# ── Input handling ────────────────────────────────────────────────────────────
+
+
 def resolve_path(path):
-    """Return an existing path for `path`, transparently accepting a `.gz`
-    sibling. Returns None if neither the given path nor `<path>.gz` exists.
-    `os.path.exists()` follows symlinks, so a DANGLING symlink (e.g. a Nextflow
-    stage-in whose target only lives on the HPC) resolves to None here — that is
-    exactly the failure mode that used to silently drop whole databases."""
+    """Return an existing path for `path`, accepting a `.gz` sibling.
+
+    Returns None when neither `path` nor `<path>.gz` exists. os.path.exists() follows
+    symlinks, so a dangling symlink (a Nextflow stage-in whose target is not reachable)
+    resolves to None instead of failing later on open.
+    """
     if path is None:
         return None
     if os.path.exists(path):
@@ -31,7 +71,12 @@ def open_maybe_gz(path, mode="rt"):
 
 
 def validate_required_inputs(args):
-    """Resolve inputs, checking optional files and resolving .gz siblings."""
+    """Normalize the optional inputs of args in place.
+
+    A NO_FILE* sentinel or "None" becomes None; a path that does not exist becomes None
+    with a warning; a `.gz` sibling replaces the path. map_dir is cleared with a warning
+    when it is not a directory.
+    """
     optional = {
         "--gene_ensembl_file": "gene_ensembl_file",
         "--domain_variability_file": "domain_variability_file",
@@ -45,7 +90,7 @@ def validate_required_inputs(args):
         "--custom_marker_file": "custom_marker_file",
     }
 
-    # map_dir is an optional directory for genomic coordinate mapping
+    # map_dir is optional and only needed for genomic coordinates
     if args.map_dir:
         if args.map_dir.startswith("NO_FILE") or not os.path.isdir(args.map_dir):
             print(f"WARNING: optional input --map_dir was not provided or not found (skipping genomic coordinate mapping): {args.map_dir}", file=sys.stderr)
@@ -66,6 +111,9 @@ def validate_required_inputs(args):
                 setattr(args, attr, resolved)
 
 
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Build position-level GMT files for FCS enrichment analysis.")
     parser.add_argument("--gene_ensembl_file", required=False, default=None, help="Path to ensembl_genes.output containing human_protein_id column")
@@ -84,7 +132,12 @@ def parse_args():
     parser.add_argument("--output_dir", required=True, help="Output directory for generated GMT files")
     return parser.parse_args()
 
+
+# ── Loading ───────────────────────────────────────────────────────────────────
+
+
 def load_universe_genes(cleaned_background_path):
+    """Set of genes of the universe file (one per line), or None when absent."""
     if not cleaned_background_path or not os.path.exists(cleaned_background_path):
         return None
     genes = set()
@@ -96,11 +149,16 @@ def load_universe_genes(cleaned_background_path):
     print(f"Loaded {len(genes)} active genes from universe filter.")
     return genes
 
+
 def load_ensembl_mapping(gene_ensembl_file):
+    """Return (ENSP to gene, gene to ENSP) from the gene/human_protein_id table.
+
+    The ENSP version suffix is dropped; rows with an empty or NA protein ID are skipped.
+    """
     if not gene_ensembl_file or not os.path.exists(gene_ensembl_file):
         print("No valid gene_ensembl_file provided; skipping Ensembl mapping.")
         return {}, {}
-    # Only the two columns we need; vectorized split beats row-wise iteration.
+    # Only the two columns needed are read; the vectorized split is faster than a row loop.
     df = pd.read_csv(gene_ensembl_file, sep='\t',
                      usecols=['gene', 'human_protein_id'], dtype=str)
     df = df.dropna(subset=['human_protein_id'])
@@ -111,7 +169,15 @@ def load_ensembl_mapping(gene_ensembl_file):
     print(f"Loaded {len(ensp_to_gene)} Ensembl protein-to-gene mappings.")
     return ensp_to_gene, gene_to_ensp
 
+
 def parse_map_file(path):
+    """Parse one <GENE>.map.tsv; returns (selected_cols, col_to_genomic, residue_to_col, strand).
+
+    Only rows with status "selected" count. Columns used: 2 status, 4 protein alignment
+    column, 5 human amino acid (NA at a gap), 6 hg38 codon coordinate (chrN:pos).
+    residue_to_col maps the 1-based index of the ungapped human residue to its column.
+    The strand is inferred from the trend of the genomic coordinates along the columns.
+    """
     selected_cols = []
     col_to_genomic = {}
     residue_to_col = {}
@@ -144,7 +210,7 @@ def parse_map_file(path):
                     non_gap_counter += 1
                     residue_to_col[non_gap_counter] = col
 
-    # Determine strand trend
+    # Strand: the sign of the coordinate steps along increasing columns
     is_minus = False
     if len(coords) > 1:
         diffs = [coords[i+1] - coords[i] for i in range(len(coords)-1)]
@@ -154,7 +220,13 @@ def parse_map_file(path):
 
     return selected_cols, col_to_genomic, residue_to_col, strand
 
+
 def build_map_cache(map_dir, universe_genes):
+    """Parse the MAP file of every gene of the universe into {gene: parsed fields}.
+
+    The gene is the file name up to the first dot. All genes are kept when there is no
+    universe. Files that fail to parse are skipped with a warning.
+    """
     map_cache = {}
     if not map_dir or not os.path.exists(map_dir):
         print("No valid map_dir provided; skipping MAP coordinate caching.")
@@ -179,7 +251,12 @@ def build_map_cache(map_dir, universe_genes):
     print(f"Cached coordinates mapping for {len(map_cache)} genes.")
     return map_cache
 
+
+# ── Writing ───────────────────────────────────────────────────────────────────
+
+
 def write_gmt(output_path, terms):
+    """Write {term: (description, members)} as GMT, sorted by term; empty terms are omitted."""
     with open(output_path, 'w') as f:
         for term_name, (desc, members) in sorted(terms.items()):
             if members:
@@ -189,15 +266,22 @@ def write_gmt(output_path, terms):
 
 
 def write_gene_list(output_path, genes):
+    """Write the genes, sorted, one per line."""
     with open(output_path, 'w') as f:
         for g in sorted(genes):
             f.write(f"{g}\n")
     print(f"Wrote {len(genes)} coverage genes to {output_path}")
 
 
+# ── External databases ────────────────────────────────────────────────────────
+
+
 def build_genomic_to_pos(map_cache):
-    """Codon-level genomic coordinate -> {(gene, col), ...} lookup, shared by
-    every external coordinate-keyed database (COSMIC, PAI3D, ...)."""
+    """Lookup (chrom, nucleotide position) -> {(gene, column)}, one entry per codon position.
+
+    Shared by the coordinate-keyed databases (COSMIC, PAI3D). The three nucleotides of a
+    codon follow the strand: forward from the stored coordinate on "+", backward on "-".
+    """
     genomic_to_pos = {}
     for gene, cache in map_cache.items():
         strand = cache['strand']
@@ -224,15 +308,12 @@ def scan_external_positions(db_path, chr_col_name, pos_col_name, genomic_to_pos,
     """Stream a gzip TSV keyed by genomic (chrom, pos) against `genomic_to_pos`.
 
     Returns (coverage_cols, filtered_cols):
-      - coverage_cols: gene -> {col, ...} for EVERY row matching genomic_to_pos,
-        regardless of filter_col_name. This answers "which genes could this
-        external database structurally have annotated at all" — used to build
-        the coverage-gene list for background restriction, independent of
-        whatever functional filter defines GMT membership.
-      - filtered_cols: gene -> {col, ...} restricted to rows where
-        filter_col_name's value contains "pathogenic" (case-insensitive). If
-        filter_col_name is None (COSMIC has no pathogenicity call — every
-        somatic mutation counts), filtered_cols == coverage_cols.
+      - coverage_cols: gene -> {column} for every row matching genomic_to_pos, whatever
+        filter_col_name says. It answers which genes the database could have annotated at
+        all, and defines the coverage-gene list used to restrict the enrichment background.
+      - filtered_cols: gene -> {column} for the rows whose filter_col_name value contains
+        "pathogenic" (case-insensitive). Without filter_col_name (COSMIC has no
+        pathogenicity call; every somatic mutation counts) it equals coverage_cols.
     """
     coverage_cols = {}
     filtered_cols = {}
@@ -278,12 +359,17 @@ def scan_external_positions(db_path, chr_col_name, pos_col_name, genomic_to_pos,
     print(f"Mapped {matched} {os.path.basename(db_path)} rows to protein alignment columns.")
     return coverage_cols, filtered_cols
 
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+
 def main():
+    """Build every GMT and table that the available inputs allow."""
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # Fail loudly on missing/dangling required inputs BEFORE doing any work,
-    # and resolve any `.gz` siblings (e.g. eggNOG ships compressed locally).
+    # Resolve the inputs before any work: a dangling path is reported once, up front,
+    # and a `.gz` sibling (eggNOG is stored compressed) replaces the plain name.
     validate_required_inputs(args)
 
     universe_genes = load_universe_genes(args.cleaned_background)
@@ -297,14 +383,13 @@ def main():
         else:
             active_genes = set(ensp_to_gene.values())
 
-    # 1. PFAM Domains & Clans
+    # 1. Pfam domains and clans
     print("Compiling PFAM Domains & Clans...")
     pfam_terms = {}
     pfam_clan_terms = {}
-    # Per-position (gene, col) -> (pfam_domain, pfam_clan), feeds
-    # position_characterization.tsv below. A position covered by more than one
-    # domain instance keeps whichever is seen last (rare, no ordering
-    # guarantee needed for a characterization-only field).
+    # (gene, column) -> (pfam_domain, pfam_clan), for position_characterization.tsv. A
+    # position covered by several domain hits keeps the last one read; the field is
+    # descriptive only.
     pfam_char = {}
 
     if os.path.exists(args.domain_variability_file):
@@ -359,35 +444,25 @@ def main():
         write_gmt(os.path.join(args.output_dir, "pfam_domains.gmt"), pfam_terms)
         write_gmt(os.path.join(args.output_dir, "pfam_clans.gmt"), pfam_clan_terms)
 
-    # 2. Load UCR Positions per gene, SPLIT by region_type.
-    #    region_type ∈ {core, flank_up, flank_down}. ucr_positions.tsv aggregates
-    #    THREE independent UCR-detection methods (absolute / relative / sliding —
-    #    see detect_ucr.py upstream); reading all three indiscriminately made
-    #    "core" and "flank" massively overlapping (a position can be core under
-    #    one method's window and flank under another's), since each method
-    #    computes its own window boundaries over the same underlying
-    #    conservation track. Restricted to `sliding` only, which empirically has
-    #    the least residual self-overlap of the three (window-merging
-    #    consolidates each conserved stretch into fewer, more contiguous blocks
-    #    per gene than the other two methods). Core and flank are kept as
-    #    independent, potentially-overlapping annotation layers — not a forced
-    #    partition: each is Fisher-tested against the background on its own, so
-    #    there is no statistical requirement that they be disjoint.
+    # 2. UCR positions per gene, split by region_type (core, flank_up, flank_down).
+    #    ucr_positions.tsv aggregates three detection methods (absolute, relative,
+    #    sliding; bin/detect_ucr.py), each with its own window boundaries over the same
+    #    conservation track, so a position can be core under one method and flank under
+    #    another. Only the sliding method is read, which merges each conserved stretch
+    #    into fewer, more contiguous blocks than the other two. Core and flank remain
+    #    separate annotation layers that may overlap: each is tested against the
+    #    background on its own, so they need not be disjoint.
     print("Loading UCR positions...")
     gene_ucr_core_cols = {}    # region_type == core
     gene_ucr_flank_cols = {}   # region_type in {flank_up, flank_down}
-    # Per-position (gene, col) -> region label ('core'/'flank_up'/'flank_down')
-    # and its per-position `variability` score, feeds position_characterization.tsv
-    # below. 'core' always wins over flank when the same position is both (see
-    # the non-disjoint-by-design note above) - checked unconditionally on every
-    # 'core' row regardless of chunk order, so a flank row seen in an earlier
-    # chunk never sticks once a core row for the same position is seen later.
+    # (gene, column) -> region label ('core', 'flank_up' or 'flank_down') and the
+    # variability of the position, for position_characterization.tsv. 'core' wins over
+    # flank whenever both occur, whatever the chunk order.
     ucr_region_char = {}
     ucr_variability_char = {}
     if os.path.exists(args.ucr_positions_file):
-        # ucr_positions.tsv can be very large (~2 GB): read only the needed
-        # columns in chunks and iterate with itertuples (row-wise iterrows over
-        # this file is pathologically slow).
+        # ucr_positions.tsv can be very large: only the needed columns are read, in
+        # chunks, and rows are iterated with itertuples (iterrows is far slower).
         reader = pd.read_csv(args.ucr_positions_file, sep='\t',
                              usecols=['gene', 'position', 'region_type', 'method', 'variability'],
                              dtype={'gene': str, 'region_type': str, 'method': str},
@@ -420,15 +495,14 @@ def main():
                         ucr_region_char[key] = region
                         ucr_variability_char[key] = row.variability
 
-    # 3. Load FUBAR Selection Positions per gene, SPLIT by selection sign.
+    # 3. FUBAR selection positions per gene, split by the sign of selection
     print("Loading FUBAR selection positions...")
     gene_pos_sel_cols = {}   # positive selection (FDR)
     gene_neg_sel_cols = {}   # purifying selection
-    # Per-position (gene, col) -> 'positive'/'negative'/'neutral', feeds
-    # position_characterization.tsv below. Unlike gene_pos_sel_cols/
-    # gene_neg_sel_cols (hits only), this records EVERY position FUBAR tested,
-    # so "neutral" (tested, not significant) is never conflated with "not in
-    # fubar_sites.tsv at all" (a position simply absent from this dict).
+    # (gene, column) -> 'positive', 'negative' or 'neutral', for
+    # position_characterization.tsv. Unlike the two hit dicts above, it records every
+    # position FUBAR tested, so "neutral" (tested, not significant) differs from a
+    # position absent from fubar_sites.tsv (absent from this dict).
     fubar_char = {}
     if os.path.exists(args.fubar_sites_file):
         reader = pd.read_csv(args.fubar_sites_file, sep='\t',
@@ -466,14 +540,18 @@ def main():
                 else:
                     fubar_char[(gene, col)] = 'neutral'
 
-    # 3.5 Load FADE directional selection positions per gene
+    # 3.5 FADE directional selection positions per gene. The dicts are only initialized
+    #     here: --fade_sites_top_file and --fade_sites_bottom_file are not read, so the
+    #     FADE_top_sig and FADE_bottom_sig layers come out empty.
     print("Loading FADE directional selection positions...")
     gene_fade_top_cols = {}
     gene_fade_bottom_cols = {}
-    #    structurally have annotated at all (coverage_genes.txt) — consumed by
-    #    posenrich_enrich.py to restrict the enrichment background for these
-    #    two GMTs specifically, instead of diluting the test with genes/positions
-    #    COSMIC/PAI3D never had a chance to observe.
+
+    # 4. COSMIC and PAI3D positions. Both are keyed by genomic coordinate, so they need
+    #    the MAP coordinates (genomic_to_pos). Each also yields the list of genes it
+    #    could have annotated at all (*_coverage_genes.txt), which posenrich_enrich.py
+    #    uses to restrict the background of cosmic_orthogroups and pai3d_orthogroups
+    #    instead of diluting the test with genes the database never observed.
     genomic_to_pos = None
     if (args.cosmic_db and os.path.exists(args.cosmic_db)) or \
        (args.pai3d_db and os.path.exists(args.pai3d_db)):
@@ -488,15 +566,12 @@ def main():
         write_gene_list(os.path.join(args.output_dir, "cosmic_coverage_genes.txt"),
                          gene_cosmic_cols.keys())
 
-    # 4b. Load PAI3D pathogenic positions per gene. Unlike COSMIC (every
-    #     somatic mutation counts as evidence), PAI3D is a per-variant
-    #     pathogenicity predictor, so GMT membership is restricted to variants
-    #     the `prediction` column calls pathogenic (matching the same
-    #     substring-match convention as 11.Scoring_report.Rmd's is_pathogenic
-    #     — no score-cutoff fallback). Coverage (for background restriction)
-    #     is tracked separately and includes every matched variant regardless
-    #     of predicted pathogenicity, since "could PAI3D see this gene" is a
-    #     coverage question, not a pathogenicity one.
+    # 4b. PAI3D pathogenic positions per gene. Unlike COSMIC (every somatic mutation
+    #     counts), PAI3D predicts the pathogenicity of each variant, so GMT membership is
+    #     limited to variants whose `prediction` contains "pathogenic" (the substring
+    #     rule of 14.Position_enrichment_report.Rmd's is_pathogenic; no score cutoff).
+    #     Coverage includes every matched variant, since whether PAI3D could see a gene
+    #     is a coverage question, not a pathogenicity one.
     print("Loading PAI3D pathogenicity positions...")
     gene_pai3d_cols = {}
     if args.pai3d_db and os.path.exists(args.pai3d_db):
@@ -506,19 +581,14 @@ def main():
         write_gene_list(os.path.join(args.output_dir, "pai3d_coverage_genes.txt"),
                          gene_pai3d_coverage.keys())
 
-    # `genomic_to_pos` is the single largest structure the script builds (one
-    # (chrom, nt_pos) -> {(gene, col)} entry per codon position across the
-    # WHOLE background universe) and is never read again past this point —
-    # both scan_external_positions calls above were its only consumers. Drop
-    # it explicitly rather than let it ride in memory through everything that
-    # follows (orthogroup GMTs, characterization_layers, position_characterization).
+    # genomic_to_pos is the largest structure of the script (one entry per codon position
+    # of the whole universe) and the two scans above are its only readers. It is released
+    # here so it does not stay in memory through the steps below.
     genomic_to_pos = None
 
-    # 5. Genomic Locations (1 Mbp Chromosome Bins)
-    # Requires actual genomic coordinates, so this is a no-op without a
-    # map_dir. active_genes falls back to universe_genes/ensp_to_gene when
-    # map_cache is empty (see above), so it can contain genes map_cache has
-    # no entry for at all -- iterate map_cache directly instead.
+    # 5. Genomic locations (1 Mbp chromosome bins). Needs genomic coordinates, so it
+    # writes nothing without a map_dir. It iterates map_cache and not active_genes,
+    # which can hold genes without a MAP entry.
     print("Compiling Genomic Locations (1 Mbp bins)...")
     gen_terms = {}
     for gene, entry in map_cache.items():
@@ -544,8 +614,8 @@ def main():
         
     write_gmt(os.path.join(args.output_dir, "genomic_locations.gmt"), gen_terms)
 
-    # 6. Orthogroups (eggNOG) - Baseline + restrictive GMTs (UCR core/flank,
-    #    positive/purifying selection, COSMIC, PAI3D).
+    # 6. eggNOG orthogroups: the baseline GMT (all positions of the member genes) and the
+    #    restricted GMTs (UCR core and flank, positive and purifying selection, COSMIC, PAI3D).
     print("Compiling eggNOG Orthogroups...")
     ortho_terms = {}
     ortho_ucr_core_terms = {}
@@ -555,7 +625,7 @@ def main():
     ortho_cosmic_terms = {}
     ortho_pai3d_terms = {}
     
-    # Load descriptions
+    # Orthogroup descriptions: annotations column 2 (id) and 4 (description)
     ortho_descs = {}
     if args.egg_annotations_file and os.path.exists(args.egg_annotations_file):
         with open_maybe_gz(args.egg_annotations_file, 'rt') as f:
@@ -574,7 +644,7 @@ def main():
                 members_list = fields[4].split(',')
                 desc = ortho_descs.get(og_id, "No functional annotation")
                 
-                # Identify member genes
+                # Member genes of the orthogroup: members column 5, entries "<taxid>.<ENSP>"
                 og_genes = []
                 for m in members_list:
                     parts = m.split('.', 1)
@@ -648,22 +718,19 @@ def main():
         if args.pai3d_db and os.path.exists(args.pai3d_db):
             write_gmt(os.path.join(args.output_dir, "pai3d_orthogroups.gmt"), ortho_pai3d_terms)
 
-    # `map_cache` (per-gene selected_cols/col_to_genomic/residue_to_col for the
-    # WHOLE background universe -- comparable in size to genomic_to_pos above)
-    # and the ortho_*_terms / per-gene coverage dicts above are all written out
-    # already and never read again below (char_layers only reuses
-    # gene_ucr_*_cols / gene_*_sel_cols / gene_fade_*_cols, not these).
+    # map_cache (comparable in size to genomic_to_pos), the orthogroup terms and the
+    # per-gene COSMIC and PAI3D dicts are already written and not read below, which
+    # reuses only gene_ucr_*_cols, gene_*_sel_cols and gene_fade_*_cols. They are released.
     map_cache = None
     ortho_terms = ortho_ucr_core_terms = ortho_ucr_flank_terms = None
     ortho_pos_sel_terms = ortho_neg_sel_terms = None
     ortho_cosmic_terms = ortho_pai3d_terms = ortho_descs = None
     gene_cosmic_cols = gene_pai3d_cols = gene_pai3d_coverage = None
 
-    # 6.5 Characterization layers — global functional layers for the report's
-    #     hypergeometric/Fisher overlap test (NOT ranked by FCS: they are far too
-    #     large and would dominate a Wilcoxon test). Written with a `.tsv`
-    #     extension so the FCS `*.gmt` glob never picks them up; consumed
-    #     separately by the enrich script's characterization step.
+    # 6.5 Characterization layers: global position sets for overlap tests, not for ranked
+    #     FCS (they are too large and would dominate a Wilcoxon test). The `.tsv`
+    #     extension keeps them out of the `*.gmt` glob; posenrich_enrich.py reads them
+    #     through --characterization.
     print("Compiling characterization layers (global overlap sets)...")
     def _global_positions(gene_cols):
         members = []
@@ -681,13 +748,10 @@ def main():
     }
     write_gmt(os.path.join(args.output_dir, "characterization_layers.tsv"), char_layers)
 
-    # 6.6 Position characterization: one row per (Gene, Position) carrying the
-    # PFAM domain/clan, UCR region, its per-position variability, and FUBAR
-    # selection call — the same per-position facts used to build the GMTs
-    # above (2f., 3.), but flattened for direct Gene/Position joins instead of
-    # GMT-membership lists. Union of every source's keys: a position missing
-    # from one source (e.g. never covered by a PFAM domain) just gets blanks
-    # for that source's columns, not a dropped row.
+    # 6.6 Position characterization: one row per (Gene, Position) with the Pfam domain and
+    # clan, UCR region and its variability, and the FUBAR call, flattened for direct
+    # Gene/Position joins. The rows are the union of the keys of all sources; a position
+    # missing from one source has blanks in its columns.
     print("Compiling position characterization table...")
     char_keys = set(pfam_char) | set(ucr_region_char) | set(fubar_char)
     with open(os.path.join(args.output_dir, "position_characterization.tsv"), 'w') as f:
@@ -700,7 +764,7 @@ def main():
             f.write(f"{gene}\t{col}\t{pfam_domain}\t{pfam_clan}\t{ucr_region}\t{variability}\t{fubar_selection}\n")
     print(f"Wrote {len(char_keys)} rows to position_characterization.tsv")
 
-    # 7. Custom Features
+    # 7. Custom features: tab-separated gene, position, term, optional description; "#" lines ignored
     if args.custom_marker_file and os.path.exists(args.custom_marker_file):
         print("Compiling Custom Features...")
         custom_terms = {}
@@ -726,6 +790,7 @@ def main():
             custom_terms[term] = (custom_terms[term][0], sorted(list(set(custom_terms[term][1]))))
             
         write_gmt(os.path.join(args.output_dir, "custom_features.gmt"), custom_terms)
+
 
 if __name__ == "__main__":
     main()

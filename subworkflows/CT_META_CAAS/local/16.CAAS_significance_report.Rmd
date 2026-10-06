@@ -24,18 +24,6 @@ params:
   seed: "1998"
 ---
 
-<!--
-This report is a DISTINCT, LATER pipeline stage than 7.CAAS_pattern_annotation.Rmd.
-CT_META_CAAS (which renders 7.CAAS_pattern_annotation.Rmd) runs upstream of
-SCORING in the live DAG -- it cannot join position_scores.tsv/gene_scores.tsv
-because those files don't exist yet when it runs. This report re-reads
-CT_META_CAAS's already-published meta_caas output (one row per
-Gene, Position, pattern, caap_group) together with SCORING's published
-position_scores.tsv/gene_scores.tsv to annotate that pattern breakdown with
-the permulation-null significance columns (p.emp/p.adj_bh/p.adj_sam,
-gene_caas_pperm/gene_caas_pperm_adj) that only exist once SCORING has run.
--->
-
 <style type="text/css">
   body {
     font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -67,6 +55,18 @@ gene_caas_pperm/gene_caas_pperm_adj) that only exist once SCORING has run.
   }
 </style>
 
+<!-- 16.CAAS_significance_report.Rmd — Annotation of the CAAS pattern table with the permulation-null significance of SCORING. -->
+<!-- PhyloPhere | subworkflows/CT_META_CAAS/local/ -->
+
+<!--
+Rendered by CAAS_SIGNIFICANCE_REPORT (ctpp_meta_caas.nf), after SCORING. The per-position CAAS table
+(global_meta_input: global_meta_caas.tsv, or the post-processed discovery table SCORING evaluated; one row per
+Gene, Position and, when present, pattern and caap_group) is joined with position_scores.tsv (p.emp, p.adj_bh,
+p.adj_sam) and gene_scores.tsv (gene_caas_pperm, gene_caas_pperm_adj) of the same run. It cannot be merged into
+7.CAAS_pattern_annotation.Rmd, which runs before SCORING, when those tables do not exist yet.
+Outputs: significance/meta_caas_significance.tsv and significance/pattern_significance_summary.tsv.
+-->
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   echo = TRUE,
@@ -89,7 +89,7 @@ createDir <- function(path) {
   if (!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
 }
 
-# Same house palette as 7.CAAS_pattern_annotation.Rmd, for visual continuity.
+# Same palette as 7.CAAS_pattern_annotation.Rmd.
 tableau_10 <- paletteer_d("ggthemes::Tableau_10")
 names(tableau_10) <- c(
   "blue", "orange", "vermillion", "bluish_green",
@@ -174,9 +174,8 @@ if (!has_p_emp_cols) {
   pos_dedup <- position_scores %>%
     mutate(Position = as.integer(Position)) %>%
     distinct(Gene, Position, p.emp, p.adj_bh, p.adj_sam)
-  # Guard against a corrupt/undeduped upstream file: if the same (Gene,Position)
-  # carries >1 distinct p.emp value, the pooling assumption above is violated --
-  # surface it loudly rather than silently duplicating rows downstream.
+  # Check the pooling assumption of the text above: a (Gene, Position) with more than one
+  # distinct p.emp value would duplicate meta_caas rows in the join, so warn and keep one.
   n_dupe_keys <- pos_dedup %>% count(Gene, Position) %>% filter(n > 1) %>% nrow()
   if (n_dupe_keys > 0) {
     warning(sprintf(paste0("%d (Gene,Position) keys have >1 distinct p.emp value in ",

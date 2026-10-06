@@ -5,15 +5,18 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-The discovery/resample sub-steps are separate boolean checkboxes on the
-config (ct_tool_discovery/resample, see gui/models/modules.py) rather than
-FieldSpec entries, since ModuleTabWidget's field kinds don't cover "2 checkboxes
-that jointly build one comma-separated flag" — they're added directly in __init__.
+CaasTab: field specification of the CAAS / contrast-selection module (conf/ct.config).
 
---contrast_selection itself has no separate on/off checkbox: the reference scripts
-always bundle it with CAAS (run_phenotype_single_primates.sh's RUN_CAAS block emits
-it unconditionally), so gui/generation/templates emit it the same way rather than
-exposing a redundant toggle here.
+The discovery and resample sub-steps are two checkboxes on the config
+(ct_tool_discovery, ct_tool_resample; see gui/models/modules.py) that jointly build
+the comma-separated --ct_tool value (gui/generation/context.py). ModuleTabWidget
+has no field kind for that, so CaasTab adds them directly in __init__.
+
+--contrast_selection has no checkbox of its own: run_single.sh.j2 turns it on
+whenever CAAS or Disambiguation is enabled, because contrast selection is the only
+producer of the foreground/background trait file that both need.
+
+Imported by: gui/widgets/main_window.py
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────
@@ -76,10 +79,9 @@ SPEC = ModuleTabSpec(
             placeholder="accepted permulations to harvest AND replay for the CAAS FCS null",
             importance="default",
         ),
-        # Borderline default/optional: a draw-budget safety cap (auto-escalated 50%
-        # up to twice if the pool falls short) rather than a knob that itself
-        # redefines the null — but too low a value can silently truncate the
-        # permulation pool, so it is not purely cosmetic either.
+        # Rated "optional" although borderline: it is a draw-budget cap (raised 50%
+        # up to twice if the pool falls short) and does not redefine the null, but
+        # a very low value can truncate the permulation pool.
         FieldSpec(
             name="max_tries",
             label="Max permulation tries",
@@ -126,7 +128,8 @@ class CaasTab(ModuleTabWidget):
     def __init__(self, config: CaasConfig, parent=None):
         super().__init__(SPEC, config, parent)
 
-        # ct_tool discovery/resample: 2 checkboxes jointly building --ct_tool.
+        # discovery and resample checkboxes jointly build --ct_tool; inserted at
+        # the top of the essential fields.
         self.ct_tool_discovery = QCheckBox("discovery")
         self.ct_tool_discovery.setChecked(config.ct_tool_discovery)
         self.ct_tool_discovery.toggled.connect(self._on_ct_tool_discovery)

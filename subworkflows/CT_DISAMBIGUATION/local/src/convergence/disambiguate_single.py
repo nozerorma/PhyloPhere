@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Convergence-type analysis module for single-gene CAAS disambiguation.
+# disambiguate_single.py — Score the CAAS rows of one gene against its ASR and pool the hypotheses per position.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/convergence/
 
-Handles ASR-driven convergence detection including:
-- Tip-level residue collection and modal analysis
-- Phylogenetic tree traversal and MRCA identification
-- Convergence pattern classification (tip-level and node-level)
-- Conserved-pair validation from metadata + ASR
+"""
+Convergence-type analysis for single-gene CAAS disambiguation.
 
-Author: Refactored from test_nutm2a_real_caas.py
-Date: 2025-11-24
+For each CAAS row of a gene it collects the tip residues of the contrast pairs of the row's hypothesis, finds the
+MRCA of each pair, reads the ancestral states from the ASR posteriors, scores the domains
+(src/convergence/path_scores.py) and pools the rows of one position and scheme across hypotheses
+(src/convergence/fop_pool.py). In axes-only mode (permulation replay) it returns the raw per-domain records instead
+of assembling full results.
+
+Imported by: src/core/driver.py, src/core/observed.py
+Inputs: CAAS entries, trait pairs, the alignment and tree data and node-level ASR posteriors (in memory)
+Outputs: ConvergenceResult rows (or PositionAxes records) and a diagnostics dict
 """
 
 import dataclasses
@@ -19,11 +24,10 @@ from typing import Dict, List, Optional, Tuple, Any
 import logging
 from collections import Counter, defaultdict, namedtuple
 
-# Add src to path
+# Make the src package importable
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-# Core imports
 from src.convergence.convergence import (
     extract_node_states_from_node_level,
     build_alignment_lookup,
@@ -43,34 +47,29 @@ logger = logging.getLogger(__name__)
 
 
 # Lightweight per-position record emitted by the axes-only (permulation) path.
-# The permulation null keeps ONLY these five fields (Gene/cycle are added by the
-# worker), so there is no reason to assemble the full 40-field ConvergenceResult.
-# It exposes the same attribute names the perm worker reads via getattr, so it is
-# a drop-in for a ConvergenceResult on that path.
+# The permulation null needs only these fields, so the full ConvergenceResult is
+# not assembled. It exposes the attribute names the perm workers read via getattr,
+# so it stands in for a ConvergenceResult on that path.
 PositionAxes = namedtuple(
     "PositionAxes",
     ["position", "caap_group", "asr_path_score",
      "side", "hypothesis", "domain_scores", "derived_agreement",
      "sides"],
 )
-# All fields after `side` are optional. `sides` is the raw
-# ``compute_domain_scores`` return ``{"top", "bottom", "domain_meta"}`` for the
-# FOP null's treeless pooler (``fop_pool.pool_domains``); populated in the
-# axes-only replay, ``None`` on the full observed path.
+# `side` and the fields after it are optional. `sides` is the raw
+# ``compute_domain_scores`` return ``{"top", "bottom", "domain_meta"}`` that the
+# treeless pooler (``fop_pool.pool_domains``) consumes; it is populated in the
+# axes-only replay.
 PositionAxes.__new__.__defaults__ = ("none", None, None, None, None)
 
 
 def _derive_convergent_call(all_rows: List["ConvergenceResult"], attr: str) -> str:
     """Pool one side's per-hypothesis ``caas``/``amino_encoded`` fg/bg strings into a
     single "<derived>/<ancestral>" call: exclude each pair index where fg==bg
-    (conserved -- caas_id.py's own conserved-pair check is this same per-index
-    group-equality test, so the two are equivalent; no metadata lookup needed),
-    then union the surviving divergent residues per side across every pooled
-    hypothesis.
-
-    Replaces the old arbitrary-first-hypothesis passthrough for these two
-    columns: the union of divergent residues, across every hypothesis in the
-    pool, is a genuine summary rather than one hypothesis's raw pattern.
+    (conserved; caas_id.py's conserved-pair check also compares the two sides at
+    the same index, on the encoded groups), then union the surviving divergent
+    residues per side across every pooled hypothesis. The union summarizes the
+    whole pool instead of reflecting one hypothesis's raw pattern.
     """
     fg_chars: set = set()
     bg_chars: set = set()
@@ -94,9 +93,9 @@ def _derive_convergent_call(all_rows: List["ConvergenceResult"], attr: str) -> s
 
 def _pooled_pair_lca(hyp_rows: List[Dict[str, Any]], side: str) -> Optional[List[Tuple[Any, Any, int, float]]]:
     """Union across pooled hypotheses of one side's ``(a, b, lca, contrib)``
-    triples, dedup'd by ``(a, b, lca)`` (average ``contrib`` across duplicates —
-    the same domain pair can recur across hypotheses with a slightly different
-    ``contrib`` if the domains' ``mrca_id`` differs by hypothesis)."""
+    triples, deduplicated by ``(a, b, lca)`` (``contrib`` is averaged across
+    duplicates: the same domain pair can recur across hypotheses with a different
+    ``contrib`` when the domains' ``mrca_id`` differs by hypothesis)."""
     acc: Dict[Tuple[Any, Any, int], List[float]] = defaultdict(list)
     for hr in hyp_rows:
         for a, b, lca, contrib in ((hr.get("sides") or {}).get(side) or {}).get("pair_lca", []) or []:
@@ -119,13 +118,13 @@ def _emit_pooled_side_rows(
 
     ``hyp_rows`` = ``[{"hyp": str, "sides": <compute_domain_scores return>}]``.
     Always calls :func:`fop_pool.pool_domains` (``M == 1`` degenerates to the
-    plain PSS-weighted mean over the K domains). A position with no changed
-    domain on either side across the harvest collapses to one ``side="none"``
-    row. When the harvest carries more than one distinct hypothesis the emitted
-    rows drop the ``hypothesis`` label (a genuine FOP pool); a lone hypothesis
-    keeps it. ``all_rows`` (the raw per-hypothesis ``ConvergenceResult`` list,
-    same length/order as ``hyp_rows``) is used only for the position-level
-    ``tag_support``/``caas``/``amino_encoded`` derivation -- these live on the
+    plain PSS-weighted mean over the domains). A position with no changed
+    domain on either side in any pooled hypothesis collapses to one
+    ``side="none"`` row. When the pool holds more than one distinct hypothesis
+    the emitted rows drop the ``hypothesis`` label; a lone hypothesis keeps it.
+    ``all_rows`` (the raw per-hypothesis ``ConvergenceResult`` list, same
+    length and order as ``hyp_rows``) is used only for the position-level
+    ``tag_support``/``caas``/``amino_encoded`` derivation: these live on the
     result itself, not inside ``sides``, so they cannot be recovered from
     ``hyp_rows`` alone.
     """
@@ -147,18 +146,17 @@ def _emit_pooled_side_rows(
     tag_support = fmt_support(_tally("tag"))
     caas_support = fmt_support(_tally("caas"))
     amino_encoded_support = fmt_support(_tally("amino_encoded"))
-    # `caas`/`amino_encoded` are no longer an arbitrary first-hypothesis
-    # passthrough: derive them as the union of divergent (non-conserved)
+    # `caas`/`amino_encoded` are the union of divergent (non-conserved)
     # residues across every pooled hypothesis (see _derive_convergent_call).
-    # Fall back to the first-hypothesis passthrough only if no divergent
-    # residue survived exclusion (e.g. every row's harvest fully agrees with
-    # its own background) -- never emit a blank caas/amino_encoded.
+    # When no divergent residue survives the exclusion (every row agrees with
+    # its own background), the first row's values are kept so that caas and
+    # amino_encoded are never blank.
     derived_caas = _derive_convergent_call(all_rows or [], "caas") or base.caas
     derived_amino_encoded = (
         _derive_convergent_call(all_rows or [], "amino_encoded") or base.amino_encoded
     )
 
-    # Harvest size (M) for this (position, scheme) pool.
+    # Number of pooled hypotheses (M) for this (position, scheme).
     n_hypotheses = int(pooled.get("n_hypotheses", 0) or 0)
 
     sides = pooled_sides(pooled)
@@ -213,15 +211,15 @@ def _build_per_node_dist(
     Mirrors exactly what the full scorer stores in ``node_posteriors["per_node"]``
     (same site key, same ``dict(sorted(...))`` ordering, same skip of empty nodes),
     so both the observed path and the perm replay feed
-    :func:`compute_asr_path_score` the same input. The ``dict(sorted(...))`` order
-    is retained because :func:`modal_encoded` breaks argmax ties by iteration order.
+    :func:`compute_domain_scores` the same input. Residues are sorted so that the
+    iteration order of a distribution is deterministic.
     """
     per_node_dist: Dict[int, Dict[str, float]] = {}
     if not posterior_data or paml_site is None:
         return per_node_dist
     for node_id, node_sites in posterior_data.items():
         site_probs = node_sites.get(paml_site)
-        if not site_probs:  # missing/empty site → node contributes nothing
+        if not site_probs:  # missing or empty site: the node contributes nothing
             continue
         per_node_dist[int(node_id)] = dict(sorted(site_probs.items()))
     return per_node_dist
@@ -244,9 +242,9 @@ def _position_axes(
     and runs :func:`compute_domain_scores`, so the observed path and the
     axes-only perm path score each position through identical code.
 
-    ``per_site_dist_cache`` (perm replay only): ``per_node_dist`` depends solely
-    on ``(posterior_data, site)`` — invariant to the grouping scheme and to the
-    permuted phenotype — so a recurring site is built once and reused. Keyed by
+    ``per_site_dist_cache`` (perm replay): ``per_node_dist`` depends only on
+    ``(posterior_data, site)``, not on the grouping scheme or the permuted
+    phenotype, so a recurring site is built once and reused. Keyed by
     ``position_one_based``; the observed path passes ``None``.
     """
     paml_site = caas_pos.position_one_based
@@ -259,7 +257,7 @@ def _position_axes(
     else:
         per_node_dist = _build_per_node_dist(posterior_data, paml_site)
 
-    if node_index is None:  # per-gene invariant; hoisted by the caller when available
+    if node_index is None:  # per-gene invariant; the caller passes it when it has one
         node_index = build_node_index(getattr(tree_data, "root", None))
 
     return compute_domain_scores(
@@ -285,9 +283,9 @@ def analyze_caas_position_disambiguation(
     """
     Perform complete convergence/disambiguation analysis for a CAAS position.
 
-    ``build_node_posteriors`` (default False): populate the heavy
-    ``node_posteriors["per_node"]`` map — the modal AA + full 20-AA distribution
-    for *every* tree node at the focal site. This field is not in the master CSV,
+    ``build_node_posteriors`` (default False): populate the large
+    ``node_posteriors["per_node"]`` map, the modal AA and full 20-AA distribution
+    of *every* tree node at the focal site. It is not written to the master CSV,
     so it is skipped by default; pass True only if an in-memory consumer needs it.
 
     Args:
@@ -305,23 +303,19 @@ def analyze_caas_position_disambiguation(
     logger.info(
         f"Analyzing convergence for {gene} position {caas_pos.position_one_based}"
     )
-    node_posteriors: Dict[str, Any] = {}  # Ensure node_posteriors is always defined
+    node_posteriors: Dict[str, Any] = {}  # always defined
 
-    # Initialize analysis variables
     ancestral = "?"
     derived = "?"
     tip_diagnostics = tip_diagnostics or {}
     state_source = "unknown"
     tip_pattern_comment = caas_pos.caas or ""
 
-    # ``side`` / ``convergence_type`` are no longer produced by a separate
-    # categorical classifier — ``side`` is set per row in
-    # :func:`_split_result_by_side` and ``convergence_type`` comes from
-    # ``compute_asr_path_score``'s ``_convergence_type``. This is the placeholder
-    # on ``base_result`` for the no-change collapse.
+    # Placeholder on ``base_result``: ``side`` and ``convergence_type`` are set per
+    # row by :func:`_emit_pooled_side_rows` from the pooled domain scores
+    # (``path_scores._convergence_type``).
     convergence_type = "no_change"
 
-    # Perform node-level convergence analysis using ASR node mapping
     if posterior_data is None:
         raise ValueError(
             f"ASR node states unavailable for {gene} position {caas_pos.position}: missing posterior data."
@@ -332,13 +326,13 @@ def analyze_caas_position_disambiguation(
     node_role_mapping = tip_diagnostics.get("node_mapping")
 
     if not node_role_mapping:
-        # tip_diagnostics doesn't have node_mapping - this happens when ASR is available
-        # but tip-level analysis hasn't been run yet. We need to build it here.
+        # tip_diagnostics has no node_mapping (tip-level analysis did not run):
+        # only the root can be mapped here.
         node_role_mapping = {}
         if tree_data and hasattr(tree_data, "root") and tree_data.root:
             node_role_mapping["root"] = tree_data.root.node_id
 
-        # We can't determine focal nodes without tip analysis, so skip ASR node states
+        # Focal nodes need the tip-level analysis, so the ASR node states are skipped
         if not node_role_mapping or len(node_role_mapping) < 4:
             logger.debug(
                 f"Skipping ASR node states for {gene} position {caas_pos.position}: "
@@ -369,14 +363,13 @@ def analyze_caas_position_disambiguation(
                 "focal_probs": node_state_info.focal_probs,
             }
 
-            # Debug: Log focal data structure
             logger.debug(
                 f"focal_states={node_state_info.focal_states}, "
                 f"focal_probs={node_state_info.focal_probs}, "
                 f"len(focal_states)={len(node_state_info.focal_states)}"
             )
 
-            # Dynamic focal states extraction (also store as individual keys)
+            # Focal states, also stored as individual keys focal_<i> and focal_<i>_prob
             for idx in range(1, len(node_state_info.focal_states) + 1):
                 state = (
                     node_state_info.focal_states[idx - 1]
@@ -415,9 +408,8 @@ def analyze_caas_position_disambiguation(
                         "aa": aa,
                         "prob": prob,
                     }
-            # Capture per-node annotations for downstream debugging/plots. Redundant
-            # in the normal path (not serialized anywhere; plots reload posteriors
-            # from the ASR dump), so only built when explicitly requested.
+            # Per-node annotations for in-memory consumers: not serialized
+            # anywhere, so only built when explicitly requested.
             if build_node_posteriors:
                 per_node_states: Dict[int, Dict[str, Any]] = {}
                 for node_id, node_sites in posterior_data.items():
@@ -447,7 +439,7 @@ def analyze_caas_position_disambiguation(
             "cannot analyze without posterior-supported nodes."
         )
 
-    # Determine ancestral/derived states using ASR node states
+    # Ancestral and derived states from the ASR node states
     if not node_state_info or not node_state_info.mrca_contrast:
         raise ValueError(
             f"ASR node states unavailable for {gene} position {caas_pos.position}: "
@@ -511,24 +503,23 @@ def analyze_caas_position_disambiguation(
         "mrca_contrast": node_state_info.mrca_contrast if node_state_info else None,
     }
 
-    # Add dynamic focal states to summary
     if node_state_info:
         for idx, state in enumerate(node_state_info.focal_states, 1):
             node_summary[f"focal_{idx}"] = state
 
-    # ── CAAS convergence score (core v3, on the Voronoi domain) ───────────────
+    # ── CAAS convergence score on the Voronoi domain ──────────────────────────
     # ``compute_domain_scores`` returns {"top", "bottom", "domain_meta"} for this
-    # (Gene, Position, scheme, hypothesis). The per-side pooling + the <=2-row
+    # (Gene, Position, scheme, hypothesis). The per-side pooling and the <=2-row
     # split happen once per (position, scheme) in analyze_gene_disambiguation via
     # :func:`_emit_pooled_side_rows` (M == 1 degenerates to the plain mean). Here
-    # we only stash the raw record on ``base_result.sides``.
+    # the raw record is only stored on ``base_result.sides``.
     domain_split: Optional[Dict[str, Any]] = None
     try:
         domain_split = _position_axes(
             caas_pos, tree_data, posterior_data, node_index, pair_details_list,
             per_site_dist_cache=per_site_dist_cache,
         )
-    except Exception as e:  # never let path scoring break disambiguation
+    except Exception as e:  # a path-scoring failure must not stop the disambiguation
         domain_split = None
         logger.warning(
             f"ASR path scoring failed for {gene}:{caas_pos.position}: {e}"
@@ -564,7 +555,7 @@ def analyze_caas_position_disambiguation(
         ),
         node_state_summary=node_summary,
         state_source=state_source,
-        side="none",  # overwritten per-side by _emit_pooled_side_rows
+        side="none",  # set per side by _emit_pooled_side_rows
         caap_group=getattr(caas_pos, "caap_group", "US"),
         amino_encoded=getattr(caas_pos, "amino_encoded", ""),
         hypothesis=hypothesis,
@@ -579,8 +570,8 @@ def analyze_caas_position_disambiguation(
         score=None,
     )
 
-    # Raw compute_domain_scores record for this (position, scheme, hypothesis);
-    # analyze_gene_disambiguation groups these by (position, scheme) and pools
+    # Raw compute_domain_scores record of this (position, scheme, hypothesis);
+    # analyze_gene_disambiguation groups them by (position, scheme) and pools
     # them with _emit_pooled_side_rows.
     base_result.sides = domain_split
     return [base_result]
@@ -615,15 +606,13 @@ def analyze_gene_disambiguation(
         taxid_mapping: Optional species to taxid mapping
         posterior_data: Optional ASR posterior data
         posterior_threshold: Posterior probability threshold for node state extraction
-        axes_only: Reduced-kernel mode for the permulation replay. When True, each
-            position still builds pair_details, but SKIPS the full per-position
-            scorer (its redundant per-node posterior-map rebuild + the 40-field
-            ConvergenceResult the perm null discards). It emits a lightweight
-            :class:`PositionAxes` per position carrying the per-side
-            ``compute_asr_path_score`` return (``.sides``). The asr_path_score is
-            scored by the same :func:`_position_axes` helper as the full path, so
-            it is bit-for-bit identical.
-
+        axes_only: Reduced-kernel mode for the permulation replay. Each position
+            still builds pair_details, but the full per-position scorer is skipped
+            (its per-node posterior-map rebuild and the full ConvergenceResult the
+            perm null discards). It emits a lightweight :class:`PositionAxes` per
+            position carrying the ``compute_domain_scores`` return (``.sides``),
+            computed by the same :func:`_position_axes` helper as the full path, so
+            the scores are identical.
         keep_unpooled: Also return, in ``diagnostics["unpooled"]``, the rows as they are before the
             hypotheses of a position are pooled: one per entry, each with its ``pair_details`` and ``sides``
             (the evidence of what every domain of every hypothesis saw). Ignored in axes_only mode.
@@ -649,15 +638,13 @@ def analyze_gene_disambiguation(
     }
 
     # ── Trait pairs, grouped by contrast ──────────────────────────────────────
-    # trait_pairs is {contrast -> pairs}: one contrast per FOP
-    # hypothesis (traitfile_H<n>.tab -> n), or a single contrast for a plain
-    # non-FOP traitfile. Each CAAS metadata row belongs to the hypothesis that
-    # discovered it (its `trait` field); it is disambiguated against THAT
-    # hypothesis's pairs only. Unioning every hypothesis's pairs (the old
-    # `flattened_pairs`) polluted every multi-pair axis of the ASR path score —
-    # LCA merge points, independence, mrca_diversity — with contrasts from
-    # unrelated hypotheses, and discarded the per-hypothesis Dunn independence
-    # the FOP harvest enforces.
+    # trait_pairs is {contrast -> pairs}: one contrast per hypothesis
+    # (traitfile_H<n>.tab -> n), or a single contrast for a plain trait file.
+    # Each CAAS row belongs to the hypothesis that discovered it (its `trait`
+    # field) and is disambiguated against THAT hypothesis's pairs only. Pooling
+    # the pairs of every hypothesis would mix contrasts of unrelated hypotheses
+    # into the domains and discard the independence between the pairs of one
+    # hypothesis.
     trait_pairs_all: Dict[int, List[Tuple[str, str]]] = trait_pairs
 
     def _dedup_pairs(pairs: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
@@ -677,9 +664,9 @@ def analyze_gene_disambiguation(
     _single_contrast_key = (
         next(iter(contrast_pairs_by_key)) if len(contrast_pairs_by_key) == 1 else None
     )
-    # Safety net only: a multi-contrast run whose metadata row carries no
-    # resolvable hypothesis tag falls back to the union (with a warning) rather
-    # than silently dropping the position.
+    # Fallback only: in a multi-contrast run, a row without a resolvable
+    # hypothesis tag is scored against the union of the pairs (with a warning)
+    # instead of being dropped silently.
     _flattened_fallback = _dedup_pairs(
         [p for pairs in trait_pairs_all.values() for p in pairs]
     )
@@ -688,9 +675,9 @@ def analyze_gene_disambiguation(
     def _resolve_contrast(entry) -> Tuple[Optional[int], Optional[str]]:
         """(contrast key, hypothesis label) for one CAAS metadata row.
 
-        FOP rows carry `trait` containing "H<n>"; map to contrast <n>. A single
-        non-FOP traitfile ignores `trait` and uses its lone contrast, emitting no
-        hypothesis label so downstream output is byte-identical to before.
+        Rows of a multi-hypothesis design carry `trait` containing "H<n>", which
+        maps to contrast <n>. A single trait file ignores `trait` and uses its
+        lone contrast, with no hypothesis label.
         """
         raw = str(getattr(entry, "trait", "") or "").strip()
         m = re.search(r"H(\d+)", raw)
@@ -703,27 +690,22 @@ def analyze_gene_disambiguation(
             return _single_contrast_key, (raw or None)
         return None, (raw or None)
 
-    # ── Hoisted per-gene/tree invariants (computed ONCE, not per position) ──────
-    # The alignment lookup, the tree node index, and each species-pair's MRCA
-    # depend only on the alignment + tree, which are fixed for the gene. Rebuilding
-    # them inside the per-position loop (and, for the permulation replay, once per
-    # position × per cycle) is pure redundant work. Hoisting/memoising them here
-    # speeds up both the observed disambiguation and the perm replay with NO change
-    # to results.
+    # ── Per-gene invariants, computed once ─────────────────────────────────────
+    # The alignment lookup, the tree node index and the MRCA of each species set
+    # depend only on the alignment and the tree, which are fixed for the gene.
+    # They are built here, outside the per-position loop, which changes no result.
     hoisted_seq_by_id = hoisted_seq_by_species = None
     if any_pairs and taxid_mapping:
         hoisted_seq_by_id, hoisted_seq_by_species = build_alignment_lookup(
             alignment_data.alignment, alignment_data.taxid_to_species
         )
     hoisted_node_index = build_node_index(getattr(tree_data, "root", None))
-    # get_mrca's tip lookups (find_node_by_name/find_node_by_taxid) are an
-    # unindexed O(tree size) recursive search each; confirmed via real-data
-    # cProfile as ~42% of total replay wall time (see
-    # docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md, Tier 3) since the null
-    # replay calls this once per cycle over a tree that never changes. Building
-    # the index is itself a single O(tree size) pass, so even rebuilding it on
-    # every call here (unavoidable without threading it in from the per-gene
-    # caller) turns many O(tree size) lookups into one.
+    # get_mrca's tip lookups (find_node_by_name, find_node_by_taxid) are each a
+    # recursive search of the whole tree, and the null replay calls this once per
+    # cycle over a tree that never changes (see
+    # docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md). Building the name and taxid
+    # index is one pass over the tree per call of this function, which replaces
+    # many whole-tree searches.
     _name_index, _taxid_index = (
         build_name_taxid_index(tree_data.root) if getattr(tree_data, "root", None) else ({}, {})
     )
@@ -742,13 +724,12 @@ def analyze_gene_disambiguation(
 
     for idx, caas_pos in enumerate(caas_entries):
         pos = caas_pos.position
-        # Contrast (hypothesis) this row belongs to; its pairs are the ONLY ones
-        # this row is scored against.
+        # Contrast (hypothesis) of this row; only its pairs score the row.
         _ckey, _hyp_label = _resolve_contrast(caas_pos)
         if _ckey is not None:
             contrast_pairs = contrast_pairs_by_key.get(_ckey, [])
         elif _hyp_label and _hyp_label.startswith("H"):
-            # Row names a hypothesis whose traitfile is absent → cannot score it.
+            # The row names a hypothesis whose traitfile is absent: it cannot be scored.
             contrast_pairs = []
             logger.warning(
                 f"{gene} pos {pos}: metadata hypothesis {_hyp_label} has no "
@@ -762,7 +743,7 @@ def analyze_gene_disambiguation(
                 )
             contrast_pairs = _flattened_fallback
         try:
-            # Skip if no amino acid conversion data
+            # No substitution recorded
             if not caas_pos.caas:
                 logger.debug(f"Skipping position {pos} - no amino acid conversion data")
                 diagnostics["skip_reasons"]["no_caasersion"] += 1
@@ -775,7 +756,7 @@ def analyze_gene_disambiguation(
                 logger.debug(f"Skipping position {pos} - ASR posterior data missing")
                 continue
 
-            # Perform tip-level convergence analysis across ALL pairs from trait file
+            # Tip-level analysis over all the pairs of the row's contrast
             tip_diagnostics: Dict[str, Any] = {}
             try:
                 if contrast_pairs and taxid_mapping:
@@ -866,8 +847,8 @@ def analyze_gene_disambiguation(
             except Exception as e:
                 logger.warning(f"Tip-level analysis failed for position {pos}: {e}")
 
-            # If no valid trait pairs overlap the alignment/taxid set, we cannot
-            # build the focal node mapping needed for ASR node-level analysis.
+            # Without trait pairs that overlap the alignment and the taxid mapping
+            # there is no focal node mapping for the node-level ASR analysis.
             if not tip_diagnostics.get("pair_details"):
                 diagnostics["skip_reasons"]["no_valid_pairs"] += 1
                 diagnostics["skipped_positions"] += 1
@@ -877,20 +858,15 @@ def analyze_gene_disambiguation(
                 continue
 
             # ── Axes-only reduced kernel (permulation replay) ──────────────────
-            # The perm null keeps only asr_path_score + the per-side split, so we
-            # skip the full per-position scorer — whose cost is the redundant per-node
-            # posterior-map rebuild (node_posteriors["per_node"]) plus the 40-field
-            # ConvergenceResult assembly the null discards — and call the shared
-            # _position_axes helper directly (which builds per_node_dist once, cached).
-            # The `.sides` field carries the whole {"top": row, "bottom": row}
-            # split; gene_wrapper._expand_sides derives per-side change labels from
-            # it. The scalar fields here collapse to the stronger side as a legacy
-            # fallback.
+            # The perm null needs the per-side domain records only, so the full
+            # per-position scorer (per-node posterior-map rebuild and the full
+            # ConvergenceResult assembly) is skipped and the shared _position_axes
+            # helper is called directly (it caches per_node_dist by site).
+            # `.sides` carries the raw compute_domain_scores record; the scalar
+            # fields stay at their neutral values.
             if axes_only:
-                # NOTE: the permulation-null replay (core.driver.score_labelings)
-                # takes this branch. It only stashes the raw compute_domain_scores
-                # record on ``.sides``; the pooled scalars are computed downstream
-                # by pool_domains.
+                # core.driver.score_labelings takes this branch. The pooled scalars
+                # are computed downstream by pool_domains.
                 axes_sides = None
                 axes_score = 0.0
                 try:
@@ -902,7 +878,7 @@ def analyze_gene_disambiguation(
                         tip_diagnostics.get("pair_details"),
                         per_site_dist_cache=per_site_dist_cache,
                     )
-                except Exception as e:  # never let path scoring break the replay
+                except Exception as e:  # a path-scoring failure must not stop the replay
                     logger.warning(
                         f"ASR path scoring failed for {gene}:{caas_pos.position}: {e}"
                     )
@@ -937,7 +913,7 @@ def analyze_gene_disambiguation(
             )
 
             # One base row per (position, scheme, hypothesis); the per-side
-            # split + pooling happens after the loop.
+            # split and pooling happen after the loop.
             results.extend(row_list)
             logger.info(
                 f"✓ Analyzed position {pos}: {row_list[0].ancestral}→{row_list[0].derived}"
@@ -953,11 +929,10 @@ def analyze_gene_disambiguation(
         diagnostics["unpooled"] = list(results)
 
     if not axes_only and results:
-        # core v3: group the per-hypothesis base rows by (position, scheme) and
-        # pool them onto <=2 per-side rows with the treeless mean-of-means pooler
-        # (M == 1 degenerates to the plain PSS-weighted mean over the K domains).
-        # PSS weights {(hyp, domain): pss} come from hyp_pairs_pss (None -> equal
-        # weight). Scoring receives rows already domain-pooled here.
+        # Group the per-hypothesis base rows by (position, scheme) and pool them
+        # onto <=2 per-side rows with the treeless mean-of-means pooler (M == 1
+        # degenerates to the plain PSS-weighted mean over the domains). PSS weights
+        # {(hyp, domain): pss} come from hyp_pairs_pss (None: equal weight).
         try:
             by_group: Dict[Tuple[Any, str], List[ConvergenceResult]] = {}
             for r in results:
@@ -975,7 +950,7 @@ def analyze_gene_disambiguation(
                     _emit_pooled_side_rows(_rows[0], hyp_rows, hyp_pairs_pss, all_rows=_rows)
                 )
             results = pooled_rows
-        except Exception as e:  # never let pooling break disambiguation
+        except Exception as e:  # a pooling failure must not stop the disambiguation
             logger.warning(f"[{gene}] domain pooling failed: {e}")
 
     logger.info(

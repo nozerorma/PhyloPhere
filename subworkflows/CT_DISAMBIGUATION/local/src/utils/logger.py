@@ -1,14 +1,13 @@
+# logger.py — Single entry point for the logging configuration of the disambiguation scripts.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/utils/
+
 """
-Centralized logging configuration for CAAS pipelines
-===============================================
+Logging configuration: one uniform format on stdout and, optionally, a log file.
 
-Provides a single entry point to configure logging for both aggregation and
-single-gene workflows. Uses synchronous stream/file handlers with a uniform
-format to keep logs traceable across processes.
+Handlers are synchronous, so the lines of the different worker processes stay
+traceable through the processName field of the format.
 
-Usage Example
--------------
-::
+Usage example::
 
     import logging
     from src.utils.logger import configure_logging
@@ -17,14 +16,8 @@ Usage Example
     log = logging.getLogger("my.module")
     log.debug("Hello world")
 
-Author
-------
-Miguel Ramon Alonso
-Evolutionary Genomics Lab - IBE-UPF
-
-Date
-----
-2025-12-09
+Imported by: contract_main.py, disambiguation_perms_main.py, explain_positions.py,
+             observed_b0_main.py, src/utils/concurrency.py (init_worker)
 """
 
 from __future__ import annotations
@@ -34,6 +27,7 @@ import logging.config
 from pathlib import Path
 from typing import Optional
 
+# One line per record: time | level | process | logger name | message.
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(processName)s | %(name)s | %(message)s"
 
 
@@ -44,6 +38,8 @@ def configure_logging(
     quiet_matplotlib: bool = True,
 ) -> None:
     """Configure root logging with a uniform, synchronous formatter.
+
+    Replaces the root handlers on every call, so it is safe to call again in a worker process.
 
     :param verbose: When True, set root log level to DEBUG; otherwise INFO.
     :type verbose: bool

@@ -68,6 +68,9 @@ params:
   }
 </style>
 
+<!-- 0.Data_pruning.Rmd — Prune species from the trait table and the tree and rebuild the exploration figures. -->
+<!-- PhyloPhere | subworkflows/TRAIT_ANALYSIS/local/ -->
+
 # Optional Data Pruning for Trait Analysis
 This document describes the process of optionally pruning the dataset based on a user-provided list of species. 
 This step ensures that only specified species are included in subsequent analyses.
@@ -80,18 +83,17 @@ This section configures the working environment, sets directories, and loads nec
 
 ```{r setup, message=FALSE, warning=FALSE}
 
-# Make params available in environment before sourcing commons.R
+# commons.R reads `params`, so it must be visible from the global environment.
 if (!exists("params")) {
   stop("params object not found - ensure this Rmd is rendered with rmarkdown::render()")
 }
-# Assign to parent environment so commons.R can access it
 tryCatch(assign("params", params, envir = .GlobalEnv), error = function(e) NULL)
 
 # Call the setup function from commons.R
 source("./src/commons.R")
 setup_rmd()
 
-# Debug helper (prints into HTML output)
+# Fallback logger, used only when commons.R has not defined debug_log().
 if (is.null(getOption("phylo_debug"))) {
   options(phylo_debug = TRUE)
 }
@@ -106,7 +108,8 @@ if (!exists("debug_log", inherits = TRUE)) {
   }
 }
 
-# Load necessary libraries
+# ── Dependencies ──────────────────────────────────────────────────────────────
+
 library(dplyr)
 library(ggplot2)
 library(readr)
@@ -124,12 +127,15 @@ library(geiger)
 library(rphylopic)
 library(paletteer)
 
-color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
-capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name
-capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and deconvoluted trait name
-capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name)) # Capitalized and deconvoluted clade name
 
-# Define color palettes, including a colorblind-friendly palette for categories
+# ── Labels, palettes and output directories ───────────────────────────────────
+
+color_palette <- paste0(clade_name, "_palette") # name of the clade palette defined in palettes.R
+capitalized_taxon <- tools::toTitleCase(taxon_of_interest)
+capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # underscores shown as spaces
+capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name))
+
+# Tableau 10 under colorblind-safe names.
 tableau_10 <- paletteer_d("ggthemes::Tableau_10")
 names(tableau_10) <- c(
   "blue", "orange", "vermillion", "bluish_green",
@@ -139,7 +145,7 @@ names(tableau_10) <- c(
 
 createDir(data_pruning_dir)
 
-# Create subdirectories for the new plots
+# Subdirectories of the pruning results.
 extreme_plots_dir <- file.path(data_pruning_dir, "1.Extreme_plots")
 asr_trees <- file.path(data_pruning_dir, "2.ASR_trees")
 phylo_distribution_dir <- file.path(data_pruning_dir, "3.Phylo_distribution")
@@ -158,7 +164,10 @@ prune_list_secondary <- params$prune_list_secondary
 
 prune_log_msgs <- c()
 
-# Load the prune list
+
+# ── Prune lists ───────────────────────────────────────────────────────────────
+
+# The primary prune list is required: one species per line.
 if (prune_list != "") {
   prune_species_primary <- readLines(prune_list)
   prune_log_msgs <- c(prune_log_msgs, sprintf("Loaded prune list with %d species\n", length(prune_species_primary)))
@@ -166,21 +175,23 @@ if (prune_list != "") {
   stop("No prune list provided. Please provide a valid list of species to prune.")
 }
 
-# Optional secondary prune list (e.g., for secondary trait)
+# Optional secondary prune list: species whose secondary trait value is blanked for the plots.
 prune_species_secondary <- character(0)
 if (prune_list_secondary != "") {
   prune_species_secondary <- readLines(prune_list_secondary)
   prune_log_msgs <- c(prune_log_msgs, sprintf("Loaded secondary prune list with %d species\n", length(prune_species_secondary)))
 }
 
-# Generate stats_df
+
+# ── Pruning ───────────────────────────────────────────────────────────────────
+
+# Per-species statistics table (stats.f in stats.R).
 stats_df <- stats.f(trait_df)
 
-# Cleanup data frame and tree
 `%ni%` <- Negate(`%in%`)
 
-# Automatic NA phenotype pruning: remove species with NA values in the primary trait column
-# or in the n_trait/c_trait count columns when count data is used
+# Species with NA in the primary trait, or in the n_trait/c_trait count columns when
+# count data is used, are pruned together with the species of the prune list.
 na_mask <- is.na(trait_df[[trait]])
 if (isTRUE(has.n) && n_trait %in% names(trait_df)) {
   na_mask <- na_mask | is.na(trait_df[[n_trait]])
@@ -196,7 +207,7 @@ if (length(prune_species_na) > 0) {
   prune_log_msgs <- c(prune_log_msgs, sprintf("Identified %d species with NA phenotype/count values to prune\n", length(prune_species_na)))
 }
 
-# Combine explicit prune list and NA prune species
+# Union of the explicit prune list and the NA species.
 all_prune_species <- unique(c(prune_species_primary, prune_species_na))
 
 visualization_tree <- pruned_tree
@@ -212,7 +223,10 @@ prune_log_msgs <- c(
   sprintf("Pruned stats data frame has %d species\n", nrow(pruned_stats))
 )
 
-# Save pruned data
+
+# ── Pruned files ──────────────────────────────────────────────────────────────
+
+# These are the files emitted for the following steps.
 pruned_trait_file <- file.path(data_pruning_dir, "pruned_trait_file.tsv")
 write.table(pruned_trait_df, file = pruned_trait_file, sep = "\t", row.names = FALSE, quote = FALSE)
 pruned_tree_file <- file.path(data_pruning_dir, "pruned_tree_file.nwk")
@@ -220,7 +234,11 @@ ape::write.tree(clean_tree, file = pruned_tree_file)
 pruned_stats_file <- file.path(data_pruning_dir, "pruned_trait_stats.csv")
 write.csv(pruned_stats, file = pruned_stats_file, row.names = FALSE)
 
-# Nullify trait values for downstream plots (do not affect emitted pruned files)
+
+# ── Plot data ─────────────────────────────────────────────────────────────────
+
+# The plots keep the pruned species but blank their trait values (NA), so the tree shows
+# every species while the pruned ones carry no data. The emitted files above are unchanged.
 nulled_trait_df <- trait_df
 nulled_stats_df <- stats_df
 
@@ -238,11 +256,11 @@ if (length(prune_species_secondary) > 0 && nzchar(secondary_trait) && secondary_
 
 cat(paste(prune_log_msgs, collapse = ""))
 
-# Rename the variables for downstream use (plots use nulled data, emitted files stay pruned)
+# From here on, trait_df and stats_df are the blanked versions used by the plots.
 trait_df <- nulled_trait_df
 stats_df <- nulled_stats_df
 
-# Save files for debug
+# Debug copies of the tables the plots use.
 debug_log("Data pruning completed. Pruned trait file: %s, Pruned tree file: %s", pruned_trait_file, pruned_tree_file)
 write.csv(stats_df, file = file.path(data_pruning_dir, "debug_pruned_stats.csv"), row.names = FALSE)
 write.csv(trait_df, file = file.path(data_pruning_dir, "debug_pruned_trait_df.csv"), row.names = FALSE)
@@ -256,8 +274,8 @@ This section loads pre-processed trait data in a long (melted) format and adds c
 
 ```{r, stat_visualization, message=FALSE, warning=FALSE}
 
-# 1. LOAD STATS ------------------------------------------------------
-# Excerpt of the trait stats data
+# ── Trait statistics ──────────────────────────────────────────────────────────
+
 head(stats_df)
 
 stats_df <- stats_df %>%
@@ -273,21 +291,19 @@ if(isTRUE(has.n)){
   debug_log("contrast_plot.f using n_trait = %s, missing N = %d", n_trait, sum(is.na(stats_df$N)))
 }
 
-# Ensure species order matches phylogeny
+# Species in tree order, so the plot rows follow the phylogeny.
 ordered_species <-  tidytree::as_tibble(pruned_tree) %>%
   dplyr::arrange(desc(.data$node)) %>%
-  # Tip nodes are numbered 1..Ntip (ape convention); `!is.na(label)` alone
-  # would also admit internal-node bootstrap-support labels, which repeat
-  # across nodes on a real ML tree and can hand factor(levels=) duplicates.
+  # Tip nodes are numbered 1..Ntip (ape convention). Filtering on `!is.na(label)` alone
+  # would also admit internal-node support labels, which repeat across nodes and give
+  # factor(levels =) duplicates.
   dplyr::filter(.data$node <= length(pruned_tree$tip.label)) %>%
   dplyr::pull(.data$label)
-
-# print(ordered_species)
 
 stats_df$species <- factor(stats_df$species, levels = ordered_species)
 debug_log("contrast_plot.f ordered_species = %d", length(ordered_species))
 
-# Define ordered taxa for plotting based on phylogeny order
+# Taxa ordered by the first species of each taxon in tree order.
 ordered_taxa <- ordered_species %>%
   sapply(function(sp) {
     idx <- which(stats_df$species == sp)
@@ -298,9 +314,6 @@ ordered_taxa <- ordered_species %>%
   na.omit() %>%
   unique()
 
-# print(ordered_taxa)
-
-# Arrange stats_df by taxa
 stats_df <- stats_df %>%
   dplyr::mutate(taxa = factor(taxa, levels = ordered_taxa)) %>%
   dplyr::arrange(taxa, .by_group = TRUE)
@@ -312,8 +325,11 @@ This section generates contrast plots to visualize the trait across taxa, highli
 
 ```{r phenoplot, fig.height=10, fig.width=15, message=FALSE, warning=FALSE, dev='png', dpi=320}
 
-## PLOT FUNCTION --------------------------------------------------------------
-### 1. Contrast plot function
+# ── Contrast plot ─────────────────────────────────────────────────────────────
+
+# Trait values by taxon: one open circle per species, the global median as a dashed line
+# and the per-taxon median as a bar. The foreground/background partition is not drawn
+# here (4.Independent_contrasts.Rmd selects it). The sizes come from species_plot_profile().
 contrast_plot.f <- function(df, palette_values = NULL) {
   stopifnot(all(c("species", taxon_of_interest, trait) %in% names(df)))
   plot_profile <- species_plot_profile(
@@ -333,10 +349,10 @@ contrast_plot.f <- function(df, palette_values = NULL) {
     debug_log("palette_values: %s", paste(palette_values, collapse = ", "))
   }
   
-  # Use the palette if available, otherwise use discrete scales
+  # Without a clade palette the plot falls back to the default discrete scales.
   if (is.null(palette_values) || length(palette_values) == 0) {
     debug_log("Using discrete color scales (no palette available)")
-    palette_values <- NULL  # Ensure it's NULL for consistency
+    palette_values <- NULL  # normalizes an empty palette to NULL
   }
   fill_scale <- if (is.null(palette_values)) {
     ggplot2::scale_fill_discrete()
@@ -351,24 +367,21 @@ contrast_plot.f <- function(df, palette_values = NULL) {
 
   global_median <- df$g_median[1]
 
-  # Create the plot base \u2014 one uniform point layer per species. The
-  # foreground/background partition is not drawn here; 4.Independent_contrasts.Rmd
-  # owns it (PSS for continuous traits, extreme coded levels for ordinal).
+  # One uniform point layer per species.
   p <- ggplot(df, aes(x = value, y = taxa)) +
     ggplot2::scale_y_discrete(limits = rev(ordered_taxa)) +
     ggplot2::geom_point(
       aes(color = taxa), shape = 1, size = contrast_dims$point_size
     )
 
-  # Add color/fill scales with breaks = 0 to hide legends but keep colors
+  # breaks = 0 matches no level, which hides the legends and keeps the colors.
   if (!is.null(palette_values) && length(palette_values) > 0) {
     p <- p +
       ggplot2::scale_fill_manual(values = palette_values, breaks = 0) +
       ggplot2::scale_color_manual(values = palette_values, breaks = 0)
   }
 
-  # Reference lines: global median (independent of any fg/bg partition) and
-  # per-taxa median error bars.
+  # Reference marks: the global median and the per-taxon medians.
   p <- p +
     ggplot2::geom_vline(xintercept = global_median, linetype = "longdash", linewidth = 1.2, color = tableau_10["vermillion"]) +
     ggplot2::stat_summary(fun = median, geom = "errorbar",
@@ -394,7 +407,6 @@ contrast_plot.f <- function(df, palette_values = NULL) {
   p
 }
 
-# 3. CONTRAST PLOTS  ------------------------------------------------------
 plot_ready <- !is.null(stats_df) && nrow(stats_df) > 0
 required_cols <- c("species", taxon_of_interest, trait)
 plot_ready <- plot_ready && all(required_cols %in% names(stats_df))
@@ -402,11 +414,10 @@ plot_ready <- plot_ready && all(required_cols %in% names(stats_df))
 if (!plot_ready) {
   message("Skipping contrast plot: missing or empty trait stats.")
 } else {
-  # Get palette values before calling the function
-  # Direct lookup as a fallback if get_palette_values() returns NULL
+  # get_palette_values() first, then a direct lookup of the clade palette as a fallback.
   palette_for_plot <- get_palette_values()
   if (is.null(palette_for_plot) && exists("color_palette") && nzchar(color_palette)) {
-    # Try direct access from global environment
+    # Global environment, then the calling frame.
     if (exists(color_palette, envir = .GlobalEnv)) {
       palette_for_plot <- get(color_palette, envir = .GlobalEnv)
       debug_log("Retrieved palette '%s' directly from GlobalEnv: length = %d", color_palette, length(palette_for_plot))
@@ -433,7 +444,10 @@ This section generates violin plots to show trait distributions across taxa.
 
 ```{r violin_plot, fig.height=10, fig.width=8, message=FALSE, warning=FALSE, dev='png', dpi=320}
 
-### PLOT FUNCTION --------------------------------------------------------------
+# ── Violin plot ───────────────────────────────────────────────────────────────
+
+# Trait distribution by taxon: a violin per taxon, species as jittered points (outliers
+# filled) and the global median as a vertical line.
 violin_extremes.f <- function(df, trait, taxon_of_interest) {
   stopifnot(all(c("species", taxon_of_interest, trait) %in% names(df)))
   plot_profile <- species_plot_profile(
@@ -460,12 +474,12 @@ violin_extremes.f <- function(df, trait, taxon_of_interest) {
     ggplot2::scale_color_manual(values = dark_palette_values)
   }
 
-  # Ensure species order matches phylogeny
+  # Species in tree order.
   ordered_species <- pruned_tree$tip.label
   df$species <- factor(df$species, levels = ordered_species)
   debug_log("violin_extremes.f ordered_species = %d", length(ordered_species))
   
-  # Define ordered taxa for plotting using global phylogeny order if available
+  # Taxa in tree order: the global ordered_taxa when it exists, else rebuilt from the tree.
   if (!exists("ordered_taxa", inherits = TRUE) || length(ordered_taxa) == 0) {
     ordered_taxa <- unique(pruned_tree$tip.label %>%
       sapply(function(sp) df$taxa[df$species == sp]) %>%
@@ -475,10 +489,8 @@ violin_extremes.f <- function(df, trait, taxon_of_interest) {
     }
   }
   
-  # Calculate median value for reference line
   median_value <- median(df$value, na.rm = TRUE)
   
-  # Create violin plot
   plot <- ggplot2::ggplot(data = df, aes(x = value, y = taxa)) +
     ggplot2::scale_y_discrete(limits = rev(ordered_taxa)) +
     ggplot2::geom_violin(
@@ -539,10 +551,16 @@ if (!plot_ready) {
 This section generates ASR plots to visualize the evolutionary history of the trait across the phylogenetic
 ```{r asr_plot, fig.height=20, fig.width=17, message=FALSE, warning=FALSE, dev='png', dpi=320}
 
-# 4. ASR PLOTS  ------------------------------------------------------
+# ── Ancestral state reconstruction ────────────────────────────────────────────
+
+# Continuous ASR of the trait on the species tree. BM and OU are fitted with geiger and the
+# OU model is kept when it improves AICc by at least 2 and alpha is above 1e-4. Node
+# estimates and their 95% CI (ape::ace) are then used to flag tips that lie outside the CI
+# of their immediate parent ("derived") or of all their ancestors ("cumulatively derived").
+# Returns the node and tip tables, the model and a ggtree plot (element `plot`).
 asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   
-  # --- Trait vector ---
+  # Trait vector, named by species, without missing or non-finite values.
   trait_vec <- df[[trait]]
   names(trait_vec) <- df$species
   trait_vec <- trait_vec[!is.na(trait_vec) & is.finite(trait_vec)]
@@ -551,12 +569,9 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   
 
   tree <- ape::drop.tip(tree, setdiff(tree$tip.label, names(trait_vec)))
-  # ape::drop.tip() can leave a non-NULL/non-zero $root.edge on the pruned tree
-  # even when the source Newick never had one (collapsing the root's remaining
-  # single child folds its branch length in as a root edge) — phytools::contMap()
-  # below refuses to plot a tree carrying one ("the tree is supposed to have no
-  # root edge (or of length 0)"). Strip it right here, before any downstream
-  # fit/rescale/ASR step that might otherwise propagate or depend on it.
+  # ape::drop.tip() can leave a $root.edge on the pruned tree even when the source Newick
+  # had none (when the root keeps a single child, its branch length is folded in as a root
+  # edge). The root edge is removed before the fit, rescaling and ASR steps.
   tree$root.edge <- NULL
   tree <- ape::reorder.phylo(tree, "cladewise")
   Ntip <- length(tree$tip.label)
@@ -565,17 +580,16 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   debug_log("asr_tree.f tree tips after prune = %d, nodes = %d", Ntip, Nnode)
   node_indices <- (Ntip+1):(Ntip+Nnode)
 
-  # Sanitize trait vector to match pruned tree
+  # Trait vector and data frame in the tip order of the pruned tree.
   trait_vec <- trait_vec[tree$tip.label]
 
-  # Also sanitize the data frame
   df <- df[df$species %in% tree$tip.label, ]
   df$species <- factor(df$species, levels = tree$tip.label)
 
   debug_log("asr_tree.f trait_vec after prune = %d", length(trait_vec))
   debug_log("asr_tree.f df after prune = %d", nrow(df))
   
-  # --- Fit BM / OU ---
+  # Fit BM and OU; sigma2 is the rate and alpha the OU pull (0 under BM).
   fit_model <- function(tree, trait, model = c("BM", "OU")) {
     model <- match.arg(model)
     fit <- if (model == "OU") {
@@ -605,7 +619,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   chosen_model <- if (delta_aicc >= 2.0 && !is.null(fit_ou$alpha) && fit_ou$alpha > 1e-4) "OU" else "BM"
   debug_log("asr_tree.f chosen_model = %s", chosen_model)
   
-  # --- Rescale tree & ASR ---
+  # Under OU the tree is rescaled with the fitted alpha before the ASR.
   if (chosen_model == "OU") {
     alpha_hat <- fit_ou$alpha
     debug_log("asr_tree.f alpha_hat = %.4f", alpha_hat)
@@ -617,12 +631,13 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   }
   debug_log("asr_tree.f sigma2_used = %.6f", sigma2_used)
   
-  # Recalculate node_indices for rescaled tree (structure may be same, but let's be safe)
+  # Node indices of the rescaled tree.
   Ntip_rescaled <- length(rescaled_tree$tip.label)
   Nnode_rescaled <- rescaled_tree$Nnode
   node_indices <- (Ntip_rescaled+1):(Ntip_rescaled+Nnode_rescaled)
 
-  # Get point estimates via ACE with fallback to the original tree
+  # ACE (REML, then ML) on the rescaled tree; when both fail, ACE on the original tree
+  # (reported as BM), and finally fastAnc without CIs.
   ace_try <- function(tree_obj) {
     tryCatch(
       ape::ace(x = trait_vec, phy = tree_obj, type = "continuous", method = "REML"),
@@ -668,8 +683,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   tip_est <- trait_vec[rescaled_tree$tip.label]
   debug_log("asr_tree.f node_est = %d, tip_est = %d", length(node_est), length(tip_est))
   
-  # --- Build node and tip tables ---
-  # Use analytical CIs from ace
+  # Node and tip tables. Node CIs are the analytical 95% CIs of ace().
   node_ci <- ace_res$CI95
   node_df <- data.frame(
     node = node_indices,
@@ -678,7 +692,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     ci_upper = as.numeric(node_ci[,2]),
     stringsAsFactors = FALSE
   )
-  # Tips don't have analytical CIs in ace output, use point estimates
+  # Tips carry no CI in the ace output: the observed value is used as both bounds.
   tip_df <- data.frame(
     tip = rescaled_tree$tip.label,
     estimate = as.numeric(tip_est[rescaled_tree$tip.label]),
@@ -693,15 +707,16 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     stringsAsFactors = FALSE
   )
   
-  # --- Derivedness tests: immediate-parent and cumulative-ancestors ---
-  # Build parent map (use rescaled tree dimensions)
+  # Derivedness tests: against the immediate parent and against all ancestors.
+  # parent_map[i] is the parent node of node i (NA for the root).
   parent_map <- integer(Ntip_rescaled + Nnode_rescaled)
   parent_map[] <- NA_integer_
   for (j in seq_len(nrow(rescaled_tree$edge))) {
     parent_map[rescaled_tree$edge[j,2]] <- rescaled_tree$edge[j,1]
   }
   
-  # Test tips for derivedness
+  # A tip is derived when its value lies outside the CI of its parent node
+  # (direction "up" or "down").
   for (i in seq_len(nrow(tip_df))) {
     tip_label <- tip_df$tip[i]
     tip_est_val <- tip_df$estimate[i]
@@ -709,10 +724,8 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     parent_id <- parent_map[tip_idx]
     
     if (!is.na(parent_id)) {
-      # Store parent node ID
       tip_df$parent_node_id[i] <- parent_id
       
-      # Get parent node CI
       if (parent_id <= Ntip_rescaled) {
         parent_row <- tip_df[tip_df$tip == rescaled_tree$tip.label[parent_id], ]
       } else {
@@ -721,7 +734,6 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
       parent_ci_low <- parent_row$ci_lower
       parent_ci_high <- parent_row$ci_upper
       
-      # Immediate-parent derivedness test
       tip_df$immediate_parent[i] <- (tip_est_val > parent_ci_high) || (tip_est_val < parent_ci_low)
       
       if (tip_est_val > parent_ci_high) {
@@ -738,7 +750,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
       }
     }
     
-    # Cumulative derivedness: derived from ALL ancestors
+    # Cumulatively derived: outside the CI of every ancestor node.
     anc_list <- integer(0)
     cur <- tip_idx
     while (!is.na(parent_map[cur])) {
@@ -759,21 +771,10 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     }
   }
   
-  # --- Plot (ggtree) ---
-  # Replaced base-R contMap()+manual tiplabels()/nodelabels()/add.color.bar()
-  # overlay (kept below in git history) with ggtree/ggplot2. That approach needed
-  # ~15 interacting cex/inches clamp() formulas (fsize, line_width, tick_cex,
-  # tip_symbol_offset, segment_length, xlim_right, ...) to all move together
-  # with n_species, but the OUTER canvas size (species_plot_profile()$asr$width/
-  # height) was computed completely independently of them -- growing just the
-  # canvas (the earlier fix for the "too narrow" crash) left fixed-physical-size
-  # content (cex is DPI/pointsize-anchored, not canvas-relative in base R)
-  # occupying a shrinking fraction of a growing canvas: measured 93.7% height
-  # but only 47.7% width filled on a real 155-species production render.
-  # ggplot2's relative/grid-based sizing doesn't have this failure mode --
-  # verified empirically with fixed, simple text/symbol sizes (no per-species
-  # clamp table) at both n=15 and n=180 synthetic trees: 94-99% of the canvas
-  # filled in both cases, vs the old approach's 47% width fill at n~155.
+  # Plot (ggtree). Branches are colored by the node estimate; tips carry the species
+  # name, with the estimate in brackets when the tip is derived from its parent. Text and
+  # symbol sizes shrink slowly with the number of tips, while the canvas size comes from
+  # species_plot_profile()$asr.
   all_vals <- rbind(
     data.frame(node = seq_len(Ntip_rescaled), estimate = as.numeric(tip_est[rescaled_tree$tip.label])),
     data.frame(node = node_df$node, estimate = node_df$estimate)
@@ -788,11 +789,10 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     sprintf("plain(%s)", vapply(tip_meta$tip, deparse, character(1)))
   )
 
-  # Collect parent nodes that have derived tips (same test as before). Folded
-  # into plot_df (below) rather than passed as a separate data= frame to
-  # geom_nodelab() -- ggtree's node/tip geoms expect the SAME tree-attached
-  # data (x/y/isTip from the %<+% join), and a standalone data.frame without
-  # those columns fails inside geom_nodelab()'s internal `!isTip` check.
+  # Parent nodes of derived tips get a label with the estimate and its CI. The labels are
+  # joined into plot_df because geom_nodelab() needs the tree-attached data (x, y and isTip
+  # from the %<+% join); a standalone data frame without those columns fails in its
+  # internal `!isTip` check.
   parent_nodes_with_derived_tips <- unique(tip_df$parent_node_id[tip_df$immediate_parent %in% TRUE & !is.na(tip_df$parent_node_id)])
   node_df$node_label <- ifelse(
     node_df$node %in% parent_nodes_with_derived_tips,
@@ -812,29 +812,22 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
 
   root_est_str <- sprintf("Root: %.2f (%.2f-%.2f)", node_df$estimate[1], node_df$ci_lower[1], node_df$ci_upper[1])
 
-  # Fixed sizes with a light floor-scaled reduction for very large trees,
-  # instead of the old ~15-parameter clamp() table -- ggplot2's own
-  # canvas-relative rendering (driven by species_plot_profile()$asr$width/
-  # height, which DOES still scale with n_species) does most of the
-  # readability work now, so this only needs to keep text from overlapping
-  # vertically as tip count grows.
+  # Text and symbol sizes decrease linearly with the number of tips, down to a floor,
+  # so the labels do not overlap vertically in large trees.
   tip_lab_size   <- max(2.2, 4.5 - 0.008 * Ntip_rescaled)
   symbol_size    <- max(2.5, 5.0 - 0.008 * Ntip_rescaled)
   node_lab_size  <- max(2.0, 4.0 - 0.008 * Ntip_rescaled)
 
   vermillion_col <- as.character(tableau_10["vermillion"])
-  # "green", not "bluish_green" -- the latter is this palette's teal/cyan
-  # shade (a distinct swatch from true green), which read as colorless
-  # against a white tree background for the down-triangle.
+  # "green" rather than "bluish_green": the teal of the latter is hard to see against the
+  # white background in the down-triangle.
   green_col <- as.character(tableau_10["green"])
   blue_col <- as.character(tableau_10["blue"])
 
   gg_base <- ggtree::ggtree(rescaled_tree, layout = "rectangular", color = "black", linewidth = 1.2) %<+% plot_df
   tree_depth <- max(gg_base$data$x, na.rm = TRUE)
-  # %<+% already joined plot_df onto the tree's own per-node x/y -- pull the
-  # tip rows back out so the value/symbol layers below can be positioned by
-  # explicit (x, y) instead of ggtree's tiplab offset/position_nudge (which
-  # only move along the branch axis, away from the tip).
+  # The tip rows of the joined data position the symbol layers at explicit (x, y), because
+  # the tiplab offset and position_nudge only move along the branch axis.
   tip_data <- gg_base$data[gg_base$data$isTip, ]
 
   p <- gg_base +
@@ -851,15 +844,11 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     ) +
     ggtree::geom_tiplab(ggplot2::aes(label = species_annotated), parse = TRUE, size = tip_lab_size, offset = 0.08 * tree_depth, color = "black") +
     ggtree::theme_tree2() +
-    # hexpand(direction=1): pads the x-range beyond the tree's own bounding
-    # box on the label side only. Canvas size (asr_dims$width, fixed inches)
-    # doesn't change, so the same branch lengths now span a smaller fraction
-    # of it -- shrinking the branches' footprint and freeing room on the
-    # right for tip labels/values/symbols that were previously getting
-    # clipped at the panel edge.
+    # hexpand(direction = 1) pads the x-range on the label side only, which frees room on
+    # the right for tip labels, values and symbols that would be clipped at the panel edge.
     ggtree::hexpand(0.28, direction = 1) +
     ggplot2::theme(
-      legend.position = "none",  # re-added below the caption via cowplot
+      legend.position = "none",  # the color bar is added below the caption with cowplot
       plot.margin = ggplot2::margin(10, 60, 10, 10),
       plot.subtitle = ggplot2::element_text(size = 16, color = "black", face = "bold"),
       plot.caption = ggplot2::element_text(size = 13, color = "black", hjust = 0.35),
@@ -872,9 +861,9 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
                         "parent node values shown for derived tips.")
     )
 
-  # Derivation symbols sit along the tip row (y = tip y) shifted to the right of the tip.
-  # Up/down triangle sits at first offset; cumulative-derived square sits next to it
-  # (second offset if a triangle is also present, first offset otherwise).
+  # Derivation symbols sit on the tip row, to the right of the tip: the up/down triangle at
+  # the first offset and the cumulative-derived square at the second offset when a triangle
+  # is also present, at the first offset otherwise.
   sym_offset1 <- 0.025 * tree_depth
   sym_offset2 <- 0.052 * tree_depth
   has_tri <- tip_data$is_up | tip_data$is_down
@@ -900,11 +889,8 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
                                    size = node_lab_size, fontface = "bold", hjust = -0.1, color = "black")
   }
 
-  # Legend (the ASR trait-estimate colour bar) is pulled from p with
-  # legend.position="bottom" set above, then stacked below the WHOLE panel
-  # (which already carries the caption at its own bottom) via cowplot --
-  # ggplot2's native legend.position="bottom" sandwiches the legend between
-  # the panel and the caption instead, which is not what was asked for here.
+  # The color bar is extracted from the plot and stacked below the whole panel, caption
+  # included; ggplot2's own bottom legend would sit between the panel and the caption.
   legend_grob <- cowplot::get_legend(
     p + ggplot2::theme(
       legend.position = "bottom",
@@ -914,7 +900,6 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   )
   p <- cowplot::plot_grid(p, legend_grob, ncol = 1, rel_heights = c(1, 0.06))
 
-  # --- Return ---
   list(
     chosen_model=chosen_model,
     node_table=node_df,
@@ -937,15 +922,9 @@ if (!plot_ready) {
     n_taxa = dplyr::n_distinct(stats_df[[taxon_of_interest]])
   )$asr
   knitr::opts_current$set(fig.width = asr_dims$width, fig.height = asr_dims$height)
-  # Single invocation (was called twice — once into a standalone png() device
-  # to save the file, once again from scratch to render into the doc — doubling
-  # the phylolm/ACE/contMap cost). asr_tree.f() plots via base-graphics side
-  # effects (contMap()/plot()), so knitr's own recording device already
-  # captures it here; dev.copy() duplicates that same render to the PNG file
-  # below without re-running the fit. A failure previously went to message(),
-  # which this chunk's message=FALSE silently swallows -- leaving a blank
-  # section with no plot and no visible reason why. It's now drawn as an
-  # in-report placeholder instead, so the section is never silently empty.
+  # One call renders and saves the plot, so the fit runs once. A failure is drawn as a
+  # placeholder in the report, because message() is suppressed by message=FALSE and the
+  # section would otherwise be empty with no visible reason.
   asr_result <- tryCatch(
     asr_tree.f(stats_df, pruned_tree, trait, taxon_of_interest),
     error = function(e) {
@@ -954,12 +933,9 @@ if (!plot_ready) {
       NULL
     }
   )
-  # asr_tree.f() now returns a ggplot object rather than plotting via base-R
-  # side effects, so it needs an explicit print() here for knitr's HTML capture
-  # (same role the old base-R device-recording played automatically). Always
-  # persist whatever succeeded (real tree, or the failure placeholder from the
-  # tryCatch above stays on the base-R device already) so the ASR_trees output
-  # folder never ends up silently empty when this fails on production data.
+  # asr_tree.f() returns a ggplot object, which is printed explicitly for the HTML output.
+  # The PNG is written in both cases: the ggplot on success, a copy of the placeholder
+  # device on failure, so the ASR_trees folder is never empty.
   if (!is.null(asr_result) && !is.null(asr_result$plot)) {
     print(asr_result$plot)
     tryCatch(
@@ -986,9 +962,10 @@ This section creates a fan-shaped phylogenetic tree.
 
 ```{r visual_distribution, fig.height=15, fig.width=15, dev="png", dpi=320, message=FALSE, warning=FALSE}
 
-# 5. PHYLOGENETIC DISTRIBUTION PLOT  ------------------------------------------------------
+# ── Fan tree and trait rings ──────────────────────────────────────────────────
+
 palette_values <- get_palette_values()
-# Fallback: try to get palette directly from GlobalEnv if NULL
+# Fallback: the clade palette from the global environment.
 if (is.null(palette_values) && exists("color_palette") && nzchar(color_palette)) {
   if (exists(color_palette, envir = .GlobalEnv)) {
     palette_values <- get(color_palette, envir = .GlobalEnv)
@@ -1006,7 +983,7 @@ color_scale <- if (is.null(palette_values)) {
   ggplot2::scale_color_manual(values = palette_values)
 }
 
-# Create base phylogenetic tree in fan layout
+# Fan layout, saved as a bare tree first.
 tree_profile_base <- species_plot_profile(
   n_species = length(visualization_tree$tip.label),
   n_taxa = dplyr::n_distinct(stats_df[[taxon_of_interest]]),
@@ -1042,16 +1019,14 @@ trait_axis_text_size <- as.numeric(tree_profile$axis_text_size)
 secondary_axis_text_size <- as.numeric(tree_profile$axis_text_size * 0.8)
 knitr::opts_current$set(fig.width = tree_profile$width, fig.height = tree_profile$height)
 
-# Prepare trait data for tree visualization
+# One row per species with the summed trait (and N, p or secondary trait when present);
+# species without a value are drawn with zero height and an asterisk.
 tree_trait_data <- tree_plot_trait_df %>%
   group_by(species, taxa)
 
-# Is there a branch color trait specified?
-# Ancestral state reconstruction of the branch trait is delegated to
-# branch_trait_node_values(), which tolerates duplicated species rows and the
-# partial coverage a secondary trait normally has (see src/plotting_fun.R).
-# This plot keeps the un-pruned visualization tree, so coverage is usually
-# thinner here than in the phenotype report.
+# Branch color trait: its ancestral states come from branch_trait_node_values()
+# (plotting_fun.R), which tolerates duplicated species rows and partial coverage. When it
+# returns NULL the branches are drawn plain.
 if (isTRUE(has.branch)) {
   combined_br_data <- branch_trait_node_values(
     circular_tree,
@@ -1064,7 +1039,7 @@ if (isTRUE(has.branch)) {
   }
 }
   
-if (isTRUE(has.n) && isTRUE(has.secondary)) { # Now for both has.n and has.secondary TRUE
+if (isTRUE(has.n) && isTRUE(has.secondary)) { # N and secondary trait
   tree_trait_data <- tree_trait_data %>%
     dplyr::rename(secondary_value = .data[[secondary_trait]]) %>%
     summarize(
@@ -1084,7 +1059,7 @@ if (isTRUE(has.n) && isTRUE(has.secondary)) { # Now for both has.n and has.secon
       p_sum = sum(p, na.rm = TRUE),
       .groups = "drop") %>%
     ungroup()
-} else if (isTRUE(has.secondary)) { # If has.secondary are TRUE, we would need to adjust accordingly.
+} else if (isTRUE(has.secondary)) { # secondary trait only
   tree_trait_data <- tree_trait_data %>%
     dplyr::rename(secondary_value = .data[[secondary_trait]]) %>%
     summarize(
@@ -1094,7 +1069,7 @@ if (isTRUE(has.n) && isTRUE(has.secondary)) { # Now for both has.n and has.secon
       secondary_is_na = all(is.na(secondary_value)),
       .groups = "drop") %>%
     ungroup()
-} else { # If neither is TRUE  
+} else { # neither N nor secondary trait
   tree_trait_data <- tree_trait_data %>%
     summarize(
       trait_sum = sum(value, na.rm = TRUE),
@@ -1122,26 +1097,24 @@ if (isTRUE(has.secondary)) {
 primary_ring_limits <- compute_ring_axis_limits(tree_trait_data$trait_sum_plot, min_limit = 1)
 secondary_ring_limits <- if (isTRUE(has.secondary)) compute_ring_axis_limits(tree_trait_data$secondary_sum_plot, min_limit = 1) else c(0, 1)
 
-# Convert tree to tibble and join with trait data
+# Tree as a tibble joined with the trait data.
 tree_tibble <- tidytree::as_tibble(circular_tree) %>%
   dplyr::rename(species = label)
 
 tree_with_traits <- full_join(tree_tibble, tree_trait_data, by = 'species')
 
-# Again, if branch color trait is present, join that data as well
+# Node values of the branch trait.
 if (isTRUE(has.branch)) {
   tree_with_traits <- full_join(tree_with_traits, combined_br_data, by = 'node')
 }
 
-# print(tree_with_traits)
-
-# Export dataframe for debug
+# Debug export of the joined table.
 write.csv(tree_with_traits, file.path(phylo_distribution_dir, "tree_with_traits.csv"), row.names = FALSE)
 
-# Convert to treedata object for ggtree
+# treedata object for ggtree.
 tree_data_object <- tidytree::as.treedata(tree_with_traits)
 
-# Create diagnostic plot showing node numbers and family colors
+# Diagnostic tree with node numbers, colored by taxon.
 diagnostic_tree <- ggtree(tree_data_object,
                           layout = "fan",
                           open.angle = 15,
@@ -1150,15 +1123,11 @@ diagnostic_tree <- ggtree(tree_data_object,
   aes(color = taxa) +
   color_scale
 
-# diagnostic_tree
-
-# Save diagnostic tree
 ggsave(file.path(phylo_distribution_dir, "diagnostic_tree.png"), diagnostic_tree, device = "png", width = tree_profile$diagnostic_size, height = tree_profile$diagnostic_size, dpi = "retina")
 
-# If branch color trait is present, add it to the tree plot
+# Base tree, with the branch trait (column BR) as a color gradient when present.
 if (isTRUE(has.branch)) {
   capitalized_branch_trait <- tools::toTitleCase(gsub("_", " ", branch_trait))
-  # Create base tree with BR gradient
   tree_plot_step1 <- ggtree(tree_data_object, aes(color = BR),
                                   layout="fan",
                                   open.angle=15, 
@@ -1166,10 +1135,9 @@ if (isTRUE(has.branch)) {
     scale_color_gradient(
       name = capitalized_branch_trait,
       low = "#F4EBD0", high = "#2B2D42",
-      # Branches subtending too few covered species carry no reconstruction;
-      # grey them out rather than letting them inherit an endpoint colour.
+      # Branches that subtend too few covered species have no reconstruction and are grey.
       na.value = "grey70",
-                        guide = guide_colorbar(order = 3)) +  # BR last
+                        guide = guide_colorbar(order = 3)) +  # legend order: branch trait last
     new_scale_color()
 } else {
   tree_plot_step1 <- ggtree(tree_data_object,
@@ -1179,14 +1147,14 @@ if (isTRUE(has.branch)) {
 }  
 
   tree_plot_step1 <- tree_plot_step1 +
-  # Trait bars
+  # Ring of trait bars
   geom_fruit(
     geom = geom_col,
     mapping = aes(y = species, x = trait_sum_plot, fill = trait_fill, width = 0.5),
-    alpha = 0.5,  # Set transparency for lighter appearance
+    alpha = 0.5,
     show.legend = TRUE,
     pwidth = tree_profile$fruit_pwidth,
-    color = "black",  # Add black contour
+    color = "black",
     size = 0.7,
     axis.params = list(
       axis = 'x',
@@ -1202,13 +1170,13 @@ if (isTRUE(has.branch)) {
   scale_fill_gradient2(
     name = capitalized_trait, 
     low = "white", 
-    high = tableau_10["blue"],  # Different gradient color for distinction
+    high = tableau_10["blue"],
     guide = guide_colorbar(order = 1),
     aesthetics = "fill"
   ) +
   new_scale_fill()
 
-  # If secondary trait is present, add secondary trait bars
+# Second ring for the secondary trait.
 if (isTRUE(has.secondary)) {
   capitalized_secondary_trait <- tools::toTitleCase(gsub("_", " ", secondary_trait))
 
@@ -1217,10 +1185,10 @@ if (isTRUE(has.secondary)) {
       geom = geom_col,
       offset = -tree_profile$fruit_pwidth,
       mapping = aes(y = species, x = secondary_sum_plot, fill = secondary_fill, width = 0.5),
-      alpha = 0.5,  # Set transparency for lighter appearance
+      alpha = 0.5,
       show.legend = TRUE,
       pwidth = tree_profile$fruit_pwidth,
-      color = "black",  # Add black contour
+      color = "black",
       size = 0.7,
       axis.params = list(
         axis = 'x',
@@ -1236,25 +1204,18 @@ if (isTRUE(has.secondary)) {
     scale_fill_gradient2(
       name = capitalized_secondary_trait, 
       low = "white", 
-      high = tableau_10["vermillion"],  # Different gradient color for distinction
+      high = tableau_10["vermillion"],
       guide = guide_colorbar(order = 2),
       aesthetics = "fill"
     ) +
     new_scale_fill()
 }
 
-# tree_plot_step1
-
-# geom_fruit sizes the trait-bar ring(s) to `fruit_pwidth` and scales bar
-# height against `axis.params$limits`, but a bar can still render past that
-# nominal band (an outlier value, the axis tick-label text itself under
-# text.angle=270, ...) -- randomly, dataset to dataset, since it depends on
-# where the actual data sits relative to the declared limits. Rather than
-# guess a fixed safety margin (which is exactly what the `+ 0.10` below used
-# to be: tuned to one dataset, wrong for the next), measure where the ring
-# stack really ends, the same way fan_label_offsets() already does for the
-# family-label ring, and only add whatever the taxa ring's nominal offset
-# doesn't already cover.
+# geom_fruit sizes the trait rings to `fruit_pwidth` and scales the bars against
+# `axis.params$limits`, but a bar can still extend past that band (an outlier value, the
+# axis tick labels), depending on where the data sit relative to the limits. Instead of a
+# fixed margin, the end of the ring stack is measured with fan_label_offsets() (as for the
+# label ring), and only the part not covered by the nominal offset of the taxa ring is added.
 trait_ring_measure <- fan_label_offsets(tree_plot_step1, labels = character(), ring_gap = 0, image_gap = 0)
 trait_ring_span_fraction <- if (trait_ring_measure$tip_radius > 0) {
   (trait_ring_measure$outer_radius - trait_ring_measure$tip_radius) / trait_ring_measure$tip_radius
@@ -1264,7 +1225,7 @@ trait_ring_span_fraction <- if (trait_ring_measure$tip_radius > 0) {
 taxa_bar_offset_effective <- tree_profile$taxa_bar_offset +
   max(0, trait_ring_span_fraction - tree_profile$fruit_pwidth)
 
-# Add taxa membership indicator bars
+# Ring that marks the taxon of each species.
 tree_plot_step2 <- tree_plot_step1 +
   geom_fruit(geom = geom_col,
              mapping = aes(y = species, x = 1, fill = taxa),
@@ -1284,9 +1245,7 @@ tree_plot_step2 <- tree_plot_step2 +
         plot.subtitle = element_text(size = 15, margin = margin(t = 0, r = 0, b = -1.5, l = 0, unit = "cm"))
   )
 
-# tree_plot_step2
-
-# Add n labels (if applicable)
+# Sample size (N) labels, when available.
 if(isTRUE(has.n)){
   tree_plot_step3 <- tree_plot_step2 +
     geom_text(aes(label = n_sum), nudge_x = tree_profile$n_label_nudge, fontface = "bold", size = tree_profile$n_label_size, vjust = 0.5)
@@ -1294,7 +1253,7 @@ if(isTRUE(has.n)){
   tree_plot_step3 <- tree_plot_step2
 }
 
-# Add asterisks for nulled traits
+# Asterisks mark species whose trait value is missing (blanked or absent).
 tree_plot_step3 <- tree_plot_step3 +
   geom_text(aes(label = trait_asterisk),
             nudge_x = tree_profile$asterisk_nudge, nudge_y = tree_profile$asterisk_y,
@@ -1313,28 +1272,26 @@ if (isTRUE(has.secondary)) {
               vjust = 0.5)
 }
 
-# tree_plot_step3
-
 dyn_height <- tree_profile$height
 dyn_width <- tree_profile$width
 
 ```
 ```{r visual_distribution_final, fig.height=dyn_height, fig.width=dyn_width, dev="png", dpi=320, message=FALSE, warning=FALSE}
 
-# Finalize tree with taxon labels and phylopic images
-# Build taxon to tip mapping
+# ── Taxon labels and silhouettes ──────────────────────────────────────────────
+
+# Most recent common ancestor node of each taxon.
 tip_df <- find_taxon_mrca(circular_tree, tree_with_traits)
 
-# Get phylopic data
+# One phylopic silhouette (rphylopic UUID) per taxon name.
 tip_df <- tip_df %>%
-  rowwise() %>%  # Apply function row by row
+  rowwise() %>%
   mutate(phylopic_UUID = rphylopic::get_uuid(name = taxa, n = 1))
 
-# Save for debug
+# Debug export.
 write.csv(tip_df, file.path(phylo_distribution_dir, "taxon_node_mapping.csv"), row.names = FALSE)
 
-# Place the label rings relative to where the fruit rings actually ended up,
-# rather than at a fixed distance that only suits one tree (see plotting_fun.R).
+# The label rings are placed relative to where the fruit rings end (see plotting_fun.R).
 label_offsets <- fan_label_offsets(
   tree_plot_step3,
   labels = tip_df$taxa,
@@ -1345,7 +1302,7 @@ label_offsets <- fan_label_offsets(
   image_size = tree_profile$image_size
 )
 
-# Add family labels and phylopic images
+# Silhouettes at the MRCA of each taxon, then the taxon names.
 final_tree_plot <- tree_plot_step3 +
   geom_cladelab(data = tip_df,
                 mapping = aes(
@@ -1380,9 +1337,8 @@ final_tree_plot <- final_tree_plot +
   theme(panel.background = element_rect(fill = "transparent", colour = NA),  
         plot.background = element_rect(fill = "transparent", colour = NA),
         legend.position = "right",
-        # Key size and spacing are absolute lengths, so they have to grow with
-        # the canvas alongside the legend text -- a fixed 1cm key on the 30in
-        # canvas of a large tree is what made the legend unreadable.
+        # Key size and spacing are absolute lengths, so they scale with the canvas
+        # together with the legend text.
         legend.spacing.y = unit(tree_profile$legend_spacing_cm, 'cm'),
         legend.title = element_text(
           size = tree_profile$legend_title_size, face = "bold",
@@ -1392,13 +1348,13 @@ final_tree_plot <- final_tree_plot +
         plot.title = element_text(size = 17, margin = margin(t = 0, r = 0, b = -1.25, l = 0, unit = "cm")),
         plot.subtitle = element_text(size = 15, margin = margin(t = 0, r = 0, b = -1.5, l = 0, unit = "cm"))
   ) +
-            # Add caption for asterisks
+  # Caption for the asterisks.
   labs(caption = "\"*\" indicates that species was removed for this trait as part of the data pruning process\n(following color conventions)") +
   theme(plot.caption = element_text(size = tree_profile$caption_size, hjust = 0, face = "italic", margin = margin(b = 10)))
 
 final_tree_plot
 
-# Save progressive tree plots
+# One PNG per construction step of the tree.
 ggsave(file.path(phylo_distribution_dir, "tree_with_trait_bars.png"), tree_plot_step1, device = "png", width = dyn_width, height = dyn_height, dpi = "retina")
 ggsave(file.path(phylo_distribution_dir, "tree_with_taxa_bars.png"), tree_plot_step2, device = "png", width = dyn_width, height = dyn_height, dpi = "retina")
 if(isTRUE(has.n)){

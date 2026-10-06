@@ -65,6 +65,9 @@ params:
   }
 </style>
 
+<!-- 3.CI-composition.Rmd — Jeffreys intervals, pair scores and the candidate foreground/background pool. -->
+<!-- PhyloPhere | subworkflows/TRAIT_ANALYSIS/local/ -->
+
 ```{r header}
 
 #  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
@@ -80,7 +83,7 @@ params:
 ### Github: https://github.com/nozerorma/caastools/nf-phylophere
 ### Author: Miguel Ramon (miguel.ramon@upf.edu)
 
-#### File: CI-composition.Rmd
+#### File: 3.CI-composition.Rmd
 
 ```
 
@@ -105,13 +108,13 @@ if (exists("params")) {
 source("./src/commons.R")
 setup_rmd()
 
-# Vendored phyloq PSS engine (Fabio Barteri) — staged into src/ by ct_ci.nf.
+# PSS engine (Fabio Barteri's phyloq, vendored); ct_ci.nf copies it into src/.
 source("./src/pss_core.R")
 
-# pss_top_pct and perm_strategy are set by commons.R from params
+# commons.R sets pss_top_pct and perm_strategy from params.
 debug_log("pss_top_pct = %.4f, perm_strategy = %s", pss_top_pct, perm_strategy)
 
-# Debug helper (prints into HTML output)
+# Fallback logger, used only when commons.R has not defined debug_log().
 if (is.null(getOption("phylo_debug"))) {
   options(phylo_debug = TRUE)
 }
@@ -126,7 +129,8 @@ if (!exists("debug_log", inherits = TRUE)) {
   }
 }
 
-# Load additional libraries
+# ── Dependencies ──────────────────────────────────────────────────────────────
+
 library(dplyr)
 library(tidyr)
 library(tibble)
@@ -134,12 +138,15 @@ library(ggplot2)
 library(patchwork)
 library(paletteer)
 
-color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
-capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name
-capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and deconvoluted trait name
-capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name)) # Capitalized and deconvoluted clade name
 
-# Define color palettes, including a colorblind-friendly palette for categories
+# ── Labels, palettes and output directory ─────────────────────────────────────
+
+color_palette <- paste0(clade_name, "_palette") # name of the clade palette defined in palettes.R
+capitalized_taxon <- tools::toTitleCase(taxon_of_interest)
+capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # underscores shown as spaces
+capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name))
+
+# Tableau 10 under colorblind-safe names.
 tableau_10 <- paletteer_d("ggthemes::Tableau_10")
 names(tableau_10) <- c(
   "blue", "orange", "vermillion", "bluish_green",
@@ -156,21 +163,25 @@ createDir(ci_dir)
 When population count columns (`n_trait` / `c_trait`) are present, 95% Jeffreys credibility intervals are computed. For continuous traits, candidate divergence is evaluated analytically using the Phylogenetic Shift Score (PSS) under the best-fitting evolutionary model (OU / BM).
 
 ```{r compute_CI, message=FALSE, warning=FALSE}
-# Determine which analysis path to follow
+# ── Trait categories and intervals ────────────────────────────────────────────
+
+# Three paths: count data (Jeffreys intervals), ordinal coded levels, or a continuous trait.
+# `category` is top / bottom / intermediate in all of them.
 use_count_data <- has.n && has.c
-# Ordinal fg/bg-coded trait (2-5 integer levels, or trait_type=ordinal): the
-# extremes are the coded levels themselves, no PSS / OU modelling.
+# Ordinal trait (2 to 5 integer levels, or trait_type = ordinal): the extremes are the
+# coded levels themselves.
 is_ordinal <- !use_count_data &&
   exists("is_ordinal_trait", inherits = TRUE) &&
   is_ordinal_trait(trait_df[[trait]], if (exists("trait_type", inherits = TRUE)) trait_type else "auto")
 debug_log("use_count_data = %s, is_ordinal = %s", use_count_data, is_ordinal)
 
 if (use_count_data) {
-  # ---- Jeffreys CI path ----
+  # Count path: 95% credible interval of the proportion n_cases / n_population (Jeffreys
+  # prior, Beta(0.5, 0.5)); top and bottom are the species above and below the median.
   debug_log("compute_CI: Jeffreys CI method (n_trait = %s, c_trait = %s)", n_trait, c_trait)
   library(binom)
 
-  # Safe wrapper for binom.confint to handle NA or invalid values
+  # One bound of the interval (column 5 lower, 6 upper of binom.confint), NA for invalid counts.
   safe_binom_bound <- function(k, n, bound_col) {
     if (is.na(k) || is.na(n) || n <= 0 || k < 0 || k > n) {
       return(NA_real_)
@@ -191,7 +202,6 @@ if (use_count_data) {
                   n_cases      = .data[[c_trait]],
                   trait        = .data[[trait]]) %>%
     dplyr::mutate(
-      # Jeffreys beta method CIs
       trait_ci_lb = safe_binom_bound(n_cases, n_population, 5),
       trait_ci_ub = safe_binom_bound(n_cases, n_population, 6),
       trait_ci = ifelse(is.na(trait_ci_lb) | is.na(trait_ci_ub),
@@ -208,7 +218,7 @@ if (use_count_data) {
   cat("Jeffreys Bayesian 95% Credible Intervals computed for count data.\n")
 
 } else if (is_ordinal) {
-  # ---- Ordinal fg/bg-coded trait path ----
+  # Ordinal path: the highest coded level is top, the lowest is bottom, the rest intermediate.
   debug_log("compute_CI: Ordinal trait mode (coded levels)")
   .levels <- sort(unique(stats::na.omit(trait_df[[trait]])))
   .lo_lvl <- .levels[1]
@@ -233,7 +243,8 @@ if (use_count_data) {
   cat("Ordinal trait mode: foreground = highest coded level, background = lowest; middle levels are intermediate (excluded from contrasts).\n")
 
 } else {
-  # ---- Continuous trait path ----
+  # Continuous path: the median splits top from bottom; the candidate pairs come from the
+  # PSS gate below.
   debug_log("compute_CI: Continuous trait mode (PSS top pct = %.4f)", pss_top_pct)
   g_med <- median(trait_df[[trait]], na.rm = TRUE)
 
@@ -255,11 +266,9 @@ if (use_count_data) {
   cat("Continuous trait mode: candidate pairs are selected via continuous Phylogenetic Shift Score (PSS) under the best-fitting evolutionary model.\n")
 }
 
-# Save results
 write.csv(trait_ci, file.path(ci_dir, "trait_CI.csv"),
           quote = FALSE, row.names = FALSE)
 
-# Display preview
 head(trait_ci)
 ```
 
@@ -270,7 +279,9 @@ This section prepares data for comparing trait values between all pairs of speci
 A pair is an eligible contrast candidate when it passes the trait-type non-overlap test: **count** — Jeffreys credible intervals that do not overlap; **ordinal** — one species at the top coded level, the other at the bottom; **continuous** — the top `pss_top_pct` of hi>lo pairs by Phylogenetic Shift Score (PSS) under the AIC-selected OU/BM model (continuous has no other significance test). For every trait type the PSS is computed and used to **rank** the eligible candidates for the independent-contrast selection in the next report.
 
 ```{r prep_CI, paged.print=TRUE, message=FALSE, warning=FALSE}
-# Helper function to create pairwise comparisons
+# Table of all ordered species pairs (species1, species2) with the trait values, the
+# categories, the intervals, the PSS score and `trait_overlap`. A pair with
+# trait_overlap == FALSE is a candidate contrast: species1 has the higher trait value.
 create_pairwise_data <- function(ci_data) {
   ci_subset <- ci_data %>%
     dplyr::select(species, n_population, n_cases, trait,
@@ -280,15 +291,12 @@ create_pairwise_data <- function(ci_data) {
                        pss_score = numeric(), S_score = numeric(), stringsAsFactors = FALSE)
   pss_top_pairs <- character(0)
 
-  # Analytical Phylogenetic Shift Score — Fabio Barteri's phyloq engine, vendored
-  # verbatim in src/pss_core.R (fit BM + OU, validate, select by AIC: OU iff
-  # AIC_OU + 2 < AIC_BM else BM; score every species pair as
-  # S * normDelta / normPatristic). Runs for every trait type. It provides:
-  #   * pss_score     — per-pair divergence signal used to RANK candidates
-  #   * pss_top_pairs — top `pss_top_pct` slice, a candidate GATE on top of the
-  #                     trait-type non-overlap test below.
-  # If the fit fails, both stay empty and selection falls back to the type gate
-  # + patristic-distance ranking.
+  # Phylogenetic Shift Score (PSS), computed for every trait type with the engine of
+  # src/pss_core.R (fit BM and OU, select by AIC: OU if AIC_OU + 2 < AIC_BM, else BM;
+  # score every species pair as S * normDelta / normPatristic). pss_score is the pair
+  # divergence signal that ranks the candidates; for a continuous trait the top
+  # `pss_top_pct` of pairs is also a gate (below). When the fit fails, no score is
+  # stored and the selection falls back to the type gate and patristic-distance ranking.
   .force <- if (exists("perm_strategy", inherits = TRUE) &&
                 tolower(perm_strategy) %in% c("bm", "ou")) toupper(perm_strategy) else NULL
   .pct   <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.05
@@ -321,12 +329,11 @@ create_pairwise_data <- function(ci_data) {
   }
   have_pss <- nrow(pss_df) > 0
 
-  # Generate all pairwise species combinations
+  # All ordered species pairs, with the data of each member.
   pairwise <- expand.grid(species1 = ci_subset$species,
                           species2 = ci_subset$species,
                           stringsAsFactors = FALSE)
 
-  # Merge species data for each pair
   pairwise <- pairwise %>%
     left_join(ci_subset %>% rename_with(~paste0(.x, "1"), .cols = -species),
               by = c("species1" = "species")) %>%
@@ -342,15 +349,14 @@ create_pairwise_data <- function(ci_data) {
   }
 
   # Candidate eligibility (trait_overlap == FALSE):
-  #   count   -> Jeffreys CIs do not overlap. That IS the gate; PSS only ranks
-  #              the survivors (see 4.Independent_contrasts.Rmd).
-  #   ordinal -> one species top coded level, the other bottom. Gate as above.
-  #   continuous -> no separate significance test exists, so the top `pss_top_pct`
-  #                 of hi>lo pairs by PSS is the gate. Set pss_top_pct outside
-  #                 (0,1) (e.g. 1) to DISABLE the gate: keep every hi>lo pair and
-  #                 let PSS rank only, exactly like the ordinal/count paths.
-  # If the PSS fit failed for a continuous trait, fall back to keeping every
-  # hi>lo pair (patristic-distance ranking then takes over).
+  #   count      -> the Jeffreys intervals do not overlap. This is the gate; PSS only
+  #                 ranks the survivors (4.Independent_contrasts.Rmd).
+  #   ordinal    -> one species at the top coded level, the other at the bottom.
+  #   continuous -> there is no separate significance test, so the top `pss_top_pct`
+  #                 of the hi>lo pairs by PSS is the gate. A pss_top_pct outside (0, 1)
+  #                 disables it: every hi>lo pair is kept and PSS only ranks.
+  # When the PSS fit failed for a continuous trait, every hi>lo pair is kept and the
+  # patristic-distance ranking takes over.
   pairwise <- pairwise %>%
     mutate(
       trait_diff = trait1 - trait2,
@@ -391,11 +397,10 @@ create_pairwise_data <- function(ci_data) {
   return(pairwise)
 }
 
-# Create pairwise data
 pairwise_data <- create_pairwise_data(trait_ci)
 
-# Keep full pairwise_data for downstream contrast selection files,
-# but generate a visualization-only copy that removes rows involving NA trait values.
+# pairwise_data is written whole (pairwise_data.csv, read by 4.Independent_contrasts.Rmd);
+# the plots use a copy without the rows that have NA trait values.
 pairwise_data_viz <- pairwise_data %>%
   dplyr::filter(!is.na(trait1), !is.na(trait2), !is.na(diff_value), !is.na(overlap_use))
 
@@ -424,18 +429,16 @@ if (!has_heatmap_extremes) {
   }
 }
 
-# Save results
 write.csv(pairwise_data, file.path(ci_dir, "pairwise_data.csv"),
           quote = FALSE, row.names = FALSE)
 
-# --- Candidate foreground / background species for FADE (pre-Dunn) ----------
-# Union of the members of every non-overlapping candidate pair, taken BEFORE the
-# phylogenetic-independence (Dunn) compositing done in 4.Independent_contrasts.Rmd.
-# FADE tests directional selection on foreground branches and does not require
-# the contrast pairs to be mutually independent, so it uses the full candidate
-# pool rather than the Dunn-thinned canonical set. Written in traitfile format
-# (species <TAB> contrast_group <TAB> pair) so EXTRACT_EXTREME_SPECIES consumes
-# it exactly like a real traitfile.
+# ── Candidate species for FADE ────────────────────────────────────────────────
+
+# Union of the members of every candidate pair, taken before the independence selection
+# (modified Dunn index) of 4.Independent_contrasts.Rmd. FADE tests selection on the
+# foreground branches and does not need mutually independent pairs, so it uses this full
+# pool. Written without header as species<TAB>contrast_group<TAB>pair (1 = top, 0 = bottom;
+# `pair` is a running index), the format that EXTRACT_EXTREME_SPECIES in SELECTION_PREP reads.
 .nonoverlap  <- pairwise_data %>%
   dplyr::filter(trait_overlap == FALSE, !is.na(species1), !is.na(species2))
 .cand_species <- unique(c(.nonoverlap$species1, .nonoverlap$species2))
@@ -456,7 +459,6 @@ write.table(candidate_species, file.path(ci_dir, "candidate_species.tab"),
 debug_log("candidate_species: %d foreground, %d background (pre-Dunn pool)",
           length(.fg_species), length(.bg_species))
 
-# Display preview
 head(pairwise_data)
 ```
 
@@ -465,7 +467,7 @@ head(pairwise_data)
 This section transforms pairwise data into matrix format for visualization.
 
 ```{r diff_matrix, paged.print=TRUE, message=FALSE, warning=FALSE}
-# Helper function to build difference matrix
+# Wide matrix of the trait differences (rows species1, columns species2).
 build_diff_matrix <- function(pairwise_data_input) {
   pairwise_data_input %>%
     select(species1, species2, diff_value) %>%
@@ -474,11 +476,10 @@ build_diff_matrix <- function(pairwise_data_input) {
     as.matrix()
 }
 
-# Create matrices
+# All species, and top/bottom species only when both classes are present.
 matrix <- build_diff_matrix(pairwise_data_viz)
 matrix_extreme <- if (has_heatmap_extremes) build_diff_matrix(pairwise_data_viz_extreme) else NULL
 
-# Save matrices
 write.csv(matrix, file.path(ci_dir, "diff_matrix-CI.csv"), 
           quote = FALSE, row.names = TRUE)
 if (!is.null(matrix_extreme)) {
@@ -486,7 +487,6 @@ if (!is.null(matrix_extreme)) {
             quote = FALSE, row.names = TRUE)
 }
 
-# Display preview
 head(matrix)
 ```
 
@@ -495,7 +495,7 @@ head(matrix)
 This section creates heatmaps to visualize pairwise differences in prevalence. Species labels are colored based on prevalence quantiles.
 
 ```{r plot_CI, fig.height=12, fig.width=15, message=FALSE, warning=FALSE, dev="ragg_png", dpi=320}
-# Build plain-text species labels and explicit categories for a version-stable heatmap.
+# Plain-text species labels (underscores shown as spaces) with their trait and category.
 create_species_labels <- function(trait_data) {
   trait_data %>%
     distinct(species, trait, category) %>%
@@ -505,6 +505,8 @@ create_species_labels <- function(trait_data) {
     arrange(species)
 }
 
+# Canvas size, font sizes and margins of the heatmap by number of species; cell values
+# are printed up to 28 species.
 heatmap_layout_profile <- function(n_species) {
   if (n_species <= 10) {
     width <- clamp_value(9.5 + 0.55 * n_species, 12, 16)
@@ -552,7 +554,8 @@ heatmap_layout_profile <- function(n_species) {
   )
 }
 
-# Helper function to create heatmap
+# Heatmap of the absolute pairwise differences; with `highlight_nonoverlap` the candidate
+# pairs (overlap_use == FALSE) get a bold border.
 create_heatmap <- function(pairwise_data, species_labels, 
                           highlight_nonoverlap = TRUE) {
   if (!all(c("species", "label_text") %in% names(species_labels))) {
@@ -614,7 +617,6 @@ create_heatmap <- function(pairwise_data, species_labels,
     p <- p + geom_text(aes(label = sprintf("%.2f", abs(diff_value))), size = heatmap_dims$cell_label_size)
   }
   
-  # Add bold border for non-overlapping CIs if requested
   if (highlight_nonoverlap) {
     p <- p + 
       geom_tile(data = filter(pairwise_plot, !overlap_use), 
@@ -638,14 +640,12 @@ create_heatmap <- function(pairwise_data, species_labels,
 }
 
 if (has_heatmap_extremes) {
-  # Create plain-text species labels directly from extreme trait data.
   species_labels <- create_species_labels(trait_ci_extreme)
 
-  # Save label metadata for debugging and downstream inspection.
+  # Label table, kept for inspection.
   write.csv(species_labels, file.path(ci_dir, "my_labels_colored.csv"), 
             quote = FALSE, row.names = FALSE)
 
-  # Create heatmap with non-overlapping CI highlights
   overlap_heatmap <- create_heatmap(pairwise_data_viz_extreme, species_labels, highlight_nonoverlap = TRUE)
   heatmap_dims <- attr(overlap_heatmap, "heatmap_dims")
 
@@ -653,12 +653,10 @@ if (has_heatmap_extremes) {
 
   knitr::opts_current$set(fig.width = heatmap_dims$width, fig.height = heatmap_dims$height)
 
-  # Save heatmap
   ggsave(file.path(ci_dir, "visual_matrix_no_overlap.png"), p_overlap,
          width = heatmap_dims$width, height = heatmap_dims$height, dpi = "retina",
          device = ragg::agg_png)
 
-  # Display plot
   print(p_overlap)
 } else {
   if (use_count_data) {
@@ -674,10 +672,12 @@ if (has_heatmap_extremes) {
 This section creates readable summary tables for the trait and pairwise comparisons.
 
 ```{r polished_tables, message=FALSE, warning=FALSE}
-# Conditionally include count columns (only present in Jeffreys CI path)
+# The count columns exist only on the count path.
 count_cols_select  <- if (use_count_data) c("n_population", "n_cases") else character(0)
 
-# Polished table for trait values
+# ── Tables ────────────────────────────────────────────────────────────────────
+
+# Trait table with readable column names.
 trait_ci_polished <- trait_ci %>%
   mutate(
     trait = round(trait, 3),
@@ -696,12 +696,11 @@ write.csv(trait_ci_polished,
           file.path(ci_dir, "trait_CI_polished.csv"), 
           quote = FALSE, row.names = FALSE)
 
-# Polished pairwise table - recreate from original data with available CI columns
+# Pairwise table rebuilt from the trait table: absolute difference and the two intervals.
 trait_diff <- trait_ci %>%
   dplyr::select(species, all_of(count_cols_select), category, trait,
                 trait_ci_lb, trait_ci_ub, trait_ci)
 
-# Generate all pairwise species combinations
 pairwise_data_full <- expand.grid(species1 = trait_diff$species,
                                    species2 = trait_diff$species,
                                    stringsAsFactors = FALSE) %>%
@@ -710,12 +709,11 @@ pairwise_data_full <- expand.grid(species1 = trait_diff$species,
   left_join(trait_diff %>% rename_with(~paste0(.x, "2"), .cols = -species),
             by = c("species2" = "species"))
 
-# Create polished pairwise table
 pairwise_data_end_polished <- pairwise_data_full %>%
   dplyr::mutate(
     trait_diff = abs(trait1 - trait2),
     trait_diff = round(trait_diff, 3),
-    # Format CIs for both Wilson and Jeffreys methods
+    # Interval as text, "[lower-upper]".
     trait_CI1 = sprintf("[%.2f-%.2f]", 
                                  as.numeric(trait_ci_lb1), 
                                  as.numeric(trait_ci_ub1)),
@@ -736,8 +734,7 @@ write.csv(pairwise_data_end_polished,
           file.path(ci_dir, "pairwise_data_end_polished.csv"),
           quote = FALSE, row.names = FALSE)
 
-# Display non-overlapping pairwise contrasts only, deduplicated (species1 < species2)
-# to avoid showing each pair twice (A-B and B-A).
+# Candidate pairs only, each pair once (species1 < species2).
 pairwise_nonoverlap <- pairwise_data_end_polished %>%
   dplyr::left_join(
     pairwise_data %>% dplyr::select(species1, species2, overlap_use),

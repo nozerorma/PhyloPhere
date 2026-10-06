@@ -1,11 +1,39 @@
 #!/usr/bin/env python3
-"""The observed labeling (b_0) as full records: one master shard per gene.
+#
+#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
+#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
+#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
+#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
+#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
+#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
+#
+# PHYLOPHERE: A Nextflow pipeline including a complete set
+# of phylogenetic comparative tools and analyses for Phenome-Genome studies
+#
+# Github: https://github.com/nozerorma/caastools/nf-phylophere
+#
+# Author:         Miguel Ramon (miguel.ramon@upf.edu)
+#
+# File: observed_b0_main.py
+#
+
+"""
+CAAS_OBSERVED / CAAS_CORE_BATCHED: Scores the observed labeling (b_0) as full records, one master shard per gene.
 
 Reads the b_0 discovery rows a perm-replay batch exported (`<alignment id>.b0.discovery.tsv`, the rows of
-discovery.tab), or a discovery.tab that already exists (`--discovery`), scores each gene through `core.observed` against its ASR (cache first, PAML on a miss) and writes
-`<gene>.master.csv.gz`: the gene's rows of caas_convergence_master.csv, in master column order. The merge step
-concatenates the shards. A gene with no alignment or ASR is left out with a warning.
+discovery.tab), or a discovery.tab that already exists (`--discovery`), scores each gene through `core.observed`
+against its ASR (cache first, PAML on a miss) and writes `<gene>.master.csv.gz`: the gene's rows of
+caas_convergence_master.csv, in master column order. The merge step (contract_main.py) concatenates the shards.
+A gene with no alignment or ASR is left out with a warning.
+
+Called by:  CAAS_CORE_BATCHED (subworkflows/CT/caas_permulation.nf, --b0-dir) and CAAS_OBSERVED
+            (subworkflows/CT_DISAMBIGUATION/ct_observed.nf, --discovery) → observed_b0_main.py
+Usage:
+    python3 observed_b0_main.py --alignment-dir <dir> --tree <newick> (--b0-dir <dir> | --discovery <file>) \\
+        --design <trait file or traitfile_H*.tab dir> --output-dir <dir> --asr-cache-dir <dir> [OPTIONS]
 """
+
+# ── Standard library ──────────────────────────────────────────────────────────
 import argparse
 import csv
 import logging
@@ -14,6 +42,7 @@ import sys
 import time
 from pathlib import Path
 
+# ── Package-internal ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from src.core.driver import load_gene_context
@@ -27,6 +56,9 @@ from src.utils.logger import configure_logging
 logger = logging.getLogger(__name__)
 
 DISCOVERY_SUFFIX = ".b0.discovery.tsv"
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
 
 
 def parse_arguments():
@@ -51,6 +83,9 @@ def parse_arguments():
     return p.parse_args()
 
 
+# ── Scoring ───────────────────────────────────────────────────────────────────
+
+
 def read_b0_rows(source):
     """{gene: [discovery rows]} of every b_0 discovery file in a directory, or of one discovery.tab; rows in file order."""
     by_gene = {}
@@ -64,6 +99,7 @@ def read_b0_rows(source):
 
 
 def _score_gene(job):
+    """Pool worker: master rows of one gene (job is the tuple built in main), or (gene, None) when it cannot be scored."""
     (gene, rows, alignment_dir, tree, taxid, model, cache, threshold, ensembl, trait_pairs, pss, fields) = job
     try:
         ctx = load_gene_context(gene, alignment_dir, tree, taxid, model, cache, threshold, ensembl)
@@ -77,6 +113,7 @@ def _score_gene(job):
 
 
 def main():
+    """Score every gene with b_0 rows in parallel and write one <gene>.master.csv.gz per gene."""
     args = parse_arguments()
     configure_logging(verbose=args.verbose, log_file=args.log_file)
     out_dir = Path(args.output_dir)
@@ -104,7 +141,7 @@ def main():
             if not rows:
                 skipped.append(gene)
                 continue
-            stem = gene.replace("/", "__").replace("\\", "__").strip() or "_"
+            stem = gene.replace("/", "__").replace("\\", "__").strip() or "_"  # a gene name is used as a file name
             write_master_csv(rows, out_dir / f"{stem}.master.csv.gz", fields)
             written += 1
     logger.info(f"[observed] {written} genes scored in {time.time() - t0:.1f}s; {len(skipped)} left out (no alignment, ASR or results)"

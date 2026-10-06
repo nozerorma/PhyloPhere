@@ -1,23 +1,24 @@
 #!/usr/bin/env nextflow
 
+// accum_report.nf — Render the HTML accumulation report.
+// PhyloPhere | subworkflows/CT_ACCUMULATION/
+
 /*
- * ACCUMULATION_REPORT
- * ───────────────────
- * Render an HTML report from CT_ACCUMULATION randomization outputs.
- * Receives all per-direction per-scheme CSVs (flat, from RANDOMIZE) plus the
- * aggregation CSVs (from AGGREGATE), reconstructs the expected directory
- * structure in the work directory, then calls 10.Accumulation_report.Rmd.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  ACCUMULATION_REPORT: renders 10.Accumulation_report.Rmd from the accumulation outputs.
  *
- * Inputs
- * ──────
- *   rand_csvs  : path — all accumulation_{dir}_{scheme}_aggregated_results.csv files (collected)
- *   agg_csvs   : path — accumulation_global.csv (collected)
+ *  The randomization CSVs arrive staged flat; the script copies them into the directory
+ *  layout the Rmd reads (accum_root/{top,bottom,all}/randomization and accum_root/aggregation)
+ *  before rendering. The two script branches differ only in the container entrypoint.
  *
- * Outputs
- * ───────
- *   report      : path — 10.Accumulation_report.html
- *   summary_tsv : path — accumulation_summary_{trait}.tsv (optional)
+ *  Consumes:  all accumulation_<direction>_<scheme>_aggregated_results.csv files (collected)
+ *             and the *_global.csv files of the aggregation (collected)
+ *  Produces:  10.Accumulation_report.html, accumulation_summary_*.tsv (optional)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Report rendering ─────────────────────────────────────────────────────────
 
 process ACCUMULATION_REPORT {
     tag "accumulation_report|${params.traitname}"
@@ -54,7 +55,7 @@ process ACCUMULATION_REPORT {
         cp -R ${local_dir}/* .
         find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
 
-        # Reconstruct directory structure expected by 10.Accumulation_report.Rmd
+        # Rebuild the directory layout that 10.Accumulation_report.Rmd reads
         mkdir -p accum_root/top/randomization \\
                  accum_root/bottom/randomization \\
                  accum_root/all/randomization \\

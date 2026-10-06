@@ -4,6 +4,18 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+README HTML builder: converts the README's Markdown subset to HTML for a Qt text widget.
+
+A small regex-based converter covering what the README uses (headings, lists,
+tables, fenced code, images, links, inline formatting, <details> blocks). Written
+for QTextBrowser's limited HTML/CSS support, so styling is mostly inline
+attributes. It is not a general Markdown parser.
+
+Imported by: gui/widgets/common/readme_dialog.py
+"""
+
+# ── Standard library ──────────────────────────────────────────────────────────
 import html
 import json
 import re
@@ -11,7 +23,7 @@ from pathlib import Path
 
 
 def parse_inline(s: str) -> str:
-    """Helper to convert inline markdown (code, bold, italic, links)."""
+    """Convert inline Markdown (code, bold, italic, links) to HTML."""
     # inline code
     s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
     # bold
@@ -26,7 +38,7 @@ def parse_inline(s: str) -> str:
 
 
 def parse_table_block(table_text: str) -> str:
-    """Helper to convert markdown table into clean HTML table."""
+    """Convert a Markdown table (header row, separator row, body rows) to an HTML table."""
     lines = [l.strip() for l in table_text.strip().split("\n") if l.strip()]
     if len(lines) < 2:
         return f"<pre>{html.escape(table_text)}</pre>"
@@ -60,15 +72,16 @@ def parse_table_block(table_text: str) -> str:
 def build_qtextbrowser_html(
     md_text: str, expanded_sections: set[int]
 ) -> tuple[str, int]:
-    """Converts README.md into rich HTML specifically formatted for QTextBrowser:
-    - Code blocks extracted first so code comments (# ...) are never misparsed as headings
-    - Replaces ![logo](src) with explicit <img height="40"> (preserving natural aspect ratio!)
-    - Headings (h1 through h6) generated with <a name="slug"> anchors for clickable TOC navigation
-    - Replaces <details><summary> with clickable <a href="toggle:SEC_ID"> toggle anchors
-    - Returns (rendered_html, total_details_count)
+    """Convert README Markdown to HTML formatted for QTextBrowser.
+
+    - Fenced code blocks are set aside first, so code comments (# ...) are never read as headings.
+    - Logo images are wrapped in a white, bordered box with an explicit height; other images scale to the width.
+    - Headings (h1 to h6) carry <a name="slug"> anchors for table-of-contents links; repeated slugs get a numeric suffix.
+    - <details><summary> blocks become "toggle:<id>" anchors; only ids in `expanded_sections` show their body.
+    - Returns (html, number of <details> blocks).
     """
 
-    # 1. PRESERVE CODE BLOCKS FIRST (prevents code comments like # 1. set up... from being turned into <h1>)
+    # 1. Set code blocks aside (prevents code comments like "# 1. set up" from becoming <h1>)
     code_blocks = []
 
     def save_code(m):
@@ -81,7 +94,7 @@ def build_qtextbrowser_html(
 
     text = re.sub(r"```(\w*)\n([\s\S]*?)```", save_code, md_text)
 
-    # 2. Image Replacement (force small height=40 without width distortion)
+    # 2. Images: logos get a framed box with a fixed height; the rest scale to the width
     def parse_img(m):
         alt = m.group(1)
         src = m.group(2)
@@ -97,7 +110,7 @@ def build_qtextbrowser_html(
 
     text = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", parse_img, text)
 
-    # 3. Details & Summary replacement
+    # 3. <details>/<summary> blocks become toggle anchors
     details_counter = 0
 
     def replace_details(m):
@@ -108,14 +121,14 @@ def build_qtextbrowser_html(
         summary_txt = m.group(1).strip()
         body_txt = m.group(2).strip()
 
-        # Parse tables inside details body
+        # Tables inside the body
         body_html = re.sub(
             r"(\|[^\n]+\|\n\|[-:\s|]+\|\n(?:\|[^\n]+\|\n?)+)",
             lambda tm: parse_table_block(tm.group(1)),
             body_txt,
         )
 
-        # Convert formatting in body
+        # Lists and paragraphs in the body
         body_lines = []
         for line in body_html.split("\n"):
             line_str = line.strip()
@@ -151,7 +164,7 @@ def build_qtextbrowser_html(
         flags=re.IGNORECASE,
     )
 
-    # 4. Headings (h1 through h6) with anchors for TOC navigation
+    # 4. Headings with anchors for TOC navigation
     slug_counts = {}
 
     def parse_heading(m):
@@ -173,14 +186,14 @@ def build_qtextbrowser_html(
 
     text = re.sub(r"^\s*(#{1,6})\s+(.+)$", parse_heading, text, flags=re.MULTILINE)
 
-    # 5. Tables outside details
+    # 5. Tables outside <details>
     text = re.sub(
         r"(\|[^\n]+\|\n\|[-:\s|]+\|\n(?:\|[^\n]+\|\n?)+)",
         lambda tm: parse_table_block(tm.group(1)),
         text,
     )
 
-    # 6. Paragraphs & Lists (do NOT wrap HTML block elements like <h1-h6>, <pre>, <div>, <details>, <table> in <p>)
+    # 6. Paragraphs and lists (HTML block elements such as <h1-h6>, <pre>, <div>, <table> are not wrapped in <p>)
     out_lines = []
     in_ul = False
     block_tags = (
@@ -223,7 +236,7 @@ def build_qtextbrowser_html(
 
     text = "\n".join(out_lines)
 
-    # 7. Restore Code Blocks LAST
+    # 7. Restore the code blocks last
     for idx, cb_html in enumerate(code_blocks):
         text = text.replace(f"___CODE_BLOCK_{idx}___", cb_html)
 

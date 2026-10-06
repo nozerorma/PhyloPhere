@@ -1,16 +1,45 @@
 #!/usr/bin/env python3
-"""CLI for the CAAS permulation-excess null (genome-wide *excess* null for FCS).
+#
+#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
+#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
+#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
+#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
+#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
+#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
+#
+# PHYLOPHERE: A Nextflow pipeline including a complete set
+# of phylogenetic comparative tools and analyses for Phenome-Genome studies
+#
+# Github: https://github.com/nozerorma/caastools/nf-phylophere
+#
+# Author:         Miguel Ramon (miguel.ramon@upf.edu)
+#
+# File: disambiguation_perms_main.py
+#
 
-Loads each gene's precomputed ASR posteriors ONCE and replays N permuted phenotype
-labelings (the full-pool `export_perm_discovery` from a perm-replay run + the matching
-`resample_*.tab` labelings) over the cached posteriors, scoring each via
-analyze_gene_disambiguation / compute_asr_path_score VERBATIM. Emits a long
-per-(gene, cycle, position, scheme) asr_path_score table that
-scoring_caas_perms.R turns into a genes×N null matrix → FCS p.perm.
+"""
+CAAS_CORE_BATCHED: Replays permuted phenotype labelings over cached ASR posteriors (the CAAS permulation null).
 
-See docs/CAAS_PERMULATION_EXCESS.md.
+Loads each gene's precomputed ASR posteriors once and replays N permuted phenotype labelings (the
+full-pool perm-discovery export of a perm-replay run, with the matching resample_*.tab labelings)
+over them, scoring each through analyze_gene_disambiguation as the observed pipeline does
+(src/utils/gene_wrapper.py, process_all_genes_perms). The real labeling (b_0) is
+replayed on its own into <output-dir>/b0, so it never enters the null.
+
+Pass A writes one per-(gene, cycle, position, scheme) detail shard per gene to
+<output-dir>/perm_pos_detail/. With --detail-only the run stops there, because pass B (scoring
+against genome-wide pools) runs once over the union of the batches (reaggregate_perm_scores.py).
+Without it the same process also writes gene_cycle_scores.tsv, perm_pos_cycle_caas.tsv.gz,
+perm_pos_quantiles.tsv and perm_pos_sample.tsv; scoring_caas_perms.R turns gene_cycle_scores.tsv
+into the genes x N null matrix behind the FCS p.perm.
+
+Called by:  CAAS_CORE_BATCHED (subworkflows/CT/caas_permulation.nf) → disambiguation_perms_main.py --detail-only
+Usage:
+    python3 disambiguation_perms_main.py --alignment-dir <dir> --tree <newick> --perm-discovery <file or dir> \\
+        --resample-dir <dir> --output-dir <dir> --asr-cache-dir <dir> [--detail-only] [OPTIONS]
 """
 
+# ── Standard library ──────────────────────────────────────────────────────────
 import sys
 import csv
 import argparse
@@ -19,6 +48,7 @@ import time
 from pathlib import Path
 from typing import Tuple
 
+# ── Package-internal ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from src.utils.gene_wrapper import process_all_genes_perms, _read_resample_labelings
@@ -26,6 +56,9 @@ from src.convergence.fop_pool import base_cycle
 from src.utils.logger import configure_logging
 
 logger = logging.getLogger(__name__)
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
 
 
 def parse_arguments():
@@ -61,7 +94,7 @@ def parse_arguments():
              "weights. When given, the resample dir is expected to hold resample_fop.tab "
              "('<base>~H<m>' labelings) and each base cycle's hypotheses are domain-pooled.",
     )
-    # ── Gap B: CT_POSTPROC filtering of the null candidate pool ───────────────
+    # ── CT_POSTPROC filters applied to the null candidate pool ────────────────
     p.add_argument("--postproc-filter", action="store_true",
                    help="Apply the observed CT_POSTPROC cluster + gene filters to "
                         "the per-cycle null CAAS pool before scoring (distribution-"
@@ -98,15 +131,18 @@ def parse_arguments():
 
 
 def _genes_from_export(perm_discovery_path: Path) -> Tuple[list, dict]:
-    """Genes that produced ≥1 CAAS in any cycle (the only genes worth replaying),
-    ordered largest-workload-first (LPT scheduling: dispatching the biggest gene
-    first keeps it from starting late and stranding idle workers behind it — see
-    docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md). Row count (file mode) / file
-    size (directory mode) is a free-to-compute proxy for a gene's cycle workload,
-    already available from the same iteration that discovers the gene names.
-    Returns (genes_sorted_largest_first, {gene: size_proxy}) -- the sizes dict is
-    reused downstream (process_all_genes_perms' gene_sizes) to decide which genes
-    are big enough to split their replay across multiple workers (Stage 2)."""
+    """Genes with at least one CAAS in any cycle (the only genes worth replaying), largest workload first.
+
+    Largest first is longest-processing-time scheduling: starting the biggest gene first keeps
+    it from starting late and leaving workers idle behind it (see
+    docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md). The row count (file mode) or file size
+    (directory mode) is a proxy for a gene's cycle workload, available from the same pass that
+    discovers the gene names.
+
+    Returns (genes sorted largest first, {gene: size proxy}); the sizes are passed on as
+    gene_sizes of process_all_genes_perms to decide which genes are large enough to split their
+    replay across several workers.
+    """
     sizes: dict = {}
     if perm_discovery_path.is_file():
         with open(perm_discovery_path, "r") as f:
@@ -119,21 +155,18 @@ def _genes_from_export(perm_discovery_path: Path) -> Tuple[list, dict]:
             except ValueError:
                 return [], {}
             for line in f:
-                # gene is column 2 (index 1), splitting maxsplit=2 avoids splitting remaining columns
+                # maxsplit=2 keeps the split short: the gene is the second column
                 parts = line.split("\t", maxsplit=2)
                 if len(parts) > gene_idx:
                     g = parts[gene_idx].strip()
                     if g:
                         sizes[g] = sizes.get(g, 0) + 1
     else:
-        # Directory mode: filenames are "<alignmentID>.perm_replay.discovery.output",
-        # where alignmentID = Nextflow's f.baseName on the alignment file (e.g.
-        # "GENE.Homo_sapiens.fa" -> "GENE.Homo_sapiens"). Splitting on ".perm_replay"
-        # left the species suffix attached ("GENE.Homo_sapiens"), which then never
-        # matches the bare "GENE" symbols used everywhere else (ensembl_genes,
-        # find_gene_alignment's own prefix match, meta_caas "Gene" column) --
-        # silently zeroing every gene. Take the first dot-delimited segment instead,
-        # mirroring find_gene_alignment's own `path.name.split(".", 1)[0]` convention.
+        # Directory mode: file names are "<alignmentID>.perm_replay.discovery.output", where
+        # alignmentID is the base name of the alignment file (for example "GENE.Homo_sapiens"
+        # from "GENE.Homo_sapiens.fa"). The gene is the first dot-delimited segment, because
+        # the bare symbol is what ensembl_genes, find_gene_alignment (which splits on the
+        # first dot) and the meta_caas Gene column use.
         for p in perm_discovery_path.iterdir():
             if p.is_file() and not p.name.startswith("."):
                 name = p.name.split(".", 1)[0]
@@ -142,8 +175,11 @@ def _genes_from_export(perm_discovery_path: Path) -> Tuple[list, dict]:
     return genes, sizes
 
 
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 
 def main():
+    """Replay the permuted labelings (the null) and then b_0 on its own, writing under args.output_dir."""
     args = parse_arguments()
     configure_logging(verbose=args.verbose, log_file=args.log_file)
 

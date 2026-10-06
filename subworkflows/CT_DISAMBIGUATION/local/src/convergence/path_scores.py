@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""CAAS convergence scoring on the Voronoi domain (scoring_v2 core v3).
+# path_scores.py — Score a CAAS position per Voronoi domain from ASR posteriors at the LCA of changed domains.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/convergence/
 
-This module scores one CAAS position as a **mean over its K fixed Voronoi
-domains**. Each domain is a candidate fg/bg pair extracted by the canonical Dunn
-selection of the reference hypothesis; the domain index *is* the unit of the
-score (there is no per-pair private-segment walk any more — that machinery, and
-the ``walk_cache`` / ``L_s`` / ``iso_override`` scaffolding around it, was
-removed in core v3).
+"""
+CAAS convergence scoring on the Voronoi domain.
+
+Imported by: src/convergence/disambiguate_single.py, src/convergence/fop_pool.py (`_convergence_type`)
+Inputs: per-domain pair details, node-level ASR posteriors and a node index of the tree (in memory)
+Outputs: per-hypothesis domain scores and domain metadata (in memory)
+
+This module scores one CAAS position as a **mean over its fixed Voronoi
+domains**. Each domain is one foreground/background pair of the design (a
+``pair_details`` entry whose ``pair_id`` is the domain id); the domain is the
+unit of the score.
 
 Conceptual model
 ----------------
@@ -22,7 +28,7 @@ encoded residue form a contrast:
                                                      {der_i, der_j}, scheme)
     contrib(i, j) = 1 - p_shared
 
-The distribution is read **only at the LCA node** — no walk. ``score_d`` is the
+The distribution is read **only at the LCA node**. ``score_d`` is the
 ``noisy_or`` of a domain's contribs with its same-residue partners (``0`` with no
 partner). A domain that did not converge is simply ``score_d = 0``; a domain
 without a valid reconstruction (no modal ASR at its MRCA, unmappable tip, or
@@ -30,29 +36,25 @@ missing ``focal_state``) is not "changed" and scores ``0``, but still occupies a
 slot in ``domain_meta`` so the pooler keeps it in the denominator.
 
 ``agree`` is hard 0/1 on the encoded residue; the biochemical gradient is
-supplied later by averaging the five schemes in ``scoring_compute.R`` section 2g,
+supplied by averaging the five schemes in ``scoring_compute.R`` section 2g,
 not by a soft rule here. ``convergence_type`` is derived from
 ``(agree_num, agree_den)`` (see :func:`_convergence_type`) for the single
-hypothesis; the harvest-wide label is recomputed in ``fop_pool.pool_domains``.
+hypothesis; the label across pooled hypotheses is recomputed in
+``fop_pool.pool_domains``.
 
-The PSS weights do **not** enter this layer — they weight domains only in the
+The PSS weights do **not** enter this layer: they weight domains only in the
 pooling step (``fop_pool.pool_domains``). ``compute_domain_scores`` returns one
 per-hypothesis record; ``pool_domains`` collapses ``M >= 1`` of them (``M = 1``
-degenerates to the plain PSS-weighted mean over the K domains).
+degenerates to the plain PSS-weighted mean over the domains).
 
 Return shape of :func:`compute_domain_scores`::
 
     {"top": <side dict>, "bottom": <side dict>, "domain_meta": {d: {...}}}
 
-See ``docs/scoring_v3_core.md`` section 2 and Appendix A for the exact contract
-and the hand-worked golden arithmetic.
+See ``docs/scoring_v3_core.md`` for the exact contract.
 
-The module is intentionally free of PAML/IO dependencies so it can be unit
-tested with synthetic trees and posteriors.
-
-Author
-------
-Miguel Ramon Alonso — Evolutionary Genomics Lab, IBE-UPF
+The module has no PAML or file I/O dependencies: it works on posteriors and a
+node index that the caller supplies.
 """
 
 from __future__ import annotations
@@ -63,7 +65,7 @@ from typing import Any, Dict, List, Optional
 from src.biochem.grouping import get_grouping_scheme
 
 
-# ── Encoding helpers ─────────────────────────────────────────────────────────
+# ── Encoding helpers ──────────────────────────────────────────────────────────
 def encode_aa(aa: Optional[str], scheme: Optional[str]) -> Optional[str]:
     """Encode an amino acid in the active grouping scheme.
 
@@ -131,7 +133,7 @@ def worst_case_any_group_probability(
     return known + (remainder if any_unrecorded else 0.0)
 
 
-# ── Tree helpers ─────────────────────────────────────────────────────────────
+# ── Tree helpers ──────────────────────────────────────────────────────────────
 def build_node_index(root) -> Dict[int, Any]:
     """Map node_id -> TreeNode for the whole tree (single traversal)."""
     index: Dict[int, Any] = {}
@@ -154,9 +156,8 @@ def node_dist(
     """Look up a node's posterior, tolerating int- or str-keyed maps.
 
     PAML posteriors are loaded with integer node ids, but the same map can
-    arrive JSON-decoded with string keys. Centralising the fallback here keeps
-    the call sites consistent and the ``per_node_dist`` key type honestly
-    ``Any``.
+    arrive JSON-decoded with string keys. The fallback lives here so that every
+    call site handles both.
     """
     if node_id is None:
         return {}
@@ -166,7 +167,7 @@ def node_dist(
 def path_to_root_ids(node_index: Dict[int, Any], mrca_id: Optional[int]) -> List[int]:
     """Node ids from the parent of the MRCA up to the root (MRCA excluded).
 
-    Kept for :func:`find_lca`, which walks each node's ancestor chain to locate
+    Used by :func:`find_lca`, which walks each node's ancestor chain to locate
     the merge point of two domain MRCAs.
     """
     if mrca_id is None:
@@ -188,8 +189,8 @@ def find_lca(
 ) -> Optional[int]:
     """Lowest common ancestor of two nodes (the node where their lineages merge).
 
-    In core v3 this locates the shared ancestor of two changed domains' MRCAs;
-    the ASR posterior read there is the only tree lookup the score makes.
+    It locates the shared ancestor of two changed domains' MRCAs; the ASR
+    posterior read there is the only tree lookup the score makes.
     """
     if id_a is None or id_b is None:
         return None
@@ -201,9 +202,9 @@ def find_lca(
     return None
 
 
-# ── Shared combinatorics ─────────────────────────────────────────────────────
+# ── Shared combinatorics ──────────────────────────────────────────────────────
 def noisy_or(probs) -> float:
-    """``1 - ∏(1 - p_i)`` — probability at least one of independent events fires.
+    """``1 - ∏(1 - p_i)``: probability that at least one of independent events fires.
 
     Empty input returns ``0.0`` (a domain with no same-residue partner has no
     convergence evidence). Each ``p_i`` is clamped to ``[0, 1]`` first.
@@ -229,7 +230,7 @@ def _convergence_type(agree_num: int, agree_den: int) -> str:
     return "no_change"
 
 
-# ── Core v3: domain scoring ──────────────────────────────────────────────────
+# ── Domain scoring ────────────────────────────────────────────────────────────
 def score_domains_side(
     domains: List[Dict[str, Any]],
     node_index: Dict[int, Any],
@@ -245,15 +246,15 @@ def score_domains_side(
     ``score_d = noisy_or`` over a domain's partner contributions (``0`` with no
     partner).
 
-    Returns ``{domain_scores, agree_num, agree_den, n_changed, pair_lca}`` —
+    Returns ``{domain_scores, agree_num, agree_den, n_changed, pair_lca}``:
     ``agree_den`` and ``n_changed`` are both ``len(domains)``. ``pair_lca`` is
     ``list[(domain_a, domain_b, lca_node_id, contrib)]`` for every same-residue
     domain pair, capturing the node whose posterior actually drove ``contrib``
-    (discarded otherwise — used only for debug-tree visualization).
+    (reported in the evidence tables of src/core/evidence.py).
     """
     contribs: Dict[Any, List[float]] = {dm["d"]: [] for dm in domains}
-    # List-of-lists (not tuples): keeps the in-memory shape identical to the
-    # JSON round-trip shape used by callers/golden fixtures.
+    # List-of-lists (not tuples): the in-memory shape equals the shape after a
+    # JSON round trip.
     pair_lca: List[List[Any]] = []
     for a, b in combinations(domains, 2):
         if a["der_enc"] != b["der_enc"]:
@@ -304,10 +305,10 @@ def compute_domain_scores(
 
         ``<side>`` carries ``domain_scores`` (only changed domains),
         ``domain_der`` / ``domain_der_enc`` / ``domain_anc`` (raw tip, encoded
-        tip, raw ancestral — only changed domains), ``agree_num`` / ``agree_den``
+        tip, raw ancestral; only changed domains), ``agree_num`` / ``agree_den``
         / ``n_changed``, and ``convergence_type``.
 
-        ``domain_meta`` carries **all K domains** (every ``pair_detail``),
+        ``domain_meta`` carries **all domains** (every ``pair_detail``),
         including those without a reconstruction::
 
             {d: {"mrca_id": int,

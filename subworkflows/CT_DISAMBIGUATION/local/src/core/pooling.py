@@ -1,4 +1,12 @@
-"""What a domain-pooled record says per phenotype side: one rule for the observed and the null.
+# pooling.py — Per-side summaries of a domain-pooled record, shared by the observed and null paths.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/core/
+
+"""
+What a domain-pooled record says per phenotype side: one rule for the observed and the null.
+
+Imported by: src/convergence/disambiguate_single.py, src/core/driver.py
+Inputs: the dict returned by `fop_pool.pool_domains`
+Outputs: a list of per-side summary dicts (in memory)
 
 `fop_pool.pool_domains` returns {"top": agg, "bottom": agg, "n_hypotheses": M}. A side takes part when at
 least one domain changed on it; a position where no side does is reported as a single `side="none"` row.
@@ -14,8 +22,9 @@ def pooled_sides(pooled: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """One summary per participating side of a pool_domains result ([] when no domain changed anywhere).
 
     Keys: side, asr_path_score (float), derived_agreement (agree_num / agree_den, None without a changed
-    domain), agreement_ambiguous (a changed domain had a tied derived residue), participating_hyps (comma-joined or None), domain_scores / domain_anc / domain_der /
-    domain_der_support / domain_anc_support (dict or None), and convergence_type when the pool carries it.
+    domain), agreement_ambiguous (a changed domain had a tied derived residue), participating_hyps (comma-joined or
+    None), domain_scores / domain_anc / domain_der / domain_der_support / domain_anc_support (dict or None), and
+    convergence_type when the pool carries it.
     """
     out = []
     for side in SIDES:

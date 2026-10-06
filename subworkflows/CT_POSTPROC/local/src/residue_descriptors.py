@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Extant-species residue tally for the disambiguation table.
+# residue_descriptors.py — Residues of the extant contrast species at each CAAS position.
+# PhyloPhere | subworkflows/CT_POSTPROC/local/src/
 
-Computed in CT_POSTPROC's input-prep step, upstream of the
-``filtered_discovery.tsv`` fork.
+"""
+Extant-species residue tally for the disambiguation table: for each (Gene, Position), how
+many foreground (top) and background (bottom) contrast species carry each residue.
 
-``side`` (``top`` / ``bottom`` / ``none``) is the disambiguation's authoritative
-call for which clade carries the substantive change. A position changing on both
-clades is TWO per-side rows (side ``top`` and side ``bottom``).
+Imported by: prepare_postproc_input.py (add_species_tally), which runs in the input-prep
+             step (CAAS_PREPARE_POSTPROC_INPUT), before the cluster and gene filters
 """
 
 from __future__ import annotations
@@ -16,10 +17,10 @@ from typing import Dict, List, Tuple
 
 import pandas as pd
 
-# ── Extant-species residue tally (alignment-based) ───────────────────────────
-# Counts the ACTUAL species in the foreground / background contrast that carry
-# each residue at the alignment column -- the "X of N species" sanity check,
-# hypothesis-independent.
+# ── Extant-species residue tally (alignment-based) ────────────────────────────
+# Counts the species of the foreground / background contrast that carry each residue
+# at the alignment column (an "X of N species" check on the call). It does not depend on
+# the hypothesis.
 
 SPECIES_TALLY_COLUMNS = (
     "top_species_residues",     # e.g. "N:15,A:8" -- FG contrast species, count-desc
@@ -35,6 +36,7 @@ _GAP_CHARS = set("-.")
 
 
 def _read_species_list(path) -> List[str]:
+    """Species of a one-per-line file (a "species" header line is skipped); [] when absent or unreadable."""
     if not path:
         return []
     try:
@@ -45,8 +47,8 @@ def _read_species_list(path) -> List[str]:
 
 
 def _index_alignment_dir(alignment_dir) -> Dict[str, str]:
-    """gene symbol -> alignment file path. Flat dir, gene = basename up to the
-    first '.', matching CT discovery / CT_ACCUMULATION's concatenate.py."""
+    """gene symbol -> alignment file path. Flat directory; the gene is the file name up to the
+    first '.', the convention of CT_ACCUMULATION's concatenate.py."""
     import glob
     import os
     out: Dict[str, str] = {}
@@ -57,6 +59,7 @@ def _index_alignment_dir(alignment_dir) -> Dict[str, str]:
 
 
 def _fmt_counts(counts: Counter) -> str:
+    """"aa:n" pairs joined by commas, most frequent first (ties by residue)."""
     if not counts:
         return ""
     return ",".join(f"{aa}:{n}" for aa, n in
@@ -75,13 +78,13 @@ def add_species_tally(
 ) -> pd.DataFrame:
     """Add ``SPECIES_TALLY_COLUMNS`` to ``df``.
 
-    ``Position`` is used as a 0-based alignment-column index (verified against
-    real CAAS output). ``fg_species`` / ``bg_species`` are the full foreground /
-    background contrast species (``selection/species_sets/{top,bottom}_species.txt``).
+    ``Position`` is a 0-based alignment-column index. ``fg_species`` / ``bg_species`` are the
+    full foreground / background contrast species, as lists or as files of
+    ``selection/species_sets/{top,bottom}_species.txt``.
 
-    No-op-safe: any of {alignment dir missing, species lists empty, gene file
-    absent, column out of range, Bio.AlignIO unavailable} -> the row keeps ""
-    for that column, so the output schema is always stable.
+    Safe to call without inputs: when the alignment directory is missing, a species list is
+    empty, the gene file is absent, the column is out of range or Bio.AlignIO is unavailable,
+    the row keeps "" in these columns, so the output schema is stable.
     """
     out = df.copy()
     for c in SPECIES_TALLY_COLUMNS:

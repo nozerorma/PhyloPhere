@@ -5,10 +5,15 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-The Seqera/Tower access token is deliberately NOT bound to RuntimeConfig (see
-gui/models/runtime.py's module docstring) — it's transient widget state, written
-straight to the repo's gitignored token.tk via gui/secrets_io.py on demand rather
-than persisted into the JSON project file.
+RuntimeTab: run behavior (resume, toy mode), execution target (slurm or local),
+Seqera/Tower settings, dataset paths and the phenotype catalogue.
+
+Edits write straight into RuntimeConfig. The Seqera/Tower access token is not part
+of RuntimeConfig (see gui/models/runtime.py): it is transient widget state, written
+to the repository's gitignored token.tk through gui/secrets_io.py when the user
+saves it, so it never enters the JSON project file.
+
+Imported by: gui/widgets/main_window.py
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────
@@ -40,13 +45,13 @@ class RuntimeTab(QWidget):
     changed = Signal()
 
     def __init__(self, config: RuntimeConfig, repo_dir_getter, parent=None):
-        """`repo_dir_getter` is a zero-arg callable returning the current General-tab
-        repo_dir, so the Tower token can be written to the right token.tk without
-        RuntimeTab needing a live reference to GeneralConfig."""
+        """`repo_dir_getter` is a zero-argument callable returning the current
+        General-tab repo_dir, so the Tower token is written to the right token.tk
+        without RuntimeTab holding a reference to GeneralConfig."""
         super().__init__(parent)
         self._config = config
         self._repo_dir_getter = repo_dir_getter
-        self._tower_token = ""  # transient, never persisted
+        self._tower_token = ""  # transient: never stored in the project file
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._build_top_toggles_group())
@@ -55,9 +60,7 @@ class RuntimeTab(QWidget):
         layout.addWidget(self._build_dataset_group())
         layout.addWidget(self._build_catalogue_group(), stretch=1)
 
-    # ── Groups ───────────────────────────────────────────────────────────────
-
-    # ── Groups ───────────────────────────────────────────────────────────────
+    # ── Groups ────────────────────────────────────────────────────────────────
 
     def _build_top_toggles_group(self) -> QGroupBox:
         self.top_box = QGroupBox("Run behavior")
@@ -278,7 +281,7 @@ class RuntimeTab(QWidget):
         layout.addWidget(self.catalogue)
         return self.catalogue_box
 
-    # ── Slots ────────────────────────────────────────────────────────────────
+    # ── Slots ─────────────────────────────────────────────────────────────────
 
     def _on_resume_changed(self, value: bool) -> None:
         self._config.resume = value
@@ -337,7 +340,7 @@ class RuntimeTab(QWidget):
         self.changed.emit()
 
     def _on_token_text_changed(self, value: str) -> None:
-        self._tower_token = value  # transient only, not written to _config
+        self._tower_token = value  # kept in the widget only; never written to _config
 
     def _save_token(self) -> None:
         repo_dir = self._repo_dir_getter()

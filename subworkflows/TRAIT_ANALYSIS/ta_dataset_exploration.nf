@@ -1,8 +1,23 @@
 #!/usr/bin/env nextflow
+// ta_dataset_exploration.nf — Species-level exploration of the trait dataset (1.Dataset_exploration.Rmd).
+// PhyloPhere | subworkflows/TRAIT_ANALYSIS/
 
 /*
-#  Trait analysis: dataset exploration (Rmarkdown)
-*/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  DATASET_EXPLORATION: renders 1.Dataset_exploration.Rmd, which plots the
+ *  number of species per taxon (before and after pruning) and writes the
+ *  per-species statistics table, trait_stats.csv (also read by
+ *  2.Phenotype_exploration.Rmd). It runs in every configuration of the callers.
+ *
+ *  Consumes:  trait file, species tree, and the output directory of DATASET_PRUNE
+ *             (or a NO_FILE sentinel when pruning was skipped)
+ *  Produces:  data_exploration/ (figures, tables, trait_stats.csv, copies of the
+ *             original trait and tree files) and the HTML report
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+
+
+// ── Dataset exploration report ───────────────────────────────────────────────
 
 process DATASET_EXPLORATION {
     tag "dataset_exploration"
@@ -21,10 +36,8 @@ process DATASET_EXPLORATION {
     path "data_exploration/1.Data-exploration/1.Species_distribution/trait_stats.csv", emit: stats_file, optional: true
     path "data_exploration/**/*.csv", emit: data_tables, optional: true
     path "data_exploration/**/*.png", emit: plots, optional: true
-    // Regeneration copy of the raw --trait_file/--tree_file inputs. This
-    // process always runs (unlike the optional DATASET_PRUNE step), so it's
-    // the one guaranteed place to recover these when pruning was skipped and
-    // ta_data_prune's pruned_trait_file.tsv/pruned_tree_file.nwk never existed.
+    // Copies of the input trait and tree files. DATASET_PRUNE is optional, so
+    // this is the one step that always leaves the original files in the results.
     path "data_exploration/1.Data-exploration/1.Species_distribution/original_trait_file.tsv", emit: original_trait_file, optional: true
     path "data_exploration/1.Data-exploration/1.Species_distribution/original_tree_file.nwk", emit: original_tree_file, optional: true
 
@@ -45,6 +58,7 @@ process DATASET_EXPLORATION {
     def trait_type = params.trait_type ?: ''
     def prune_dir = prune_results_dir ?: ''
 
+    // The two branches are identical except that the container one runs Rscript through the image entrypoint.
     if (params.use_singularity | params.use_apptainer) {
         """
         cp -R ${local_dir}/* .

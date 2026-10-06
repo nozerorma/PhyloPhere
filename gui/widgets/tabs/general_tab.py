@@ -4,6 +4,17 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+GeneralTab: project name, repository and plugin directories, random seed, the
+reporting switch and the remote host used to browse and validate paths.
+
+Edits write straight into GeneralConfig. The remote host and remote root directory
+are also mirrored into gui/widgets/common/remote_context.py, which PathField reads
+when Browse is clicked.
+
+Imported by: gui/widgets/main_window.py
+"""
+
 # ── Third-party ───────────────────────────────────────────────────────────────
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -166,7 +177,7 @@ class GeneralTab(QWidget):
                 lang,
             ))
 
-    # ── Slots ────────────────────────────────────────────────────────────────
+    # ── Slots ─────────────────────────────────────────────────────────────────
 
     def _on_repo_dir_changed(self, value: str) -> None:
         self._config.repo_dir = value

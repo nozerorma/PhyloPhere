@@ -1,17 +1,10 @@
+# io_utils.py — Locate and read the per-gene alignment files.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/utils/
+
 """
-I/O Utilities
-=============
+I/O utilities: find the alignment of a gene in a directory tree and read it with Biopython.
 
-File readers and writers for alignments, trees, and metadata.
-
-Author
-------
-Miguel Ramon Alonso
-Evolutionary Genomics Lab - IBE-UPF
-
-Date
-----
-2025-12-09
+Imported by: src/core/driver.py (find_gene_alignment), src/asr/asr_single.py (read_alignment)
 """
 
 import functools
@@ -26,24 +19,19 @@ logger = logging.getLogger(__name__)
 
 
 def _is_supported_alignment_path(path: Path) -> bool:
+    """True for a regular file whose extension is a PHYLIP or FASTA one, or that has none."""
     suffix = path.suffix.lower()
     return suffix in {".phy", ".phylip", ".aln", ".fa", ".fasta", ""} and path.is_file()
 
 
 @functools.lru_cache(maxsize=32)
 def _scan_alignment_dir(alignment_dir: Path) -> Dict[str, Path]:
-    """One-time recursive scan of `alignment_dir`, memoized per directory.
+    """Map every alignment file under `alignment_dir` to its gene prefix, scanning once per directory.
 
-    `find_gene_alignment` used to re-run this `glob("**/*")` + per-entry
-    `is_file()` stat sweep on EVERY call -- an O(N_files) NFS readdir+stat
-    storm (~16,100 alignment files in production) repeated once per gene, and
-    (since the null-replay Stage 2 chunking,
-    docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md) once per CHUNK of a gene --
-    multiplying real NFS latency by up to ~40x for a large gene split into many
-    chunks. Confirmed live: workers spend nearly all wall-clock time in `S`
-    state at ~0% CPU, the exact signature of NFS metadata-call blocking, not
-    compute. Caching the scan per worker process turns N calls x O(N_files)
-    into O(N_files) once + N calls x O(1) dict lookup.
+    The scan is memoized because find_gene_alignment runs once per gene (and per chunk of a
+    gene), and a recursive glob plus a stat per entry is expensive on a network file system
+    when the directory holds thousands of alignments. The key is the file name up to the
+    first dot; the first path in sorted order wins when several files share a prefix.
     """
     candidates = sorted(
         path for path in alignment_dir.glob("**/*") if _is_supported_alignment_path(path)
@@ -51,8 +39,7 @@ def _scan_alignment_dir(alignment_dir: Path) -> Dict[str, Path]:
     by_prefix: Dict[str, Path] = {}
     for path in candidates:
         prefix = path.name.split(".", 1)[0]
-        # First match in sorted order wins -- matches the pre-cache linear scan's
-        # "return the first candidates[] hit" behavior exactly.
+        # First match in sorted order wins.
         by_prefix.setdefault(prefix, path)
     return by_prefix
 
@@ -116,7 +103,7 @@ def read_alignment(
     :raises FileNotFoundError: If alignment file doesn't exist
     :raises ValueError: If alignment cannot be parsed or format invalid
     """
-    # Convert to Path if input is string
+    # Accept a str as well as a Path
     if isinstance(alignment_file, str):
         alignment_file = Path(alignment_file)
 

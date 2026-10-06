@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
-# secrets_io.py — Seqera/Tower access-token handling.
+# secrets_io.py — Write and remove the Seqera/Tower access token file.
 # PhyloPhere | gui/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Reuses the pipeline's existing convention: conf/common.config's `tower {}` block
-already reads a gitignored `token.tk` at the repo root automatically
-(`accessToken = new File("$baseDir/token.tk").exists() ? ... : System.getenv(...)`).
-The GUI never needs to write the token into a generated script — it just writes
-straight to that file. `token.tk` is confirmed present in .gitignore.
+Secrets: write and remove `token.tk`, the Seqera/Tower access token file.
 
-The token itself is intentionally NOT part of ProjectConfig (see gui/models/runtime.py)
-so it can never end up in the human-diffable JSON project file.
+The tower{} block of conf/common.config reads a gitignored `token.tk` at the repo root
+(or, without the file, the TOWER_ACCESS_TOKEN environment variable). The GUI writes the
+token to that file and never into a generated script. The token is not part of
+ProjectConfig (see gui/models/runtime.py), so it cannot reach the JSON project file.
 
-`repo_dir` is "wherever the pipeline checkout that will actually execute lives" —
-when General > Remote host is set, that's a path on the cluster reached over SSH,
-not on the machine running the GUI (same local/remote split as gui/remote.py's
-path validation and browsing). `remote_host` must be passed through explicitly so
-this stays true regardless of where the GUI happens to be running.
+`repo_dir` is the checkout that will run the pipeline. With General > Remote host set it
+is a path on the cluster, not on the machine running the GUI, and `remote_host` must be
+passed for the file to be written there over SSH (gui/remote.py).
+
+Imported by: gui/widgets/tabs/runtime_tab.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -32,8 +30,11 @@ TOKEN_FILENAME = "token.tk"
 
 
 def write_tower_token(repo_dir: Path | str, token: str, remote_host: str = "") -> str:
-    """Write `token` to <repo_dir>/token.tk with owner-only permissions, on
-    `remote_host` over SSH if given, else on the local filesystem."""
+    """Write `token` to <repo_dir>/token.tk with owner-only permissions (mode 600).
+
+    The file goes to `remote_host` over SSH when given, else to the local filesystem.
+    Returns the path written.
+    """
     token_content = token.strip() + "\n"
     if remote_host:
         remote_path = f"{str(repo_dir).rstrip('/')}/{TOKEN_FILENAME}"
@@ -46,7 +47,7 @@ def write_tower_token(repo_dir: Path | str, token: str, remote_host: str = "") -
 
 
 def clear_tower_token(repo_dir: Path | str, remote_host: str = "") -> None:
-    """Remove <repo_dir>/token.tk, if present (e.g. user unchecks 'use Tower')."""
+    """Remove <repo_dir>/token.tk if present (used when the token field is empty)."""
     if remote_host:
         remote_path = f"{str(repo_dir).rstrip('/')}/{TOKEN_FILENAME}"
         remote.remove_remote_file(remote_host, remote_path)

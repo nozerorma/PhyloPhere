@@ -1,38 +1,26 @@
 #!/usr/bin/env nextflow
+// rer_trait.nf — Trait vector for RERconverge and detection of its type (binary or continuous).
+// PhyloPhere | subworkflows/RERCONVERGE/
 
 /*
-#
-#
-#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
-#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
-#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
-#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#
-#
-# PHYLOPHERE: A Nextflow pipeline including a complete set
-# of phylogenetic comparative tools and analyses for Phenome-Genome studies
-#
-# Github: https://github.com/nozerorma/caastools/nf-phylophere
-#
-# Author:         Miguel Ramon (miguel.ramon@upf.edu)
-#
-# File: rer_trait.nf
-#
-*/
-
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  RER_TRAIT module: This module is responsible for the discovery process based on input alignments.
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  RER_TRAIT: runs build_rer_trait.R, which reads the trait file, builds the named
+ *  trait vector (and the optional count vectors for the Haldane-Anscombe logit) and
+ *  classifies the trait as binary (two values, recoded to 0/1 if needed) or
+ *  continuous. The type file routes the analysis to RER_BIN or RER_CONT.
+ *
+ *  Consumes:  trait file (species column params.sp_colname, trait column params.traitname)
+ *  Produces:  <trait>.polished.output (RData), <trait>.trait_type.output ('binary' or
+ *             'continuous')
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
+
+// ── Trait vector ───────────────────────────────────────────────────────────────
 
 process RER_TRAIT {
     tag "$my_traitfile"
 
-    // Uncomment the following lines to assign workload priority.
     label 'process_low'
 
 

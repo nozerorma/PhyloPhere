@@ -5,11 +5,16 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-The table starts empty: conf/resources.config is the only source of defaults and
-a row is a deliberate deviation from it. The button replaces every row with the
-current conf defaults (see gui/resource_defaults.py) as a starting point to edit.
-Selector Type is edited via a combo box delegate rather than free text,
-since it only has two legal values (see ResourceOverrideTableModel.setData).
+ResourceOverrideTableWidget: table of per-process resource overrides with Add row,
+Remove selected and load-defaults buttons.
+
+The table starts empty: conf/resources.config is the source of defaults, and each
+row is a deliberate deviation from it. The load button replaces every row with the
+current defaults parsed from that file (see gui/resource_defaults.py), as a
+starting point to edit. Selector Type is edited through a combo-box delegate
+because it has only two legal values (see ResourceOverrideTableModel.setData).
+
+Imported by: gui/widgets/tabs/resources_tab.py
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────
@@ -46,7 +51,7 @@ class SelectorTypeDelegate(QStyledItemDelegate):
 
 
 class ResourceOverrideTableWidget(QWidget):
-    """QTableView + Add row / Remove row / load-conf-defaults button."""
+    """QTableView + Add row / Remove selected / load-conf-defaults buttons."""
 
     changed = Signal()
 

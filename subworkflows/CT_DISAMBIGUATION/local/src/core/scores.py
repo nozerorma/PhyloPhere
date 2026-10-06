@@ -1,6 +1,14 @@
-"""Position and gene CAAS scores, shared by the observed chain (labeling b_0) and the null.
+# scores.py — Position and gene CAAS scores from per-scheme path scores.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/core/
 
-* ``caas_row`` is the row's ``asr_path_score`` (identity), so a position's score is the
+"""
+Position and gene CAAS scores, shared by the observed chain (labeling b_0) and the null.
+
+Imported by: src/utils/gene_wrapper.py
+Inputs: per-scheme (or per-side) score mappings and the reference pools of position scores
+Outputs: position scores, per-direction values and gene scores (in memory)
+
+* The score of a row (``caas_row``) is its ``asr_path_score`` (identity), so a position's score is the
   mean of ``asr_path_score`` over the caap_group schemes that detected it, per side.
 * Directions: ``top`` and ``bottom`` use only that side's rows; ``all`` keeps one entry per
   position, its best side, so a position detected on both sides is not counted twice.

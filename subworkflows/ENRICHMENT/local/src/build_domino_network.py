@@ -1,29 +1,35 @@
 #!/usr/bin/env python3
-# =============================================================================
-# build_domino_network.py — builds DOMINO's input network (network.sif)
-# =============================================================================
-# DOMINO has no background/universe concept (confirmed from src/core/domino.py's
-# main()): whatever is in the network file IS the implicit background. So the
-# network itself has to be built and filtered here, not left to DOMINO.
-#
-# STRING v12.0's raw links file is cached once, unfiltered, exactly like
-# 13.AMI_analysis.Rmd's ensure_string_cache() does for the R/STRINGdb path —
-# score_threshold is applied here at use-time so the same cache serves any
-# threshold. Node IDs are mapped ENSP -> gene symbol in a single hop via
-# protein.info.v12.0.txt.gz; do NOT round-trip through Ensembl gene IDs, that
-# loses information STRING already gives directly.
-#
-# Output is a plain 3-column SIF (geneA\tpp\tgeneB) — this is exactly what
-# DOMINO's own build_network() expects (src/core/network_builder.py reads
-# columns 0 and 2 of a tab-separated file, ignoring column 1). combined_score
-# is read only to filter edges here and used to be discarded once an edge
-# passed threshold, leaving 13.AMI_analysis.Rmd's plot_cluster_network() with
-# no score to vary edge width/opacity by (every edge rendered identically
-# thick). Also written to a sidecar network_edge_scores.tsv (gene1, gene2,
-# combined_score) instead — network.sif itself stays untouched/3-column since
-# DOMINO's own tools (slicer, run_domino_modules.py) expect exactly that shape.
-# =============================================================================
+# build_domino_network.py — Builds DOMINO's input network (network.sif) from STRING links.
+# PhyloPhere | subworkflows/ENRICHMENT/local/src/
 
+"""
+BuildDominoNetwork: filters the STRING protein-links file of one species to the edges
+whose two endpoints are both in the gene background, and writes them as the network
+DOMINO reads.
+
+DOMINO has no background argument: the genes of the network file are its implicit
+background. The network is therefore restricted to the analysis background here, not
+left to DOMINO.
+
+The raw STRING links and protein-info files are cached unfiltered (the same cache
+convention as ensure_string_cache() in 13.AMI_analysis.Rmd), so one cache serves any
+--score-threshold, which is applied at use time. Node IDs are mapped from ENSP to gene
+symbol in a single hop with the protein-info file; no round trip through Ensembl gene IDs.
+
+network.sif keeps the three columns DOMINO's own tools (slicer, run_domino_modules.py)
+expect (gene A, "pp", gene B; only columns 0 and 2 are read). The combined score, which
+the SIF cannot carry, goes to a sidecar table that 13.AMI_analysis.Rmd uses to scale the
+width of the network edges.
+
+Called by:  DOMINO_BUILD_NETWORK Nextflow process (domino.nf → build_domino_network.py)
+Inputs:     --cleaned-background  gene symbols, one per line; both endpoints of an edge must be in it
+            --string-db-dir       optional directory of pre-cached STRING files, checked before downloading
+            --species, --version  STRING species taxon ID and release (files <species>.protein.<kind>.v<version>.txt.gz)
+Outputs:    network.sif               geneA<TAB>pp<TAB>geneB, one line per undirected edge
+            network_edge_scores.tsv   gene1, gene2, combined_score (0-1000, max over the two directions)
+"""
+
+# ── Standard library ──────────────────────────────────────────────────────────
 import argparse
 import gzip
 import os
@@ -31,7 +37,13 @@ import shutil
 import sys
 import urllib.request
 
+
+# ── Constants ─────────────────────────────────────────────────────────────────
+
 STRING_BASE = "https://stringdb-downloads.org/download"
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
 
 
 def parse_args():
@@ -50,8 +62,15 @@ def parse_args():
     return p.parse_args()
 
 
+# ── STRING files ──────────────────────────────────────────────────────────────
+
+
 def ensure_cached(kind, species, version, string_db_dir, cache_dir):
-    """kind is 'links' or 'info'. Returns the local path to the (possibly just-downloaded) file."""
+    """Return the path of the cached STRING file of `kind` ('links' or 'info').
+
+    Lookup order: the cache directory, then string_db_dir (copied into the cache), then a
+    download from STRING. Raises RuntimeError when no source yields a non-empty file.
+    """
     fname = f"{species}.protein.{kind}.v{version}.txt.gz"
     dest = os.path.join(cache_dir, fname)
     os.makedirs(cache_dir, exist_ok=True)
@@ -76,7 +95,11 @@ def ensure_cached(kind, species, version, string_db_dir, cache_dir):
 
 
 def load_id2symbol(info_path):
-    """protein.info.v12.0.txt.gz: #string_protein_id  preferred_name  protein_size  annotation (tab-separated)."""
+    """Map STRING protein ID (ENSP) to preferred gene symbol.
+
+    Reads the protein-info file: tab-separated, one header line, columns
+    #string_protein_id, preferred_name, protein_size, annotation.
+    """
     id2sym = {}
     with gzip.open(info_path, "rt") as f:
         next(f)  # header
@@ -89,16 +112,20 @@ def load_id2symbol(info_path):
 
 
 def load_background(path):
+    """Set of gene symbols of the background file (one per line, blank lines ignored)."""
     with open(path) as f:
         return {line.strip() for line in f if line.strip()}
 
 
 def build_edges(links_path, id2sym, background, score_threshold):
-    """STRING links file: 'protein1 protein2 combined_score', space-separated,
-    each undirected edge listed once per direction — dedup via a sorted-pair
-    dict keyed on the gene pair, keeping the max score seen for that pair
-    (the two directions can carry slightly different values in STRING's
-    links file; max is the conservative/informative choice for display)."""
+    """Edges of the links file as {(gene_a, gene_b): combined_score}, gene_a < gene_b.
+
+    The links file is space-separated (protein1 protein2 combined_score) and lists each
+    undirected edge once per direction. Edges are deduplicated on the sorted gene pair,
+    keeping the higher score, since the two directions can differ slightly. An edge is
+    kept when its score reaches score_threshold, both proteins map to different symbols
+    and both symbols are in the background.
+    """
     edge_scores = {}
     n_lines = 0
     with gzip.open(links_path, "rt") as f:
@@ -126,6 +153,9 @@ def build_edges(links_path, id2sym, background, score_threshold):
     print(f"[build_domino_network] scanned {n_lines} links, kept {len(edge_scores)} edges "
           f"(score >= {score_threshold}, both endpoints in background)", file=sys.stderr)
     return edge_scores
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 
 def main():

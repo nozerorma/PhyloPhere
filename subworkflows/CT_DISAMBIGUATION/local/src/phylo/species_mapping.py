@@ -1,8 +1,15 @@
+# species_mapping.py — Read the species-to-tax_id table and match a tree and an alignment through it.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/phylo/
+
 """
 Species name to taxon ID mapping utilities.
 
-This module provides functions to map species names (used in trait files)
-to numeric taxon IDs (used in phylogenetic trees).
+Reads the species name -> tax_id table and uses it to match the species of a tree and of an alignment: both are pruned
+or filtered to their common tax_ids and relabeled with them.
+
+Imported by: src/asr/asr_single.py
+Inputs: a tab-separated tax_id table (columns tax_id and species), a Bio.Phylo tree, a Bio.Align alignment
+Outputs: the matched tree and alignment and the tax_id -> original name maps (in memory)
 """
 
 import logging
@@ -19,8 +26,8 @@ from src.phylo.tree_utils import prune_tree
 
 logger = logging.getLogger(__name__)
 
-# Per-process deduplication: log each taxid conflict only once per worker to
-# avoid flooding stderr when processing thousands of genes with the same conflict.
+# Per-process deduplication: each unmatched species and each taxid conflict is warned about once per
+# worker, to avoid flooding stderr when thousands of genes share the same conflict.
 _WARNED_CONFLICT_TAXIDS: Set[str] = set()
 _WARNED_TREE_UNMATCHED_SPECIES: Set[str] = set()
 _WARNED_ALIGNMENT_UNMATCHED_SPECIES: Set[str] = set()
@@ -47,7 +54,7 @@ def read_taxid_mapping(taxid_file: Path) -> Dict[str, str]:
         FileNotFoundError: If taxid file doesn't exist
         ValueError: If required columns are missing
     """
-    # Convert to Path if input is string
+    # Accept a plain string path
     if isinstance(taxid_file, str):
         taxid_file = Path(taxid_file)
 
@@ -70,7 +77,7 @@ def read_taxid_mapping(taxid_file: Path) -> Dict[str, str]:
             f"Available columns: {list(df.columns)}"
         )
 
-    # Create mapping dictionary
+    # Species name -> tax_id
     mapping = {}
     for _, row in df.iterrows():
         species_name = str(row["species"]).strip()
@@ -98,12 +105,9 @@ def match_tree_alignment_by_taxid(
 ]:
     """Match tree and alignment species using tax_id mapping.
 
-    Handles:
-    - Synonyms (multiple names → same tax_id)
-    - Spelling variations
-    - Subspecies/species differences
-    - Taxonomy conflicts (creates synthetic tax_ids for phylogenetically distinct
-      species sharing same NCBI tax_id)
+    Species are matched by exact name through `tax_mapping`; tree and alignment names that are not in it are
+    dropped. Alignment species that share one tax_id (e.g. synonyms of the same taxon) keep the alphabetically first
+    name on the original tax_id and the others receive synthetic tax_ids, so each sequence has a distinct label.
 
     Args:
         tree: Input phylogenetic tree
@@ -144,7 +148,7 @@ def match_tree_alignment_by_taxid(
             tree_unmatched.append(sp)
 
     if tree_unmatched:
-        # Avoid printing the same missing species for every gene in long runs.
+        # Report each missing species once, not for every gene.
         unseen_tree_unmatched = sorted(
             [sp for sp in tree_unmatched if sp not in _WARNED_TREE_UNMATCHED_SPECIES]
         )
@@ -222,9 +226,8 @@ def match_tree_alignment_by_taxid(
             continue
 
         species_list = sorted(species_list)
-        # Only emit the full warning block once per taxid conflict per worker process.
-        # In a multi-gene run this conflict recurs for every gene sharing these species;
-        # repeated logging floods stderr and can cause SLURM to kill the job.
+        # Warn once per taxid conflict per worker process: the conflict recurs for every
+        # gene that contains these species, and repeated logging floods stderr.
         first_occurrence = taxid not in _WARNED_CONFLICT_TAXIDS
         _WARNED_CONFLICT_TAXIDS.add(taxid)
 
@@ -361,8 +364,8 @@ def match_tree_alignment_by_taxid(
         tree_taxid_to_sp[taxid] for taxid in common_taxids if taxid in tree_taxid_to_sp
     ]
 
-    # Explicitly drop tree tips that have no tax_id mapping before the final common
-    # species prune so this behavior is guaranteed and visible in logs.
+    # Drop the tree tips without a tax_id mapping before the common-species prune,
+    # so that the drop is explicit and logged.
     if tree_unmatched:
         tree = prune_tree(tree, sorted(tree_sp_to_taxid.keys()))
 

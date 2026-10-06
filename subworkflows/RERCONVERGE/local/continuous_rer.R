@@ -1,49 +1,47 @@
+# continuous_rer.R — RERconverge correlation of gene RERs with a continuous trait.
+# PhyloPhere | subworkflows/RERCONVERGE/local/
+# =============================================================================
+# Called by:  RER_CONT Nextflow process (rer_cont.nf → Rscript continuous_rer.R ...)
 #
+# Transforms the trait (args[12]), converts it to phylogenetic paths on the master tree,
+# correlates the paths with the RER matrix (correlateWithContinuousPhenotype) and,
+# when permutations are requested, adds p.perm (empirical, from Brownian-motion null
+# phenotypes) and p.perm.adj (BH). The result carries the attribute n_perms.
 #
-#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
-#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
-#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
-#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#
-# PHYLOPHERE: A Nextflow pipeline including a complete set
-# of phylogenetic comparative tools and analyses for Phenome-Genome studies
-#
-# Github: https://github.com/nozerorma/caastools/nf-phylophere
-#
-# Author:         Miguel Ramon (miguel.ramon@upf.edu)
-#
-# File: continuous_rer.R
-#
-# Arguments
-# ---------
-#   args[1]  path to trait .polished.output (RData with trait_vector)
-#   args[2]  path to master gene trees RDS
-#   args[3]  output path for char2path RDS
-#   args[4]  path to RER matrix RDS
-#   args[5]  output path for continuous correlation RDS
-#   args[6]  min.sp  — minimum species per gene (integer)
-#   args[7]  winsorizeRER   — winsorization threshold for RER values
-#   args[8]  winsorizeTrait — winsorization threshold for trait values
-#   args[9]  rer_perm_batches   — number of permutation batches (0 = skip)
-#   args[10] rer_perms_per_batch — permutations per batch
-#   args[11] rer_perm_mode — permutation mode: "cc" (Complete Case) or "auto"
+# Args (positional, from task.script):
+#   args[1]  polished trait RData (trait_vector, n_vector, c_vector)
+#   args[2]  master gene-trees RDS (RER_TREES)
+#   args[3]  output: char2Paths RDS
+#   args[4]  RER matrix RDS (RER_MATRIX)
+#   args[5]  output: continuous correlation RDS (the permutations go to the same name
+#            with .output replaced by .perms.rds)
+#   args[6]  min.sp: minimum species per gene (integer)
+#   args[7]  winsorizeRER: winsorization threshold of the RER values
+#   args[8]  winsorizeTrait: winsorization threshold of the trait values
+#   args[9]  rer_perm_batches: permutation batches (0 = no permutations)
+#   args[10] rer_perms_per_batch: permutations per batch
+#   args[11] permutation mode ("cc"); passed by the process, not read by this script
+#   args[12] trait transformation: auto | ha_logit | logit | arcsin | log10 | none
+# =============================================================================
 
 args <- commandArgs(TRUE)
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
 
 library(dplyr)
 library(RERconverge)
 
 # ── Load trait vector and count vectors ───────────────────────────────────────
+
 traitPath <- args[1]
-load(traitPath)   # loads objects: trait_vector, n_vector, c_vector (if present)
+load(traitPath)   # trait_vector, n_vector, c_vector (n_vector and c_vector may be NULL)
 
 # ── Trait transformation ───────────────────────────────────────────────────────
+
 transform_type <- if (length(args) >= 12) args[12] else "auto"
 message(sprintf("[RER] Trait transformation parameter: '%s'", transform_type))
 
-# Check for NA values in trait_vector
+# At least one non-NA value is needed
 vals <- trait_vector[!is.na(trait_vector)]
 if (length(vals) == 0) {
   stop("ERROR: trait_vector contains no non-NA values.")
@@ -53,7 +51,7 @@ if (transform_type == "ha_logit") {
   if (is.null(n_vector) || is.null(c_vector)) {
     stop("ERROR: ha_logit transformation requested, but n_trait and/or c_trait were not specified or not found in the raw trait file.")
   }
-  # Align species and compute Haldane-Anscombe corrected logit
+  # Haldane-Anscombe logit of c_trait out of n_trait, on the species present in all three vectors
   common_sp <- intersect(names(n_vector), names(c_vector))
   common_sp <- intersect(common_sp, names(trait_vector))
   if (length(common_sp) == 0) {
@@ -64,7 +62,7 @@ if (transform_type == "ha_logit") {
   
   trans_vals <- log((c_val + 0.5) / (n_val - c_val + 0.5))
   
-  # Align trait_vector to these transformed values, keeping others NA
+  # The transformed values replace trait_vector; the other species become NA
   trait_vector <- setNames(rep(NA_real_, length(trait_vector)), names(trait_vector))
   trait_vector[common_sp] <- trans_vals
   message("[RER] Applied Haldane-Anscombe corrected logit transformation")
@@ -81,7 +79,7 @@ if (transform_type == "ha_logit") {
                       (1 - pmax(pmin(trait_vector, 1 - eps), eps)))
   message("[RER] Applied standard logit transformation")
 } else if (transform_type == "arcsin") {
-  # Arcsine square root: asin(sqrt(x))
+  # asin(sqrt(x)), defined for proportions in [0, 1]
   if (any(vals < 0 | vals > 1)) {
     warning("[RER] Trait values outside [0,1] detected; arcsine square root may produce NaNs.")
   }
@@ -133,22 +131,25 @@ if (transform_type == "ha_logit") {
 }
 
 # ── Load gene trees ───────────────────────────────────────────────────────────
+
 geneTrees <- readRDS(args[2])
 
 # ── Convert trait vector to phylogenetic paths ────────────────────────────────
+
 charpaths <- char2Paths(trait_vector, geneTrees)
 saveRDS(charpaths, args[3])
 
 # ── Load RER matrix ───────────────────────────────────────────────────────────
+
 traitRERw <- readRDS(args[4])
 
-# ── Dimensional consistency guard ────────────────────────────────────────────
-# char2Paths() derives its length from allPaths(treesObj$masterTree); the RER
-# matrix columns were fixed at getAllResiduals() time from the SAME master tree.
-# If they disagree, every downstream correlation misaligns the trait paths
-# against the RER columns by recycling — which either hard-errors inside
-# getAllCor() ("logical subscript too long") or, depending on the RERconverge
-# build, silently produces meaningless correlations. Fail loudly instead.
+# ── Dimension check ───────────────────────────────────────────────────────────
+
+# The number of paths from char2Paths() comes from allPaths(treesObj$masterTree), and the
+# RER matrix columns come from the master tree used in getAllResiduals(). If they
+# differ, the trait paths are recycled against the RER columns: an error inside
+# getAllCor() ("logical subscript too long") or, depending on the RERconverge build,
+# meaningless correlations. The script stops instead.
 if (length(charpaths) != ncol(traitRERw)) {
   stop(sprintf(
     paste0("[RER] Path/RER dimension mismatch: char2Paths produced %d paths but ",
@@ -159,6 +160,7 @@ if (length(charpaths) != ncol(traitRERw)) {
 }
 
 # ── Continuous RER correlation ────────────────────────────────────────────────
+
 message("[RER] Running correlateWithContinuousPhenotype ...")
 res <- correlateWithContinuousPhenotype(
   traitRERw,
@@ -169,10 +171,11 @@ res <- correlateWithContinuousPhenotype(
 )
 message(sprintf("[RER] Correlation done: %d genes tested.", nrow(res)))
 
-# ── Permutation statistics (Brownian Motion null phenotypes) ──────────────────
-# Following Valenzuela et al. (2024): 10 batches x 100 permutations per trait
-# (total 1,000 permutations) using the Complete Case (CC) method.
-# Empirical p-value (p.perm) = proportion of null correlations >= observed |Rho|.
+# ── Permulation null (Brownian-motion phenotypes) ─────────────────────────────
+
+# Null phenotypes are simulated under Brownian motion; the configured default (conf/
+# rerconverge.config) is 10 batches x 100 permutations, as in Valenzuela et al. (2024).
+# p.perm is the empirical p-value computed by permpvalcor() from the null correlations.
 num_batches      <- as.integer(args[9])
 perms_per_batch  <- as.integer(args[10])
 
@@ -182,27 +185,26 @@ if (num_batches > 0 && perms_per_batch > 0) {
     num_batches, perms_per_batch
   ))
 
-  # ── BM-null master tree ────────────────────────────────────────────────────
-  # getPermsContinuous() simulates null phenotypes with geiger::ratematrix() +
-  # geiger::sim.char(), which require a ROOTED, fully dichotomous tree whose
-  # tips match the (complete-case) trait vector. We build such a tree ONLY for
-  # the `mastertree=` argument. Critically, `trees=` must remain the ORIGINAL,
-  # untouched treesObj: splicing a multi2di'd master tree into the treesObj
-  # desyncs its cached $paths / $matIndex / $ap slots from the topology, so
-  # char2Paths() inside the null loop returns a path vector of the wrong length
-  # (see the dimensional guard above). Rooting/dichotomising a standalone tree
-  # for the simulation only sidesteps that entirely.
+  # ── Master tree for the simulation ─────────────────────────────────────────
+
+  # getPermsContinuous() simulates the null phenotypes with geiger::ratematrix() and
+  # geiger::sim.char(), which need a rooted, fully dichotomous tree whose tips are
+  # the species of the complete-case trait vector. That tree is built here and passed
+  # only as `mastertree=`. `trees=` must stay the original treesObj: replacing its
+  # master tree with a multi2di() tree leaves its cached $paths, $matIndex and $ap
+  # slots out of step with the topology, and char2Paths() in the null loop would
+  # return paths of the wrong length (see the dimension check above).
   sim_sp     <- intersect(names(trait_vector)[!is.na(trait_vector)],
                           geneTrees$masterTree$tip.label)
   sim_trait  <- trait_vector[sim_sp]
   sim_master <- ape::keep.tip(geneTrees$masterTree, sim_sp)
   if (!ape::is.rooted(sim_master)) {
-    # No outgroup is declared anywhere in the pipeline; midpoint rooting is the
-    # neutral default. BM simulation is only weakly sensitive to root placement.
+    # The pipeline defines no outgroup, so the tree is midpoint-rooted; the Brownian-motion
+    # simulation is only weakly sensitive to the placement of the root.
     sim_master <- phytools::midpoint.root(sim_master)
   }
   sim_master <- ape::multi2di(sim_master)
-  # multi2di() inserts zero-length edges; nudge them so ratematrix() stays
+  # multi2di() adds zero-length edges; they are set to 1e-8 to keep ratematrix()
   # non-singular.
   zero_edge <- sim_master$edge.length <= 0
   if (any(zero_edge)) {
@@ -247,12 +249,12 @@ if (num_batches > 0 && perms_per_batch > 0) {
 
   n_perms <- num_batches * perms_per_batch
 
-  # permpvalcor()'s return type changed across RERconverge builds:
-  #   * bioconda v0.3.0 tag  -> named numeric vector, raw proportion
-  #     sum(|null| > |obs|) / N. Needs the (x*N + 1)/(N + 1) pseudo-count here.
-  #   * install_env.sh pin (2bd328f7) -> data.frame(permpval, permstats), a
-  #     median-centred two-tailed empirical p with the (num + 1)/(denom + 1)
-  #     pseudo-count ALREADY applied internally. Take permpval as-is.
+  # The return type of permpvalcor() depends on the RERconverge build:
+  #   * bioconda v0.3.0 tag: named numeric vector with the raw proportion
+  #     sum(|null| > |obs|) / N, so the (x*N + 1)/(N + 1) pseudo-count is added here.
+  #   * the commit pinned in environment/install_env.sh (2bd328f7): data.frame(permpval,
+  #     permstats) with a median-centered two-tailed empirical p and the
+  #     (num + 1)/(denom + 1) pseudo-count already applied; permpval is used as is.
   ppc <- permpvalcor(res, perms_combined)
   if (is.data.frame(ppc)) {
     permpvals <- setNames(ppc$permpval, rownames(ppc))
@@ -261,19 +263,19 @@ if (num_batches > 0 && perms_per_batch > 0) {
     names(permpvals) <- names(ppc)
   }
 
-  # Align by gene name (row names of res)
+  # Match by gene name (row names of res)
   res$p.perm <- permpvals[rownames(res)]
-  # BH-correct the permulation p-values for multiple testing across genes.
+  # BH adjustment across genes
   res$p.perm.adj <- p.adjust(res$p.perm, method = "BH")
-  # Store total permutation count as attribute so the report can display
-  # the minimum detectable p.perm rather than a literal zero.
+  # The total number of permutations lets the report show the smallest detectable
+  # p.perm instead of 0.
   attr(res, "n_perms") <- n_perms
   message(sprintf(
     "[RER] Permutation p-values computed for %d / %d genes (N=%d perms total).",
     sum(!is.na(res$p.perm)), nrow(res), n_perms
   ))
   
-  # Save the raw permutations object containing null statistics matrices for pathway-level permulations downstream
+  # The raw permutations object (null statistics matrices) is kept for the FCS and comparison stages
   perms_path <- sub("\\.output$", ".perms.rds", args[5])
   saveRDS(perms_combined, file = perms_path)
   message("[RER] Saved raw null permutations RDS to: ", perms_path)

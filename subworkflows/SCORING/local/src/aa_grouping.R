@@ -1,31 +1,31 @@
 #!/usr/bin/env Rscript
+# aa_grouping.R — Amino-acid grouping schemes (US, GS1-GS4) and a residue encoder.
+# PhyloPhere | subworkflows/SCORING/local/src/
+# Sourced by: nothing in the pipeline (scoring_compute.nf stages it next to scoring_compute.R)
 # =============================================================================
-# PHYLOPHERE: amino-acid grouping schemes (R port)
-# File: subworkflows/SCORING/local/src/aa_grouping.R
-# =============================================================================
-# Verbatim transcription of the 5 partitions in
+# R copy of the five partitions defined in
 #   subworkflows/CT_DISAMBIGUATION/local/src/biochem/grouping.py
-# (the source of truth; byte-identical to subworkflows/CT/local/modules/caas_id.py,
-# both following Chen & Zou 2025, Mol Ecol Resour 25(1):e70052,
-# doi:10.1111/1755-0998.70052).
+# (the source of truth; its labels match this table residue by residue). The same
+# partitions are defined in subworkflows/CT/local/modules/caas_id.py, after
+# Chen & Zou 2025, Mol Ecol Resour 25(1):e70052, doi:10.1111/1755-0998.70052.
 #
-# These 5 schemes are INDEPENDENT partitions along DIFFERENT physicochemical
-# axes — NOT a nested/hierarchical refinement. Any cross-scheme descriptor built
-# on them must be a SET/PROFILE, never an ordinal "level".
+# The five schemes are independent partitions along different physicochemical axes,
+# not a nested refinement. Any cross-scheme descriptor built on them must therefore
+# be a set or a profile, never an ordinal level.
 #
-#   US   Classical CAAS. Strict amino-acid identity: each AA is its own group.
-#   GS1  Coarse biochemical recoding, 6 groups. Custom Dayhoff-like partition
-#        (no literature source). Basis: broad side-chain family.
-#   GS2  Side-chain dipole / volume, 7 groups. Yang 2010 from Shen 2007
-#        (doi:10.2174/092986610791760306). Basis: dipole moment + volume.
+#   US   Classical CAAS. Strict amino-acid identity: each residue is its own group.
+#   GS1  Coarse biochemical recoding, 6 groups. Dayhoff-like partition with no
+#        literature source. Basis: broad side-chain family.
+#   GS2  Side-chain dipole and volume, 7 groups. Yang 2010 from Shen 2007
+#        (doi:10.2174/092986610791760306).
 #   GS3  Polarity and volume, 6 groups. Zhang 2000 (doi:10.1007/s002399910007).
 #        Basis: polar vs non-polar crossed with small vs large.
-#   GS4  Fine-grained biochemical, 12 groups. Textbook functional bins; reactive
-#        / structural singletons kept apart.
+#   GS4  Fine-grained biochemical, 12 groups. Textbook functional bins; reactive or
+#        structural residues (G, P, K, M, F) are kept apart.
 #
-# encode_aa_r(aa, scheme) -> group label. An unknown residue passes through as
-# the raw (upper-cased) residue — mirrors path_scores.py::encode_aa, which
-# returns `get_grouping_scheme(raw, scheme) or raw`.
+# encode_aa_r(aa, scheme) returns the group label. An unknown residue passes through
+# as the raw upper-cased residue, as path_scores.py::encode_aa does (it returns
+# get_grouping_scheme(raw, scheme) or raw).
 # =============================================================================
 
 .AA_GROUPING_SCHEMES <- local({

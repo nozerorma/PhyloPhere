@@ -1,39 +1,35 @@
 #!/usr/bin/env python3
+# generate_taxid_map.py — Resolve the tip labels of a species tree to NCBI tax_ids.
+# PhyloPhere | bin/
+
 """
-generate_taxid_map.py  —  Auto-generate a tax_id/species mapping from a
-species tree's tip labels, using NCBI taxonomy for resolution.
+GenerateTaxidMap: builds the tax_id/species table of the pipeline from the tip labels of a
+Newick tree, for runs where the user supplies no tax_id file.
 
-Replaces the need for a user-supplied --tax_id file in the common case
-(species names already match, or differ only by underscore/space).
-Resolution is exact-match only: a tip label is looked up as its scientific
-name (underscores -> spaces) against NCBI taxonomy. Anything that doesn't
-resolve exactly is reported in --unresolved rather than guessed via fuzzy
-or synonym matching, so the user can supply corrections deliberately -- with
-one narrow exception: a label with more than two whitespace-separated
-tokens (e.g. "Cyperus eragrostis FM208065" -- a species name plus a
-disambiguating suffix, the shape multi-accession-per-species fixtures use to
-keep sibling tips unique) falls back to an exact match on just its first two
-tokens ("Cyperus eragrostis"). This is still exact match, just against a
-shorter, deterministically-derived candidate name -- not fuzzy/synonym
-matching -- and multiple tips correctly collapsing to the same species-level
-tax_id is expected in that case (they *are* the same species).
+Resolution is exact-match only: a label, with underscores read as spaces, is looked up as an NCBI
+scientific name. A name without an exact match is written to --unresolved, never guessed by
+fuzzy or synonym matching. One narrow exception: a label with more than two tokens (e.g.
+"Cyperus eragrostis FM208065", a species name plus a suffix that keeps sibling tips unique)
+is retried as its first two tokens. This is still an exact match on a deterministically
+derived name; several tips then share one tax_id, as they are the same species.
 
-Resolution source: live NCBI eutils, queried one name at a time in three
-tiers, so a transient failure on one name never affects the others:
-  1. each name is retried up to LIVE_ATTEMPTS times with exponential backoff
-     on network errors, timeouts, HTTP errors (429/5xx) or malformed replies;
-  2. names still failing are retried once more as a group after
-     SECOND_PASS_PAUSE seconds (rate limiting, short NCBI outages);
-  3. only names that never got a live answer fall back to ete3's local cached
-     NCBI taxonomy dump, and each is reported on stderr.
-A live answer of "no exact match" is final and is not retried. The local dump
-is a point-in-time snapshot and can disagree with live NCBI for
-recently-updated names (observed for e.g. "Machaerina articulata"), so it is
-the last resort, per name.
+Source: live NCBI eutils, queried one name at a time in three tiers, so that a transient
+failure on one name does not affect the others:
+  1. each name is retried up to LIVE_ATTEMPTS times with exponential backoff on network
+     errors, timeouts, HTTP errors or malformed replies;
+  2. the names still failing are retried once as a group after SECOND_PASS_PAUSE seconds
+     (rate limiting, short outages);
+  3. only the names that never got a live answer fall back to the local NCBI taxonomy dump of
+     ete3, each reported on stderr. The dump is a snapshot and can disagree with live NCBI
+     for recently updated names, so it is the last resort.
+A live answer of "no exact match" is final and not retried.
 
-Output (--output): TSV with columns tax_id, species — the exact schema
-required by subworkflows/TRAIT_ANALYSIS/local/src/phylo.R and
-subworkflows/RERCONVERGE/local/rer_master_tree.R.
+Called by:  resolve_core_inputs.py (when tax_id is blank and a tree is given)
+Inputs:     --tree        Newick species tree
+Outputs:    --output      TSV with columns tax_id, species (the label), the schema read by
+                          subworkflows/TRAIT_ANALYSIS/local/src/phylo.R and
+                          subworkflows/RERCONVERGE/local/rer_master_tree.R; unresolved labels are absent
+            --unresolved  TSV with one column, species, listing the unresolved labels
 """
 
 from __future__ import annotations
@@ -59,11 +55,13 @@ _TRANSIENT = (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError
 
 
 def normalize_label(label: str) -> str:
+    """Strip quotes and surrounding blanks from a tip label and turn inner whitespace into underscores."""
     label = (label or "").strip().strip("'\"")
     return re.sub(r"\s+", "_", label)
 
 
 def load_tip_labels(tree_path: str) -> list:
+    """Unique normalized tip labels of the tree, in tree order."""
     tree = dendropy.Tree.get(path=tree_path, schema="newick", preserve_underscores=True)
     labels = [normalize_label(leaf.taxon.label) for leaf in tree.leaf_node_iter() if leaf.taxon]
     seen = set()
@@ -76,9 +74,11 @@ def load_tip_labels(tree_path: str) -> list:
 
 
 def _esearch_once(name: str) -> list[str]:
-    """One eutils esearch, exact scientific-name match. Raises one of
-    _TRANSIENT when NCBI gives no usable answer (network error, timeout, HTTP
-    error, malformed JSON)."""
+    """One eutils esearch for an exact scientific name; returns the list of tax_ids found.
+
+    Raises one of _TRANSIENT when NCBI gives no usable answer (network error, timeout,
+    HTTP error, malformed JSON).
+    """
     term = urllib.parse.quote(f"{name}[Scientific Name]")
     with urllib.request.urlopen(f"{_EUTILS_ESEARCH}?db=taxonomy&retmode=json&term={term}",
                                  timeout=15) as r:
@@ -87,9 +87,11 @@ def _esearch_once(name: str) -> list[str]:
 
 def _resolve_names_live(names: list[str], attempts: int = LIVE_ATTEMPTS
                         ) -> tuple[dict[str, int], list[str]]:
-    """Tier 1: live eutils per name with retries. Returns (resolved, failed):
-    `failed` holds the names for which NCBI never gave a usable answer; a name
-    NCBI answered without a unique exact match is in neither."""
+    """Tier 1: live eutils per name with retries. Returns (resolved, failed).
+
+    `failed` holds the names for which NCBI never gave a usable answer; a name answered
+    without a unique exact match is in neither.
+    """
     out: dict[str, int] = {}
     failed: list[str] = []
     for name in names:
@@ -112,9 +114,10 @@ def _resolve_names_live(names: list[str], attempts: int = LIVE_ATTEMPTS
 
 
 def _resolve_names_local(names: list[str]) -> dict[str, int]:
-    """Same exact-match resolution against ete3's local cached NCBI taxonomy
-    dump -- used only when live eutils is unreachable. May disagree with
-    live NCBI if the local dump predates a taxonomic update."""
+    """Tier 3: the same exact-match resolution against the local NCBI taxonomy dump of ete3.
+
+    May disagree with live NCBI if the dump predates a taxonomic update.
+    """
     from ete3 import NCBITaxa
 
     name2taxid = NCBITaxa().get_name_translator(names)
@@ -122,7 +125,7 @@ def _resolve_names_local(names: list[str]) -> dict[str, int]:
 
 
 def _resolve_names(names: list[str]) -> dict[str, int]:
-    """Three-tier resolution of `names` (see module docstring)."""
+    """Three-tier resolution of `names` (see the module docstring); returns name → tax_id."""
     resolved, failed = _resolve_names_live(names)
     if failed:
         print(f"  {len(failed)} name(s) without a live NCBI answer; retrying in "
@@ -146,9 +149,8 @@ def _resolve_names(names: list[str]) -> dict[str, int]:
 
 
 def resolve_taxids(labels: list[str]) -> tuple[dict[str, int], list[str]]:
-    """label -> NCBI tax_id via _resolve_names, full label first, then the
-    genus+species fallback described above for multi-token labels. Returns
-    (resolved, unresolved)."""
+    """Label → NCBI tax_id via _resolve_names: the full label first, then the
+    genus + species fallback for labels with more than two tokens. Returns (resolved, unresolved)."""
     query_names = {label: label.replace("_", " ") for label in labels}
     name2taxid = _resolve_names(list(query_names.values()))
 

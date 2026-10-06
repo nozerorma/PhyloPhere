@@ -1,34 +1,37 @@
 #!/usr/bin/env Rscript
+# parse_fade_json_sites.R — Site-level FADE Bayes factors from the raw *.FADE.json files.
+# PhyloPhere | subworkflows/FADE/local/src/
 # =============================================================================
-# parse_fade_json_sites.R — per-site FADE Bayes Factors, direct from raw JSON
-# =============================================================================
-# HyPhy FADE reports one Bayes Factor per (site, target amino acid); the
-# gene-level FADE_REPORT (6.FADE_report.Rmd) collapses this to a single
-# per-gene row and no longer keeps the underlying site-level table (dropped as
-# a memory optimisation — nothing downstream used to consume it). This script
-# regenerates the piece posenrich needs: one row per site whose max BF (across
-# the 20 target AAs) clears the classic significance bar, giving FADE a
-# position-level ((Gene,Position)-keyed) evidence layer analogous to UCR
-# core/flank and FUBAR positive/purifying.
+# Called by:  FADE_JSON_TO_CSV Nextflow process (fade_json_to_csv.nf → Rscript parse_fade_json_sites.R ...)
 #
-# Validated this session against a real 16,130-file production run: 1,195
-# significant (gene,site) rows for the `top` direction, matching the pipeline's
-# own gene-level fade_summary_top.tsv aggregate (sum(n_sig_site_aa)) exactly.
+# HyPhy FADE reports one Bayes factor per (site, target amino acid). The gene-level
+# FADE report keeps one row per gene, so this script reads the JSON files again and
+# writes one row per site whose maximum BF over the 20 amino acids reaches --bf_thr:
+# the position-keyed ((Gene, Position)) FADE evidence layer of POSENRICH.
 #
-# Usage:
-#   Rscript parse_fade_json_sites.R \
-#     --json_dir   <dir with *.FADE.json> \
-#     --direction  top|bottom \
-#     --bf_thr     100 \
-#     --n_cores    8 \
-#     --out        fade_sites_top.csv
+# Output columns: gene, position (0-based, the coordinate system of the CAAS Position
+# column), max_bf, target_aa (the amino acid with the highest BF). A header-only
+# CSV is written when there are no JSON files or no site reaches the threshold.
+#
+# Args (named flags, from task.script):
+#   --json_dir   directory with the <gene>.<direction>.FADE.json files
+#   --direction  top | bottom
+#   --bf_thr     minimum max BF to keep a site (default 100)
+#   --n_cores    parallel workers (default 4; fork-based, serial on non-unix)
+#   --out        output CSV (default fade_sites_<direction>.csv)
 # =============================================================================
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
 
 suppressPackageStartupMessages({
   library(jsonlite)
   library(parallel)
 })
 
+
+# ── Arguments ─────────────────────────────────────────────────────────────────
+
+# Value after `flag` on the command line, or `default` when the flag is absent.
 parse_arg <- function(flag, default = NULL) {
   args <- commandArgs(trailingOnly = TRUE)
   idx <- which(args == flag)
@@ -44,21 +47,29 @@ out_file  <- parse_arg("--out", sprintf("fade_sites_%s.csv", direction))
 
 stopifnot(!is.null(json_dir), !is.null(direction))
 
+# Order of the amino acids (keys of the MLE content in the JSON)
 AA_LETTERS <- strsplit("ACDEFGHIKLMNPQRSTVWY", "")[[1]]
+
+
+# ── Input files ───────────────────────────────────────────────────────────────
 
 json_files <- list.files(json_dir, pattern = "\\.FADE\\.json$", full.names = TRUE)
 cat(sprintf("[parse_fade_json_sites] direction=%s | %d JSON files | bf_thr=%.1f\n",
             direction, length(json_files), bf_thr))
 
 if (length(json_files) == 0) {
-  # Write header-only CSV so the Nextflow output declaration is satisfied and
-  # downstream (build_position_gmt.py) sees an honestly-empty FADE layer
-  # rather than a missing file.
+  # Header-only CSV: the declared output exists and build_position_gmt.py reads an
+  # empty FADE layer.
   writeLines("gene,position,max_bf,target_aa", out_file)
   cat("[parse_fade_json_sites] no JSON files found — wrote empty output\n")
   quit(save = "no", status = 0)
 }
 
+
+# ── Per-gene parsing ──────────────────────────────────────────────────────────
+
+# Significant sites of one JSON file as a data frame, NULL when the file has no MLE
+# content, no site reaches --bf_thr, or the file cannot be parsed (reported as a message).
 parse_one <- function(path) {
   gene_id <- sub("\\.(top|bottom)\\.FADE\\.json$", "", basename(path))
   tryCatch({
@@ -73,9 +84,8 @@ parse_one <- function(path) {
     for (aa in AA_LETTERS) {
       aa_data <- content[[aa]]
       if (is.null(aa_data) || length(aa_data) == 0) next
-      # content[[aa]] is keyed by partition (in practice always one key, "0");
-      # the per-gene site index is the POSITION within that partition's list,
-      # not the key name.
+      # content[[aa]] is keyed by partition (a single key in these runs); the site
+      # index is the position within that partition's list, not the key name.
       site_key <- names(aa_data)[1]
       all_site_rows <- aa_data[[site_key]]
       if (is.null(all_site_rows) || length(all_site_rows) == 0) next
@@ -97,7 +107,7 @@ parse_one <- function(path) {
     top_aa_idx <- apply(bf_matrix[sig_idx, , drop = FALSE], 1, which.max)
     data.frame(
       gene = gene_id, position = sig_idx - 1L,   # 1-based site -> 0-based position,
-      max_bf = max_bf[sig_idx],                  # matching CAAS/CT's coordinate system
+      max_bf = max_bf[sig_idx],                  # as in the CAAS Position column
       target_aa = AA_LETTERS[top_aa_idx],
       stringsAsFactors = FALSE
     )
@@ -106,6 +116,9 @@ parse_one <- function(path) {
     NULL
   })
 }
+
+
+# ── Parse all files and write ─────────────────────────────────────────────────
 
 t0 <- Sys.time()
 if (.Platform$OS.type == "unix" && n_cores > 1L) {

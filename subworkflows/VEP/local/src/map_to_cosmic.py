@@ -1,12 +1,38 @@
 #!/usr/bin/env python3
-"""Map CAAS protein positions to COSMIC somatic mutations using upstream MAP files.
+# map_to_cosmic.py — Map CAAS positions to COSMIC somatic mutations.
+# PhyloPhere | subworkflows/VEP/local/src/
+
+"""
+MapToCosmic: For every CAAS position (Gene, Position), finds the COSMIC Mutant Census
+missense mutations at its hg38 codon whose amino-acid change is the ancestral→derived
+change of the CAAS, and writes them with their COSMIC annotation.
 
 Strategy:
-1. Load CAAS file and group targets by (Gene, Position).
-2. Load MAP files and build genomic position lookup (chrom, nt_pos) -> (gene, caas_pos).
-3. Stream Cosmic_MutantCensus_v104_GRCh38.tsv.gz, match coordinates, and output matching rows.
+  1. Group the CAAS rows by (Gene, Position); only the `US` caap_group is used (rows
+     without a caap_group column count as `US`).
+  2. Translate each position to its hg38 codon with the per-gene MAP files (alignment
+     column = Position + 1) and index the three nucleotides of the codon by
+     (chromosome, coordinate); the strand is inferred from the MAP file.
+  3. Stream the COSMIC table (gzip TSV), look up each mutation by (chromosome,
+     GENOME_START) and keep it when MUTATION_AA is a plain missense change (p.X123Y),
+     X is an ancestral residue of the CAAS (when that set is known) and Y a derived one.
+
+Called by:  COSMIC_MAP Nextflow process (cosmic.nf → map_to_cosmic.py)
+Inputs:     caas_file     position_scores.tsv, with Gene, Position and, when present, tag,
+                          caas, side, amino_encoded, caap_group and the residue tally
+                          columns (top_species_residues / bottom_species_residues)
+            vep_map_dir   directory of the per-gene MAP files
+            cosmic_gz     COSMIC Mutant Census GRCh38 table (gzip TSV)
+            output_tsv    path of the output table
+            [position_scores_tsv]  optional fifth argument, accepted and ignored
+Outputs:    output_tsv    Gene, Position, hg38_ref_aa, caas_alt_aas, caas_change,
+                          caap_group, scheme_weight, CHROMOSOME, GENOME_START,
+                          GENOMIC_WT_ALLELE, GENOMIC_MUT_ALLELE, MUTATION_AA,
+                          MUTATION_DESCRIPTION, MUTATION_SOMATIC_STATUS; header only
+                          when no CAAS row can be mapped
 """
 
+# ── Standard library ──────────────────────────────────────────────────────────
 import sys
 import os
 import gzip
@@ -14,6 +40,7 @@ import re
 import glob
 from pathlib import Path
 
+# ── Package-internal ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 from vep_common import (  # noqa: E402
     _support_letters,
@@ -22,12 +49,17 @@ from vep_common import (  # noqa: E402
     load_map_file,
 )
 
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+# Weight written for each caap_group (only US is processed).
 SCHEME_WEIGHTS = {
     "US":  1.0,
 }
 
 
 def write_header_only(output_tsv):
+    """Write the output header (and no rows) and exit with status 0."""
     with open(output_tsv, 'w') as out:
         out.write(
             "Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaas_change\tcaap_group\tscheme_weight\t"
@@ -36,7 +68,12 @@ def write_header_only(output_tsv):
         )
     sys.exit(0)
 
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+
 def main():
+    """Map the CAAS positions of argv[1] to COSMIC mutations (see the module docstring)."""
     if len(sys.argv) not in (5, 6):
         sys.exit("Usage: map_to_cosmic.py <caas_file> <vep_map_dir> <cosmic_gz> "
                  "<output_tsv> [position_scores_tsv]")
@@ -88,7 +125,7 @@ def main():
                 continue
 
             if skip_positions is not None and (gene, position) in skip_positions:
-                continue  # fractional FOP rule: derived residues genuinely disagree
+                continue  # position excluded by load_convergence_skip()
 
             tag = fields[tag_col] if tag_col is not None else f"{gene}_{position}"
             caas_pat = fields[caas_col] if caas_col is not None else ''
@@ -124,8 +161,8 @@ def main():
         write_header_only(output_tsv)
 
     print("Loading MAP files and building genomic lookup ...", file=sys.stderr)
-    pos_lookup = {}
-    loaded_maps = {}
+    pos_lookup = {}  # (chrom, pos) -> list of (gene, caas_pos, hg38_aa_pos, tag_entries)
+    loaded_maps = {}  # gene -> (pos_map, strand)
 
     for (gene, caas_pos) in caas_targets:
         if gene not in loaded_maps:
@@ -137,12 +174,13 @@ def main():
         if not pos_map:
             continue
 
-        prot_ali_idx = caas_pos + 1
+        prot_ali_idx = caas_pos + 1  # Position is 0-based, prot_ali_col 1-based
         if prot_ali_idx not in pos_map:
             continue
 
         hg38_aa_pos, chrom, coord = pos_map[prot_ali_idx]
 
+        # The three nucleotides of the codon, in the direction of the strand.
         if strand == '+':
             codon_positions = [coord, coord + 1, coord + 2]
         else:
@@ -179,7 +217,6 @@ def main():
         except ValueError as exc:
             sys.exit(f"Missing expected column in COSMIC header: {exc}")
 
-        # Output header
         out.write(
             "Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaas_change\tcaap_group\tscheme_weight\t"
             "CHROMOSOME\tGENOME_START\tGENOMIC_WT_ALLELE\tGENOMIC_MUT_ALLELE\t"
@@ -224,8 +261,7 @@ def main():
                     weight = entry['weight']
                     caas_change = entry['caas_change']
 
-                    # Parse amino acid change if possible
-                    # Somatic mutation must be a clean missense mutation matching the CAAS transition
+                    # Only a plain missense change (p.X123Y) can match the CAAS transition.
                     match_parts = re.match(r'^p\.([A-Z])\d+([A-Z])$', mut_aa)
                     if not match_parts:
                         continue

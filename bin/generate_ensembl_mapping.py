@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
+# generate_ensembl_mapping.py — Build the gene → Ensembl annotation table from a gene list via BioMart.
+# PhyloPhere | bin/
+
 """
-generate_ensembl_mapping.py  —  Auto-generate the gene Ensembl mapping file
-from a gene list, via a BioMart query against Ensembl human genes.
+GenerateEnsemblMapping: queries Ensembl BioMart for genomic coordinates and the protein ID of
+each gene, for runs where the user supplies no gene_ensembl_file.
 
-Replaces the need for a user-supplied --gene_ensembl_file in the common
-case (gene names match HGNC symbols). Only genes matched by
-external_gene_name are returned; genes with no BioMart hit are reported to
---unresolved and are simply absent from the output (only 'gene' and
-'length' are hard-required downstream, per filter_caas_genes.py).
+Genes are matched by external_gene_name, so the gene names must be symbols of the BioMart
+dataset (HGNC symbols for the human dataset). A gene without a BioMart hit is listed in
+--unresolved and absent from the output. Of the output columns, gene and length are the ones
+subworkflows/CT_POSTPROC/local/src/filter_caas_genes.py requires; human_protein_id is read by
+the VEP step. When BioMart returns several rows per gene (one per peptide), the first is kept.
 
-Model: extract_bg.py (Malignancy_Primates/Scripts/AdHoc-Scripts), using direct
-Ensembl BioMart XML queries via requests.
-
-Output (--output) schema:
-    gene  chr  start  end  strand  length  human_protein_id
-Coordinate length (end - start + 1) is used as 'length', since this file
-supplies per-gene genomic length, not alignment-column length.
-
-Caching: the BioMart response is cached under --cache-dir (default:
-.cache/biomart/ next to --output), keyed by the sorted gene-ID set, so
-repeated runs against the same gene list don't re-hit Ensembl.
+Called by:  resolve_core_inputs.py (when gene_ensembl_file is blank and auto-generation is enabled)
+Inputs:     --gene-list    one gene name per line
+            --dataset      BioMart dataset; derived from --ref-species when empty
+                           (Homo_sapiens → hsapiens_gene_ensembl)
+Outputs:    --output       TSV: gene, chr, start, end, strand, length, human_protein_id. length is
+                           end - start + 1, the genomic length of the gene, not an alignment length
+            --unresolved   genes with no BioMart hit, one per line
+            cache          raw BioMart response at <--cache-dir>/<sha256 of the sorted gene list>_<dataset>.tsv
+                           (default --cache-dir: .cache/biomart next to --output), reused on rerun
 """
 
 import argparse
@@ -35,6 +36,7 @@ _COLUMNS = ["gene", "chr", "start", "end", "strand", "length", "human_protein_id
 
 
 def load_gene_list(path: str) -> list:
+    """Sorted unique non-empty lines of the gene list file."""
     genes = set()
     with open(path) as fh:
         for line in fh:
@@ -45,10 +47,12 @@ def load_gene_list(path: str) -> list:
 
 
 def cache_key(genes: list) -> str:
+    """SHA-256 of the sorted gene names, so the same gene set reuses one cache file."""
     return hashlib.sha256("\n".join(genes).encode("utf-8")).hexdigest()
 
 
 def query_biomart(genes: list, dataset: str = "hsapiens_gene_ensembl", chunk_size: int = 500) -> pd.DataFrame:
+    """BioMart martservice query, in chunks of chunk_size genes; raises RuntimeError on a BioMart error reply."""
     url = "http://www.ensembl.org/biomart/martservice"
     frames = []
     for i in range(0, len(genes), chunk_size):
@@ -88,7 +92,7 @@ def query_biomart(genes: list, dataset: str = "hsapiens_gene_ensembl", chunk_siz
 
 
 def derive_dataset(ref_species: str) -> str:
-    """e.g. 'Homo_sapiens' -> 'hsapiens_gene_ensembl'"""
+    """BioMart dataset from a species name: 'Homo_sapiens' → 'hsapiens_gene_ensembl' (human when it has no two parts)."""
     parts = ref_species.strip().lower().split("_")
     if len(parts) >= 2:
         return f"{parts[0][0]}{parts[1]}_gene_ensembl"

@@ -1,30 +1,41 @@
 #!/usr/bin/env Rscript
+# scoring_compute.R — Position-level and gene-level CAAS scores, integrated with FADE, RER and accumulation.
+# PhyloPhere | subworkflows/SCORING/local/src/
 # =============================================================================
-# CAAS Scoring - Position-Level and Gene-Level Composite Scores
-# =============================================================================
+# Called by:  SCORING_COMPUTE Nextflow process (scoring_compute.nf → Rscript scoring_compute.R ...),
+#             after observed_core_scores.py, whose two tables it reads
 #
-# Integrates outputs from CT_POSTPROC, FADE, RERConverge, and
-# CT_ACCUMULATION into a unified scoring framework.
+# The position score (CAAS_score) and the gene score (size_adj_max) come from core.scores via
+# observed_core_scores.py. This script adds the permulation p-values of positions (p.emp and its
+# BH and permutation-FDR adjustments) and genes (gene_caas_pperm), joins the per-gene evidence of
+# FADE, RERConverge and accumulation, and writes the tables, the ranked slices and the enrichment
+# curves that the ENRICHMENT subworkflow and the reports read. It runs once on the full pool of
+# filtered_discovery.tsv; direction is carried by the `side` column (top, bottom, none).
 #
-# Usage:
-#   Rscript scoring_compute.R \
-#     --postproc   <filtered_discovery.tsv> \
-#     --fade_top      <fade_summary_top.tsv> \
-#     --fade_bottom   <fade_summary_bottom.tsv> \
-#     --fade_site_top <fade_site_bf_top.tsv> \
-#     --fade_site_bot <fade_site_bf_bottom.tsv> \
-#     --rer           <rerconverge_summary.tsv> \
-#     --accum_dir     <directory_with_accumulation_CSVs> \
-#     --top_pct    0.10 \
-#     --gene_top_pct  0.10 \
+# Args (named flags, from task.script). An input whose file name starts with NO_ counts as absent.
+#   --postproc            filtered_discovery.tsv (mandatory)
+#   --core_positions      observed_core_scores.py positions table (mandatory)
+#   --core_genes          observed_core_scores.py genes table (mandatory)
+#   --fade_top, --fade_bottom         gene-level FADE summaries (fade_summary_{top,bottom}.tsv)
+#   --fade_site_top, --fade_site_bot  per-site FADE tables (comma-delimited)
+#   --rer                 rerconverge_summary_<trait>.tsv
+#   --accum_dir           directory with accumulation_<direction>_<scheme>_aggregated_results.csv
+#   --caas_perms          caas_perms.rds, the gene-level null (scoring_caas_perms.R)
+#   --caas_pos_cycle_caas perm_pos_cycle_caas.tsv.gz, the position-level null for p.emp
+#   --gene_perm_pooled    true|false: also write the n-stratified pooled gene p (default false)
+#   --p_emp_thr           threshold of flag_caas_significant (default 0.05)
+#   --hypotheses_pairs, --top_pct, --gene_top_pct   parsed but not used by the computation
 #
-# Outputs (in working directory):
-#   position_scores.tsv - per Gene×Position scores
-#   gene_scores.tsv - per Gene scores
-#   gene_correlations.tsv - pairwise correlations between gene scores
-#   gene_threshold_enrichment.tsv - gene-level enrichment curve (OR + Fisher) across CAAS thresholds × tools
-#   pos_threshold_enrichment.tsv - position-level FADE enrichment curve across CAAS thresholds
-#   gene_lists/slice_*.tsv - 8 ranked gene lists (Top/Bottom × 25/10/5/1%) for STRING
+# Outputs (working directory):
+#   position_scores.tsv            one row per Gene, Position and side
+#   gene_scores.tsv                one row per Gene
+#   gene_correlations.tsv          pairwise correlations between gene scores (header only while one score exists)
+#   fcs_stats.tsv                  gene scores and flags for the FCS reports
+#   fcs_stats_{rer,fade,accum}.tsv per-module FCS rankings, written when that evidence exists
+#   gene_lists/slice_*.tsv         12 ranked gene slices (top, bottom, global x 25, 10, 5, 1%)
+#   position_lists/slice_*.tsv     12 ranked position slices, same layout
+#   gene_threshold_enrichment.tsv  odds ratio and Fisher p of FADE, RER and accumulation across CAAS thresholds
+#   pos_threshold_enrichment.tsv   the same curve for position-level FADE
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -33,7 +44,7 @@ suppressPackageStartupMessages({
   library(readr)
 })
 
-# ─── Argument parsing ────────────────────────────────────────────────────────
+# ── Parse arguments ───────────────────────────────────────────────────────────
 args <- commandArgs(trailingOnly = TRUE)
 
 parse_arg <- function(flag, default = "NO_FILE") {
@@ -55,16 +66,12 @@ core_positions_file  <- parse_arg("--core_positions")  # observed_core_scores.py
 core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: size-adjusted gene CAAS scores
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
 gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
-# Gene-level permulation significance threshold for flag_caas_significant (fcs_stats.tsv)
-# and gene_caas_pperm_adj. Mirrors 11.Scoring_report.Rmd's `scoring_p_emp_thr`
-# param (conf/scoring.config) - one threshold, reused here so the
-# FCS/POSENRICH/Comparison "% significant" tables agree with what the Scoring
-# report itself calls significant.
+# Threshold of flag_caas_significant (fcs_stats.tsv): gene_caas_pperm_adj <= p_emp_thr. It is the value of
+# the scoring_p_emp_thr param of 11.Scoring_report.Rmd (conf/scoring.config), so the "% significant"
+# figures of the enrichment reports agree with the Scoring report.
 p_emp_thr         <- as.numeric(parse_arg("--p_emp_thr", "0.05"))
-# The disambiguation subworkflow domain-pools the hypothesis harvest in-tree
-# (core v3: fop_pool.pool_domains over the K fixed Voronoi domains), so rows
-# arrive one per (Gene, Position, scheme, side) with hypothesis=NA and scoring
-# never pools hypotheses itself.
+# Rows reach this script already pooled over hypotheses by CT_DISAMBIGUATION (one row per Gene,
+# Position, scheme and side, hypothesis NA), so scoring never pools hypotheses itself.
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
 top25_pct         <- 0.25
 top5_pct          <- 0.05
@@ -74,9 +81,9 @@ gene_top25_pct    <- 0.25
 gene_top5_pct     <- 0.05
 gene_top1_pct     <- 0.01
 gene_perm_pooled      <- tolower(as.character(gene_perm_pooled_raw)) %in% c("true", "1", "yes")
-# direction removed: scoring always runs on the full postproc pool.
-# Directional characterisation happens post-scoring via side column.
+# Direction is not a parameter: scoring runs on the full pool and the `side` column carries it.
 
+# TRUE for a real file; a sentinel (basename starting with NO_) or an empty name counts as absent.
 file_exists <- function(f) {
   !is.null(f) && f != "" && !grepl("^NO_", basename(f)) && file.exists(f)
 }
@@ -91,6 +98,7 @@ file_exists <- function(f) {
 # TIE_TOL as ties (same constant as core.scores.TIE_TOL).
 TIE_TOL <- 1e-12
 
+# Correlation over the complete pairs; NA when fewer than 3 remain.
 safe_cor <- function(x, y, method = "pearson") {
   ok <- complete.cases(x, y)
   if (sum(ok) < 3) return(NA_real_)
@@ -101,30 +109,20 @@ cat("═════════════════════════
 cat("  CAAS Scoring - Compute\n")
 cat("═══════════════════════════════════════════════════════════════\n\n")
 
-# =============================================================================
-# 1. LOAD POSTPROC DATA (mandatory)
-# =============================================================================
+# ── 1. Load postproc data (mandatory) ─────────────────────────────────────────
 stopifnot(file_exists(postproc_file))
 stopifnot("--core_positions and --core_genes (observed_core_scores.py) are required" =
             file_exists(core_positions_file) && file_exists(core_genes_file))
 cat("Loading postproc:", postproc_file, "\n")
 df <- read_tsv(postproc_file, show_col_types = FALSE)
-# filtered_discovery.tsv uses disambiguation's canonical lowercase concept names
-# (caap_group, …) - consumed as-is; position_scores.tsv keeps the same lowercase schema.
-# NOTE: `pvalue` / `gate_sig` / `gate_all` are NOT live columns here. The
-# hypergeometric CAAP p-value (subworkflows/CT/local/modules/hyper.py) was
-# deleted in 6448728 ("no greeeedy plus pss", 2026-09-01); caas_id.py no longer
-# emits a `pvalue` field at all, so this and every downstream reference to
-# pvalue/gate_sig/gate_all is structurally NA/FALSE. Cleaned up 2026-09-11 --
-# see git blame if reviving the hypergeometric gate is ever wanted.
+# filtered_discovery.tsv carries the canonical lowercase column names of CT_DISAMBIGUATION
+# (caap_group, asr_path_score, side, ...), used as they are; position_scores.tsv keeps the same schema.
 cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
             nrow(df), n_distinct(paste(df$Gene, df$Position))))
 
-# =============================================================================
-# 2. POSITION-LEVEL SCORING
-# =============================================================================
+# ── 2. Position-level scoring ─────────────────────────────────────────────────
 
-# ── 2a. Pre-scoring exclusions + scheme scope ────────────────────────────────
+# ── 2a. Scheme scope ──────────────────────────────────────────────────────────
 # The five scoring schemes.
 #
 # No per-scheme weight: how many of the five schemes detect a substitution is a
@@ -133,10 +131,9 @@ cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
 # strength. Section 2g aggregates schemes with a mean for this reason.
 scoring_schemes <- c("US", "GS4", "GS3", "GS2", "GS1")
 
-# Priority ONLY for picking a representative scheme's display/gating columns
-# (side, caap_group, ...) at the Gene×Position
-# aggregation below (section 2g). Deliberately separate from the scoring itself,
-# which treats all five schemes symmetrically.
+# Priority only picks the representative scheme whose display columns (side, caap_group, ...) the
+# Gene×Position aggregation of section 2g carries. It is separate from the scoring itself, which treats
+# all five schemes symmetrically.
 scheme_priority_int <- c(US = 5, GS4 = 4, GS3 = 3, GS2 = 2, GS1 = 1)
 
 df <- df %>%
@@ -147,44 +144,36 @@ df <- df %>%
 cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring schemes\n",
             nrow(df), n_distinct(df$caap_group)))
 
-# ── 2b. FOP domain-pooling (collapse H1..Hn -> one row per Gene×Position×scheme) ─
-# A FOP run emits one disambiguation row per (Gene, Position, scheme, hypothesis).
-# H1..Hn are overlapping K-pair designs over the same Voronoi domains, NOT
-# independent replicates, so §2g's per-scheme mean must not also average over
-# them uniformly (it would dilute a strong canonical signal and let a position
-# with many harvested hypotheses distort every genome-wide rank). core v3
-# (fop_pool.pool_domains) averages the per-hypothesis domain scores over the K
-# fixed Voronoi domains in-tree (PSS-weighted, weights from
-# contrast_hypotheses_pairs.tsv). Non-FOP input (single contrast) degenerates
-# to the plain PSS-weighted domain mean. Scoring receives rows already pooled.
+# ── 2b. Hypothesis pooling (already done upstream) ────────────────────────────
+# Rows arrive pooled over hypotheses by CT_DISAMBIGUATION (fop_pool.pool_domains). H1..Hn are
+# overlapping K-pair designs over the same Voronoi domains, not independent replicates: averaging over
+# them in section 2g would dilute a strong canonical signal and let a position with many harvested
+# hypotheses distort every genome-wide rank. The pooling averages the per-hypothesis domain scores over
+# the K fixed domains, weighted by the PSS of contrast_hypotheses_pairs.tsv; a single contrast reduces
+# to the plain PSS-weighted domain mean.
 cat("  FOP pooling: done in-tree per (Gene, Position, scheme, side) [core v3]\n")
-# Backfill the stable-schema columns downstream (§2g display picks, reports)
-# expects so a missing column is never hit.
+# Backfill the descriptor columns that section 2g and the reports expect, so that a missing column is
+# never hit.
 if (!"n_hypotheses" %in% names(df))          df$n_hypotheses <- 1L
 if (!"participating_hypotheses" %in% names(df)) df$participating_hypotheses <- ""
-# V3-4 (core v3): convergence_schemes and n_conserved_pairs are retired --
-# convergence_schemes was the scheme-dependent FOP-disagreement flag and
-# n_conserved_pairs counted the dropped conserved_<j>_* block. A domain that
-# does not converge simply scores 0 now.
+# Descriptors of the species that carry the change; empty text when the input has none.
 for (.c in c("top_species_residues", "bottom_species_residues",
              "n_top_species", "n_bottom_species")) {
   if (!.c %in% names(df)) df[[.c]] <- ""
 }
 df$asr_path_score <- suppressWarnings(as.numeric(df$asr_path_score))
 
-# TRUE when a change label indicates an assessable directional event.
 
-# Detect the K fixed Voronoi-domain posterior columns (V3-2 renamed
-# mrca_<i>_posterior -> domain_<d>_posterior; keep the old name as a fallback for
-# pre-v3 inputs).
+# Detect the posterior columns of the K fixed Voronoi domains (domain_<d>_posterior; the
+# mrca_<i>_posterior spelling is accepted too). Only their number is reported.
 mrca_posterior_cols <- grep("^(?:mrca|domain)_\\d+_posterior$", names(df),
                             value = TRUE, perl = TRUE)
 n_pairs <- length(mrca_posterior_cols)
 cat(sprintf("  Detected %d domains (%s)\n", n_pairs, paste(mrca_posterior_cols, collapse = ", ")))
 
-# ── 2c. ASR score (per-row) ──────────────────────────────────────────────────
-# asr_score sources the unified ASR path score computed upstream in
-# CT_DISAMBIGUATION (src/convergence/path_scores.py).
+# ── 2c. ASR score (per-row) ───────────────────────────────────────────────────
+# asr_score is the unified ASR path score computed upstream in CT_DISAMBIGUATION
+# (src/convergence/path_scores.py).
 stopifnot("asr_path_score" %in% names(df))
 cat("  Using upstream asr_path_score (unified ASR/convergence/parallel signal)\n")
 df <- df %>%
@@ -192,8 +181,7 @@ df <- df %>%
     asr_score = suppressWarnings(as.numeric(asr_path_score))
   )
 
-# Ensure the diagnostic path-score columns exist even if the input file lacks them.
-# T1: mrca_diversity + conservation_gate dropped from the score and the schema.
+# Keep the diagnostic column derived_agreement present even when the input lacks it.
 if (!"derived_agreement" %in% names(df)) df$derived_agreement <- NA_real_
 df$derived_agreement <- suppressWarnings(as.numeric(df$derived_agreement))
 
@@ -202,10 +190,9 @@ df$derived_agreement <- suppressWarnings(as.numeric(df$derived_agreement))
 # A row's CAAS score is its asr_path_score (the unified ASR path score computed upstream);
 # the position score aggregating rows is computed by core.scores (section 2g).
 
-# ── 2g. Aggregate to Gene×Position ───────────────────────────────────────────
-# Position to integer here (the old §2f-bis join used to do this as a side
-# effect): §2f-ter joins pos_scores to the per-cycle null on (Gene, Position),
-# and that side reads Position as integer -- the key types must agree.
+# ── 2g. Aggregate to Gene×Position ────────────────────────────────────────────
+# Position as integer: §2f-ter joins pos_scores to the per-cycle null on (Gene, Position), and the
+# null reads Position as integer, so the key types must agree.
 df <- df %>% mutate(Position = suppressWarnings(as.integer(Position)))
 # Sort descending by scheme_priority (US > GS4 > GS3 > GS2 > GS1) so first()
 # deterministically picks the US scheme (falling back to GS4..GS1) for
@@ -213,18 +200,16 @@ df <- df %>% mutate(Position = suppressWarnings(as.integer(Position)))
 # Priority is display-only and never enters a scored quantity.
 df <- df %>% arrange(desc(scheme_priority))
 
-# `side` is a first-class aggregation key -- a "both" position is TWO per-side
-# rows in `df`, each carrying its own core_s, and CAAS_score = mean over the 5
-# schemes is taken PER SIDE.
+# `side` belongs to the aggregation key: a position detected on both sides has two rows, and
+# CAAS_score (the mean over the five schemes) is taken per side.
 .pos_grp_keys <- c("Gene", "Position", "side")
 
 pos_scores <- df %>%
   group_by(across(all_of(.pos_grp_keys))) %>%
   summarise(
     CAAS_score         = NA_real_,  # filled from the core table below
-    # FOP descriptors: §2b already pooled H1..Hn, so these are per-position
-    # columns now, not a re-count over rows. Recurrence stays descriptor-only —
-    # it never multiplies CAAS_score.
+    # FOP descriptors: the hypotheses were pooled upstream, so these are per-position columns, not a
+    # count over rows. They never enter CAAS_score.
     n_hypotheses       = if ("n_hypotheses" %in% names(df)) {
       .nh <- n_hypotheses[is.finite(n_hypotheses)]; if (length(.nh)) max(.nh) else 0L
     } else 0L,
@@ -234,19 +219,17 @@ pos_scores <- df %>%
     } else "",
     n_schemes          = dplyr::n(),
     scheme_set         = paste(sort(unique(as.character(caap_group))), collapse = "+"),
-    # POINT 3 descriptors: position-level after §2b pooling -> first() carries them.
+    # Position-level descriptors: first() carries them.
     top_species_residues    = if ("top_species_residues" %in% names(df)) dplyr::first(top_species_residues) else "",
     bottom_species_residues = if ("bottom_species_residues" %in% names(df)) dplyr::first(bottom_species_residues) else "",
     n_top_species           = if ("n_top_species" %in% names(df)) dplyr::first(n_top_species) else "",
     n_bottom_species        = if ("n_bottom_species" %in% names(df)) dplyr::first(n_bottom_species) else "",
     caas                    = if ("caas" %in% names(df)) dplyr::first(caas) else "",
-    # The per-caap_group factors (asr_score / caas_row) and the ASR diagnostic
-    # axes (asr_path_score, derived_agreement) are DELIBERATELY not
-    # carried to the position level: CAAS_score = mean_k(asr_k) over schemes, and
-    # a position-level mean of each sub-factor hides scheme disagreement (a
-    # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees).
-    # They stay per-(Gene, Position, caap_group) in `df` for anything that needs
-    # the breakdown (e.g. the §3 stress test used to aggregate them there directly).
+    # The per-scheme factors (asr_score / caas_row) and the ASR diagnostic columns (asr_path_score,
+    # derived_agreement) are not carried to the position level: CAAS_score is the mean of asr_path_score
+    # over the schemes, and a position-level mean of each sub-factor would hide scheme disagreement (a
+    # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees). They stay per
+    # (Gene, Position, caap_group) in `df` for anything that needs the breakdown.
     caap_group         = first(caap_group),
     .groups = "drop"
   )
@@ -266,10 +249,9 @@ if (anyNA(.hit) || nrow(core_pos) != nrow(pos_scores)) {
 pos_scores$CAAS_score <- core_pos$CAAS_score[.hit]
 rm(core_pos, .hit)
 
-# `side` (top / bottom / none) is the authoritative aggregation key and the sole
-# direction descriptor downstream -- T4b retired change_top/change_bottom/change_side.
-# Per-side diagnostic for the reports (SC5): the mean asr_path_score of this side, which is
-# CAAS_score itself (caas_row is the row's asr_path_score).
+# `side` (top / bottom / none) is the only direction descriptor downstream. The asr_path_score of a
+# position row is the mean over its schemes for that side, which is CAAS_score itself (caas_row is the
+# row's asr_path_score).
 pos_scores <- pos_scores %>% mutate(asr_path_score = CAAS_score)
 
 cat(sprintf("  %d unique positions after aggregation\n", nrow(pos_scores)))
@@ -279,8 +261,8 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
             median(pos_scores$CAAS_score, na.rm = TRUE),
             max(pos_scores$CAAS_score, na.rm = TRUE)))
 
-# ── 2f-ter. p.emp — position-level "detects AND exceeds" permulation p ────────
-# docs/scoring_v2_p_emp.md §1-§2. Per (Gene, Position):
+# ── 2f-ter. p.emp: position-level "detects AND exceeds" permulation p ─────────
+# Design: docs/scoring_v2_p_emp.md §1-§2. Per (Gene, Position):
 #   k_emp = #{null cycle : re-detects the position on ANY side
 #                          AND  max_side(caas_score) >= max_side(CAAS_obs)}
 #   p.emp = (k_emp + 1) / (N + 1)                          add-one, right-tailed
@@ -297,8 +279,8 @@ if (has_caas_pos_cycle_caas && length(read_lines(caas_pos_cycle_caas_file, n_max
   cat("  perm_pos_cycle_caas.tsv.gz has no row: no null cycle, so p.emp, p.adj_bh and p.adj_sam stay NA\n")
   has_caas_pos_cycle_caas <- FALSE
 }
-# caas_perms.rds is loaded here when present (its columns are the cycle roster
-# for N below) and reused by the gene-level p.perm in §4.
+# caas_perms.rds is loaded here when present (its columns are the cycle roster for N below) and
+# reused by the gene-level p in §4f.
 caas_perms <- NULL
 if (has_caas_pos_cycle_caas) {
   cat("Loading per-cycle CAAS null (p.emp):", caas_pos_cycle_caas_file, "\n")
@@ -389,7 +371,7 @@ if (has_caas_pos_cycle_caas) {
   cat("  no --caas_pos_cycle_caas provided, skipping p.emp\n")
 }
 
-# ── 2h. Position-level multiple testing: p.adj_bh and p.adj_sam ─────────────
+# ── 2h. Position-level multiple testing: p.adj_bh and p.adj_sam ───────────────
 # p.adj_bh: BH over the permutation family, one test per (Gene, Position) (the
 # side rows of a position share one pooled p.emp and enter BH once). The
 # family is every position the null detects in >= 1 cycle plus every observed
@@ -451,11 +433,9 @@ if (has_caas_pos_cycle_caas) {
   rm(cyc_pooled)
 }
 
-# ── 2i. FADE (gene-level - see section 4d) ──────────────────────────────────
-# FADE operates at gene level (max Bayes Factor per gene across sites).
-# Significance threshold: BF >= 100 (FADE's standard criterion).
-# Top and bottom are loaded separately: fade_top tests acceleration in top
-# phenotype direction; fade_bottom tests the bottom direction.
+# ── 2i. FADE (gene-level - see section 4d) ────────────────────────────────────
+# FADE is read at gene level here (max Bayes Factor per gene across sites); significance is BF >= 100.
+# fade_top and fade_bottom hold the FADE results of the top and the bottom direction.
 has_fade_top    <- file_exists(fade_top_file)
 has_fade_bottom <- file_exists(fade_bottom_file)
 has_fade        <- has_fade_top || has_fade_bottom
@@ -494,17 +474,16 @@ if (has_fade_bottom) {
   fade_bottom_df <- tibble(Gene = character(), fade_max_bf_bottom = numeric())
 }
 
-# ── 2j. FADE site-level (position-level BF) ─────────────────────────────────
-# Per-site max BF from FADE_report. Coordinate: FADE emits 1-based site index;
-# CAAS uses 0-based positions - subtract 1 before any join.
+# ── 2j. FADE site-level (position-level BF) ───────────────────────────────────
+# Per-site max BF from FADE_JSON_TO_CSV (parse_fade_json_sites.R): comma-delimited, with columns gene,
+# position (0-based, as in position_scores.tsv), max_bf and target_aa. A 1-based `site` column, when
+# the file has one instead of `position`, is shifted by one.
 has_fade_site_top <- file_exists(fade_site_top_file)
 has_fade_site_bot <- file_exists(fade_site_bot_file)
 
 .load_fade_sites <- function(path) {
-  # FADE_JSON_TO_CSV's real (and only) producer of this file
-  # (parse_fade_json_sites.R) writes comma-delimited (write.csv()), not tab --
-  # read_tsv() here would silently parse the whole line as one column and
-  # crash downstream at df[[2]]. read_csv() matches the actual pipeline output.
+  # The file is comma-delimited (write.csv in parse_fade_json_sites.R); read_tsv() would parse each
+  # line as a single column.
   df <- read_csv(path, show_col_types = FALSE)
   names(df) <- tolower(names(df))
   
@@ -556,16 +535,13 @@ if (has_fade_site_bot) {
   fade_site_bot_df <- tibble(Gene = character(), Position = integer(), max_site_bf = numeric(), top_target_aa = character(), fade_biased = logical())
 }
 
-# Direction filter removed: all positions are retained for scoring.
-# Directional splits (top/bottom) are applied per-analysis after scoring.
+# All positions are retained; the directional splits (top, bottom) are applied per analysis after scoring.
 
-# =============================================================================
-# 4. GENE-LEVEL SCORING
-# =============================================================================
+# ── 4. Gene-level scoring ─────────────────────────────────────────────────────
 
 cat("\n─── Gene-level scoring ────────────────────────────────────────\n")
 
-# ── 4a. Gene CAAS Scores: size-adjusted max of CAAS_score per gene ──────────
+# ── 4a. Gene CAAS Scores: size-adjusted max of CAAS_score per gene ────────────
 # Three scores computed from different position subsets:
 #   gene_caas_score - all positions (full pool)
 #   gene_caas_score_top - positions with side == "top"
@@ -615,22 +591,17 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
             sum(!is.na(gene_caas$gene_caas_score_top)),
             sum(!is.na(gene_caas$gene_caas_score_bottom))))
 
-# ── 4b. Gene Accumulation Score (optional) ──────────────────────────────────
-# Uses accumulation_<direction>_* files: direction in {all, top, bottom}.
-# "all" = every non-none position pooled (side != "none"); "top"/"bottom"
-# restrict to that direction (side == dir),
-# matching how every other cross-module flag (FADE, RER) is direction-aware.
-# ct_accumulation.nf runs Channel.of("top","bottom","all"), so all three
-# accumulation_{top,bottom,all}_<scheme>_aggregated_results.csv files are
-# staged into accum_dir and all three are read here.
-# Score: accumulation_score = 1 - mean(w_i * p_i) / n_available_schemes
-#   where w_i are scheme weights and p_i are PValueEmpirical per scheme.
-# Significance: top 5% of accumulation_score (genome-wide empirical threshold).
+# ── 4b. Gene Accumulation Score (optional) ────────────────────────────────────
+# Reads accumulation_<direction>_<scheme>_aggregated_results.csv for direction in {all, top, bottom};
+# ct_accumulation.nf runs the three directions and stages all of them in accum_dir. "all" pools every
+# position with side != "none"; "top" / "bottom" restrict to that side, so the flag is
+# direction-aware like FADE and RER. Per direction, the per-scheme PValueEmpirical columns are combined
+# into one p per gene (Cauchy combination below), BH-adjusted over the genes with at least one CAAS,
+# and flagged at FDR < 0.05.
 #
-# Returns a tibble with Gene + accum_cct_p<suffix>/accum_fdr<suffix>/
-# accum_significant<suffix>/accum_pval_<scheme><suffix> (suffix = "" for "all",
-# "_top"/"_bottom" otherwise) -- suffixed so the three direction-specific
-# results can full_join onto gene_scores without colliding.
+# Returns a tibble with Gene + accum_cct_p<suffix> / accum_fdr<suffix> / accum_significant<suffix> and
+# accum_pval_<scheme><suffix> (suffix = "" for "all", "_top" / "_bottom" otherwise); the suffixes let
+# the three directions full_join onto gene_scores without colliding.
 compute_accum_significance <- function(accum_dir, direction, suffix) {
   scheme_names <- c("us", "gs4", "gs3", "gs2", "gs1")
   empty <- tibble(
@@ -683,13 +654,11 @@ compute_accum_significance <- function(accum_dir, direction, suffix) {
   # collapsing the per-scheme accumulation p-values into one value per gene.
   # Stat: T = sum(w_i * tan((0.5 - p_i) * pi)), p_CCT = pcauchy(T, lower.tail = FALSE).
   #
-  # CCT is the right combiner here because the five schemes (US, GS4, GS3, GS2,
-  # GS1) are independent partitions of the amino acids but test the same
-  # physical positions: a position counted under one scheme is frequently
-  # counted under others, making the per-scheme p-values positively correlated.
-  # CCT's heavy Cauchy tail keeps its null valid under arbitrary dependence, so
-  # no independence assumption is required.
-  # The same combiner is applied in accum_gene_lists.nf and 10.Accumulation_report.Rmd.
+  # The five schemes (US, GS4, GS3, GS2, GS1) partition the amino acids but test the same positions: a
+  # position counted under one scheme is frequently counted under others, so the per-scheme p-values
+  # are positively correlated. CCT keeps its null valid under arbitrary dependence, which a combiner
+  # that assumes independence does not. Weights are equal (1 / number of schemes available). The same
+  # combiner is applied in accum_gene_lists.nf and 10.Accumulation_report.Rmd.
   out <- accum_pval_df %>%
     rowwise() %>%
     mutate(
@@ -736,7 +705,7 @@ gene_rand <- .accum_all$df %>%
   full_join(.accum_top$df,    by = "Gene") %>%
   full_join(.accum_bottom$df, by = "Gene")
 
-# ── 4c. Gene RERConverge Score (optional) ───────────────────────────────────
+# ── 4c. Gene RERConverge Score (optional) ─────────────────────────────────────
 has_rer <- file_exists(rer_file)
 if (has_rer) {
   cat("Loading RER summary:", rer_file, "\n")
@@ -795,7 +764,7 @@ if (has_rer) {
                      rer_acceleration = character())
 }
 
-# ── 4d. Gene FADE Significance (optional) ───────────────────────────────────
+# ── 4d. Gene FADE Significance (optional) ─────────────────────────────────────
 # BF >= 100 per direction. fade_significant_top / _bottom used separately
 # to characterise top-CAAS and bottom-CAAS gene sets respectively.
 gene_fade <- tibble(Gene = character())
@@ -822,14 +791,12 @@ if (nrow(fade_bottom_df) > 0) {
   gene_fade$fade_significant_bottom <- NA
 }
 
-# ── 4e. Assemble gene scores ────────────────────────────────────────────────
-# full_join (not left_join): gene_caas only covers genes with a CAAS-detected
-# position, but gene_rand/gene_rer/gene_fade each have their own, larger gene
-# universe (e.g. RERConverge scores every gene with a sufficiently-populated
-# gene tree). A left_join rooted at gene_caas silently drops every gene that
-# has RER/FADE/accumulation evidence but no CAAS position - which then never
-# reaches gene_scores.tsv or the per-module fcs_stats_*.tsv files, truncating
-# their FCS universe to the CAAS gene set instead of each module's own.
+# ── 4e. Assemble gene scores ──────────────────────────────────────────────────
+# full_join, not left_join: gene_caas only covers genes with a CAAS-detected position, whereas
+# gene_rand, gene_rer and gene_fade each have their own, larger gene universe (RERConverge scores every
+# gene with a sufficiently populated gene tree). A left_join rooted at gene_caas would drop every gene
+# with RER, FADE or accumulation evidence but no CAAS position, and the per-module fcs_stats_*.tsv files
+# would then be truncated to the CAAS gene set instead of the universe of each module.
 gene_scores <- gene_caas
 
 if (nrow(gene_rand) > 0) {
@@ -864,17 +831,13 @@ if (nrow(gene_fade) > 0) {
   gene_scores$fade_significant_bottom <- NA
 }
 
-# ── 4f. Per-gene CAAS permulation p (Tier 1A) ───────────────────────────────
-# gene_caas_score{,_top_all,_bottom_all} vs. the matching direction's
-# caas_corStat_byrank null row (genes x N cycles, dense -- structural zeros
-# kept, so N is always the full cycle count) from caas_perms.rds. Per-gene-row
-# nominal p, right-tailed and BH-adjusted within direction -- same idiom as
-# the RER permulation p (continuous_rer.R) and every other FDR site in this
-# pipeline. At the production caas_full_perms this floors around 1/(N+1) per
-# gene, so it is a prioritisation signal with FDR context, not by itself a
-# genome-wide-significant call (the optional pooled variant below trades that
-# floor for validity only within an n-stratum). A gene absent from the null's
-# own universe gets NA -- never an implicit-zero-row 1/(N+1) (break-point #4a).
+# ── 4f. Per-gene CAAS permulation p ───────────────────────────────────────────
+# gene_caas_score{,_top_all,_bottom_all} against the matching direction's matrix of
+# caas_corStat_byrank in caas_perms.rds (genes × N cycles; zeros are kept, so N is always the full cycle
+# count). Per gene, p is right-tailed, (k + 1) / (N + 1), and BH-adjusted within direction. It floors
+# near 1/(N+1) per gene, so it ranks genes with FDR context and is not a genome-wide-significant call
+# by itself; the optional pooled variant below trades that floor for validity only within an
+# n-stratum. A gene absent from the null's universe gets NA, never the implicit-zero-row value 1/(N+1).
 cat("\n─── CAAS permulation gene p (Tier 1A) ─────────────────────────\n")
 for (col in c("gene_caas_pperm", "gene_caas_pperm_top", "gene_caas_pperm_bottom",
               "gene_caas_pperm_adj", "gene_caas_pperm_adj_top", "gene_caas_pperm_adj_bottom")) {
@@ -942,12 +905,11 @@ if (!file_exists(caas_perms_file)) {
                 if (!is.na(.n_cycles) && .n_cycles > 0) 1 / (.n_cycles + 1) else NA_real_))
 
     if (gene_perm_pooled) {
-      # Optional n-stratified pooled null: pool ALL genes' null rows within the
-      # same n_positions decile as the tested gene, for higher resolution than
-      # the per-gene-row floor above. Valid ONLY within an n-stratum -- the
-      # size_adj_max null is n-dependent (F(max)^n) by construction, so pooling
-      # across strata would compare a gene against a null it was never drawn
-      # from (break-point #4b). Default off (params.scoring_gene_perm_pooled).
+      # Optional n-stratified pooled null: all genes' null rows within the same n_positions decile as the
+      # tested gene are pooled, for higher resolution than the per-gene-row floor above. It is valid only
+      # within an n-stratum: the size_adj_max null depends on n by construction (F(max)^n), so pooling
+      # across strata would compare a gene with a null it was never drawn from. Off by default
+      # (params.scoring_gene_perm_pooled).
       .pooled_direction <- function(obs_col, n_col, mat) {
         out <- rep(NA_real_, nrow(gene_scores))
         if (is.null(mat) || nrow(mat) == 0 || !(n_col %in% names(gene_scores))) return(out)
@@ -976,9 +938,7 @@ if (!file_exists(caas_perms_file)) {
   }
 }
 
-# =============================================================================
-# 5. CORRELATION ANALYSIS (gene-level)
-# =============================================================================
+# ── 5. Correlation analysis (gene-level) ──────────────────────────────────────
 
 cat("\n─── Correlation analysis ──────────────────────────────────────\n")
 
@@ -1029,24 +989,15 @@ if (length(score_cols) >= 2) {
   cat("  Only one gene score available, skipping correlations\n")
 }
 
-# =============================================================================
-# 6. WRITE OUTPUTS
-# =============================================================================
+# ── 6. Write outputs ──────────────────────────────────────────────────────────
 
 cat("\n─── Writing outputs ───────────────────────────────────────────\n")
 
-# Position scores. asr_score (the per-row factor of caas_row) / mrca_diversity /
-# derived_agreement / conservation_gate are intentionally absent: they are
-# per-caap_group factors of caas_row and their scheme-mean does not reconstruct
-# CAAS_score (see §2g note). CAAS_score is the position-level number; the
-# per-scheme breakdown lives upstream in filtered_discovery.tsv. `asr_path_score`
-# (the .side_diag per-side mean, SC5) is dropped here too: since core v3
-# caas_row == asr_path_score row-for-row, its (Gene, Position, side) mean is
-# bit-identical to CAAS_score, so carrying it is pure duplication.
-# derived_residues / top_residue_support / bottom_residue_support (+ _detail)
-# are gone entirely (residue_descriptors.py): top_species_residues /
-# bottom_species_residues (alignment-based, hypothesis-independent) is the
-# sole raw-AA descriptor now.
+# Position scores. The per-scheme factors (asr_score, derived_agreement) and asr_path_score are not
+# written: CAAS_score is the position-level number (the asr_path_score of a position equals it), and
+# the per-scheme breakdown lives in filtered_discovery.tsv. top_species_residues and
+# bottom_species_residues (alignment-based, independent of the hypothesis) are the raw-residue
+# descriptors.
 pos_out <- pos_scores %>%
   select(Gene, Position,
          n_schemes, any_of("scheme_set"),
@@ -1091,12 +1042,11 @@ gene_out <- gene_scores %>%
 write_tsv(gene_out, "gene_scores.tsv")
 cat(sprintf("  gene_scores.tsv: %d rows\n", nrow(gene_out)))
 
-# ── FCS stats table (consumed by FCS_general.Rmd) ─────────────────────────────
-# Generic contract: gene + score_<ranking> (zero-floored downstream over the
-# cleaned_background universe) + flag_<name> per-gene highlight booleans.
-#   score_global/top/bottom = magnitude (the *_all columns); direction via the
-#   {top,both}/{bottom,both} membership already baked into the *_top/_bottom cols.
-#   flags ride along as leading-edge annotation (NEVER gate the FCS input).
+# ── FCS stats table ───────────────────────────────────────────────────────────
+# Read by 12.FCS_general_report.Rmd. Columns: gene; score_<ranking>, zero-floored downstream over the
+# cleaned_background universe; flag_<name>, per-gene booleans. score_global, score_top and score_bottom
+# are the *_all gene scores (magnitude); the top and bottom ones use only the positions of that side.
+# The flags annotate the leading edge and never gate the FCS input.
 .has  <- function(d, c) c %in% names(d)
 .col  <- function(d, c, default = NA) if (.has(d, c)) d[[c]] else rep(default, nrow(d))
 .istrue <- function(x) !is.na(x) & x %in% c(TRUE, "TRUE", "True", "true", 1, "1")
@@ -1114,13 +1064,9 @@ fcs_stats <- tibble(
   flag_accum        = .istrue(.col(gene_scores, "accum_significant")),
   flag_accum_top    = .istrue(.col(gene_scores, "accum_significant_top")),
   flag_accum_bottom = .istrue(.col(gene_scores, "accum_significant_bottom")),
-  # CAAS permulation-null significance (gene_caas_pperm_adj <= p_emp_thr). This is
-  # a genuinely separate evidence axis from flag_fade/flag_rer/flag_accum above:
-  # those measure whether OTHER per-module tools (FADE/RERconverge/accumulation)
-  # independently flagged the gene, whereas this measures CAAS's own permutation-
-  # null p-value on its own composite score. Kept as its own flag rather than
-  # folded into any of the others so a reader can still ask "was this gene
-  # CAAS-significant" independently of what FADE/RER/accum said about it.
+  # CAAS permulation-null significance (gene_caas_pperm_adj <= p_emp_thr). It is a separate evidence
+  # axis from flag_fade, flag_rer and flag_accum, which record whether the other tools flagged the gene;
+  # keeping it apart lets a reader ask whether a gene is CAAS-significant independently of them.
   flag_caas_significant = .istrue(.col(gene_scores, "gene_caas_pperm_adj") <= p_emp_thr)
 ) %>%
   mutate(flag_fade = flag_fade_top | flag_fade_bottom)
@@ -1129,12 +1075,11 @@ cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom)\n",
             nrow(fcs_stats), sum(!is.na(fcs_stats$score_top)),
             sum(!is.na(fcs_stats$score_bottom))))
 
-# ── Per-module FCS RANKING files (rankings only) ─────────────────────────────
-# Each carries only its module's score_<ranking> columns. The cross-module
-# leading-edge annotation (CAAS gates, top/bottom percentiles, FADE, accum) is
-# supplied separately to the FCS report via annot_file = fcs_stats.tsv (above).
-# This lets SCORING render an FCS report per module - ranked by that module's own
-# statistic, annotated with every module's evidence - downstream of the join.
+# ── Per-module FCS ranking files ──────────────────────────────────────────────
+# Each carries only the score_<ranking> columns of its module. The cross-module annotation (CAAS scores,
+# FADE, accumulation flags) reaches the FCS report separately, as annot_file = fcs_stats.tsv. SCORING can
+# thus render one FCS report per module, ranked by that module's own statistic and annotated with the
+# evidence of every module.
 .nonempty <- function(col) .has(gene_scores, col) && any(!is.na(gene_scores[[col]]))
 
 if (has_rer) {
@@ -1159,9 +1104,8 @@ if (.nonempty("fade_max_bf_top") || .nonempty("fade_max_bf_bottom")) {
 }
 
 if (.nonempty("accum_cct_p")) {
-  # FCS ranks descending (higher = more significant) while the CCT p runs the
-  # other way (lower = more significant), so the ranking axis is
-  # -log10(accum_cct_p), derived inline rather than stored as its own column.
+  # FCS ranks in descending order (higher = more significant) while the CCT p runs the other way, so
+  # the ranking axis is -log10(accum_cct_p), derived here and not stored as a column of gene_scores.
   .afp <- suppressWarnings(as.numeric(.col(gene_scores, "accum_cct_p")))
   write_tsv(tibble(
     gene         = gene_scores$Gene,
@@ -1173,28 +1117,17 @@ if (.nonempty("accum_cct_p")) {
 # Correlations
 write_tsv(corr_results, "gene_correlations.tsv")
 
-# =============================================================================
-# 7. EXPORT PERCENTILE-RANKED GENE LISTS FOR STRING
-# =============================================================================
+# ── 7. Ranked gene slices ─────────────────────────────────────────────────────
 
 dir.create("gene_lists", showWarnings = FALSE)
 
-# Define the 12 percentile slices (top/bottom/global x 25/10/5/1%), mirroring
-# posenrich_enrich.py's top-fraction-of-scored-positions cutoff at gene
-# granularity: rank genes with a defined score desc, keep the top frac% of
-# THAT ranked set (not the full background) -- same selection axis as
-# 16.Position_enrichment_report.Rmd, just at genes instead of positions.
-# Percentile slices, not a significance gate: a significance-gated foreground
-# close to the whole gene universe is a poor input for interaction-density
-# tests (and the hypergeometric gate_sig/gate_all this note used to point to
-# no longer exists -- see the §1 NOTE near the top of this script).
-#
-# "global" slices (added alongside top/bottom): ranked on gene_caas_score, the
-# undirected 90th-percentile-of-all-positions aggregate -- the gene-level
-# analog of CAAS FCS's own undirected "global" ranking (fcs_all_results.tsv's
-# ranking=="global" rows). fade_sig is NA for global (FADE has no undirected
-# significance flag); is_fade in the export loop below already treats a
-# missing/NA fade_sig as FALSE.
+# 12 percentile slices (top, bottom, global × 25, 10, 5, 1%). The genes with a defined score are
+# ranked in descending order and the top frac of that ranked set is kept (not of the full
+# background), the same selection axis as the position slices of section 7b. They are percentile
+# slices, not a significance gate: a foreground close to the whole gene universe is a poor input for
+# interaction-density tests. The global slices rank on gene_caas_score, the undirected size-adjusted
+# score. fade_sig is NA for them because FADE has no undirected flag, and is_fade in the export loop
+# treats a missing or NA fade_sig as FALSE.
 slices_def <- list(
   list(name = "top25",    col = "gene_caas_score_top_all",    frac = 0.25, direction = "top",    fade_sig = "fade_significant_top"),
   list(name = "top10",    col = "gene_caas_score_top_all",    frac = 0.10, direction = "top",    fade_sig = "fade_significant_top"),
@@ -1225,7 +1158,7 @@ for (slice in slices_def) {
 
   n_total <- nrow(ranked)
   if (n_total == 0) {
-    # Write empty file to prevent Nextflow missing output crashes
+    # Write an empty slice so that the process always finds its declared output
     write_tsv(tibble(Gene = character(), score = numeric(), is_fade = logical(), is_rer = logical(), is_accum = logical()), file_name)
     cat(sprintf("  %s: empty (0 genes) exported\n", file_name))
     next
@@ -1234,7 +1167,7 @@ for (slice in slices_def) {
   n_keep <- max(1, round(slice$frac * n_total))
   slice_df <- ranked %>% slice_head(n = n_keep)
 
-  # Add validation columns: is_fade, is_rer, is_accum
+  # Evidence columns: whether the other tools also call the gene significant, matched to the direction
   f_col <- slice$fade_sig
   slice_df <- slice_df %>%
     mutate(
@@ -1252,9 +1185,8 @@ for (slice in slices_def) {
           is_sig
         }
       } else FALSE,
-      # Direction-matched, mirroring is_fade above -- a "top" slice checks
-      # accum_significant_top (accumulation_top_* pooled positions), not the
-      # non-directional accum_significant (accumulation_all_* pooled).
+      # Direction-matched like is_fade: a "top" slice checks accum_significant_top (accumulation_top_*),
+      # a "bottom" slice accum_significant_bottom, a "global" slice accum_significant (accumulation_all_*).
       is_accum = {
         acc_col <- if (slice$direction == "top") "accum_significant_top"
                    else if (slice$direction == "bottom") "accum_significant_bottom"
@@ -1270,21 +1202,12 @@ for (slice in slices_def) {
   cat(sprintf("  %s: %d/%d genes exported (top %.0f%%)\n", file_name, nrow(slice_df), n_total, 100 * slice$frac))
 }
 
-# =============================================================================
-# 7b. EXPORT PERCENTILE-RANKED POSITION LISTS FOR POSENRICH/REPORTS
-# =============================================================================
-# Position-level analog of the gene_lists/ slices above, published so
-# posenrich_enrich.py and the FCS/comparison reports (12/14/15) all read ONE
-# canonical top/bottom/global x 25/10/5/1% position ranking instead of each
-# independently re-deriving their own cutoff over position_scores.tsv (which
-# invited drift -- see e.g. a single outlier position ranking in a gene's top
-# 1% of ALL positions while that gene's own aggregate score doesn't crack the
-# gene-level top 5%; both were "correct" under their own re-derivation, just
-# never guaranteed to agree). Mirrors posenrich_enrich.py's direction_scores()
-# + top-frac cutoff exactly (subworkflows/ENRICHMENT/local/src/posenrich_enrich.py):
-# direction filters on side (top: side=="top", bottom: side=="bottom",
-# global: unfiltered), ranked over positions with CAAS_score > 0 only, cut at
-# round(frac * n_scored), stable sort by (desc score, Gene, Position).
+# ── 7b. Ranked position slices ────────────────────────────────────────────────
+# Position-level analog of the gene slices above. 14.Position_enrichment_report.Rmd and posenrich.nf read
+# them (position_lists_dir), so the position percentiles are defined in one place. The direction filters
+# on side (top: side == "top", bottom: side == "bottom", global: every row of position_scores.tsv); only
+# positions with CAAS_score > 0 are ranked; the cut is round(frac * n_scored) after a stable sort by
+# (desc score, Gene, Position).
 dir.create("position_lists", showWarnings = FALSE)
 
 pos_slices_def <- list(
@@ -1331,9 +1254,7 @@ for (slice in pos_slices_def) {
   cat(sprintf("  %s: %d/%d scored positions exported (top %.0f%%)\n", file_name, nrow(slice_df), n_scored, 100 * slice$frac))
 }
 
-# =============================================================================
-# 8. THRESHOLD ENRICHMENT ANALYSIS
-# =============================================================================
+# ── 8. Threshold enrichment ───────────────────────────────────────────────────
 # For each progressively tighter CAAS threshold, test whether the retained
 # set is enriched in independent convergent signals (RER, FADE, accumulation).
 # Produces enrichment curves: odds ratio + Fisher p per (direction × threshold × tool).
@@ -1451,7 +1372,7 @@ if (length(gene_enrich_rows) > 0) {
   cat("  Gene-level enrichment: skipped (no tool data available)\n")
 }
 
-# ── 8b. Position-level FADE enrichment ───────────────────────────────────────
+# ── 8b. Position-level FADE enrichment ────────────────────────────────────────
 has_fade_site_data <- (has_fade_site_top && nrow(fade_site_top_df) > 0) ||
                       (has_fade_site_bot && nrow(fade_site_bot_df) > 0)
 

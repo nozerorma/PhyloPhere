@@ -1,33 +1,26 @@
 #!/usr/bin/env python3
+# filter_caas_clusters-param.py — Flag the CAAS positions that lie in dense clusters ("trains").
+# PhyloPhere | subworkflows/CT_POSTPROC/local/src/
+
 """
-CAAS Cluster Filtering Script
+Cluster filter: flags the positions of a gene that lie in a high-density run of CAAS.
 
-This script identifies and filters high-density clusters of CAAS (Context-Aware Amino Acid 
-Substitutions) positions within genes. Positions are flagged as "Discarded" if they fall 
-within regions where the density of CAAS exceeds a threshold over a minimum interval length.
+The positions of a tight cluster ("train") of substitutions are flagged "Discarded", so that
+clustered substitutions do not pass as independent CAAS.
+For each gene (and each caap_group when that column exists) every interval [start, end]
+of the sorted positions with span >= minlen and count / span >= maxcaas flags all the
+positions it holds (core.postproc.ctrain, shared with the permulation null). With --map-dir
+the span is measured in untrimmed alignment columns.
 
-Algorithm:
------------
-For each gene, the script evaluates all possible position intervals [start, end] where:
-  - Interval span ≥ minlen (minimum length threshold)
-  - Density = count_positions / span ≥ maxcaas (maximum density threshold)
-
-Positions within any interval exceeding the density threshold are marked for removal,
-preventing false CAAS discovery from tightly clustered substitutions ("trains").
+Called by:  CT_FILTER process (ctpp_clustfilter.nf), once per (minlen, maxcaas) pair
+Inputs:     -i  TSV with at least Gene and Position (caap_group is used when present)
+            -l, -c  minimum interval span and maximum density (maxcaas)
+            --map-dir  optional directory of per-gene MAP tables (untrimmed coordinates)
+Outputs:    <input stem>.filtered.minlen<L>.maxcaas<C*100>.tsv with Gene, Position, [caap_group],
+            clustering_flag ("Good" or "Discarded"); <input stem>.minlen<L>.maxcaas<C*100>.log
 
 Usage:
-------
-  python filter_caas_clusters-param.py -i input.caas -c 0.7 -l 3 [-v]
-
-Input Format:
--------------
-  Tab-separated file with columns: Gene, Position (integer), [other columns...]
-
-Output:
--------
-  - Filtered TSV file: input.filtered.minlenX.maxcaasY.tsv
-    Columns: Gene, Position, clustering_flag ("Good" or "Discarded")
-  - Log file: input.minlenX.maxcaasY.log
+  python filter_caas_clusters-param.py -i input.tsv -c 0.7 -l 3 [-v]
 """
 
 import pandas as pd
@@ -36,14 +29,12 @@ import logging
 import sys
 from pathlib import Path
 
-# core.postproc is the single implementation of trains for the observed and null chains.
+# core.postproc holds the one implementation of trains, shared by the observed chain and the null.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CT_DISAMBIGUATION" / "local"))
 from src.core.columns import gene_columns, index_files  # noqa: E402
 from src.core.postproc import ctrain  # noqa: E402
 
-# ============================================================================
-# Argument Parsing
-# ============================================================================
+# ── Argument Parsing ──────────────────────────────────────────────────────────
 
 def parse_args():
     parser = argparse.ArgumentParser(description="CAAS Train Hack with dynamic pruning and logging")
@@ -91,9 +82,7 @@ def parse_args():
         parser.error("--minlen must be at least 1.")
     return args
 
-# ============================================================================
-# Logger Setup
-# ============================================================================
+# ── Logger Setup ──────────────────────────────────────────────────────────────
 
 def setup_logger(input_path: Path, maxcaas: float, minlen: int, verbose: bool):
     """
@@ -125,9 +114,7 @@ def setup_logger(input_path: Path, maxcaas: float, minlen: int, verbose: bool):
     logger.addHandler(ch)
     return logger
 
-# ============================================================================
-# Main Filtering Function
-# ============================================================================
+# ── Main Filtering Function ───────────────────────────────────────────────────
 
 def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.tsv"):
     """
@@ -155,23 +142,21 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
         logger.error(f"Input file not found: {infile}")
         sys.exit(1)
     
-    # Validate input file format and required columns
+    # Validate the file format and the required columns
     try:
-        # keep_default_na=False + na_values=[""]: the CAAS table has categorical
-        # amino-acid columns (caas, amino_encoded, derived_residues) whose values
-        # can legitimately be NA-sentinel strings -- "N/A" is Asn-on-the-changed-
-        # side against Ala, and pandas' default NA parsing would silently blank it.
-        # Only a truly empty cell is missing data here.
+        # keep_default_na=False + na_values=[""]: the CAAS table has categorical amino-acid
+        # columns (caas, amino_encoded, derived_residues) whose values can be NA-sentinel
+        # strings ("N/A" is Asn on the changed side against Ala), and the default NA parsing
+        # of pandas would blank them. Only an empty cell is missing here.
         df = pd.read_csv(path, sep="\t", header=0,
                          keep_default_na=False, na_values=["", "nan", "NaN"])
         
-        # Check for required columns
         for col in ("Gene", "Position"):
             if col not in df.columns:
                 logger.error(f"Missing required column: {col}")
                 sys.exit(1)
         
-        # Ensure Position column contains integers
+        # Position must be integer
         if not pd.api.types.is_integer_dtype(df["Position"]):
             try:
                 df["Position"] = pd.to_numeric(
@@ -195,7 +180,7 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
     genes = df["Gene"].unique()
     total_genes = len(genes)
     
-    # Check if caap_group column exists for group-aware processing
+    # With a caap_group column every group of a gene is processed on its own
     has_caap_group = "caap_group" in df.columns
     
     if has_caap_group:
@@ -211,12 +196,11 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
             f"maxcaas={maxcaas}, minlen={minlen}"
         )
     
-    # Cache column access for performance
     position_col = df["Position"]
     gene_col = df["Gene"]
     caap_group_col = df["caap_group"] if has_caap_group else None
     
-    # Process each gene independently
+    # Each gene is independent
     for i, gene in enumerate(genes, 1):
         gene_df = df[gene_col == gene]
         columns = gene_columns(map_index, gene, map_suffix) if map_index is not None else None
@@ -224,7 +208,6 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
             genes_without_map.append(gene)
         
         if has_caap_group:
-            # Process each CAAP group within the gene independently
             groups_in_gene = gene_df["caap_group"].unique()
             logger.info(f"Gene [{i}/{total_genes}]: {gene} (Groups: {', '.join(groups_in_gene)})")
             
@@ -240,7 +223,6 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
                     f"{positions[:5]}{'...' if len(positions) > 5 else ''}"
                 )
                 
-                # Find discarded positions for this gene-group combination
                 group_discarded = ctrain(positions, maxcaas, minlen, columns)
                 
                 if group_discarded:
@@ -248,11 +230,10 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
                         f"  Group {group}: {len(group_discarded)} positions flagged "
                         f"(density threshold exceeded)"
                     )
-                    # Store with gene and group information
                     for pos in group_discarded:
                         discarded.append((gene, pos, group))
         else:
-            # CAAS mode: process all positions for the gene together
+            # No caap_group column: all positions of the gene form one unit
             logger.info(f"Gene [{i}/{total_genes}]: {gene}")
             positions = sorted(gene_df["Position"].unique())
             
@@ -264,7 +245,6 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
                 f"{positions[:5]}{'...' if len(positions) > 5 else ''}"
             )
             
-            # Find discarded positions
             gene_discarded = ctrain(positions, maxcaas, minlen, columns)
             
             if gene_discarded:
@@ -272,7 +252,6 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
                     f"  {len(gene_discarded)} positions flagged "
                     f"(density threshold exceeded)"
                 )
-                # Store with gene only
                 for pos in gene_discarded:
                     discarded.append((gene, pos, None))
     
@@ -282,40 +261,34 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
             f"e.g. {sorted(genes_without_map)[:5]}"
         )
 
-    # Create output dataframe with flagging
     out = df.copy()
     
-    # Mark positions as Good/Discarded based on gene-group-position tuple
+    # A row is Discarded when its (Gene, Position[, caap_group]) was flagged
     if has_caap_group:
-        # For CAAP mode, check gene + position + group
         out["clustering_flag"] = out.apply(
             lambda row: "Discarded" if (row["Gene"], row["Position"], row["caap_group"]) in discarded else "Good",
             axis=1
         )
     else:
-        # For CAAS mode, check gene + position only
         discarded_set = {(gene, pos) for gene, pos, _ in discarded}
         out["clustering_flag"] = out.apply(
             lambda row: "Discarded" if (row["Gene"], row["Position"]) in discarded_set else "Good",
             axis=1
         )
     
-    # Output essential columns (preserve caap_group if present)
+    # Only the keys and the flag are written (caap_group included when present)
     output_cols = ["Gene", "Position", "clustering_flag"]
     if "caap_group" in df.columns:
-        # Insert caap_group after Position
         output_cols = ["Gene", "Position", "caap_group", "clustering_flag"]
         out = out[output_cols]
     else:
         out = out[output_cols]
     
-    # Generate output filename
     out_file = path.with_suffix(
         f".filtered.minlen{minlen}.maxcaas{int(maxcaas*100)}.tsv"
     )
     out.to_csv(out_file, sep="\t", index=False)
     
-    # Summary statistics
     logger.info(f"Output written to: {out_file}")
     logger.info(f"Total genes processed: {total_genes}")
     logger.info(f"Total positions discarded: {len(discarded)}")
@@ -325,9 +298,7 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
     
     return out_file
 
-# ============================================================================
-# Entry Point
-# ============================================================================
+# ── Entry Point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     args = parse_args()

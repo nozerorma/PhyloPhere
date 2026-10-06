@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Shared support-string formatting for cross-hypothesis/cross-scheme pooling.
+# support_fmt.py — Format residue support tallies as 'L:3,S:2' strings.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/convergence/
 
-Vendored here (not imported) because CT_DISAMBIGUATION and CT_POSTPROC run in
-separate Nextflow process work dirs and cannot share a `local/src` tree.
+"""
+Support-string formatting for cross-hypothesis pooling.
+
+Imported by: src/convergence/disambiguate_single.py, src/convergence/fop_pool.py
+Inputs: a {residue or tag: count} dict
+Outputs: a comma-joined 'key:count' string (empty when there is no count)
 """
 
 from __future__ import annotations
@@ -11,10 +16,7 @@ from typing import Dict
 
 
 def fmt_support(counts: Dict[str, int]) -> str:
-    """'L:3,S:2'-style string: count-descending, then alphabetical tiebreak.
-
-    Mirrors CT_POSTPROC's residue_descriptors._fmt_support convention.
-    """
+    """'L:3,S:2'-style string: count-descending, then alphabetical tiebreak. Zero counts are dropped."""
     counts = {k: v for k, v in counts.items() if v}
     if not counts:
         return ""

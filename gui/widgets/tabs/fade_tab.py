@@ -4,7 +4,13 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
-"""Off by default (RUN_FADE=false in the reference scripts)."""
+"""
+FadeTab: field specification of the FADE module (directional selection, HyPhy).
+
+Off by default (FadeConfig.enabled is False in gui/models/modules.py).
+
+Imported by: gui/widgets/main_window.py
+"""
 
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import FadeConfig
@@ -27,10 +33,9 @@ SPEC = ModuleTabSpec(
     ),
     essential_fields=(
         Section("Direction and background"),
-        # Borderline default/optional: changes which biological hypothesis is
-        # tested (top/bottom/both extreme), not a hard requirement, but not
-        # cosmetic either — treated as "default" since picking the wrong
-        # direction silently answers a different question than intended.
+        # Rated "default": the direction (top, bottom or both extremes) sets which
+        # hypothesis is tested, so a wrong choice answers a different question
+        # without any error.
         FieldSpec(
             name="fade_direction",
             label="Foreground direction(s)",
@@ -38,8 +43,8 @@ SPEC = ModuleTabSpec(
             choices=("both", "top", "bottom"),
             importance="default",
         ),
-        # Changes the null/background branch definition the Bayes Factor is
-        # computed against — affects test validity like a control-group choice.
+        # Sets the background branch definition the Bayes Factor is computed
+        # against, which affects test validity like the choice of a control group.
         FieldSpec(
             name="fade_background_scope",
             label="Background scope",

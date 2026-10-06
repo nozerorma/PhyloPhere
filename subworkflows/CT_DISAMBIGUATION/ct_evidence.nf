@@ -1,17 +1,31 @@
 #!/usr/bin/env nextflow
 
+// ct_evidence.nf — Evidence of the best-scored positions: what each domain of each hypothesis saw.
+// PhyloPhere | subworkflows/CT_DISAMBIGUATION/
+
 /*
- * CAAS_EVIDENCE: what each domain of each hypothesis saw at the N best positions of a run.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  CAAS_EVIDENCE: for the N best positions of position_scores.tsv, re-scores their rows
+ *  of the observed discovery.tab with the code of the observed labeling
+ *  (explain_positions.py), keeping the rows before the hypotheses of a position are
+ *  pooled.
  *
- * Runs after SCORING, only when params.caas_evidence_top_n > 0. The positions come from position_scores.tsv; their rows
- * are taken from the observed discovery.tab and scored again with the code of the observed labeling
- * (explain_positions.py), keeping the rows before the hypotheses of a position are pooled.
+ *  Runs after SCORING, only when params.caas_evidence_top_n is greater than 0 (main.nf).
+ *
+ *  Consumes:  discovery.tab, scoring/position_scores.tsv, observed design (trait file or
+ *             traitfile_H*.tab directory), species tree
+ *  Produces:  evidence/ with evidence_top<N>.tsv (one row per entry and domain) and
+ *             top_positions.tsv, published to <outdir>/scoring/evidence
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Evidence of the top positions ────────────────────────────────────────────
 
 process CAAS_EVIDENCE {
     tag "caas_evidence"
     label 'process_low'
-    // the directory is declared by name: a `dir/**` pattern publishes nothing for a process that declares only the directory
+    // The directory is published by name: a `dir/**` pattern publishes nothing for a process that declares only the directory.
     publishDir path: "${params.outdir}/scoring", mode: 'copy', overwrite: true, pattern: 'evidence'
 
     input:

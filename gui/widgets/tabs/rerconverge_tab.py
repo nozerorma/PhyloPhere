@@ -5,17 +5,19 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Off by default (RUN_RER=false in the reference scripts). The 4 rer_tool sub-steps
-are individual checkboxes jointly building --rer_tool, same pattern as CAAS's
-ct_tool discovery/resample/bootstrap checkboxes.
+RerConvergeTab: field specification of the RERconverge module (conf/rerconverge.config).
 
-No "gene_set" mode here: RERconverge operates genome-wide across all
-gene trees. Subworkflows take full gene trees as standard input.
-main.nf always passes Channel.empty() for both gene-set channels, and RER_MAIN's
-own take: comment says so explicitly ("Kept for backwards-compatible signature;
-currently unused."). Exposing a mode picker here would silently do nothing, so
-this is left as a real pipeline gap rather than a GUI gap — see the spawned
-follow-up task for wiring it, not a fix to make here.
+Off by default (RerConfig.enabled is False in gui/models/modules.py). The four
+rer_tool sub-steps (build_trait, build_tree, build_matrix, continuous) are
+checkboxes that jointly build --rer_tool (gui/generation/context.py), as the CAAS
+tab does for --ct_tool.
+
+There is no gene-set mode: RERconverge runs genome-wide on the full gene trees.
+main.nf passes Channel.empty() for both optional gene-set inputs of RER_MAIN
+(workflows/rerconverge.nf), which does not use them, so a mode selector here would
+have no effect.
+
+Imported by: gui/widgets/main_window.py
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────
@@ -39,8 +41,8 @@ SPEC = ModuleTabSpec(
     ),
     essential_fields=(
         Section("RER trait analysis"),
-        # Routes which statistical model applies to the trait (continuous vs
-        # binary RERconverge machinery) — model-selection parameter.
+        # Selects the statistical model applied to the trait (continuous or
+        # binary RERconverge machinery): a model-selection parameter.
         FieldSpec(
             name="rer_trait_mode",
             label="Trait type routing",
@@ -48,8 +50,8 @@ SPEC = ModuleTabSpec(
             choices=("auto", "continuous", "binary"),
             importance="default",
         ),
-        # Transform choice directly affects the RER-trait correlation's
-        # statistical validity (comparable to a model-selection parameter).
+        # The transform affects the validity of the RER-trait correlation, so it
+        # counts as a model-selection parameter.
         FieldSpec(
             name="rer_transform",
             label="Trait transform",
@@ -57,8 +59,8 @@ SPEC = ModuleTabSpec(
             choices=("ha_logit", "auto", "logit", "arcsin", "log10", "none"),
             importance="default",
         ),
-        # p.perm (raw permutation p) vs p.adj (BH-adjusted) changes what
-        # "significant" means downstream — an FDR/p-value-threshold-like choice.
+        # p.perm (raw permutation p) or p.adj (BH-adjusted) changes what counts as
+        # "significant" downstream, like an FDR threshold choice.
         FieldSpec(
             name="rer_pval_column",
             label="Report p-value column",
@@ -66,9 +68,8 @@ SPEC = ModuleTabSpec(
             choices=("p.perm", "p.adj"),
             importance="default",
         ),
-        # validate.py: require(rer.gene_trees, ...) whenever rer.enabled; also
-        # user-supplied with no in-house generation path (promoted from advanced
-        # to essential per commit history) — a strong "required" field.
+        # Required: gui/generation/validate.py demands it whenever the module is
+        # enabled, and the pipeline has no way to generate it.
         FieldSpec(
             name="gene_trees",
             label="Gene trees file",

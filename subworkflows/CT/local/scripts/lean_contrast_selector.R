@@ -1,19 +1,17 @@
 #!/usr/bin/env Rscript
+# lean_contrast_selector.R — Contrast selection shared by the observed selector and the permulation null.
+# PhyloPhere | subworkflows/CT/local/scripts/
+# Sourced by: permulations.R, selection_algorithm.R (fop_pair_sel.f, observed selector of TRAIT_ANALYSIS)
 # =============================================================================
-# PHYLOPHERE: A Nextflow pipeline for Phenome-Genome studies
-# File: subworkflows/CT/local/scripts/lean_contrast_selector.R
+# Candidates pass the trait-type gate (count: Jeffreys CI non-overlap; ordinal: top
+# level vs bottom level; continuous: top `pss_top_pct` by Phylogenetic Shift Score under
+# the AIC-selected OU/BM model) and are ranked by PSS. The canonical contrast (H1) is
+# assembled greedily under the modified Dunn index; the FOP harvest adds Dunn-independent
+# alternative hypotheses (H2..Hn) drawn from the Voronoi domains of the canonical pairs.
+# The file defines functions only. The PSS engine is pss_core.R.
 # =============================================================================
-# Contrast selection shared by the observed selector (TRAIT_ANALYSIS
-# selection_algorithm.R::fop_pair_sel.f) and the permulation null
-# (permulations.R).
-#
-# Candidates pass the trait-type gate (count: Jeffreys CI non-overlap; ordinal:
-# top level vs bottom level; continuous: top `pss_top_pct` by Phylogenetic Shift
-# Score under the AIC-selected OU/BM model) and are ranked by PSS. The canonical
-# contrast is assembled greedily under the modified Dunn index; the FOP harvest
-# adds Dunn-independent alternative hypotheses drawn from the Voronoi domains of
-# the canonical pairs.
-# =============================================================================
+
+# ── Dunn index ────────────────────────────────────────────────────────────────
 
 # Modified Dunn index for one cluster: (min distance to any other cluster)
 # divided by (this cluster's own diameter).
@@ -36,13 +34,12 @@ overall_dunn_lean <- function(D, members) {
   min(vapply(seq_along(members), function(k) mod_dunn_lean(D, members, k), numeric(1)))
 }
 
-# Integer-indexed specialization of overall_dunn_lean for the FOP-mirror hot
-# loop: `pi1`/`pi2` are length-K integer row/col indices into the bare matrix
-# `Dm` (a cluster k is the pair pi1[k]-pi2[k]). Returns the identical numeric
-# min-over-k modified Dunn as overall_dunn_lean(Dm, <same members as names>),
-# but without character subscripting, per-call closure allocation, or building
-# the `members` list. A cluster with zero diameter contributes Inf (skipped),
-# matching mod_dunn_lean's early return.
+# Integer-indexed specialization of overall_dunn_lean for the hot loop of the FOP
+# harvest: `pi1`/`pi2` are length-K integer row/col indices into the bare matrix `Dm`
+# (cluster k is the pair pi1[k]-pi2[k]). It returns the same min-over-k modified Dunn as
+# overall_dunn_lean(Dm, <same members as names>), without character subscripting,
+# per-call closure allocation or the `members` list. A cluster with zero diameter
+# contributes Inf (skipped), as in mod_dunn_lean.
 overall_dunn_int <- function(Dm, pi1, pi2, K) {
   best <- Inf
   for (k in seq_len(K)) {
@@ -62,9 +59,12 @@ overall_dunn_int <- function(Dm, pi1, pi2, K) {
   best
 }
 
-# PSS scoring is provided by the vendored phyloq engine (src/pss_core.R):
-# analytical_s() and calculate_pairwise_scores(). This file only needs to be
-# sourced alongside it — permulations.R and the report modules stage both.
+# ── PSS engine ────────────────────────────────────────────────────────────────
+
+# PSS scoring comes from the vendored phyloq engine (pss_core.R): analytical_s() and
+# calculate_pairwise_scores(). If they are not loaded yet, pss_core.R is looked for in
+# src/ and in the working directory, then at a fixed absolute path of the development
+# checkout.
 if (!exists("calculate_pairwise_scores", mode = "function")) {
   .pss_core_paths <- c(
     file.path(getwd(), "src", "pss_core.R"),
@@ -75,19 +75,18 @@ if (!exists("calculate_pairwise_scores", mode = "function")) {
   if (length(.hit)) source(.hit[1])
 }
 
-# Ordinal fg/bg code auto-detection (mirrors stats.R::is_ordinal_trait "auto").
+# ── Shared selection core ─────────────────────────────────────────────────────
+
+# Ordinal code auto-detection: two to five integer levels (mirrors stats.R::is_ordinal_trait "auto").
 .is_ordinal_vec <- function(v) {
   u <- unique(v[!is.na(v)])
   length(u) >= 2 && length(u) <= 5 && all(u == round(u))
 }
 
-# ---------------------------------------------------------------------------
-# SHARED CORE — the observed selector (selection_algorithm.R::fop_pair_sel.f)
-# and the permulation null (permulations.R) both select contrasts through these
-# functions only: selection_context() -> lean_candidate_df() ->
-# greedy_dunn_select() -> lean_fop_harvest(). Run on the real labeling, the null
-# therefore reproduces the observed selection exactly.
-# ---------------------------------------------------------------------------
+# The observed selector (selection_algorithm.R::fop_pair_sel.f) and the permulation null
+# (permulations.R) select contrasts through these functions only: selection_context() ->
+# lean_candidate_df() -> greedy_dunn_select() -> lean_fop_harvest(). Run on the real
+# labeling, the null therefore reproduces the observed selection.
 
 #' Unified candidate ranking policy.
 #'
@@ -227,12 +226,12 @@ greedy_dunn_select <- function(ranked, D, target = Inf, enforce_dunn = TRUE) {
   list(selected = selected, members = members)
 }
 
-#' Candidate-pair gate + ranking for one (permulated) trait vector.
+#' Candidate-pair gate and ranking for one (permulated) trait vector.
 #'
 #' Shared by evaluate_lean_contrast_selection() (the tiered Dunn null) and
 #' lean_fop_harvest() (the per-cycle FOP mirror). Reproduces stages 1-2 of the
 #' observed selector: PSS via the vendored phyloq engine on the fixed observed-
-#' model covariances, then the trait-type non-overlap gate (CI / ordinal /
+#' model covariances, then the trait-type gate (CI non-overlap / ordinal levels /
 #' continuous top_pct), then rank_candidates().
 #'
 #' @return list(cand_df = ranked data.frame | NULL, mode = "ci"|"ordinal"|"pss",
@@ -394,10 +393,10 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
     .with_seed(seed, as.data.frame(lapply(psz, function(n) sample.int(n, ITER_CAP, replace = TRUE))))
   }
 
-  # Hot loop below runs up to ITER_CAP (= max_fop*20) draws per cycle, over up to
-  # caas_full_perms cycles. The draw index is materialized as an integer matrix
-  # and each Voronoi pool as bare vectors once; dedup goes through a hashed
-  # environment and the Dunn test runs on integer indices (overall_dunn_int).
+  # The hot loop below runs up to ITER_CAP (= max_fop * 20) draws per call, and the null
+  # calls it once per cycle. The draw index is materialized once as an integer matrix and
+  # each Voronoi pool as bare vectors; deduplication goes through a hashed environment and
+  # the Dunn test runs on integer indices (overall_dunn_int).
   idx_mat  <- matrix(as.integer(unlist(idx, use.names = FALSE)), ncol = length(psz))
   pool_s1  <- lapply(pools, `[[`, "species1")
   pool_s2  <- lapply(pools, `[[`, "species2")
@@ -406,10 +405,9 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
   pool_dif <- lapply(pools, `[[`, "abs_diff")
   Kseq <- seq_len(K)
 
-  # Species -> integer row/col index into Dm, once. Lets the hot loop below do
-  # the Dunn test and the dedup signature on integers instead of character
-  # subscripts (the profiled cost center: mod_dunn_lean's D[c1,c1] / D[c1,c2]
-  # name-indexing was ~35% of lean_fop_harvest's total time).
+  # Species -> integer row/col index into Dm, once. The hot loop below then runs the
+  # Dunn test and the dedup signature on integers: name-indexing of D (as in
+  # mod_dunn_lean) is the costly operation there.
   sp_idx  <- setNames(seq_len(nrow(Dm)), rownames(Dm))
   pool_i1 <- lapply(pool_s1, function(s) sp_idx[s])
   pool_i2 <- lapply(pool_s2, function(s) sp_idx[s])
@@ -418,10 +416,9 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
   h1i <- sp_idx[c(hyps$H1$species1, hyps$H1$species2)]
   assign(paste(sort(h1i), collapse = "|"), TRUE, envir = seen)
   n_it <- nrow(idx_mat)
-  # Defer building the per-hypothesis data.frame to the final max_fop cut below
-  # (most iterations are duplicates or fail the Dunn gate and never need one) —
-  # stash the plain species/PSS vectors, which is what the profiler showed
-  # data.frame()/add_cluster() spending most of their time re-deriving anyway.
+  # The per-hypothesis data.frame is built only at the final max_fop cut below, because
+  # most iterations are duplicates or fail the Dunn gate; until then the plain
+  # species/PSS vectors are stored.
   harv_s1 <- vector("list", n_it); harv_s2 <- vector("list", n_it)
   harv_ps <- vector("list", n_it); harv_dst <- vector("list", n_it)
   harv_dif <- vector("list", n_it); harv_sig <- character(n_it)

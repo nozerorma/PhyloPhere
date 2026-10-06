@@ -1,4 +1,12 @@
-"""Public exports for phylogenetic tree and taxid-mapping utilities."""
+# __init__.py — Package exports of the tree and taxid-mapping utilities.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/phylo/
+
+"""
+Public exports for phylogenetic tree utilities (src/phylo/tree_utils.py) and taxid mapping
+(src/phylo/species_mapping.py).
+
+Imported by: the submodules are imported directly (`src.phylo.<module>`) by src/asr/asr_single.py and src/core/driver.py
+"""
 
 from .tree_utils import (
     load_tree,

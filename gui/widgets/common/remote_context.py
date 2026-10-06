@@ -5,18 +5,22 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-PathField instances are created in ~15 different places across the 12 tabs
-(General, Runtime, and each module tab's essential/fallback fields). Threading a
-"current remote host" value through every one of those constructors would mean
-touching every call site whenever the active project changes (New/Open). Instead,
-PathField reads the current remote host (and root dir) from this tiny shared
-holder at Browse-click time — cheap, and correct because this is a single-window,
-single-project-at-a-time desktop app (see gui/widgets/main_window.py, which
-updates this on every project load/switch).
+Module-level holder of the current remote host and remote root directory.
 
-Deliberately not part of GeneralConfig's own object identity — it's read-only
-convenience state derived from GeneralConfig.remote_host/remote_root_dir, not a
-second source of truth for either.
+PathField instances are created in many places (General, Runtime and
+Precomputed tabs, every module tab's path fields, the regenerate dialog). Passing the current
+remote host to each constructor would mean touching every call site whenever the
+active project changes (New/Open). Instead, PathField reads the host and root
+directory from this holder when Browse is clicked. This is safe because the
+application has one window and one project at a time.
+
+The holder is a synchronized copy of GeneralConfig.remote_host and
+GeneralConfig.remote_root_dir, not a second source of truth: the General tab
+(gui/widgets/tabs/general_tab.py) writes it whenever those values change or the
+tab is rebuilt.
+
+Imported by: gui/widgets/common/path_field.py, gui/widgets/common/regenerate_dialog.py,
+gui/widgets/tabs/general_tab.py, gui/widgets/tabs/runtime_tab.py
 """
 
 _current_remote_host = ""

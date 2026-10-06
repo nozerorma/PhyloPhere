@@ -1,39 +1,38 @@
 #!/usr/bin/env python3
+# compute_domain_variability.py — Pfam domain hits per gene, with Pfam metadata, from the reference sequences of an alignment directory.
+# PhyloPhere | bin/
+
 """
-compute_domain_variability.py  —  Auto-generate ENRICHMENT's
---domain_variability_file (Pfam domain-per-gene annotation used to build
-pfam_domains.gmt/pfam_clans.gmt in build_position_gmt.py) directly from the
-alignment, via a cached Pfam-A + hmmscan.
+ComputeDomainVariability: scans the reference-species sequence of every gene against Pfam-A
+with hmmscan and writes the domain table that build_position_gmt.py turns into the Pfam
+domain and clan gene sets.
 
-Note this is a DIFFERENT schema from ortholog_characterizator's own
-domain_variability.tsv (map_domain_variability.py's output: per-domain-hit
-*variability statistics* — mean/max/n_analyzed). phylophere's file instead
-needs Pfam *metadata* per hit (target_name, description, clan_acc,
-clan_name — see build_position_gmt.py:334-335) to build gene-set GMTs, no
-variability numbers at all. So this reuses map_domain_variability.py's
-domtblout parser (parse_domtblout) and reference-sequence extraction
-(get_ref_seq) verbatim — that IS re-derived from ortholog_characterizator —
-but the Pfam-A.clans.tsv metadata join below is new: phylophere doesn't
-already have anything that does it, in either repo.
+The table holds Pfam metadata per hit (name, description, clan), not variability statistics, so
+its schema differs from the domain_variability.tsv of map_domain_variability.py. The hmmscan
+domtblout parser and the reference-sequence extraction are imported from that script
+(parse_domtblout, get_ref_seq); the join with Pfam-A.clans.tsv is done here. hmmscan runs once
+on the reference sequences of all genes pooled in one FASTA.
 
-hmmscan is run ONCE across all genes' reference sequences pooled into one
-FASTA (the pattern map_domain_variability.py's own docstring documents for
-efficiency), not once per gene.
+Cache: --cache-dir (default ~/.cache/phylophere/pfam) holds Pfam-A.hmm (with its hmmpress index)
+and Pfam-A.clans.tsv, downloaded once from the EBI Pfam FTP and reused. Requires hmmscan and
+hmmpress on the PATH.
 
-Cache ("cache large" pattern, not committed): --cache-dir (default
-~/.cache/phylophere/pfam/) holds Pfam-A.hmm (+ hmmpress binary index) and
-Pfam-A.clans.tsv, downloaded once from EBI's InterPro FTP and reused across
-runs/genes.
+Called by:  COMPUTE_DOMAIN_VARIABILITY Nextflow process (subworkflows/ENRICHMENT/domain_variability_generation.nf → compute_domain_variability.py)
+Inputs:     --alignment-dir     directory of FASTA alignments, one per gene (gene = file name without
+                                extension); only fasta is supported
+            --ref-species       species whose sequence is scanned (default Homo_sapiens); a gene
+                                without it is skipped with a warning
+            --evalue-threshold  maximum i-evalue of a domain hit (default 0.01)
+Outputs:    <output-dir>/domain_variability.tsv  gene, pfam_id, target_name, description, clan_acc,
+                                clan_name, ali_start, ali_end; ali_start and ali_end are positions
+                                in the ungapped reference sequence, as reported by hmmscan.
+                                Hits without a Pfam-A.clans.tsv entry are dropped with a warning.
+            <output-dir>/reference_seqs.fa, hmmscan.domtblout  intermediate files
 
-Usage
------
+Usage:
     compute_domain_variability.py --alignment-dir <dir> --output-dir <dir> \
         [--cache-dir ~/.cache/phylophere/pfam] [--ref-species Homo_sapiens] \
         [--evalue-threshold 0.01] [--alignment-format fasta]
-
-Output schema (--output-dir/domain_variability.tsv), per
-build_position_gmt.py:334-335:
-    gene, pfam_id, target_name, description, clan_acc, clan_name, ali_start, ali_end
 """
 
 import argparse
@@ -53,6 +52,7 @@ _PFAM_CLANS_URL = "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam
 
 
 def _download_gz(url: str, dest: str) -> None:
+    """Download a gzip file and write it decompressed to dest."""
     print(f"Downloading {url} -> {dest}", file=sys.stderr)
     tmp_gz = dest + ".gz.tmp"
     urllib.request.urlretrieve(url, tmp_gz)
@@ -62,6 +62,7 @@ def _download_gz(url: str, dest: str) -> None:
 
 
 def ensure_pfam_cache(cache_dir: str) -> tuple:
+    """Make sure Pfam-A.hmm (hmmpress-indexed) and Pfam-A.clans.tsv are in cache_dir; returns their paths."""
     os.makedirs(cache_dir, exist_ok=True)
     hmm_path = os.path.join(cache_dir, "Pfam-A.hmm")
     clans_path = os.path.join(cache_dir, "Pfam-A.clans.tsv")
@@ -102,11 +103,10 @@ def load_clan_metadata(clans_tsv: str) -> dict:
 
 def build_reference_fasta(alignment_dir: str, alignment_format: str, ref_species: str,
                           out_fasta: str) -> list:
-    """Extract each gene's reference-species sequence into one combined FASTA.
+    """Write the reference-species sequence of each gene, gaps removed, into one FASTA; returns the genes written.
 
-    Only 'fasta' alignments are supported (map_domain_variability.py's
-    read_fasta() is a hand-rolled FASTA-only parser, same constraint as the
-    rest of this Valdar-variability toolchain).
+    Only 'fasta' alignments are supported, because read_fasta() of map_domain_variability.py
+    parses FASTA only.
     """
     if alignment_format != "fasta":
         sys.exit("Error: compute_domain_variability.py only supports --alignment-format fasta "

@@ -1,14 +1,17 @@
-# ----------------------------------------
-# Phylogenetic Selection Algorithm for Independent Contrast Pairs
-# ----------------------------------------
-# Observed-trait entry point to the shared contrast-selection core
-# (subworkflows/CT/local/scripts/lean_contrast_selector.R, staged into src/).
-# The permulation null (permulations.R) selects through the same core, so the
-# null run on the real labeling reproduces this selection exactly.
-# ----------------------------------------
+# selection_algorithm.R — Selection of independent contrast pairs (H1..Hn) for the observed trait.
+# PhyloPhere | subworkflows/TRAIT_ANALYSIS/local/src/
+# =============================================================================
+# Sourced by: 4.Independent_contrasts.Rmd
+#
+# Observed-trait entry point to the contrast-selection core shared with the
+# permulation null (permulations.R). The core,
+# subworkflows/CT/local/scripts/lean_contrast_selector.R, is staged into src/
+# by ct_independent-contrasts.nf. Defines fop_pair_sel.f().
+# =============================================================================
 
 suppressPackageStartupMessages(library(ape))
 
+# Fallback logger, used only when commons.R has not defined debug_log().
 if (!exists("debug_log", inherits = TRUE)) {
   debug_log <- function(...) {
     msg <- sprintf(...)
@@ -16,7 +19,10 @@ if (!exists("debug_log", inherits = TRUE)) {
   }
 }
 
-# Source the shared contrast selector core
+# ── Shared selection core ─────────────────────────────────────────────────────
+
+# Locate lean_contrast_selector.R: the staged copy in src/ first, then its home
+# in the CT scripts directory (relative to the working directory or to this file).
 selector_script_path <- {
   this_ofile <- tryCatch(sys.frame(1)$ofile, error = function(e) NULL)
   this_dir <- if (!is.null(this_ofile)) dirname(this_ofile) else ""
@@ -39,12 +45,15 @@ if (nzchar(selector_script_path) && file.exists(selector_script_path)) {
        paste(cand_paths, collapse = " ; "))
 }
 
+# ── Multi-hypothesis selection ────────────────────────────────────────────────
+
 # FOP multi-hypothesis contrast selection for the observed trait.
 #
-# Canonical contrast (H1): the shared candidate gate/rank (lean_candidate_df)
-# and greedy Dunn-gated assembly, stopping when no candidate keeps the overall
-# modified Dunn index >= 1 or at `max_contrasts`. H2..Hn: the shared FOP
-# harvest (lean_fop_harvest) around H1, seeded with the pipeline seed.
+# Canonical contrast (H1): the shared candidate gate and ranking
+# (lean_candidate_df) followed by greedy Dunn-gated assembly, which stops when no
+# candidate keeps every cluster's modified Dunn index >= 1, or at `max_contrasts`.
+# H2..Hn: the shared FOP harvest (lean_fop_harvest) around H1, seeded with the
+# pipeline seed.
 #
 # @param ctx           selection_context() for the observed trait.
 # @param ci_lb,ci_ub   per-species Jeffreys bounds (count traits), else NULL.
@@ -54,7 +63,9 @@ if (nzchar(selector_script_path) && file.exists(selector_script_path)) {
 # @param max_contrasts cap on canonical pairs (Inf = until Dunn stops it).
 # @param max_fop       cap on hypotheses (H1 included).
 # @param seed          pipeline seed (params.seed).
-# @return list(canon_pairs, hypotheses, summary_df, species_domain)
+# @return list(canon_pairs, hypotheses, summary_df, species_domain); summary_df
+#   has one row per hypothesis (pair count, min Dunn, mean distance and PSS,
+#   Jaccard overlap of its species with H1, pair composition).
 fop_pair_sel.f <- function(ctx, ci_lb = NULL, ci_ub = NULL, n_vec = NULL,
                            ordinal = NULL, top_pct, max_contrasts = Inf,
                            max_fop = 100L, seed) {

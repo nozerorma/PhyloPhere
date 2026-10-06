@@ -71,6 +71,9 @@ Script to visualize and process data. It generates family distribution plots, su
 
 ---
 
+<!-- 1.Dataset_exploration.Rmd — Species counts per taxon and the per-species trait statistics table. -->
+<!-- PhyloPhere | subworkflows/TRAIT_ANALYSIS/local/ -->
+
 ## Setup and Directory Configuration
 This section configures the working environment, sets directories, and loads necessary functions and libraries.
 
@@ -84,18 +87,21 @@ if (exists("params")) {
 source("./src/commons.R")
 setup_rmd()
 
-# Load necessary libraries
+# ── Dependencies ──────────────────────────────────────────────────────────────
+
 library(dplyr)
 library(ggplot2)
 library(readr)
 library(reshape2)
 library(paletteer)
 
-# Objects
-color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
-capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name
-capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and deconvoluted trait name
-capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name)) # Capitalized and deconvoluted clade name
+
+# ── Labels and output directory ───────────────────────────────────────────────
+
+color_palette <- paste0(clade_name, "_palette") # name of the clade palette defined in palettes.R
+capitalized_taxon <- tools::toTitleCase(taxon_of_interest)
+capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # underscores shown as spaces
+capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name))
 
 createDir(species_distribution_dir)
 
@@ -106,28 +112,26 @@ This section visualizes the distribution of species across families to provide a
 
 ```{r dataset_visualization, fig.height=7, fig.width=7, dev='png', dpi=320}
 
-# 1. DATA VISUALIZATION  ------------------------------------------------------
-# Calculate species count per taxon_of_interest
-# Note that for this section we use the original trait dataframe (trait_df_ori), and will generate two plots
-# : one for the pruned tree species, and another for all species in the original dataframe.
+# ── Species per taxon ─────────────────────────────────────────────────────────
+
+# Two bar plots are drawn: all species of the original trait table (trait_df_ori, the table
+# before pruning) and the species kept after pruning (trait_df).
 
 taxa_distribution <- trait_df_ori %>%
   dplyr::rename(taxa = !!taxon_of_interest) %>%
   dplyr::group_by(taxa) %>%
   dplyr::summarise(count = n())
 
-# Ensure species order matches phylogeny
+# Species in tree order, so the taxa follow the phylogeny.
 ordered_species <-  tidytree::as_tibble(pruned_tree) %>%
   dplyr::arrange(desc(.data$node)) %>%
-  # Tip nodes are numbered 1..Ntip (ape convention); `!is.na(label)` alone
-  # would also admit internal-node bootstrap-support labels, which repeat
-  # across nodes on a real ML tree and can hand factor(levels=) duplicates.
+  # Tip nodes are numbered 1..Ntip (ape convention). Filtering on `!is.na(label)` alone
+  # would also admit internal-node support labels, which repeat across nodes and give
+  # factor(levels =) duplicates.
   dplyr::filter(.data$node <= length(pruned_tree$tip.label)) %>%
   dplyr::pull(.data$label)
 
-# print(ordered_species)
-
-# Define ordered taxa for plotting based on phylogeny order
+# Taxa ordered by the first species of each taxon in tree order.
 ordered_taxa <- ordered_species %>%
   sapply(function(sp) {
     idx <- which(trait_df_ori$species == sp)
@@ -138,9 +142,11 @@ ordered_taxa <- ordered_species %>%
   na.omit() %>%
   unique()
 
-# print(ordered_taxa)
 
-## PLOT FUNCTION --------------------------------------------------------------
+# ── Bar plot ──────────────────────────────────────────────────────────────────
+
+# Horizontal bars with the species count per taxon, in the order of `ordered_taxa_levels`.
+# Label size, margins and canvas size follow the number of taxa and the largest count.
 taxa_plot.f <- function(df, ordered_taxa_levels, caption_text = NULL){
   max_count <- max(df$count, na.rm = TRUE)
   plot_profile <- species_plot_profile(
@@ -212,10 +218,9 @@ taxa_plot.f <- function(df, ordered_taxa_levels, caption_text = NULL){
 }
 
 
-# Order taxa for the full dataset using original data order
+# All species: taxa in the order of the original table, since some may be absent from the tree.
 ordered_taxa_all <- unique(taxa_distribution$taxa)
 
-# Create bar plot for taxa distribution (all taxa)
 taxa_distribution_all <- taxa_distribution %>%
   dplyr::mutate(taxa = factor(taxa, levels = ordered_taxa_all)) %>%
   dplyr::arrange(taxa, .by_group = TRUE)
@@ -228,20 +233,18 @@ p1 <- taxa_plot.f(
 plot_dims_all <- attr(p1, "plot_dims")
 knitr::opts_current$set(fig.width = plot_dims_all$width, fig.height = plot_dims_all$height)
 
-# Save the plot to the results directory
+# Saved to the results directory.
 ggplot2::ggsave(file.path(species_distribution_dir, paste0(clade_name, "_", taxon_of_interest, "_distribution_original.png")), p1, 
                 device = "png", width = plot_dims_all$width, height = plot_dims_all$height, dpi = "retina")
 
-# Display the plot
 p1
 
-# Prune taxa distribution to only include species in the pruned tree
+# Pruned species: the counts of trait_df, in tree order of the taxa.
 pruned_taxa_distribution <- trait_df %>%
   dplyr::rename(taxa = !!sym(taxon_of_interest)) %>%
   dplyr::group_by(taxa) %>%
   dplyr::summarise(count = n(), .groups = "drop")
 
-# Create bar plot for pruned taxa distribution
 pruned_taxa_distribution <- pruned_taxa_distribution %>%
   dplyr::mutate(taxa = factor(taxa, levels = ordered_taxa)) %>%
   dplyr::arrange(taxa, .by_group = TRUE)
@@ -254,11 +257,10 @@ p2 <- taxa_plot.f(
 plot_dims_pruned <- attr(p2, "plot_dims")
 knitr::opts_current$set(fig.width = plot_dims_pruned$width, fig.height = plot_dims_pruned$height)
 
-# Save the plot to the results directory
+# Saved to the results directory.
 ggplot2::ggsave(file.path(species_distribution_dir, paste0(clade_name, "_", taxon_of_interest, "_distribution_pruned.png")), p2, 
                 device = "png", width = plot_dims_pruned$width, height = plot_dims_pruned$height, dpi = "retina")
 
-# Display the plot
 p2
 
 ```
@@ -268,17 +270,15 @@ Stats excerpt (head only)
 
 ```{r stats_overview}
 
-# Apply stats.f to trait_df
-# Here we directly use trait_df from the global environment, already loaded and pruned using the phylogeny
+# Per-species statistics (stats.f in stats.R) of trait_df, the table already matched to the tree.
+# trait_stats.csv is read by 2.Phenotype_exploration.Rmd.
 stats_df <- stats.f(trait_df)
 
-# Save the melted dataframe
 save_path <- file.path(species_distribution_dir, "trait_stats.csv")
 if (!is.null(stats_df)) {
   write.csv(stats_df, save_path, row.names = FALSE)
 }
 
-# Print an excerpt
 if (!is.null(stats_df)) {
   print(head(stats_df))
 }

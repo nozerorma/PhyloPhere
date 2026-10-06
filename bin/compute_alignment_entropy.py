@@ -1,41 +1,34 @@
 #!/usr/bin/env python3
+# compute_alignment_entropy.py — Batch driver computing per-gene Valdar variability from an alignment directory.
+# PhyloPhere | bin/
+
 """
-compute_alignment_entropy.py  —  Batch driver auto-generating the per-gene
-Valdar variability files CT_ACCUMULATION's --accumulation_entropy_dir expects,
-directly from the alignment directory (no cds2prot/ortholog_characterizator
-run required).
+ComputeAlignmentEntropy: runs compute_variability.py once per alignment file of a directory,
+so that the per-gene <gene>.entropy.tsv files exist without a prior ortholog_characterizator run.
 
-bin/compute_variability.py in this same directory is a byte-for-byte copy of
-ortholog_characterizator/subworkflows/variability/local/compute_variability.py
-(the user's own reference implementation) — fully verbatim, not
-reimplemented, so the numbers this produces match what that pipeline would
-have produced for the same alignment. This driver only adds the batching
-(the reference script computes one gene per invocation, driven there by
-run_variability_batch.sh + a manifest) and is not itself part of the ported
-algorithm.
+compute_variability.py (same directory) computes one gene per call; this driver only adds the
+batching. All numbers come from that script.
 
---taxid_tsv is a hard requirement of compute_variability.py (used for its
-per-clade breakdown, <gene>.clade_entropy.tsv) — pass params.tax_id through
-unchanged, whatever its schema. A 2-column tax_id file (this pipeline's own
-auto-generated one, bin/generate_taxid_map.py) parses to zero clade rows
-(load_taxonomy skips any line with fewer than 5 columns) rather than
-erroring — CT_ACCUMULATION's own consumer never reads the clade file anyway
-(subworkflows/CT_ACCUMULATION/local/src/aggregation/concatenate.py only
-reads <gene>.entropy.tsv's `position`/`variability` columns) — but a richer
-5-column taxid.tsv (tax_id, species, family, rank, name_class — the format
-this pipeline's own fixtures already use) gets the full per-clade output.
+Called by:  COMPUTE_ALIGNMENT_ENTROPY Nextflow process (subworkflows/CT_ACCUMULATION/ctacc_run.nf →
+            compute_alignment_entropy.py); consumed by CT_ACCUMULATION (accumulation_entropy_dir)
+            and by UCR_GENERATION
+Inputs:     --alignment-dir    directory of FASTA alignments, one file per gene
+            --taxid-tsv        required by compute_variability.py for its per-clade output
+            --family-order-tsv optional family → order table; --alpha/--beta/--gamma Valdar exponents
+Outputs:    <output-dir>/<gene>.entropy.tsv, <gene>.clade_entropy.tsv, <gene>.fa (variable columns
+            only); a count of the genes done on stderr
 
-compute_variability.py only understands FASTA (its own hand-rolled
-read_fasta(), not Biopython) and derives the gene name via
-`basename(prot_ali).replace('.fa', '')` — verbatim, including that it
-replaces every '.fa' substring, not just a trailing extension. This driver
-symlinks each alignment file to a temporary `<gene>.fa` before invoking it,
-so gene-name extraction is correct regardless of the real alignment
-filename/extension (--ali_format must be "fasta"; this path doesn't support
-other formats since the reference script doesn't).
+Notes:
+  * compute_variability.py reads only FASTA and derives the gene name with
+    basename(path).replace('.fa', ''), which replaces every '.fa' substring. Each alignment is
+    therefore symlinked as <gene>.fa in a temporary directory, with <gene> the file name
+    without its last extension.
+  * Clade rows need a taxid table with at least 5 columns (species in column 2, family in
+    column 3, name class "scientific name" in column 5). A 2-column table such as the one of
+    generate_taxid_map.py gives an empty clade file, with no error. The consumers
+    (CT_ACCUMULATION, detect_ucr.py, aggregate_ucr.py) read only <gene>.entropy.tsv.
 
-Usage
------
+Usage:
     compute_alignment_entropy.py --alignment-dir <dir> --output-dir <dir> \
         --taxid-tsv <tax_id_file> [--family-order-tsv <tsv>] \
         [--alpha 1.0] [--beta 1.0] [--gamma 1.0]

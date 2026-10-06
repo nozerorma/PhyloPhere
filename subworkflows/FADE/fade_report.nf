@@ -1,21 +1,21 @@
 #!/usr/bin/env nextflow
+// fade_report.nf — HTML report and gene-level summary of the FADE results of one direction.
+// PhyloPhere | subworkflows/FADE/
 
 /*
- * FADE_REPORT
- * ───────────
- * Generate an HTML summary report from all FADE JSON results for a given
- * direction (top / bottom). Calls 6.FADE_report.Rmd.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  FADE_REPORT: renders 6.FADE_report.Rmd over all FADE JSON results of one direction
+ *  (top or bottom).
  *
- * Inputs
- * ──────
- *   direction  : val — 'top' or 'bottom'
- *   json_files : collected list of *.FADE.json paths
- *
- * Outputs
- * ───────
- *   report      : HTML report
- *   summary_tsv : gene-level summary table (TSV)
+ *  Consumes:  direction, the collected *.FADE.json files, optional foreground species
+ *             list (NO_FG_LIST sentinel when absent)
+ *  Produces:  6.FADE_report_<direction>.html, fade_summary_<direction>.tsv (one row per
+ *             gene), fade_site_bf_<direction>.tsv
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Report ─────────────────────────────────────────────────────────────────────
 
 process FADE_REPORT {
     tag "fade_report|${direction}"

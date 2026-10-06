@@ -1,35 +1,39 @@
 #!/usr/bin/env python3
-# =============================================================================
-# run_domino_modules.py — active module identification via DOMINO's Python API
-# =============================================================================
-# Calls src.core.domino.main() directly instead of shelling out to the `domino`
-# CLI. This matters for exactly one reason: DOMINO's own module_threshold gate
-# inside get_final_modules() computes a real Bonferroni-corrected hypergeometric
-# sig_score per module (scipy.stats.hypergeom), but the reference return
-# statement is `return [a[0] for a in module_sigs]` — it keeps only the module,
-# throws the score away. The CLI (src/runner.py's main_domino) then only ever
-# writes gene names to modules.out. There is no flag or API path that returns
-# the score; the only way to recover it is to intercept get_final_modules()
-# before it discards its own second tuple element.
-#
-# _get_final_modules_capturing() below is byte-for-byte the same statistical
-# logic as the upstream get_final_modules() (verified against
-# github.com/Shamir-Lab/DOMINO/blob/master/src/core/domino.py) — same
-# hypergeom.sf + hypergeom.pmf tail-inclusive test, same
-# module_threshold/len(putative_modules) Bonferroni correction, same sort order
-# — it just also stashes the per-module sig_score instead of dropping it. It is
-# monkeypatched onto the domino module before calling main(), so every other
-# step (network build/caching, slice pruning, PCST optimization) runs exactly
-# as upstream.
-# =============================================================================
+# run_domino_modules.py — Active module identification with DOMINO's Python API, one gene list at a time.
+# PhyloPhere | subworkflows/ENRICHMENT/local/src/
 
+"""
+RunDominoModules: finds the active modules of each gene list on the STRING network and
+reports, for every module, its genes and its Bonferroni-corrected hypergeometric p-value.
+
+src.core.domino.main() is called directly instead of the `domino` CLI because the
+per-module score is otherwise lost: get_final_modules() computes it, but returns only
+the modules, and the CLI writes gene names only. install_capturing_get_final_modules()
+replaces that function with one that applies the same test (hypergeom.sf + hypergeom.pmf,
+tail inclusive; module_threshold divided by the number of putative modules; ascending
+score order) and also stores the scores. Every other step (network caching, slice
+pruning, PCST optimization) is upstream DOMINO.
+
+Called by:  DOMINO_RUN_MODULES Nextflow process (domino.nf → run_domino_modules.py)
+Inputs:     --network          network.sif (build_domino_network.py)
+            --slices           slices.txt (output of the `slicer` CLI)
+            --gene-lists-dir   directory of *.txt active-gene files, one gene per line
+Outputs:    <list>_domino_modules.tsv       node, cluster (cluster = rank by p-value)
+            <list>_domino_module_stats.tsv  cluster, n_genes, genes (comma-separated), p_value, p_adj
+"""
+
+# ── Standard library ──────────────────────────────────────────────────────────
 import argparse
 import glob
 import os
 import sys
 
+# ── Third-party ───────────────────────────────────────────────────────────────
 import pandas as pd
 from scipy.stats import hypergeom
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
 
 
 def parse_args():
@@ -49,9 +53,15 @@ def parse_args():
     return p.parse_args()
 
 
+# ── DOMINO wrapper ────────────────────────────────────────────────────────────
+
+
 def install_capturing_get_final_modules(domino_core):
-    """Monkeypatch domino_core.get_final_modules with a copy that also records
-    each accepted module's sig_score (see module docstring for why)."""
+    """Replace domino_core.get_final_modules with a copy that also records the scores.
+
+    Returns the dict the copy fills on each call: sig_scores (Bonferroni-corrected score of
+    every accepted module, ascending) and n_putative (number of putative modules tested).
+    """
     captured = {}
 
     def _get_final_modules_capturing(G, G_putative_modules, module_threshold):
@@ -78,6 +88,11 @@ def install_capturing_get_final_modules(domino_core):
 
 
 def run_one_list(domino_core, captured, list_path, network_file, slices_file, slice_threshold, module_threshold):
+    """Run DOMINO on one active-gene list.
+
+    Returns (rows_modules, rows_stats): one row per gene (node, cluster) and one per module
+    (cluster, n_genes, genes, p_value, p_adj). p_adj is p_value times n_putative, capped at 1.
+    """
     captured.clear()
     try:
         final_modules = domino_core.main(
@@ -88,13 +103,10 @@ def run_one_list(domino_core, captured, list_path, network_file, slices_file, sl
             module_threshold=module_threshold,
         )
     except ValueError as e:
-        # DOMINO builds predating nozerorma/DOMINO commit b3ecce1 crash here
-        # when zero modules survive modularity slicing -- a legitimate outcome
-        # for a small/sparse network, not malformed input. Guard defensively
-        # in case the installed build predates that fix (not yet republished
-        # to the miralnso Anaconda channel as of this writing), rather than
-        # failing the whole gene-list batch over a network too sparse to
-        # produce any module.
+        # Some DOMINO builds raise a ValueError mentioning union_all when zero modules
+        # survive modularity slicing. That is a legitimate outcome for a small or sparse
+        # network, not malformed input, so it yields zero modules instead of failing the
+        # whole batch of gene lists.
         if "union_all" not in str(e):
             raise
         print(f"[run_domino_modules] {os.path.basename(list_path)}: 0 modules "
@@ -119,6 +131,9 @@ def run_one_list(domino_core, captured, list_path, network_file, slices_file, sl
             "p_adj": p_adj,
         })
     return rows_modules, rows_stats
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 
 def main():

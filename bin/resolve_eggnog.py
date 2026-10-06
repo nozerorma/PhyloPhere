@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
+# resolve_eggnog.py — Resolve the eggNOG orthogroup pair (members, annotations) read by POSENRICH.
+# PhyloPhere | bin/
+
 """
-resolve_eggnog.py  --  Resolve the eggNOG orthogroup pair (members, annotations) that POSENRICH reads when
+ResolveEggnog: provides the eggNOG members and annotations files used when
 --egg_members_file / --egg_annotations_file are left blank.
 
 Two sources, chosen explicitly:
@@ -11,29 +14,27 @@ Two sources, chosen explicitly:
             reference species, and write them. A failed download is an error: the versioned copy is never substituted
             silently, because the two can hold different orthogroups.
 
-Both modes write `eggnog_source.json` next to the pair: mode, tax level, reference species, the SHA-256 of each output
+Both modes write eggnog_source.json next to the pair: mode, tax level, reference species, the SHA-256 of each output
 file and, for --fetch, the source URLs, the UTC retrieval time and the SHA-256 of each download.
-
-Why this runs outside main.nf: params.egg_members_file / params.egg_annotations_file are read by the process inputs of
-subworkflows/ENRICHMENT/posenrich.nf, and Nextflow enforces single assignment on params keys, so a value set inside
-workflow {} after conf/enrichment.config would be ignored.
 
 Filtering: build_position_gmt.py reads the orthogroup id (members column 2, annotations column 2), the description
 (annotations column 4) and the members whose taxon prefix is "<ref_taxid>." (human: "9606.ENSP"). Every other member
 and annotation row is discarded on load, so only orthogroups with at least one reference member are kept, with only
 those members in each row. For Primates this reduces ~1.8 MB to ~470 KB compressed and changes nothing the pipeline uses.
 
-Usage
------
+Called by:  RESOLVE_EGGNOG Nextflow process (subworkflows/ENRICHMENT/eggnog_resolution.nf → resolve_eggnog.py)
+Inputs:     --output-dir, --tax-level (default 9443), --ref-taxid (default 9606), --fetch, --timeout,
+            --versioned-dir (default subworkflows/ENRICHMENT/dat); with both --egg-members-file and
+            --egg-annotations-file the two paths are echoed back unchanged
+Outputs:    <output-dir>/<tax>_members_<ref>.tsv.gz, <tax>_annotations_<ref>.tsv.gz and eggnog_source.json;
+            stdout, shell-sourceable:  EGG_MEMBERS_FILE=<path>  and  EGG_ANNOTATIONS_FILE=<path>
+
+The two files are always produced together: the pair is joined by orthogroup id, and files of
+different releases would mismatch.
+
+Usage:
     resolve_eggnog.py --output-dir <dir> [--tax-level 9443] [--ref-taxid 9606] [--fetch] [--timeout 30] \
         [--versioned-dir <dir>] [--egg-members-file F --egg-annotations-file F]
-
-Prints two shell-sourceable lines on stdout:
-    EGG_MEMBERS_FILE=<path>
-    EGG_ANNOTATIONS_FILE=<path>
-
-When both --egg-members-file and --egg-annotations-file are given they are echoed back unchanged. Resolution always
-produces both files together: the pair is joined by orthogroup id, and one file of each release would mismatch.
 """
 
 import argparse
@@ -60,10 +61,12 @@ _DEFAULT_VERSIONED_DIR = os.path.join(
 
 
 def _sha256_bytes(data: bytes) -> str:
+    """Hex SHA-256 of a byte string."""
     return hashlib.sha256(data).hexdigest()
 
 
 def _sha256_file(path: str) -> str:
+    """Hex SHA-256 of a file, read in 1 MiB chunks."""
     h = hashlib.sha256()
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
@@ -72,6 +75,7 @@ def _sha256_file(path: str) -> str:
 
 
 def _fetch(url: str, timeout: int) -> bytes:
+    """Body of an HTTP GET; errors propagate to the caller."""
     with urllib.request.urlopen(url, timeout=timeout) as resp:
         return resp.read()
 

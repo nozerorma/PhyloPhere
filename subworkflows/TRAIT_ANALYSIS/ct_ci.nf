@@ -1,8 +1,21 @@
 #!/usr/bin/env nextflow
+// ct_ci.nf — Render the trait composition report that prepares the candidate contrast pairs.
+// PhyloPhere | subworkflows/TRAIT_ANALYSIS/
 
 /*
-#  Contrast selection for CT analysis (Rmarkdown)
-*/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  CI_COMPOSITION_REPORT: renders 3.CI-composition.Rmd. Depending on the trait it
+ *  builds Jeffreys credible intervals (count columns), uses the coded levels (ordinal)
+ *  or scores species pairs by Phylogenetic Shift Score (continuous), and writes the
+ *  pairwise table and the candidate foreground/background species pool.
+ *
+ *  Consumes:  trait file, species tree, results directory of the previous exploration step
+ *  Produces:  the updated results directory, html_reports/*.html, candidate_species.tab
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+
+
+// ── Composition report ─────────────────────────────────────────────────────────
 
 process CI_COMPOSITION_REPORT {
     tag "CI_COMPOSITION_REPORT"
@@ -20,16 +33,15 @@ process CI_COMPOSITION_REPORT {
     path "*.html", emit: reports, optional: true
     path "${results_dir}/**/*.csv", emit: data_tables, optional: true
     path "${results_dir}/**/*.png", emit: plots, optional: true
-    // Pre-Dunn candidate foreground/background species pool (traitfile format),
-    // consumed by SELECTION_PREP -> EXTRACT_EXTREME_SPECIES for FADE.
+    // Candidate foreground/background species pool before the Dunn-based selection
+    // (candidate_species.tab format), read by SELECTION_PREP for FADE.
     path "${results_dir}/1.Data-exploration/5.CI_overlaps/candidate_species.tab", emit: candidate_species_out, optional: true
 
     script:
     def local_dir = "${baseDir}/subworkflows/TRAIT_ANALYSIS/local"
-    // Shared contrast-selection core (rank_candidates / greedy_dunn_select /
-    // fit_evo_model / mod_dunn_lean) lives with the CT permulation scripts;
-    // stage it into src/ so 3.CI-composition.Rmd and selection_algorithm.R
-    // resolve it via the getwd()/src/ path candidate.
+    // The shared contrast-selection core (lean_contrast_selector.R) and the PSS engine
+    // (pss_core.R) live with the CT scripts; they are copied into src/ so the Rmd and
+    // selection_algorithm.R find them through the getwd()/src/ path.
     def ct_scripts = "${baseDir}/subworkflows/CT/local/scripts"
     def seed = params.seed ?: ''
     def clade = params.clade_name ?: ''

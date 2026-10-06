@@ -5,10 +5,14 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Stands in for QFileDialog when a remote host is configured (see remote_context.py)
-— QFileDialog can only browse the local filesystem. Deliberately minimal: a path
-bar, a listing, and double-click navigation. No SFTP/paramiko dependency — reuses
-gui.remote's plain `ssh` + `find` based listing.
+RemoteBrowseDialog: pick a file or directory on a remote host.
+
+Replaces QFileDialog when a remote host is configured (see remote_context.py),
+since QFileDialog browses only the local filesystem. Deliberately minimal: a path
+bar, a listing and double-click navigation. It needs no SFTP library: the listing
+comes from gui.remote.list_remote_directory, which runs `find` over plain `ssh`.
+
+Imported by: gui/widgets/common/path_field.py
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────

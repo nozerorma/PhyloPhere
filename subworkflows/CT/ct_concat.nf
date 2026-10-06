@@ -1,6 +1,20 @@
+// ct_concat.nf — Concatenate the partitioned resample output into a single resample.tab.
+// PhyloPhere | subworkflows/CT/
+
 /*
- * Concatenation of the resample output of the CT tools
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  CONCAT_RESAMPLE: joins the resample_*.tab files that RESAMPLE writes (version-sorted
+ *  by name, no header line in them) into resample.tab for reporting, and carries
+ *  permulation_manifest.tsv through when the staged directory has one.
+ *
+ *  Consumes:  resample directory (RESAMPLE output, or a directory given by resample_from)
+ *  Produces:  resample.tab, permulation_manifest.tsv (optional), published to
+ *             caastools/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Resample concatenation ───────────────────────────────────────────────────
 
 process CONCAT_RESAMPLE {
     tag "Concatenating resample outputs"
@@ -11,11 +25,10 @@ process CONCAT_RESAMPLE {
 
     output:
     path("resample.tab"), emit: resample_concat
-    // The per-cycle audit trail written by permulations.R (tier, pair count,
-    // overall Dunn, and the permulated trait values the FG/BG were selected on).
-    // Published alongside resample.tab so the pool can be checked from the
-    // results directory rather than only from the Nextflow work dir. Optional:
-    // resample_from / precomputed runs stage a directory that has no manifest.
+    // Per-cycle audit trail written by permulations.R (tier, pair count, overall Dunn, and the
+    // permulated trait values the FG/BG were selected on). It is published next to resample.tab so
+    // the pool can be checked from the results directory. Optional: a directory given by
+    // resample_from may have no manifest.
     path("permulation_manifest.tsv"), emit: resample_manifest, optional: true
 
     script:
@@ -38,14 +51,14 @@ process CONCAT_RESAMPLE {
     ls -la ${resample_dir}/
     echo ""
     
-    # Find all resample_*.tab files in the staged directory and sort them numerically
+    # Version-sorted, so that resample_010.tab follows resample_009.tab
     mapfile -t resample_files < <(find ${resample_dir}/ -type f -name "resample_*.tab" | sort -V)
     
     echo "Found \${#resample_files[@]} resample files:"
     printf '%s\n' "\${resample_files[@]}"
     echo ""
     
-    # Check if we have any files
+    # Without resample files a placeholder is written and the process ends successfully
     if [ \${#resample_files[@]} -eq 0 ]; then
         echo "WARNING: No resample files found - creating placeholder file"
         echo "No resample files found" > resample.tab
@@ -57,10 +70,10 @@ process CONCAT_RESAMPLE {
     echo "Line count: \$(wc -l < "\${resample_files[0]}")"
     echo ""
     
-    # Copy first file completely
+    # The first file starts resample.tab
     cat "\${resample_files[0]}" > resample.tab
     
-    # Append all remaining files (resample files don't have headers, all lines are data)
+    # The resample files have no header line, so the others are appended whole
     for ((i=1; i<\${#resample_files[@]}; i++)); do
         echo "Appending file \$((i+1))/\${#resample_files[@]}: \${resample_files[\$i]} (\$(wc -l < "\${resample_files[\$i]}") lines)"
         cat "\${resample_files[\$i]}" >> resample.tab

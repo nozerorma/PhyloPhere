@@ -5,20 +5,19 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Post-processing (conf/ct_postproc.config) stays bundled here rather than its own
-tab: the reference scripts only ever expose it as a bare --ct_postproc boolean
-nested inside RUN_DISAMBIGUATION's block, and matching that keeps the GUI aligned
-with the scripts it replaces (see implementation plan §5, "Decision").
+DisambiguationTab: field specification of the Disambiguation module, which also
+holds the Post-processing parameters (conf/ct_disambiguation.config and
+conf/ct_postproc.config).
 
---ct_postproc has no separate on/off checkbox: it always runs whenever this tab's
-own enable toggle is on (gui/generation/context.py's ct_postproc_enabled is derived
-straight from disambig.enabled, not a sibling field) — Post-processing was never
-meaningfully independent of Disambiguation in practice, so the extra checkbox only
-added a state (Disambiguation on, Post-processing off) nobody used on purpose.
+Post-processing has no tab or enable checkbox of its own: gui/generation/context.py
+derives ct_postproc_enabled from this tab's enable toggle (and from the Precomputed
+Run tab not supplying a post-processing result).
 
 ASR: a gene's reconstruction is read from the cache directory when it is there and
 computed with PAML (and written to the cache) when it is not, so there is no mode to
 choose.
+
+Imported by: gui/widgets/main_window.py
 """
 
 # ── Local ─────────────────────────────────────────────────────────────────────
@@ -53,9 +52,9 @@ SPEC = ModuleTabSpec(
             name="ct_disambig_asr_model",
             label="ASR substitution model",
             kind="choice",
-            # Ground truth is subworkflows/CT_DISAMBIGUATION/local/src/asr/reconstruct.py's
-            # MODEL->aa_rate_file map (dayhoff/jtt/wag/lg via PAML codeml) — the 3-way
-            # set in earlier task notes omitted "dayhoff", which the code does accept.
+            # Empirical amino-acid matrices run through PAML codeml; the full set of
+            # models is MODEL_SPECS in
+            # subworkflows/CT_DISAMBIGUATION/local/src/asr/reconstruct.py.
             choices=("lg", "wag", "jtt", "dayhoff"),
             importance="default",
         ),
@@ -180,10 +179,10 @@ SPEC = ModuleTabSpec(
         Section("Performance and batching"),
         FieldSpec(name="ct_disambig_max_tasks_per_child", label="Max tasks per worker child", importance="optional"),
         Section("Exploratory parameter sweep values (conf/ct_postproc.config)"),
-        # Borderline default/optional: these only shape the diagnostic sweep grid
-        # (Exploratory mode), not the production filter thresholds above that
-        # actually gate what ships — so a wrong sweep range wastes a diagnostic
-        # run rather than compromising a committed result.
+        # Rated "optional" although borderline: these values shape only the
+        # diagnostic sweep grid of Exploratory mode, not the production filter
+        # thresholds above, so a poor sweep range wastes a diagnostic run without
+        # affecting a final result.
         FieldSpec(
             name="minlen_values",
             label="Cluster min length sweep (exploratory mode)",

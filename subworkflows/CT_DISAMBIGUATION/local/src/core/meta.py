@@ -1,4 +1,12 @@
-"""CAAS ids: a function of the content of one discovery.tab row.
+# meta.py — Content-derived CAAS ids of discovery.tab rows.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/core/
+
+"""
+CAAS ids: a function of the content of one discovery.tab row.
+
+Imported by: src/core/contract.py, src/core/observed.py
+Inputs: the fields of one discovery.tab row
+Outputs: a `CAAS_<hex>` id string
 
 A CAAS is one row of discovery.tab: a gene, a 0-based alignment position, a hypothesis, a caap_group (scheme)
 and the substitution found there (caas, amino_encoded, pattern). Its id hashes exactly those fields, so the same

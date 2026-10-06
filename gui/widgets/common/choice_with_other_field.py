@@ -4,6 +4,17 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+ChoiceWithOtherField: a dropdown of curated values plus a free-text escape hatch.
+
+Serves fields whose usual values form a short list (e.g. a STRING species) but
+for which any other value is legal. The widget exposes the same text()/set_text()/
+valueChanged interface as the other field widgets, so ModuleTabWidget treats it
+as a string field.
+
+Imported by: gui/widgets/common/module_tab.py (field kind "choice_with_other")
+"""
+
 # ── Third-party ───────────────────────────────────────────────────────────────
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLineEdit, QWidget

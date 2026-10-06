@@ -1,22 +1,27 @@
 #!/usr/bin/env nextflow
+// rer_gene_lists.nf — Gene lists and per-gene statistics table from the RERconverge summary.
+// PhyloPhere | subworkflows/RERCONVERGE/
 
 /*
- * RER_GENE_LISTS
- * ──────────────
- * Extract FCS/AMI-ready gene lists from the RERconverge summary TSV:
- *   background.txt           — all genes tested by RERConverge
- *   rer_significant.txt      — p.perm < threshold & |Rho| >= rho_threshold
- *   rer_accelerating.txt     — significant & Rho > 0
- *   rer_decelerating.txt     — significant & Rho < 0
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  RER_GENE_LISTS: extracts from rerconverge_summary_<trait>.tsv (RER_REPORT) the gene
+ *  lists used by the FCS and AMI stages, and the fcs_stats.tsv with the RER scores and
+ *  flags. The significance column is params.rer_pval_column (default p.perm, replaced
+ *  by p.adj when p.perm is absent or all NA) at params.rer_pval_threshold.
  *
- * Inputs
- * ──────
- *   summary_tsv : path — rerconverge_summary_{trait}.tsv from RER_REPORT
- *
- * Outputs
- * ───────
- *   gene_lists : path — all four .txt files (collected)
+ *  Consumes:  summary TSV, optional SCORING gene-scores table (NO_* sentinel when absent)
+ *  Produces:  background.txt (every gene tested by RERconverge),
+ *             rer_significant.txt (p below the threshold),
+ *             rer_accelerating.txt (significant, Rho > 0),
+ *             rer_decelerating.txt (significant, Rho < 0),
+ *             fcs_stats.tsv (gene, score_global, score_accelerating, score_decelerating,
+ *             flag_rer_acc, flag_rer_decc, plus the cross-module columns found in the
+ *             gene-scores table)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Gene lists ─────────────────────────────────────────────────────────────────
 
 process RER_GENE_LISTS {
     tag "rer_gene_lists|${params.traitname}"
@@ -54,10 +59,9 @@ process RER_GENE_LISTS {
         writeLines(sig\$gene[sig\$Rho > 0], "rer_accelerating.txt")
         writeLines(sig\$gene[sig\$Rho < 0], "rer_decelerating.txt")
 
-        # RER own directional significance. NOTE: gate_sig is a CAAS concept
-        # and are deliberately NOT set here — RER significance lives in flag_rer_acc/
-        # flag_rer_decc. The CAAS gates (and FADE/accum/CAAS-directional) flags are
-        # joined from the scoring gene-scores file below when one is provided.
+        # Directional RER significance lives in flag_rer_acc and flag_rer_decc; gate_sig is
+        # a CAAS flag and is not set here. The CAAS directional scores and the FADE and
+        # accumulation flags come from the scoring gene-scores file below, when given.
         rer_sig       <- !is.na(pval_col) & pval_col < ${pval_thr}
         flag_rer_acc  <- rer_sig & df\$Rho > 0
         flag_rer_decc <- rer_sig & df\$Rho < 0
@@ -72,10 +76,8 @@ process RER_GENE_LISTS {
             stringsAsFactors = FALSE
         )
 
-        # Optional cross-module annotation: CAAS gate (gate_sig), CAAS
-        # directional scores (score_top/score_bottom -> top/bottom percentiles), FADE
-        # and accumulation flags — imported from a scoring gene-scores TSV when given.
-        # Absent columns are simply not joined, so the report omits them gracefully.
+        # Optional cross-module columns from the scoring gene-scores TSV (CAAS directional
+        # scores, FADE and accumulation flags). Columns absent from the file are not joined.
         gs_file <- "${gene_scores}"
         if (file.exists(gs_file) && !grepl("^NO_", basename(gs_file))) {
             gs <- tryCatch(read.delim(gs_file, stringsAsFactors = FALSE), error = function(e) NULL)

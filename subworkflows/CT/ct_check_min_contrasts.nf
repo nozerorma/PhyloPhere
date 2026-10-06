@@ -1,33 +1,38 @@
 #!/usr/bin/env nextflow
+// ct_check_min_contrasts.nf — Gate that stops a trait with too few foreground contrasts before CT.
+// PhyloPhere | subworkflows/CT/
 
 /*
-#
-# PHYLOPHERE — Minimum-contrast gate
-#
-# Checks that the caastools traitfile produced by CONTRAST_ALGORITHM contains
-# at least params.min_contrasts (default 3) foreground species (column 2 == 1).
-#
-# When the threshold is NOT met:
-#   • A plain-text sentinel  low_contrasts.skip  is published to ${params.outdir}.
-#   • Neither traitfile nor permulation_traitfile is emitted downstream.
-#   • All subsequent CT / meta_caas / disambiguation / … processes are
-#     silently skipped because their input channels never receive a value.
-#   • The Nextflow run exits 0 (no error).
-#   • The bash orchestrators (run_phenotypes.sh, test_stress.sh) detect the
-#     sentinel and continue to the next phenotype.
-#
-# When the threshold IS met:
-#   • Both traitfiles are emitted unchanged (as traitfile_ok.tab /
-#     permulation_traitfile_ok.tab) and downstream processing proceeds normally.
-#   • No sentinel file is written.
-*/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  CHECK_MIN_CONTRASTS: counts the foreground species (column 2 == 1) of the
+ *  caastools traitfile produced by CONTRAST_ALGORITHM and compares the count with
+ *  params.min_contrasts (3 when unset).
+ *
+ *  Threshold not met: a sentinel, low_contrasts.skip (trait, count, minimum), is
+ *  published to params.outdir and no traitfile is emitted, so the processes that
+ *  consume them do not run. main.nf stops the run gracefully (exit 0) when it sees
+ *  the sentinel, and the single-phenotype launch scripts check for the file to move on
+ *  to the next phenotype.
+ *
+ *  Threshold met: the traitfile, the permulation traitfile and the traitfile
+ *  directory are copied through under *_ok names and no sentinel is written.
+ *
+ *  Consumes:  traitfile, permulation traitfile, traitfile directory
+ *             (CONTRAST_ALGORITHM, through workflows/contrast_selection.nf)
+ *  Produces:  traitfile_ok.tab, permulation_traitfile_ok.tab, traitfiles_ok_dir/
+ *             or low_contrasts.skip
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+
+
+// ── Minimum-contrast gate ────────────────────────────────────────────────────
 
 process CHECK_MIN_CONTRASTS {
     tag "CHECK_MIN_CONTRASTS"
     label 'process_discovery'   // lightest available label; trivially fast
 
-    // Publish the sentinel only when the threshold is not met so that the
-    // orchestrating bash scripts can detect a skipped run without parsing logs.
+    // The sentinel exists only when the threshold is not met, so a launch script can detect a
+    // skipped run without parsing logs.
     publishDir path: "${params.outdir}", mode: 'copy', overwrite: true,
                pattern: "low_contrasts.skip"
 
@@ -58,7 +63,7 @@ process CHECK_MIN_CONTRASTS {
         cp ${traitfile}             traitfile_ok.tab
         cp ${permulation_traitfile} permulation_traitfile_ok.tab
         mkdir -p traitfiles_ok_dir
-        # Copy traitfiles based on params.multi_hypothesis toggle (multi vs single canonical hypothesis mode)
+        # params.multi_hypothesis chooses between all the traitfile_H*.tab hypotheses and the canonical one (H1)
         if [ "${params.multi_hypothesis}" = "true" ] && [ -d "${trait_dir}" ]; then
             cp ${trait_dir}/traitfile_H*.tab traitfiles_ok_dir/ 2>/dev/null || cp ${traitfile} traitfiles_ok_dir/traitfile_H1.tab
         else
@@ -68,11 +73,10 @@ process CHECK_MIN_CONTRASTS {
                 cp ${traitfile} traitfiles_ok_dir/traitfile_H1.tab
             fi
         fi
-        # FOP per-pair PSS weights (contrast_hypotheses_pairs.tsv, written by
-        # 4.Independent_contrasts.Rmd) must travel WITH the passing traitfiles:
-        # traitfiles_ok_dir is what flows to SCORING as the FOP domain-pool
-        # weight source (main.nf scoring_hyp_pairs_ch). Absent on single-contrast
-        # runs — harmless.
+        # The per-pair PSS weights (contrast_hypotheses_pairs.tsv, written by
+        # 4.Independent_contrasts.Rmd) travel with the passing traitfiles: traitfiles_ok_dir
+        # is the source of the domain-pool weights of SCORING (scoring_hyp_pairs_ch in main.nf).
+        # The copy is allowed to fail when the files do not exist.
         if [ -d "${trait_dir}" ]; then
             cp ${trait_dir}/contrast_hypotheses_pairs.tsv traitfiles_ok_dir/ 2>/dev/null || true
             cp ${trait_dir}/contrast_hypotheses_summary.tsv traitfiles_ok_dir/ 2>/dev/null || true

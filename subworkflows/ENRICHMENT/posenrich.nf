@@ -1,23 +1,30 @@
 #!/usr/bin/env nextflow
+// posenrich.nf — Position-level enrichment of CAAS score magnitudes (Position-Level Path Sum Permulation).
+// PhyloPhere | subworkflows/ENRICHMENT/
 
 /*
- * POSENRICH - Position-wise enrichment (Position-Level Path Sum Permulation)
- * ────────────────────────────────────────────────────────────────────
- * NOT the gene-level FCS. Builds position-level GMTs (Pfam, Bins, Orthogroups,
- * COSMIC, UCR core/flank, positive/purifying selection) plus the broad
- * functional characterization layers, and tests them with Position-Level Path
- * Sum Permulation (posenrich_enrich.py): raw CAAS score magnitudes are summed
- * per term and compared against a null across the full honest ~1.47M position
- * background, per direction (global/top/bottom). The null is the real CAAS
- * permulation cycles (perm_pos_cycle_caas.tsv.gz) when supplied -- same
- * preference fcs_enrich.R gives FCS's own Permsum test -- falling back to a
- * private label shuffle only when no CAAS null is available. Replaces an
- * earlier fixed-cutoff Fisher-exact design, which had power to flag
- * biologically negligible deviations as significant at that background size.
- * Significance is p_adj < posenrich_padj_thr with NES > 0.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  POSENRICH: position-wise enrichment, not the gene-level FCS.
  *
- * Author: Miguel Ramon (miguel.ramon@upf.edu)
+ *  Builds position-level GMTs (Pfam, bins, orthogroups, COSMIC, PrimateAI-3D, UCR
+ *  core/flank, FUBAR positive/purifying selection, FADE sites) plus the broad
+ *  functional characterization layers, and tests them with Position-Level Path Sum
+ *  Permulation (posenrich_enrich.py). Raw CAAS score magnitudes are summed per term
+ *  and compared with a null over the whole tested-position background, per
+ *  direction (global, top, bottom). The null is the CAAS permulation cycles
+ *  (perm_pos_cycle_caas.tsv.gz), the same null fcs_enrich.R gives FCS's own Permsum
+ *  test. Without a null, p_value, p_adj and perm_nes are NA and no term is
+ *  significant. A term is significant when p_adj < posenrich_padj_thr with NES > 0.
+ *
+ *  Consumes:  position scores, SCORING's position_lists/, tested-position background,
+ *             cleaned background, functional annotation inputs, CAAS permulation null
+ *  Produces:  posenrich/ (posenrich_characterization.tsv, posenrich_leading_edge.tsv,
+ *             HTML report), position_characterization.tsv
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── GMT construction ───────────────────────────────────────────────────────────
 
 process POSENRICH_BUILD_GMT {
     label 'process_low'
@@ -45,11 +52,10 @@ process POSENRICH_BUILD_GMT {
     path "pai3d_coverage_genes.txt", optional: true, emit: pai3d_coverage
 
     script:
-    // Each optional input's absent-value sentinel is a uniquely-named 'NO_FILE_*'
-    // path (see workflows/enrichment.nf) rather than a shared literal 'NO_FILE':
-    // staging two path inputs under the identical filename in one task directory
-    // is a Nextflow "input file name collision", which is exactly what happens
-    // if two or more of these optional inputs are absent in the same run.
+    // Each optional input is absent as a uniquely named 'NO_FILE_*' sentinel (set in
+    // workflows/enrichment.nf), not a shared 'NO_FILE': two path inputs staged under
+    // the same name in one task directory collide, which happens whenever two or
+    // more optional inputs are missing in the same run.
     def ensembl_arg = !(gene_ensembl_file.name =~ /^NO_FILE/) ? "--gene_ensembl_file ${gene_ensembl_file}" : ""
     def domain_arg  = !(domain_variability_file.name =~ /^NO_FILE/) ? "--domain_variability_file ${domain_variability_file}" : ""
     def ucr_arg     = !(ucr_positions_file.name =~ /^NO_FILE/) ? "--ucr_positions_file ${ucr_positions_file}" : ""
@@ -59,9 +65,9 @@ process POSENRICH_BUILD_GMT {
     def cosmic_arg = !(cosmic_db.name =~ /^NO_FILE/) ? "--cosmic_db ${cosmic_db}" : ""
     def pai3d_arg  = !(pai3d_db.name =~ /^NO_FILE/) ? "--pai3d_db ${pai3d_db}" : ""
     def bg_arg     = !(cleaned_background.name =~ /^NO_FILE/) ? "--cleaned_background ${cleaned_background}" : ""
-    // FADE_top_sig/FADE_bottom_sig position group (§ FADE_JSON_TO_CSV) - the
-    // classic BF>=100 sites, joined directly on Gene:Position (same
-    // coordinate space CAAS's own Position column uses, no map_cache lookup).
+    // FADE_top_sig/FADE_bottom_sig position groups (from FADE_JSON_TO_CSV): the sites
+    // with BF >= fade_bf_threshold, joined directly on Gene:Position, the coordinate
+    // space of the CAAS Position column (no map_cache lookup).
     def fade_top_arg    = !(fade_sites_top_file.name    =~ /^NO_FILE/) ? "--fade_sites_top_file ${fade_sites_top_file}"       : ""
     def fade_bottom_arg = !(fade_sites_bottom_file.name =~ /^NO_FILE/) ? "--fade_sites_bottom_file ${fade_sites_bottom_file}" : ""
     """
@@ -82,6 +88,9 @@ process POSENRICH_BUILD_GMT {
     """
 }
 
+
+// ── Enrichment test ────────────────────────────────────────────────────────────
+
 process POSENRICH_RUN {
     label 'process_medium'
     publishDir "${params.outdir}/posenrich", mode: 'copy', overwrite: true
@@ -98,41 +107,32 @@ process POSENRICH_RUN {
     val min_size
     val max_size
     path position_lists_dir
-    path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz -> primary null
+    path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz, the null (NO_FILE* sentinel for none)
 
     output:
     path "posenrich_characterization.tsv", emit: results
     path "posenrich_leading_edge.tsv", emit: leading_edge
 
     script:
-    // Position-Level Path Sum Permulation (posenrich_enrich.py): raw CAAS score
-    // magnitudes are summed per term and compared against a null. When
-    // caas_cycle_null is supplied, its real permulation cycles are used AS
-    // the null (same preference fcs_enrich.R gives FCS's own Permsum test);
-    // without one the null-based values (p_value, p_adj, perm_nes) are NA and nothing is
-    // significant. Significance is p_adj < posenrich_padj_thr with NES > 0.
+    // Raw CAAS score magnitudes are summed per term and compared with a null. When
+    // caas_cycle_null is supplied, its permulation cycles are the null; without one,
+    // p_value, p_adj and perm_nes are NA and no term is significant. Significance is
+    // p_adj < posenrich_padj_thr with NES > 0.
     def annot_arg = annot_file.name != 'NO_FILE' ? "--annot-file ${annot_file}" : ""
-    // cosmic_orthogroups/pai3d_orthogroups are GMTs derived from external,
-    // incompletely-covered databases; restricting their background to genes
-    // the database itself could ever annotate avoids diluting the test with
-    // structurally-uncoverable genes (see build_position_gmt.py's coverage
-    // file comment). Every other GMT keeps the full honest background.
+    // The cosmic_orthogroups and pai3d_orthogroups GMTs come from external databases
+    // that do not cover every gene. Their background is restricted to the genes the
+    // database can annotate, so that genes it cannot cover do not dilute the test
+    // (coverage files written by build_position_gmt.py). Every other GMT keeps the
+    // full tested-position background.
     def cosmic_cov_arg = !(cosmic_coverage.name =~ /^NO_FILE/) ? "--cosmic-coverage ${cosmic_coverage}" : ""
     def pai3d_cov_arg  = !(pai3d_coverage.name =~ /^NO_FILE/) ? "--pai3d-coverage ${pai3d_coverage}" : ""
     def caas_null_arg  = !(caas_cycle_null.name =~ /^NO_FILE/) ? "--caas-cycle-null ${caas_cycle_null}" : ""
-    // SCORING's own published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv
-    // (scoring_compute.R) is posenrich's SOLE foreground source, SCORING is a
-    // mandatory upstream dependency, never optional, so this is passed
-    // unconditionally (no NO_FILE-sentinel guard): if it's absent,
-    // posenrich_enrich.py hard-fails with a clear message rather than silently
-    // re-deriving its own ranking.
-    // --background (caastools background.output, tested positions) is equally
-    // mandatory: without it the permulation null's background collapses to
-    // scored positions only, invalidating the test. Also passed unconditionally;
-    // posenrich_enrich.py hard-fails on any NO_FILE* sentinel or missing path.
-    // In _complete runs (CT skipped), the caller must supply it via
-    // params.posenrich_background_file (wired in run_single.sh.j2's
-    // reuse_exploratory block from the _exploratory caastools/background.output).
+    // SCORING's published position_lists/ (slice_{top,bottom,global}{25,10,5,1}.tsv,
+    // from scoring_compute.R) is the only foreground source, so it is passed without
+    // a NO_FILE guard. --background (caastools background.output, the tested
+    // positions) is equally mandatory: without it the null background would collapse
+    // to the scored positions only. When the CT stage is skipped, the caller supplies
+    // it through params.posenrich_background_file.
     """
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_enrich.py \
         --obs-scores ${caas_file} \
@@ -155,6 +155,9 @@ process POSENRICH_RUN {
     """
 }
 
+
+// ── Batched enrichment ─────────────────────────────────────────────────────────
+
 process POSENRICH_PREP_NULL {
     label 'process_posenrich_prep_null'
     publishDir path: "${params.outdir}/posenrich",
@@ -162,16 +165,15 @@ process POSENRICH_PREP_NULL {
                enabled: params.publish_intermediates
 
     input:
-    path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz -> primary null; NO_FILE* sentinel to skip
+    path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz, the null (NO_FILE* sentinel for none)
 
     output:
     path "caas_null_prepped.pkl", emit: prepped
 
     script:
-    // perm_pos_cycle_caas.tsv.gz is broadcast identically to every
-    // POSENRICH_RUN_BATCHED task (same null, only the GMT term sets differ
-    // per batch) -- parsing it once here, instead of once per batch task,
-    // is the whole point of this process. See posenrich_prep_caas_null.py.
+    // Every POSENRICH_RUN_BATCHED task uses the same null (only the GMT term sets
+    // differ), so the null is parsed once here instead of once per batch
+    // (posenrich_prep_caas_null.py).
     def caas_null_arg = !(caas_cycle_null.name =~ /^NO_FILE/) ? "--caas-cycle-null ${caas_cycle_null}" : "--caas-cycle-null NO_FILE"
     """
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_prep_caas_null.py \
@@ -200,7 +202,7 @@ process POSENRICH_RUN_BATCHED {
     val min_size
     val max_size
     path position_lists_dir
-    path caas_null_prepped    // caas_null_prepped.pkl from POSENRICH_PREP_NULL (parsed once for the whole run, not once per batch)
+    path caas_null_prepped    // caas_null_prepped.pkl from POSENRICH_PREP_NULL (shared by all batches)
 
     output:
     path "posenrich_characterization.tsv", emit: results
@@ -211,12 +213,10 @@ process POSENRICH_RUN_BATCHED {
     def cosmic_cov_arg = !(cosmic_coverage.name =~ /^NO_FILE/) ? "--cosmic-coverage ${cosmic_coverage}" : ""
     def pai3d_cov_arg  = !(pai3d_coverage.name =~ /^NO_FILE/) ? "--pai3d-coverage ${pai3d_coverage}" : ""
     def caas_null_arg  = "--caas-null-prepped ${caas_null_prepped}"
-    // The characterization layer (Pfam/UCR/FUBAR/...) is one source shared
-    // across the whole run, not split per GMT file — passing it to every batch
-    // would re-run and re-append it N times once POSENRICH_CONCAT merges the
-    // batches. Only the designated batch (includeCharacterization=true) gets it;
-    // posenrich_enrich.py's read_charset() already treats a missing/omitted
-    // --characterization as "no characterization layer" for every other batch.
+    // The characterization layers are shared by the whole run, not split per GMT file:
+    // giving them to every batch would append them once per batch in POSENRICH_CONCAT.
+    // Only the batch with includeCharacterization = true receives them; an omitted
+    // --characterization means "no characterization layer" for the others.
     def char_arg = includeCharacterization ? "--characterization ${characterization_layers}" : ""
     """
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_enrich.py \
@@ -239,6 +239,9 @@ process POSENRICH_RUN_BATCHED {
         --output-dir .
     """
 }
+
+
+// ── Merge and report ───────────────────────────────────────────────────────────
 
 process POSENRICH_CONCAT {
     tag "Concatenating POSENRICH batch outputs"
@@ -291,10 +294,9 @@ process POSENRICH_REPORT {
     input:
     path results
     path leading_edge
-    // Position Characterisation (PrimateAI-3D + COSMIC + FADE validation, moved
-    // here from the Scoring report): all optional, NO_FILE-sentinel-tolerant.
-    // Section is skipped entirely (has_pos_char = FALSE) when position_scores
-    // is absent.
+    // Inputs of the Position Characterisation section (PrimateAI-3D, COSMIC and FADE
+    // validation): all optional and NO_FILE-tolerant. The section is skipped when
+    // position_scores is absent.
     path position_scores
     path gene_scores
     path vep_primateai
@@ -302,21 +304,14 @@ process POSENRICH_REPORT {
     path genomic_info
     path fade_sites_top
     path fade_sites_bottom
-    // SCORING's published position_lists/ dir, same channel POSENRICH_RUN
-    // already consumes as its foreground source; reused here so Position
-    // Characterisation's own 10/5/1% membership (test_glob_*/test_top_*/
-    // test_bot_* in 14.Position_enrichment_report.Rmd) reads the identical
-    // published cutoff instead of re-deriving its own quantile().
+    // SCORING's position_lists/, the foreground source of the enrichment test. The
+    // report reads the same 10/5/1% cutoffs instead of recomputing quantiles.
     path position_lists
-    // SCORING's fcs_stats.tsv (gene + flag_* columns), same file POSENRICH_RUN
-    // already consumes as --annot-file. Kept as an input for pipeline-wiring
-    // compatibility; 14.Position_enrichment_report.Rmd no longer reads it
-    // directly (the Overall dotplot's cross-module composite that needed it
-    // was removed).
+    // SCORING's fcs_stats.tsv (gene + flag_* columns), the file POSENRICH_RUN takes as
+    // --annot-file. It is passed to the report as fcs_stats_file.
     path fcs_stats
-    // cleaned_background_main.txt, staged into the Rmd's universe_file param,
-    // the honest tested-gene background for the PrimateAI-3D/COSMIC join
-    // sections' shared_genes_pai/shared_genes_cosmic restriction.
+    // cleaned_background_main.txt, passed as the universe_file parameter: the tested-gene
+    // background that restricts the PrimateAI-3D and COSMIC join sections.
     path cleaned_background
 
     output:
@@ -373,6 +368,9 @@ process POSENRICH_REPORT {
     }
 }
 
+
+// ── Workflow ───────────────────────────────────────────────────────────────────
+
 workflow POSENRICH {
     take:
     gene_ensembl_file
@@ -386,7 +384,7 @@ workflow POSENRICH {
     pai3d_db
     cleaned_background
     caas_file
-    position_lists_file     // SCORING's published position_lists/ dir, mandatory, posenrich's sole foreground source
+    position_lists_file     // SCORING's position_lists/ dir, mandatory (sole foreground source)
     background_output
     annot_file
     min_size
@@ -397,7 +395,7 @@ workflow POSENRICH {
     genomic_info_file       // optional: gene genomic coords TSV (Position Characterisation)
     fade_sites_top_file     // optional: fade_sites_top.csv (FADE_top_sig position group)
     fade_sites_bottom_file  // optional: fade_sites_bottom.csv (FADE_bottom_sig position group)
-    caas_cycle_null_file    // optional: perm_pos_cycle_caas.tsv.gz -> primary null
+    caas_cycle_null_file    // optional: perm_pos_cycle_caas.tsv.gz, the null
 
     main:
     POSENRICH_BUILD_GMT(
@@ -418,11 +416,10 @@ workflow POSENRICH {
     def cosmic_coverage_ch = POSENRICH_BUILD_GMT.out.cosmic_coverage.ifEmpty { file('NO_FILE_COSMIC_COV') }
     def pai3d_coverage_ch  = POSENRICH_BUILD_GMT.out.pai3d_coverage.ifEmpty { file('NO_FILE_PAI3D_COV') }
 
-    // Batch by GMT/db source: posenrich_enrich.py already scopes BH correction
-    // per (direction, db) group, so splitting the GMT-file loop across
-    // independent Nextflow tasks (one SLURM job each, its own memory ceiling
-    // and its own retry) changes nothing statistically. batch_size=1 keeps the
-    // original monolithic POSENRICH_RUN path untouched.
+    // Batch by GMT file: posenrich_enrich.py applies the BH correction within each
+    // (direction, database) group, so spreading the GMT files over independent tasks
+    // (each with its own memory limit and retries) does not change the statistics.
+    // posenrich_batch_size = 1 runs everything in the single POSENRICH_RUN task.
     def posenrichBatchSize = (params.posenrich_batch_size ?: 1) as int
     def posenrich_results_ch
     def posenrich_leading_edge_ch
@@ -437,16 +434,12 @@ workflow POSENRICH {
                 tuple(batchID, batch.size(), idx == 1, batch)
             }
 
-        // caas_file/cleaned_background/background_output/annot_file/
-        // position_lists_file are take: params (single item, but plain queue
-        // channels, not genuine Nextflow value channels -- see
-        // caas_permulation.nf's CAAS_CORE workflow for the
-        // full mechanism); cosmic_coverage_ch/pai3d_coverage_ch are similarly
-        // one-item channels rebuilt via .ifEmpty() above. Paired positionally
-        // against the many-item posenrich_batches channel, any of these would
-        // silently truncate POSENRICH_RUN_BATCHED to its first batch once
-        // exhausted. .collect().map { it[0] } makes each a proper reusable/
-        // broadcastable value channel without .first()'s warning on value channels.
+        // The single-item inputs (the take: channels and the coverage channels rebuilt
+        // with .ifEmpty above) are queue channels, not value channels. Paired with the
+        // many-item posenrich_batches channel, each would end POSENRICH_RUN_BATCHED
+        // after its first batch. .collect().map { it[0] } turns each into a value
+        // channel that every batch can read (same mechanism as CAAS_CORE in
+        // caas_permulation.nf).
         def caas_file_bc           = caas_file.collect().map { it[0] }
         def cleaned_background_bc  = cleaned_background.collect().map { it[0] }
         def background_output_bc   = background_output.collect().map { it[0] }
@@ -455,8 +448,7 @@ workflow POSENRICH {
         def pai3d_coverage_bc      = pai3d_coverage_ch.collect().map { it[0] }
         def position_lists_file_bc = position_lists_file.collect().map { it[0] }
 
-        // Parsed once for the whole run here, instead of once per batch task
-        // inside POSENRICH_RUN_BATCHED -- see POSENRICH_PREP_NULL / posenrich_prep_caas_null.py.
+        // The null is parsed once for the whole run (POSENRICH_PREP_NULL).
         POSENRICH_PREP_NULL(caas_cycle_null_file)
         def caas_null_prepped_bc = POSENRICH_PREP_NULL.out.prepped.collect().map { it[0] }
 
@@ -523,8 +515,8 @@ workflow POSENRICH {
     report                   = POSENRICH_REPORT.out.report
     overall_dotplot          = POSENRICH_REPORT.out.overall_dotplot
     leading_edge_summary     = POSENRICH_REPORT.out.leading_edge_summary
-    // Per-position PFAM domain/clan, UCR core/flank region + per-position
-    // variability, and FUBAR selection call, flattened for a direct
-    // Gene/Position join (15.Comparison_report.Rmd's Interesting Positions table).
+    // Per-position Pfam domain/clan, UCR core/flank region and variability, and FUBAR
+    // selection call, flattened for a Gene/Position join (read by 15.Comparison_report.Rmd
+    // and by the SCORING report).
     position_characterization = POSENRICH_BUILD_GMT.out.position_char
 }

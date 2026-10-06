@@ -1,41 +1,29 @@
 #!/usr/bin/env nextflow
+// rer_trees.nf — Pruned gene trees and RERconverge master tree object.
+// PhyloPhere | subworkflows/RERCONVERGE/
 
 /*
-#
-#
-#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
-#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
-#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
-#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#
-#
-# PHYLOPHERE: A Nextflow pipeline including a complete set
-# of phylogenetic comparative tools and analyses for Phenome-Genome studies
-#
-# Github: https://github.com/nozerorma/caastools/nf-phylophere
-#
-# Author:         Miguel Ramon (miguel.ramon@upf.edu)
-#
-# File: rer_obj.R
-#
-*/
-
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  DISCOVERY module: This module is responsible for the discovery process based on input alignments.
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  RER_TREES: runs rer_master_tree.R, which prunes every gene tree to the species of the
+ *  trait file (optionally renaming tips through the tax_id table) and reads the pruned
+ *  trees with RERconverge::readTrees.
+ *
+ *  Consumes:  trait file, gene trees (multi-Newick file; unnamed trees are called gene1,
+ *             gene2, ...), tax_id table (NO_FILE to skip the renaming)
+ *  Produces:  <gene_trees>.pruned.txt (gene name, tab, Newick),
+ *             <gene_trees>.masterTree.output (RDS of the readTrees object)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
+
+// ── Master tree ────────────────────────────────────────────────────────────────
 
 process RER_TREES {
     tag "$gene_trees_file"
 
     label 'process_reporting'
-    // RER_TREES loads all gene trees at once into R memory; override the
-    // generic process_reporting label with higher resources.
-    // maxRetries 3 gives memory steps of 32, 64, 96 GB before giving up.
+    // All gene trees are loaded into R at once: conf/resources.config gives RER_TREES
+    // 32 GB x attempt, so maxRetries 3 steps through 32, 64 and 96 GB.
     maxRetries 3
 
     publishDir path: "${params.outdir}/rerconverge/rer_objects", mode: 'copy', saveAs: { filename -> filename.equals('versions.yml') ? null : filename }

@@ -1,21 +1,21 @@
 #!/usr/bin/env nextflow
+// rer_report.nf — HTML report and gene-level summary of a RERconverge correlation table.
+// PhyloPhere | subworkflows/RERCONVERGE/
 
 /*
- * RER_REPORT
- * ──────────
- * Generate an HTML summary report from the RERconverge continuous analysis
- * RDS result file. Calls 5.RERconverge_report.Rmd.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  RER_REPORT: renders 5.RERconverge_report.Rmd over the RDS written by RER_CONT or
+ *  RER_BIN (a table with Rho, N, P and p.adj per gene, and p.perm with permutations).
+ *  A failed task is ignored.
  *
- * Inputs
- * ──────
- *   continuous_output : path — {traitname}.continuous.output RDS file
- *   gmt_file          : path — GMT gene-set annotation file (or 'NO_FILE' to skip enrichment)
- *
- * Outputs
- * ───────
- *   report      : HTML report
- *   summary_tsv : gene-level summary table (TSV, optional)
+ *  Consumes:  correlation RDS (<trait>.continuous.output or <trait>.binary.output)
+ *  Produces:  5.RERconverge_report.html, rerconverge_summary_<trait>.tsv (gene-level table,
+ *             emitted when the report writes it)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Report ─────────────────────────────────────────────────────────────────────
 
 process RER_REPORT {
     tag "rer_report|${params.traitname}"

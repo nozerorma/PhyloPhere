@@ -5,16 +5,19 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-One dataclass per pipeline module (CAAS, Disambiguation, Accumulation, RERconverge,
-FADE, VEP, Scoring, Enrichment). Each field maps 1:1 to a conf/*.config param
-(see the inline `# --flag` comment) so every module's full tuning surface is a real
-GUI field rather than only the handful of "essential" knobs real runs vary — see
-gui/models/precomputed.py's docstring for why the previously per-module standalone/
-fallback ("_from"/"_input") fields moved out into one consolidated dataclass instead
-of staying scattered one-per-tab.
+Modules: one dataclass per pipeline module (CAAS, Disambiguation, Accumulation,
+RERconverge, FADE, VEP, Scoring, Enrichment) plus the ModulesConfig container.
 
-No PySide6 imports here — this module must stay importable headless (see
-gui/generation/, which renders these into shell scripts without any GUI dependency).
+Each field maps to one conf/*.config param (named in the inline `# --flag` comment),
+so the full tuning surface of every module is a GUI field. Inputs that substitute for
+an upstream module's output (the "_from" and "_input" params) are not fields here:
+they are derived per phenotype from PrecomputedConfig (gui/models/precomputed.py).
+
+No PySide6 import: the module stays importable headless, because gui/generation/
+renders these dataclasses into shell scripts without a GUI.
+
+Imported by: gui/models/project.py, gui/widgets/common/module_tab.py, the module tabs
+in gui/widgets/tabs/
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -26,10 +29,11 @@ from dataclasses import dataclass, field
 
 @dataclass(kw_only=True)
 class ModuleConfigBase:
-    """Shared shape for every module tab: an enable toggle and a raw-flags override."""
+    """Shared shape of every module tab: an enable toggle and a raw-flags override."""
 
     enabled: bool = True
-    # Free-text power-user override, appended verbatim to this module's NF_FLAGS block.
+    # Free text appended verbatim to the nextflow command line of the generated script
+    # (run_single.sh.j2), when this module is enabled.
     extra_flags: str = ""
 
 
@@ -46,8 +50,8 @@ class CaasConfig(ModuleConfigBase):
     caas_permulation_enrichment: bool = True  # --caas_permulation_enrichment
     caas_perms_postproc: bool = True  # --caas_perms_postproc (apply the observed post-processing filters to the permulation null)
 
-    # Contrast-selection tuning (conf/common.config) — used when --contrast_selection
-    # runs upstream of CT (bundled unconditionally with CAAS, see run_single.sh.j2).
+    # Contrast-selection tuning (conf/common.config), used when --contrast_selection
+    # runs upstream of CT.
     pss_top_pct: str = "0.05"  # --pss_top_pct
     max_contrasts: str = "0"  # --max_contrasts (0 = dynamic discovery)
     min_contrasts: str = "3"  # --min_contrasts
@@ -71,10 +75,8 @@ class CaasConfig(ModuleConfigBase):
     multi_hypothesis: bool = True  # --multi_hypothesis
     max_fop: str = "100"  # --max_fop (max FOP alternative hypotheses H1..Hn per contrast)
 
-    # Debug-only (conf/ct.config warns: don't run these unless needed).
-
-    # NOTE: discovery_from/resample_from/bootstrap_from moved to
-    # gui/models/precomputed.py::PrecomputedConfig.
+    # Precomputed discovery/resample inputs (discovery_from, resample_from) are
+    # derived from PrecomputedConfig.
 
 
 # ── Disambiguation (+ bundled Post-processing sub-section) ────────────────────
@@ -87,19 +89,21 @@ class DisambiguationConfig(ModuleConfigBase):
     ct_disambig_hypotheses_pairs: str = ""  # --ct_disambig_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for the observed scoring)
     ct_disambig_posterior_threshold: str = "0.1"  # --ct_disambig_posterior_threshold
     ct_disambig_max_tasks_per_child: str = "50"  # --ct_disambig_max_tasks_per_child
-    # Separate ASR Robustness diagnostics report/stage (conf/ct_disambiguation.config).
+    # ASR robustness diagnostics report, a separate stage (conf/ct_disambiguation.config).
     asr_robustness: bool = True  # --asr_robustness
 
-    # Post-processing (--ct_postproc) always runs whenever Disambiguation itself is
-    # enabled — no separate toggle; see DisambiguationConfig.enabled (ModuleConfigBase).
-    # Post-processing sub-section (conf/ct_postproc.config), only meaningful when enabled.
+    # Post-processing (--ct_postproc) has no toggle of its own: it runs whenever
+    # Disambiguation is enabled, unless PrecomputedConfig.use_postproc supplies its
+    # outputs (see gui/generation/context.py). Parameters of conf/ct_postproc.config.
     run_postproc_exploratory: bool = True  # Run exploratory parameter sweep
     run_postproc_filter: bool = True  # Run filtering production run
-    caas_postproc_mode: str = "filter"  # Legacy compatibility field
+    caas_postproc_mode: str = "filter"  # --caas_postproc_mode (filter|exploratory); the generated scripts set it per pass
     # Filter-mode (single run) thresholds.
     filter_minlen: str = "3"  # --filter_minlen
     filter_maxcaas: str = "0.7"  # --filter_maxcaas
-    # Trimmer MAP tables (--caas_map_dir): cluster trains in untrimmed columns, observed and null; VEP reads it too.
+    # Directory of the trimmer's per-gene MAP tables (--caas_map_dir). Post-processing
+    # uses it to place clusters in untrimmed alignment columns, for the observed and the null
+    # sets; VEP reads it from here as well.
     caas_map_dir: str = ""  # --caas_map_dir
     # Exploratory-mode (parameter sweep) threshold lists.
     minlen_values: str = "2,3,4,10"  # --minlen_values
@@ -109,11 +113,11 @@ class DisambiguationConfig(ModuleConfigBase):
     extreme_threshold: str = "0.99"  # --extreme_threshold
     iqr_multiplier: str = "3.0"  # --iqr_multiplier
 
-    # NOTE: meta_caas_from/disambiguation_input/disambiguation_dir/background_input
-    # moved to gui/models/precomputed.py::PrecomputedConfig.
+    # Precomputed inputs (meta_caas_from, disambiguation_input, disambiguation_dir,
+    # background_input) are derived from PrecomputedConfig.
 
 
-# ── Accumulation ────────────────────────────────────────────────────────────
+# ── Accumulation ──────────────────────────────────────────────────────────────
 
 
 @dataclass(kw_only=True)
@@ -123,16 +127,16 @@ class AccumulationConfig(ModuleConfigBase):
     accumulation_entropy_dir: str = ""  # --accumulation_entropy_dir
     accumulation_fdr: str = "0.1"  # --accumulation_fdr
 
-    # NOTE: accumulation_caas_input/accumulation_background_input moved to
-    # gui/models/precomputed.py::PrecomputedConfig.
+    # Precomputed inputs (accumulation_caas_input, accumulation_background_input) are
+    # derived from PrecomputedConfig.
 
 
-# ── RERconverge ─────────────────────────────────────────────────────────────
+# ── RERconverge ───────────────────────────────────────────────────────────────
 
 
 @dataclass(kw_only=True)
 class RerConfig(ModuleConfigBase):
-    # Off by default — matches RUN_RER=false in the reference scripts.
+    # Off by default, as RUN_RER=false in example_sbatch_run_phenotypes.sh.
     enabled: bool = False
     rer_tool_build_trait: bool = True
     rer_tool_build_tree: bool = True
@@ -142,8 +146,8 @@ class RerConfig(ModuleConfigBase):
     rer_perm_batches: str = "10"  # --rer_perm_batches
     rer_perms_per_batch: str = "100"  # --rer_perms_per_batch
 
-    # Intermediate-output paths (conf/rerconverge.config) — leave blank to use the
-    # pipeline's own ${params.traitname}-derived defaults.
+    # Intermediate-output paths (conf/rerconverge.config). Blank selects the
+    # defaults derived from ${params.traitname}.
     trait_out: str = ""  # --trait_out
     trees_out: str = ""  # --trees_out
     matrix_out: str = ""  # --matrix_out
@@ -166,25 +170,23 @@ class RerConfig(ModuleConfigBase):
     rer_top_n_labels: str = "20"  # --rer_top_n_labels
     rer_transform: str = "ha_logit"  # --rer_transform (auto|ha_logit|logit|arcsin|log10|none)
 
-    # RER's own tested-gene universe for the FCS report (falls back to the CAAS
-    # background when unset).
+    # Gene universe of the RER FCS report. Unset, the genes RERconverge tested in
+    # this run are used, or the CAAS background when RER did not run (workflows/enrichment.nf).
     rer_universe_file: str = ""  # --rer_universe_file
-    # Cross-module annotation input (SCORING's fcs_stats.tsv) for the RER FCS
+    # SCORING's fcs_stats.tsv, used for the cross-module flags of the RER FCS
     # leading-edge table.
     rer_gene_scores: str = ""  # --rer_gene_scores
 
-    # NOTE: rer_continuous_file/rer_perms_file/scoring_rer_input/scoring_rer_perms_input
-    # (used when RER itself is off) all live on gui/models/precomputed.py::PrecomputedConfig
-    # (use_rer), auto-derived per phenotype from one base_path rather than typed in here
-    # or per-row on PhenotypeRow.
+    # Precomputed RER inputs (rer_continuous_file, rer_perms_file, scoring_rer_input,
+    # scoring_rer_perms_input) are derived from PrecomputedConfig (use_rer).
 
 
-# ── FADE ─────────────────────────────────────────────────────────────────────
+# ── FADE ──────────────────────────────────────────────────────────────────────
 
 
 @dataclass(kw_only=True)
 class FadeConfig(ModuleConfigBase):
-    # Off by default — matches RUN_FADE=false in the reference scripts.
+    # Off by default, as RUN_FADE=false in example_sbatch_run_phenotypes.sh.
     enabled: bool = False
 
     # Direction and background scope
@@ -193,7 +195,8 @@ class FadeConfig(ModuleConfigBase):
     fade_internal_nodes: str = "all_descendants"  # --fade_internal_nodes (all_descendants|none)
     fade_species_file: str = ""  # --fade_species_file (optional user-supplied fg/bg species file, candidate_species.tab format)
 
-    # Shared alignment-prep / FADE-run batching (SLURM/Seqera scheduler overhead).
+    # Batch sizes of the shared alignment-preparation and FADE-run tasks (genes per
+    # task; larger batches reduce scheduler overhead).
     selection_prep_batch_size: str = "500"  # --selection_prep_batch_size
     fade_batch_size: str = "200"  # --fade_batch_size
 
@@ -213,27 +216,25 @@ class FadeConfig(ModuleConfigBase):
 
     # Report options
     fade_min_genes_for_heatmap: str = "2"  # --fade_min_genes_for_heatmap
-    # FADE's own tested-gene universe for the FCS report (falls back to the CAAS
-    # background when unset).
+    # Gene universe of the FCS report for FADE. Unset, the union of the tested genes
+    # of both directions is used (workflows/enrichment.nf).
     fade_universe_file: str = ""  # --fade_universe_file
 
-    # NOTE: fade_json_dir_top/bottom/scoring_fade_summary_top/bottom/
-    # scoring_fade_site_top/bottom (used when FADE itself is off) all live on
-    # gui/models/precomputed.py::PrecomputedConfig (use_fade), auto-derived per
-    # phenotype from one base_path rather than typed in here or per-row on
-    # PhenotypeRow.
+    # Precomputed FADE inputs (fade_json_dir_top/bottom, scoring_fade_summary_top/bottom,
+    # scoring_fade_site_top/bottom) are derived from PrecomputedConfig (use_fade).
 
 
-# ── VEP ──────────────────────────────────────────────────────────────────────
+# ── VEP ───────────────────────────────────────────────────────────────────────
 
 
 @dataclass(kw_only=True)
 class VepConfig(ModuleConfigBase):
     vep_primateai_db: str = ""  # --vep_primateai_db
-    # The per-gene MAP directory is DisambiguationConfig.caas_map_dir (--caas_map_dir); VEP reads it from there.
-    # VEP's own COSMIC database (conf/vep.config) — distinct from Scoring's
-    # scoring_vep_cosmic *scores* fallback (see PrecomputedConfig), which is a
-    # separate param workflows/vep.nf never reads.
+    # The per-gene MAP directory is DisambiguationConfig.caas_map_dir (--caas_map_dir);
+    # VEP reads it from there.
+    # COSMIC mutation database that VEP maps positions onto (conf/vep.config). It is not
+    # the scoring_vep_cosmic scores table that SCORING can take as a precomputed input
+    # (see PrecomputedConfig), which workflows/vep.nf does not read.
     cosmic_db: str = ""  # --cosmic_db
     vep_ensembl: bool = False  # --vep_ensembl
     vep_cache_dir: str = ""  # --vep_cache_dir
@@ -242,7 +243,7 @@ class VepConfig(ModuleConfigBase):
 
 
 
-# ── Scoring ──────────────────────────────────────────────────────────────────
+# ── Scoring ───────────────────────────────────────────────────────────────────
 
 
 @dataclass(kw_only=True)
@@ -260,9 +261,9 @@ class ScoringConfig(ModuleConfigBase):
     scoring_gene_perm_pooled: bool = False  # --scoring_gene_perm_pooled (opt-in n-stratified pooled-null gene permulation p)
     scoring_hypotheses_pairs: str = ""  # --scoring_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for SCORING)
 
-    # NOTE: scoring_postproc_input/scoring_accum_dir/scoring_vep_primateai/
-    # scoring_background_input/caas_perms_file/scoring_fade_site_top/bottom moved
-    # to gui/models/precomputed.py::PrecomputedConfig.
+    # Precomputed inputs (scoring_postproc_input, scoring_accum_dir, scoring_vep_primateai,
+    # scoring_background_input, caas_perms_file, scoring_fade_site_top/bottom) are derived
+    # from PrecomputedConfig.
 
 
 # ── Enrichment (+ bundled POSENRICH, FCS, STRING/DOMINO, COMPARE) ─────────────
@@ -287,36 +288,33 @@ class EnrichmentConfig(ModuleConfigBase):
     fcs_pperm_thr: str = "0.025"  # --fcs_pperm_thr
     fcs_top_n: str = "20"  # --fcs_top_n
     fcs_batch_size: str = "4"  # --fcs_batch_size (GMTs per FCS_COMPUTE_BATCHED task)
-    # NOTE: caas_permulation_enrichment lives on CaasConfig, not here -- it's one
-    # param (conf/enrichment.config) but also gates whether CT's own
-    # permulation core (CAAS_CORE) runs (see main.nf), so its one true home is the
-    # CAAS tab. A duplicate field here would silently do nothing (never wired to
-    # any template flag) and imply Enrichment has independent control it doesn't.
+    # caas_permulation_enrichment (conf/enrichment.config) is a field of CaasConfig, not
+    # of this class: it also gates whether CT's permulation core (CAAS_CORE) runs
+    # (see main.nf), so the CAAS tab owns it.
 
-    # STRING (ID mapping + per-DOMINO-module functional labelling only —
-    # module-finding is DOMINO's job; no standalone STRING term-enrichment report)
+    # STRING: ID mapping and functional labelling of each DOMINO module. Module
+    # detection itself is done by DOMINO.
     string_db_dir: str = ""  # --string_db_dir
     string_cache_dir: str = ""  # --string_cache_dir
     string_species: str = ""  # --string_species (blank -> fallback to RuntimeConfig.ref_species_taxid)
 
-    # DOMINO active-module identification (replaces STRING's walktrap clustering)
+    # DOMINO active-module identification
     domino_network_score_thr: str = "700"  # --domino_network_score_thr
     domino_slice_thr: str = "0.3"  # --domino_slice_thr
     domino_module_thr: str = "0.05"  # --domino_module_thr
-    # Off by default: network.sif/domino_modules/edge_scores are large and not
-    # needed by the AMI report itself, only for manually regenerating it later.
+    # Off by default: the network, module and edge-score files are large and only
+    # needed to regenerate the AMI report by hand.
     publish_domino_intermediates: bool = False  # --publish_domino_intermediates
-    # Centralized DOMINO-based AMI run + cross-module COMPARE report
-    # (conf/scoring.config, gated inside workflows/enrichment.nf). RER/FADE/
-    # Accumulation's own gene lists are always computed automatically whenever
-    # those tools run (no separate --ami flag) and feed this unified report's
-    # FADE/RER sections directly.
+    # Active-module identification (DOMINO) run and cross-module COMPARE report
+    # (conf/scoring.config, gated inside workflows/enrichment.nf). The gene lists of
+    # RER, FADE and Accumulation are built whenever those tools run and feed the
+    # FADE and RER sections of this report directly.
     scoring_ami: bool = True  # --scoring_ami
     scoring_string: bool = True  # --scoring_string
     scoring_compare_fdr: str = "0.15"  # --scoring_compare_fdr
     scoring_compare_top_n: str = "20"  # --scoring_compare_top_n
-    # Tier 4D: unpaired CAAS x RER gene-score concordance null in the COMPARE
-    # report (randomization null, not a joint permulation p).
+    # Concordance null of the unpaired CAAS and RER gene scores in the COMPARE
+    # report (a randomization null, not a joint permulation p).
     comparison_perm_null: bool = True  # --comparison_perm_null
     comparison_perm_stat: str = "spearman"  # --comparison_perm_stat ("spearman" | "topk_overlap")
     comparison_perm_topk: str = "0.05"  # --comparison_perm_topk
@@ -342,10 +340,8 @@ class EnrichmentConfig(ModuleConfigBase):
     posenrich_padj_thr: str = "0.05"  # --posenrich_padj_thr (Permsum-family test: no independent analytic estimate to dual-gate against, same 0.05 fdr_permsum uses in FCS)
     posenrich_batch_size: str = "4"  # --posenrich_batch_size (GMTs per POSENRICH_RUN_BATCHED task; 1 = no batching)
 
-    # NOTE: posenrich_background_file (CT's own background.output — used when CT
-    # is off) is derived per phenotype via PrecomputedConfig.use_discovery, not a
-    # separate field here. accumulation_enrichment_gene_lists_input was removed
-    # entirely: no producer or consumer of it existed anywhere in the pipeline.
+    # posenrich_background_file (CT's background.output, used when CT is off) is derived
+    # from PrecomputedConfig.use_discovery.
 
 
 # ── Aggregate ─────────────────────────────────────────────────────────────────
@@ -353,7 +349,7 @@ class EnrichmentConfig(ModuleConfigBase):
 
 @dataclass(kw_only=True)
 class ModulesConfig:
-    """Container for all 8 module configs, aggregated under ProjectConfig."""
+    """The 8 module configs, held by ProjectConfig.modules."""
 
     caas: CaasConfig = field(default_factory=CaasConfig)
     disambiguation: DisambiguationConfig = field(default_factory=DisambiguationConfig)

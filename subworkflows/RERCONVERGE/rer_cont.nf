@@ -1,38 +1,28 @@
 #!/usr/bin/env nextflow
+// rer_cont.nf — RERconverge correlation of gene RERs with a continuous trait.
+// PhyloPhere | subworkflows/RERCONVERGE/
 
 /*
-#
-#
-#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
-#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗  
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝  
-#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
-#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#                                                                                    
-#                                      
-# PHYLOPHERE: A Nextflow pipeline including a complete set
-# of phylogenetic comparative tools and analyses for Phenome-Genome studies
-#
-# Github: https://github.com/nozerorma/caastools/nf-phylophere
-#
-# Author:         Miguel Ramon (miguel.ramon@upf.edu)
-#
-# File: rer_cont.R
-#
-*/
-
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  DISCOVERY module: This module is responsible for the discovery process based on input alignments.
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  RER_CONT: runs continuous_rer.R, which transforms the trait (rer_transform), converts
+ *  it to phylogenetic paths on the master tree and correlates the paths with the RER
+ *  matrix (correlateWithContinuousPhenotype), with an optional Brownian-motion
+ *  permulation null (rer_perm_batches > 0). A failed task is ignored.
+ *
+ *  Consumes:  polished trait RData (trait_vector, n_vector, c_vector), master gene-trees
+ *             RDS (RER_TREES), RER matrix RDS (RER_MATRIX)
+ *  Produces:  <trait>.char2path.output, <trait>.continuous.output,
+ *             <trait>.continuous.perms.rds (only with permutations)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Continuous correlation ─────────────────────────────────────────────────────
+
 process RER_CONT {
     tag "$rer_matrix"
     errorStrategy 'ignore'
-
-    // Uncomment the following lines to assign workload priority.
-    label 'process_medium' // have to tell it that only if using cluster!!!!!!!
+    label 'process_medium'
 
 
     publishDir path: "${params.outdir}/rerconverge/rer_results", mode: 'copy', saveAs: { filename -> filename.equals('versions.yml') ? null : filename }

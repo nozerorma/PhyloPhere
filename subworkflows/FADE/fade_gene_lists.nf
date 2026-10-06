@@ -1,22 +1,21 @@
 #!/usr/bin/env nextflow
+// fade_gene_lists.nf — Gene lists and per-gene statistics table from a FADE summary TSV.
+// PhyloPhere | subworkflows/FADE/
 
 /*
- * FADE_GENE_LISTS
- * ───────────────
- * Extract AMI-ready gene lists from a FADE summary TSV for one direction:
- *   background.txt                  — all genes tested by FADE for this direction
- *   fade_{direction}_significant.txt — genes with max_bf >= fade_bf_threshold
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  FADE_GENE_LISTS: for one direction (top or bottom), extracts from the gene-level
+ *  FADE summary the gene lists used by the AMI and FCS stages.
  *
- * Inputs
- * ──────
- *   direction   : val  — 'top' or 'bottom'
- *   summary_tsv : path — fade_summary_{direction}.tsv from FADE_REPORT
- *
- * Outputs
- * ───────
- *   direction  : val  — passed through for downstream routing
- *   gene_lists : path — both .txt files
+ *  Consumes:  direction, fade_summary_<direction>.tsv (from FADE_REPORT)
+ *  Produces:  background.txt (every gene tested by FADE in this direction),
+ *             fade_<direction>_significant.txt (genes with max_bf >= fade_bf_threshold),
+ *             fcs_stats.tsv (gene, score_fade = max_bf, flag_gate_sig = max_bf >= threshold)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── Gene lists ─────────────────────────────────────────────────────────────────
 
 process FADE_GENE_LISTS {
     tag "fade_gene_lists|${direction}"

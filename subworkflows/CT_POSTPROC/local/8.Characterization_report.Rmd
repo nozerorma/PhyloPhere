@@ -61,6 +61,17 @@ params:
   }
 </style>
 
+<!-- 8.Characterization_report.Rmd — Characterization of the CAAS post-processing: gene outliers, cluster filters and removals. -->
+<!-- PhyloPhere | subworkflows/CT_POSTPROC/local/ -->
+
+<!--
+Rendered by CT_POSTPROC_REPORT (ctpp_characterization.nf). Inputs: the prepared discovery table, the
+filter summary of the cluster sweep, the gene lengths, the gene statistics of CAAS_FILTER_GENES and, for the
+removal events, the published cluster files (filter_dir) and removed_genes_summary.tsv. Section 1 shows the
+extreme and dubious gene outliers, section 2 the cluster filter (the parameter sweep in the exploratory
+mode), section 3 which filters remove which positions and genes (not in the exploratory mode), section 4 the impact.
+-->
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   echo = TRUE,
@@ -109,9 +120,7 @@ as_bool <- function(x) {
   tolower(as.character(x)) %in% c("true", "t", "1", "yes", "y")
 }
 
-# The parallel_* axis was retired upstream (the ASR path score's clean-path /
-# independence machinery approximates it; T1 also removed the interim
-# mrca_diversity axis), so the convergence label is now the convergence_type alone.
+# Label of a position in the pattern plots: its convergence_type ("unknown" when empty).
 make_pattern_parallel_label <- function(convergence_type) {
   pattern_chr <- as.character(convergence_type)
   pattern_chr[is.na(pattern_chr) | pattern_chr == ""] <- "unknown"
@@ -251,7 +260,7 @@ resolve_filtered_cluster_file <- function(minlen, maxcaas_int, filter_root = NUL
 }
 
 normalize_disambig_schema <- function(df) {
-  # This normalises the DISAMBIGUATION output
+  # Standardize the disambiguation output: lowercase key names, and defaults for the optional columns
   if ('Gene' %in% names(df) && !'gene' %in% names(df)) df <- df %>% rename(gene = Gene)
   if ('Position' %in% names(df) && !'position' %in% names(df)) df <- df %>% rename(position = Position)
   if (!'caap_group' %in% names(df)) df$caap_group <- 'US'
@@ -390,7 +399,7 @@ cat(
 ## 1.2 Outlier Gene Detection
 
 ```{r outlier_detection, fig.height=10, fig.width=14, results='asis'}
-# Load gene statistics from precomputed file or compute fallback
+# Gene statistics (gene_stats.tsv of CAAS_FILTER_GENES)
 gene_summary_annotated <- NULL
 
 if (!is.null(gene_stats_file) && !is.na(gene_stats_file) && file.exists(gene_stats_file)) {
@@ -405,7 +414,7 @@ if (!is.null(gene_stats_file) && !is.na(gene_stats_file) && file.exists(gene_sta
     cat(sprintf("Loaded gene statistics for %d genes\n", n_unique_genes))
   }
 
-  # Ensure all downstream-required columns exist (file may lack some)
+  # Columns the plots need, with defaults for the ones the file lacks
   if (!"caap_group" %in% names(gene_summary_annotated)) {
     gene_summary_annotated$caap_group <- "US"
   }
@@ -426,7 +435,7 @@ if (!is.null(gene_stats_file) && !is.na(gene_stats_file) && file.exists(gene_sta
   cat("Gene statistics file not found or not provided\n")
 }
 
-# Ensure caap_group column exists for plotting
+# Without a caap_group column all rows belong to the "US" scheme
 if (!"caap_group" %in% names(gene_summary_annotated)) {
   gene_summary_annotated$caap_group <- "US"
 }
@@ -437,7 +446,7 @@ if (nrow(gene_summary_annotated) == 0) {
   cat("WARNING: gene_summary_annotated is empty — skipping outlier distribution plots.\n")
 } else {
 
-# Pre-compute vline data — guard against empty frames that break facet_wrap
+# Per-group threshold lines; filtering the NA thresholds keeps facet_wrap from receiving an empty frame
 vline_dubious_data  <- gene_summary_annotated %>%
   filter(!is.na(threshold_dubious)) %>%
   group_by(caap_group) %>%
@@ -447,7 +456,7 @@ vline_extreme_data  <- gene_summary_annotated %>%
   group_by(caap_group) %>%
   summarise(threshold_extreme = mean(threshold_extreme), .groups = "drop")
 
-# Generate histograms with increased font sizes for slides
+# Histograms of the gene descriptors, with the thresholds of the extreme and dubious filters
 p_gross_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS, fill = category)) +
   geom_histogram(binwidth = 0.05, color = "black", alpha = 0.8) +
   scale_fill_manual(values = category_palette, breaks = c("Extreme", "Dubious", "Both", "Normal")) +
@@ -525,8 +534,8 @@ ggsave(file.path(outliers_dir, "outlier_distributions.png"), combined_outlier_pl
 ggsave(file.path(outliers_dir, "outlier_distributions_zoomed.png"), combined_zoomed_plot,
        width = outlier_dims$width, height = outlier_dims$height, dpi = 320)
 
-# Dedicated bar chart: removed gene counts per category and caap_group
-# Clearly separates Extreme-only, Dubious-only, and Both (genes failing both criteria).
+# Bar chart of the removed genes per category and caap_group (Extreme only, Dubious only,
+# and Both for the genes that fail both criteria)
 removed_cat_summary <- gene_summary_annotated %>%
   filter(category != "Normal") %>%
   distinct(caap_group, Gene, category) %>%
@@ -1000,10 +1009,9 @@ gene_filter_plot <- gene_filter_flags %>%
   filter(!is.na(filter_combo)) %>%
   mutate(filter_combo = factor(filter_combo, levels = combo_levels))
 
-# Tiny fixtures (a single-gene run) can leave nothing to plot once NA rows are
-# dropped, or a `caap_group` column that is entirely NA -- facet_wrap() then
-# aborts with "Faceting variables must have at least one value" and takes the
-# whole report (and pipeline) down. Skip the panel in that case.
+# A run with very few genes can leave nothing to plot once the NA rows are dropped, or a
+# `caap_group` column that is entirely NA; facet_wrap() then stops with "Faceting variables
+# must have at least one value". The panel is skipped in that case.
 .have_facet <- "caap_group" %in% names(gene_filter_plot) &&
   any(!is.na(gene_filter_plot$caap_group))
 if (nrow(gene_filter_plot) == 0 || !.have_facet) {

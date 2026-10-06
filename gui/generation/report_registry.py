@@ -1,33 +1,35 @@
 #!/usr/bin/env python3
-# report_registry.py — standalone HTML-report regeneration: detects which of the
-# pipeline's Rmd reports were produced in a given output directory and builds a
-# ready-to-run shell script that re-renders each one from the files already on
-# disk there, mirroring the exact rmarkdown::render() call its Nextflow process
-# ran (see subworkflows/*/*.nf) but pointed at outdir paths instead of
-# Nextflow-staged ones.
-#
+# report_registry.py — Detection of the HTML reports of a run and standalone scripts that re-render them.
 # PhyloPhere | gui/generation/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-This module never runs R itself — gui/widgets/common/regenerate_dialog.py calls
-detect_reports() to find candidates, lets the user confirm/override each
-report's input files, then calls ReportSpec.build_script() per checked report
-and hands the resulting scripts to MainWindow._show_preview() (the same
-preview/save window "Generate Scripts" uses).
+Detects which of the pipeline's Rmd reports exist in an output directory
+(detect_reports) and builds, per report, a shell script that re-renders it from the
+files already on disk there. Each script is modeled on the rmarkdown::render() call
+of the Nextflow process that produced the report (subworkflows/*/*.nf), with outdir
+paths in place of the staged inputs and with the render parameters fixed in this
+module. The module never runs R itself.
 
-Each report's required inputs are searched for with a short, ordered list of
-globs (most-specific first) rooted at outdir — reflecting the module subdirectory
-each upstream process is known to publish into (see the process's own publishDir
-in its .nf file). A glob miss just leaves that slot unresolved; it does not
-throw. Optional inputs left unresolved are passed as R's NULL — exactly the
-NO_-sentinel behavior the original Nextflow process itself falls back to when
-that file wasn't produced, so an unresolved optional slot is never a
-correctness bug, only a conservatively-skipped report section. Required slots
-left unresolved make the report non-runnable until the user manually browses to
-the file (some inputs — e.g. TRAIT_ANALYSIS's original --trait_file/--tree_file
-— aren't outputs at all and are never auto-locatable).
+Each report is a ReportSpec: a filename regex that identifies it, a find_slots
+function that locates its input files, and a build_script function. The inputs of a
+report are searched with a short ordered list of globs (most specific first) rooted
+at outdir, which follow the subdirectory each upstream process publishes into (the
+publishDir of its .nf file). A glob miss leaves the slot unresolved and never raises.
+An unresolved optional slot is passed to R as NULL, as the Nextflow processes do for
+their NO_* sentinels, so the report skips that section. An unresolved required slot
+makes the report non-runnable until the user selects the file by hand; some inputs
+(the --trait_file and --tree_file of TRAIT_ANALYSIS) are pipeline inputs rather than
+outputs and are rarely found automatically.
+
+Called by:  gui/widgets/common/regenerate_dialog.py (detect_reports, build_script);
+            the generated scripts go to MainWindow._show_preview, the same
+            preview/save window as "Generate Scripts"
+Inputs:     the output directory of a run (local, or a remote listing from gui.remote)
+Outputs:    one bash script per report (regenerate_<report id>.sh) that renders the
+            report into a scratch directory and copies the HTML to the directories its
+            Nextflow process publishes to
 """
 
 from __future__ import annotations
@@ -39,19 +41,18 @@ from pathlib import Path, PurePosixPath
 from typing import Callable, Optional
 
 
-# ── Listing: local-or-remote filesystem view ─────────────────────────────────
-#
-# find_slots() functions below are written once against this thin interface
-# (glob / is_dir / '/' chaining, mirroring pathlib) and work unchanged whether
-# outdir is a real local directory or a remote one reached over SSH. Remote
-# mode never touches the network itself here — it's fed a pre-fetched
-# {relpath: is_dir} map (see gui.remote.list_all_remote, one round trip),
-# keeping this module network-call-free per its own module docstring; the
-# caller (regenerate_dialog.py) does the SSH round trip and passes the result
-# in. Results are always PurePosixPath — correct regardless of the pipeline
-# running on a Linux cluster while the GUI itself runs on any host OS.
+# ── Listing: local-or-remote filesystem view ──────────────────────────────────
+
 
 class Listing:
+    """Thin directory view (glob, is_dir, "/" chaining, as in pathlib) that the
+    find_slots functions are written against, so they work unchanged on a local
+    outdir and on a remote one reached over SSH. Remote mode makes no network call
+    here: it is given a pre-fetched {relpath: is_dir} map (gui.remote.list_all_remote,
+    one round trip made by the caller). Results are PurePosixPath, correct for a
+    pipeline that runs on a Linux cluster whatever the host OS of the GUI.
+    """
+
     def __init__(self, root: str, remote_entries: Optional[dict[str, bool]] = None, prefix: str = ""):
         self.root = PurePosixPath(root)
         self._remote = remote_entries  # None => local filesystem; else {relpath: is_dir}
@@ -72,9 +73,8 @@ class Listing:
         full_pattern = f"{self._prefix}/{pattern}" if self._prefix else pattern
         if self._remote is None:
             return sorted(PurePosixPath(p) for p in Path(str(self.root)).glob(full_pattern))
-        # fnmatch's '*' already crosses '/' (it matches on the whole string,
-        # unlike shell globbing), so '**/x.tsv'-style patterns work the same
-        # as they do against a real filesystem glob() here.
+        # fnmatch matches the whole relative path and its '*' crosses '/', so
+        # '**/x.tsv' patterns behave as in the local glob() branch above.
         hits = sorted(rel for rel in self._remote if fnmatch.fnmatch(rel, full_pattern))
         return [self.root / rel for rel in hits]
 
@@ -84,7 +84,8 @@ class Listing:
         return self._remote.get(self._prefix) is True
 
 
-# ── Slot / detection data model ─────────────────────────────────────────────
+# ── Slot / detection data model ───────────────────────────────────────────────
+
 
 @dataclass
 class InputSlot:
@@ -92,7 +93,7 @@ class InputSlot:
     label: str  # shown in the regenerate dialog
     required: bool
     path: Optional[PurePosixPath] = None  # resolved (glob hit) or user-overridden; None = unresolved
-    note: str = ""  # short UI hint, e.g. "optional — passed as NULL if not set"
+    note: str = ""  # short UI hint, e.g. "optional: passed as NULL if not set"
 
 
 @dataclass
@@ -126,11 +127,11 @@ class ReportSpec:
     guess_traitname: Callable[[str], str] = lambda basename: "unknown_trait"
 
 
-# ── Path-search helpers ──────────────────────────────────────────────────────
+# ── Path-search helpers ───────────────────────────────────────────────────────
+
 
 def _first_match(listing: Listing, *rel_globs: str) -> Optional[PurePosixPath]:
-    """Tries each glob (relative to listing) in order, most-specific first;
-    returns the first match found anywhere, or None."""
+    """Return the first hit of the globs tried in order, most specific first, or None."""
     for pattern in rel_globs:
         hits = listing.glob(pattern)
         if hits:
@@ -148,9 +149,11 @@ _TRAIT_SUFFIX_RE = re.compile(r"_(?P<trait>[A-Za-z0-9][A-Za-z0-9_.-]*)\.html$")
 
 
 def _guess_trait_from_suffix(basename: str, prefix_to_strip: str) -> str:
-    """basename like '11.Scoring_report_um_myotis.html' -> 'um_myotis'. Falls
-    back to 'unknown_trait' (the same default every .nf process itself uses)
-    when the name doesn't carry a trait suffix."""
+    """Trait name from a report filename: '11.Scoring_report_um_myotis.html' → 'um_myotis'.
+
+    Falls back to 'unknown_trait', the default several Nextflow report processes use
+    when --traitname is empty, if the name carries no trait suffix.
+    """
     stem = basename
     if stem.startswith(prefix_to_strip):
         stem = stem[len(prefix_to_strip):]
@@ -158,7 +161,8 @@ def _guess_trait_from_suffix(basename: str, prefix_to_strip: str) -> str:
     return m.group("trait") if m else "unknown_trait"
 
 
-# ── Script-assembly helpers ──────────────────────────────────────────────────
+# ── Script-assembly helpers ───────────────────────────────────────────────────
+
 
 def _r_arg(path: Optional[Path]) -> str:
     return f"'{path}'" if path is not None else "NULL"
@@ -169,12 +173,13 @@ def _entrypoint_prefix(use_singularity: bool) -> str:
 
 
 def _render_call(rmd_filename: str, param_lines: list[str], output_file: str, extra_arg: str = "") -> str:
-    """extra_arg, when given, is a top-level rmarkdown::render() argument
-    (e.g. "envir = new.env()") added alongside output_file -- NOT appended
-    after this function's return value. A caller that instead does
-    `render += ",\\n envir = new.env()"` tacks it on AFTER the closing `)`
-    this already emits, producing `...)\\n, envir = new.env()` -- a stray
-    top-level comma R's parser rejects outright ("unexpected ','")."""
+    """Build the rmarkdown::render() call of one report as R source text.
+
+    extra_arg is an additional top-level render() argument (e.g. "envir = new.env()")
+    and must be passed here, so that it is written inside the call, next to
+    output_file. Appending it to the returned string would put it after the closing
+    parenthesis, a stray top-level comma that R's parser rejects.
+    """
     params = ",\n                ".join(param_lines)
     extra = f",\n            {extra_arg}" if extra_arg else ""
     return (
@@ -200,13 +205,15 @@ def _wrap_script(
     use_singularity: bool,
     post_lines: Optional[list[str]] = None,
 ) -> str:
-    """Assembles one standalone, ready-to-run bash script: stage the Rmd's
-    local/ dir into a scratch work dir, run the render, then copy the result
-    back to every location the original process's publishDir would have used
-    (backing up an existing file there first, since this overwrites it).
-    post_lines run after a successful render but before the publish copy —
-    mirrors a couple of upstream processes (e.g. CONTRAST_ALGORITHM) that do a
-    fixup copy after rendering, not before."""
+    """Assemble one standalone bash script that re-renders a report.
+
+    The script stages the report's local/ directory into a scratch work directory,
+    runs pre_lines (input staging), renders, then copies the HTML to every
+    publish_targets directory, keeping a .bak of any file it overwrites.
+    post_lines run after a successful render and before the publish copy; some
+    upstream processes also copy files after rendering (the independent-contrasts
+    report is one).
+    """
     entry = _entrypoint_prefix(use_singularity)
     pre = "\n".join(pre_lines)
     post = "\n".join(post_lines or [])
@@ -248,7 +255,8 @@ echo "Regenerated {output_file}"
 """
 
 
-# ── SCORING ───────────────────────────────────────────────────────────────
+# ── SCORING ───────────────────────────────────────────────────────────────────
+
 
 def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
     scoring = outdir / "scoring"
@@ -272,8 +280,8 @@ def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(fade_top, "fade_site_bf_top.tsv")),
         _slot("fade_site_bot", "FADE per-site BF (bottom)", False,
               _first_match(fade_bot, "fade_site_bf_bottom.tsv")),
-        # genomic_info_file is literally params.gene_ensembl_file (main.nf
-        # resolves it from there) — same regeneration copy as CT_POSTPROC's slot.
+        # The genomic-coordinates file is params.gene_ensembl_file (resolved from
+        # there in scoring.nf), the same file as the gene Ensembl slot of CT_POSTPROC.
         _slot("genomic_info", "Gene genomic coordinates TSV", False,
               _first_match(outdir, "postproc/postproc_inputs/*", "**/*genomic_info*.tsv", "**/*genomic*coords*.tsv")),
         _slot("caas_perms", "CAAS permulation RDS", False,
@@ -334,7 +342,8 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
     )
 
 
-# ── RERconverge ──────────────────────────────────────────────────────────
+# ── RERconverge ───────────────────────────────────────────────────────────────
+
 
 def _rer_find_slots(outdir: Listing) -> list[InputSlot]:
     rer_dir = outdir / "rerconverge" / "rer_results"
@@ -370,12 +379,13 @@ def _rer_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
     )
 
 
-# ── FADE (one spec instance per direction) ─────────────────────────────────
+# ── FADE (one spec instance per direction) ────────────────────────────────────
+
 
 def _make_fade_spec(direction: str) -> ReportSpec:
     def find_slots(outdir: Listing) -> list[InputSlot]:
-        # fade_run.nf publishes *.FADE.json one level deeper, under a "json"
-        # subdir (selection/fade/{direction}/json/), not directly in fade_dir.
+        # fade_run.nf publishes the *.FADE.json files in selection/fade/<direction>/json/,
+        # one level below fade_dir.
         fade_dir = outdir / "selection" / "fade" / direction
         json_dir = fade_dir / "json"
         json_files = sorted(json_dir.glob("*.FADE.json"))
@@ -383,8 +393,8 @@ def _make_fade_spec(direction: str) -> ReportSpec:
             _slot("json_dir", f"FADE JSON directory ({direction})", True,
                   json_dir if json_files else None,
                   note=f"{len(json_files)} *.FADE.json file(s) found" if json_files else "no *.FADE.json files found"),
-            # selection_utils.nf publishes these direction-named files into a
-            # shared selection/species_sets/ dir, not inside fade_dir.
+            # selection_utils.nf publishes the <direction>_species.txt files in the
+            # shared selection/species_sets/, not inside fade_dir.
             _slot("fg_list_file", "Foreground species list", False,
                   _first_match(outdir / "selection" / "species_sets", f"{direction}_species.txt")),
         ]
@@ -392,11 +402,9 @@ def _make_fade_spec(direction: str) -> ReportSpec:
     def build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
         s = {slot.key: slot.path for slot in report.slots}
         output_file = f"6.FADE_report_{direction}.html"
-        # Symlink rather than copy: a full CAAS run's *.FADE.json set can run
-        # into the tens of GB, and this scratch workdir is torn down right
-        # after the render reads it -- copying that much data in just to
-        # read it once needlessly doubles disk use (and, run concurrently
-        # for several directions/traits, can exhaust /tmp outright).
+        # Symlink instead of copy: the *.FADE.json files of a full run can total tens
+        # of GB and the scratch directory is removed right after the render reads
+        # them once, so copying would only double the disk use.
         pre_lines = [f'ln -sf "{s["json_dir"]}"/*.FADE.json . 2>/dev/null || true']
         render = _render_call(
             "6.FADE_report.Rmd",
@@ -431,7 +439,8 @@ def _make_fade_spec(direction: str) -> ReportSpec:
     )
 
 
-# ── CT_ACCUMULATION ─────────────────────────────────────────────────────────
+# ── CT_ACCUMULATION ───────────────────────────────────────────────────────────
+
 
 def _accumulation_find_slots(outdir: Listing) -> list[InputSlot]:
     accum = outdir / "accumulation"
@@ -483,7 +492,8 @@ def _accumulation_build_script(report: DetectedReport, repo_dir: Path, use_singu
     )
 
 
-# ── CT_POSTPROC ──────────────────────────────────────────────────────────
+# ── CT_POSTPROC ───────────────────────────────────────────────────────────────
+
 
 def _postproc_find_slots(outdir: Listing) -> list[InputSlot]:
     postproc = outdir / "postproc"
@@ -535,15 +545,13 @@ def _postproc_build_script(report: DetectedReport, repo_dir: Path, use_singulari
     )
 
 
-# ── CT_META_CAAS ─────────────────────────────────────────────────────────
+# ── CT_META_CAAS ──────────────────────────────────────────────────────────────
+
 
 def _meta_caas_find_slots(outdir: Listing) -> list[InputSlot]:
-    # CAAS_META_CAAS_REPORT (workflows/ct_meta_caas.nf) takes CT's own
-    # discovery.tab directly -- it runs after the observed files are written in the
-    # live DAG and never sees caas_convergence_master.csv (that belongs to a
-    # different, later report). The old glob here looked for that CSV and,
-    # failing that, a "*discovery*.csv" that doesn't exist either (the real
-    # file is a .tab), so this slot never resolved against a real outdir.
+    # CAAS_META_CAAS_REPORT (workflows/ct_meta_caas.nf) takes the discovery.tab of CT
+    # directly, not caas_convergence_master.csv (the input of the post-processing
+    # characterization report).
     return [
         _slot("discovery_input", "Discovery input TSV", True,
               _first_match(outdir, "caastools/discovery.tab", "**/discovery.tab", "**/*discovery*.tab")),
@@ -573,18 +581,17 @@ def _meta_caas_build_script(report: DetectedReport, repo_dir: Path, use_singular
         pre_lines=[],
         render_block=render,
         output_file=output_file,
-        # meta_caas/ used to be called signification/ -- publish under the
-        # current name; older outdirs on disk keep their signification/ tree
-        # untouched (this only affects where THIS regeneration writes).
+        # Publishes under meta_caas/ only; a signification/ tree already present in
+        # the outdir is left untouched.
         publish_targets=[report.html_path.parent.parent / "meta_caas", report.html_path.parent],
         use_singularity=use_singularity,
     )
 
 
-# ── CAAS_SIGNIFICANCE (post-SCORING; distinct from CT_META_CAAS above) ──
-# Joins CT_META_CAAS's published meta_caas/global_meta_caas.tsv against
-# SCORING's published position_scores.tsv/gene_scores.tsv. Runs at a later
-# DAG position than "meta_caas" above (after scoring, not after CT).
+# ── CAAS_SIGNIFICANCE (after SCORING; distinct from CT_META_CAAS) ─────────────
+# Joins the meta_caas/global_meta_caas.tsv of CT_META_CAAS with the
+# position_scores.tsv and gene_scores.tsv of SCORING, so it runs after scoring.
+
 
 def _signif_significance_find_slots(outdir: Listing) -> list[InputSlot]:
     scoring = outdir / "scoring"
@@ -634,7 +641,8 @@ def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, us
     )
 
 
-# ── ASR_ROBUSTNESS ───────────────────────────────────────────────────────
+# ── ASR_ROBUSTNESS ────────────────────────────────────────────────────────────
+
 
 def _asr_find_slots(outdir: Listing) -> list[InputSlot]:
     return [
@@ -667,9 +675,10 @@ def _asr_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
     )
 
 
-# ── ENRICHMENT: FCS (scoring/CAAS report only — RER_FCS_REPORT's dynamic
-#    report_label naming isn't reliably detectable from the outdir alone; not
-#    supported in v1) ─────────────────────────────────────────────────────
+# ── ENRICHMENT: FCS (CAAS report only) ────────────────────────────────────────
+# RER_FCS_REPORT is not covered: its output filename comes from a caller-supplied
+# report_label, so it cannot be recognized from the outdir (see UNSUPPORTED_NOTE).
+
 
 def _fcs_scoring_find_slots(outdir: Listing) -> list[InputSlot]:
     fcs = outdir / "fcs"
@@ -704,10 +713,10 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
         ],
         output_file,
     )
-    # gmt_dir references REPO_DIR from inside the R params list, so it must be
-    # resolved before the render() call runs. Single-quoted: this whole block
-    # is itself embedded inside a double-quoted `Rscript -e "..."` bash string,
-    # so an R double-quoted literal here would prematurely close it.
+    # gmt_dir refers to REPO_DIR from inside the R params list, so REPO_DIR is set
+    # before the render() call. It is single-quoted because the block sits inside a
+    # double-quoted `Rscript -e "..."` bash string, which a double-quoted R literal
+    # would close early.
     render_prefix = f"REPO_DIR <- '{repo_dir}'\n    "
     return _wrap_script(
         header_comment="ENRICHMENT — 12.FCS_general_report.Rmd (Scoring/CAAS)",
@@ -721,13 +730,14 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
     )
 
 
-# ── ENRICHMENT: POSENRICH ────────────────────────────────────────────────
+# ── ENRICHMENT: POSENRICH ─────────────────────────────────────────────────────
+
 
 def _posenrich_find_slots(outdir: Listing) -> list[InputSlot]:
     posenrich = outdir / "posenrich"
     return [
-        # posenrich.nf emits this as "posenrich_characterization.tsv" (emit:
-        # results) — the filename itself doesn't contain "results".
+        # posenrich.nf emits this file (emit: results) as
+        # posenrich_characterization.tsv, a name without "results".
         _slot("results", "Posenrich results TSV", True,
               _first_match(posenrich, "posenrich_characterization.tsv", "*results*.tsv")),
         _slot("leading_edge", "Posenrich leading-edge TSV", True, _first_match(posenrich, "*leading_edge*.tsv")),
@@ -785,7 +795,8 @@ def _posenrich_build_script(report: DetectedReport, repo_dir: Path, use_singular
     )
 
 
-# ── ENRICHMENT: AMI (SCORING_AMI_REPORT — DOMINO active modules) ───────────
+# ── ENRICHMENT: AMI (SCORING_AMI_REPORT, DOMINO active modules) ───────────────
+
 
 def _ami_find_slots(outdir: Listing) -> list[InputSlot]:
     scoring = outdir / "scoring"
@@ -856,13 +867,13 @@ def _ami_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
     )
 
 
-# ── ENRICHMENT: COMPARE (SCORING_COMPARE_REPORT) ────────────────────────────
+# ── ENRICHMENT: COMPARE (SCORING_COMPARE_REPORT) ──────────────────────────────
+
 
 def _compare_find_slots(outdir: Listing) -> list[InputSlot]:
-    # fcs.nf publishes with `publishDir ".../fcs/fcs_results", pattern:
-    # 'fcs_results/**'` — the emitted path already starts with "fcs_results/",
-    # so the real files land one level deeper than that publishDir alone
-    # suggests: fcs/fcs_results/fcs_results/*.tsv.
+    # fcs.nf publishes into fcs/fcs_results/ with pattern 'fcs_results/**'; the
+    # emitted paths already start with "fcs_results/", so the files land one level
+    # deeper: fcs/fcs_results/fcs_results/*.tsv.
     fcs = outdir / "fcs" / "fcs_results" / "fcs_results"
     return [
         _slot("caas_fcs", "CAAS FCS all-results TSV", False, _first_match(fcs, "fcs_all_results.tsv")),
@@ -875,8 +886,8 @@ def _compare_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(fcs, "fcs_leading_edge_composition.tsv")),
         _slot("rer_le_comp", "RER leading-edge composition TSV", False,
               _first_match(outdir, "rerconverge/**/fcs_results/fcs_leading_edge_composition.tsv")),
-        # scoring_enrichment.nf publishes with `publishDir ".../ami/ami_networks",
-        # pattern: 'ami_networks/**'` — same double-nesting as fcs above.
+        # scoring_enrichment.nf publishes into ami/ami_networks/ with pattern
+        # 'ami_networks/**': the same double nesting as fcs above.
         _slot("ami_module_desc", "AMI module descriptions TSV", False,
               _first_match(outdir, "ami/ami_networks/ami_networks/ami_module_descriptions_all_tools.tsv")),
         _slot("ami_term_membership", "AMI term membership TSV", False,
@@ -957,15 +968,16 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
     )
 
 
-# ── TRAIT_ANALYSIS (5 reports; trait_file/tree_file are original pipeline
-#    inputs, never outputs, so they're always left for the user to browse to
-#    unless a copy happens to sit under outdir) ─────────────────────────────
+# ── TRAIT_ANALYSIS (5 reports) ────────────────────────────────────────────────
+# trait_file and tree_file are inputs of the pipeline, not outputs, so they are
+# found only when a copy (original or pruned) sits under outdir; otherwise the user
+# selects them.
+
 
 def _ta_common_slots(outdir: Listing, extra_dir_glob: Optional[str] = None) -> list[InputSlot]:
-    # pruned_trait_file.tsv only exists when --prune_data ran (ta_data_prune,
-    # optional); original_trait_file.tsv is DATASET_EXPLORATION's own copy of
-    # the raw --trait_file, published unconditionally since that process
-    # always runs — the reliable fallback when pruning was skipped.
+    # pruned_trait_file.tsv exists only when pruning ran (--prune_data, ta_data_prune.nf).
+    # original_trait_file.tsv is the copy of the raw trait file made by
+    # ta_dataset_exploration.nf: the fallback when pruning was skipped.
     slots = [
         _slot("trait_file", "Original trait file (--trait_file)", True,
               _first_match(outdir, "**/pruned_trait_file.tsv", "**/original_trait_file.tsv"),
@@ -1166,15 +1178,11 @@ def _ta_contrast_build_script(report: DetectedReport, repo_dir: Path, use_singul
         f'mkdir -p "{s["results_dir"]}/2.CT/3.Tree"',
         f'cp "{s["tree_file"]}" "{s["results_dir"]}/2.CT/3.Tree/pruned_tree_file.nwk"',
     ]
-    # selection_algorithm.R (sourced by 4.Independent_contrasts.Rmd) reaches
-    # outside its own local/ dir for the shared rank_candidates()/greedy_
-    # dunn_select() core, via a relative path assuming the full repo tree
-    # sits around it (../../CT/local/scripts/lean_contrast_selector.R). The
-    # regeneration workdir only ever gets subworkflows/TRAIT_ANALYSIS/local/
-    # staged into it (see _wrap_script), so that relative path -- and every
-    # other candidate selection_algorithm.R tries -- resolves to nothing.
-    # Stage it at the first candidate it checks (./src/, i.e. this workdir's
-    # own src/) instead of trying to reproduce the surrounding tree.
+    # selection_algorithm.R (sourced by 4.Independent_contrasts.Rmd) locates
+    # lean_contrast_selector.R at a list of candidate paths, most of them relative to
+    # the full repository tree. The scratch directory holds only the staged
+    # subworkflows/TRAIT_ANALYSIS/local/ (see _wrap_script), so the script is copied
+    # to the first candidate, ./src/, instead of reproducing the tree.
     pre_lines = [
         f'cp "{repo_dir}/subworkflows/CT/local/scripts/lean_contrast_selector.R" src/',
     ]
@@ -1191,7 +1199,7 @@ def _ta_contrast_build_script(report: DetectedReport, repo_dir: Path, use_singul
     )
 
 
-# ── Registry ─────────────────────────────────────────────────────────────
+# ── Registry ──────────────────────────────────────────────────────────────────
 
 REPORTS: list[ReportSpec] = [
     ReportSpec(
@@ -1228,11 +1236,8 @@ REPORTS: list[ReportSpec] = [
     ReportSpec(
         id="meta_caas",
         display_name="CT_META_CAAS — CAAS Pattern Annotation",
-        # Matches the current filename plus two earlier ones seen in
-        # production outdirs (7.CT_signification.html from before the
-        # 2026-09 rename, and 7.CT_Pattern_Annotation.html from an even
-        # earlier interim naming), so "Regenerate HTML Reports" still finds
-        # this report regardless of which era produced the outdir.
+        # Also matches 7.CT_signification.html and 7.CT_Pattern_Annotation.html, the
+        # other names under which this report appears in existing outdirs.
         html_regex=re.compile(r"^7\.(?:CT_signification|CAAS_pattern_annotation|CT_Pattern_Annotation)\.html$"),
         find_slots=_meta_caas_find_slots,
         build_script=_meta_caas_build_script,
@@ -1320,11 +1325,9 @@ REPORTS: list[ReportSpec] = [
     ),
 ]
 
-# Reports whose upstream Rmd/naming makes them unsupported for auto-detection
-# in v1 (surfaced as a note in the regenerate dialog rather than silently
-# omitted): RER_FCS_REPORT (subworkflows/ENRICHMENT/fcs.nf) takes a
-# caller-supplied report_label/subpath, so its output HTML filename isn't
-# fixed and can't be matched generically.
+# Reports that cannot be detected automatically, shown as a note in the regenerate
+# dialog instead of being omitted: RER_FCS_REPORT (subworkflows/ENRICHMENT/fcs.nf)
+# takes a caller-supplied report_label, so its HTML filename has no fixed pattern.
 UNSUPPORTED_NOTE = (
     "Not auto-detected: RER's own FCS report (RER_FCS_REPORT) uses a "
     "caller-chosen output filename with no fixed pattern to match — "
@@ -1338,15 +1341,14 @@ def detect_reports(
     traitname_override: str = "",
     remote_entries: Optional[dict[str, bool]] = None,
 ) -> list[DetectedReport]:
-    """Scans {outdir}/html_reports/*.html (every report process publishes its
-    HTML there, in addition to its own module subdir) and returns one
-    DetectedReport per match, with input slots best-effort resolved.
+    """Return one DetectedReport per report HTML found in {outdir}/html_reports/.
 
-    Purely local (real filesystem) by default. Pass remote_entries (a
-    {relpath: is_dir} map for everything under outdir, from one
-    gui.remote.list_all_remote() SSH round trip) to scan a remote outdir
-    instead — this function itself never touches the network, keeping it
-    hermetic/unit-testable (see module docstring)."""
+    Every report process publishes its HTML there as well as in its own module
+    subdirectory. The input slots of each report are resolved on a best-effort basis.
+    The local filesystem is scanned by default; pass remote_entries (the {relpath:
+    is_dir} map of everything under outdir, from one gui.remote.list_all_remote()
+    round trip) to scan a remote outdir instead. The function makes no network call.
+    """
     root = Listing(str(outdir), remote_entries)
     html_dir = root / "html_reports"
     if not html_dir.is_dir():
@@ -1378,4 +1380,5 @@ def detect_reports(
 
 
 def build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
+    """Build the re-rendering script of a detected report (dispatches to its spec)."""
     return report.spec.build_script(report, repo_dir, use_singularity)

@@ -1,12 +1,15 @@
 #!/bin/bash
-# install_gui_launcher.sh — Adds a "PhyloPhere Runner GUI" entry to your desktop's
-# application menu, so you can launch it like any other installed app.
+# install_gui_launcher.sh — Add a "PhyloPhere Runner GUI" entry to the desktop application menu.
+# PhyloPhere | ./
 #
-# Optional — run_gui.sh works fine on its own from a terminal or file manager.
-# This just makes the GUI show up in menus/launchers (GNOME Activities, KDE
-# app menu, etc.) without needing to know where the repo lives.
+# Called by:  the user, once per checkout
+# Usage:      ./install_gui_launcher.sh
 #
-# Safe to re-run (e.g. after moving the repo) — it always regenerates the entry.
+# Optional: run_gui.sh works on its own from a terminal or file manager. This script
+# writes a .desktop file (in $XDG_DATA_HOME/applications, default ~/.local/share/applications)
+# that points at run_gui.sh and the icon of this checkout, so the GUI appears in menus
+# and launchers (GNOME Activities, KDE application menu) without knowing where the repo is.
+# The file is rewritten on every run, so re-running after moving the repo updates the paths.
 
 set -Eeuo pipefail
 

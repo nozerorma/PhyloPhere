@@ -89,9 +89,14 @@ params:
   }
 </style>
 
+<!-- 14.Position_enrichment_report.Rmd — Position-level path-sum permulation enrichment and characterization of the CAAS positions. -->
+<!-- PhyloPhere | subworkflows/ENRICHMENT/local/ -->
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
                       fig.width = 10, fig.height = 6, dev = "png", dpi = 150)
+
+# ── Dependencies and theme ────────────────────────────────────────────────────
 suppressPackageStartupMessages({
   library(tidyverse)
   library(knitr)
@@ -116,12 +121,16 @@ suppressPackageStartupMessages({
   library(patchwork)
 })
 
+# ── Parameters and helpers ────────────────────────────────────────────────────
+# BH threshold of significance and rows shown per table.
 PADJ <- params$padj_thr
 TOP_N <- params$table_top_n
 
+# Directory of this Rmd.
 this_dir <- tryCatch(dirname(normalizePath(knitr::current_input(), mustWork = FALSE)),
                      error = function(e) ".")
 
+# HTML table with the report style; optional scroll box of fixed height.
 kbl_html <- function(df, caption = NULL, height = NULL, escape = TRUE, ...) {
   k <- kable(df, format = "html", escape = escape, caption = caption, ...) %>%
     kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = FALSE)
@@ -129,8 +138,8 @@ kbl_html <- function(df, caption = NULL, height = NULL, escape = TRUE, ...) {
   k
 }
 
-# Safe correlation helper: returns NA (not an error) when inputs have fewer
-# than 3 complete pairs, avoids crashes in sparse optional-module sections.
+# Correlation that returns NA, not an error, with fewer than 3 complete pairs, so that
+# sparse optional sections do not abort the render.
 safe_cor <- function(x, y, method = "pearson") {
   ok <- complete.cases(x, y)
   if (sum(ok) < 3) return(NA_real_)
@@ -139,6 +148,7 @@ safe_cor <- function(x, y, method = "pearson") {
 ```
 
 ```{r load, include=FALSE}
+# ── Results table ─────────────────────────────────────────────────────────────
 stopifnot(!is.null(params$results_file), file.exists(params$results_file))
 res <- readr::read_tsv(params$results_file, show_col_types = FALSE)
 if (!is.null(res) && "top_frac" %in% names(res)) {
@@ -155,12 +165,12 @@ if (!is.null(res)) {
 has_res <- !is.null(res) && nrow(res) > 0
 RANKING_ORDER <- c("global", "top", "bottom")
 if (has_res && !"sig" %in% names(res)) {
-  # p.adj < padj_thr AND NES > 0
+  # Significant: p_adj < padj_thr and NES > 0.
   res$sig <- res$p_adj < PADJ & (!"perm_nes" %in% names(res) | res$perm_nes > 0)
 }
 
-# Truncates a "gene1, gene2, ..." string to the first n_show entries, with
-# the remainder tucked behind an inline <details>/<summary> toggle
+# Truncate a "gene1, gene2, ..." string to its first n_show entries; the remainder sits
+# behind an inline <details>/<summary> toggle.
 truncate_gene_list <- function(x, n_show = 5) {
   vapply(x, function(s) {
     if (is.na(s) || !nzchar(s)) return("")
@@ -175,7 +185,8 @@ truncate_gene_list <- function(x, n_show = 5) {
   }, character(1), USE.NAMES = FALSE)
 }
 
-# Observed gene:position members of the overlap, significant terms only
+# ── Leading edge and flags ────────────────────────────────────────────────────
+# Observed gene:position members of the overlap, significant terms only.
 le_raw <- NULL
 if (!is.null(params$leading_edge_file) && file.exists(params$leading_edge_file)) {
   le_raw <- tryCatch(readr::read_tsv(params$leading_edge_file, show_col_types = FALSE),
@@ -187,8 +198,7 @@ if (!is.null(params$leading_edge_file) && file.exists(params$leading_edge_file))
   }
   if (!is.null(le_raw) && nrow(le_raw) == 0) le_raw <- NULL
 }
-# Pooled across top_frac cutoffs (one row per ranking x database x pathway,
-# not per cutoff)
+# Pooled across the top_frac cutoffs: one row per ranking x database x pathway.
 le_summary <- if (!is.null(le_raw)) {
   le_raw %>%
     dplyr::group_by(ranking, database, pathway) %>%
@@ -197,13 +207,11 @@ le_summary <- if (!is.null(le_raw)) {
                      .groups = "drop")
 } else NULL
 
-# Direction-aware corroboration columns (mirrors 12.FCS_general_report.Rmd's
-# cols_by_rk): fade_bottom only under `bottom`, fade_top only under `top` --
-# no combined "fade" column under `global` (redundant with _top/_bottom, which
-# already cover both directions). pct_accum_top/pct_accum_bottom are the
-# direction-restricted accumulation tests (same convention as fade); pct_accum
-# (non-directional, accumulation_all_* pooled) is reserved for `global`. Only
-# columns actually present are ever shown.
+# Direction-aware corroboration columns (as cols_by_rk of 12.FCS_general_report.Rmd):
+# pct_fade_bottom only under `bottom`, pct_fade_top only under `top`, and no combined
+# fade column under `global`. pct_accum_top and pct_accum_bottom are the
+# direction-restricted accumulation tests, as for FADE; the non-directional pct_accum is
+# reserved for `global`. Only the columns present in the results are shown.
 flag_cols_by_rk <- list(
   global = c("pct_rer_acc", "pct_rer_decc", "pct_accum"),
   top    = c("pct_fade_top", "pct_rer_acc", "pct_rer_decc", "pct_accum_top"),
@@ -212,10 +220,10 @@ flag_cols_by_rk <- list(
 
 .fcs_stats_file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
 
-# FADE_top_sig/FADE_bottom_sig: gene,position,max_bf,target_aa, direction-specific
-# (never cross-checked, a TOP-direction position is only ever validated against
-# fade_sites_top, never fade_sites_bottom, and vice versa). Position is already in
-# CAAS's own coordinate space (see build_position_gmt.py), so no map_cache lookup.
+# FADE_top_sig and FADE_bottom_sig sites (gene, position, max_bf, target_aa). They are
+# direction-specific: a top position is only checked against fade_sites_top and a
+# bottom position against fade_sites_bottom. Position is already in the coordinate space
+# of the CAAS positions, so no coordinate mapping is needed.
 has_fade_sites_top    <- .fcs_stats_file_ok(params$fade_sites_top_file)
 has_fade_sites_bottom <- .fcs_stats_file_ok(params$fade_sites_bottom_file)
 fade_sites_top_df <- if (has_fade_sites_top) {
@@ -359,20 +367,15 @@ if (!has_res) {
 ```
 
 ```{r term-clustering-setup, include=FALSE}
-# Term-similarity clustering - ported verbatim from 13.AMI_analysis.Rmd's
-# Module summary rollup. Different GMT databases can describe the same
-# biological concept with slightly different wording (case, punctuation,
-# minor rewording, collapsed via normalized edit-distance, utils::adist()),
-# or one description can be a compound/nested restatement of another (e.g.
-# "Primary ciliary dyskinesia" inside "Axonemal dynein complex and Primary
-# ciliary dyskinesia"), character-level edit distance alone rejects these
-# (the extra words dominate the ratio even though one term is wholly
-# contained in the other), so containment is checked explicitly and forces a
-# merge regardless of the edit-distance threshold. Defined here (ahead of the
-# Overall dotplot / Direction triangle / Term recurrence sections below) so
-# all three consume the SAME canonical Term per (database, pathway) --
-# otherwise a term split across two near-duplicate GMT entries would merge
-# in one section but not another.
+# Term-similarity clustering, the same as in 13.AMI_analysis.Rmd. Different GMT databases
+# describe the same concept with slightly different wording (case, punctuation, minor
+# rewording), merged through a normalized edit distance (utils::adist()), or one
+# description nests in another ("Primary ciliary dyskinesia" inside "Axonemal dynein
+# complex and Primary ciliary dyskinesia"). The edit distance alone rejects the nested
+# pair because the extra words dominate the ratio, so containment is tested explicitly
+# and forces the merge. The functions are defined before the Overall dotplot, the
+# Direction triangle and the Term recurrence sections so that all three use the same
+# canonical Term per (database, pathway).
 .normalize_term <- function(x) {
   x <- tolower(x)
   x <- gsub("[^a-z0-9 ]", " ", x)
@@ -426,21 +429,19 @@ _threshold`/`n_occurrences` (also in the table export) record which
 recurrence count - not a weighted score.
 
 ```{r overall-dotplot, echo=FALSE, results='asis', fig.height=6}
-.NES_HUE_LIGHT <- "#e7d4e8"  # same Permulation colour family as 12.FCS_general_report.Rmd,
-.NES_HUE_DARK  <- "#4a148c"  # since this report's one test IS Path Sum Permulation.
+.NES_HUE_LIGHT <- "#e7d4e8"  # color family of the Permulation method in 12.FCS_general_report.Rmd,
+.NES_HUE_DARK  <- "#4a148c"  # the one test of this report.
 
-# Darkens a hex colour toward black by `amount` (0-1), used so the tip
-# marker reads as "this arm's own colour, just deeper" rather than a fixed
-# anchor shade unrelated to the term's own NES.
+# Darken a hex color toward black by `amount` (0-1); the tip marker takes a deeper shade
+# of the color of its own segment.
 .darken_hex <- function(hex, amount = 0.3) {
   rgb <- grDevices::col2rgb(hex) / 255
   rgb <- rgb * (1 - amount)
   grDevices::rgb(rgb[1, ], rgb[2, ], rgb[3, ])
 }
 
-# A standalone light->dark gradient bar used as the legend key, scale_
-# colour_identity() can only draw a flat swatch, so the ramp itself is
-# otherwise invisible in the legend.
+# Light-to-dark gradient bar used as the legend key: scale_colour_identity() draws only
+# flat swatches, so the color ramp would otherwise be absent from the legend.
 .method_gradient_legend <- function(title, light, dark) {
   df <- data.frame(y = 1, v = seq(0, 1, length.out = 100))
   ggplot(df, aes(x = v, y = y, fill = v)) +
@@ -455,12 +456,10 @@ recurrence count - not a weighted score.
           plot.margin = margin(2, 2, 2, 2))
 }
 
-# knitr opens the figure device for a chunk ONCE, using the fig.height in
-# effect at chunk start - opts_current$set(fig.height = ...) called mid-chunk
-# (e.g. inside this per-direction loop) does NOT change the size of the image
-# actually written out, verified empirically, it's a known knitr limitation,
-# not a working per-plot override. Render+embed each plot manually instead,
-# which is the only reliable way to vary height per plot in one asis chunk.
+# knitr opens the figure device once per chunk with the fig.height in effect at the
+# start, so setting it inside the per-direction loop does not resize the image written
+# out. Each plot is rendered and embedded as a base64 PNG instead, which allows a
+# different height per plot in one asis chunk.
 .emit_sized_plot <- function(p, height_in, width_in = knitr::opts_chunk$get("fig.width"),
                               dpi = knitr::opts_chunk$get("dpi")) {
   f <- tempfile(fileext = ".png")
@@ -470,8 +469,8 @@ recurrence count - not a weighted score.
               base64enc::base64encode(f)))
 }
 
-.overall_dotplot_rows <- list()  # accumulated across rankings, written to disk after
-                                  # the loop; the Comparison report imports this file directly.
+.overall_dotplot_rows <- list()  # one table per ranking, written to posenrich_overall_dotplot.tsv
+                                  # after the loop (read by the Comparison report).
 if (!has_res || !any(res$sig, na.rm = TRUE)) {
   cat("_No significant sets._\n\n")
 } else {
@@ -480,9 +479,8 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
     rk_sig <- res %>% filter(ranking == rk, sig)
     if (nrow(rk_sig) == 0) { cat("_No significant sets for this direction._\n\n"); next }
 
-    # list_threshold/n_occurrences: which top_frac cutoffs this term reached
-    # significance at, and how many, a plain recurrence count, independent
-    # of any composite score.
+    # list_threshold and n_occurrences: the top_frac cutoffs at which the term is
+    # significant and their number, a plain recurrence count.
     .has_tf_col <- "top_frac" %in% names(rk_sig) && !all(is.na(rk_sig$top_frac))
     term_meta <- rk_sig %>%
       dplyr::group_by(database, pathway) %>%
@@ -493,8 +491,8 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
                         n_occurrences = if (.has_tf_col) dplyr::n_distinct(top_frac, na.rm = TRUE) else 1L,
                         .groups = "drop")
 
-    # N positions in the leading edge (dot size), purely descriptive, not
-    # part of the ranking.
+    # Number of positions in the leading edge (dot size); descriptive, it does not enter
+    # the ranking.
     if (!is.null(le_raw)) {
       n_le_tbl <- le_raw %>% dplyr::filter(ranking == rk) %>%
         dplyr::group_by(database, pathway) %>%
@@ -509,14 +507,14 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
       dplyr::arrange(p_adj) %>%
       dplyr::mutate(label = stringr::str_trunc(sprintf("%s (%s)", description, database), 60))
 
-    # Every significant/scored term for this direction, kept for the Triangle
-    # plot below and the exported TSV; the visual dotplot is TOP_N-limited only.
+    # Every significant term of this direction is kept for the triangle plot and the
+    # exported TSV; only the dotplot is limited to TOP_N.
     .overall_dotplot_rows[[rk]] <- dp_all %>% dplyr::mutate(ranking = rk, .before = 1)
 
     dp <- dp_all %>% head(TOP_N)
     if (nrow(dp) == 0) { cat("_No terms to display._\n\n"); next }
 
-    # y-axis index 1 = bottom of plot, reverse so the best (smallest p_adj) term is at the top.
+    # y index 1 is the bottom of the plot: reversing puts the term with the smallest p_adj at the top.
     term_levels <- rev(unique(dp$label))
     dp <- dp %>%
       dplyr::mutate(
@@ -525,8 +523,7 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
         .nes_pct = dplyr::percent_rank(perm_nes),
         arm_colour = grDevices::colorRampPalette(c(.NES_HUE_LIGHT, .NES_HUE_DARK))(101)[
           pmax(1, pmin(101, round(dplyr::coalesce(.nes_pct, 0.7) * 100) + 1))],
-        # Tip marker: darkened shade of this row's own arm colour, not the
-        # fixed anchor, keeps the dot visually tied to its own bar.
+        # Tip marker: darkened shade of the color of the row, tying the dot to its bar.
         tip_colour = .darken_hex(arm_colour)
       )
 
@@ -548,19 +545,12 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
             legend.position = "bottom",
             legend.box = "horizontal")
 
-    # Method legend: a gradient bar for the one test this report runs
-    # (Permulation NES), placed directly under p (which already carries its
-    # own "N positions" size legend at its bottom via legend.position =
-    # "bottom" above) - a patchwork guide_area() + guides = "collect"
-    # placement was tried first, to share one right-hand column with that
-    # size legend, but the collected guide rendered as its own block beside
-    # the gradient bar instead of stacked above it. Bottom placement avoids
-    # that entirely: the whole legend reads top-to-bottom as one column.
+    # Method legend: the gradient bar of the one test of this report (Permulation NES),
+    # directly under p, which carries its own "N positions" size legend at the bottom
+    # (legend.position = "bottom"), so the whole legend reads as one column.
     gradient_bar <- .method_gradient_legend("Permulation (NES)", .NES_HUE_LIGHT, .NES_HUE_DARK)
-    # Fixed absolute height for the gradient bar (not a proportion of the
-    # whole figure) - a relative split makes it grow right along with the
-    # main plot on term-heavy reports, ending up huge; a thin colour ramp
-    # needs the same ~0.3in regardless of plot height.
+    # The gradient bar has a fixed absolute height (0.18 in): a relative split would make
+    # it grow with the main plot on reports with many terms.
     combo <- p / gradient_bar + patchwork::plot_layout(heights = grid::unit(c(1, 0.18), c("null", "in")))
     .emit_sized_plot(combo, height_in = pmax(5, pmin(22, 2.6 + 0.4 * length(term_levels))))
   }
@@ -603,21 +593,18 @@ sc_all <- if (length(.overall_dotplot_rows) > 0) dplyr::bind_rows(.overall_dotpl
 if (nrow(sc_all) == 0) {
   cat("_No significant terms to compare across directions._\n\n")
 } else {
-  # Merge near-duplicate term descriptions BEFORE pivoting to directions --
-  # otherwise a term split across two databases (or two differently-worded
-  # GMT entries) would survive as two separate, incomplete points instead of
-  # the one term the Recurrence Table/Heatmap below reports. Two rows that
-  # merge into the same Term *and* the same ranking (e.g. two databases both
-  # significant under "top") keep the stronger (higher) NES, mirroring
-  # 15.Comparison_report.Rmd's "best across merged aliases" convention.
+  # Near-duplicate descriptions are merged before pivoting to directions, so that a term
+  # split across two databases or two wordings is one point, as in the Recurrence Table
+  # and Heatmap below. Rows that merge into the same Term and ranking (two databases
+  # both significant under "top") keep the higher NES, the "best across merged aliases"
+  # convention of 15.Comparison_report.Rmd.
   desc_levels <- unique(dplyr::coalesce(sc_all$description, sc_all$pathway))
   cluster_map <- setNames(.cluster_terms(desc_levels), desc_levels)
   sc_all <- sc_all %>%
     dplyr::mutate(Term = unname(cluster_map[dplyr::coalesce(description, pathway)])) %>%
     dplyr::group_by(Term, ranking) %>%
-    # max(..., na.rm=TRUE) over an all-NA group returns -Inf with a warning,
-    # not NA, guard explicitly so an all-NA perm_nes group (a pathway with
-    # p_adj but no recorded NES) stays NA rather than becoming a bogus -Inf.
+    # max(na.rm = TRUE) of an all-NA group returns -Inf with a warning. The guard keeps NA
+    # for a pathway with p_adj but no recorded NES.
     dplyr::summarise(perm_nes = if (all(is.na(perm_nes))) NA_real_ else max(perm_nes, na.rm = TRUE),
                       .groups = "drop")
 
@@ -637,10 +624,10 @@ if (nrow(sc_all) == 0) {
     ) %>%
     dplyr::filter(has_g | has_t | has_b) %>%
     dplyr::mutate(
-      # A direction with NES <= 0 still "counts" for the category (it cleared
-      # its own significance gate) even though it contributes zero barycentric
-      # weight, fall back to an equal split among the significant
-      # direction(s) so the point doesn't collapse to the origin.
+      # A direction with NES <= 0 still counts for the category (it passed its own gate)
+      # but has zero barycentric weight. When all weights are 0 the weight is split
+      # equally among the significant directions, so that the point does not collapse
+      # to the origin.
       w_sum = w_g + w_t + w_b,
       w_g = dplyr::if_else(w_sum > 0, w_g / w_sum, as.numeric(has_g) / pmax(has_g + has_t + has_b, 1)),
       w_t = dplyr::if_else(w_sum > 0, w_t / w_sum, as.numeric(has_t) / pmax(has_g + has_t + has_b, 1)),
@@ -659,9 +646,8 @@ if (nrow(sc_all) == 0) {
       Category = factor(Category, levels = c("global", "top", "bottom", "top_bottom",
                                               "global_bottom", "global_top", "all")),
       n_dirs = has_g + has_t + has_b,
-      # Total raw NES across whichever direction(s) cleared significance --
-      # used only to ORDER points that land on the exact same vertex/edge
-      # position, not as a literal coordinate (there is no magnitude axis).
+      # Total NES over the significant directions. It only orders the points that land on
+      # the same vertex or edge position; it is not a coordinate.
       strength = pmax(dplyr::coalesce(nes_global, 0), 0) +
                  pmax(dplyr::coalesce(nes_top, 0), 0) +
                  pmax(dplyr::coalesce(nes_bottom, 0), 0)
@@ -676,16 +662,13 @@ if (nrow(sc_all) == 0) {
                      top_bottom = "#8e44ad", global_bottom = "#16a085",
                      global_top = "#d35400", all = "#e74c3c")
 
-    # Deterministic, order-preserving spread: exact barycentric coordinates
-    # collapse every single-direction term onto the same vertex (and can
-    # coincide on an edge too), with no magnitude axis to separate them.
-    # Random jitter would imply a meaning the offset doesn't have, so instead
-    # fan colliding points out along the TANGENT to their shared position
-    # (perpendicular to the ray from the triangle centroid through that
-    # point), ranked by `strength`, stronger terms end up closer to the
-    # true vertex/edge position, weaker ones further out along the fan.
-    # Spacing shrinks as a cluster grows so the fan stays bounded near its
-    # vertex rather than spilling arbitrarily far across the plot.
+    # Deterministic spread of coincident points. The barycentric coordinates put every
+    # single-direction term on the same vertex (and terms can coincide on an edge), with
+    # no magnitude axis to separate them. Random jitter would suggest a meaning that the
+    # offset does not have, so colliding points are fanned out along the tangent to their
+    # shared position (perpendicular to the ray from the centroid of the triangle) in the
+    # order of `strength`: stronger terms stay closer to the true position. The spacing
+    # shrinks as a cluster grows, which keeps the fan near its vertex.
     sc <- sc %>%
       dplyr::group_by(x, y) %>%
       dplyr::mutate(
@@ -717,10 +700,8 @@ if (nrow(sc_all) == 0) {
             legend.position = "right",
             plot.margin = margin(20, 40, 10, 40))
 
-    # Only terms shared between two or three directions are labelled (edge
-    # and interior points) - single-direction terms already read as "which
-    # vertex" without a label, so ggrepel spends its budget on the points
-    # that actually need disambiguating.
+    # Only terms shared by two or three directions (edge and interior points) are
+    # labeled; single-direction terms are identified by their vertex.
     shared_sc <- dplyr::filter(sc, n_dirs >= 2)
     if (nrow(shared_sc) > 0) {
       p <- p + ggrepel::geom_text_repel(
@@ -732,9 +713,8 @@ if (nrow(sc_all) == 0) {
         min.segment.length = 0, segment.size = 0.3, segment.alpha = 0.6,
         bg.color = "white", bg.r = 0.1, show.legend = FALSE)
     }
-    # Height scales with how many points are on the plot, same convention as
-    # the Overall dotplot above (manual render+embed - opts_current$set()
-    # mid-chunk does not actually resize the figure device, see .emit_sized_plot).
+    # The height grows with the number of points; the plot is embedded with
+    # .emit_sized_plot() as in the Overall dotplot.
     .emit_sized_plot(p, height_in = pmax(6, pmin(20, 4 + 0.03 * nrow(sc))))
   }
 }
@@ -771,9 +751,8 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
     has_nes <- "perm_nes" %in% names(rk_sig_raw)
     .has_tf <- "top_frac" %in% names(rk_sig_raw) && !all(is.na(rk_sig_raw$top_frac))
 
-    # Collapse to one row per pathway: best (min) p.adj, strongest (max)
-    # NES/fold across the cutoffs it recurred at, cutoff flags averaged
-    # (already a %, so the mean of several cutoffs' % is itself meaningful).
+    # One row per pathway: the smallest p.adj, the largest NES or fold over the cutoffs at
+    # which it recurs, and the mean of the flag percentages over those cutoffs.
     rk_sig <- rk_sig_raw %>%
       dplyr::group_by(database, pathway) %>%
       dplyr::summarise(
@@ -814,16 +793,13 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
     if ("Genes/positions" %in% names(rk_sig)) {
       le_df <- dplyr::bind_cols(le_df, rk_sig %>% dplyr::select(`N genes`, `Genes/positions`))
       .leading_edge_summary_rows[[rk]] <- le_df %>% dplyr::mutate(Ranking = rk, .before = 1)
-      # Full member list is unabridged in posenrich_leading_edge_summary.tsv --
-      # here, show only the first few inline with a <details> toggle for the
-      # rest, since a row can otherwise carry hundreds of comma-separated
-      # gene:positions.
+      # posenrich_leading_edge_summary.tsv keeps the full member list; the table shows
+      # the first few entries and a <details> toggle for the rest, since a row can carry
+      # hundreds of gene:positions.
       le_df[["Genes/positions"]] <- truncate_gene_list(le_df[["Genes/positions"]])
-      # DT column indices for `escape` are 1-based over the data columns when
-      # rownames = FALSE (no offset needed), verified empirically, since
-      # DT's own docs are ambiguous on this point and getting it wrong throws
-      # "attempt to select less than one element in integerOneIndex" deep
-      # inside DT:::escapeData(), aborting the whole render.
+      # Column indices of DT's `escape` are 1-based over the data columns when
+      # rownames = FALSE (no offset). A wrong index makes DT:::escapeData() fail with
+      # "attempt to select less than one element in integerOneIndex" and aborts the render.
       esc_cols <- which(names(le_df) != "Genes/positions")
     } else {
       .leading_edge_summary_rows[[rk]] <- le_df %>% dplyr::mutate(Ranking = rk, .before = 1)
@@ -863,27 +839,24 @@ score signs. Underneath, a **term x direction-list** heatmap makes the same
 recurrence pattern visually scannable.
 
 ```{r module-rollup-setup, include=FALSE}
-# .normalize_term/.term_contains/.cluster_terms are defined earlier
-# (term-clustering-setup, above the Overall dotplot section) so the Overall
-# dotplot, Direction triangle, and this section's Recurrence Table/Heatmap
-# all merge near-duplicate term descriptions the same way.
+# .normalize_term, .term_contains and .cluster_terms are defined in the
+# term-clustering-setup chunk (above the Overall dotplot), so that the Overall dotplot,
+# the Direction triangle and the Recurrence Table and Heatmap merge near-duplicate
+# descriptions identically.
 
-# Term x direction-list heatmap, one tile per (canonical Term, GLOBAL/TOP/
-# BOTTOM) it was recovered under, replacing the old term x percentile-cutoff
-# heatmap: cutoff-level recurrence within one direction is a tautology of
-# top1 ⊂ top5 ⊂ top10 ⊂ top25, not an independent signal (see section intro
-# above). Takes `rec_pairs` post-clustering (already carries the canonical
-# `Term` column, one row per database/pathway/list) so the heatmap's merge
-# is identical to the Recurrence Table's, not a second independent one.
+# Term x direction-list heatmap: one tile per (canonical Term, GLOBAL/TOP/BOTTOM) under
+# which the term is recovered. Recurrence across the cutoffs of one direction is not an
+# independent signal (top1 is a subset of top5, of top10 and of top25; see the section
+# introduction). It takes `rec_pairs` after clustering (canonical `Term`, one row per
+# database, pathway and list), so its merge is the one of the Recurrence Table.
 .render_posenrich_list_heatmap <- function(rec_pairs) {
   if (nrow(rec_pairs) == 0) { cat("_No terms to show._\n\n"); return(invisible(NULL)) }
   pres <- rec_pairs %>% dplyr::distinct(Term, list_name)
 
   list_levels <- intersect(c("GLOBAL", "TOP", "BOTTOM"), unique(pres$list_name))
 
-  # Term order (most lists recovered first), a term merged from several
-  # pathways can now recur across more lists than any single contributing
-  # pathway did on its own.
+  # Term order: most lists first. A term merged from several pathways can recur across
+  # more lists than any one of its pathways.
   term_counts <- pres %>% dplyr::count(Term, name = "n_lists") %>%
     dplyr::arrange(dplyr::desc(n_lists), Term)
   term_order <- term_counts$Term
@@ -910,11 +883,9 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
 } else {
   sig_res <- res %>% filter(sig)
 
-  # One row per (database, pathway, direction list actually recovering it) --
-  # the base unit BEFORE similarity clustering, so a term split across two
-  # databases (or two near-duplicate GMT entries) is unioned into ONE row
-  # below rather than surviving as several rows that merely display the same
-  # text. Pooled across that list's own percentile cutoffs.
+  # One row per (database, pathway, direction list that recovers it), the unit before the
+  # similarity clustering, pooled over the percentile cutoffs of the list. The clustering
+  # below unions a term split across databases or near-duplicate GMT entries into one row.
   rec_pairs <- sig_res %>%
     dplyr::mutate(description = dplyr::coalesce(description, pathway),
                   list_name = toupper(ranking)) %>%
@@ -923,10 +894,9 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
   if (nrow(rec_pairs) == 0) {
     cat("_No significant sets._\n\n")
   } else {
-    # Cluster map (near-duplicate/nested description text -> canonical
-    # label) drives the actual merge below, two (database, pathway) pairs
-    # mapping to the same canonical Term become ONE row, with their
-    # Database/Lists/N_lists all pooled across the merge, not just relabelled.
+    # The cluster map (near-duplicate or nested description to canonical label) drives
+    # the merge: (database, pathway) pairs that map to one Term become a single row whose
+    # Database, Lists and N_lists are pooled over the merge.
     desc_levels <- unique(rec_pairs$description)
     cluster_map <- setNames(.cluster_terms(desc_levels), desc_levels)
     rec_pairs <- rec_pairs %>% dplyr::mutate(Term = unname(cluster_map[description]))
@@ -958,10 +928,11 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
 ---
 
 ```{r poschar-setup, include=FALSE}
+# ── Position characterization inputs ──────────────────────────────────────────
+# TRUE when the path is a non-empty string of an existing file.
 .file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
 
-# Tableau_10 colour swatch for pipeline-wide consistency (same palette used
-# throughout the Scoring/Characterization reports).
+# Tableau 10 palette, shared with the other reports.
 if (requireNamespace("paletteer", quietly = TRUE)) {
   .tableau10 <- as.character(paletteer::paletteer_d("ggthemes::Tableau_10"))
 } else {
@@ -979,12 +950,10 @@ gene_df <- if (has_gene_scores)     readr::read_tsv(params$gene_scores_file,    
 has_vep_primateai <- .file_ok(params$vep_primateai_file)
 has_vep_cosmic    <- .file_ok(params$vep_cosmic_file)
 has_genomic       <- .file_ok(params$genomic_info_file)
-# has_fade_sites_top/bottom + fade_sites_top_df/bottom_df already loaded in the
-# `load` chunk near the top of this file (hoisted so the Overall dotplot's
-# position-native FADE-overlap component can use them too).
-# Position scores are required for every sub-tab below (PAI3D/COSMIC/FADE joins,
-# regional accumulation), gate the whole section on them, not just on which
-# external database happens to be supplied.
+# has_fade_sites_top/bottom and fade_sites_top_df/bottom_df are loaded in the `load` chunk.
+# Position scores are required by every sub-tab below (PAI3D, COSMIC and FADE joins,
+# regional accumulation), so they gate the whole section together with at least one
+# external layer.
 has_pos_char <- has_position_scores &&
   (has_vep_primateai || has_vep_cosmic || has_genomic || has_fade_sites_top || has_fade_sites_bottom)
 
@@ -1003,7 +972,7 @@ if (has_vep_cosmic) {
 }
 
 if (has_genomic) {
-  # Format: gene, chr, start, end, length (no header assumed; detect if present)
+  # Columns: gene, chr, start, end, length; a header line is dropped when present.
   genomic_raw <- readr::read_tsv(params$genomic_info_file,
                           col_names = c("Gene", "chr", "gene_start", "gene_end", "gene_length"),
                           show_col_types = FALSE)
@@ -1019,9 +988,9 @@ if (has_genomic) {
   genomic_raw <- NULL
 }
 
-# Join scored positions with genomic coordinates via their gene, and lay
-# out chromosome-cumulative offsets for the regional-accumulation section
-# below, each position inherits its gene's genomic midpoint as x-coordinate.
+# Scored positions are joined to genomic coordinates through their gene: each position
+# inherits the genomic midpoint of its gene as x coordinate, shifted by chromosome-
+# cumulative offsets (plus a 5 Mb gap) for the regional accumulation plot.
 if (has_genomic && has_position_scores) {
   pos_genomic <- pos_df %>%
     dplyr::inner_join(genomic_raw, by = "Gene") %>%
@@ -1063,17 +1032,13 @@ if (has_pos_char) {
   pos_top    <- pos_df %>% dplyr::filter(side == "top")
   pos_bottom <- pos_df %>% dplyr::filter(side == "bottom")
 
-  # Percentile membership: prefer SCORING's published position_lists/
-  # slice_<dir><pct>.tsv (scoring_compute.R), the same canonical top/bottom/
-  # global x 10/5/1% cutoff 15.Comparison_report.Rmd and posenrich both read,
-  # over an independently re-derived quantile() cut. Each .pos_pct_test()
-  # call returns a CLOSURE (not a bare vector) so it can be applied to
-  # whichever population later needs it (pos_score_meta, pos_genomic_top/bot
-  # are different row subsets of pos_df, so the SAME membership set/threshold
-  # must be evaluated against each one individually, not computed once and
-  # reused positionally). Falls back to quantile() on `pop` (the direction's
-  # own population) when position_lists_dir is NULL or a slice file is
-  # missing, all 3 files for a direction, never a mix.
+  # Percentile membership comes from the position_lists/slice_<dir><pct>.tsv files
+  # published by scoring_compute.R when position_lists_dir is given, so that the
+  # reports agree on the top percentiles by construction. Otherwise it is a quantile()
+  # cut on the population `pop` of the direction. .pos_pct_test() returns a closure
+  # because the same membership set or threshold must be applied to different row
+  # subsets of pos_df (pos_score_meta, pos_genomic_top/bot), not computed once and
+  # reused by position.
   .pos_slice_ids <- function(dir_key, pct) {
     if (is.null(params$position_lists_dir)) return(NULL)
     f <- file.path(params$position_lists_dir, sprintf("slice_%s%d.tsv", dir_key, pct))
@@ -1092,13 +1057,9 @@ if (has_pos_char) {
     }
   }
 
-  # top25_pct: only used by the PAI3D/COSMIC/FADE "characterization by CAAS
-  # threshold" Fisher-OR sweep tables below, replacing their old ad hoc 50%
-  # row (quantile(0.50), no SCORING equivalent) with a 25% row that DOES have
-  # one (position_lists/slice_<dir>25.tsv), so every percentage row in
-  # those tables except the trivial 100% baseline now comes from the same
-  # published source. Not used for in_top_Xpct (only ever a 10/5/1% trio
-  # elsewhere in this report).
+  # top25_pct is used only by the Fisher odds-ratio tables of PAI3D, COSMIC and FADE
+  # (rows 100, 25, 10, 5 and 1%); every row except the 100% baseline comes from the
+  # published slices. The in_top_Xpct flags cover 10, 5 and 1% only.
   top25_pct <- 0.25
 
   test_glob_25 <- .pos_pct_test("global", top25_pct, pos_df)
@@ -1114,10 +1075,9 @@ if (has_pos_char) {
   test_bot_5   <- .pos_pct_test("bottom", top5_pct, pos_bottom)
   test_bot_1   <- .pos_pct_test("bottom", top1_pct, pos_bottom)
 
-  # thr_10: cosmetic-only scalar for the geom_vline reference line further
-  # below (a plot annotation has no equivalent to a discrete membership set) --
-  # always a plain quantile, independent of whether the tests above used the
-  # published path.
+  # thr_10: scalar for the reference line of the scatter plot, always a plain quantile
+  # (a line has no equivalent of a membership set), whether or not the tests above use
+  # the published slices.
   thr_10 <- quantile(pos_df$CAAS_score, 1 - top_pct, na.rm = TRUE)
 }
 ```
@@ -1148,10 +1108,9 @@ not restricted to the US scheme.
 ```
 
 ```{r vep-setup-common}
-# Computed against pos_df directly (test_glob_*() need Gene/Position/CAAS_score,
-# all present there), select() below only drops columns, never reorders/
-# filters rows, so assigning these vectors positionally into pos_score_meta
-# stays row-aligned with pos_df.
+# The tests are evaluated on pos_df (they need Gene, Position and CAAS_score). select()
+# below only drops columns and never reorders or filters rows, so the vectors stay
+# row-aligned with pos_df when assigned to pos_score_meta.
 .glob10 <- test_glob_10(pos_df); .glob5 <- test_glob_5(pos_df); .glob1 <- test_glob_1(pos_df)
 
 pos_score_meta <- pos_df %>%
@@ -1181,7 +1140,7 @@ if (has_vep_primateai) cat("## VEP: PrimateAI-3D\n\n")
 ```
 
 ```{r vep-pai-setup, eval=has_vep_primateai}
-# Detect PrimateAI score column (varies by database version)
+# The PrimateAI score column name varies with the database version.
 .pai_score_col <- intersect(
   c("score_PAI3D", "score", "primateai_score", "pathogenicity_score", "PrimateAI_score"),
   names(vep_pai_df)
@@ -1193,14 +1152,14 @@ if (is.na(.pai_score_col)) {
 ```
 
 ```{r vep-pai-join, eval=has_vep_primateai}
-# Restrict to shared genes present in both our results (background clean) and database
+# Restrict to the genes present in both the background and the database.
 shared_genes_pai <- intersect(bg_genes, unique(vep_pai_df$Gene))
 pos_pai_shared <- pos_score_meta %>% filter(Gene %in% shared_genes_pai)
 
-# Under US-only design, pai_char_score is simply the pathogenicity score of the US change.
-# If multiple alternative AAs map, we keep the maximum score.
-# Pathogenic status is defined exclusively by the prediction column (containing
-# "pathogenic", case-insensitive) - never by a raw score cutoff.
+# The layer is restricted to the US scheme, so pai_char_score is the pathogenicity score
+# of the US change; with several alternative amino acids the maximum is kept. Pathogenic
+# status comes only from the prediction column (containing "pathogenic", case-insensitive),
+# never from a score cutoff.
 pai_by_prot <- vep_pai_df %>%
   filter(caap_group == "US", Gene %in% shared_genes_pai) %>%
   mutate(
@@ -1220,7 +1179,7 @@ pos_vep_pai <- pai_by_prot %>%
   inner_join(pos_pai_shared, by = c("Gene", "Position")) %>%
   distinct(Gene, Position, .keep_all = TRUE)
 
-# Join back caas_change and other details for display table
+# Keep caas_change and the other details for the display table.
 pos_vep_pai_table_source <- vep_pai_df %>%
   filter(caap_group == "US", Gene %in% shared_genes_pai) %>%
   inner_join(pos_pai_shared, by = c("Gene", "Position")) %>%
@@ -1228,7 +1187,7 @@ pos_vep_pai_table_source <- vep_pai_df %>%
 
 has_vep_primateai <- nrow(pos_vep_pai) > 0
 
-# Directional PAI subsets: top+both and bottom+both
+# Directional PAI subsets (side top or bottom).
 pos_vep_pai_top    <- pos_vep_pai %>% filter(side == "top")
 pos_vep_pai_bottom <- pos_vep_pai %>% filter(side == "bottom")
 ```
@@ -1243,7 +1202,7 @@ pai_dir_df <- bind_rows(
 ) %>%
   filter(!is.na(caas_decile), !is.na(pai_char_score))
 
-# Per-direction median for horizontal reference lines
+# Median per direction, for the reference lines.
 pai_medians <- pai_dir_df %>%
   group_by(pai_direction) %>%
   summarise(median_pai = median(pai_char_score, na.rm = TRUE), .groups = "drop")
@@ -1282,18 +1241,14 @@ ggplot(pai_dir_df, aes(x = factor(caas_decile, levels = 1:10), y = pai_char_scor
 ```
 
 ```{r vep-pai-scatter, eval=has_vep_primateai, fig.height=5}
-# CAAS_score vs pai_char_score, coloured by direction.
-# Normalise both axes for Pearson r (rank / n).
+# CAAS_score against pai_char_score, colored by direction.
 #
-# NOTE the reported r is computed on WITHIN-RUN PERCENTILE RANKS of both axes, not
-# on their raw values, so it is a Spearman-style rank correlation reported under a
-# Pearson call, and its magnitude is not comparable to an r computed on raw scores.
-# Ranking is deliberate: CAAS_score's own phenotype component is already a
-# percent_rank (see scoring_compute.R sec. 2f / 11.Scoring_report.Rmd), and the raw
-# statistics underneath are floor-limited by the resampling resolution (1/N), so raw
-# correlations would be dominated by ties at the floor. The same caveat applies to
-# every "(rank-norm)" subtitle in this report: values are only interpretable relative
-# to other positions in THIS run, never across runs or traits.
+# The reported r is a Pearson correlation of the within-run percentile ranks (rank / n)
+# of both axes, i.e. a Spearman-type rank correlation, and its magnitude is not
+# comparable to an r on raw scores. Ranks are used because the resampling statistics
+# are floor-limited at 1/N, so raw values tie at the floor. The same caveat applies to
+# every "(rank-norm)" subtitle: values are interpretable only relative to the other
+# positions of this run, not across runs or traits.
 pos_vep_pai_dir <- bind_rows(
   pos_vep_pai_top    %>% mutate(pai_direction = "TOP"),
   pos_vep_pai_bottom %>% mutate(pai_direction = "BOTTOM")
@@ -1326,7 +1281,7 @@ ggplot(pos_vep_pai_dir, aes(x = CAAS_score, y = pai_char_score,
 ```
 
 ```{r vep-pai-pathogenic-bar, eval=has_vep_primateai, fig.height=5}
-# Count of pathogenic vs non-pathogenic positions, TOP and BOTTOM.
+# Pathogenic and non-pathogenic positions per direction.
 pai_pathogenic_counts <- bind_rows(
   pos_vep_pai_top    %>% mutate(pai_direction = "TOP"),
   pos_vep_pai_bottom %>% mutate(pai_direction = "BOTTOM")
@@ -1370,21 +1325,17 @@ DT::datatable(
 ```
 
 ```{r vep-pai-fisher, eval=has_vep_primateai}
-# Odds ratio & P-value interpretation:
-# - Odds Ratio: Measures the enrichment of pathogenic residues (by the prediction column) within the specified CAAS threshold compared to the rest of the positions. An odds ratio > 1 indicates enrichment.
-# - P-value: Reaches significance (via Fisher's exact test) when the proportion of pathogenic mutations is significantly higher inside the CAAS threshold.
-# `N positions` IS the Fisher test's actual population (PAI-scored, shared-gene
-# positions), mirrors run_cosmic_fisher_dir below.
+# Odds ratio: enrichment of pathogenic residues (by the prediction column) inside the CAAS
+# threshold relative to the other positions; a value above 1 is enrichment. P value:
+# Fisher's exact test of a higher proportion of pathogenic residues inside the threshold.
+# `N positions` is the population of the test (PAI-scored positions of shared genes), as
+# in run_cosmic_fisher_dir below.
 run_pai_fisher_dir <- function(df, label) {
   df   <- df %>% mutate(high_pai = !is.na(pai_pathogenic) & pai_pathogenic)
   n_all <- nrow(df)
 
-  # Build named threshold list: CAAS-flag-based thresholds + percentage-based
-  # rows. 100% is trivial (the full population, no computation needed); every
-  # other row, 25/10/5/1%, comes from SCORING's published position_lists
-  # slices (test_glob_25/in_top_Xpct), not an independently re-derived
-  # quantile() cut. 25% replaces the old ad hoc 50% row (quantile(0.50) had no
-  # published equivalent; SCORING only ever publishes 25/10/5/1%).
+  # Threshold rows: 100% is the whole population; 25, 10, 5 and 1% come from the
+  # published position_lists slices (test_glob_25, in_top_Xpct).
   pct_rows <- list(
     list(col = NULL, lbl = "100% (all positions)",    flag = rep(TRUE, n_all)),
     list(col = NULL, lbl = "25% (top 25% CAAS)",      flag = test_glob_25(df)),
@@ -1401,10 +1352,9 @@ run_pai_fisher_dir <- function(df, label) {
     n_top_h  <- sum(in_top & df$high_pai, na.rm = TRUE)
     n_rest   <- sum(!in_top)
     n_rest_h <- sum(!in_top & df$high_pai, na.rm = TRUE)
-    # Column order is [flag, not-flag] (not [not-flag, flag]) so fisher.test's
-    # odds ratio reads as "odds of pathogenic in-threshold vs out-of-threshold"
-    # the right way round, verified against an unambiguous 90%-vs-10%
-    # synthetic case (OR=77.3, not the inverted 0.013 the other order gives).
+    # The columns are ordered [flag, not flag] so that the odds ratio of fisher.test()
+    # is the odds of pathogenic inside the threshold over the odds outside it (the
+    # reverse order would give its inverse).
     mat <- matrix(c(n_top_h, n_rest_h, n_top - n_top_h, n_rest - n_rest_h), nrow = 2)
     ft  <- tryCatch(fisher.test(mat),
                     error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
@@ -1439,18 +1389,18 @@ if (has_vep_cosmic) cat("## VEP: COSMIC Mutant Census\n\n")
 ```
 
 ```{r vep-cosmic-setup, eval=has_vep_cosmic}
-# Restrict to shared genes present in both our results (background clean) and database
+# Restrict to the genes present in both the background and the database.
 shared_genes_cosmic <- intersect(bg_genes, unique(vep_cosmic_df$Gene))
 pos_cosmic_shared <- pos_score_meta %>% filter(Gene %in% shared_genes_cosmic)
 
-# Filter cosmic annotations for US only if caap_group is present
+# US scheme only, when the table has caap_group.
 if ("caap_group" %in% names(vep_cosmic_df)) {
   vep_cosmic_df <- vep_cosmic_df %>% filter(caap_group == "US", Gene %in% shared_genes_cosmic)
 } else {
   vep_cosmic_df <- vep_cosmic_df %>% filter(Gene %in% shared_genes_cosmic)
 }
 
-# Join cosmic annotations with pos_cosmic_shared (keeping all rows to count recurrence)
+# All rows are kept so that the recurrence of each position can be counted.
 cosmic_joined <- vep_cosmic_df %>%
   inner_join(pos_cosmic_shared, by = c("Gene", "Position"))
 
@@ -1490,7 +1440,7 @@ DT::datatable(
 ```
 
 ```{r vep-cosmic-somatic-bar, eval=has_vep_cosmic, fig.height=5}
-# Count of COSMIC mutations by Somatic Status and direction.
+# COSMIC mutations by somatic status and direction.
 cosmic_counts <- bind_rows(
   cosmic_joined %>% filter(side == "top") %>% mutate(cosmic_direction = "TOP"),
   cosmic_joined %>% filter(side == "bottom") %>% mutate(cosmic_direction = "BOTTOM")
@@ -1511,9 +1461,9 @@ ggplot(cosmic_counts, aes(x = MUTATION_SOMATIC_STATUS, y = n, fill = cosmic_dire
 ```
 
 ```{r vep-cosmic-fisher, eval=has_vep_cosmic}
-# Odds ratio & P-value interpretation:
-# - Odds Ratio: Measures the enrichment of positions with somatic mutations reported in the COSMIC database within the specified CAAS threshold compared to the rest of the positions. An odds ratio > 1 indicates enrichment.
-# - P-value: Reaches significance (via Fisher's exact test) when the proportion of cancer somatic mutations is significantly higher inside the CAAS threshold.
+# Odds ratio: enrichment of positions with COSMIC somatic mutations inside the CAAS
+# threshold relative to the other positions; a value above 1 is enrichment. P value:
+# Fisher's exact test of a higher proportion of such positions inside the threshold.
 pos_cosmic <- pos_cosmic_shared %>%
   mutate(has_cosmic = paste(Gene, Position, sep = "_") %in% paste(vep_cosmic_df$Gene, vep_cosmic_df$Position, sep = "_"))
 
@@ -1537,11 +1487,8 @@ run_cosmic_fisher_dir <- function(df, label) {
     n_top_c  <- sum(in_top & df$has_cosmic, na.rm = TRUE)
     n_rest   <- sum(!in_top)
     n_rest_c <- sum(!in_top & df$has_cosmic, na.rm = TRUE)
-    # Column order is [flag, not-flag] (not [not-flag, flag]) so fisher.test's
-    # odds ratio reads as "odds of COSMIC overlap in-threshold vs out-of-
-    # threshold" the right way round, verified against an unambiguous
-    # 90%-vs-10% synthetic case (OR=77.3, not the inverted 0.013 the other
-    # order gives).
+    # The columns are ordered [flag, not flag] so that the odds ratio of fisher.test()
+    # is the odds of COSMIC overlap inside the threshold over the odds outside it.
     mat <- matrix(c(n_top_c, n_rest_c, n_top - n_top_c, n_rest - n_rest_c), nrow = 2)
     ft  <- tryCatch(fisher.test(mat),
                     error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
@@ -1576,13 +1523,12 @@ if (has_fade_sites_top || has_fade_sites_bottom) cat("## FADE Site Overlap\n\n")
 ```
 
 ```{r fade-setup, eval=has_fade_sites_top || has_fade_sites_bottom}
-# Direction-specific by construction: TOP positions are only ever checked
-# against fade_sites_top, BOTTOM positions only against fade_sites_bottom --
-# never cross-checked (mirrors the FADE_top_sig/FADE_bottom_sig GMT layers in
-# build_position_gmt.py). Unlike COSMIC/PAI3D, FADE ran on the full analysed
-# gene set (not a partial external database), so no shared-gene / coverage
-# restriction is needed here, the universe is simply the direction-specific
-# CAAS position set itself (pos_score_meta, already carries in_top_Xpct flags).
+# Direction-specific: top positions are checked only against fade_sites_top and bottom
+# positions only against fade_sites_bottom (as the FADE_top_sig and FADE_bottom_sig
+# layers of build_position_gmt.py). FADE covers the full analyzed gene set, unlike the
+# partial external databases COSMIC and PAI3D, so no shared-gene restriction applies: the
+# universe is the CAAS position set of the direction (pos_score_meta, with the
+# in_top_Xpct flags).
 pos_fade_top <- if (has_fade_sites_top) {
   pos_score_meta %>%
     dplyr::filter(side == "top") %>%
@@ -1651,12 +1597,10 @@ ggplot(fade_bf_df, aes(x = fade_direction, y = max_bf, fill = fade_direction)) +
 ```
 
 ```{r fade-fisher, eval=has_fade_sites_top || has_fade_sites_bottom}
-# Odds ratio & P-value interpretation:
-# - Odds Ratio: Measures the enrichment of FADE-significant sites (BF >= fade_bf_threshold)
-#   within the specified CAAS threshold compared to the rest of the direction's positions.
-#   An odds ratio > 1 indicates enrichment.
-# - P-value: Reaches significance (via Fisher's exact test) when the proportion of
-#   FADE-significant sites is significantly higher inside the CAAS threshold.
+# Odds ratio: enrichment of FADE-significant sites (BF >= fade_bf_threshold) inside the
+# CAAS threshold relative to the other positions of the direction; a value above 1 is
+# enrichment. P value: Fisher's exact test of a higher proportion of such sites inside
+# the threshold.
 run_fade_fisher_dir <- function(df, label) {
   n_all <- nrow(df)
   pct_rows <- list(
@@ -1674,10 +1618,8 @@ run_fade_fisher_dir <- function(df, label) {
     n_top_f  <- sum(in_top & df$has_fade, na.rm = TRUE)
     n_rest   <- sum(!in_top)
     n_rest_f <- sum(!in_top & df$has_fade, na.rm = TRUE)
-    # Column order is [flag, not-flag] (not [not-flag, flag] as in the sibling
-    # PAI3D/COSMIC Fisher helpers above) so fisher.test's odds ratio reads as
-    # "odds of FADE-sig in-threshold vs out-of-threshold" the right way round --
-    # verified against an unambiguous 90%-vs-10% synthetic case (OR=77.3, not 0.013).
+    # The columns are ordered [flag, not flag] so that the odds ratio of fisher.test()
+    # is the odds of a FADE-significant site inside the threshold over the odds outside it.
     mat <- matrix(c(n_top_f, n_rest_f, n_top - n_top_f, n_rest - n_rest_f), nrow = 2)
     ft  <- tryCatch(fisher.test(mat),
                     error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
@@ -1711,12 +1653,10 @@ if (has_genomic) cat("## Regional Accumulation\n\n")
 ```
 
 ```{r position-region-accum, eval=has_genomic, fig.height=10, fig.width=14}
-# Build directional window summaries - TOP and BOTTOM use direction-specific
-# membership tests (test10/test5/test1: closures from test_top_*/test_bot_*
-# above, published-slice-preferring with a quantile() fallback, pos_sub here
-# is pos_genomic_top/pos_genomic_bot, a DIFFERENT row subset than pos_top/
-# pos_bottom the closures were built against, so they must be re-evaluated
-# against pos_sub's own rows, not reused positionally).
+# Window summaries per direction. test10, test5 and test1 are the closures test_top_* or
+# test_bot_* (published slices, quantile() fallback). pos_sub is pos_genomic_top or
+# pos_genomic_bot, a different row subset than pos_top and pos_bottom (which the closures
+# were built on), so the closures are evaluated on its own rows.
 .build_region_wins <- function(pos_sub, test10, test5, test1, chr_offsets_df, dir_label) {
   pos_sub %>%
     mutate(
@@ -1747,7 +1687,7 @@ if (has_genomic) cat("## Regional Accumulation\n\n")
     )
 }
 
-# pos_genomic already has chr_order and gene_mid; split by direction
+# pos_genomic carries chr_order and gene_mid; split by direction.
 pos_genomic_top <- pos_genomic %>% filter(side == "top")
 pos_genomic_bot <- pos_genomic %>% filter(side == "bottom")
 
@@ -1787,7 +1727,7 @@ knitr::kable(.make_region_tbl(pos_region_top),
 knitr::kable(.make_region_tbl(pos_region_bot),
   caption = "BOTTOM-direction: genomic windows with high-CAAS positions, ordered by N positions (top 30; direction-specific thresholds)")
 
-# Export directional regional accumulation tables as TSV
+# Export of the regional accumulation tables (regional_accumulation.tsv).
 region_export <- bind_rows(
   .make_region_tbl(pos_region_top) %>% mutate(Direction = "TOP"),
   .make_region_tbl(pos_region_bot) %>% mutate(Direction = "BOTTOM")

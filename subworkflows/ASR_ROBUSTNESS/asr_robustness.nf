@@ -1,13 +1,24 @@
 #!/usr/bin/env nextflow
+// asr_robustness.nf — Render the ASR path-score robustness report from the observed scoring output.
+// PhyloPhere | subworkflows/ASR_ROBUSTNESS/
 
 /*
-#  ASR Robustness: Characterization and reporting (Rmarkdown)
-#
-#  Consumes the full ct_disambiguation/ output directory produced by
-#  the observed scoring (CAAS_CORE_OBSERVED, CAAS_OBSERVED).  Focal MRCA nodes are auto-derived from the
-#  mrca_1_node / mrca_2_node / … columns in caas_convergence_master.csv.
-#  The canonical filtering threshold is params.ct_disambig_posterior_threshold.
-*/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  ASR_ROBUSTNESS_REPORT: renders 9.ASR_robustness.Rmd, which describes the
+ *  distribution of asr_path_score and of its descriptor derived_agreement over the
+ *  scored positions of caas_convergence_master.csv.
+ *
+ *  The report only displays params.ct_disambig_posterior_threshold; it does not
+ *  filter positions with it.
+ *
+ *  Consumes:  ct_disambiguation/ directory of the observed scoring (CAAS_CORE_OBSERVED, or
+ *             CAAS_OBSERVED when a discovery.tab is reused), posterior threshold
+ *  Produces:  9.ASR_robustness.html, tsv/ (summary statistics), plots/ (PNG)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+
+
+// ── ASR robustness report ──────────────────────────────────────────────────────
 
 process ASR_ROBUSTNESS_REPORT {
     tag "asr_robustness"

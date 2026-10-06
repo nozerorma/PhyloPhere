@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-# validate.py — Pre-render validation: required fields per enabled module.
+# validate.py — Pre-render validation: required fields per enabled module, and path existence.
 # PhyloPhere | gui/generation/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Pure function, no PySide6 import. Returns a list of human-readable error strings;
-an empty list means the project is renderable. Used both by tests/gui and by the
-GUI's "Generate Scripts..." action (which should show these in a dialog rather than
-letting render.py fail with a StrictUndefined KeyError deep inside a template).
+Pure functions, no PySide6 import. validate() returns a list of human-readable
+error strings; an empty list means the project is renderable. The GUI's "Generate
+Scripts..." action shows them in a dialog, so a missing field is reported there
+instead of surfacing as a StrictUndefined error inside a template.
 
-Scope is deliberately the "essential fields" surface only (see implementation plan
-§5) — this checks the fields actually exposed as GUI widgets, not the full
-conf/*.config parameter space.
+The scope is the fields exposed as GUI widgets, not the full conf/*.config
+parameter space. validate_paths() and path_entries() cover the complementary
+question: whether the filled-in paths exist.
+
+Imported by: gui/widgets/main_window.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -24,20 +26,25 @@ from gui.models.project import ProjectConfig
 
 
 def validate(project: ProjectConfig) -> list[str]:
+    """Return the error messages of a project that cannot be rendered (empty if valid).
+
+    Each enabled module is checked only for inputs that have no fallback: a blank
+    field that the pipeline can auto-generate is not an error.
+    """
     errors: list[str] = []
 
     def require(value: str, message: str) -> None:
         if not value.strip():
             errors.append(message)
 
-    # --- General ---
+    # ── General ───────────────────────────────────────────────────────────────
     require(project.general.repo_dir, "General: PhyloPhere repo directory is required.")
     require(
         project.general.nextflow_plugins_dir,
         "General: Nextflow plugins directory is required (symlinked into every run's NXF_HOME).",
     )
 
-    # --- Runtime ---
+    # ── Runtime ───────────────────────────────────────────────────────────────
     rt = project.runtime
     pc = project.precomputed
     require(rt.alignment_dir, "Runtime: alignment directory is required.")
@@ -67,7 +74,7 @@ def validate(project: ProjectConfig) -> list[str]:
                 f"(got {row.trait_type!r})."
             )
 
-    # --- Precomputed Run tab: base_path required whenever any reuse box is checked ---
+    # ── Precomputed Run: base_path is required whenever a reuse box is checked 
     any_precomp_checked = any(
         [
             pc.use_discovery, pc.use_resample, pc.use_disambiguation,
@@ -80,25 +87,20 @@ def validate(project: ProjectConfig) -> list[str]:
             "Precomputed Run: base path is required — at least one reuse checkbox is checked.",
         )
 
-    # --- CAAS ---
-    # caas_config_path is never required from this GUI. CONTRAST_SELECTION is the
-    # trait-file supplier, and run_single.sh.j2 turns it on whenever CAAS **or**
-    # Disambiguation is enabled — so a trait file always exists for whichever
-    # consumer needs one:
-    #   • CAAS on  -> CONTRAST_SELECTION's trait/tree feed CT(...) directly.
-    #   • CAAS off, Disambiguation on (Precomputed Run reuse) -> ct_tool is empty so
-    #     CT() never runs, but CONTRAST_SELECTION still does, and main.nf hands its
-    #     trait_file_out/tree_file_out to the observed scoring (CT_OBSERVED).
-    # The --caas_config fallbacks (ct.nf, ct_disambiguation.nf) are therefore only
-    # reachable by standalone non-GUI invocations, which is why the GUI can drive
-    # phenotypes purely through --my_traits.
+    # ── CAAS ──────────────────────────────────────────────────────────────────
+    # caas_config_path is never required. CONTRAST_SELECTION supplies the trait file
+    # and run_single.sh.j2 turns it on whenever CAAS or Disambiguation is enabled, so
+    # a trait file exists for whichever consumer needs one:
+    #   * CAAS on: the trait and tree of CONTRAST_SELECTION feed CT(...) directly.
+    #   * CAAS off, Disambiguation on (reuse via the Precomputed Run tab): CT() does
+    #     not run (ct_tool is empty) but CONTRAST_SELECTION does, and main.nf hands
+    #     its trait and tree files to the observed scoring (CT_OBSERVED).
+    # The --caas_config fallbacks are therefore reached only by standalone, non-GUI
+    # invocations, which is why the GUI can drive phenotypes through --my_traits alone.
     #
-    # CAAS's own output (discovery/resample) is only ever consumed
-    # downstream by Disambiguation, via run_meta_caas (main.nf:184-199) — so this
-    # is only a real problem when Disambiguation is actually enabled. The more precise
-    # version of this same check lives in the `disambig.enabled` branch below; a
-    # phenotype/reporting-only run (main.nf:155's standalone --contrast_selection path,
-    # or --reporting alone) has no downstream module reading CAAS output at all.
+    # The output of CAAS (discovery, resample) is consumed downstream only by
+    # Disambiguation, so a disabled CAAS is a problem only when Disambiguation is
+    # enabled and nothing is reused in its place.
     caas = project.modules.caas
     disambig = project.modules.disambiguation
     if not caas.enabled and disambig.enabled:
@@ -109,7 +111,7 @@ def validate(project: ProjectConfig) -> list[str]:
                 "have no input."
             )
 
-    # --- Disambiguation (+ Post-processing) ---
+    # ── Disambiguation (+ Post-processing) ────────────────────────────────────
     if disambig.enabled:
         require(
             disambig.ct_disambig_asr_cache_dir,
@@ -120,117 +122,110 @@ def validate(project: ProjectConfig) -> list[str]:
                 "Disambiguation is enabled but CAAS is disabled with no reuse box checked on "
                 "the Precomputed Run tab."
             )
-        # Post-processing's characterization report step always runs alongside
-        # Disambiguation now (no separate --ct_postproc toggle; see
-        # gui/models/modules.py's DisambiguationConfig) and needs gene_ensembl_file
-        # for its characterization reports and gene filtering. No longer a hard
-        # requirement here: leaving it blank auto-generates it from the alignment
-        # gene list via an Ensembl BioMart query (bin/generate_ensembl_mapping.py) —
-        # rt.alignment_dir is already required above, so the fallback source is
-        # always available.
-    # else: Disambiguation disabled means Post-processing is too (they're no longer
-    # independently toggleable) — Accumulation/Scoring's own checks below already
-    # cover the case where they still need Post-processing's output via pc.use_postproc.
+        # Post-processing always runs with Disambiguation (it has no toggle of its
+        # own, see DisambiguationConfig in gui/models/modules.py). Its gene filtering
+        # and characterization reports need gene_ensembl_file, which is not required
+        # here: left blank, it is generated from the alignment gene list by an Ensembl
+        # BioMart query (bin/generate_ensembl_mapping.py, called through
+        # bin/resolve_core_inputs.py). The alignment directory is required above, so
+        # the source of that gene list is always present.
+    # With Disambiguation disabled, Post-processing is disabled too. The Accumulation
+    # and Scoring checks below cover the case that still needs its output through
+    # pc.use_postproc.
 
-    # --- Accumulation ---
+    # ── Accumulation ──────────────────────────────────────────────────────────
     accum = project.modules.accumulation
     scoring = project.modules.scoring
     if accum.enabled:
-        # No longer a hard requirement: leaving it blank auto-generates Valdar
-        # variability files from the alignment (bin/compute_alignment_entropy.py,
-        # a verbatim port of ortholog_characterizator's compute_variability.py) —
-        # that needs --tax_id, which is itself optional (auto-generated from the
-        # tree, §1) — and if tax_id ultimately isn't available either, Accumulation
-        # falls back to a coarser raw-conservation measure computed straight from
-        # the alignment, not an error.
+        # accumulation_entropy_dir is not required: left blank, Valdar variability
+        # files are generated from the alignment (bin/compute_alignment_entropy.py).
+        # That needs --tax_id, itself optional because it is generated from the
+        # tree; without a tax_id, Accumulation falls back to a coarser conservation
+        # measure computed from the alignment (raw majority-residue conservation).
         if not disambig.enabled and not pc.use_postproc:
             errors.append(
                 "Accumulation is enabled but Post-processing is disabled with no "
                 "'Use precomputed Post-processing output' box checked on the Precomputed Run tab."
             )
-    # NOTE: Scoring does NOT require Accumulation. When the accum channel is absent
-    # main.nf passes null -> scoring.nf resolves a NO_ACCUM sentinel -> scoring_compute.R's
-    # has_accum_dir guard skips every accumulation code path. Scoring's only hard
-    # upstream is CT post-processing, checked below.
+    # Scoring does not require Accumulation: with no accumulation channel, main.nf
+    # passes null, scoring.nf resolves a NO_ACCUM sentinel and scoring_compute.R
+    # skips every accumulation code path (has_accum_dir). The only hard upstream of
+    # Scoring is CT post-processing, checked below.
 
-    # --- RERconverge ---
+    # ── RERconverge ───────────────────────────────────────────────────────────
     rer = project.modules.rer
     if rer.enabled:
         require(rer.gene_trees, "RERconverge: gene trees file is required when RER is enabled.")
 
-    # --- FADE ---
-    # FADE parameters always have defaults; nothing strictly required.
+    # ── FADE ──────────────────────────────────────────────────────────────────
+    # Every FADE parameter has a default; nothing is required.
 
-    # --- VEP ---
+    # ── VEP ───────────────────────────────────────────────────────────────────
     vep = project.modules.vep
     if vep.enabled:
         require(project.modules.disambiguation.caas_map_dir,
                 "VEP: per-gene MAP directory (Disambiguation, post-processing) is required when VEP is enabled.")
-        # vep_cache_dir is NOT required even when vep_ensembl is checked: left
-        # blank, ENSEMBL_VEP_ANNOTATE resolves a persistent default location
-        # and populates it itself via vep_install on first use (see
-        # subworkflows/VEP/ensembl_vep.nf).
+        # vep_cache_dir is not required even with vep_ensembl checked: left blank,
+        # ENSEMBL_VEP_ANNOTATE resolves a persistent default location and fills it
+        # with vep_install on first use (subworkflows/VEP/ensembl_vep.nf).
 
-    # --- Scoring ---
+    # ── Scoring ───────────────────────────────────────────────────────────────
     if scoring.enabled:
-        # gene_ensembl_file is no longer a hard requirement here either (same
-        # relaxation as the Disambiguation section above): leaving it blank
-        # auto-generates it from the alignment gene list via an Ensembl BioMart
-        # query (bin/generate_ensembl_mapping.py), unconditionally, regardless of
-        # whether Disambiguation is enabled — rt.alignment_dir is already required
-        # above, so the fallback source is always available.
+        # gene_ensembl_file is not required, as in the Disambiguation section: left
+        # blank, it is generated from the alignment gene list by an Ensembl BioMart
+        # query (bin/generate_ensembl_mapping.py), whether or not Disambiguation is
+        # enabled.
         if not disambig.enabled and not pc.use_postproc:
             errors.append(
                 "Scoring is enabled but Post-processing is disabled with no 'Use precomputed "
                 "Post-processing output' box checked on the Precomputed Run tab."
             )
-        # NOTE: RER and FADE are OPTIONAL inputs to Scoring, not requirements. When
-        # either is absent main.nf passes null -> scoring.nf resolves a NO_RER /
-        # NO_FADE_* sentinel -> scoring_compute.R's file_exists() guard (rejects any
-        # ^NO_ basename) drives has_rer / has_fade, skipping every RER/FADE code path.
-        # A CAAS-only Scoring run is valid; do not block it here.
+        # RER and FADE are optional inputs to Scoring. When either is absent, main.nf
+        # passes null, the Scoring process resolves a NO_* sentinel and the
+        # file_exists() guard of scoring_compute.R (it rejects any basename starting
+        # with NO_) sets has_rer / has_fade, which skip every RER/FADE code path.
+        # A CAAS-only Scoring run is valid and is not blocked here.
 
-    # --- Evidence of the N best positions (workflow CAAS_EVIDENCE, after SCORING) ---
+    # ── Evidence of the N best positions (CAAS_EVIDENCE, after SCORING) ───────
     n_evidence = scoring.caas_evidence_top_n.strip()
     if not (n_evidence.isascii() and n_evidence.isdigit()):
         errors.append(f"Scoring: the number of positions to explain (evidence) must be a non-negative integer (got {scoring.caas_evidence_top_n!r}).")
     elif int(n_evidence) > 0:
         if not scoring.enabled:
             errors.append("Scoring: evidence of the best positions explains position_scores.tsv, so Scoring must be enabled.")
-        # main.nf re-scores the rows of those positions from the observed discovery.tab: the run's own (CAAS replay
-        # feeding Disambiguation) or the reused one (Precomputed Run, discovery_from).
+        # main.nf re-scores the rows of those positions from the observed
+        # discovery.tab: the run's own (CAAS feeding Disambiguation) or the reused
+        # one (Precomputed Run, discovery_from).
         if not disambig.enabled or not (caas.enabled or pc.use_discovery):
             errors.append("Scoring: evidence of the best positions needs the observed discovery.tab: enable CAAS and "
                           "Disambiguation, or reuse a discovery on the Precomputed Run tab with Disambiguation enabled.")
 
-    # --- Enrichment (+ POSENRICH) ---
+    # ── Enrichment (+ POSENRICH) ──────────────────────────────────────────────
     enrichment = project.modules.enrichment
-    # gmt_dir is no longer required: leaving it blank defaults to the curated
-    # GMT set in subworkflows/ENRICHMENT/dat/ (plus the downloaded sets with auto_fetch_gmt, via bin/resolve_gmts.py).
+    # gmt_dir is not required: left blank, it defaults to the curated gene sets of
+    # subworkflows/ENRICHMENT/dat/ (plus the downloaded sets when auto_fetch_gmt is
+    # on, through bin/resolve_gmts.py).
     if enrichment.posenrich_enabled:
-        # cosmic_db and fubar_sites_file are NOT required: workflows/enrichment.nf
-        # and subworkflows/ENRICHMENT/posenrich.nf both fall back to NO_FILE sentinels
-        # and skip those layers gracefully when absent.
+        # Nothing is required for POSENRICH. cosmic_db and fubar_sites_file fall back
+        # to NO_FILE sentinels (workflows/enrichment.nf, posenrich.nf) and their
+        # layers are skipped when absent. egg_members_file and egg_annotations_file,
+        # both blank, use the pair versioned in subworkflows/ENRICHMENT/dat/, or a
+        # download when auto_fetch_eggnog is set (eggnog_resolution.nf).
+        # ucr_positions_file and domain_variability_file, when blank, are generated
+        # from the alignment (ucr_generation.nf, domain_variability_generation.nf);
+        # ucr_positions_file also needs runtime.tax_id, itself optional.
         pass
-        # egg_members_file / egg_annotations_file are not required either: leaving
-        # both blank uses the pair versioned in subworkflows/ENRICHMENT/dat/, or
-        # downloads it when auto_fetch_eggnog is set (subworkflows/ENRICHMENT/eggnog_resolution.nf).
-        # ucr_positions_file / domain_variability_file are no longer required:
-        # leaving either blank auto-generates it from the alignment
-        # (subworkflows/ENRICHMENT/{ucr_generation,domain_variability_generation}.nf)
-        # — ucr_positions_file also needs runtime.tax_id, itself optional (§1).
 
     return errors
 
 
 def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
-    """(label, path, kind) for every path-like field in the project. kind is
-    "file" or "dir". Empty values are the caller's job to skip — validate() above
-    already reports missing-but-required fields; this only checks paths that ARE
-    filled in but don't exist on disk.
+    """List (label, path, kind) for every path-like field of the project.
 
-    Shared with gui/remote.py's SSH-based existence check, so local and remote
-    validation always agree on exactly which fields count as paths.
+    kind is "file" or "dir". Empty values are included and left to the caller to
+    skip: validate() reports the required ones that are missing. Shared with the
+    SSH-based existence check of gui/remote.py, so local and remote validation
+    cover the same fields.
     """
     general = project.general
     runtime = project.runtime
@@ -274,7 +269,7 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("Enrichment: FUBAR sites file", m.enrichment.fubar_sites_file, "file"),
     ]
 
-    # --- Precomputed Run tab: real per-phenotype derived paths, not stored strings ---
+    # Precomputed Run tab: the per-phenotype paths derived from base_path, not stored strings.
     for i, row in enumerate(runtime.phenotype_rows, start=1):
         if not row.trait:
             continue
@@ -297,16 +292,16 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
 
 
 def validate_paths(project: ProjectConfig) -> list[str]:
-    """Check that every filled-in path field actually exists on disk.
+    """Return one message per filled-in path field that does not exist on disk.
 
-    Complements validate() (which only checks required-ness) — a field can be
-    non-empty but point at a typo'd or not-yet-mounted path, which validate()
-    can't catch since it never touches the filesystem.
+    Complements validate(), which checks only that required fields are set and never
+    touches the filesystem: a field can be non-empty and still point at a mistyped
+    or unmounted path.
     """
     problems: list[str] = []
     for label, path, kind in path_entries(project):
         if not path.strip():
-            continue  # required-ness is validate()'s job, not this function's
+            continue  # a blank path is validate()'s concern
         exists = os.path.isfile(path) if kind == "file" else os.path.isdir(path)
         if not exists:
             noun = "file" if kind == "file" else "directory"

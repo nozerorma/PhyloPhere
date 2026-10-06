@@ -1,19 +1,29 @@
 #!/usr/bin/env bash
-# run_hyphy_fade_batch.sh
-# ───────────────────────────────────────────────────────────────────────────
-# Run HyPhy FADE on a batch of genes using bash job control.
-# Each gene in the manifest is launched as a background subshell; up to
-# --workers run concurrently. Individual gene failures are TOLERATED (logged
-# and skipped) so the overall batch task always succeeds.
+# run_hyphy_fade_batch.sh — Run HyPhy FADE on a batch of genes with bash job control.
+# PhyloPhere | subworkflows/FADE/local/src/
+# =============================================================================
+# Called by:  FADE_BATCHED Nextflow process (fade_run.nf → bash run_hyphy_fade_batch.sh ...)
 #
-# Manifest format (tab-separated, one gene per line):
+# Each gene of the manifest runs as a background subshell, up to --workers at a time.
+# A failed gene is logged and skipped, so the batch task itself succeeds; an empty
+# JSON is removed so that it is not emitted as an output.
+#
+# Manifest (tab-separated, one gene per line, written by the process):
 #   gene_id <TAB> fasta_filename <TAB> annotated_tree_filename
+# The files are staged by Nextflow as fastas/<fasta_filename> and trees/<annotated_tree_filename>.
 #
-# Files are staged by Nextflow into:
-#   fastas/<fasta_filename>
-#   trees/<annotated_tree_filename>
-# ───────────────────────────────────────────────────────────────────────────
-set -uo pipefail  # NOT -e: individual gene failures must not abort the batch
+# Args (named flags):
+#   --batch-id, --manifest, --direction (top | bottom), --runner-mode (container | local)
+#       required; container mode runs hyphy through /usr/local/bin/_entrypoint.sh
+#   --workers            concurrent genes (positive integer, default 1)
+#   --cpu-per-worker     CPUs of each HyPhy call (default 1)
+#   --model, --model-file-arg, --method, --grid, --concentration
+#       FADE options (--model-file-arg is split into separate tokens)
+#   --mcmc-chains, --mcmc-chain-length, --mcmc-burn-in, --mcmc-samples
+#       MCMC options, used only when --method is not Variational-Bayes
+# Output: <gene_id>.<direction>.FADE.json in the working directory.
+# =============================================================================
+set -uo pipefail  # no -e: a failed gene must not abort the batch
 
 batch_id=""
 manifest=""
@@ -62,7 +72,7 @@ if ! [[ "$workers" =~ ^[1-9][0-9]*$ ]]; then
     exit 1
 fi
 
-# ── Build base HyPhy command ─────────────────────────────────────────────────
+# ── Base HyPhy command ───────────────────────────────────────────────────────
 declare -a base_cmd
 if [[ "$runner_mode" == "container" ]]; then
     base_cmd=("/usr/local/bin/_entrypoint.sh" "hyphy" "fade")
@@ -70,7 +80,7 @@ else
     base_cmd=("hyphy" "fade")
 fi
 
-# MCMC args only needed when not using Variational-Bayes
+# MCMC options are passed only for the MCMC method
 declare -a mcmc_args=()
 if [[ "$method" != "Variational-Bayes" ]]; then
     mcmc_args=(
@@ -87,7 +97,7 @@ echo "Genes in batch: $gene_count"
 echo "Concurrent workers: $workers (${cpu_per_worker} CPU(s) per HyPhy call)"
 
 # ── Job-control helpers ──────────────────────────────────────────────────────
-# Note: unlike the CT batch scripts, failures are non-fatal here.
+# A failed gene is not fatal; the loops swallow the exit status of finished jobs.
 
 wait_for_slot() {
     while [[ "$(jobs -pr | wc -l | tr -d ' ')" -ge "$workers" ]]; do
@@ -114,8 +124,8 @@ while IFS=$'\t' read -r gene_id fasta_name tree_name; do
     tree_path="trees/${tree_name}"
 
     (
-        # model_file_arg may be empty or "--model-file lg.dat"; pass as separate
-        # tokens only when non-empty to avoid quoting issues.
+        # model_file_arg is empty or "--model-file lg.dat"; it is added as separate
+        # tokens only when non-empty, to avoid quoting problems.
         declare -a cmd=(
             "${base_cmd[@]}"
             "--alignment"               "$fasta_path"
@@ -129,16 +139,15 @@ while IFS=$'\t' read -r gene_id fasta_name tree_name; do
             "--output"                  "$output_json"
         )
         if [[ -n "$model_file_arg" ]]; then
-            # model_file_arg is e.g. "--model-file lg.dat" — split into two tokens
+            # split "--model-file lg.dat" into two tokens
             read -r -a _mfa <<< "$model_file_arg"
             cmd+=("${_mfa[@]}")
         fi
         cmd+=("${mcmc_args[@]}")
 
-        # Cap BLAS/OpenMP threads to the per-worker CPU allocation.
-        # HyPhy's --cpu flag only controls its own scheduler; library-level
-        # threads (OpenBLAS, OpenMP, MKL) still detect hardware CPU count via
-        # sysconf() and ignore --cpu entirely unless these vars are set.
+        # Cap BLAS and OpenMP threads at the per-worker CPUs: --cpu only sets the
+        # HyPhy scheduler, while OpenBLAS, OpenMP and MKL read the CPU count of the
+        # node unless these variables are set.
         export OMP_NUM_THREADS="${cpu_per_worker}"
         export MKL_NUM_THREADS="${cpu_per_worker}"
         export OPENBLAS_NUM_THREADS="${cpu_per_worker}"

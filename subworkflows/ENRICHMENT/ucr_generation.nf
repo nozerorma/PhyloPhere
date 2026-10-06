@@ -1,32 +1,37 @@
 #!/usr/bin/env nextflow
+// ucr_generation.nf — Generate ucr_positions.tsv (ultra-conserved regions) from the protein alignments.
+// PhyloPhere | subworkflows/ENRICHMENT/
 
 /*
- * UCR_GENERATION subworkflow
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  UCR_GENERATION: builds the ucr_positions.tsv that POSENRICH takes as
+ *  --ucr_positions_file when the file is not provided. Three steps:
+ *    1. COMPUTE_ALIGNMENT_ENTROPY (compute_alignment_entropy.py): per-gene Valdar
+ *       variability, shared with CT_ACCUMULATION.
+ *    2. RUN_UCR_DETECTION (run_ucr_detection.py, which calls detect_ucr.py): UCR
+ *       windows per gene.
+ *    3. AGGREGATE_UCR_POSITIONS (aggregate_ucr.py): ucr_positions.tsv with the columns
+ *       build_position_gmt.py reads (gene, ucr_id, method, position, region_type,
+ *       C_trident, variability, g).
  *
- * Auto-generates ucr_positions.tsv (posenrich's --ucr_positions_file) when
- * left blank, chaining three verbatim ports of the user's own reference
- * implementation (ortholog_characterizator/subworkflows/variability):
- *   1. compute_alignment_entropy.py -> per-gene Valdar variability
- *      (shared with CT_ACCUMULATION's own auto-generation, §5)
- *   2. run_ucr_detection.py -> bin/detect_ucr.py (verbatim) per gene
- *   3. bin/aggregate_ucr.py (verbatim) -> ucr_positions.tsv in the exact
- *      schema build_position_gmt.py expects (gene, ucr_id, method, position,
- *      region_type, C_trident, variability, g)
+ *  The caller runs it only when --tax_id and --alignment are available (the entropy
+ *  step needs the taxonomy table); otherwise no UCR layer is built, which POSENRICH
+ *  accepts as an absent optional layer.
  *
- * Requires --tax_id (compute_variability.py's hard requirement) and
- * --alignment. If either is unavailable, generation is skipped and
- * ucr_positions_file stays empty — posenrich_enrich.py already treats an
- * absent UCR file as an optional annotation layer, not a hard failure.
+ *  When CT_ACCUMULATION runs with accumulation_entropy_dir unset, its own
+ *  COMPUTE_ALIGNMENT_ENTROPY call (workflows/ct_accumulation.nf) computes the same
+ *  entropy files again; the two calls are not merged, and only -resume reuses the
+ *  cached task.
  *
- * NOTE: if --ct_accumulation is ALSO enabled in the same run, its own
- * COMPUTE_ALIGNMENT_ENTROPY call (workflows/ct_accumulation.nf) recomputes
- * the identical entropy files independently — not deduplicated across
- * workflows in a fresh run (Nextflow's own -resume work-dir cache does
- * dedupe it on a resumed run, since the process+inputs hash is identical).
- * Not worth a cross-module cache for a single redundant computation.
+ *  Consumes:  alignment directory, tax_id table
+ *  Produces:  core_inputs/ucr_positions.tsv
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
 include { COMPUTE_ALIGNMENT_ENTROPY } from '../CT_ACCUMULATION/ctacc_run.nf'
+
+
+// ── UCR detection ──────────────────────────────────────────────────────────────
 
 process RUN_UCR_DETECTION {
     tag "auto-generate UCR windows"
@@ -45,6 +50,9 @@ process RUN_UCR_DETECTION {
         --output-dir ucr_raw
     """
 }
+
+
+// ── Aggregation ────────────────────────────────────────────────────────────────
 
 process AGGREGATE_UCR_POSITIONS {
     tag "auto-generate ucr_positions.tsv"
@@ -73,10 +81,13 @@ process AGGREGATE_UCR_POSITIONS {
     """
 }
 
+
+// ── Workflow ───────────────────────────────────────────────────────────────────
+
 workflow UCR_GENERATION {
     take:
-        alignment_dir_ch  // path/value channel: alignment directory
-        taxid_ch          // path/value channel: tax_id file
+        alignment_dir_ch  // alignment directory
+        taxid_ch          // tax_id table
 
     main:
         COMPUTE_ALIGNMENT_ENTROPY(alignment_dir_ch, taxid_ch)

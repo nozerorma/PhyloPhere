@@ -1,4 +1,13 @@
-"""Labelings and their hypothesis weights: one reader for the observed design and the null.
+# labelings.py — Readers of foreground/background labelings, trait files and PSS weights.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/core/
+
+"""
+Labelings and their hypothesis weights: one reader for the observed design and the null.
+
+Imported by: contract_main.py, observed_b0_main.py, explain_positions.py, src/core/driver.py, src/core/meta.py,
+src/utils/gene_wrapper.py
+Inputs: resample_*.tab, fop_labelings.tab, traitfile*.tab, fop_pairs.tsv, contrast_hypotheses_pairs.tsv
+Outputs: in-memory Labeling objects, trait pairs and PSS maps
 
 A labeling is one foreground/background assignment: a resample cycle (`b_12`), or one of the
 Dunn-independent hypotheses of a cycle (`b_12~H3`, the FOP fan-out). The real (observed) labeling

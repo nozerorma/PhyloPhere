@@ -1,27 +1,34 @@
 #!/usr/bin/env nextflow
+// primateai.nf — Map CAAS positions to PrimateAI-3D pathogenicity scores.
+// PhyloPhere | subworkflows/VEP/
 
 /*
- * PRIMATEAI_MAP
- * ─────────────
- * Maps CAAS variants to PrimateAI-3D pathogenicity scores.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  PRIMATEAI_MAP: maps CAAS positions to PrimateAI-3D scores (map_to_primateai.py):
+ *    1. group the CAAS rows by (Gene, Position);
+ *    2. translate each position to its hg38 codon with the per-gene MAP files
+ *       and infer the strand;
+ *    3. index the three nucleotides of every codon;
+ *    4. stream the PrimateAI-3D table (gzip TSV) and keep the rows whose alt_aa is a
+ *       derived residue of the CAAS and (when the ancestral residues are known)
+ *       whose ref_aa is an ancestral one.
  *
- * Strategy:
- *   1. Load CAAS file → group targets by (Gene, Position)
- *   2. Load MAP files for each Gene → map Position to codon coordinate and infer strand
- *   3. Build a genomic-position lookup table (expand codon to 3 nucleotides)
- *   4. Stream PrimateAI-3D.hg38.txt.gz and emit rows where:
- *        alt_aa ∈ derived_aas  AND  ref_aa matches hg38 reference
- *
- * Output columns:
- *   Gene | Position | hg38_ref_aa | caas_alt_aas | caap_group | scheme_weight |
- *   [all PrimateAI-3D columns: chr, pos, ref_aa, alt_aa, score_PAI3D,
- *    percentile_PAI3D, refseq, prediction, ...]
+ *  Consumes:  position_scores.tsv (SCORING), directory of per-gene MAP files,
+ *             PrimateAI-3D hg38 table
+ *  Produces:  vep/primateai_mapped.tsv, columns Gene, Position, hg38_ref_aa,
+ *             caas_alt_aas, caas_change, caap_group, scheme_weight, then every
+ *             PrimateAI-3D column (header only when nothing matches; empty when
+ *             the database file is missing)
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+
+// ── PrimateAI-3D mapping ─────────────────────────────────────────────────────
 
 process PRIMATEAI_MAP {
     tag "primateai"
     label 'process_long_compute'
-    errorStrategy 'ignore'
+    errorStrategy 'ignore'   // a failed annotation never stops the run
 
     publishDir path: "${params.outdir}/vep",
                mode: 'copy', overwrite: true,

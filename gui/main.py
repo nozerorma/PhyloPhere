@@ -21,6 +21,7 @@
 PhyloPhere Runner GUI: generates the SBATCH array-job wrapper and single-phenotype
 runner scripts from a multi-tab desktop form, instead of hand-editing them.
 
+Called by:  run_gui.sh (exec python -m gui.main "$@"), or by hand
 Usage:
     python -m gui.main [--project PROJECT.json]
 
@@ -37,6 +38,9 @@ from gui import project_io
 from gui.app import run as run_app
 
 
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="PhyloPhere Runner GUI",
@@ -46,7 +50,11 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+
 def main() -> None:
+    # Fail before Qt starts when the project file is missing; the exit code is the app's.
     args = parse_args()
     if args.project is not None and not args.project.is_file():
         print(f"error: project file not found: {args.project}", file=sys.stderr)

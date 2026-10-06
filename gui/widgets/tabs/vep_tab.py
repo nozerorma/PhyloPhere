@@ -5,10 +5,16 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-cosmic_db (conf/vep.config) is the COSMIC database path. It is one pipeline parameter with two readers: workflows/vep.nf builds
-its COSMIC channel from it, and workflows/enrichment.nf hands it to POSENRICH. Its only GUI field is on this tab, so it is
-editable only while the VEP module is enabled. scoring_vep_cosmic (Scoring's standalone fallback for a precomputed COSMIC
-scores TSV, conf/scoring.config) is a different parameter and lives on the Precomputed Run tab.
+VepTab: field specification of the VEP module (variant effect annotation; conf/vep.config).
+
+cosmic_db (conf/vep.config) is the COSMIC database path. It is one pipeline
+parameter with two readers: workflows/vep.nf builds its COSMIC channel from it, and
+workflows/enrichment.nf hands it to POSENRICH. Its only GUI field is on this tab,
+so it is editable only while the VEP module is enabled. scoring_vep_cosmic
+(Scoring's standalone fallback for a precomputed COSMIC scores TSV,
+conf/scoring.config) is a different parameter and lives on the Precomputed Run tab.
+
+Imported by: gui/widgets/main_window.py
 """
 
 # ── Local ─────────────────────────────────────────────────────────────────────
@@ -46,8 +52,9 @@ SPEC = ModuleTabSpec(
                  "pending that check.",
             importance="optional",
         ),
-        # validate.py requires disambiguation.caas_map_dir whenever vep.enabled: the per-gene
-        # MAP directory is a post-processing parameter that VEP reuses.
+        # gui/generation/validate.py requires disambiguation.caas_map_dir whenever
+        # vep is enabled: the per-gene MAP directory is a post-processing
+        # parameter that VEP reuses.
         Section("Per-gene MAP directory: set under Disambiguation, post-processing (required by VEP)"),
         Section("Ensembl VEP (independent of the databases above)"),
         FieldSpec(
@@ -72,10 +79,9 @@ SPEC = ModuleTabSpec(
                  "runs. Set this only to reuse/share an already-populated cache.",
             importance="default",
         ),
-        # Borderline default/optional: not in validate.py and has a working
-        # default ("homo_sapiens"/"GRCh38"), but silently mismatching your actual
-        # reference data produces wrong annotations rather than an obvious error —
-        # treated as "default" so changing it prompts a second look.
+        # Rated "default" although borderline: validate.py does not check it and it
+        # has a working default ("homo_sapiens"/"GRCh38"), but a mismatch with the
+        # actual reference data gives wrong annotations without an error.
         FieldSpec(name="vep_species", label="Ensembl VEP species", importance="default"),
         FieldSpec(name="vep_assembly", label="Ensembl VEP assembly", importance="default"),
     ),

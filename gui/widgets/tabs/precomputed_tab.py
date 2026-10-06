@@ -5,22 +5,23 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Replaces the old one-global-path-per-field design (gui/models/precomputed.py's
-module docstring has the full story — a single global path can't work once a batch
-run has more than one phenotype, since TRAIT varies per row). Every checkbox here
-both supplies a precomputed input AND turns off the module that would otherwise
-recompute it live — done by directly toggling that module's own enable checkbox on
-its tab (self._module_tabs / self._postproc_checkbox below), not by poking its
-config field, so the other tab's own enabled-state visuals (its essential/advanced
-groups graying out) stay in sync for free.
+PrecomputedTab: one base path plus one reuse checkbox per pipeline stage.
 
-CT/CAAS gets a general checkbox + 2 specific ones (discovery/resample),
-mirroring the CAAS tab's own 2-checkbox --ct_tool pattern — ct.nf treats each of
-discovery_from/resample_from independently, so partial reuse (e.g.
-discovery precomputed, resample recomputed) is meaningful. Every other
-stage is one checkbox: the actual "which of several files" fan-out (e.g. Disambiguation
-still needing 2 files) is an implementation detail handled entirely in
-gui/generation/templates/run_single.sh.j2's path construction, not exposed here.
+The per-phenotype path of each input is base_path/<TRAIT>/..., so one base path
+serves a batch with several phenotypes (gui/models/precomputed.py describes the
+layout). Each checkbox both supplies a precomputed input and turns off the module
+that would otherwise recompute it. The module is switched off by toggling the enable
+checkbox on its own tab (self._module_tabs), not by writing its config field, so
+that tab's enabled-state display (essential and advanced groups graying out) stays
+consistent.
+
+CT/CAAS has a general checkbox plus two specific ones (discovery, resample), as
+the CAAS tab has two checkboxes for --ct_tool: the pipeline takes --discovery_from
+and --resample_from independently, so reusing only one of them is meaningful.
+Every other stage has a single checkbox; the choice of which files that implies is
+made in gui/generation/templates/run_single.sh.j2 and is not exposed here.
+
+Imported by: gui/widgets/main_window.py
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────
@@ -55,11 +56,11 @@ class PrecomputedTab(QWidget):
         vep_tab,
         parent=None,
     ):
-        """The 6 *_tab args are the already-built module tabs (see
-        MainWindow._build_project_tabs, which constructs this tab last) — checking a
-        box here calls straight into that tab's own enable_toggle, so its config
-        field and visuals update through its existing logic rather than this tab
-        reaching into another module's config directly."""
+        """The six *_tab arguments are the already-built module tabs (see
+        MainWindow._build_project_tabs, which constructs this tab after them).
+        Checking a box here calls that tab's own enable_toggle, so its config field
+        and display update through its existing logic instead of this tab writing to
+        another module's config."""
         super().__init__(parent)
         self._config = config
         self._module_tabs = {
@@ -104,10 +105,9 @@ class PrecomputedTab(QWidget):
             "Disambiguation", "use_disambiguation", self._on_disambiguation_toggled
         ))
         content_layout.addWidget(self._build_simple_section(
-            # Post-processing has no separate enable toggle of its own to flip off
-            # here — it's derived straight from Disambiguation's enable_toggle in
-            # gui/generation/context.py, so checking this box just supplies the
-            # precomputed files without any module-toggle cascade.
+            # Post-processing has no enable toggle of its own to switch off:
+            # gui/generation/context.py derives it from Disambiguation's toggle and
+            # from this checkbox, so no module tab needs to be toggled here.
             "Post-processing", "use_postproc", lambda v: None
         ))
         content_layout.addWidget(self._build_simple_section(
@@ -125,7 +125,7 @@ class PrecomputedTab(QWidget):
         content_layout.addStretch(1)
         scroll.setWidget(content)
 
-    # ── Sections ─────────────────────────────────────────────────────────────
+    # ── Sections ──────────────────────────────────────────────────────────────
 
     def _build_ct_section(self) -> QGroupBox:
         box = QGroupBox("CT / CAAS")
@@ -162,7 +162,7 @@ class PrecomputedTab(QWidget):
         setattr(self, f"_checkbox_{field_name}", checkbox)
         return box
 
-    # ── Slots ────────────────────────────────────────────────────────────────
+    # ── Slots ─────────────────────────────────────────────────────────────────
 
     def _on_base_path_changed(self, value: str) -> None:
         self._config.base_path = value
@@ -180,8 +180,8 @@ class PrecomputedTab(QWidget):
         self._set_bool("use_ct", value)
         self._toggle_module("ct", value)
         if value:
-            # Convenience default: checking the general box reuses both files: the
-            # common case is a full precomputed CT stage, not a partial one.
+            # Checking the general box ticks both sub-boxes, since the usual case is a
+            # fully precomputed CT stage; either can then be unticked.
             for cb in (self.use_discovery, self.use_resample):
                 cb.setChecked(True)
 
@@ -193,7 +193,7 @@ class PrecomputedTab(QWidget):
         if tab.enable_toggle.isChecked() != (not value):
             tab.enable_toggle.setChecked(not value)
 
-    # ── i18n ─────────────────────────────────────────────────────────────────
+    # ── i18n ──────────────────────────────────────────────────────────────────
 
     def retranslate(self, lang: str = "en") -> None:
         from gui.i18n import tr

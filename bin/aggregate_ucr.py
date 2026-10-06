@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
+# aggregate_ucr.py — Aggregate the UCR windows of all genes into window, position and clade tables.
+# PhyloPhere | bin/
+
 """
-Aggregate UCR windows (from detect_ucr.py) across all genes and produce:
+AggregateUcr: joins the per-gene UCR windows (detect_ucr.py) with the per-position
+Valdar tables, optional Pfam domain hits and optional positive-selection calls.
 
-  ucr_windows.tsv            One row per detected UCR (all genes, all methods).
-  ucr_positions.tsv          Per-position table within each UCR's full window
-                             (core + flanks), enriched with optional Pfam domain
-                             overlap and positive-selection calls.
-  ucr_clade_variability.tsv  Per-UCR × clade mean variability for core and flanks
-                             (requires PROT_RAW FASTA files + taxid_tsv).
-  ucr_selection_summary.tsv  Per-UCR selection count summary (written only when
-                             --fubar_sites or --fel_results is provided).
+Called by:  AGGREGATE_UCR_POSITIONS Nextflow process (subworkflows/ENRICHMENT/ucr_generation.nf → aggregate_ucr.py)
+Inputs:     --ucr_dir      directory of <gene>.ucr.tsv (detect_ucr.py via run_ucr_detection.py)
+            --entropy_dir  directory of <gene>.entropy.tsv (compute_alignment_entropy.py)
+            --prot_dir     directory of <gene>.fa protein alignments
+            --taxid_tsv    taxonomy table read by compute_variability.load_taxonomy
+            optional: --map_dir, --domain_tsv, --fubar_sites, --fel_results, --family_order_tsv
+            --flank_size is accepted but unused: the flanks come from the UCR tables
+Outputs:    ucr_windows.tsv            one row per detected UCR (all genes, all methods)
+            ucr_positions.tsv          one row per position of each UCR window (core + flanks),
+                                       with Pfam domain overlap and selection calls when given
+            ucr_clade_variability.tsv  per-UCR x clade mean variability of core and flanks
+            ucr_selection_summary.tsv  per-UCR selection counts; written only when --fubar_sites
+                                       or --fel_results is given
 
-Position cross-referencing for positive selection:
-  HyPhy site numbers are 1-based positions in the BMGE-trimmed protein alignment,
-  while entropy.tsv positions are 1-based raw protein alignment columns.  When
-  --map_dir is provided (*.map.tsv files from parse_bmge_track.py), the mapping
-  ori_codon_col → trim_codon_col is used to translate raw positions to HyPhy site
-  numbers.  Without MAP files, raw and trim positions are assumed equal (accurate
-  for genes where BMGE removed very few columns).
+Positive-selection cross-reference: HyPhy site numbers index the trimmed alignment, while
+entropy.tsv positions index the raw alignment columns. With --map_dir (per-gene *.map.tsv:
+raw column, status, trimmed column) a raw position is translated through the rows with status
+"selected". Without a MAP file, or for a position it lacks, raw and trimmed numbers are taken
+as equal, which holds only when the trimmer removed few columns upstream of the position.
+A path whose file name starts with NO_ is a Nextflow placeholder for an absent optional input.
 
 Usage:
   python aggregate_ucr.py \\
@@ -42,24 +50,22 @@ import os
 import sys
 from collections import defaultdict
 
-# Import Valdar helpers from sibling script (co-located in subworkflows/variability/local/).
-# __file__ resolves to the absolute projectDir path when called via Nextflow.
+# compute_variability.py sits next to this script in bin/; the path insert makes the import
+# independent of the working directory of the Nextflow task.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from compute_variability import clade_variability, load_taxonomy
 
 
-# ---------------------------------------------------------------------------
-# Sentinels
-# ---------------------------------------------------------------------------
+# ── Sentinels ─────────────────────────────────────────────────────────────────
+
 
 def _is_sentinel(path):
-    """Return True for Nextflow sentinel files like NO_FUBAR, NO_DOMAIN_TSV, …"""
+    """True for an absent optional input: None or a Nextflow placeholder file named NO_*."""
     return path is None or os.path.basename(path).startswith('NO_')
 
 
-# ---------------------------------------------------------------------------
-# File readers
-# ---------------------------------------------------------------------------
+# ── File readers ──────────────────────────────────────────────────────────────
+
 
 def read_fasta(path):
     seqs, hdr, buf = [], None, []
@@ -78,7 +84,7 @@ def read_fasta(path):
 
 
 def load_ucr_tsvs(ucr_dir):
-    """Returns dict  gene -> list[ucr_record_dict]."""
+    """Read <gene>.ucr.tsv files into {gene: [UCR record dict]}; genes without rows are omitted."""
     result = {}
     for path in sorted(glob.glob(os.path.join(ucr_dir, '*.ucr.tsv'))):
         gene = os.path.basename(path).replace('.ucr.tsv', '')
@@ -110,7 +116,7 @@ def load_ucr_tsvs(ucr_dir):
 
 
 def load_entropy_index(entropy_dir):
-    """Returns dict  gene -> {position(int): {C_trident, variability, g}}."""
+    """Read <gene>.entropy.tsv files into {gene: {position: {C_trident, variability, g}}}."""
     result = {}
     for path in sorted(glob.glob(os.path.join(entropy_dir, '*.entropy.tsv'))):
         gene = os.path.basename(path).replace('.entropy.tsv', '')
@@ -133,9 +139,10 @@ def load_entropy_index(entropy_dir):
 
 
 def load_map_files(map_dir):
-    """
-    Returns dict  gene -> {ori_codon_col(int): trim_codon_col(int)}.
-    Skips sentinel files.
+    """Read <gene>.map.tsv files into {gene: {raw column: trimmed column}}.
+
+    Only rows with status "selected" and a numeric trimmed column are kept (the columns
+    are, in order, raw column, status, trimmed column). Placeholder files are skipped.
     """
     result = {}
     for path in sorted(glob.glob(os.path.join(map_dir, '*.map.tsv'))):
@@ -160,7 +167,7 @@ def load_map_files(map_dir):
 
 
 def load_fubar_sites(path):
-    """Returns dict  (gene, site_int) -> {fubar_prob_pos, fubar_prob_neg, fubar_is_pos, fubar_is_neg}."""
+    """Read FUBAR site calls into {(gene, trimmed site): {fubar_prob_pos, fubar_prob_neg, fubar_is_pos, fubar_is_neg}}."""
     result = {}
     with open(path) as fh:
         header = fh.readline().rstrip().split('\t')
@@ -183,7 +190,7 @@ def load_fubar_sites(path):
 
 
 def load_fel_results(path):
-    """Returns dict  (gene, site_int) -> {dN, dS, p_fel}."""
+    """Read FEL site results into {(gene, trimmed site): {dN, dS, p_fel}}."""
     result = {}
     with open(path) as fh:
         header = fh.readline().rstrip().split('\t')
@@ -205,7 +212,7 @@ def load_fel_results(path):
 
 
 def load_domain_tsv(path):
-    """Returns dict  gene -> list[{pfam_id, domain_instance, ali_start, ali_end}]."""
+    """Read domain hits into {gene: [{pfam_id, domain_instance, ali_start, ali_end}]}; the bounds are compared as such with the UCR position numbers."""
     result = {}
     with open(path) as fh:
         header = fh.readline().rstrip().split('\t')
@@ -237,11 +244,11 @@ def _safe_float(v):
         return float('nan')
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def region_type(pos, ucr):
+    """Label a position as core or as upstream/downstream flank of the UCR."""
     if pos < ucr['start_pos']:
         return 'flank_up'
     if pos > ucr['end_pos']:
@@ -250,7 +257,7 @@ def region_type(pos, ucr):
 
 
 def find_domain(domain_list, pos):
-    """Return pfam_id of the first overlapping domain hit, or None."""
+    """pfam_id of the first domain hit covering pos, or None."""
     for hit in domain_list:
         if hit['ali_start'] <= pos <= hit['ali_end']:
             return hit['pfam_id']
@@ -265,19 +272,19 @@ def _fmt(v, digits=6):
     return str(v)
 
 
-# ---------------------------------------------------------------------------
-# Clade variability within UCR windows
-# ---------------------------------------------------------------------------
+# ── Clade variability within UCR windows ──────────────────────────────────────
+
 
 def _norm_key(name):
     return name.replace(' ', '_').lower()
 
 
 def compute_ucr_clade_variability(gene, ucrs, prot_dir, taxonomy, alpha, beta, gamma):
-    """
-    For each UCR window in the gene, compute per-clade mean variability
-    separately for the core positions and the flank positions.
-    Returns a list of row dicts.
+    """Per-clade mean variability of the core and of the flank columns of each UCR of a gene.
+
+    Clades with fewer than 3 sequences are skipped. Variability is computed by
+    compute_variability.clade_variability on the sub-alignment of the selected columns;
+    NaN when the region has no columns. Returns a list of row dicts (empty without a FASTA).
     """
     fa_path = os.path.join(prot_dir, f'{gene}.fa')
     if not os.path.isfile(fa_path):
@@ -339,12 +346,16 @@ def compute_ucr_clade_variability(gene, ucrs, prot_dir, taxonomy, alpha, beta, g
     return rows
 
 
-# ---------------------------------------------------------------------------
-# Selection class helper
-# ---------------------------------------------------------------------------
+# ── Selection class helper ────────────────────────────────────────────────────
+
 
 def sel_class(fubar_row, fel_row):
-    """Return 'positive', 'negative', or 'neutral'."""
+    """Selection class of a site: 'positive', 'negative' or 'neutral'.
+
+    A FUBAR positive call gives 'positive'. Otherwise a FEL result with p < 0.05 decides:
+    positive if dN > dS, negative if not (this overrides a FUBAR negative call with dN > dS).
+    Without FEL, a FUBAR negative call gives 'negative'.
+    """
     is_pos = fubar_row.get('fubar_is_pos', False)
     is_neg = fubar_row.get('fubar_is_neg', False)
     if not is_pos and fel_row:
@@ -363,9 +374,8 @@ def sel_class(fubar_row, fel_row):
     return 'neutral'
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
@@ -395,7 +405,7 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    # ── Load core data ─────────────────────────────────────────────────────
+    # ── Load inputs ────────────────────────────────────────────────────────
     all_ucrs = load_ucr_tsvs(args.ucr_dir)
     if not all_ucrs:
         print('No UCR TSV files found — writing empty ucr_windows.tsv.', file=sys.stderr)
@@ -462,7 +472,7 @@ def main():
                     ent_row = ent.get(pos)
                     if ent_row is None:
                         continue
-                    hphy = gmap.get(pos, pos)  # fallback: raw pos == trim pos
+                    hphy = gmap.get(pos, pos)  # without a MAP entry the raw position is used as the trimmed one
                     fubar_row = fubar_data.get((gene, hphy), {})
                     fel_row   = fel_data.get((gene, hphy),   {})
 
@@ -515,7 +525,7 @@ def main():
                 n_clad += 1
     print(f'Written: {clad_path} ({n_clad} clade×UCR rows)', flush=True)
 
-    # ── ucr_selection_summary.tsv (only when psel data is present) ─────────
+    # ── ucr_selection_summary.tsv (only when selection data is present) ────
     if not (has_fubar or has_fel):
         return
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env nextflow
+// contrast_selection.nf — Select the independent foreground/background contrast pairs of a trait.
+// PhyloPhere | workflows/
 
 /*
 ##
@@ -17,17 +19,33 @@
 #
 # Author:         Miguel Ramon (miguel.ramon@upf.edu)
 #
-# File: reporting.nf
+# File: contrast_selection.nf
 #
 */
 
 /*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  CONTRAST_SELECTION Workflow: Preliminary reporting pipeline for trait analysis Rmarkdowns.
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  CONTRAST_SELECTION: prepares the species tree and trait table, runs the trait
+ *  reports and selects the independent contrast pairs that define the foreground
+ *  and background species of the CAAS discovery.
+ *
+ *  Steps: tree-tip curation against the alignments (NAME_CURATION, when
+ *  params.ali_sp_names or params.alignment is set); optional data pruning
+ *  (params.prune_data) and exploration reports (params.reporting), or a bare
+ *  dataset exploration that generates the trait statistics; the composition
+ *  report (CI_COMPOSITION_REPORT) and the selection of the contrast pairs
+ *  (CONTRAST_ALGORITHM); and the minimum-contrast gate (CHECK_MIN_CONTRASTS).
+ *
+ *  Consumes:  params.my_traits (trait table), params.tree (species tree)
+ *  Produces:  traitfile, permulation traitfile and traitfile directory (gated by
+ *             CHECK_MIN_CONTRASTS), tree, trait statistics, candidate species,
+ *             contrast results directory, the low_contrasts skip flag and, when
+ *             pruning ran, the pruned trait and tree files
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
-// Import local modules/subworkflows
+// ── Includes ─────────────────────────────────────────────────────────────────
+
 include { DATASET_EXPLORATION } from '../subworkflows/TRAIT_ANALYSIS/ta_dataset_exploration'
 include { PHENOTYPE_EXPLORATION } from '../subworkflows/TRAIT_ANALYSIS/ta_phenotype_exploration'
 include { DATASET_PRUNE } from '../subworkflows/TRAIT_ANALYSIS/ta_data_prune'
@@ -37,6 +55,8 @@ include { CONTRAST_ALGORITHM } from '../subworkflows/TRAIT_ANALYSIS/ct_independe
 include { CHECK_MIN_CONTRASTS } from '../subworkflows/CT/ct_check_min_contrasts'
 include { NAME_CURATION } from '../subworkflows/TRAIT_ANALYSIS/ta_name_curation'
 
+// ── Workflow ─────────────────────────────────────────────────────────────────
+
 workflow CONTRAST_SELECTION {
     main:
     assert params.my_traits : "Contrast selection workflow requires --my_traits."
@@ -45,20 +65,12 @@ workflow CONTRAST_SELECTION {
     def trait_file = file(params.my_traits)
     def tree_file_ch = Channel.value(file(params.tree))
 
-    // NAME_CURATION: normalise tree tip labels to alignment-canonical species names,
-    // pruning any tip with no real alignment coverage. Always run it here, regardless
-    // of params.reporting/prune_data: REPORTING() (called below when reporting=true and
-    // prune_data=false) does curate its own tree internally, but that curation is
-    // scoped to REPORTING's own DATASET_EXPLORATION/PHENOTYPE_EXPLORATION calls -- its
-    // emit: block never exposes the plain curated tree back to this caller (only
-    // pruned_tree_file, which stays empty whenever prune_data=false). Without this fix,
-    // `tree_file` below silently stayed the RAW, uncurated params.tree for that whole
-    // branch, so CI_COMPOSITION_REPORT/CONTRAST_ALGORITHM could (and did, in production)
-    // select a contrast pair partner that exists in the tree/trait data but has zero
-    // real alignment coverage anywhere -- e.g. Papio_ursinus (tax_id 36229, no synonym
-    // under that tax_id in ali_sp_names.txt either) -- silently dooming that pair to
-    // never produce a CAAS discovery for any gene. TREE_CLEANUP is cheap; running it a
-    // second time when REPORTING() also curates internally is a non-issue next to that.
+    // NAME_CURATION renames the tree tips to the alignment species names and prunes the
+    // tips with no alignment counterpart. It runs here whenever alignment names are
+    // available, regardless of params.reporting and params.prune_data. REPORTING() curates
+    // the tree too, but only for its own reports (its emit: block does not return the
+    // curated tree), so without this call the contrast pairs would be selected on the raw
+    // params.tree and could include a species that has no alignment coverage.
     if (params.ali_sp_names || params.alignment) {
         def tax_id_param = params.tax_id
         def tax_id_ch = tax_id_param
@@ -118,18 +130,18 @@ workflow CONTRAST_SELECTION {
         contrast_stats_file = dataset_exploration_out.stats_file
     }
 
-    // Always run composition step — the Rmd branches internally:
-    // Jeffreys CI when n_trait/c_trait columns exist in the data, discrete categorization otherwise.
+    // The composition report always runs; it chooses its method from the data (see
+    // CI_COMPOSITION_REPORT: Jeffreys intervals for count columns, coded levels for an
+    // ordinal trait, Phylogenetic Shift Score for a continuous one).
     log.info "Running composition analysis (CI or discrete). n_trait=${params.n_trait ?: '<none>'}, c_trait=${params.c_trait ?: '<none>'}"
     ci_composition_out = CI_COMPOSITION_REPORT(trait_file, tree_file, dataset_out)
     ci_out = ci_composition_out.results_dir
 
     contrast_out = CONTRAST_ALGORITHM(trait_file, tree_file, ci_out)
 
-    // Gate: skip the entire CT pipeline if the traitfile contains fewer than
-    // params.min_contrasts (default 3) foreground pairs.  When the threshold
-    // is not met, CHECK_MIN_CONTRASTS writes a low_contrasts.skip sentinel to
-    // outdir and emits nothing — all downstream processes are silently skipped.
+    // Gate: with fewer than params.min_contrasts (3 when unset) foreground species in the
+    // traitfile, CHECK_MIN_CONTRASTS writes a low_contrasts.skip sentinel to outdir and
+    // emits no traitfile, so the processes that consume it do not run.
     check_out = CHECK_MIN_CONTRASTS(
         contrast_out.trait_file_out,
         contrast_out.permulation_trait_file_out,
@@ -142,7 +154,7 @@ workflow CONTRAST_SELECTION {
         trait_dir_out              = check_out.trait_dir_out
         tree_file_out            = contrast_out.tree_file_out
         stats_file_out           = contrast_stats_file
-        // Pre-Dunn candidate fg/bg species pool for FADE (see 3.CI-composition.Rmd).
+        // Candidate fg/bg species pool before the Dunn gate, used by FADE (written by 3.CI-composition.Rmd).
         candidate_species_out    = ci_composition_out.candidate_species_out
         contrast_results_dir     = contrast_out.contrast_results_dir
         low_contrasts_skip       = check_out.skip_flag

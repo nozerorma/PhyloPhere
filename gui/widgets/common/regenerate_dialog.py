@@ -1,15 +1,27 @@
 #!/usr/bin/env python3
-# regenerate_dialog.py — RegenerateReportsDialog: standalone "regenerate HTML
-# reports from an existing output directory" dialog, independent of any
-# project configuration. Scans a chosen directory for the pipeline's known
-# report HTML files and builds ready-to-run shell scripts that re-render them
-# from the files already produced there (see gui/generation/report_registry.py).
+# regenerate_dialog.py — RegenerateReportsDialog: re-render HTML reports from an existing output directory.
 # PhyloPhere | gui/widgets/common/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+RegenerateReportsDialog: scan a pipeline output directory and build scripts that
+re-render its HTML reports.
+
+Independent of the project configuration: it takes only a directory. The scan
+(local, or over SSH when a remote host is set in the General tab) looks for the
+known report HTML files under <outdir>/html_reports/, and each detected report
+lists the input files it needs (see gui/generation/report_registry.py). The
+selected reports become shell scripts, left in `generated_scripts` as
+(filename, text) pairs for the caller to save.
+
+Imported by: gui/widgets/main_window.py
+"""
+
+# ── Standard library ──────────────────────────────────────────────────────────
 from pathlib import Path
 
+# ── Third-party ───────────────────────────────────────────────────────────────
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
@@ -28,6 +40,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+# ── Local ─────────────────────────────────────────────────────────────────────
 from gui import remote
 from gui.generation.report_registry import (
     UNSUPPORTED_NOTE,
@@ -38,14 +51,12 @@ from gui.generation.report_registry import (
 from gui.widgets.common import remote_context
 from gui.widgets.common.path_field import PathField
 
-# A remote outdir can hold a lot of files; a plain existence/glob check needs
-# more room than the 15s default used for the small single-round-trip checks
-# elsewhere (gui.remote.DEFAULT_TIMEOUT).
+# A remote output directory can hold many files, so its listing needs more time
+# than the default timeout of the small single-round-trip checks (gui.remote.DEFAULT_TIMEOUT).
 _REMOTE_SCAN_TIMEOUT = 60
 
-# Same yellow translucent disclaimer style used for module-tab "if disabled"
-# banners (gui/widgets/common/module_tab.py) — reused here for consistency
-# rather than inventing a second warning-box style.
+# Same yellow disclaimer style as the module tabs' "If disabled" banner
+# (gui/widgets/common/module_tab.py).
 _DISCLAIMER_STYLESHEET = (
     "QLabel { background-color: rgba(234, 179, 8, 0.12); color: #d97706; "
     "border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 6px; padding: 8px 12px; font-weight: 500; }"
@@ -55,7 +66,7 @@ _STATUS_COL, _REPORT_COL, _SLOTS_COL = 0, 1, 2
 
 
 class RegenerateReportsDialog(QDialog):
-    """Standalone: takes no ProjectConfig, only a directory. Emits nothing —
+    """Standalone: takes no ProjectConfig, only a directory. Emits no signal;
     the caller (MainWindow) reads self.generated_scripts after exec()."""
 
     def __init__(self, parent: QWidget | None = None, repo_dir: str = ""):
@@ -143,7 +154,7 @@ class RegenerateReportsDialog(QDialog):
         button_row.addWidget(close_btn)
         layout.addLayout(button_row)
 
-    # ── Actions ──────────────────────────────────────────────────────────
+    # ── Actions ───────────────────────────────────────────────────────────────
 
     def _scan(self) -> None:
         outdir_str = self.outdir_field.text().strip()
@@ -151,9 +162,9 @@ class RegenerateReportsDialog(QDialog):
             QMessageBox.warning(self, "Cannot scan", "Set the output directory first.")
             return
 
-        # Read at scan time, not construction time — matches PathField's own
-        # convention (see remote_context.py) so a host set/cleared on the
-        # General tab after this dialog opened is still respected.
+        # Read at scan time, not at construction, as PathField does (see
+        # remote_context.py), so a host set or cleared in the General tab while
+        # the dialog is open is respected.
         host = remote_context.get_remote_host()
         repo_dir = Path(self.repo_field.text().strip() or ".")
 

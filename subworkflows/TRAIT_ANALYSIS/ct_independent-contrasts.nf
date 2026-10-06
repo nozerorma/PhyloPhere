@@ -1,8 +1,22 @@
 #!/usr/bin/env nextflow
+// ct_independent-contrasts.nf — Render the independent-contrast selection report and emit the CT traitfiles.
+// PhyloPhere | subworkflows/TRAIT_ANALYSIS/
 
 /*
-#  Contrast selection for CT analysis (Rmarkdown)
-*/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  CONTRAST_ALGORITHM: renders 4.Independent_contrasts.Rmd, which ranks the candidate
+ *  pairs of the composition report and selects the independent contrasts (modified
+ *  Dunn index) for the CT analysis. The report writes the trait files and the
+ *  permulation trait file; the process copies the input tree to the output location.
+ *
+ *  Consumes:  trait file, species tree, results directory of CI_COMPOSITION_REPORT
+ *  Produces:  data_exploration/ (traitfile.tab, traitfile directory, permulation_traitfile.tab,
+ *             pruned_tree_file.nwk, trait_stats.csv when present), html_reports/*.html
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+
+
+// ── Contrast selection report ──────────────────────────────────────────────────
 
 process CONTRAST_ALGORITHM {
     tag "CONTRAST_ALGORITHM"
@@ -30,7 +44,7 @@ process CONTRAST_ALGORITHM {
     script:
     def local_dir = "${baseDir}/subworkflows/TRAIT_ANALYSIS/local"
     // selection_algorithm.R sources the shared contrast-selection core from
-    // src/lean_contrast_selector.R; stage it in (it lives with the CT scripts).
+    // src/lean_contrast_selector.R; it lives with the CT scripts and is copied into src/.
     def ct_scripts = "${baseDir}/subworkflows/CT/local/scripts"
     def seed = params.seed ?: ''
     def clade = params.clade_name ?: ''

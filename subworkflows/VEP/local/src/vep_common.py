@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""
-vep_common.py  —  Shared helpers for the VEP annotation-source scripts
-(map_to_primateai.py, map_to_cosmic.py, build_vep_hgvs.py).
+# vep_common.py — Residue-tally and MAP-file parsing shared by the VEP annotation scripts.
+# PhyloPhere | subworkflows/VEP/local/src/
 
-Extracted verbatim from map_to_primateai.py (map_to_cosmic.py carried an
-identical copy) so a third annotation source (Ensembl VEP) can reuse the same
-CAAS-descriptor and MAP-file parsing without a fourth copy-paste, and without
-importing a script that runs its own database-streaming logic at module
-scope.
+"""
+VepCommon: Helpers shared by the three annotation sources, so that they read a
+CAAS position and its MAP file identically: the ancestral and derived residues of
+a position, and the table from alignment column to hg38 codon and strand.
+
+Imported by: map_to_primateai.py, map_to_cosmic.py, build_vep_hgvs.py (copied next
+to them in the work directory by PRIMATEAI_MAP, COSMIC_MAP and ENSEMBL_VEP_ANNOTATE)
 """
 
+# ── Standard library ──────────────────────────────────────────────────────────
 import os
 import sys
 import glob
+
+
+# ── Residue sets ──────────────────────────────────────────────────────────────
 
 
 def _support_letters(support_str):
@@ -37,19 +42,24 @@ def _support_letters(support_str):
 
 
 def anc_der_from_descriptor(*args, **kwargs):
-    """(ancestral_aas, derived_aas) from position-level residues and side.
+    """(ancestral_aas, derived_aas) from the residue tallies of a position and its side.
 
-    Accepts:
+    Call forms:
       anc_der_from_descriptor(top_residues, bottom_residues, side, caas="")
-    or legacy 4-arg signature:
       anc_der_from_descriptor(derived_residues, top_residues, bottom_residues, side, caas="")
+    The leading derived_residues of the second form is ignored (the derived set is
+    recomputed from the other arguments); a fifth positional argument is `caas`.
 
-    Extracts ancestral and derived alleles from top/bottom residues and side.
-    Falls back to caas pattern (e.g. "G/K") if species residues are empty.
+    The side sets the direction: "top" makes the bottom residues ancestral and the
+    top ones derived, "bottom" the reverse; any other side leaves the ancestral set
+    empty and takes both as derived.
+    The caas pattern (e.g. "G/K", top/bottom) replaces the residues when both
+    tallies are empty. Residues shared by both sets are removed from the derived
+    set unless that would empty it.
     """
     caas = kwargs.get("caas", "")
     if len(args) == 4:
-        # Legacy: (derived_residues, top_residues, bottom_residues, side)
+        # (derived_residues, top_residues, bottom_residues, side)
         _, top_res, bot_res, side = args
     elif len(args) == 3:
         top_res, bot_res, side = args
@@ -81,17 +91,26 @@ def anc_der_from_descriptor(*args, **kwargs):
 
 
 def load_convergence_skip(position_scores_tsv):
-    """RETIRED in scoring_v2 core v3 (V3-4). The old gate skipped positions whose
-    ``convergence_schemes`` was "" (fractional-FOP disagreement). core v3 dropped
-    ``convergence_schemes`` entirely — a domain that does not converge just scores
-    0 — so there is nothing to gate on. Always a no-op; the optional CLI arg is
-    accepted but ignored for backward compatibility.
+    """Positions to skip, as a set of (gene, position); always None (no position is skipped).
+
+    The position_scores argument is accepted so callers can pass the optional
+    command-line argument through; it is not read.
     """
     return None
 
 
+# ── MAP files ─────────────────────────────────────────────────────────────────
+
+
 def load_map_file(gene, vep_map_dir):
-    """Parse Gene.*.map.tsv to retrieve codon position-to-coordinate mapping and strand."""
+    """Parse the MAP file of `gene` (`<gene>.*.map.tsv`, else `<gene>.map.tsv`).
+
+    Returns (pos_map, strand), or (None, None) when the file is missing, lacks
+    the columns hg38_nt_coord, hg38_aa_pos and prot_ali_col, or has no usable
+    coordinate. pos_map is {prot_ali_col (1-based alignment column): (hg38_aa_pos,
+    chromosome, hg38 coordinate of the first codon nucleotide)}; strand is "+" or
+    "-", inferred from the trend of the coordinates down the file.
+    """
     pattern = os.path.join(vep_map_dir, f"{gene}.*.map.tsv")
     matching = glob.glob(pattern)
     if not matching:
@@ -113,7 +132,6 @@ def load_map_file(gene, vep_map_dir):
         header = header_line.split('\t')
         col = {name.strip(): idx for idx, name in enumerate(header)}
 
-        # Verify required columns exist
         required = ['hg38_nt_coord', 'hg38_aa_pos', 'prot_ali_col']
         if not all(c in col for c in required):
             print(f"WARN: MAP file {map_file} is missing required columns", file=sys.stderr)
@@ -144,7 +162,7 @@ def load_map_file(gene, vep_map_dir):
     if not coords:
         return None, None
 
-    # Determine strand by coordinate trend
+    # Strand: the sign of the summed steps between consecutive coordinates.
     is_minus = False
     if len(coords) > 1:
         diffs = [coords[i+1] - coords[i] for i in range(len(coords)-1)]
@@ -152,7 +170,7 @@ def load_map_file(gene, vep_map_dir):
         is_minus = (sign_sum < 0)
     strand = '-' if is_minus else '+'
 
-    # Build mapping from 1-based prot_ali_col to (hg38_aa_pos, chrom, coord)
+    # Rows without a valid alignment column or coordinate are left out of the map.
     pos_map = {}
     for r in rows:
         prot_ali = r['prot_ali_col']

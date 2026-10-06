@@ -1,26 +1,38 @@
 #!/usr/bin/env python3
-"""
-join_vep_output.py  —  Rejoin Ensembl VEP's --tab consequence output to the
-originating CAAS (Gene, Position, caap_group) via the id-map TSV
-build_vep_hgvs.py wrote (VEP echoes the input HGVS identifier back verbatim
-under Uploaded_variation).
+# join_vep_output.py — Attach Ensembl VEP consequences to the CAAS positions they were computed for.
+# PhyloPhere | subworkflows/VEP/local/src/
 
-Usage
------
-    join_vep_output.py <vep_tab_output> <id_map.tsv> <output_tsv>
+"""
+JoinVepOutput: rejoins the --tab output of Ensembl VEP to the CAAS position that
+produced each input identifier. VEP echoes the input HGVS identifier verbatim in the
+first column (Uploaded_variation), which is the key of the id map written by
+build_vep_hgvs.py. VEP rows whose identifier is not in the map are dropped.
+
+Called by:  ENSEMBL_VEP_ANNOTATE Nextflow process (ensembl_vep.nf → join_vep_output.py)
+Inputs:     vep_tab_output  VEP --tab file (## metadata lines, a #-prefixed header, rows)
+            id_map.tsv      hgvs_id, Gene, Position, caap_group
+Outputs:    output_tsv      Gene, Position, caap_group, then the VEP columns
 """
 
+# ── Standard library ──────────────────────────────────────────────────────────
 import csv
 import sys
 
 
+# ── Functions ─────────────────────────────────────────────────────────────────
+
+
 def load_id_map(path: str) -> dict:
+    """Return {hgvs_id: (Gene, Position, caap_group)} from the id-map TSV."""
     mapping = {}
     with open(path, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
         for row in reader:
             mapping[row["hgvs_id"]] = (row["Gene"], row["Position"], row["caap_group"])
     return mapping
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
 
 
 def main():

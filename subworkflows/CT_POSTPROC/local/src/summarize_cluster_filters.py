@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Summarize CT cluster-filter parameter sweeps."""
+# summarize_cluster_filters.py — Count the positions discarded by each (minlen, maxcaas) cluster filter.
+# PhyloPhere | subworkflows/CT_POSTPROC/local/src/
+
+"""
+Summary of the cluster-filter parameter sweep: the number of Discarded positions of every
+*.filtered.minlen<L>.maxcaas<C>.tsv file, in total and per caap_group.
+
+Called by:  CT_FILTER_SUMMARY process (ctpp_clustfilter.nf)
+Inputs:     --input-dir  directory with the *.filtered.*.tsv files of filter_caas_clusters-param.py
+Outputs:    --summary-output  one row per parameter pair (Parameter, Minlen, Maxcaas, one column
+                              per caap_group when present, DiscardedCount)
+            --discarded-output  one row per file (File, DiscardedCount, Minlen, Maxcaas, caap_groups)
+"""
 
 import argparse
 import re

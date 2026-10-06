@@ -1,6 +1,12 @@
+# loaders.py — Small loaders and parsers of discovery-row fields shared by the observed and null sides.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/data/
+
 """
-Data loaders for the CAAS scorer
-================================
+Data loaders for the CAAS scorer.
+
+Imported by: explain_positions.py, observed_b0_main.py, src/core/observed.py, src/utils/gene_wrapper.py
+Inputs: an Ensembl genes TSV/CSV with a `gene` column; discovery-row cell values
+Outputs: in-memory sets and normalized values
 
 Small helpers shared by the observed and the null side:
 
@@ -23,9 +29,9 @@ logger = logging.getLogger(__name__)
 def _parse_conserved_pair(raw: str) -> str:
     """Normalise the conserved_pair field from the CT output.
 
-    caas_id.py writes the field as ``"{count}:{pair_id1},{pair_id2},..."``,
-    e.g. ``"1:3"`` or ``"2:1,4"``.  Legacy data (max_conserved=0 runs or old
-    tooling) may already contain just a plain pair id like ``"1"``.
+    caas_id.py (CT) writes the field as ``"{count}:{pair_id1},{pair_id2},..."``,
+    e.g. ``"1:3"`` or ``"2:1,4"``. A value without the count prefix (a plain pair
+    id such as ``"1"``) is returned unchanged.
 
     Returns a comma-separated string of pair ids, or ``""`` when no conserved
     pairs are present (``"0:"`` or empty input).
@@ -34,14 +40,14 @@ def _parse_conserved_pair(raw: str) -> str:
     if not raw:
         return ""
     if ":" in raw:
-        # "{count}:{pairs}" — drop the count prefix
+        # "{count}:{pairs}": drop the count prefix
         pairs_part = raw.split(":", 1)[1]
-        # "0:" → "" (no conserved pairs)
+        # "0:" gives "" (no conserved pairs)
         return pairs_part.strip()
-    return raw  # already a plain id or comma-separated ids (legacy)
+    return raw  # already a plain id or comma-separated ids
 
 
-# -- Functions for CAAS Metadata Loading and Parsing --#
+# ── Metadata parsing ──────────────────────────────────────────────────────────
 
 
 def as_bool(v: Any) -> bool:
@@ -53,7 +59,7 @@ def as_bool(v: Any) -> bool:
     return str(v).strip().lower() in {"true", "1", "yes", "y"}
 
 
-# -- Function to Load Ensembl Genes --#
+# ── Ensembl genes ─────────────────────────────────────────────────────────────
 
 
 def load_ensembl_genes(ensembl_genes_file: Path) -> Set[str]:
@@ -66,7 +72,7 @@ def load_ensembl_genes(ensembl_genes_file: Path) -> Set[str]:
         handle.seek(0)
         dialect = csv.Sniffer().sniff(sample)
         reader = csv.DictReader(handle, dialect=dialect)
-        # reader.fieldnames may be None (no header) — guard against that before membership test
+        # reader.fieldnames is None without a header: check it before the membership test
         if not reader.fieldnames or "gene" not in reader.fieldnames:
             raise ValueError("Ensembl genes file must contain a 'gene' column")
         genes = {row["gene"].strip() for row in reader if row.get("gene")}

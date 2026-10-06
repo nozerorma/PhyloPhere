@@ -1,27 +1,30 @@
-################################################################################
-# Analytical phylogenetic shift score
-#
-# VENDORED VERBATIM from Fabio Barteri's phyloq:
+# pss_core.R — Vendored phyloq engine: BM/OU fits, covariances and the analytical phylogenetic shift score (PSS).
+# PhyloPhere | subworkflows/CT/local/scripts/
+# Sourced by: permulations.R, lean_contrast_selector.R (when the PSS functions are not yet loaded),
+#             3.CI-composition.Rmd (copied into src/ by ct_ci.nf and ct_independent-contrasts.nf)
+# =============================================================================
+# Provenance: vendored verbatim from Fabio Barteri's phyloq
 #   github.com/linudz/phyloq @ 84eb428
 #   fabio/primate.traits/scripts/pss.core.R
 #   (+ fit_models / covariances_from_fits from parametric_bootstrap_chunk.R)
 #
 # Local additions are marked "PHYLOPHERE:":
-#   - `force_model` arg on phylogenetic_shift_score() / select_model() to honour
-#     an explicit --perm_strategy (ou|bm) instead of the AIC rule.
-#   - OU fits use an alpha upper bound scaled to tree height (ou_alpha_bounds);
+#   - `force_model` arg of phylogenetic_shift_score() / select_model(), which honors an
+#     explicit --perm_strategy (ou|bm) instead of the AIC rule.
+#   - OU fits use an alpha upper bound scaled to tree height (ou_alpha_bounds), because
 #     geiger's default bound is absolute and truncates the fit on short trees.
-# Validation (validate_fit) and model selection (select_model: OU iff
-# AIC_OU + 2 < AIC_BM, otherwise BM — plain AIC) are identical to upstream so
-# PhyloPhere's PSS ranking matches phyloq's.
-################################################################################
+# Validation (validate_fit) and model selection (select_model: OU iff AIC_OU + 2 < AIC_BM,
+# otherwise BM) are identical to upstream, so the PSS ranking matches phyloq's.
+# =============================================================================
 
-# PHYLOPHERE: OU alpha search interval scaled to tree height. geiger's default
-# upper bound, exp(1), is absolute: on a unit-height chronogram (e.g. ape::chronos
-# output) it corresponds to a half-life of 0.25 tree heights and truncates fits
-# of weakly structured traits, while the same data on a tree in Myr are fitted
-# freely. An upper bound of 100 / height puts the shortest admissible half-life
-# at under 1% of the tree height, i.e. effectively independent tips.
+# ── Model fits ────────────────────────────────────────────────────────────────
+
+# PHYLOPHERE: OU alpha search interval scaled to tree height. geiger's default upper
+# bound, exp(1), is absolute: on a unit-height chronogram (e.g. ape::chronos output) it
+# corresponds to a half-life of 0.25 tree heights and truncates the fit of weakly
+# structured traits, while the same data on a tree in Myr are fitted freely. An upper
+# bound of 100 / height puts the shortest admissible half-life at under 1% of the tree
+# height, i.e. effectively independent tips.
 ou_alpha_bounds <- function(tree) {
   height <- max(ape::node.depth.edgelength(tree))
   c(exp(-500), 100 / height)
@@ -48,6 +51,8 @@ covariances_from_fits <- function(tree, fits) {
   )
 }
 
+# Full PSS workflow on a trait table and a tree (fit, select model, score all species pairs).
+# The CAAS pipeline calls the pieces above and below directly instead of this wrapper.
 phylogenetic_shift_score <- function(data, tree, trait,
                                       species_col = "SpeciesBROAD",
                                       outdir = NULL,
@@ -154,6 +159,9 @@ match_trait_to_tree <- function(data, tree, trait, species_col) {
   list(data = trait_data, tree = tree)
 }
 
+# ── Fit validation and covariances ────────────────────────────────────────────
+
+# Stops on a non-positive rate (sigsq, alpha), which would make the covariances invalid.
 validate_fit <- function(fit, model) {
   if (is.null(fit$opt$sigsq) || !is.finite(fit$opt$sigsq) || fit$opt$sigsq <= 0) {
     stop(model, " produced an invalid variance rate.", call. = FALSE)
@@ -163,11 +171,13 @@ validate_fit <- function(fit, model) {
   }
 }
 
+# Expected tip covariance under BM: sigma2 times the shared root-to-MRCA path length.
 bm_covariance <- function(tree, sigma2) {
   covariance <- sigma2 * ape::vcv.phylo(tree)
   covariance[tree$tip.label, tree$tip.label, drop = FALSE]
 }
 
+# Expected tip covariance under OU for a process started at a fixed root state.
 ou_covariance <- function(tree, alpha, sigma2) {
   shared <- ape::vcv.phylo(tree)
   shared <- shared[tree$tip.label, tree$tip.label, drop = FALSE]
@@ -187,6 +197,8 @@ fit_aic <- function(fit) {
   value
 }
 
+# ── Model selection and pairwise scores ───────────────────────────────────────
+
 select_model <- function(fits, force_model = NULL) {
   # PHYLOPHERE: explicit --perm_strategy override; NULL/auto keeps the AIC rule.
   if (!is.null(force_model) && nzchar(force_model)) {
@@ -198,6 +210,9 @@ select_model <- function(fits, force_model = NULL) {
   if (ou + 2 < bm) "OU" else "BM"
 }
 
+# Probability-like shift score of one pair: 1 - 2 * P(Z > |difference| / sd of the pair
+# difference under the model); close to 1 when the difference is large for the pair's
+# phylogenetic distance.
 analytical_s <- function(observed_difference, pair_variance) {
   tolerance <- 100 * .Machine$double.eps * max(abs(pair_variance), 1)
   pair_variance[pair_variance < 0 & pair_variance >= -tolerance] <- 0
@@ -206,6 +221,9 @@ analytical_s <- function(observed_difference, pair_variance) {
   -expm1(log(2) + stats::pnorm(z, lower.tail = FALSE, log.p = TRUE))
 }
 
+# Scores every species pair. FinalScore = S (under the selected model) x trait difference
+# / patristic distance, the last two normalized by their maxima. The table is sorted by
+# FinalScore, best first.
 calculate_pairwise_scores <- function(values, tree, covariance_bm,
                                       covariance_ou, selected_model) {
   species <- tree$tip.label

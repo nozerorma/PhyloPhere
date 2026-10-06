@@ -1,7 +1,17 @@
+# stats.R — Trait classification, descriptive statistics and interval overlap for the reports.
+# PhyloPhere | subworkflows/TRAIT_ANALYSIS/local/src/
+# =============================================================================
+# Sourced by: commons.R (itself sourced by the trait-analysis Rmd reports)
+#
+# Loaded after commons.R has defined the trait parameters (`trait`,
+# `taxon_of_interest`, `n_trait`, `c_trait`, `secondary_trait`, `branch_trait`),
+# which stats.f() reads from the calling environment. Defines is_ordinal_trait(),
+# compute_trait_summary(), stats.f() and ci_overlap().
+# =============================================================================
 
-# Load required library
 library(stats)
 
+# Fallback logger, used only when commons.R has not defined debug_log().
 if (!exists("debug_log", inherits = TRUE)) {
   debug_log <- function(...) {
     msg <- sprintf(...)
@@ -9,13 +19,15 @@ if (!exists("debug_log", inherits = TRUE)) {
   }
 }
 
-# Decide whether a trait vector is an ordinal fg/bg code rather than a
-# continuous measurement. `trait_type` (from params / commons.R) forces it:
-#   "ordinal"    -> always treat as coded
-#   "continuous" -> never
-#   ""/"auto"    -> infer: 2-5 distinct, all-integer levels => coded
-# A genuine continuous trait (prevalence, body mass, ...) has many distinct
-# non-integer values over the sampled species, so "auto" leaves it alone.
+# ── Trait type and global summary ─────────────────────────────────────────────
+
+# TRUE when a trait vector is an ordinal fg/bg code rather than a continuous
+# measurement. `trait_type` (params / commons.R) can force the answer:
+#   "ordinal"    always coded
+#   "continuous" never coded
+#   ""/"auto"    inferred: 2 to 5 distinct integer-valued levels => coded
+# A continuous trait (prevalence, body mass, ...) has many distinct non-integer
+# values across species, so the inference leaves it alone.
 is_ordinal_trait <- function(trait_values, trait_type = "auto") {
   tt <- as.character(trait_type)
   if (length(tt) == 0 || is.na(tt[1]) || !nzchar(tt[1])) tt <- "auto"
@@ -28,11 +40,10 @@ is_ordinal_trait <- function(trait_values, trait_type = "auto") {
 }
 
 # Descriptive global summary of a trait vector: location, spread, and the
-# quantiles used for IQR outlier fences and summary tables. This is pure
-# description — the fg/bg (foreground/background) partition that drives contrast
-# selection and FADE is produced downstream by 4.Independent_contrasts.Rmd from
-# the phylogenetically-independent selected pairs (PSS for continuous traits,
-# extreme coded levels for ordinal), never here.
+# quantiles used for the IQR outlier fences and the summary tables. It is purely
+# descriptive: the fg/bg (foreground/background) partition that drives contrast
+# selection is produced by 4.Independent_contrasts.Rmd from the selected
+# independent pairs, never here.
 compute_trait_summary <- function(trait_values) {
   trait_values <- as.numeric(trait_values)
   trait_values <- trait_values[!is.na(trait_values)]
@@ -55,7 +66,18 @@ compute_trait_summary <- function(trait_values) {
   )
 }
 
-# Function to extract several statistical insights from the data
+# ── Per-species statistics table ──────────────────────────────────────────────
+
+# Per-species table of the trait with its descriptive context. Keeps species,
+# taxon, trait and the optional n / c / tax_id / secondary / branch columns that
+# exist in `df`, drops rows with NA trait, and adds:
+#   g_*               global mean, median, sd, quantiles (q10 to q90) and IQR
+#   taxa_*            within-taxon mean, median, sd, q25 and q75
+#   outlier           low/high outlier vs the global 1.5 x IQR fences
+#   extreme_outlier   same with 3 x IQR fences
+#   taxa_outlier, extreme_taxa_outlier   same fences computed within the taxon
+#   taxa_label        low_extreme / high_extreme / normal tail flag within the taxon
+# Returns NULL when fewer than 4 rows remain.
 stats.f <- function(df) {
   c_trait_name <- if (exists("c_trait", inherits = TRUE)) c_trait else ""
   n_trait_name <- if (exists("n_trait", inherits = TRUE)) n_trait else ""
@@ -101,11 +123,10 @@ stats.f <- function(df) {
     return(NULL)
   }
 
-  # Normalize to numeric once
+  # Trait as numeric, once.
   df_num <- df %>% dplyr::mutate("{trait_col}" := as.numeric(.data[[trait_col]]))
 
-  # Global descriptive stats (location, spread, quantiles for outlier fences).
-  # No fg/bg partition here — 4.Independent_contrasts.Rmd owns that.
+  # Global descriptive statistics; the fg/bg partition is made in 4.Independent_contrasts.Rmd.
   trait_summary <- compute_trait_summary(df_num[[trait]])
   g_mean <- trait_summary$g_mean
   g_median <- trait_summary$g_median
@@ -119,7 +140,7 @@ stats.f <- function(df) {
   g_iqr <- trait_summary$g_iqr
   debug_log("stats.f: g_median = %.4f, g_iqr = %.4f", g_median, g_iqr)
 
-  # Taxon stats separately, then join
+  # Per-taxon statistics, joined back below.
   taxon_stats <- df_num %>%
     dplyr::group_by(.data[[taxa_col]]) %>%
     dplyr::summarise(
@@ -168,8 +189,7 @@ stats.f <- function(df) {
         TRUE ~ "normal"
       ),
       taxa_label = dplyr::case_when(
-        # descriptive per-taxon tail flag for exploration plots only; the
-        # median guard keeps a minority-tail trait labelable (see compute_trait_summary)
+        # Descriptive per-taxon tail flag, for the exploration plots only.
         (.data[[trait_col]] < taxa_q25) & (.data[[trait_col]] <= taxa_median) ~ "low_extreme",
         (.data[[trait_col]] > taxa_q75) & (.data[[trait_col]] >= taxa_median) ~ "high_extreme",
         TRUE ~ "normal"
@@ -179,9 +199,7 @@ stats.f <- function(df) {
   df_num
 }
 
-# ----------------------------------------
-# Confidence Interval Functions
-# ----------------------------------------
+# ── Confidence intervals ──────────────────────────────────────────────────────
 
 #' Check if two confidence intervals overlap
 #' 

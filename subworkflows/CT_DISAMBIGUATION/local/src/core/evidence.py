@@ -1,4 +1,12 @@
-"""Evidence of a position: what each domain of each hypothesis saw, and the choice of the positions worth looking at.
+# evidence.py — Per-domain evidence rows of a position and the selection of the top positions to explain.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/core/
+
+"""
+Evidence of a position: what each domain of each hypothesis saw, and the choice of the positions worth looking at.
+
+Imported by: explain_positions.py (run by CT_EVIDENCE, subworkflows/CT_DISAMBIGUATION/ct_evidence.nf)
+Inputs: unpooled scorer rows; position_scores.tsv rows (Gene, Position, side, CAAS_score, p.emp)
+Outputs: EVIDENCE_COLUMNS rows (dicts of text) and the ranked top positions; the files are written by the caller
 
 `evidence_rows` turns the rows of the scorer before the hypotheses of a position are pooled
 (`analyze_gene_disambiguation(..., keep_unpooled=True)`) into one table row per entry and domain: the MRCA of the domain's

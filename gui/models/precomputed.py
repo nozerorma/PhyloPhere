@@ -5,49 +5,50 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-One base_path + one checkbox per producing stage, instead of one manually-typed
-global path per field. A single global path field can't work once a batch run has
-more than one phenotype (TRAIT varies per row) — the same problem the old per-row
-Scoring fallback overrides on PhenotypeRow (scoring_rer_input, scoring_rer_perms_input,
-scoring_fade_summary_top/bottom) existed to solve, one dialog at a time. Every file
-this GUI generates writes to a known, stable layout under an outdir
-(see run_single.sh.j2/sbatch_array.sh.j2's RESULTS_BASE), so the actual per-phenotype
-path is always base_path/<TRAIT>/<known-subpath> — computed in the generated shell
-script itself (using $TRAIT), not typed in here.
+Precomputed: reuse of outputs from an earlier run, as one base_path plus one checkbox
+per producing stage.
 
-Checking a box both supplies the precomputed input AND turns off the module that
-would otherwise recompute it live (see gui/generation/templates/run_single.sh.j2's
-PRECOMP_* wiring) — recomputing something you're also feeding a precomputed answer
-for is never what you want.
+A single global path per input cannot serve a batch with several phenotypes, because
+the TRAIT changes per row. Every file the pipeline writes sits in a stable layout under
+an outdir (RESULTS_BASE in run_single.sh.j2), so the per-phenotype path is always
+base_path/<TRAIT>/<subpath>. The generated shell script builds it from $TRAIT
+(PRECOMP_* variables of sbatch_array.sh.j2 and run_single.sh.j2); nothing is typed per path.
 
-Path templates (relative to base_path/<TRAIT>), verified against each process's
-actual publishDir rather than guessed:
-  CT/CAAS      : caastools/{discovery,resample}.tab, caastools/background_genes.output,
-                 caastools/background.output, meta_caas/meta_caas/global_meta_caas.tsv
-                 (older outdirs: signification/meta_caas/global_meta_caas.tsv),
-                 caas_permulation/caas_perms.rds,
-                 caas_permulation/perm_pos_{pval,sample,quantiles}.tsv,
-                 caas_permulation/perm_pos_detail/  (one gz shard per gene; triggers CAAS_CORE_MERGE:
-                   SCORING re-derives the null from this rather than trusting the cached
-                   caas_perms.rds, which is only valid while it holds the same gene-level
-                   statistic as the observed score)
+Checking a box supplies the precomputed input and turns off the module that would
+recompute it (see the PRECOMP_* wiring in gui/generation/templates/run_single.sh.j2):
+feeding a precomputed result while also recomputing it is never intended.
+
+Path templates, relative to base_path/<TRAIT>, matched to the publishDir of each process:
+  CT/CAAS       : caastools/{discovery,resample}.tab, caastools/background_genes.output,
+                  caastools/background.output, meta_caas/meta_caas/global_meta_caas.tsv
+                  (signification/meta_caas/ is also searched, for outdirs that use that name),
+                  caas_permulation/{caas_perms.rds,gene_cycle_scores.tsv,
+                  perm_pos_cycle_caas.tsv.gz,perm_pos_sample.tsv,perm_pos_quantiles.tsv},
+                  caas_permulation/perm_pos_detail/ (one gz shard per gene; it makes
+                  SCORING rebuild the null with CAAS_CORE_MERGE instead of trusting the cached
+                  caas_perms.rds, which is valid only while it holds the same gene-level
+                  statistic as the observed score)
   Disambiguation: ct_disambiguation/caas_convergence_master.csv, ct_disambiguation/ (dir)
   Post-processing: postproc/gene_filtering/filtered_discovery.tsv,
-                 postproc/cleaned_backgrounds/cleaned_background_main.txt
-  Accumulation : accumulation/ (dir; workflows/scoring.nf recurses into
-                 <dir>/{top,bottom,all}/randomization/*.csv)
-  RER          : rerconverge/rer_results/<TRAIT>.continuous.{output,perms.rds},
-                 rerconverge/rer_results/rerconverge_summary_<TRAIT>.tsv (glob-resolved
-                 at generation time in the shell script, filename carries a variable suffix)
-  FADE         : selection/fade/{top,bottom}/json (dir),
-                 selection/fade/{top,bottom}/fade_summary_{top,bottom}.tsv,
-                 selection/fade/{top,bottom}/fade_site_bf_{top,bottom}.tsv
-  VEP          : vep/primateai_mapped.tsv, vep/cosmic_scores.tsv
+                  postproc/cleaned_backgrounds/cleaned_background_main.txt
+  Accumulation  : accumulation/ (dir; workflows/scoring.nf reads
+                  <dir>/{top,bottom,all}/randomization/*.csv)
+  RER           : rerconverge/rer_results/<TRAIT>.continuous.{output,perms.rds},
+                  rerconverge/rer_results/rerconverge_summary_<TRAIT>.tsv (resolved by glob
+                  at generation time, because the filename carries a variable suffix)
+  FADE          : selection/fade/{top,bottom}/json (dir),
+                  selection/fade/{top,bottom}/fade_summary_{top,bottom}.tsv,
+                  selection/fade/{top,bottom}/fade_site_bf_{top,bottom}.tsv
+  VEP           : vep/primateai_mapped.tsv, vep/cosmic_scores.tsv
 
-Some of these are conditionally published (gene_filter_mode != 'none' for the
-Post-processing pair; optional emits for RER perms, FADE summary/site, VEP scores;
-whole-subworkflow opt-in for caas_perms.rds) — checking the box still wires the path,
-but the file only exists if the source run actually had the matching settings on.
+Some of these files are published conditionally (the post-processing pair only when
+gene_filter_mode != 'none'; the optional emits for RER perms, FADE summary and site
+tables and VEP scores; caas_perms.rds only when the permulation ran). Checking the box
+wires the path in any case, but the file exists only if the source run had the matching
+settings on.
+
+Imported by: gui/models/project.py, gui/widgets/tabs/precomputed_tab.py,
+gui/generation/validate.py (derive_paths)
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -58,26 +59,26 @@ from dataclasses import dataclass
 
 @dataclass(kw_only=True)
 class PrecomputedConfig:
-    """Base path + per-stage reuse toggles. See module docstring for path layout."""
+    """Base path and per-stage reuse toggles. The module docstring gives the path layout."""
 
     base_path: str = ""  # per-phenotype dir = base_path/<TRAIT> (no toy/postproc-mode tag)
 
-    # --- CT / CAAS (general + 2 specific, mirroring the CAAS tab's own
-    # discovery/resample checkboxes) ---
+    # --- CT / CAAS (one general toggle and the two step toggles of the CAAS tab:
+    # discovery and resample) ---
     use_ct: bool = False  # turns off CAAS; also wires background_input, meta_caas_from,
-    # caas_perms_file, posenrich_background_file — all derive from CT's own concat/
-    # permulation outputs, not from either of the 2 specific steps individually.
+    # caas_perms_file, posenrich_background_file, which come from CT's concatenation and
+    # permulation outputs rather than from either single step.
     use_discovery: bool = False  # wires discovery_from
     use_resample: bool = False  # wires resample_from
 
-    # --- Disambiguation (live ASR/convergence compute) ---
+    # --- Disambiguation (ASR and convergence computation) ---
     use_disambiguation: bool = False  # turns off Disambiguation; wires disambiguation_input/_dir
 
-    # --- Post-processing (no separate enable toggle — always runs alongside
-    # Disambiguation; see gui/generation/context.py's ct_postproc_enabled) ---
-    use_postproc: bool = False  # wires the filtered-discovery/cleaned-background
-    # pair that Accumulation/VEP/Scoring each fall back to, without turning off
-    # Disambiguation's own live compute (check use_disambiguation for that)
+    # --- Post-processing (no enable toggle: it runs with Disambiguation unless
+    # this box supplies its outputs; see ct_postproc_enabled in gui/generation/context.py) ---
+    use_postproc: bool = False  # wires the filtered-discovery/cleaned-background pair
+    # that Accumulation, VEP and Scoring take as input; it does not turn off
+    # Disambiguation (use_disambiguation does)
 
     # --- Accumulation ---
     use_accumulation: bool = False  # turns off Accumulation; wires scoring_accum_dir
@@ -95,11 +96,12 @@ class PrecomputedConfig:
 
 
 def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str, str]]:
-    """(label, path, kind) for every path implied by config's checked boxes, for one
-    phenotype's TRAIT. Python-side mirror of run_single.sh.j2's own PRECOMP_OUTDIR
-    construction — used by gui/generation/validate.py for real existence checks (the
-    shell script builds the identical paths at generation/run time; keep both in sync
-    if the layout ever changes, see this module's docstring for the source of truth).
+    """List (label, path, kind) for every path implied by the checked boxes, for one TRAIT.
+
+    kind is "file" or "dir". Python mirror of the PRECOMP_OUTDIR construction of
+    run_single.sh.j2, used by gui/generation/validate.py for existence checks. The shell
+    script builds the same paths at run time, so both must follow the layout in this
+    module's docstring.
     """
     if not config.base_path or not trait:
         return []
@@ -110,9 +112,8 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
 
     if config.use_discovery:
         entries.append(("discovery_from", os.path.join(outdir, "caastools", "discovery.tab"), "file"))
-        # meta_caas/ is the current CT_META_CAAS publishDir; signification/ is
-        # the pre-rename layout still on disk for outdirs from older runs.
-        # Try the current path first, then each fallback in turn.
+        # Meta-CAAS table: meta_caas/ is searched first, then signification/ (the name
+        # used by some existing outdirs), global_meta_caas.tsv before meta_caas.tsv.
         sig_candidates = [
             os.path.join(outdir, "meta_caas", "meta_caas", "global_meta_caas.tsv"),
             os.path.join(outdir, "signification", "meta_caas", "global_meta_caas.tsv"),
@@ -124,10 +125,10 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         entries.append(("background_input", os.path.join(outdir, "caastools", "background_genes.output"), "file"))
         entries.append(("posenrich_background_file", os.path.join(outdir, "caastools", "background.output"), "file"))
         # The permulation outputs travel together: caas_perms.rds feeds the FCS
-        # p.perm, perm_pos_cycle_caas.tsv.gz the position-level p.emp (used when
-        # SCORING does not rebuild the null from perm_pos_detail), and the
-        # sample/quantile files the report's position-level null plots. Mirrors
-        # run_single.sh.j2's PRECOMP_USE_DISCOVERY block -- keep both in sync.
+        # p.perm, perm_pos_cycle_caas.tsv.gz the position-level p.emp (when SCORING
+        # does not rebuild the null from perm_pos_detail), and the sample and quantile
+        # files the position-level null plots of the report. Mirrors the
+        # PRECOMP_USE_DISCOVERY block of run_single.sh.j2.
         perm_dir = os.path.join(outdir, "caas_permulation")
         entries.append(("caas_perms_file", os.path.join(perm_dir, "caas_perms.rds"), "file"))
         entries.append(("caas_pos_cycle_caas_file", os.path.join(perm_dir, "perm_pos_cycle_caas.tsv.gz"), "file"))
@@ -135,12 +136,12 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         entries.append(("caas_pos_quantiles_file", os.path.join(perm_dir, "perm_pos_quantiles.tsv"), "file"))
         entries.append(("caas_gene_cycle_scores_file", os.path.join(perm_dir, "gene_cycle_scores.tsv"), "file"))
         # caas_pos_detail_file makes SCORING rebuild the null (CAAS_CORE_MERGE)
-        # instead of importing caas_perms.rds as a cached artifact. That matters
-        # because a cached null is only valid while it holds the same gene-level
-        # statistic as the observed score; rebuilding guarantees it by construction,
-        # costs minutes (no ASR replay), and is what keeps p.perm populated --
-        # fcs_enrich.R leaves it NA when it detects a stale null. Wired last so it
-        # takes precedence over caas_perms_file above.
+        # instead of importing caas_perms.rds as a cached artifact. A cached null is
+        # valid only while it holds the same gene-level statistic as the observed
+        # score; rebuilding guarantees that by construction, takes minutes (no ASR
+        # replay) and keeps p.perm populated, since fcs_enrich.R leaves it NA when it
+        # detects a stale null. Appended last so it takes precedence over
+        # caas_perms_file.
         entries.append(("caas_pos_detail_file",
                         os.path.join(perm_dir, "perm_pos_detail"), "dir"))
     if config.use_resample:

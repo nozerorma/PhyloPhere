@@ -1,4 +1,6 @@
 #!/usr/bin/env nextflow
+// asr_robustness.nf — Workflow wrapper of the ASR path-score robustness report.
+// PhyloPhere | workflows/
 
 /*
 ##
@@ -22,47 +24,45 @@
 */
 
 /*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  ASR Robustness Workflow: Standalone diagnostic module that characterises ASR
- *  posterior uncertainty across all genes and nodes, extracts focal-MRCA confidence
- *  metrics, applies the canonical site-retention filter
- *  (params.ct_disambig_posterior_threshold), and generates publication-quality
- *  diagnostic plots and tables.
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  ASR_ROBUSTNESS: standalone diagnostic of the ASR path score of the observed
+ *  scoring. It renders the ASR robustness report (ASR_ROBUSTNESS_REPORT), which
+ *  describes the distribution of asr_path_score and of its components over the
+ *  scored positions of caas_convergence_master.csv.
  *
- *  Design:
- *    - Runs in parallel with CT_POSTPROC; does NOT alter the CT_POSTPROC data path.
- *    - Focal MRCA nodes are auto-derived from mrca_1_node / mrca_2_node / …
- *      columns in caas_convergence_master.csv (no user-supplied node list needed).
- *    - All filtering uses params.ct_disambig_posterior_threshold exclusively.
- *      No threshold is hardcoded here or in the companion Rmd.
- *    - A sensitivity analysis over tau = {0.90, 0.95, 0.99} is produced as a
- *      diagnostic table; it does not affect pipeline filtering decisions.
+ *  The workflow runs beside the CT_POSTPROC filtering and does not feed it. The
+ *  posterior threshold (params.ct_disambig_posterior_threshold) is displayed in the
+ *  report; no position is filtered with it here.
  *
- *  Core filtering rule (from the spec):
- *    ASR uncertainty is described globally and per gene, but filtering for
- *    convergence inference is based only on the focal MRCA nodes that define
- *    change polarity. A site is retained only if the minimum MAP posterior
- *    across all focal nodes is >= params.ct_disambig_posterior_threshold.
- *    Additional threshold values are evaluated only in sensitivity analyses.
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  The ct_disambiguation/ directory comes from the upstream channel or, standalone,
+ *  from --disambiguation_dir (a directory or a .tar.gz / .tgz archive).
+ *
+ *  Consumes:  ct_disambiguation/ directory (caas_convergence_master.csv)
+ *  Produces:  report (9.ASR_robustness.html), tables (tsv/**), plots (plots/**),
+ *             published in asr_robustness/ and html_reports/
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
 include { ASR_ROBUSTNESS_REPORT } from '../subworkflows/ASR_ROBUSTNESS/asr_robustness'
 
-// Utility: extract a .tar.gz archive to a work-dir subdirectory.
-// Used only when --disambiguation_dir points to a .tar.gz file.
+// ── Archive input ────────────────────────────────────────────────────────────
+
+// Unpack a .tar.gz archive into extracted/, dropping its top-level directory.
+// Used only when --disambiguation_dir points to an archive.
 process EXTRACT_DISAMBIG_DIR {
     input:  path tarball
     output: path "extracted", emit: dir
     script: "mkdir -p extracted && tar -xzf '${tarball}' --strip-components=1 -C extracted/"
 }
 
+// ── Workflow ─────────────────────────────────────────────────────────────────
+
 workflow ASR_ROBUSTNESS {
     take:
         disambiguation_dir_channel    // ct_disambiguation/ directory of the observed scoring (holds caas_convergence_master.csv)
 
     main:
-        // Resolve the disambiguation directory from upstream or standalone param
+        // The disambiguation directory: the upstream channel, else --disambiguation_dir.
         def disambig_dir_ch
 
         if (disambiguation_dir_channel) {

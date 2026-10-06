@@ -70,12 +70,9 @@ params:
   }
 </style>
 
-<!--
-  Scoring Report - PhyloPhere Pipeline
-  ======================================================
-
-  Author: Miguel Ramon (miguel.ramon@upf.edu)
--->
+<!-- 11.Scoring_report.Rmd — Position-level and gene-level CAAS scores of one trait, with FADE, RERConverge and accumulation evidence. -->
+<!-- PhyloPhere | subworkflows/SCORING/local/ -->
+<!-- Author: Miguel Ramon (miguel.ramon@upf.edu) -->
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
@@ -84,6 +81,8 @@ knitr::opts_chunk$set(
   message = FALSE,
   out.width = "100%"
 )
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
 
 suppressPackageStartupMessages({
   library(readr)
@@ -96,7 +95,9 @@ suppressPackageStartupMessages({
   library(ggrepel)
 })
 
-# Tableau_10 colour swatch for pipeline-wide consistency
+# ── Palette and theme ─────────────────────────────────────────────────────────
+
+# Tableau_10 swatch, shared with the other reports of the pipeline.
 if (requireNamespace("paletteer", quietly = TRUE)) {
   .tableau10 <- as.character(paletteer::paletteer_d("ggthemes::Tableau_10"))
 } else {
@@ -116,11 +117,14 @@ theme_set(
   )
 )
 
+# ── Seed and helpers ──────────────────────────────────────────────────────────
+
+# Seed for the subsamples and jitter of the plots (params$seed, 1998 when unset).
 seed_val <- if (exists("params") && !is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998
 set.seed(seed_val)
 
-# Safe correlation helper: returns NA (not an error) when inputs have fewer
-# than 3 complete pairs - avoids crashes in sparse optional-module sections.
+# Correlation that returns NA, not an error, when fewer than 3 complete pairs remain, so that
+# sections of sparse optional modules do not fail.
 safe_cor <- function(x, y, method = "pearson") {
   ok <- complete.cases(x, y)
   if (sum(ok) < 3) return(NA_real_)
@@ -134,12 +138,10 @@ pos_df  <- read_tsv(params$position_scores_file, show_col_types = FALSE)
 gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
-# scoring_compute.R §2g stopped carrying the per-scheme factors to the position
-# level in T1 (a position-level mean of asr_score hides scheme disagreement).
-# T3d (native_side_split) re-emits `asr_path_score` PER SIDE as a diagnostic
-# (formerly duplicated onto a separate `core` column, retired as pure
-# duplication). Alias `asr_score` to whichever is present so the panels below
-# degrade instead of erroring.
+# position_scores.tsv carries no per-scheme factor: a position-level mean of asr_score would hide
+# scheme disagreement, and CAAS_score is already the mean of asr_path_score over the schemes.
+# `asr_score` is aliased to asr_path_score when the table has it and to CAAS_score otherwise, so
+# that the panels below always find the column.
 if (!"asr_score" %in% names(pos_df)) {
   pos_df$asr_score <- if ("asr_path_score" %in% names(pos_df) && any(!is.na(pos_df$asr_path_score))) {
     pos_df$asr_path_score
@@ -148,8 +150,8 @@ if (!"asr_score" %in% names(pos_df)) {
   }
 }
 
-# Provisional detection - overridden in the load-data block after directional scores are computed
-# NOTE: what for then?
+# Provisional availability flags from gene_df; has_rand and has_rer are set again from the same
+# columns further down.
 has_rand <- "accum_cct_p" %in% names(gene_df) && any(!is.na(gene_df$accum_cct_p))
 has_rer  <- "rer_min_pval"    %in% names(gene_df) && any(!is.na(gene_df$rer_min_pval)) &&
             "rer_rho"         %in% names(gene_df)
@@ -161,8 +163,8 @@ has_perms         <- .file_ok(params$caas_perms_file)
 has_filtered      <- .file_ok(params$filtered_discovery_file) # observed per-scheme asr_path_score
 # FADE site (position-level) data: use top direction if available, otherwise try bottom
 has_fade_pos      <- .file_ok(params$fade_site_top_file) || .file_ok(params$fade_site_bot_file)
-# FADE gene-level data: computed independently by scoring_compute.R from
-# fade_summary_top/bottom.tsv.
+# FADE gene-level data: computed by scoring_compute.R from fade_summary_top/bottom.tsv,
+# independently of the site-level tables.
 has_fade_gene     <- any(c("fade_max_bf_top", "fade_max_bf_bottom") %in% names(gene_df))
 # Initialized FALSE here so later chunks with eval=has_fade_any don't crash when
 # the fade-pos-setup chunk is skipped (has_fade_pos == FALSE).
@@ -188,9 +190,10 @@ if (has_genomic) {
   genomic_raw <- NULL
 }
 
-# ── Gene-level permulation null (rds: asr corStat + NEW caas corStat) ──────────
-# Tidy both byrank lists into one long frame (gene × cycle × direction × metric)
-# for the gene-level tabs. asr names are *_asr; strip the suffix → global/top/bottom.
+# ── Gene-level permulation null (caas_perms.rds) ──────────────────────────────
+# Both byrank lists (ASR axis and CAAS axis) become one long frame (metric, direction,
+# null_score), pooled over genes and cycles and subsampled to 100,000 values per matrix, for the
+# gene-level tabs. ASR names are *_asr; the suffix is stripped to give global, top and bottom.
 if (has_perms) {
   caas_perms_obj <- tryCatch(readRDS(params$caas_perms_file), error = function(e) NULL)
   .tidy_byrank <- function(cs, metric) {
@@ -253,24 +256,22 @@ top1_pct  <- 0.01
   df[mask, , drop = FALSE]
 }
 
-# ── RERConverge availability ────────────────────────────────────────────────
+# ── RERConverge availability ──────────────────────────────────────────────────
 has_rer <- "rer_min_pval" %in% names(gene_df) &&
            any(!is.na(gene_df$rer_min_pval)) &&
            "rer_rho" %in% names(gene_df)
 
-# ── Directional position subsets (side, from per-side position_scores) ─────
+# ── Directional position subsets (side, from per-side position_scores) ────────
 pos_top    <- pos_df %>% filter(side == "top")
 pos_bottom <- pos_df %>% filter(side == "bottom")
 
-# ── Directional gene CAAS scores ────────────────────────────────────────────
-# Read from gene_scores.tsv (written by scoring_compute.R section 4a), never
-# recomputed here, so the report cannot disagree with the pipeline's own output.
-# gene_caas_top / gene_caas_bot survive only as local aliases: ~49 downstream
-# call sites in this file already use those shorter names.
+# ── Directional gene CAAS scores ──────────────────────────────────────────────
+# Read from gene_scores.tsv (scoring_compute.R section 4a), never recomputed here, so the report
+# cannot disagree with the pipeline's own output. gene_caas_top and gene_caas_bot are local
+# aliases that keep the later code short.
 #
-# Prefer the canonical gene_caas_score_{top,bottom}; fall back to the *_all
-# columns they are copied from, so a gene_scores.tsv written by an older run
-# still renders instead of erroring.
+# gene_caas_score_{top,bottom} is preferred; the *_all columns, which hold the same values, are
+# the fallback when it is absent or empty.
 .pick_dir <- function(primary, fallback) {
   v <- if (primary %in% names(gene_df)) gene_df[[primary]] else NULL
   if (is.null(v) || all(is.na(v))) {
@@ -281,14 +282,14 @@ pos_bottom <- pos_df %>% filter(side == "bottom")
 gene_df$gene_caas_top <- .pick_dir("gene_caas_score_top", "gene_caas_score_top_all")
 gene_df$gene_caas_bot <- .pick_dir("gene_caas_score_bottom", "gene_caas_score_bottom_all")
 
-# ── Gene-level accumulation significance ─────────────────────────────────────
+# ── Gene-level accumulation significance ──────────────────────────────────────
 # Accumulation is represented by its CCT combined p-value (accum_cct_p) across
 # the per-scheme accum p-values, with BH FDR (accum_fdr) and accum_significant
 # (accum_fdr < 0.05).
 has_accum_score <- "accum_cct_p" %in% names(gene_df) && any(!is.na(gene_df$accum_cct_p))
 has_rand <- has_accum_score
 
-# ── Gene-level direction assignment ─────────────────────────────────────────
+# ── Gene-level direction assignment ───────────────────────────────────────────
 # Assign direction to each gene from its top-scoring position
 gene_direction_df <- pos_df %>%
   group_by(Gene) %>%
@@ -298,9 +299,10 @@ gene_direction_df <- pos_df %>%
 
 gene_df <- gene_df %>% left_join(gene_direction_df, by = "Gene")
 
-# ── Gate-based gene lists (global / p-val sig) ────────────────────────────────
-# Derived from position-level hypergeometric significance flags so gene membership
-# is tied to the test outcome rather than an arbitrary top-% rank cut.
+# ── Gene lists per direction ──────────────────────────────────────────────────
+# A gene belongs to the top (bottom) list when it has at least one scored position on that side.
+# With a `gate_col` naming a logical column of the position table, only the rows where it is TRUE
+# would count; no gate is used here.
 .gate_genes <- function(pos_sub, gate_col = NULL) {
   if (!is.null(gate_col) && gate_col %in% names(pos_sub))
     pos_sub %>% filter(.data[[gate_col]] %in% TRUE) %>% pull(Gene) %>% unique()
@@ -321,6 +323,7 @@ gene_bot_list <- .gate_genes(pos_bottom)
 gene_universe_n <- nrow(gene_df)
 
 # ── Normalisation helper ──────────────────────────────────────────────────────
+# Rank scaled to [0, 1] (ties averaged, NA kept).
 rank_norm <- function(x) {
   r <- rank(x, na.last = "keep", ties.method = "average")
   (r - 1) / (max(r, na.rm = TRUE) - 1)
@@ -1265,15 +1268,14 @@ if (has_fade_pos) cat(r"(
 ```
 
 ```{r fade-pos-setup, eval=has_fade_pos}
-# Load FADE site tables for each direction separately.
-# FADE_report.Rmd emits site = seq_along(...) making site numbers 1-based, while
-# CAAS/CT uses 0-based positions (alimport.py range(0, length), caas_id.py as-is).
-# Subtract 1 here to align coordinate systems before joining.
+# Load the FADE site table of each direction separately. The file comes from FADE_JSON_TO_CSV
+# (columns gene, position, max_bf, target_aa) and its `position` is already 0-based, like the
+# Position of position_scores.tsv. A 1-based `site` column, when the file has one instead, is
+# shifted by one so that the coordinate systems agree before joining.
 .load_fade_sites <- function(path) {
   if (!.file_ok(path)) return(NULL)
-  # FADE_JSON_TO_CSV emits a comma-separated file (fade_sites_*.csv); older
-  # paths handed a .tsv. Pick the reader by the delimiter actually present on
-  # the header line rather than trusting the extension.
+  # FADE_JSON_TO_CSV writes a comma-separated file. The reader is chosen by the delimiter on the
+  # header line, not by the extension, so a tab-separated table also loads.
   hdr <- tryCatch(readLines(path, n = 1L, warn = FALSE), error = function(e) "")
   df <- if (length(hdr) && grepl(",", hdr) && !grepl("\t", hdr)) {
     read_csv(path, show_col_types = FALSE)
@@ -1676,15 +1678,10 @@ DT::datatable(
 `r if (!has_fade_gene) "> **Note:** No gene-level FADE data available for this run (neither fade_summary_top/bottom.tsv nor site-level FADE files were supplied)."`
 
 ```{r gene-fade-setup, eval=has_fade_gene}
-# Prefer aggregating the site-level (position) FADE data when it's available --
-# it's the same information scoring_compute.R already rolled up into gene_df's
-# fade_max_bf_top/fade_significant_top/fade_max_bf_bottom/fade_significant_bottom,
-# but keeping this path lets the Manhattan/venn plots below reuse fade_top_df/
-# fade_bot_df where they exist. When the site-level files are absent or broken
-# (has_fade_pos == FALSE, e.g. a dangling symlink to a renamed results dir),
-# fall back directly to gene_df's own columns -- those are computed
-# independently from fade_summary_top/bottom.tsv and don't depend on the
-# site-level files at all, so this section still renders correctly.
+# The site-level (position) FADE data are aggregated per gene when available. They carry the same
+# information as the gene-level columns of gene_df (fade_max_bf_*, fade_significant_*), which
+# scoring_compute.R takes from fade_summary_top/bottom.tsv. When the site-level files are absent
+# (has_fade_pos == FALSE), gene_df's own columns are used, as they do not depend on those files.
 if (has_fade_pos && exists("fade_top_df") && !is.null(fade_top_df) && nrow(fade_top_df) > 0) {
   gene_fade_top_agg <- fade_top_df %>%
     group_by(Gene) %>%
@@ -1895,7 +1892,7 @@ if (has_rer) {
     ))
 }
 
-# ── FADE: max BF and BF>=100 significance flag per direction ─────────────────
+# ── FADE: max BF and BF>=100 significance flag per direction ──────────────────
 if (has_fade_gene && exists("gene_fade_df")) {
   top_genes_df <- top_genes_df %>%
     left_join(
@@ -1908,7 +1905,7 @@ if (has_fade_gene && exists("gene_fade_df")) {
 # ── Accumulation score ────────────────────────────────────────────────────────
 # accum_cct_p already on top_genes_df; no extra join needed.
 
-# ── CAAS-threshold indicators (10%, 50% and 100%) per direction ──────────────
+# ── CAAS-threshold indicators (10%, 50% and 100%) per direction ───────────────
 g_top_thr_50 <- quantile(gene_df$gene_caas_top, 0.50, na.rm = TRUE)
 g_bot_thr_50 <- quantile(gene_df$gene_caas_bot, 0.50, na.rm = TRUE)
 
@@ -2299,7 +2296,8 @@ cat(sprintf("Columns: %s\n", paste(names(supp_df), collapse = ", ")))
 ## Summary
 
 ```{r summary-stats}
-n_components <- 5L  # variability, pattern, asr, convergence, parallel
+# Fixed counts shown in the summary table, not derived from the data.
+n_components <- 5L
 
 n_gene_components <- 1L  # gene_caas always present
 if (has_accum_score) n_gene_components <- n_gene_components + 1L

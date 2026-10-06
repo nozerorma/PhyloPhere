@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+# resolve_gmts.py — Resolve gmt_dir, the directory of gene sets (*.gmt) read by the FCS enrichment.
+# PhyloPhere | bin/
+
 """
-resolve_gmts.py  --  Resolve --gmt_dir, the directory of gene-set files (*.gmt) read by the FCS enrichment, when it is left
-blank.
+ResolveGmts: provides the gene-set directory used when --gmt_dir is left blank.
 
 Two modes, chosen explicitly:
 
@@ -12,21 +14,20 @@ Two modes, chosen explicitly:
             WikiPathways files, so they are added to the set, not substituted for it. A failed download is an error:
             nothing is written and the versioned set is not offered as a replacement.
 
-Both modes write `gmt_source.json` in the output directory: for each file its origin (versioned or fetched), its SHA-256
+Both modes write gmt_source.json in the output directory: for each file its origin (versioned or fetched), its SHA-256
 and, for a download, the URL and the UTC retrieval time.
 
-Why this runs outside main.nf: params.gmt_dir is read directly in several places of subworkflows/ENRICHMENT/fcs.nf, and
-Nextflow enforces single assignment on params keys, so a value set inside workflow {} after conf/enrichment.config would
-be ignored.
+Why it runs outside main.nf: params.gmt_dir is read directly in subworkflows/ENRICHMENT/fcs.nf, and Nextflow keeps the
+first assignment of a params key, so a value set inside workflow {} after conf/enrichment.config would be ignored.
 
-Usage
------
+Called by:  the generated run script (gui/generation/templates/run_single.sh.j2), before nextflow
+Inputs:     --output-dir, --fetch, --timeout, --versioned-dir (default subworkflows/ENRICHMENT/dat);
+            --gmt-dir, an existing --gmt_dir value, wins and is echoed back unchanged
+Outputs:    the *.gmt files and gmt_source.json in --output-dir;
+            stdout, shell-sourceable:  GMT_DIR=<path>
+
+Usage:
     resolve_gmts.py --output-dir <dir> [--fetch] [--versioned-dir <dir>] [--gmt-dir <existing --gmt_dir value>] [--timeout 30]
-
-Prints one shell-sourceable line on stdout:
-    GMT_DIR=<path>
-
-When --gmt-dir is given it is echoed back unchanged: an explicit directory always wins.
 """
 
 import argparse
@@ -56,11 +57,13 @@ _DEFAULT_VERSIONED_DIR = os.path.join(_REPO_ROOT, "subworkflows", "ENRICHMENT", 
 
 
 def _download(url: str, timeout: int) -> bytes:
+    """Body of an HTTP GET; errors propagate to the caller."""
     with urllib.request.urlopen(url, timeout=timeout) as resp:
         return resp.read()
 
 
 def _resolve_wikipathways_url(timeout: int) -> str:
+    """URL of the current Homo_sapiens GMT, read from the WikiPathways index page (the file name carries the release date)."""
     try:
         listing = _download(_WIKIPATHWAYS_INDEX, timeout).decode("utf-8", errors="replace")
     except Exception as exc:
@@ -72,6 +75,7 @@ def _resolve_wikipathways_url(timeout: int) -> str:
 
 
 def _sha256(data: bytes) -> str:
+    """Hex SHA-256 of a byte string."""
     return hashlib.sha256(data).hexdigest()
 
 

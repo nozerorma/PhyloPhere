@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-# about.py — Static About-tab content. No user-editable state.
+# about.py — Static content of the About tab.
 # PhyloPhere | gui/models/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Modeled as a dataclass (rather than inlined constants in the widget) purely for
-testability and to keep gui/widgets/ free of hardcoded prose — but it carries no
-user-editable state and is not part of ProjectConfig's persisted JSON.
+AboutInfo: project name, version, repository, authorship and attributions shown on
+the About tab.
+
+Kept as a dataclass rather than as constants inside the widget so that gui/widgets/
+holds no hardcoded prose. It has no user-editable state and is not part of
+ProjectConfig's persisted JSON.
+
+Imported by: gui/widgets/main_window.py, gui/widgets/tabs/about_tab.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────

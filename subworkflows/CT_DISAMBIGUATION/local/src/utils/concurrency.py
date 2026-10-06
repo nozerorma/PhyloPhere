@@ -1,25 +1,16 @@
-"""Concurrency Helpers for ASR Pipeline
-=======================================
+# concurrency.py — CPU concurrency planning and worker initialization for the per-gene pools.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/utils/
 
-Unified helpers for planning CPU concurrency, initializing worker processes, and managing
-thread limits to prevent oversubscription in ASR computations (e.g., codeml runs).
+"""
+Concurrency helpers: size a worker pool against the CPUs the process may use,
+initialize each worker, and optionally gate concurrent codeml runs.
 
-Usage Example
--------------
-::
+Usage example::
 
-    # Plan concurrency for 4 threads per gene, auto workers
+    # Plan for 4 threads per gene, with the number of workers chosen automatically
     workers, threads = plan_concurrency(None, 4, logger=my_logger)
-    print(f"Using {workers} workers with {threads} threads each")
 
-Author
-------
-Miguel Ramon Alonso
-Evolutionary Genomics Lab - IBE-UPF
-
-Date
-----
-2025-12-09
+Imported by: src/utils/gene_wrapper.py, src/core/driver.py, explain_positions.py, observed_b0_main.py
 """
 
 import multiprocessing as mp
@@ -27,7 +18,8 @@ import os
 from contextlib import contextmanager
 from typing import Optional, Tuple
 
-_CODEML_SEM = None  # set in worker initializer
+# Semaphore that gates concurrent codeml runs; set per worker by init_worker (None = no gate).
+_CODEML_SEM = None
 
 
 def _cpu_available() -> int:
@@ -41,7 +33,10 @@ def _cpu_available() -> int:
 def plan_concurrency(
     requested_workers: Optional[int], threads_per_gene: int, logger=None
 ) -> Tuple[int, int]:
-    """Derive a safe (workers, threads) plan to reduce oversubscription.
+    """Derive a (workers, threads) plan that does not oversubscribe the available CPUs.
+
+    The number of workers is capped at available CPUs // threads, so that
+    workers x threads never exceeds the CPUs the process may use.
 
     :param requested_workers: User-supplied worker count or None for auto.
     :type requested_workers: Optional[int]
@@ -76,18 +71,13 @@ def plan_concurrency(
 
 
 def init_worker(threads_per_gene: int, codeml_sem=None) -> None:
-    """Initializer for worker processes to set thread env, logging, and an
-    optional codeml gate.
+    """Initialize a worker process: thread environment, logging and the optional codeml gate.
 
     Side effects: sets the OMP_NUM_THREADS environment variable, configures
-    root logging (a forkserver-spawned worker starts with NO logging
-    configuration at all -- the parent's `configure_logging()` call in `main()`
-    runs after the pool's forkserver already started, so it is never inherited;
-    every `logger.info(...)` a worker makes was previously silently dropped,
-    confirmed in production where a per-chunk diagnostic log line never once
-    appeared across 4+ hours of a real run's .command.log -- see
-    docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md), and may set the
-    module-global semaphore used by :func:`codeml_slot`.
+    root logging, and stores the module-global semaphore used by :func:`codeml_slot`.
+    Logging must be configured here because a worker started with the spawn or
+    forkserver method inherits no logging configuration from the parent; without it
+    every `logger.info(...)` of a worker is dropped.
 
     :param threads_per_gene: Number of threads each worker should use.
     :type threads_per_gene: int
@@ -106,9 +96,9 @@ def init_worker(threads_per_gene: int, codeml_sem=None) -> None:
 
 @contextmanager
 def codeml_slot():
-    """Context manager that limits concurrent codeml runs when a shared semaphore is provided.
+    """Limit concurrent codeml runs with the shared semaphore of the worker.
 
-    If no semaphore is set (e.g., running locally without gating), this is a no-op.
+    A no-op when init_worker received no semaphore (no gating).
 
     :returns: Yields control to a block guarded by the semaphore if present; otherwise, a no-op.
     :rtype: contextlib.AbstractContextManager

@@ -1,4 +1,12 @@
-"""The observed labeling (b_0) as full records: discovery rows -> CAAS entries -> pooled results -> master rows.
+# observed.py — Score the observed labeling (b_0) as full records, from discovery rows to master rows.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/core/
+
+"""
+The observed labeling (b_0) as full records: discovery rows -> CAAS entries -> pooled results -> master rows.
+
+Imported by: observed_b0_main.py, explain_positions.py
+Inputs: discovery rows of b_0 (mappings), the gene context of src/core/driver.py, trait pairs and PSS weights
+Outputs: pooled ConvergenceResult lists and (gene, msa_pos, row) triples for src/core/master.py
 
 The null scores its labelings as thin axes records; the observed labeling needs everything the master carries
 (which hypotheses took part, the support tallies, the per-domain residues), so it goes through
@@ -111,7 +119,7 @@ def score_observed(
 
 def observed_master_rows(gene: str, results: Iterable[Any], master_fields: List[str]) -> List[Tuple[str, Any, Dict[str, str]]]:
     """(gene, msa_pos, row) triples for core.master.write_master_csv."""
-    # imported here: gene_wrapper imports the core, so a top-level import would be circular
+    # imported here so that loading this module does not load gene_wrapper (and the driver it imports)
     from src.core.master import master_row
     from src.utils.gene_wrapper import convert_convergence_result_to_dict
 

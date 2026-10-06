@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
-# context.py — ProjectConfig -> Jinja2 render-context dict.
+# context.py — ProjectConfig → Jinja2 render context for the two shell templates.
 # PhyloPhere | gui/generation/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Pure function, no PySide6 import. Single source of truth for the shell env-var
-names shared between sbatch_array.sh.j2 (which `export`s them) and run_single.sh.j2
-(which reads them) — keep the two templates' variable names in sync with this file.
+Pure function, no PySide6 import. Flattens a ProjectConfig into the dict both
+templates render from: the config sections as plain dicts, the module toggles
+resolved to the strings "true"/"false" (run_defaults), the CT and RER tool strings,
+the runtime profile and the SLURM array size and spec.
+
+The shell variable names themselves are written literally in sbatch_array.sh.j2
+(which exports them) and run_single.sh.j2 (which reads them, with run_defaults as
+fallback), so a rename must be made in both templates.
+
+Imported by: gui/generation/render.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -19,10 +26,12 @@ from gui.models.project import ProjectConfig
 
 
 def _bool_str(value: bool) -> str:
+    # Shell and JSON boolean literal, as the templates write it.
     return "true" if value else "false"
 
 
 def _ct_tool_string(caas) -> str:
+    # Comma-separated --ct_tool value ("discovery,resample") from the CAAS tool toggles.
     parts = []
     if caas.ct_tool_discovery:
         parts.append("discovery")
@@ -32,6 +41,7 @@ def _ct_tool_string(caas) -> str:
 
 
 def _rer_tool_string(rer) -> str:
+    # Comma-separated --rer_tool value from the RERconverge tool toggles.
     parts = []
     if rer.rer_tool_build_trait:
         parts.append("build_trait")
@@ -45,8 +55,13 @@ def _rer_tool_string(rer) -> str:
 
 
 def build_context(project: ProjectConfig) -> dict[str, Any]:
-    """Build the full Jinja2 render context for both templates."""
-    ctx = dataclasses.asdict(project)  # general/runtime/modules/resources as plain dicts
+    """Build the full Jinja2 render context for both templates.
+
+    ctx keeps the config sections (general, runtime, modules, resources, precomputed)
+    as plain dicts and adds run_defaults, ct_tool_string, rer_tool_string, profile,
+    array_size and array_spec.
+    """
+    ctx = dataclasses.asdict(project)
 
     caas = project.modules.caas
     disambig = project.modules.disambiguation
@@ -56,19 +71,17 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
     ctx["ct_tool_string"] = _ct_tool_string(caas)
     ctx["rer_tool_string"] = _rer_tool_string(project.modules.rer)
 
-    ctx["profile"] = project.runtime.runtime_type  # "local" | "slurm"
+    ctx["profile"] = project.runtime.runtime_type  # "local" or "slurm"
 
     pc = project.precomputed
-    # A "use precomputed X" box checked on the Precomputed Run tab must win over that
-    # module's own enabled toggle, no matter what — the two are supposed to stay
-    # mutually exclusive via the tab's UI cascade (PrecomputedTab._toggle_module), but
-    # that cascade only fires on an interactive checkbox click. A project loaded from a
-    # hand-edited/older/template JSON, or one whose tabs got out of sync before "Generate
-    # Scripts" was clicked, can carry enabled=true and use_x=true at once; rendering that
-    # combination verbatim double-runs the stage live AND feeds it a precomputed answer,
-    # which is never correct and (for Disambiguation/Accumulation/etc, whose live inputs
-    # come from the sibling module that DID get switched off) fails fast on missing
-    # upstream input. Enforced here, once, rather than trusted to have happened upstream.
+    # A "use precomputed X" box on the Precomputed Run tab wins over that module's own
+    # enabled toggle. The tab's cascade (PrecomputedTab._toggle_module) keeps the two
+    # mutually exclusive, but it only fires on an interactive checkbox click: a project
+    # loaded from a hand-edited JSON or a template, or one whose tabs were out of sync
+    # at generation time, can carry enabled=true and use_x=true together. Rendering
+    # that combination would run the stage live and also feed it a precomputed result,
+    # so the precedence is enforced here, once, instead of being assumed upstream.
+    # Post-processing runs with Disambiguation, so it follows disambig.enabled.
     caas_enabled = caas.enabled and not (pc.use_discovery or pc.use_resample or pc.use_ct)
     disambiguation_enabled = disambig.enabled and not pc.use_disambiguation
     ct_postproc_enabled = disambig.enabled and not pc.use_postproc
@@ -115,6 +128,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "asr_robustness": _bool_str(disambig.asr_robustness),
     }
 
+    # One array task per phenotype row; the optional concurrency cap becomes "%N".
     n_rows = len(project.runtime.phenotype_rows)
     cap = project.runtime.sbatch_array_concurrency.strip()
     ctx["array_size"] = n_rows

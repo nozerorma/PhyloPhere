@@ -5,15 +5,16 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Backed directly by RuntimeConfig.phenotype_rows: list[PhenotypeRow] — table edits
-flow straight into the serializable model, no separate view-only state (see
-implementation plan §4). TRAIT is the only always-required column; every other
-column (SECONDARY/NTRAIT/CTRAIT/PRUNE/PRUNE_SEC/TRAIT_TYPE) is optional and safe
-to leave blank — the R side (subworkflows/TRAIT_ANALYSIS/local/src/{sample_size.R,
-commons.R}) already branches on column-presence, not on any explicit class flag, so
-there is nothing here to disable per-row. Missing-but-required cells are
-background-tinted so the mistake is visible without opening a separate validation
-dialog.
+PhenotypeTableModel: Qt table model over the phenotype catalogue of the Runtime tab.
+
+Backed directly by RuntimeConfig.phenotype_rows (a list of PhenotypeRow): edits
+write straight into the serializable model, with no separate view state. Each row
+becomes one phenotype run in the generated scripts (the columns are passed to the
+per-phenotype runner as TRAIT, SECONDARY, NTRAIT, CTRAIT, PRUNE, PRUNE_SEC and
+TRAIT_TYPE). TRAIT is the only column that must be filled (a blank TRAIT cell is
+tinted red); the others may be left blank. Header tooltips describe each column.
+
+Imported by: gui/widgets/phenotype_table/widget.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -75,7 +76,7 @@ class PhenotypeTableModel(QAbstractTableModel):
         self.lang = lang
         self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, len(COLUMNS) - 1)
 
-    # ── Required overrides ─────────────────────────────────────────────────
+    # ── Required overrides ────────────────────────────────────────────────────
 
     def rowCount(self, parent=QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._rows)
@@ -133,7 +134,7 @@ class PhenotypeTableModel(QAbstractTableModel):
         base = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
         return base | Qt.ItemFlag.ItemIsEditable
 
-    # ── Row add/remove ─────────────────────────────────────────────────────
+    # ── Row add/remove ────────────────────────────────────────────────────────
 
     def insertRows(self, row: int, count: int, parent=QModelIndex()) -> bool:
         self.beginInsertRows(parent, row, row + count - 1)

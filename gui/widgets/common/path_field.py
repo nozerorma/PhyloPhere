@@ -4,6 +4,17 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+PathField: a line edit paired with a Browse button for a file or directory path.
+
+Browse opens the local QFileDialog, or an SSH-backed RemoteBrowseDialog when a
+remote host is configured (see remote_context.py).
+
+Imported by: gui/widgets/common/module_tab.py, gui/widgets/common/regenerate_dialog.py,
+gui/widgets/tabs/general_tab.py, gui/widgets/tabs/precomputed_tab.py,
+gui/widgets/tabs/runtime_tab.py
+"""
+
 # ── Third-party ───────────────────────────────────────────────────────────────
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLineEdit, QPushButton, QWidget
@@ -12,7 +23,7 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLineEdit, QPushButton, 
 from gui.widgets.common import remote_context
 
 
-_MISSING_TINT = "rgb(255, 210, 210)"  # matches gui/widgets/phenotype_table/model.py's _MISSING_TINT
+_MISSING_TINT = "rgb(255, 210, 210)"  # same tint as _MISSING_TINT in gui/widgets/phenotype_table/model.py
 
 
 class PathField(QWidget):
@@ -25,9 +36,9 @@ class PathField(QWidget):
     time).
 
     `required`: when True, the line edit gets a red background while empty,
-    live-updating as the user types/browses (see set_required() to toggle it
-    after construction). Mirrors the phenotype table's existing red-tint pattern
-    for missing-but-required cells.
+    updated live as the user types or browses (set_required() toggles it after
+    construction). Uses the same red tint as the phenotype table's
+    missing-but-required cells.
     """
 
     textChanged = Signal(str)
@@ -86,10 +97,9 @@ class PathField(QWidget):
         if current.startswith("/"):
             start_path = current.rsplit("/", 1)[0]
         else:
-            # Empty field (or a relative value): start at the configured remote
-            # root directory instead of always "/" — General tab's "Remote root
-            # directory" lets a user set this once (e.g. "/scratch/mramon")
-            # rather than navigating down from "/" on every single field.
+            # Empty field or relative value: start at the remote root directory
+            # set in the General tab (e.g. "/scratch/mramon"), so the user does
+            # not have to navigate down from "/" for every field.
             start_path = remote_context.get_remote_root_dir()
         dialog = RemoteBrowseDialog(host, self._mode, start_path or "/", parent=self)
         if dialog.exec() == dialog.DialogCode.Accepted and dialog.selected_path:

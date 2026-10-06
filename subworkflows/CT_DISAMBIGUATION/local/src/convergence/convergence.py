@@ -1,51 +1,17 @@
+# convergence.py — Tip-residue and node-state helpers of the convergence analysis.
+# PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/convergence/
+
 """
-Convergence Classification Module
-=================================
+Tip-residue lookup and node-state extraction for the convergence analysis.
 
-Classifies amino acid substitution patterns as divergent, convergent,
-or parallel evolution using ancestral state reconstruction (ASR) data.
-Supports dynamic multi-pair focal logic for contrast-based analyses.
+Provides the alignment lookups by taxid and species name, the residues observed at the tips of a group, and the
+modal ASR states at the root, MRCA and focal nodes of a contrast (`NodeStates`). The convergence type and the side of
+a row are derived from the domain path scores (src/convergence/path_scores.py and
+`disambiguate_single._emit_pooled_side_rows`), not here.
 
-Key Concepts
-------------
-**Convergent**: Multiple lineages evolve the same derived state from
-    a shared ancestral state (e.g., A→V in both groups).
-**Divergent**: Lineages evolve different derived states from the same
-    ancestral state (e.g., A→V vs A→I).
-**Parallel**: Both groups change but to different states, with different
-    ancestral states (e.g., A→V and T→I).
-**Codivergent**: Mixed pattern where one group converges while the other diverges.
-
-Classification Hierarchy
------------------------
-1. **no_change**: No substitutions detected in any group
-2. **convergent**: One or both groups converge to a single derived state
-3. **divergent**: One group diverges to multiple states, other unchanged/insufficient
-4. **parallel_convergence**: Both groups converge to different states
-5. **parallel_divergence**: Both groups diverge to different state sets
-6. **codivergent**: Mixed convergence + divergence patterns
-7. **ambiguous**: Complex pattern requiring manual inspection
-
-Data Contracts
---------------
-- **NodeStates**: Dataclass container for key phylogenetic node states
-
-Note
-----
-The categorical ``classify_change_and_parallelism`` classifier was retired in
-scoring_v2 T4a. ``convergence_type`` and the first-class ``side`` key are now
-derived from ``compute_asr_path_score`` (see ``path_scores.py`` and
-``disambiguate_single._split_result_by_side``). This module keeps only the
-tip-residue / node-state collection helpers.
-
-Author
-------
-Miguel Ramon Alonso
-Evolutionary Genomics Lab - IBE-UPF
-
-Date
-----
-2025-12-07
+Imported by: src/convergence/disambiguate_single.py
+Inputs: a Bio.Align alignment, taxid -> species maps and node-level ASR posteriors (in memory)
+Outputs: lookups, tip-residue records and NodeStates (in memory)
 """
 
 from typing import Dict, List, Optional, Tuple, Any
@@ -83,9 +49,7 @@ class NodeStates:
     mrca_contrast_prob: Optional[float] = None
 
 
-# =============================================================================
-# TIP-LEVEL ANALYSIS FUNCTIONS
-# =============================================================================
+# ── Tip-level helpers ─────────────────────────────────────────────────────────
 
 
 def build_alignment_lookup(
@@ -110,9 +74,8 @@ def build_alignment_lookup(
     - Trait files that reference species by name or taxid
 
     The lookup functions (_fetch_residue_from_lookup, collect_tip_residues) try
-    taxid lookup first, then fall back to species name lookup. This is NOT a
-    failure fallback - it's an intentional dual-key strategy to handle different
-    identifier formats without requiring normalization.
+    taxid lookup first, then species name lookup. The second key is not an error
+    path: it covers the different identifier formats without normalizing them.
 
     Args:
         alignment: BioPython MultipleSeqAlignment object
@@ -135,12 +98,12 @@ def build_alignment_lookup(
         seq = str(rec.seq)
         seq_by_id[rec_id] = seq
 
-        # Also index by species name if available
+        # Index by species name too, when the taxid maps to one
         species_name = taxid_to_species.get(rec_id)
         if species_name:
             seq_by_species[species_name] = seq
         else:
-            # Also index by record ID (handles alignments where ID is species name)
+            # No mapping: the record ID is already the species name
             seq_by_species[rec_id] = seq
 
     return seq_by_id, seq_by_species
@@ -169,10 +132,10 @@ def _fetch_residue_from_lookup(
 
     key = str(label)
 
-    # Try ID lookup first (most common: taxid in trait file matches record ID)
+    # Taxid lookup first (the usual case: the trait file taxid matches the record ID)
     seq = seq_by_id.get(key)
     if seq is None:
-        # Try species name lookup (handles trait files with species names instead of taxids)
+        # Species-name lookup (trait files that list names instead of taxids)
         seq = seq_by_species.get(key)
         if seq is not None:
             logger.debug(
@@ -221,16 +184,16 @@ def collect_tip_residues(
     taxid_to_species = taxid_to_species or {}
     species_list = species_list or []
 
-    # Process taxids
+    # One record per taxid
     for idx, taxid in enumerate(taxa_list or []):
         species_name = taxid_to_species.get(str(taxid))
         if not species_name and idx < len(species_list):
             species_name = species_list[idx]
 
-        # Try to fetch residue by taxid first
+        # Taxid first
         residue = _fetch_residue_from_lookup(taxid, msa_pos, seq_by_id, seq_by_species)
 
-        # Retry with species name if taxid lookup failed (handles trait files with species names)
+        # Retry with the species name when the taxid lookup fails
         if residue is None and species_name:
             residue = _fetch_residue_from_lookup(
                 species_name, msa_pos, seq_by_id, seq_by_species
@@ -244,7 +207,7 @@ def collect_tip_residues(
             {"taxid": str(taxid), "species": species_name, "residue": residue}
         )
 
-    # If only species names provided (no taxids)
+    # Species names only (no taxids)
     if not (taxa_list or []) and species_list:
         for species_name in species_list:
             residue = _fetch_residue_from_lookup(
@@ -276,7 +239,7 @@ def extract_tip_residue(tip_records: List[Dict[str, Any]]) -> Optional[str]:
         >>> extract_tip_residue(tips)
         'A'
     """
-    # Filter out missing/gap/unknown residues
+    # Drop missing, gap and unknown residues
     residues = [
         tip["residue"]
         for tip in tip_records
@@ -286,7 +249,7 @@ def extract_tip_residue(tip_records: List[Dict[str, Any]]) -> Optional[str]:
     if not residues:
         return None
 
-    # Return the residue
+    # The first valid residue
     return residues[0] if residues else None
 
 
@@ -311,9 +274,7 @@ def format_amino_display(amino_list: List[str]) -> str:
     return "+".join(amino_list)
 
 
-# =============================================================================
-# NODE-LEVEL ANALYSIS FUNCTIONS (MRCA-based)
-# =============================================================================
+# ── Node-level helpers (MRCA-based) ───────────────────────────────────────────
 
 
 def extract_node_states_from_node_level(
@@ -333,13 +294,13 @@ def extract_node_states_from_node_level(
         position: Alignment position (1-based)
         gene: Gene identifier
         posterior_threshold: Minimum posterior probability to accept state
-        tree_node_lookup: Unused. Kept for API compatibility.
+        tree_node_lookup: Unused.
 
     Returns:
         NodeStates object or None if extraction fails or confidence too low
     """
 
-    # Guard against missing or incomplete node mappings
+    # A missing or incomplete node mapping gives no states
     if not node_mapping:
         logger.debug(
             f"No node mapping provided for {gene}:{position}; skipping node-level extraction"
@@ -377,7 +338,7 @@ def extract_node_states_from_node_level(
         root_data = get_modal_state(node_mapping["root"])
         mrca_data = get_modal_state(node_mapping["mrca_contrast"])
 
-        # Extract focal states dynamically from focal_nodes list
+        # Focal states, one per node of focal_nodes
         focal_node_ids = node_mapping.get("focal_nodes", [])
         focal_states_data = []
         for idx, focal_id in enumerate(focal_node_ids):
@@ -398,14 +359,13 @@ def extract_node_states_from_node_level(
             logger.debug(f"Missing required node states for {gene}:{position}")
             return None
 
-        # Extract optional nodes
+        # pre_split is optional
         pre_split_data = (
             get_modal_state(node_mapping.get("pre_split", -1))
             if "pre_split" in node_mapping
             else None
         )
 
-        # Build lists of focal states and probabilities
         focal_states = [d[0] if d else "" for d in focal_states_data]
         focal_probs = [d[1] if d else 0.0 for d in focal_states_data]
 

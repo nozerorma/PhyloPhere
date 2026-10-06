@@ -1,26 +1,25 @@
 #!/bin/bash
-# run_gui.sh — Launches the PhyloPhere Runner GUI.
+# run_gui.sh — Launch the PhyloPhere Runner GUI.
+# PhyloPhere | ./
 #
-# Double-click this file in a file manager (if it's configured to run
-# executable .sh scripts) or run it from a terminal: ./run_gui.sh
+# Called by:  the user (terminal, file-manager double-click, or the .desktop entry
+#             written by install_gui_launcher.sh)
+# Usage:      ./run_gui.sh [args passed to gui.main]
 #
-# Requires the `phylophere` conda/mamba environment (environment/install_env.sh)
-# — it already pins PySide6 and Jinja2, so no separate GUI install step is needed.
+# Requires the `phylophere` environment (environment/install_env.sh), which pins
+# PySide6 and Jinja2 (environment/phylophere.yml), so the GUI needs no separate install.
 #
-# Uses `<tool> run -n phylophere` rather than `conda activate` — activation
-# depends on shell hooks that are only loaded for interactive shells, which
-# breaks when this script is launched non-interactively (double-clicked from a
-# file manager, or via the .desktop entry from install_gui_launcher.sh). `run -n`
-# works regardless of whether the current shell has ever been hooked up.
+# The GUI starts through `<tool> run -n phylophere` instead of `conda activate`:
+# activation relies on shell hooks that only interactive shells load, so it fails when the
+# script is launched from a file manager or from the .desktop entry.
 #
-# Desktop launchers (GNOME/KDE .desktop Exec=, double-click from a file
-# manager) start this script with a bare session PATH — typically just
-# /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin — because they
-# don't source ~/.bashrc or ~/.profile. Most micromamba/conda installers only
-# put the binary on PATH via the shell rc hook (and this user's ~/.bashrc, like
-# most, early-returns for non-interactive shells), so `command -v micromamba`
-# silently fails there even though the exact same command works from a
-# terminal. Explicitly add the well-known install locations before searching.
+# ── PATH for desktop launchers ────────────────────────────────────────────────
+# Desktop launchers start this script with a bare session PATH (typically
+# /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin), because they source
+# neither ~/.bashrc nor ~/.profile. Installers usually put micromamba on PATH through
+# an rc-file hook that non-interactive shells skip, so `command -v micromamba` would
+# fail there although it works in a terminal. The well-known install locations are
+# therefore appended to PATH when they exist.
 for _dir in \
     "$HOME/.local/bin" \
     "$HOME/micromamba/bin" \
@@ -40,24 +39,23 @@ for _dir in \
 done
 export PATH
 
-# Likewise MAMBA_ROOT_PREFIX is normally exported by the same rc-file hook;
-# without it micromamba guesses a default (harmless here since it happens to
-# match, but it warns on every launch and isn't guaranteed elsewhere), so pin
-# it explicitly whenever the standard install layout is present.
+# ── Environment variables ─────────────────────────────────────────────────────
+# MAMBA_ROOT_PREFIX is normally exported by the same rc-file hook. Without it
+# micromamba guesses a default, warns on every launch and may guess wrong, so it is
+# set explicitly when the standard install layout is present.
 if [ -z "${MAMBA_ROOT_PREFIX:-}" ] && [ -d "$HOME/micromamba/envs" ]; then
     export MAMBA_ROOT_PREFIX="$HOME/micromamba"
 fi
 
-# Qt has no platform-theme plugin loaded by default, so without this the GUI
-# renders with Qt's plain built-in look instead of matching Plasma/GNOME (dark
-# mode, accent color, fonts) — even though nothing in the app code forces a
-# style. conf/phylophere.yml's qt6-main package already ships the
-# xdg-desktop-portal theme plugin (reads native theme over the portal, no
-# extra system packages needed on modern Plasma/GNOME); only opt in if the
-# user hasn't already set their own (e.g. qt6ct).
+# Qt loads no platform-theme plugin by default, so the GUI would render with Qt's plain
+# built-in look instead of matching Plasma/GNOME (dark mode, accent color, fonts). The
+# qt6-main package of the environment ships the xdg-desktop-portal theme plugin, which
+# reads the native theme over the portal. A theme already set by the user (e.g. qt6ct)
+# is kept.
 : "${QT_QPA_PLATFORMTHEME:=xdgdesktopportal}"
 export QT_QPA_PLATFORMTHEME
 
+# ── Launch ────────────────────────────────────────────────────────────────────
 set -Eeuo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -65,10 +63,9 @@ cd "$REPO_DIR"
 
 ENV_NAME="phylophere"
 
-# Terminal=false in the installed .desktop entry means stderr below is
-# normally invisible ("the shortcut does nothing"). Report failures through
-# whatever notifier is available so they're not silently swallowed, in
-# addition to printing them (still useful when run from a terminal).
+# The installed .desktop entry runs without a terminal (Terminal=false), so stderr is
+# normally invisible and a failure would look like a shortcut that does nothing.
+# Failures are therefore also reported through whichever desktop notifier exists.
 notify_failure() {
     echo "$1" >&2
     if command -v notify-send >/dev/null 2>&1; then

@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-"""Background cleanup for CAAS post-processing.
+# cleanup_background.py — Remove the genes dropped by the gene filter from the background gene list.
+# PhyloPhere | subworkflows/CT_POSTPROC/local/src/
 
-Implements CAAP-group-aware cleanup from a *single global background* source:
+"""
+Background cleanup for CAAS post-processing, by caap_group, from one global background.
 
-1) Load global background genes (typically discovery::background_genes.output)
-2) Load removed_genes_summary.tsv from gene filtering
-3) Build one cleaned background per caap_group
-4) Build cleaned_background_main.txt by removing genes removed in ALL groups
+1) Load the global background genes (one gene per line, or a TSV with a Gene column).
+2) Load removed_genes_summary.tsv from the gene filter.
+3) Write one cleaned background per caap_group: the background minus the genes removed in it.
+4) Write cleaned_background_main.txt: the background minus the genes removed in all the
+   groups listed in the summary. A gene removed in only some groups stays in the main list.
+
+Called by:  CAAS_BACKGROUND_CLEANUP process (ctpp_clustfilter.nf)
+Inputs:     -s  removed_genes_summary.tsv (Gene, caap_group, category)
+            -g  global background gene list
+            -o  output directory
+Outputs:    cleaned_background_<caap_group>.txt per group and cleaned_background_main.txt
 """
 
 import argparse
@@ -17,7 +26,7 @@ import pandas as pd
 
 
 def load_removed_genes(summary_file):
-    """Load removed genes summary and normalize caap_group."""
+    """Read the removed-genes summary; a missing caap_group column is filled with "US"."""
     if not Path(summary_file).exists():
         print(f"Error: Removed genes summary file not found: {summary_file}", file=sys.stderr)
         sys.exit(1)
@@ -45,7 +54,7 @@ def load_removed_genes(summary_file):
 
 
 def load_global_background_genes(bg_file):
-    """Load single global background gene universe from background_genes.output."""
+    """Read the global background gene universe: a Gene column when present, else the first column."""
     p = Path(bg_file)
     if not p.exists():
         print(f"Error: Global background file not found: {bg_file}", file=sys.stderr)
@@ -68,12 +77,14 @@ def load_global_background_genes(bg_file):
 
 
 def sanitize_group_name(group):
+    """Group name made safe for a file name (characters outside A-Za-z0-9_.- become underscores)."""
     g = str(group).strip()
     g = re.sub(r'[^A-Za-z0-9_.-]+', '_', g)
     return g or 'UNKNOWN'
 
 
 def write_gene_list(genes, output_file):
+    """One gene per line."""
     Path(output_file).write_text("\n".join(genes) + ("\n" if genes else ""))
 
 
@@ -117,7 +128,7 @@ def main():
             file=sys.stderr,
         )
 
-    # Global main: remove only genes removed in ALL groups
+    # Main list: only genes removed in every group are dropped
     intersection_removed = set.intersection(*removed_per_group.values()) if removed_per_group else set()
     cleaned_main = sorted(bg_gene_set - intersection_removed)
     out_main = output_dir / "cleaned_background_main.txt"

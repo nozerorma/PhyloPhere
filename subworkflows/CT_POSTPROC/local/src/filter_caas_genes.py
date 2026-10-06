@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
-"""
-CAAS Gene-Level Filtering Module
+# filter_caas_genes.py — Remove extreme and dubious genes, and optionally clustered positions, from the pooled CAAS table.
+# PhyloPhere | subworkflows/CT_POSTPROC/local/src/
 
-Filters the pooled CAAS discovery table by gene-level outlier criteria, using the same
-implementation (core.postproc) as the permulation null:
+"""
+Gene-level filter of the pooled CAAS discovery table, with the implementation of the
+permulation null (core.postproc):
+
 1. Extreme genes: density (distinct positions / gene length) above a percentile.
 2. Dubious genes: IQR outliers (Q3 + k*IQR) in distinct positions that also carry a
    cluster-train position.
 
-Thresholds are calibrated within each caap_group over the pooled rows (the observed
-labeling), with no per-hypothesis grain. Cluster positions are dropped only with
---remove-clusters.
+Thresholds are calibrated within each caap_group over the pooled rows (one unit per
+caap_group and gene). Cluster positions are dropped only with --remove-clusters.
 
-Author: PhyloPhere Pipeline
-License: GPL-3.0
+Called by:  CAAS_FILTER_GENES process (ctpp_clustfilter.nf)
+Inputs:     -i  pooled discovery TSV (Gene, Position, optionally caap_group)
+            -l  gene annotation TSV with gene and length columns
+            -c  cluster file of filter_caas_clusters-param.py (needed for the dubious and
+                both modes and for --remove-clusters)
+Outputs:    -o  filtered discovery TSV
+            -s  removed (caap_group, Gene, category) units
+            -g  statistics of every unit that has a gene length (gene_stats.tsv)
 """
 
 import argparse
@@ -22,20 +29,18 @@ from pathlib import Path
 
 import pandas as pd
 
-# core.postproc lives with the disambiguation core; it is the single implementation of
-# trains and gene removal for the observed and null chains.
+# core.postproc lives with the disambiguation core and is shared with the null chain.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CT_DISAMBIGUATION" / "local"))
 from src.core.postproc import GeneUnit, gene_removal, gene_unit_stats, load_gene_lengths  # noqa: E402
 
 # The CAAS table carries categorical amino-acid columns (caas, amino_encoded,
-# derived_residues) whose values can legitimately equal NA-sentinel strings --
-# "N/A" is Asn on the changed side against Ala -- and pandas' default NA parsing
-# would silently blank them (this is exactly how derived_residues was being lost).
-# Only a truly empty cell is missing data in these files.
-# float_precision="round_trip": float columns (asr_path_score) must keep every bit.
+# derived_residues) whose values can equal NA-sentinel strings ("N/A" is Asn on the
+# changed side against Ala), and the default NA parsing of pandas would blank them.
+# Only an empty cell is missing data in these files.
+# float_precision="round_trip": float columns (asr_path_score) keep every bit.
 _CAAS_READ_KW = dict(keep_default_na=False, na_values=["", "nan", "NaN"], float_precision="round_trip")
 
-# Label of the observed slice in core.postproc units, and the hyp_id shown in gene_stats.tsv.
+# Labeling of the observed slice in core.postproc units, and the hyp_id column of gene_stats.tsv.
 OBSERVED = "b_0"
 POOL_ID = "ALL"
 
@@ -62,7 +67,7 @@ def build_units(discovery_df, discarded):
 
 
 def gene_stats_table(stats, removal):
-    """gene_stats.tsv: one row per (caap_group, Gene) with a length; category is the removal verdict."""
+    """gene_stats.tsv: one row per (caap_group, Gene) with a gene length; category is the removal verdict (Extreme, Dubious, Both or Normal)."""
     rows = []
     for s in stats:
         if s["density"] is None:
@@ -127,7 +132,6 @@ Examples:
 """
     )
 
-    # Input files
     parser.add_argument('-i', '--disambiguation-input', required=True,
                         help='Pooled CAAS discovery file (TSV with Gene, Position and, optionally, caap_group)')
     parser.add_argument('-l', '--gene-ensembl-file', required=True,
@@ -135,7 +139,6 @@ Examples:
     parser.add_argument('-c', '--cluster-file', default=None,
                         help='Cluster filtering output (required for dubious gene detection)')
 
-    # Filter parameters
     parser.add_argument('-m', '--filter-mode',
                         choices=['none', 'extreme', 'dubious', 'both'],
                         default='both',
@@ -147,7 +150,6 @@ Examples:
     parser.add_argument('--iqr-multiplier', type=float, default=3.0,
                         help='IQR multiplier for dubious gene threshold (default: 3.0)')
 
-    # Output files
     parser.add_argument('-o', '--output', required=True,
                         help='Filtered discovery output file')
     parser.add_argument('-s', '--summary', default=None,

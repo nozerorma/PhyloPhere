@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
-# resources.py — Resources tab config: local/slurm profile-level resource caps.
+# resources.py — Resources tab config: resource ceilings of the local and slurm profiles.
 # PhyloPhere | gui/models/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-nextflow.config's `local` and `slurm` profiles set different params.max_memory /
-max_cpus / max_time ceilings (local: 64.GB/32/5.day; slurm: 128.GB/128/960.h) —
-these are the profile-level knobs, exposed as --max_cpus/--max_memory/--max_time
-overrides on the generated `nextflow run` invocation.
+Resources: ceilings of the `local` and `slurm` profiles, SLURM executor settings and
+per-process resource overrides.
 
-process_overrides is a different, finer-grained knob: per-process cpus/memory
-overrides, empty by default. conf/resources.config is the only source of per-process
-values, so a row here is a deliberate deviation from it. The Resources tab's button
-loads the current conf defaults into this list (see gui/resource_defaults.py) to edit.
-Machine size is not expressed per process: local_max_* / slurm_max_* are ceilings that
-Nextflow enforces on every request (process.resourceLimits), retries included.
-Overrides are rendered into a `-c`-loaded config generated alongside the run scripts
-(see run_single.sh.j2) rather than as --flags, since Nextflow only reads per-process
-resource directives from a config file, never from the command line.
+The `local` and `slurm` profiles of nextflow.config set separate params.max_memory,
+max_cpus and max_time ceilings (local: 64.GB/32/5.day; slurm: 128.GB/128/960.h). They
+are passed as --max_cpus/--max_memory/--max_time on the generated `nextflow run`
+command. Nextflow enforces them on every request (process.resourceLimits), retries
+included, so machine size is not set per process.
+
+process_overrides is a finer knob: per-process cpus and memory, empty by default.
+conf/resources.config is the only source of per-process values, so a row here is a
+deliberate deviation from it. The button of the Resources tab fills the list with the
+current defaults (gui/resource_defaults.py) as a starting point. The rows are rendered
+into a config loaded with `-c` and generated beside the run scripts (run_single.sh.j2),
+because Nextflow reads per-process resource directives from config files only, not from
+command-line flags.
+
+Imported by: gui/models/project.py, gui/resource_defaults.py, gui/widgets/resource_table/,
+gui/widgets/tabs/resources_tab.py
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -47,16 +52,15 @@ class ResourcesConfig:
     slurm_max_memory: str = "128.GB"
     slurm_max_time: str = "960.h"
 
-    # SLURM executor knobs (nextflow.config's executor.$slurm block) -- no local
-    # equivalent, since the local executor has no submission queue to throttle.
-    # Defaults mirror that block's own comment: the lab account's SLURM QOS caps
-    # concurrent CPUs at 100 cluster-wide, shared across everything the lab runs,
-    # so queueSize/submitRateLimit are deliberately conservative -- raising them
-    # without also checking that ceiling risks the QOSMaxCpuPerUserLimit rejection
-    # storm documented there.
+    # SLURM executor settings (executor.$slurm block of nextflow.config); the local
+    # executor has no submission queue to throttle. The defaults follow the comment of
+    # that block: the lab account's QOS caps concurrent CPUs at 100 cluster-wide, shared
+    # by everything the lab runs, so queueSize and submitRateLimit are conservative.
+    # Raising them without checking that cap risks QOSMaxCpuPerUserLimit rejections of
+    # the submissions.
     slurm_queue_size: str = "8"
     slurm_submit_rate_limit: str = "30/1min"
     slurm_exit_read_timeout: str = "4h"
 
-    # Per-process cpus/memory overrides (see module docstring above).
+    # Per-process cpus and memory overrides (see the module docstring).
     process_overrides: list[ProcessResourceOverride] = field(default_factory=list)

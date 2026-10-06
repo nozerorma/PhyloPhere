@@ -1,4 +1,6 @@
 #!/usr/bin/env nextflow
+// ct_resample.nf — Harvest the pool of permulated FG/BG labelings used as the CAAS null.
+// PhyloPhere | subworkflows/CT/
 
 /*
 #                          _              _
@@ -22,16 +24,27 @@
 */
 
 /*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  RESAMPLE module: This module is responsible for resampling based on different strategies.
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *  RESAMPLE: runs permulations.R, which permulates the observed trait on the species
+ *  tree and keeps params.caas_full_perms labelings that have the same number of
+ *  independent pairs as the observed contrast (and, with params.multi_hypothesis, the
+ *  same number of FOP hypotheses). The strategy is params.perm_strategy and the
+ *  randomness is seeded with params.seed (1998 when unset).
+ *
+ *  Consumes:  species tree, observed traitfile (or a directory of traitfile_H*.tab,
+ *             of which H1 is used), trait values
+ *  Produces:  <tree>.resampled.output/ with resample_NNN.tab, permulation_manifest.tsv
+ *             and, with multi_hypothesis, fop_labelings.tab and fop_pairs.tsv;
+ *             copied to ${params.outdir}/resample when params.publish_intermediates
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
+
+// ── Permulation harvest ──────────────────────────────────────────────────────
 
 process RESAMPLE {
     tag "$nw_tree"
 
-    // Uncomment the following lines to assign workload priority.
     label 'process_resample'
 
     publishDir path: { "${params.outdir}/resample" },
@@ -59,8 +72,8 @@ process RESAMPLE {
             ls -la >&2
             exit 1
         fi
-        # multi_hypothesis mode passes a directory of traitfile_H*.tab; b_0 and the
-        # observed pair count come from the canonical hypothesis H1.
+        # With multi_hypothesis the input is a directory of traitfile_H*.tab; the observed pair
+        # count comes from the canonical hypothesis H1 (any .tab file when H1 is absent).
         if [ -d "${caas_config}" ]; then
             if [ -f "${caas_config}/traitfile_H1.tab" ]; then
                 actual_caas_config="${caas_config}/traitfile_H1.tab"
@@ -118,8 +131,8 @@ process RESAMPLE {
             ls -la >&2
             exit 1
         fi
-        # multi_hypothesis mode passes a directory of traitfile_H*.tab; b_0 and the
-        # observed pair count come from the canonical hypothesis H1.
+        # With multi_hypothesis the input is a directory of traitfile_H*.tab; the observed pair
+        # count comes from the canonical hypothesis H1 (any .tab file when H1 is absent).
         if [ -d "${caas_config}" ]; then
             if [ -f "${caas_config}/traitfile_H1.tab" ]; then
                 actual_caas_config="${caas_config}/traitfile_H1.tab"
