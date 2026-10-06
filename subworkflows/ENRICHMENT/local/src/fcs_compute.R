@@ -1,30 +1,40 @@
 #!/usr/bin/env Rscript
+# fcs_compute.R — FCS statistics of the gene sets of one batch of GMT files.
+# PhyloPhere | subworkflows/ENRICHMENT/local/src/
 # =============================================================================
-# fcs_compute.R — standalone FCS stats entry point (Nextflow-batchable)
-# =============================================================================
-# Extracted from 12.FCS_general_report.Rmd's `run` chunk so the expensive part
-# — fcs_run_all()'s Wilcoxon-AUC / Lachenbruch / Path-Sum-Permulation tests
-# over every GMT database — can run as N independent Nextflow tasks batched by
-# GMT file, instead of one monolithic in-Rmd computation. Safe to batch: BH
-# correction in fcs_enrich.R is scoped per database throughout (see its own
-# header comment + fcs_run_ranking/fcs_run_lachenbruch/fcs_run_permulation),
-# so a batch's rows never need reconciling against another batch's — a plain
-# row-concat of every batch's output (see FCS_CONCAT in fcs.nf) is exact.
+# Called by:  FCS_COMPUTE_BATCHED Nextflow process (fcs.nf → Rscript fcs_compute.R ...)
 #
-# Deliberately stops short of the GMT-description join and evidence_score
-# percentile-rank step: `description` comes from the FULL (unbatched) GMT
-# directory in 12.FCS_general_report.Rmd itself (cheap, and desc_map is reused
-# a second time later in that Rmd — see its own comments), and evidence_score
-# ranks each term's statistic as a percentile among ALL terms tested in that
-# ranking across every database, so it can only be computed once, after every
-# batch's rows are merged back together — also left to the Rmd.
+# Runs fcs_run_all() (Wilcoxon-AUC, Lachenbruch and path-sum permulation tests) over
+# every GMT database of --gmt-dir, so the expensive part can run as independent tasks
+# batched by GMT file. The BH correction of fcs_enrich.R is scoped per database, so the
+# rows of one batch never need reconciling with another and a row-concat of all batches
+# (FCS_CONCAT in fcs.nf) is exact.
+#
+# Left to 12.FCS_general_report.Rmd, after the batches are merged:
+#   - the GMT description join, which uses the full (unbatched) GMT directory;
+#   - evidence_score, which ranks each statistic as a percentile among all the terms
+#     tested in that ranking across every database.
+#
+# Args (named flags, from task.script):
+#   --stats-file        gene scores, one score_<ranking> column per ranking
+#   --universe-file     gene universe, or NO_FILE (then the genes of --stats-file)
+#   --gmt-dir           directory of the *.gmt files of this batch
+#   --perms-file        null permutations for the path-sum test, or NO_FILE
+#   --num-g, --max-g    minimum and maximum gene-set size (max-g 0 = no limit)
+#   --fdr-thr           default FDR; --fdr-wilcoxon, --fdr-lachenbruch and --fdr-permsum override it per test
+#   --pperm-thr         permutation p-value threshold; --n-perms-sum number of path-sum permutations
+#   --seed, --output    random seed and output TSV
 # =============================================================================
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
 
 suppressPackageStartupMessages({
   library(readr); library(dplyr)
 })
 
-# ── minimal flag parser (see subworkflows/SCORING/local/src/scoring_caas_perms.R) ──
+# ── Arguments ─────────────────────────────────────────────────────────────────
+
+# Minimal named-flag parser: returns the value after `flag`, or `default` when it is absent or last.
 args <- commandArgs(trailingOnly = TRUE)
 get_arg <- function(flag, default = NULL) {
   i <- match(flag, args)
@@ -51,13 +61,19 @@ stopifnot(!is.null(stats_file), file.exists(stats_file))
 stopifnot(!is.null(gmt_dir), dir.exists(gmt_dir))
 set.seed(seed_val)
 
+
+# ── Load fcs_enrich.R ─────────────────────────────────────────────────────────
+
+# fcs_enrich.R sits next to this script in the task directory, or under src/ when run from the module root.
 this_dir <- dirname(normalizePath(sub("--file=", "", grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)[1])))
 src_candidates <- c(file.path(this_dir, "fcs_enrich.R"), "src/fcs_enrich.R", "fcs_enrich.R")
 src <- src_candidates[file.exists(src_candidates)][1]
 if (is.na(src)) stop("fcs_enrich.R not found next to fcs_compute.R or under src/")
 suppressMessages(invisible(capture.output(source(src))))
 
-# ── stats / universe / rankings — identical logic to 12.FCS_general_report.Rmd's `load`/`run` chunks ──
+# ── Stats, universe and rankings ──────────────────────────────────────────────
+
+# Same logic as the `load` and `run` chunks of 12.FCS_general_report.Rmd.
 stats <- readr::read_tsv(stats_file, show_col_types = FALSE)
 if (!"gene" %in% names(stats)) {
   gcol <- intersect(c("Gene", "GENE"), names(stats))[1]
@@ -65,6 +81,7 @@ if (!"gene" %in% names(stats)) {
 }
 stopifnot("gene" %in% names(stats))
 
+# Without a universe file (or with fewer than 2 genes in it) the universe is the set of scored genes.
 universe <- character(0)
 if (universe_file != "NO_FILE" && file.exists(universe_file) && !grepl("^NO_", basename(universe_file))) {
   universe <- unique(trimws(readLines(universe_file)))
@@ -81,6 +98,9 @@ for (sc in score_cols) {
   rankings[[rk]] <- fcs_build_vals(setNames(stats[[sc]], stats$gene), universe)
 }
 
+
+# ── Enrichment ────────────────────────────────────────────────────────────────
+
 gmts <- fcs_load_gmts(gmt_dir)
 
 enrich <- fcs_run_all(rankings, gmts, num_g = num_g, max_g = max_g,
@@ -88,5 +108,8 @@ enrich <- fcs_run_all(rankings, gmts, num_g = num_g, max_g = max_g,
                       fdr_wilcoxon = fdr_wilcoxon, fdr_lachenbruch = fdr_lachenbruch,
                       fdr_permsum = fdr_permsum, p_perm_thr = pperm_thr,
                       n_perms_sum = n_perms_sum, seed = seed_val)
+
+
+# ── Output ────────────────────────────────────────────────────────────────────
 
 readr::write_tsv(enrich, out_file)

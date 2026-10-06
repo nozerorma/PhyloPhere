@@ -52,6 +52,9 @@ params:
   }
 </style>
 
+<!-- 7.CAAS_pattern_annotation.Rmd — Distribution of the CAAS positions over contrast patterns and caap_group. -->
+<!-- PhyloPhere | subworkflows/CT_META_CAAS/local/ -->
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   echo = TRUE,
@@ -61,7 +64,7 @@ knitr::opts_chunk$set(
   fig.height = 7
 )
 
-# Load required libraries
+# ── Dependencies ──────────────────────────────────────────────────────────────
 suppressPackageStartupMessages({
   library(tidyverse)
   library(knitr)
@@ -70,12 +73,18 @@ suppressPackageStartupMessages({
   library(paletteer)
 })
 
-# Directory management
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+# Creates `path`, and its parents, when it does not exist.
 createDir <- function(path) {
   if (!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
 }
 
-# Define color palettes, including a colorblind-friendly palette for categories
+
+# ── Palettes ──────────────────────────────────────────────────────────────────
+
+# Tableau 10 under colourblind-safe names; the category palette below is built from it.
 tableau_10 <- paletteer_d("ggthemes::Tableau_10")
 names(tableau_10) <- c(
   "blue", "orange", "vermillion", "bluish_green",
@@ -83,7 +92,6 @@ names(tableau_10) <- c(
   "brown", "gray"
 )
 
-# Consistent colorblind-friendly palette
 category_palette <- c(
   "Normal" = tableau_10[["gray"]],
   "Dubious" = tableau_10[["blue"]],
@@ -102,7 +110,8 @@ removal_palette <- c(
 This section loads the filtered CAAS data and validates input files.
 
 ```{r data_import, message=FALSE}
-# Load filtered discovery file
+# ── Filtered discovery ────────────────────────────────────────────────────────
+
 filtered_discovery_path <- params$discovery_input
 if (is.null(filtered_discovery_path)) {
   stop("Filtered discovery file parameter is NULL")
@@ -113,7 +122,7 @@ cat(sprintf("  File exists: %s\n", file.exists(filtered_discovery_path)))
 cat(sprintf("  Working directory: %s\n", getwd()))
 
 if (!file.exists(filtered_discovery_path)) {
-  # List files in current directory for debugging
+  # Show the working directory to help locate a misplaced input.
   cat("Files in current directory:\n")
   print(list.files(".", full.names = TRUE))
   stop("Filtered discovery file not found: ", filtered_discovery_path)
@@ -121,11 +130,10 @@ if (!file.exists(filtered_discovery_path)) {
 
 discovery_df <- read_tsv(filtered_discovery_path, show_col_types = FALSE)
 
-# discovery.tab is now fully lowercase (gene/mode/trait/position/pattern/ffgn/…).
-# Map ONLY the structural keys to the CamelCase names this report uses internally
-# (joins on Gene/Position, GenePos = paste(Gene, Position)). Concept columns —
-# including the cardinal `pattern` contrast index — stay lowercase (canonical), so
-# they are no longer re-capitalised here.
+# The columns of discovery.tab are lowercase (gene, mode, trait, position, pattern, ffgn, ...).
+# Only the structural keys are renamed to the CamelCase names this report joins on (Gene,
+# Position; GenePos = paste(Gene, Position)). The other columns, including the `pattern`
+# contrast index, keep their lowercase names.
 .disc_keymap <- c(Gene = "gene", Position = "position")
 for (.new in names(.disc_keymap)) {
   .old <- .disc_keymap[[.new]]
@@ -134,14 +142,14 @@ for (.new in names(.disc_keymap)) {
   }
 }
 
-# Normalize discovery schema (legacy CAAS files may not include caap_group)
+# A table without caap_group is treated as the US scheme.
 if (!"caap_group" %in% names(discovery_df)) {
   discovery_df <- discovery_df %>% mutate(caap_group = "US")
 }
 cat(sprintf("Loaded discovery file: %s\n", basename(filtered_discovery_path)))
 cat(sprintf("  Total CAAS positions: %s\n", format(nrow(discovery_df), big.mark = ",")))
 
-# Detect CAAP mode (after normalization)
+# TRUE after the step above; the groups present are listed below.
 has_caap_group <- 'caap_group' %in% names(discovery_df)
 cat(sprintf("  CAAP mode detected: %s\n", has_caap_group))
 
@@ -150,7 +158,9 @@ if (has_caap_group) {
   cat(sprintf("  Groups present: %s\n", paste(groups, collapse = ", ")))
 }
 
-# Load filtered background
+
+# ── Filtered background ───────────────────────────────────────────────────────
+
 filtered_background_path <- params$background_input
 if (is.null(filtered_background_path) || !file.exists(filtered_background_path)) {
   stop("Filtered background file not found: ", filtered_background_path)
@@ -160,7 +170,9 @@ background_df <- read_tsv(filtered_background_path, show_col_types = FALSE)
 cat(sprintf("Loaded background file: %s\n", basename(filtered_background_path)))
 cat(sprintf("Total genes in background: %s\n", format(nrow(background_df), big.mark = ",")))
 
-# Validate required columns
+
+# ── Required columns ──────────────────────────────────────────────────────────
+
 required_cols <- c("Gene", "Position", "pattern")
 missing_cols <- setdiff(required_cols, names(discovery_df))
 if (length(missing_cols) > 0) {
@@ -176,7 +188,7 @@ Analyze CAAS patterns across discovered positions.
 ```{r pattern_analysis}
 cat("\n=== Pattern-Based Analysis ===\n")
 
-# Normalize optional conserved columns for downstream meta export
+# Columns the meta_caas export reads; filled with NA when the table does not carry them.
 if (!"is_conserved_meta" %in% names(discovery_df)) {
   discovery_df <- discovery_df %>% mutate(is_conserved_meta = NA)
 }
@@ -186,11 +198,13 @@ if (!"conserved_pair" %in% names(discovery_df)) {
 
 caas_for_export <- discovery_df
 
-# Detect available patterns
+# ── Pattern distribution ──────────────────────────────────────────────────────
+
+# Contrast patterns present in the table.
 patterns_present <- unique(caas_for_export$pattern)
 cat(sprintf("Patterns detected: %s\n", paste(patterns_present, collapse = ", ")))
 
-# Pattern distribution
+# One panel per caap_group when the table has the column, one plot otherwise.
 if (has_caap_group) {
   pattern_summary <- caas_for_export %>%
     group_by(caap_group, pattern) %>%

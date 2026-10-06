@@ -1,52 +1,39 @@
 #!/usr/bin/env python3
+# build_vep_hgvs.py — Protein-level HGVS identifiers for Ensembl VEP, one per ancestral→derived change.
+# PhyloPhere | subworkflows/VEP/local/src/
+
 """
-build_vep_hgvs.py  —  Build protein-level HGVS identifiers for Ensembl VEP's
---format hgvs input, for the ancestral->derived amino-acid change at every
-CAAS position.
+BuildVepHgvs: writes the HGVS protein identifier (VEP's --format hgvs input) of the
+ancestral→derived amino-acid change at every position of a scored table, and the table
+that rejoins VEP's output to the rows.
 
-Unlike map_to_primateai.py / map_to_cosmic.py, this does not consult any
-pathogenicity database for the reference amino acid: the ancestral state is
-already known from this pipeline's own ASR output (the same
-top_residue_support/bottom_residue_support descriptor columns
-CT_POSTPROC/local/src/residue_descriptors.py writes), so no external
-reference-proteome dependency is introduced by adding this annotation source.
+The ancestral and derived residues are read from the species residue tallies of the table
+(top_species_residues / bottom_species_residues, written by
+CT_POSTPROC/local/src/residue_descriptors.py) and from the side, with the caas pattern as
+fallback (vep_common.anc_der_from_descriptor). No reference proteome is needed.
+Translating an alignment column to a protein position needs the vep_map_dir MAP files,
+which this pipeline cannot derive. human_protein_id must be an Ensembl protein ID (ENSP...)
+for VEP's cache lookup; a gene with another ID system is skipped without a message.
 
-Coordinate translation (alignment column -> real hg38 protein position) still
-requires the upstream vep_map_dir MAP files (see map_to_primateai.py's
-docstring) — that mapping is not something this pipeline can derive on its
-own, which is why vep_map_dir stays a required external input.
-
-human_protein_id must be an Ensembl protein stable ID (ENSP...) for VEP's
---format hgvs cache lookup to resolve it — bin/generate_ensembl_mapping.py's
-BioMart query (ensembl_peptide_id attribute) already produces IDs in that
-form, so this composes correctly with an auto-generated gene_ensembl_file
-(see §1). A user-supplied gene_ensembl_file using a different protein-ID
-system (e.g. UniProt from an older cds2prot-based run) will not resolve and
-that gene is silently skipped.
-
-Reuses map_to_primateai.py's anc_der_from_descriptor()/load_map_file() as a
-library rather than re-implementing the same position-matching logic twice.
-
-Usage
------
-    build_vep_hgvs.py <caas_file> <vep_map_dir> <gene_ensembl_file> \
-        <output_hgvs.txt> <output_id_map.tsv>
-
-Output
-------
-  output_hgvs.txt   — one HGVS protein identifier per line, e.g.
-                       ENSP00000234875.4:p.Trp24Cys
-  output_id_map.tsv — HGVS identifier -> Gene, Position, caap_group, so VEP's
-                       tab output (which echoes the input identifier back
-                       under Uploaded_variation) can be rejoined afterwards.
+Called by:  ENSEMBL_VEP_ANNOTATE Nextflow process (ensembl_vep.nf → build_vep_hgvs.py)
+Inputs:     caas_file          position_scores.tsv, with Gene, Position and the residue tally columns
+            vep_map_dir        directory of the per-gene MAP files (alignment column → hg38 position)
+            gene_ensembl_file  TSV with gene and human_protein_id (ENSP...)
+Outputs:    output_hgvs.txt    one identifier per line, e.g. ENSP00000234875.4:p.Trp24Cys
+            output_id_map.tsv  hgvs_id, Gene, Position, caap_group
 """
 
+# ── Standard library ──────────────────────────────────────────────────────────
 import csv
 import sys
 from pathlib import Path
 
+# ── Package-internal ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 from vep_common import anc_der_from_descriptor, load_map_file  # noqa: E402
+
+
+# ── Constants ─────────────────────────────────────────────────────────────────
 
 _AA_3LETTER = {
     "A": "Ala", "R": "Arg", "N": "Asn", "D": "Asp", "C": "Cys",
@@ -56,7 +43,11 @@ _AA_3LETTER = {
 }
 
 
+# ── Inputs ────────────────────────────────────────────────────────────────────
+
+
 def load_gene_protein_ids(gene_ensembl_file: str) -> dict:
+    """Gene → Ensembl protein ID, skipping genes whose ID is empty or NA."""
     mapping = {}
     with open(gene_ensembl_file, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
@@ -70,7 +61,7 @@ def load_gene_protein_ids(gene_ensembl_file: str) -> dict:
 
 
 def load_caas_targets(caas_file: str) -> dict:
-    """(gene, position) -> list of {anc_aas, der_aas, caap_group}."""
+    """(gene, position) → list of {anc_aas, der_aas, caap_group}, for the US scheme rows only."""
     targets = {}
     with open(caas_file, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
@@ -112,7 +103,11 @@ def load_caas_targets(caas_file: str) -> dict:
     return targets
 
 
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+
 def main():
+    """Write the HGVS list and the id map for every CAAS position with a protein ID and a MAP entry."""
     if len(sys.argv) != 6:
         sys.exit(f"Usage: {sys.argv[0]} <caas_file> <vep_map_dir> <gene_ensembl_file> "
                   "<output_hgvs.txt> <output_id_map.tsv>")
