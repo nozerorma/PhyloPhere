@@ -60,3 +60,4 @@ run_phenotype_*.sh
 /res/*.tsv
 /res/*.tsv.gz
 papers
+.Rhistory
