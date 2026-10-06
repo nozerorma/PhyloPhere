@@ -72,7 +72,8 @@ fop_pair_sel.f <- function(ctx, ci_lb = NULL, ci_ub = NULL, n_vec = NULL,
   empty <- list(
     canon_pairs = data.frame(species1 = character(), species2 = character(),
                              stringsAsFactors = FALSE),
-    hypotheses = list(), summary_df = data.frame(), species_domain = integer(0)
+    hypotheses = list(), summary_df = data.frame(), species_domain = integer(0),
+    cand_df = data.frame()
   )
 
   cc <- lean_candidate_df(ctx$trait_vec, ctx$D, 1L, ctx$tree, ctx$cov_bm, ctx$cov_ou,
@@ -118,6 +119,7 @@ fop_pair_sel.f <- function(ctx, ci_lb = NULL, ci_ub = NULL, n_vec = NULL,
     canon_pairs = canon_pairs,
     hypotheses = hypotheses,
     summary_df = summary_df,
-    species_domain = hv$species_domain
+    species_domain = hv$species_domain,
+    cand_df = cc$cand_df
   )
 }

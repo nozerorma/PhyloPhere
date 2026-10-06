@@ -266,6 +266,10 @@ if (use_count_data) {
   cat("Continuous trait mode: candidate pairs are selected via continuous Phylogenetic Shift Score (PSS) under the best-fitting evolutionary model.\n")
 }
 
+# Deduplicate by species so each species tree tip has exactly one row.
+trait_ci <- trait_ci %>%
+  dplyr::distinct(species, .keep_all = TRUE)
+
 write.csv(trait_ci, file.path(ci_dir, "trait_CI.csv"),
           quote = FALSE, row.names = FALSE)
 
@@ -284,6 +288,7 @@ A pair is an eligible contrast candidate when it passes the trait-type non-overl
 # trait_overlap == FALSE is a candidate contrast: species1 has the higher trait value.
 create_pairwise_data <- function(ci_data) {
   ci_subset <- ci_data %>%
+    dplyr::distinct(species, .keep_all = TRUE) %>%
     dplyr::select(species, n_population, n_cases, trait,
                   trait_ci_lb, trait_ci_ub, category)
 
@@ -470,9 +475,10 @@ This section transforms pairwise data into matrix format for visualization.
 # Wide matrix of the trait differences (rows species1, columns species2).
 build_diff_matrix <- function(pairwise_data_input) {
   pairwise_data_input %>%
-    select(species1, species2, diff_value) %>%
-    pivot_wider(names_from = species2, values_from = diff_value) %>%
-    column_to_rownames("species1") %>%
+    dplyr::distinct(species1, species2, .keep_all = TRUE) %>%
+    dplyr::select(species1, species2, diff_value) %>%
+    tidyr::pivot_wider(names_from = species2, values_from = diff_value, values_fn = mean) %>%
+    tibble::column_to_rownames("species1") %>%
     as.matrix()
 }
 
