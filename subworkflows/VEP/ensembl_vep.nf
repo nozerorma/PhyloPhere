@@ -10,9 +10,14 @@
  *  depend on PrimateAI-3D or COSMIC.
  *
  *  Steps: build_vep_hgvs.py writes one protein-level HGVS identifier per change
- *  (the ancestral residue comes from the CAAS residue tallies, so no reference
- *  proteome is needed), `vep --offline` annotates them, and join_vep_output.py
+ *  (the ancestral and derived residues are the ASR ones of position_scores.tsv, so no
+ *  reference proteome is needed), `vep --offline` annotates them, and join_vep_output.py
  *  attaches the result to Gene, Position and caap_group.
+ *
+ *  Requires the `ensembl-vep` package (the `vep` and `vep_install` commands) in the task
+ *  environment. A process that does not find them writes the header-only table and says
+ *  so in .command.err; install it with
+ *    micromamba install -n phylophere -c conda-forge -c bioconda ensembl-vep
  *
  *  Offline cache: the VEP cache of a species and assembly is several GB, so it
  *  lives in vep_cache_dir rather than in the work directory. An empty cache
@@ -23,8 +28,8 @@
  *
  *  Consumes:  position_scores.tsv (SCORING), directory of per-gene MAP files,
  *             gene_ensembl_file (gene, human_protein_id), VEP cache directory
- *  Produces:  vep/ensembl_vep_mapped.tsv (header only when the cache cannot be
- *             installed or no HGVS identifier resolves)
+ *  Produces:  vep/ensembl_vep_mapped.tsv (header only when ensembl-vep is not installed,
+ *             the cache cannot be installed or no HGVS identifier resolves)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -55,6 +60,17 @@ process ENSEMBL_VEP_ANNOTATE {
     def assembly = params.vep_assembly ?: 'GRCh38'
     """
     cp ${local_dir}/build_vep_hgvs.py ${local_dir}/join_vep_output.py ${local_dir}/vep_common.py .
+
+    # Without the ensembl-vep package there is nothing to run: say so before anything else.
+    for tool in vep vep_install; do
+        if ! command -v "\$tool" >/dev/null 2>&1; then
+            echo "ERROR '\$tool' is not on the PATH of this task: the ensembl-vep package is missing from the environment." >&2
+            echo "      Install it with: micromamba install -n phylophere -c conda-forge -c bioconda ensembl-vep" >&2
+            echo "      Skipping Ensembl VEP annotation; the output table has only its header." >&2
+            printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
+            exit 0
+        fi
+    done
 
     mkdir -p "${vep_cache_dir}"
     if [[ -z "\$(ls -A "${vep_cache_dir}" 2>/dev/null)" ]]; then
