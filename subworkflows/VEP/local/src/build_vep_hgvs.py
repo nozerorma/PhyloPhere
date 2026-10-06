@@ -7,16 +7,14 @@ BuildVepHgvs: writes the HGVS protein identifier (VEP's --format hgvs input) of 
 ancestral→derived amino-acid change at every position of a scored table, and the table
 that rejoins VEP's output to the rows.
 
-The ancestral and derived residues are read from the species residue tallies of the table
-(top_species_residues / bottom_species_residues, written by
-CT_POSTPROC/local/src/residue_descriptors.py) and from the side, with the caas pattern as
-fallback (vep_common.anc_der_from_descriptor). No reference proteome is needed.
+The ancestral and derived residues come from the caas pattern and the side of each position
+(vep_common.anc_der_from_caas). No reference proteome is needed.
 Translating an alignment column to a protein position needs the vep_map_dir MAP files,
 which this pipeline cannot derive. human_protein_id must be an Ensembl protein ID (ENSP...)
 for VEP's cache lookup; a gene with another ID system is skipped without a message.
 
 Called by:  ENSEMBL_VEP_ANNOTATE Nextflow process (ensembl_vep.nf → build_vep_hgvs.py)
-Inputs:     caas_file          position_scores.tsv, with Gene, Position and the residue tally columns
+Inputs:     caas_file          position_scores.tsv, with Gene, Position, side and caas
             vep_map_dir        directory of the per-gene MAP files (alignment column → hg38 position)
             gene_ensembl_file  TSV with gene and human_protein_id (ENSP...)
 Outputs:    output_hgvs.txt    one identifier per line, e.g. ENSP00000234875.4:p.Trp24Cys
@@ -30,7 +28,7 @@ from pathlib import Path
 
 # ── Package-internal ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
-from vep_common import anc_der_from_descriptor, load_map_file  # noqa: E402
+from vep_common import anc_der_from_caas, load_map_file  # noqa: E402
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -75,8 +73,6 @@ def load_caas_targets(caas_file: str) -> dict:
             sys.exit(
                 f"Error: {caas_file} is missing required columns 'Gene' and 'Position'."
             )
-        top_col = col_lc.get("top_species_residues") or col_lc.get("top_residue_support")
-        bot_col = col_lc.get("bottom_species_residues") or col_lc.get("bottom_residue_support")
         side_col = col_lc.get("side")
         caas_col = col_lc.get("caas")
         caap_col = col_lc.get("caap_group")
@@ -90,11 +86,9 @@ def load_caas_targets(caas_file: str) -> dict:
                 position = int(row[pos_col])
             except ValueError:
                 continue
-            top_res = row.get(top_col, "") if top_col else ""
-            bot_res = row.get(bot_col, "") if bot_col else ""
             side = row.get(side_col, "") if side_col else ""
             caas = row.get(caas_col, "") if caas_col else ""
-            anc_aas, der_aas = anc_der_from_descriptor(top_res, bot_res, side, caas=caas)
+            anc_aas, der_aas = anc_der_from_caas(caas, side)
             if not anc_aas or not der_aas:
                 continue
             targets.setdefault((gene, position), []).append({

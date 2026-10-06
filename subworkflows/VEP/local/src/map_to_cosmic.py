@@ -5,7 +5,8 @@
 """
 MapToCosmic: For every CAAS position (Gene, Position), finds the COSMIC Mutant Census
 missense mutations at its hg38 codon whose amino-acid change is the ancestral→derived
-change of the CAAS, and writes them with their COSMIC annotation.
+change of the CAAS, in either orientation (the human residue may be the ancestral or the
+derived one), and writes them with their COSMIC annotation.
 
 Strategy:
   1. Group the CAAS rows by (Gene, Position); only the `US` caap_group is used (rows
@@ -14,13 +15,14 @@ Strategy:
      column = Position + 1) and index the three nucleotides of the codon by
      (chromosome, coordinate); the strand is inferred from the MAP file.
   3. Stream the COSMIC table (gzip TSV), look up each mutation by (chromosome,
-     GENOME_START) and keep it when MUTATION_AA is a plain missense change (p.X123Y),
-     X is an ancestral residue of the CAAS (when that set is known) and Y a derived one.
+     GENOME_START) and keep it when MUTATION_AA is a plain missense change (p.X123Y) and
+     either X is an ancestral residue of the CAAS (any residue when that set is unknown)
+     and Y a derived one, or X is a derived residue and Y an ancestral one.
 
 Called by:  COSMIC_MAP Nextflow process (cosmic.nf → map_to_cosmic.py)
 Inputs:     caas_file     position_scores.tsv, with Gene, Position and, when present, tag,
-                          caas, side, amino_encoded, caap_group and the residue tally
-                          columns (top_species_residues / bottom_species_residues)
+                          caas, side, amino_encoded and caap_group; the ancestral and
+                          derived residues come from caas and side
             vep_map_dir   directory of the per-gene MAP files
             cosmic_gz     COSMIC Mutant Census GRCh38 table (gzip TSV)
             output_tsv    path of the output table
@@ -43,8 +45,7 @@ from pathlib import Path
 # ── Package-internal ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 from vep_common import (  # noqa: E402
-    _support_letters,
-    anc_der_from_descriptor,
+    anc_der_from_caas,
     load_convergence_skip,
     load_map_file,
 )
@@ -102,8 +103,6 @@ def main():
         amino_col = col_lc.get('amino_encoded')
         caap_col = col.get('caap_group') or col_lc.get('caap_group')
         dres_col = col_lc.get('derived_residues')
-        top_sup_col = col_lc.get('top_species_residues') or col_lc.get('top_residue_support')
-        bot_sup_col = col_lc.get('bottom_species_residues') or col_lc.get('bottom_residue_support')
 
         if any(c is None for c in [gene_col, pos_col]):
             print("Missing required columns (Gene, Position) in CAAS / position_scores file header.", file=sys.stderr)
@@ -134,15 +133,8 @@ def main():
             caas_change = amino_enc if amino_enc else caas_pat
             weight = SCHEME_WEIGHTS.get(caap_grp, 1.0)
 
-            top_sup = fields[top_sup_col] if top_sup_col is not None else ''
-            bot_sup = fields[bot_sup_col] if bot_sup_col is not None else ''
 
-            anc_aas, der_aas = anc_der_from_descriptor(
-                top_sup,
-                bot_sup,
-                cside,
-                caas=caas_pat,
-            )
+            anc_aas, der_aas = anc_der_from_caas(caas_pat, cside)
 
             key = (gene, position)
             if key not in caas_targets:

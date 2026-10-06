@@ -5,7 +5,7 @@
 """
 MapToPrimateai: For every CAAS position (Gene, Position), finds the PrimateAI-3D
 missense variants of its hg38 codon that reproduce the ancestral→derived change of
-the CAAS, and writes them with their scores.
+the CAAS, in either orientation, and writes them with their scores.
 
 Strategy:
   1. MAP file lookup. The gene's MAP file gives, for the 1-based alignment column
@@ -15,19 +15,20 @@ Strategy:
      strand (codon nucleotides C, C+1, C+2); decreasing coordinates mean the minus
      strand (C, C-1, C-2).
   3. Database scan. The PrimateAI-3D table (gzip) is streamed once and the variants at
-     any of the three codon nucleotides are kept when `alt_aa` is a derived residue.
+     any of the three codon nucleotides are kept when `alt_aa` is a residue of the CAAS
+     that differs from the human one.
 
-Ancestral filter: the human reference residue of PrimateAI-3D (`ref_aa`) must belong
-to the ancestral set of the CAAS, when that set is known; a variant whose human residue is
-not ancestral does not describe the substitution of the CAAS and is dropped. The human residue is removed
-from the derived set (no missense variant leads to it) unless that would empty the
-set. Only rows of the `US` caap_group are used (rows without a caap_group column
-count as `US`).
+Orientation: the human reference residue of PrimateAI-3D (`ref_aa`) decides which
+residues are valid alternatives. If it is an ancestral residue of the CAAS the
+alternatives are the derived ones; if it is a derived residue they are the ancestral
+ones; if it is neither, any CAAS residue other than the human one. When that leaves no
+residue, every CAAS residue is accepted. Only rows of the `US` caap_group are used
+(rows without a caap_group column count as `US`).
 
 Called by:  PRIMATEAI_MAP Nextflow process (primateai.nf → map_to_primateai.py)
 Inputs:     caas_file       position_scores.tsv, with Gene, Position and, when present, tag,
-                            caas, side, amino_encoded, caap_group and the residue tally
-                            columns (top_species_residues / bottom_species_residues)
+                            caas, side, amino_encoded and caap_group; the ancestral and
+                            derived residues come from caas and side
             vep_map_dir     directory of the per-gene MAP files
             primateai_gz    PrimateAI-3D hg38 table (gzip TSV, with chr, pos, ref_aa, alt_aa)
             output_tsv      path of the output table
@@ -45,8 +46,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from vep_common import (  # noqa: E402
-    _support_letters,
-    anc_der_from_descriptor,
+    anc_der_from_caas,
     load_convergence_skip,
     load_map_file,
 )
@@ -110,8 +110,6 @@ with open(caas_file) as fh:
     amino_col = col_lc.get('amino_encoded')
     caap_col = col.get('caap_group') or col_lc.get('caap_group')
     dres_col = col_lc.get('derived_residues')
-    top_sup_col = col_lc.get('top_species_residues') or col_lc.get('top_residue_support')
-    bot_sup_col = col_lc.get('bottom_species_residues') or col_lc.get('bottom_residue_support')
 
     if any(c is None for c in [gene_col, pos_col]):
         print("Missing required columns (Gene, Position) in CAAS / position_scores file header.", file=sys.stderr)
@@ -142,15 +140,8 @@ with open(caas_file) as fh:
         caas_change = amino_enc if amino_enc else caas_pat
         weight = SCHEME_WEIGHTS.get(caap_grp, 1.0)
 
-        top_sup = fields[top_sup_col] if top_sup_col is not None else ''
-        bot_sup = fields[bot_sup_col] if bot_sup_col is not None else ''
 
-        anc_aas, der_aas = anc_der_from_descriptor(
-            top_sup,
-            bot_sup,
-            cside,
-            caas=caas_pat,
-        )
+        anc_aas, der_aas = anc_der_from_caas(caas_pat, cside)
 
         key = (gene, position)
         if key not in caas_targets:
