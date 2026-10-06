@@ -30,7 +30,7 @@ CALLED BY: ct
 from modules.perm_replay_io import *
 from modules.caas_id import (
     US, GS1, GS2, GS3, GS4, SCHEMES,
-    check_pattern, check_caap_pattern, iscaas,
+    check_pattern, check_caap_pattern,
     encode_to_groups, _pair_sort_key, process_position
 )
 from modules.pindex import load_cfg

@@ -3,7 +3,6 @@
 from .tree_utils import (
     load_tree,
     prune_tree,
-    get_mrca,
     build_tree_node_mapping,
     extract_tip_labels,
 )
@@ -15,7 +14,6 @@ from .species_mapping import (
 __all__ = [
     "load_tree",
     "prune_tree",
-    "get_mrca",
     "build_tree_node_mapping",
     "extract_tip_labels",
     "read_taxid_mapping",

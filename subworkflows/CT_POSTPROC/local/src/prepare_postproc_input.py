@@ -3,7 +3,6 @@
 
 import argparse
 import os
-import re
 import sys
 
 import pandas as pd
@@ -28,29 +27,6 @@ def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         df["caap_group"] = "US"
 
     return df
-
-
-def _collect_removed_rows(cleaned: pd.DataFrame, mrca_threshold: float):
-    removed_frames = []
-
-    # scoring_v2 core v3 renamed mrca_<i>_posterior -> domain_<d>_posterior.
-    mrca_cols = [
-        col for col in cleaned.columns if re.fullmatch(r"(?:mrca|domain)_\d+_posterior", str(col))
-    ]
-    removed_low_mrca = cleaned.iloc[0:0].copy()
-    if mrca_cols:
-        for col in mrca_cols:
-            cleaned[col] = pd.to_numeric(cleaned[col], errors="coerce")
-        mask_low_mrca = cleaned[mrca_cols].lt(mrca_threshold).any(axis=1, skipna=True)
-        removed_low_mrca = cleaned.loc[mask_low_mrca].copy()
-        if not removed_low_mrca.empty:
-            removed_low_mrca["removal_reason"] = (
-                f"mrca_posterior_below_{mrca_threshold:g}"
-            )
-            removed_frames.append(removed_low_mrca)
-        cleaned = cleaned.loc[~mask_low_mrca].copy()
-
-    return cleaned, removed_frames, removed_low_mrca, mrca_cols
 
 
 def main() -> int:

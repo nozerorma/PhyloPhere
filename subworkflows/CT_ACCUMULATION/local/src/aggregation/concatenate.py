@@ -234,25 +234,7 @@ def read_metadata_caas(metadata_file):
     return metadata
 
 
-def get_combined_species(species_data, group_combo):
-    groups = [int(g) for g in str(group_combo).split(',')]
-    return {sp for sp in species_data if any(g in species_data[sp]['contrast'] for g in groups)}
-
-
 # Alignment ops
-
-def load_alignment(filepath, fmt):
-    try:
-        return AlignIO.read(filepath, fmt)
-    except Exception as e:
-        raise ValueError(f"Invalid alignment file: {str(e)}")
-
-
-def validate_species(alignment, required_species):
-    present_species = {rec.id for rec in alignment}
-    missing = required_species - present_species
-    if missing:
-        raise ValueError(f"Missing species in alignment: {', '.join(sorted(missing))}")
 
 
 def calculate_conservation(alignment, group_species=None):

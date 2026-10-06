@@ -25,10 +25,6 @@ INPUTS:      single or multiple trait binary file
 
 TABLE OF CONTENTS
 ------------------------------------------
-update_dictionary()         a function to update a dictionary with
-                            new information. No, there is no built-in method for
-                            this.
-
 load_cfg_dictionary()       Loads the multi cfg dictionary
 
 '''
@@ -38,11 +34,6 @@ import glob
 # FUNCTION update dictionary
 # A function to update a dictionary with new information. No, there is no built-in method for this.
 
-def update_dictionary(dictionary, key, value):
-    try:
-        dictionary[key].append(value)
-    except:
-        dictionary[key] = [value]
 
 # FUNCTION load multi cfg dictionary
 # Loads the multi cfg dictionary

@@ -52,7 +52,6 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 import logging
 
-from ..utils.amino import normalize_amino_list as _normalize_amino_list
 
 logger = logging.getLogger(__name__)
 
@@ -289,25 +288,6 @@ def extract_tip_residue(tip_records: List[Dict[str, Any]]) -> Optional[str]:
 
     # Return the residue
     return residues[0] if residues else None
-
-
-def normalize_amino_list(values: List[Optional[str]]) -> List[str]:
-    """
-    Clean and deduplicate a list of amino acids.
-
-    Args:
-        values: List of amino acid codes (may contain None, gaps, etc.)
-
-    Returns:
-        Cleaned list of unique amino acids (uppercase, no gaps/unknowns)
-
-    Example:
-        >>> normalize_amino_list(['A', 'a', 'T', None, '-', 'X', 'A'])
-        ['A', 'T']
-    """
-    # Keep public API here for backward compatibility, but delegate implementation
-    # to the neutral helper module to avoid cross-package circular imports.
-    return _normalize_amino_list(values)
 
 
 def format_amino_display(amino_list: List[str]) -> str:

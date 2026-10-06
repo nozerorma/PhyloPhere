@@ -43,7 +43,6 @@ process_position()          Processes a position from an imported alignment
 encode_to_groups()          Encodes an amino acid string to group codes
 check_pattern()             Core convergence & pattern check for any scheme (US or GS1-4)
 check_caap_pattern()        Alias for check_pattern()
-iscaas()                    Legacy wrapper for check_pattern() using scheme US
 fetch_caas()                Main discovery function across specified or all schemes
 fetch_caap()                Alias for fetch_caas()
 '''
@@ -53,9 +52,6 @@ from typing import Dict, List, Tuple, Optional, Any
 
 from modules.pindex import *
 from modules.alimport import *
-
-
-
 
 
 def _pair_sort_key(multiconfig, sp, trait=None):
@@ -429,31 +425,6 @@ def check_pattern(
 
 # Alias for backward-compatibility with caap_id
 check_caap_pattern = check_pattern
-
-
-def iscaas(input_string, multiconfig=None, position_dict=None, max_conserved=0, trait=None, fg_species_list=None, bg_species_list=None):
-    """Backward-compatible wrapper for classical CAAS checking (scheme US)."""
-    class caaspositive:
-        def __init__(self):
-            self.caas = False
-            self.pattern = "4"
-            self.conserved_pairs = "0:"
-
-    z = caaspositive()
-    twosides = input_string.split("/")
-    fg_string = twosides[0]
-    bg_string = twosides[1]
-
-    is_match, pattern, _, conserved_pairs = check_pattern(
-        fg_string, bg_string, scheme_dict=US,
-        max_conserved=max_conserved, multiconfig=multiconfig,
-        fg_species_list=fg_species_list, bg_species_list=bg_species_list,
-        trait=trait
-    )
-    z.caas = is_match
-    z.pattern = pattern
-    z.conserved_pairs = conserved_pairs
-    return z
 
 
 # ---------------------------------------------------------------------------

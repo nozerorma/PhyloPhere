@@ -217,12 +217,6 @@ def direction_rows(df, direction):
     return sub.loc[sub.groupby("pos_id", sort=False)["CAAS_score"].idxmax()]
 
 
-def direction_scores(df, direction):
-    """Return {pos_id: CAAS_score} for a direction (global/top/bottom)."""
-    sub = direction_rows(df, direction)
-    return dict(zip(sub["pos_id"], sub["CAAS_score"]))
-
-
 def collapse_null_sides(sub):
     """Reduce a (pos_id, side, cycle, score) null subset to one score per
     (pos_id, cycle) = max over sides, mirroring direction_rows() on the

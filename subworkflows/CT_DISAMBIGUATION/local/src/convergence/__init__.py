@@ -5,7 +5,6 @@ from .convergence import (
     extract_node_states_from_node_level,
     build_alignment_lookup,
     collect_tip_residues,
-    normalize_amino_list,
     format_amino_display,
 )
 
@@ -22,5 +21,4 @@ __all__ = [
     "collect_tip_residues",
     "extract_node_states_from_node_level",
     "format_amino_display",
-    "normalize_amino_list",
 ]

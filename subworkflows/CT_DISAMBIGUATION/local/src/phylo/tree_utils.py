@@ -15,10 +15,10 @@ Key features:
 
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from Bio import Phylo
-from Bio.Phylo.BaseTree import Tree, Clade
+from Bio.Phylo.BaseTree import Tree
 
 logger = logging.getLogger(__name__)
 
@@ -106,43 +106,6 @@ def prune_tree(tree: Tree, species_to_keep: List[str]) -> Tree:
     )
 
     return pruned_tree
-
-
-def get_mrca(tree: Tree, terminals: List[str]) -> Optional[Clade]:
-    """
-    Find most recent common ancestor (MRCA) of specified terminals.
-
-    Args:
-        tree: BioPython Tree object
-        terminals: List of terminal names
-
-    Returns:
-        MRCA Clade or None if not found
-    """
-    if not terminals:
-        return None
-
-    if len(terminals) == 1:
-        # Single terminal, return itself
-        for term in tree.get_terminals():
-            if term.name == terminals[0]:
-                return term
-        return None
-
-    # Find MRCA using BioPython
-    terminal_clades = []
-    for term_name in terminals:
-        for term in tree.get_terminals():
-            if term.name == term_name:
-                terminal_clades.append(term)
-                break
-
-    if len(terminal_clades) != len(terminals):
-        logger.warning(f"Could not find all terminals in tree: {terminals}")
-        return None
-
-    mrca = tree.common_ancestor(terminal_clades)
-    return mrca
 
 
 def build_tree_node_mapping(tree_file: Path, rst_file: Path = None):
