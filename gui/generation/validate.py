@@ -206,7 +206,7 @@ def validate(project: ProjectConfig) -> list[str]:
     # --- Enrichment (+ POSENRICH) ---
     enrichment = project.modules.enrichment
     # gmt_dir is no longer required: leaving it blank defaults to the curated
-    # GMT set in subworkflows/ENRICHMENT/dat/ (or auto-fetches via bin/resolve_gmts.py).
+    # GMT set in subworkflows/ENRICHMENT/dat/ (plus the downloaded sets with auto_fetch_gmt, via bin/resolve_gmts.py).
     if enrichment.posenrich_enabled:
         # cosmic_db and fubar_sites_file are NOT required: workflows/enrichment.nf
         # and subworkflows/ENRICHMENT/posenrich.nf both fall back to NO_FILE sentinels

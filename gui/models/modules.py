@@ -273,7 +273,7 @@ class EnrichmentConfig(ModuleConfigBase):
     posenrich_enabled: bool = True  # RUN_POSENRICH -> --posenrich
     fcs_enabled: bool = True  # Gate FCS (ranked-Wilcoxon) enrichment
     gmt_dir: str = ""  # --gmt_dir
-    auto_fetch_gmt: bool = False  # Auto-download WikiPathways GMTs if gmt_dir is unset
+    auto_fetch_gmt: bool = False  # Also download the current GO and WikiPathways gene sets
     auto_fetch_eggnog: bool = False  # Download the eggNOG pair instead of using the versioned copy
 
     # FCS (ranked-Wilcoxon) enrichment

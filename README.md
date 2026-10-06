@@ -441,7 +441,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | Parameter | Default | Purpose |
 |---|---|---|
 | `gmt_dir` | `""` | Path to directory containing custom `.gmt` gene set files for FCS enrichment. |
-| `auto_fetch_gmt` | `false` | With `gmt_dir` blank, download the GO and WikiPathways gene sets instead of using `subworkflows/ENRICHMENT/dat/`. |
+| `auto_fetch_gmt` | `false` | With `gmt_dir` blank, add the current GO (Enrichr) and WikiPathways gene sets to the versioned ones in `subworkflows/ENRICHMENT/dat/`. A failed download stops the run. `core_inputs/gmt/gmt_source.json` records the origin and SHA-256 of every file. |
 | `string_species` | `9606` | NCBI taxonomy ID for STRING DB mapping (default 9606 for human). |
 | `domino_network_score_thr` | `700` | STRING combined-score threshold for edges included in DOMINO network construction. |
 | `domino_slice_thr` | `0.3` | Relevance threshold for DOMINO network slicing. |

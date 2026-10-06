@@ -610,18 +610,18 @@ if [[ -z "${INPUT_TAX_ID:-}" || ( -z "${GENE_ENSEMBL_FILE:-}" && "${AUTO_GENERAT
     GENE_ENSEMBL_FILE="$(echo "$_CORE_INPUTS_RESOLVED" | grep '^GENE_ENSEMBL_FILE=' | cut -d= -f2-)"
 fi
 
-# Resolve --gmt_dir when left blank: fetches current GO/Reactome/WikiPathways
-# GMTs if AUTO_FETCH_GMT is true, falling back per-file to the copies in subworkflows/ENRICHMENT/dat/
-# (or copies those without network calls when false via --no-fetch).
+# Resolve --gmt_dir when left blank: copies the gene sets versioned in subworkflows/ENRICHMENT/dat/ and, when
+# AUTO_FETCH_GMT is true, adds the current GO and WikiPathways sets (bin/resolve_gmts.py). A failed download stops the
+# run; core_inputs/gmt/gmt_source.json records the origin and checksum of every file.
 if [[ -z "${GMT_DIR:-}" ]]; then
-    _NO_FETCH_ARG=""
-    if [[ "${AUTO_FETCH_GMT:-false}" != "true" ]]; then
-        _NO_FETCH_ARG="--no-fetch"
+    _GMT_FETCH_ARG=""
+    if [[ "${AUTO_FETCH_GMT:-false}" == "true" ]]; then
+        _GMT_FETCH_ARG="--fetch"
     fi
     _GMT_RESOLVED="$(python3 "$REPO_DIR/bin/resolve_gmts.py" \
         --output-dir "$RESULTS_BASE/core_inputs/gmt" \
         --gmt-dir "${GMT_DIR:-}" \
-        $_NO_FETCH_ARG)"
+        $_GMT_FETCH_ARG)"
     GMT_DIR="$(echo "$_GMT_RESOLVED" | grep '^GMT_DIR=' | cut -d= -f2-)"
 fi
 

@@ -2155,13 +2155,13 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "it": "Esegui arricchimento set di geni FCS",
         "de": "FCS-Genset-Anreicherung ausführen",
     },
-    "Auto-fetch WikiPathways GMTs if directory is unset": {
-        "en": "Auto-fetch WikiPathways GMTs if directory is unset",
-        "es": "Descargar automáticamente GMTs de WikiPathways si el directorio no se define",
-        "ca": "Descarregar automàticament GMTs de WikiPathways si el directori no està definit",
-        "fr": "Télécharger automatiquement les GMTs WikiPathways si le répertoire n'est pas défini",
-        "it": "Scarica automaticamente i GMT WikiPathways se la directory non è impostata",
-        "de": "WikiPathways-GMTs automatisch herunterladen, falls Verzeichnis nicht gesetzt",
+    "Also download the current GO and WikiPathways gene sets": {
+        "en": "Also download the current GO and WikiPathways gene sets",
+        "es": "Descargar además los conjuntos génicos actuales de GO y WikiPathways",
+        "ca": "Descarrega també els conjunts gènics actuals de GO i WikiPathways",
+        "fr": "Télécharger aussi les jeux de gènes actuels de GO et WikiPathways",
+        "it": "Scarica anche gli insiemi di geni attuali di GO e WikiPathways",
+        "de": "Zusätzlich die aktuellen GO- und WikiPathways-Gensets herunterladen",
     },
     "Run Pfam domain variability analysis": {
         "en": "Run Pfam domain variability analysis",

@@ -36,7 +36,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="fcs_enabled", label="Run FCS gene-set enrichment", kind="bool", importance="optional"),
         FieldSpec(
             name="auto_fetch_gmt",
-            label="Auto-fetch WikiPathways GMTs if directory is unset",
+            label="Also download the current GO and WikiPathways gene sets",
             kind="bool",
             importance="optional",
         ),
