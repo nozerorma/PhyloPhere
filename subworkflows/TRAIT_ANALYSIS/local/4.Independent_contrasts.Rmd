@@ -557,13 +557,11 @@ dyn_size <- tree_profile$diagnostic_size
 viz_species <- intersect(pruned_tree$tip.label, trait_df$species)
 viz_tree <- if (length(viz_species) > 0) ape::keep.tip(pruned_tree, viz_species) else pruned_tree
 
-dyn_size_w <- 18
-dyn_size_h <- 18
-tip_label_size <- 6.5
-tree_line_size <- 0.95
+branch_line_size <- max(0.85, tree_profile$tree_line_width * 1.5)
+tip_label_size <- 5.8
 max_depth <- max(ape::node.depth.edgelength(viz_tree))
-# Generous offset so tip marker and label text never collide
-tip_label_offset <- max_depth * 0.050
+# Offset so tip marker and label text never collide
+tip_label_offset <- max_depth * 0.020
 
 contrast_df <- traits_res
 
@@ -578,17 +576,14 @@ tree_tip_df <- tibble::tibble(species = viz_tree$tip.label) %>%
     is_selected = contrast_label != "Not selected"
   )
 
-contrast_tree_tibble <- tidytree::as_tibble(viz_tree) %>% dplyr::rename(species = label)
-contrast_tree_with_labels <- dplyr::full_join(contrast_tree_tibble, tree_tip_df, by = "species")
-contrast_tree_data <- tidytree::as.treedata(contrast_tree_with_labels)
-
-selected_pairs_tree <- ggtree(contrast_tree_data, aes(color = contrast_label),
-                              layout = "fan", open.angle = 25,
-                              size = tree_line_size) +
-  geom_tippoint(aes(subset = is_selected), size = tree_line_size * 3.5) +
-  geom_tiplab(aes(subset = is_selected, label = species),
+# Attach contrast annotation with %<+% to preserve phylo branch lengths
+selected_pairs_tree <- ggtree(viz_tree, layout = "fan", open.angle = 15,
+                              size = branch_line_size) %<+% tree_tip_df +
+  aes(color = contrast_label) +
+  geom_tippoint(aes(subset = is_selected), size = branch_line_size * 4.0) +
+  geom_tiplab(aes(subset = is_selected, label = label),
               size = tip_label_size, offset = tip_label_offset,
-              fontface = "bold", family = "sans",
+              fontface = "bold",
               show.legend = FALSE) +
   scale_color_manual(
     name = "Contrast group:",
@@ -597,13 +592,10 @@ selected_pairs_tree <- ggtree(contrast_tree_data, aes(color = contrast_label),
     na.value = "grey75"
   ) +
   labs(title = paste("Selected contrast pairs for trait:", capitalized_trait)) +
-  # hexpand/vexpand pad the coordinate system around the bounding box of the branches and
-  # tips, which shrinks the tree on the canvas and leaves ample room for large labels.
-  hexpand(0.85) +
-  vexpand(0.85) +
+  # Expand radial limits so the tree is smaller relative to canvas, leaving room for labels
+  expand_limits(x = max_depth * 1.30) +
   theme_tree() +
   theme(
-    text = element_text(family = "sans"),
     panel.background = element_rect(fill = "transparent", colour = NA),
     plot.background = element_rect(fill = "transparent", colour = NA),
     legend.position = "bottom",
@@ -616,7 +608,7 @@ selected_pairs_tree <- ggtree(contrast_tree_data, aes(color = contrast_label),
 
 ggsave(
   file.path(traitfile_dir, "selected_pairs_tree.png"),
-  selected_pairs_tree, device = "png", width = dyn_size_w, height = dyn_size_h, dpi = "retina"
+  selected_pairs_tree, device = "png", width = dyn_size, height = dyn_size, dpi = "retina"
 )
 
 selected_pairs_tree
@@ -647,32 +639,31 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
       is_selected = contrast_label != "Not selected",
       is_canonical = species %in% canon_species,
       display_label = dplyr::case_when(
-        is_canonical ~ paste0("★ ", species, "\n[Canonical H1 · ", contrast_label, " · ", n_hyp, "/", total_hypotheses, " hyp]"),
-        is_selected  ~ paste0(species, "\n(", contrast_label, " · ", n_hyp, "/", total_hypotheses, " hyp)"),
+        is_canonical ~ paste0("[H1] ", species, " (", contrast_label, " · ", n_hyp, "/", total_hypotheses, ")"),
+        is_selected  ~ paste0(species, " (", contrast_label, " · ", n_hyp, "/", total_hypotheses, ")"),
         TRUE         ~ species
       )
     )
 
-  dyn_size_all_w <- 20
-  dyn_size_all_h <- 20
-  tip_label_size_all <- 5.5
-  tip_label_offset_all <- max_depth * 0.055
+  dyn_size_all <- tree_profile$diagnostic_size
+  tip_label_size_all <- 4.8
+  tip_label_offset_all <- max_depth * 0.020
 
   # The data are attached to the plain phylo tree with %<+%. A treedata object built with
   # tidytree::as.treedata() from a joined tibble, as in the plot above, breaks later
   # ggtreeExtra::geom_fruit() layers ("replacement has 1 row, data has 0" in
   # ggtreeExtra:::set_mapping()).
-  selected_pairs_tree_all <- ggtree(viz_tree, layout = "fan", open.angle = 25,
-                                   size = tree_line_size) %<+% tree_tip_df_all +
+  selected_pairs_tree_all <- ggtree(viz_tree, layout = "fan", open.angle = 15,
+                                   size = branch_line_size) %<+% tree_tip_df_all +
     aes(color = contrast_label) +
     # Non-canonical selected species (points)
-    geom_tippoint(aes(subset = is_selected & !is_canonical), size = tree_line_size * 3.0) +
+    geom_tippoint(aes(subset = is_selected & !is_canonical), size = branch_line_size * 3.5) +
     # Canonical H1 species: highlighted with gold diamond and bold outline
-    geom_tippoint(aes(subset = is_canonical), shape = 23, size = tree_line_size * 5.2,
-                  stroke = 1.3, fill = "#FFD700") +
+    geom_tippoint(aes(subset = is_canonical), shape = 23, size = branch_line_size * 5.5,
+                  stroke = 1.4, fill = "#FFD700") +
     geom_tiplab(aes(subset = is_selected, label = display_label),
                 size = tip_label_size_all, offset = tip_label_offset_all,
-                fontface = "bold", family = "sans",
+                fontface = "bold",
                 show.legend = FALSE) +
     scale_color_manual(
       name = "Contrast group:",
@@ -748,13 +739,12 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
   selected_pairs_tree_all <- selected_pairs_tree_all +
     labs(
       title = paste("All Selected Species Across", total_hypotheses, "Parallel Hypotheses for Trait:", capitalized_trait),
-      subtitle = "★ Gold diamond indicates Canonical H1 species. Selection frequency shown across FOP non-replacement hypotheses."
+      subtitle = "Gold diamond [H1] indicates Canonical H1 species. Selection frequency shown across FOP non-replacement hypotheses."
     ) +
-    hexpand(0.85) +
-    vexpand(0.85) +
+    # Expand radial limits so the tree is smaller relative to canvas, leaving room for labels
+    expand_limits(x = max_depth * 1.38) +
     theme_tree() +
     theme(
-      text = element_text(family = "sans"),
       panel.background = element_rect(fill = "transparent", colour = NA),
       plot.background = element_rect(fill = "transparent", colour = NA),
       legend.position = "bottom",
@@ -768,7 +758,7 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
 
   ggsave(
     file.path(traitfile_dir, "selected_pairs_tree_all_hypotheses.png"),
-    selected_pairs_tree_all, device = "png", width = dyn_size_all_w, height = dyn_size_all_h, dpi = "retina"
+    selected_pairs_tree_all, device = "png", width = dyn_size_all, height = dyn_size_all, dpi = "retina"
   )
 
   selected_pairs_tree_all
