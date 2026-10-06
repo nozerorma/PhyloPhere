@@ -274,15 +274,21 @@ with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
                 weight = entry['weight']
                 caas_change = entry['caas_change']
 
-                alt_aas = der_aas - {ref_aa}
+                # Determine valid alternative amino acids to match in PrimateAI:
+                # If human ref_aa is ancestral, target the derived state(s).
+                # If human ref_aa is derived, target the ancestral state(s) (reverse transition in hg38).
+                # Otherwise, target any CAAS state.
+                if anc_aas and ref_aa in anc_aas:
+                    alt_aas = der_aas - {ref_aa}
+                elif der_aas and ref_aa in der_aas:
+                    alt_aas = anc_aas - {ref_aa}
+                else:
+                    alt_aas = (der_aas | anc_aas) - {ref_aa}
+
                 if not alt_aas:
-                    alt_aas = der_aas   # keep every derived residue when removing the human one empties the set
+                    alt_aas = der_aas | anc_aas
 
                 if alt_aa not in alt_aas:
-                    continue
-
-                # The human residue must be ancestral, when the ancestral set is known.
-                if anc_aas and ref_aa not in anc_aas:
                     continue
 
                 out.write(

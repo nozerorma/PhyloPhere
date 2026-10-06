@@ -219,12 +219,20 @@ pos_scores <- df %>%
     } else "",
     n_schemes          = dplyr::n(),
     scheme_set         = paste(sort(unique(as.character(caap_group))), collapse = "+"),
-    # Position-level descriptors: first() carries them.
-    top_species_residues    = if ("top_species_residues" %in% names(df)) dplyr::first(top_species_residues) else "",
-    bottom_species_residues = if ("bottom_species_residues" %in% names(df)) dplyr::first(bottom_species_residues) else "",
+    # Position-level descriptors: first() carries them, falling back to caas pattern when empty.
+    caas                    = if ("caas" %in% names(df)) dplyr::first(caas) else "",
+    top_species_residues    = {
+      .tsr <- if ("top_species_residues" %in% names(df)) dplyr::first(top_species_residues) else ""
+      .c   <- if ("caas" %in% names(df)) dplyr::first(caas) else ""
+      if (is.na(.tsr) || !nzchar(.tsr) || identical(.tsr, "NA")) ifelse(grepl("/", .c), sub("/.*", "", .c), .c) else .tsr
+    },
+    bottom_species_residues = {
+      .bsr <- if ("bottom_species_residues" %in% names(df)) dplyr::first(bottom_species_residues) else ""
+      .c   <- if ("caas" %in% names(df)) dplyr::first(caas) else ""
+      if (is.na(.bsr) || !nzchar(.bsr) || identical(.bsr, "NA")) ifelse(grepl("/", .c), sub(".*/", "", .c), "") else .bsr
+    },
     n_top_species           = if ("n_top_species" %in% names(df)) dplyr::first(n_top_species) else "",
     n_bottom_species        = if ("n_bottom_species" %in% names(df)) dplyr::first(n_bottom_species) else "",
-    caas                    = if ("caas" %in% names(df)) dplyr::first(caas) else "",
     # The per-scheme factors (asr_score / caas_row) and the ASR diagnostic columns (asr_path_score,
     # derived_agreement) are not carried to the position level: CAAS_score is the mean of asr_path_score
     # over the schemes, and a position-level mean of each sub-factor would hide scheme disagreement (a

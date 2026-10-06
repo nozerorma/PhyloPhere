@@ -554,7 +554,7 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
             hit = _reconstruct_hit(cfg, pos_dict, scheme_dict, trait, max_conserved)
             if not hit["is_match"]:
                 disagreements.append((trait, genename, scheme_name, posnum))
-            fields = [trait, genename, "CAAP", scheme_name, trait, str(posnum),
+            fields = [trait, genename, "CAAP", scheme_name, str(posnum),
                       hit["substitution"], hit["encoded"], hit["pattern"]]
             if max_conserved > 0:
                 fields.extend(_conserved_fields(hit["conserved_pairs"]))
@@ -695,7 +695,6 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
             "gene",
             "mode",
             "caap_group",
-            "trait",
             "position",
             "caas",
             "amino_encoded",

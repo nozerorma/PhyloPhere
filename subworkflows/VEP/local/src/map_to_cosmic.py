@@ -269,9 +269,9 @@ def main():
                     ref_aa = match_parts.group(1)
                     alt_aa = match_parts.group(2)
 
-                    if anc_aas and ref_aa not in anc_aas:
-                        continue
-                    if alt_aa not in der_aas:
+                    is_fwd = (not anc_aas or ref_aa in anc_aas) and (alt_aa in der_aas)
+                    is_rev = (ref_aa in der_aas) and (alt_aa in anc_aas)
+                    if not (is_fwd or is_rev):
                         continue
 
                     out.write(

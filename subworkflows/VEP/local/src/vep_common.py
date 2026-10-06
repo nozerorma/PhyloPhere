@@ -24,12 +24,15 @@ def _support_letters(support_str):
     """Raw AA letters from `{top,bottom}_species_residues` or `{top,bottom}_residue_support`.
 
     "L:3,S:2" -> {'L', 'S'}. "L:3, S:2" -> {'L', 'S'}. "L, S" -> {'L', 'S'}.
-    Empty / malformed -> set().
+    Empty / malformed / "NA" -> set().
     """
     out = set()
-    for tok in str(support_str or "").split(","):
+    s = str(support_str or "").strip()
+    if not s or s.upper() in ("NA", "NAN", "NONE"):
+        return out
+    for tok in s.split(","):
         tok = tok.strip()
-        if not tok:
+        if not tok or tok.upper() in ("NA", "NAN", "NONE"):
             continue
         if ":" in tok:
             aa = tok.split(":", 1)[0].strip().upper()
@@ -42,20 +45,18 @@ def _support_letters(support_str):
 
 
 def anc_der_from_descriptor(*args, **kwargs):
-    """(ancestral_aas, derived_aas) from the residue tallies of a position and its side.
+    """(ancestral_aas, derived_aas) from the CAAS pattern and residue tallies of a position and its side.
 
     Call forms:
       anc_der_from_descriptor(top_residues, bottom_residues, side, caas="")
       anc_der_from_descriptor(derived_residues, top_residues, bottom_residues, side, caas="")
-    The leading derived_residues of the second form is ignored (the derived set is
-    recomputed from the other arguments); a fifth positional argument is `caas`.
+    The leading derived_residues of the second form is ignored; a fifth positional argument is `caas`.
 
-    The side sets the direction: "top" makes the bottom residues ancestral and the
+    The CAAS pattern (e.g. "G/K", top/bottom) is the primary source of truth for the amino
+    acid states. The side sets the direction: "top" makes the bottom residues ancestral and the
     top ones derived, "bottom" the reverse; any other side leaves the ancestral set
     empty and takes both as derived.
-    The caas pattern (e.g. "G/K", top/bottom) replaces the residues when both
-    tallies are empty. Residues shared by both sets are removed from the derived
-    set unless that would empty it.
+    Residues shared by both sets are removed from the derived set unless that would empty it.
     """
     caas = kwargs.get("caas", "")
     if len(args) == 4:
@@ -69,16 +70,18 @@ def anc_der_from_descriptor(*args, **kwargs):
     else:
         raise ValueError(f"anc_der_from_descriptor expected 3-5 arguments, got {len(args)}")
 
-    top_set = _support_letters(top_res)
-    bot_set = _support_letters(bot_res)
-    cs = str(side or "").strip().lower()
-
-    if not top_set and not bot_set and caas:
-        # Fallback to caas pattern (e.g. "G/K" -> raw_top/raw_bot)
+    top_set = set()
+    bot_set = set()
+    if caas:
         raw_top, _, raw_bot = str(caas).partition("/")
         top_set = {c for c in raw_top.upper() if c.isalpha()}
         bot_set = {c for c in raw_bot.upper() if c.isalpha()}
 
+    if not top_set and not bot_set:
+        top_set = _support_letters(top_res)
+        bot_set = _support_letters(bot_res)
+
+    cs = str(side or "").strip().lower()
     if cs == "top":
         anc, der = bot_set, top_set          # ancestral = bottom, derived = top
     elif cs == "bottom":

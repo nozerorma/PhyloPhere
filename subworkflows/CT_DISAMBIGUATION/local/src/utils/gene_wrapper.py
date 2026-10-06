@@ -844,7 +844,7 @@ def _finalize_perm_scores(
             key = (cyc, grp)
             seen[key] = seen.get(key, 0) + 1
             res = reservoirs.setdefault(key, [])
-            item = (gene, pos, asr, rc)
+            item = (gene, pos, asr)
             if len(res) < sample_per_cycle_group:
                 res.append(item)
             else:
@@ -857,16 +857,15 @@ def _finalize_perm_scores(
             _flush(current_gene, pos_scheme, writer_scores)
 
     # ── Sample + quantile summaries ───────────────────────────────────────────
-    sample_fields = ["Gene", "Position", "caap_group", "cycle",
-                     "asr_path_score", "null_row_caas"]
+    sample_fields = ["Gene", "Position", "caap_group", "cycle", "asr_path_score"]
     with open(sample_path, "w", newline="") as f_sample:
         writer_sample = _csv.DictWriter(f_sample, fieldnames=sample_fields, delimiter="\t")
         writer_sample.writeheader()
         for (cyc, grp), res in reservoirs.items():
             writer_sample.writerows({
                 "Gene": g, "Position": p, "caap_group": grp, "cycle": cyc,
-                "asr_path_score": a, "null_row_caas": rc,
-            } for (g, p, a, rc) in res)
+                "asr_path_score": a,
+            } for (g, p, a) in res)
 
     quant_levels = [5, 10, 25, 50, 75, 90, 95]
     quant_fields = (["cycle", "caap_group", "metric", "n_sampled", "n_total", "mean"]
@@ -877,14 +876,13 @@ def _finalize_perm_scores(
         for (cyc, grp), res in reservoirs.items():
             if not res:
                 continue
-            for metric, idx in (("asr_path_score", 2), ("null_row_caas", 3)):
-                vals = np.asarray([r[idx] for r in res], dtype=float)
-                rec = {"cycle": cyc, "caap_group": grp, "metric": metric,
-                       "n_sampled": len(vals), "n_total": seen.get((cyc, grp), len(vals)),
-                       "mean": float(vals.mean())}
-                for q, v in zip(quant_levels, np.percentile(vals, quant_levels)):
-                    rec[f"q{q}"] = float(v)
-                writer_quant.writerow(rec)
+            vals = np.asarray([r[2] for r in res], dtype=float)
+            rec = {"cycle": cyc, "caap_group": grp, "metric": "asr_path_score",
+                   "n_sampled": len(vals), "n_total": seen.get((cyc, grp), len(vals)),
+                   "mean": float(vals.mean())}
+            for q, v in zip(quant_levels, np.percentile(vals, quant_levels)):
+                rec[f"q{q}"] = float(v)
+            writer_quant.writerow(rec)
 
     logger.info(
         "[perms] pass B done: scored %d rows -> %s; sample=%s quantiles=%s cycle_caas=%s",

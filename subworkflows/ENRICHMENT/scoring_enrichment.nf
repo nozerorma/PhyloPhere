@@ -251,14 +251,6 @@ process SCORING_COMPARE_REPORT {
     // position_lists_dir) instead of recomputed.
     path gene_lists,          stageAs: 'gene_lists'
     path position_lists,      stageAs: 'position_lists'
-    // Inputs of the unpaired randomization null for the CAAS and RER gene-score
-    // concordance: caas_perms is SCORING's caas_perms.rds (caas_corStat_byrank),
-    // rer_perms is the RERconverge *.perms.rds (corStat, corRho) and gene_scores_cmp is
-    // SCORING's gene_scores.tsv (observed gene_caas_score and rer_rho). NO_* sentinels
-    // when unavailable.
-    path caas_perms,          stageAs: 'caas_perms_cmp.rds'
-    path rer_perms,           stageAs: 'rer_perms_cmp.rds'
-    path gene_scores_cmp,     stageAs: 'gene_scores_cmp.tsv'
 
     output:
     path "15.Comparison_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -285,12 +277,6 @@ process SCORING_COMPARE_REPORT {
     def position_char_arg     = (position_char.name =~ /^NO_/)     ? 'NULL' : "'${position_char}'"
     def gene_lists_arg     = (gene_lists.name =~ /^NO_/)     ? 'NULL' : "'${gene_lists}'"
     def position_lists_arg = (position_lists.name =~ /^NO_/) ? 'NULL' : "'${position_lists}'"
-    def caas_perms_arg     = (caas_perms.name =~ /^NO_/)      ? 'NULL' : "'${caas_perms}'"
-    def rer_perms_arg      = (rer_perms.name =~ /^NO_/)       ? 'NULL' : "'${rer_perms}'"
-    def gene_scores_cmp_arg = (gene_scores_cmp.name =~ /^NO_/) ? 'NULL' : "'${gene_scores_cmp}'"
-    def cmp_perm_null      = (params.comparison_perm_null == null) ? true : params.comparison_perm_null
-    def cmp_perm_stat      = params.comparison_perm_stat ?: 'spearman'
-    def cmp_perm_topk      = params.comparison_perm_topk ?: 0.05
 
     def render_cmd = """
         Rscript -e "
@@ -318,12 +304,6 @@ process SCORING_COMPARE_REPORT {
                     position_characterization_file = ${position_char_arg},
                     gene_lists_dir     = ${gene_lists_arg},
                     position_lists_dir = ${position_lists_arg},
-                    caas_perms_file       = ${caas_perms_arg},
-                    rer_perms_file        = ${rer_perms_arg},
-                    gene_scores_file      = ${gene_scores_cmp_arg},
-                    comparison_perm_null  = '${cmp_perm_null}',
-                    comparison_perm_stat  = '${cmp_perm_stat}',
-                    comparison_perm_topk  = ${cmp_perm_topk},
                     scoring_p_emp_thr  = ${params.scoring_p_emp_thr ?: 0.05},
                     seed               = '${params.seed ?: 1998}'
                 ),
