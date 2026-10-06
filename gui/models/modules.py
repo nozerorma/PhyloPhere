@@ -315,9 +315,6 @@ class EnrichmentConfig(ModuleConfigBase):
     scoring_compare_top_n: str = "20"  # --scoring_compare_top_n
     # Concordance null of the unpaired CAAS and RER gene scores in the COMPARE
     # report (a randomization null, not a joint permulation p).
-    comparison_perm_null: bool = True  # --comparison_perm_null
-    comparison_perm_stat: str = "spearman"  # --comparison_perm_stat ("spearman" | "topk_overlap")
-    comparison_perm_topk: str = "0.05"  # --comparison_perm_topk
 
     # POSENRICH component toggles & data files (conf/enrichment.config).
     posenrich_domains: bool = True  # Run Pfam domain variability analysis

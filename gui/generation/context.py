@@ -112,7 +112,6 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "scoring_ami": _bool_str(getattr(enrichment, 'scoring_ami', enrichment.scoring_string)),
         "scoring_string": _bool_str(enrichment.scoring_string),
         "publish_domino_intermediates": _bool_str(enrichment.publish_domino_intermediates),
-        "comparison_perm_null": _bool_str(getattr(enrichment, 'comparison_perm_null', True)),
         "auto_generate_ensembl": _bool_str(scoring.auto_generate_ensembl),
         "fcs_enabled": _bool_str(enrichment.fcs_enabled),
         "auto_fetch_gmt": _bool_str(enrichment.auto_fetch_gmt),

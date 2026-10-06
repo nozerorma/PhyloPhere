@@ -110,24 +110,6 @@ SPEC = ModuleTabSpec(
         ),
         FieldSpec(name="scoring_compare_fdr", label="COMPARE report FDR threshold", importance="default"),
         FieldSpec(name="scoring_compare_top_n", label="COMPARE report top-N", importance="optional"),
-        # Rated "optional" although borderline: it gates whether the concordance
-        # null chunk is computed, but disabling it leaves the other results valid;
-        # it only skips an additional corroborating test, like the other optional
-        # report switches.
-        FieldSpec(
-            name="comparison_perm_null",
-            label="COMPARE: CAAS x RER concordance null",
-            kind="bool",
-            importance="optional",
-        ),
-        FieldSpec(
-            name="comparison_perm_stat",
-            label="COMPARE concordance statistic (spearman | topk_overlap)",
-            kind="choice",
-            choices=("spearman", "topk_overlap"),
-            importance="default",
-        ),
-        FieldSpec(name="comparison_perm_topk", label="COMPARE concordance top-k fraction", importance="default"),
         Section("POSENRICH position-wise enrichment parameters"),
         FieldSpec(name="posenrich_enabled", label="Run POSENRICH", kind="bool", importance="optional"),
         FieldSpec(name="posenrich_domains", label="Run Pfam domain variability analysis", kind="bool", importance="optional"),
