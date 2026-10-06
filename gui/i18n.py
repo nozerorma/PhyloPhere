@@ -681,9 +681,19 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     },
     "Runs CAAStools' discovery and resample steps to find convergent amino-acid substitutions (CAAS) associated with the phenotype.": {
         'en': "Runs CAAStools' discovery and resample steps to find convergent amino-acid substitutions (CAAS) associated with the phenotype.",
+        "es": "Ejecuta los pasos de descubrimiento y remuestreo de CAAStools para encontrar sustituciones aminoacídicas convergentes (CAAS) asociadas al fenotipo.",
+        "ca": "Executa els passos de descobriment i remostreig de CAAStools per trobar substitucions aminoacídiques convergents (CAAS) associades al fenotip.",
+        "fr": "Exécute les étapes de découverte et de rééchantillonnage de CAAStools pour trouver les substitutions d'acides aminés convergentes (CAAS) associées au phénotype.",
+        "it": "Esegue i passaggi di scoperta e ricampionamento di CAAStools per trovare le sostituzioni amminoacidiche convergenti (CAAS) associate al fenotipo.",
+        "de": "Führt die Entdeckungs- und Resampling-Schritte von CAAStools aus, um konvergente Aminosäuresubstitutionen (CAAS) zu finden, die mit dem Phänotyp verbunden sind.",
     },
     "Disambiguation and Accumulation need this module's output. Check Discovery/Resample on the Precomputed Run tab to feed them precomputed results instead.": {
         'en': "Disambiguation and Accumulation need this module's output. Check Discovery/Resample on the Precomputed Run tab to feed them precomputed results instead.",
+        "es": "Desambiguación y Acumulación necesitan la salida de este módulo. Marca Discovery/Resample en la pestaña Precomputed Run para alimentarlas con resultados precalculados.",
+        "ca": "Desambiguació i Acumulació necessiten la sortida d'aquest mòdul. Marca Discovery/Resample a la pestanya Precomputed Run per alimentar-les amb resultats precalculats.",
+        "fr": "La désambiguïsation et l'accumulation ont besoin de la sortie de ce module. Cochez Discovery/Resample dans l'onglet Precomputed Run pour leur fournir des résultats précalculés.",
+        "it": "Disambiguazione e Accumulo richiedono l'output di questo modulo. Seleziona Discovery/Resample nella scheda Precomputed Run per fornire loro risultati precalcolati.",
+        "de": "Disambiguierung und Akkumulation benötigen die Ausgabe dieses Moduls. Aktivieren Sie Discovery/Resample im Tab Precomputed Run, um stattdessen vorberechnete Ergebnisse zu verwenden.",
     },
     'CAAS config file': {
         'en': 'CAAS config file',
