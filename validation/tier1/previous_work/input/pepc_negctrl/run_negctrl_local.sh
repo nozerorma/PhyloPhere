@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Negative-control launcher for the PEPC fixture. Same settings as
-# ../pepc/scripts/run_tier1_pepc_local_complete.sh, with the trait file
+# input/pepc/scripts/run_tier1_pepc_local_complete.sh, with the trait file
 # replaced by the nc01..ncK controls from build_negctrl_traits.R, a separate
 # output base, and the modules that do not feed p.emp switched off.
 # Run a subset with: NC_IDS="1 2 3" bash run_negctrl_local.sh
@@ -85,7 +85,7 @@ export SLURM_QUEUE=""
 export ALI_DIR="/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc/align"
 export ALI_FORMAT="fasta"
 export TREE_FILE="/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc/tree.nwk"
-export TRAIT_FILE="/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc_negctrl/my_traits.tsv"
+export TRAIT_FILE="/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/previous_work/input/pepc_negctrl/my_traits.tsv"
 export PRUNE_DIR=""
 export BRANCH_TRAIT=""
 export ALI_SP_NAMES="/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc/ali_sp_names.txt"

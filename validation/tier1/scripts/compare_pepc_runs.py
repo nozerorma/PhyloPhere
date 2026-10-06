@@ -6,7 +6,7 @@ counts), the positions held by only one run, how far the scores and the empirica
 the 10 truth-set sites side by side, and the cycles of the permulation null each run holds. Exit code 1 when `--require-equal`
 is given and the runs differ beyond `--tol`.
 
-    python3 validation/tier1/scripts/compare_pepc_runs.py --a validation/tier1/output/pepc_pre_unification/results \\
+    python3 validation/tier1/scripts/compare_pepc_runs.py --a validation/tier1/previous_work/output/pepc_pre_unification/results \\
         --b validation/tier1/output/pepc/results --require-equal
 """
 import argparse

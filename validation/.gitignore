@@ -36,9 +36,11 @@ tier1/input/**/*.genbank
 !tier1/input/**/*.spec.json
 !tier1/input/**/positive_selection/*.tsv
 
-# Run outputs: one directory per run under tier1/output/.
+# Run outputs: one directory per run under tier1/output/ and tier1/previous_work/output/.
 tier1/output/**
 !tier1/output/.gitkeep
+tier1/previous_work/output/**
+tier1/previous_work/input/**/*.tsv
 
 # Bytecode.
 __pycache__/

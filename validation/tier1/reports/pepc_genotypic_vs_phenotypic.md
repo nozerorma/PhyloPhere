@@ -171,7 +171,7 @@ The observed data detect more positions, at higher scores, than a typical null c
 
 ### 6e. Negative controls
 
-Twenty control traits (`input/pepc_negctrl/my_traits.tsv`, columns nc01 to nc20) were drawn by `input/pepc/scripts/build_negctrl_traits.R` from the permulation null's own generator fitted on the genotypic trait (BM, 23 foreground tips, Tier-1 Dunn acceptance at 4 pairs, seed 2026). Each was run through the observed path with the genotypic run's settings (`input/pepc_negctrl/run_negctrl_local.sh`; FADE, enrichment and reports off). Overlap with the real C4 set is low (Jaccard ≤ 0.10; φ from −0.43 to 0.38). Summary: `output/pepc_negctrl/negctrl_summary.tsv`, from `input/pepc_negctrl/analyze_negctrl.py`.
+These controls were run with the pipeline before the unified CAAS core and have not been repeated with it; their inputs and outputs are in `previous_work/`. Twenty control traits (`previous_work/input/pepc_negctrl/my_traits.tsv`, columns nc01 to nc20) were drawn by `previous_work/input/pepc_negctrl/build_negctrl_traits.R` from the permulation null's own generator fitted on the genotypic trait (BM, 23 foreground tips, Tier-1 Dunn acceptance at 4 pairs, seed 2026). Each was run through the observed path with the genotypic run's settings (`previous_work/input/pepc_negctrl/run_negctrl_local.sh`; FADE, enrichment and reports off). Overlap with the real C4 set is low (Jaccard ≤ 0.10; φ from −0.43 to 0.38). Summary: `previous_work/output/pepc_negctrl/negctrl_summary.tsv`, from `previous_work/input/pepc_negctrl/analyze_negctrl.py`.
 
 | quantity | value |
 |---|---|
