@@ -109,28 +109,6 @@ as_bool <- function(x) {
   tolower(as.character(x)) %in% c("true", "t", "1", "yes", "y")
 }
 
-format_threshold <- function(x) {
-  formatC(as.numeric(x), format = "f", digits = 2)
-}
-
-
-
-collapse_side <- function(x) {
-  x <- tolower(as.character(x))
-  x <- x[x %in% c("top", "bottom")]
-  if (length(x) == 0) return("none")
-  ux <- unique(x)
-  if (all(c("top", "bottom") %in% ux)) return("both")  # two per-side rows for one site
-  ux[[1]]
-}
-
-combo_from_flags <- function(df, cols) {
-  apply(df[, cols, drop = FALSE], 1, function(v) {
-    labs <- cols[as.logical(v)]
-    if (length(labs) == 0) "none" else paste(labs, collapse = "+")
-  })
-}
-
 # The parallel_* axis was retired upstream (the ASR path score's clean-path /
 # independence machinery approximates it; T1 also removed the interim
 # mrca_diversity axis), so the convergence label is now the convergence_type alone.

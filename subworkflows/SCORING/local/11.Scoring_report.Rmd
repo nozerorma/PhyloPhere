@@ -127,16 +127,6 @@ safe_cor <- function(x, y, method = "pearson") {
   cor(x[ok], y[ok], method = method)
 }
 
-# Safe quantile: base quantile(x, p, na.rm = TRUE) still ERRORS ("missing values
-# and NaN's not allowed if 'na.rm' is FALSE") when na.rm drops every element -
-# which happens on small/degenerate permulation pools (e.g. strict
-# min_divergent_fraction with few positions). Return NA there instead of halting.
-.safe_q <- function(v, p) {
-  v <- v[is.finite(v)]
-  if (!length(v)) return(NA_real_)
-  as.numeric(stats::quantile(v, p, names = FALSE))
-}
-
 ```
 
 ```{r load-data}
@@ -477,7 +467,6 @@ $$\text{CAAS\_score} = \operatorname{mean}_{s \in \text{detected schemes}} \text
 (which ones) are reported as descriptors and do not scale the score. See the
 Biochemistry tab for what the five schemes are and why breadth is not treated
 as extra evidence.
-
 
 
 ---

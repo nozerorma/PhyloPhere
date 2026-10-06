@@ -179,16 +179,6 @@ stats.f <- function(df) {
   df_num
 }
 
-# Robust scaling
-robust_scale <- function(x) {
-  (x - median(x)) / IQR(x)
-}
-
-# Find outliers
-findoutlier <- function(x) {
-  return(x < quantile(x, .25) - 1.5 * IQR(x) | x > quantile(x, .75) + 1.5 * IQR(x))
-}
-
 # ----------------------------------------
 # Confidence Interval Functions
 # ----------------------------------------
