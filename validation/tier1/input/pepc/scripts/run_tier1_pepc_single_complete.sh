@@ -611,8 +611,8 @@ if [[ -z "${INPUT_TAX_ID:-}" || ( -z "${GENE_ENSEMBL_FILE:-}" && "${AUTO_GENERAT
 fi
 
 # Resolve --gmt_dir when left blank: fetches current GO/Reactome/WikiPathways
-# GMTs if AUTO_FETCH_GMT is true, falling back per-file to vendored copies in assets/gmt/
-# (or copies vendored copies without network calls when false via --no-fetch).
+# GMTs if AUTO_FETCH_GMT is true, falling back per-file to the copies in subworkflows/ENRICHMENT/dat/
+# (or copies those without network calls when false via --no-fetch).
 if [[ -z "${GMT_DIR:-}" ]]; then
     _NO_FETCH_ARG=""
     if [[ "${AUTO_FETCH_GMT:-false}" != "true" ]]; then

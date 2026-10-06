@@ -2,7 +2,7 @@
 """
 resolve_gmts.py  —  Resolve --gmt_dir before invoking Nextflow, when left
 blank: fetch fresh copies of the default GMT set, falling back to the
-vendored copies (assets/gmt/) per-file when a fetch fails (offline node, no
+copies in subworkflows/ENRICHMENT/dat/ per-file when a fetch fails (offline node, no
 network, upstream host down).
 
 Fetching is tried first deliberately — offline safety is what the vendored
@@ -18,7 +18,7 @@ silently ignored.
 
 Usage
 -----
-    resolve_gmts.py --output-dir <dir> [--vendored-dir <assets/gmt>] \
+    resolve_gmts.py --output-dir <dir> [--vendored-dir <dir>] \
         [--gmt-dir <existing --gmt_dir value>] [--timeout 30]
 
 Prints one line to stdout, shell-sourceable:
@@ -47,9 +47,8 @@ _SOURCES = {
     # and changes each release, no stable "current" alias exists.
     #
     # Reactome ships as a zip archive (multi-file), not a plain-text GMT URL,
-    # so it isn't included in the live-fetch set at all — the vendored copy is
-    # always used for it. Refresh assets/gmt/reactome_pathways.gmt manually
-    # (see assets/gmt/README.md) rather than teaching this script to unzip.
+    # so it is not in the live-fetch set: the copy in subworkflows/ENRICHMENT/dat/
+    # is always used for it and is refreshed by hand.
 }
 
 
@@ -68,8 +67,7 @@ def _resolve_wikipathways_url(timeout: int):
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ENRICHMENT_DAT_DIR = os.path.join(_REPO_ROOT, "subworkflows", "ENRICHMENT", "dat")
-_ASSETS_GMT_DIR = os.path.join(_REPO_ROOT, "assets", "gmt")
-_DEFAULT_VENDORED_DIR = _ENRICHMENT_DAT_DIR if os.path.isdir(_ENRICHMENT_DAT_DIR) else _ASSETS_GMT_DIR
+_DEFAULT_VENDORED_DIR = _ENRICHMENT_DAT_DIR
 
 
 
