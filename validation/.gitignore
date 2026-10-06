@@ -1,30 +1,35 @@
-# Heavy / derived fixture content — never committed.
-# Specs and per-fixture READMEs ARE tracked (they are small and describe how to
-# rebuild everything else).
+# Paper validation (tier1, tier2, truthsets).
+# Tracked: the scripts that build and run a fixture, its READMEs and specs, the GUI template, the reports, the
+# reference papers and the truth sets. Ignored: everything those scripts regenerate.
+
+# Built fixture content. Each fixture's scripts/build.py and scripts/build_cds.py recreate it.
 tier1/input/**/align/
+tier1/input/**/align_cds/
 tier1/input/**/aln/
 tier1/input/**/gene_trees/
-tier1/input/**/*.nwk
+tier1/input/**/oc_run/
 tier1/input/**/*.fasta
 tier1/input/**/*.fa
 tier1/input/**/*.phy
 tier1/input/**/*.aln
+tier1/input/**/*.nwk
 tier1/input/**/*.newick
 tier1/input/**/*.nh
 tier1/input/**/*.tree
 tier1/input/**/*.tre
+tier1/input/**/*.nex
+tier1/input/**/*.phyml_tree*
+tier1/input/**/*.iqtree.log
 tier1/input/**/*.tsv
 tier1/input/**/*.txt
-tier1/input/**/*.phyml_tree*
-# fetched raw inputs (build.py re-fetches); keep build.py + README + *.spec.json
+
+# Raw inputs fetched by build.py.
 tier1/input/**/*.coor_*
-tier1/input/**/*.nex
 tier1/input/**/*.gb
 tier1/input/**/*.gbk
 tier1/input/**/*.genbank
-tier1/input/**/*.iqtree.log
-tier1/input/**/oc_run/
-tier1/input/**/align_cds/
+
+# Exceptions: the files that describe and rebuild a fixture.
 !tier1/input/**/README.md
 !tier1/input/**/build.py
 !tier1/input/**/build_cds.py
@@ -32,20 +37,10 @@ tier1/input/**/align_cds/
 !tier1/input/fixture-tools.yml
 !tier1/input/**/positive_selection/*.tsv
 
-# Local GUI run outputs — never committed.
+# Run outputs: one directory per run under tier1/output/.
 tier1/output/**
 !tier1/output/.gitkeep
 
-# Pipeline outputs
-runs/**
-!runs/.gitkeep
-
-# Demoted Tier 0 — heavy fixture content stays out (code + READMEs tracked)
-.demoted/fixtures_tier0/trees/
-.demoted/**/*.tree
-.demoted/**/*.nh
-
-# Python
+# Bytecode.
 __pycache__/
 *.pyc
-.metrics_cache/
