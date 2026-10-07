@@ -457,6 +457,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `fcs_min_genes` / `fcs_max_genes` | `5` / `1000` | Minimum / maximum gene set size required for FCS enrichment evaluation (`0` = no upper limit). |
 | `fcs_fdr` | `0.15` | Benjamini-Hochberg FDR threshold for FCS gene-set significance. |
 | `fcs_pperm_thr` | `0.025` | Permulation p-value threshold for filtering phylogenetic non-independence. |
+| `fcs_caas_score` | `raw` | Score of the CAAS rankings (global, top, bottom) tested by the FCS. `raw`: `gene_caas_score`. `fact`: `-log10` of the factorized gene p (`gene_caas_pperm_fact*`), with the permulation null rebuilt on the same scale (`scoring/caas_perms_fcs.rds`: each null detection takes its factorized p against the other cycles). The FCS is rank based, so the choice changes the order of the genes, not the scale. Needs `--scoring` and the CAAS permulation null; without them the raw scores are kept. |
 | `fcs_top_n` | `20` | Number of top-ranked gene sets highlighted in report tables. |
 | `caas_permulation_enrichment` | `true` | Runs the permulation core (CAAS_CORE, CAAS_CORE_MERGE) to build the genome-wide null used for CAAS's FCS permulation p-value. |
 | `posenrich_min_size` / `posenrich_max_size` | `5` / `0` | Position set size boundaries for POSENRICH (0 = un-capped). |

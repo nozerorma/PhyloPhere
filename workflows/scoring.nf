@@ -236,6 +236,12 @@ workflow SCORING {
 
         def final_reports = report_out.report
 
+        // The null the pathway tests (FCS) consume. With fcs_caas_score = fact it is the null rebuilt on the scale of the
+        // factorized gene p (SCORING_COMPUTE, caas_perms_fcs.rds); otherwise the null resolved above.
+        def caas_perms_fcs = ((params.fcs_caas_score ?: 'raw') == 'fact')
+            ? compute_out.caas_perms_fcs.ifEmpty { file('NO_FILE') }.collect().map { it[0] }
+            : caas_perms_resolved
+
     emit:
         position_scores  = compute_out.position_scores
         gene_scores      = compute_out.gene_scores
@@ -251,5 +257,5 @@ workflow SCORING {
         // one, not re-resolve from params, or its FCS p.perm would fall back to the
         // cached (possibly stale) caas_perms.rds while the scoring report used the
         // rebuilt one — two different nulls in the same run.
-        caas_perms       = caas_perms_resolved
+        caas_perms       = caas_perms_fcs
 }

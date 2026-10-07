@@ -61,8 +61,8 @@ params:
 <!--
 Rendered by CAAS_SIGNIFICANCE_REPORT (ctpp_meta_caas.nf), after SCORING. The per-position CAAS table
 (global_meta_input: global_meta_caas.tsv, or the post-processed discovery table SCORING evaluated; one row per
-Gene, Position and, when present, pattern and caap_group) is joined with position_scores.tsv (p.emp, p.adj_bh,
-p.adj_sam) and gene_scores.tsv (gene_caas_pperm, gene_caas_pperm_adj) of the same run. It cannot be merged into
+Gene, Position and, when present, pattern and caap_group) is joined with position_scores.tsv (p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact)
+and gene_scores.tsv (gene_caas_pperm, gene_caas_pperm_adj) of the same run. It cannot be merged into
 7.CAAS_pattern_annotation.Rmd, which runs before SCORING, when those tables do not exist yet.
 Outputs: significance/meta_caas_significance.tsv and significance/pattern_significance_summary.tsv.
 -->
@@ -163,16 +163,28 @@ the undeduped table (or on `side`, which meta_caas doesn't have) would
 silently duplicate every meta_caas row once per side.
 
 ```{r position_join}
-has_p_emp_cols <- all(c("p.emp", "p.adj_bh", "p.adj_sam") %in% names(position_scores))
+has_p_emp_cols <- all(c("p.emp", "p.adj_bh") %in% names(position_scores))
+if (has_p_emp_cols) {
+  for (.c in c("p.emp_fact", "p.adj_bh_fact")) if (!.c %in% names(position_scores)) position_scores[[.c]] <- NA_real_
+}
+# p.emp is add-one smoothed: its minimum is 1/(N + 1). A value at that floor is displayed as "< 1/N" (Saputra et al.
+# 2021: with 1000 permulations the lowest reportable p is 0.001 and a p of 0 is written "<0.001"); the TSV keeps the number.
+.p_floor <- if (has_p_emp_cols) suppressWarnings(min(position_scores$p.emp, na.rm = TRUE)) else NA_real_
+.n_perm  <- if (is.finite(.p_floor) && .p_floor > 0) round(1 / .p_floor) - 1 else NA_real_
+.fmt_p <- function(p) vapply(p, function(x) {
+  if (is.na(x)) return(NA_character_)
+  if (is.finite(.n_perm) && x <= .p_floor * (1 + 1e-9)) return(sprintf("<%s", format(1 / .n_perm, digits = 3)))
+  format(signif(x, 3), scientific = FALSE, trim = TRUE)
+}, character(1))
 if (!has_p_emp_cols) {
   warning("position_scores.tsv has no p.emp/p.adj_bh columns -- was it produced by ",
           "a stale scoring_compute.R build? Significance columns will be all-NA.")
   pos_dedup <- tibble(Gene = character(), Position = integer(),
-                       p.emp = numeric(), p.adj_bh = numeric(), p.adj_sam = numeric())
+                       p.emp = numeric(), p.adj_bh = numeric(), p.emp_fact = numeric(), p.adj_bh_fact = numeric())
 } else {
   pos_dedup <- position_scores %>%
     mutate(Position = as.integer(Position)) %>%
-    distinct(Gene, Position, p.emp, p.adj_bh, p.adj_sam)
+    distinct(Gene, Position, p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact)
   # Check the pooling assumption of the text above: a (Gene, Position) with more than one
   # distinct p.emp value would duplicate meta_caas rows in the join, so warn and keep one.
   n_dupe_keys <- pos_dedup %>% count(Gene, Position) %>% filter(n > 1) %>% nrow()
@@ -191,7 +203,7 @@ meta_caas <- meta_caas %>%
   mutate(
     position_significant_raw = !is.na(p.emp) & p.emp <= p_emp_thr,
     position_significant_bh  = !is.na(p.adj_bh) & p.adj_bh <= p_emp_thr,
-    position_significant_sam = !is.na(p.adj_sam) & p.adj_sam <= p_emp_thr,
+    position_significant_bh_fact = !is.na(p.adj_bh_fact) & p.adj_bh_fact <= p_emp_thr,
     position_significant     = position_significant_bh
   )
 
@@ -272,11 +284,11 @@ pattern_summary <- meta_caas %>%
     pct_positions_significant_raw = 100 * n_positions_significant_raw / n_positions,
     n_positions_significant_bh = sum(position_significant_bh, na.rm = TRUE),
     pct_positions_significant_bh = 100 * n_positions_significant_bh / n_positions,
-    n_positions_significant_sam = sum(position_significant_sam, na.rm = TRUE),
-    pct_positions_significant_sam = 100 * n_positions_significant_sam / n_positions,
+    n_positions_significant_bh_fact = sum(position_significant_bh_fact, na.rm = TRUE),
     min_p_emp = suppressWarnings(min(p.emp, na.rm = TRUE)),
     min_p_adj_bh = suppressWarnings(min(p.adj_bh, na.rm = TRUE)),
-    min_p_adj_sam = suppressWarnings(min(p.adj_sam, na.rm = TRUE)),
+    min_p_emp_fact = suppressWarnings(min(p.emp_fact, na.rm = TRUE)),
+    min_p_adj_bh_fact = suppressWarnings(min(p.adj_bh_fact, na.rm = TRUE)),
     n_genes = n_distinct(Gene),
     n_genes_significant_raw = n_distinct(Gene[gene_significant_raw %in% TRUE]),
     pct_genes_significant_raw = 100 * n_genes_significant_raw / n_genes,
@@ -287,11 +299,12 @@ pattern_summary <- meta_caas %>%
   mutate(
     min_p_emp = ifelse(is.infinite(min_p_emp), NA_real_, min_p_emp),
     min_p_adj_bh = ifelse(is.infinite(min_p_adj_bh), NA_real_, min_p_adj_bh),
-    min_p_adj_sam = ifelse(is.infinite(min_p_adj_sam), NA_real_, min_p_adj_sam)
+    min_p_emp_fact = ifelse(is.infinite(min_p_emp_fact), NA_real_, min_p_emp_fact),
+    min_p_adj_bh_fact = ifelse(is.infinite(min_p_adj_bh_fact), NA_real_, min_p_adj_bh_fact)
   ) %>%
   arrange(across(all_of(group_vars)))
 
-kable(pattern_summary, digits = 4, format.args = list(big.mark = ",")) %>%
+kable(pattern_summary %>% mutate(min_p_emp = .fmt_p(min_p_emp)), digits = 4, format.args = list(big.mark = ",")) %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
 ```
 
@@ -350,13 +363,13 @@ print(p_counts_sig)
 ```{r rowlevel_table}
 key_cols <- intersect(
   c("Gene", "Position", "caap_group", "convergence_type", "pattern", "side",
-    "p.emp", "p.adj_bh", "p.adj_sam", "position_significant", "gene_caas_pperm", "gene_caas_pperm_adj"),
+    "p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact", "position_significant", "gene_caas_pperm", "gene_caas_pperm_adj"),
   names(meta_caas)
 )
 other_cols <- setdiff(names(meta_caas), key_cols)
 meta_caas_display <- meta_caas %>%
   select(all_of(c(key_cols, other_cols))) %>%
-  mutate(across(where(is.numeric), ~ round(., 4)))
+  mutate(across(where(is.numeric), ~ round(., 4)), across(any_of("p.emp"), .fmt_p))
 
 if (requireNamespace("DT", quietly = TRUE)) {
   DT::datatable(

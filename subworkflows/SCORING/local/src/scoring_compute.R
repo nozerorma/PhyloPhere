@@ -22,6 +22,9 @@
 #   --accum_dir           directory with accumulation_<direction>_<scheme>_aggregated_results.csv
 #   --caas_perms          caas_perms.rds, the gene-level null (scoring_caas_perms.R)
 #   --caas_pos_cycle_caas perm_pos_cycle_caas.tsv.gz, the position-level null for p.emp
+#   --score_aggregation   mean|cumulative: rule of the observed position score; must match the null's (default cumulative)
+#   --fcs_caas_score      raw|fact: what the CAAS rankings of fcs_stats.tsv hold (default raw): gene_caas_score, or
+#                         -log10 of the factorized gene p; "fact" also writes caas_perms_fcs.rds, the null on that scale
 #   --p_emp_thr           threshold of flag_caas_significant (default 0.05)
 #   --hypotheses_pairs, --top_pct, --gene_top_pct   parsed but not used by the computation
 #
@@ -64,6 +67,14 @@ caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permul
 core_positions_file  <- parse_arg("--core_positions")  # observed_core_scores.py: CAAS_score per (Gene, Position, side)
 core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: size-adjusted gene CAAS scores
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
+# Scheme aggregation of the position score (params.caas_score_aggregation): "mean" or "cumulative". The observed
+# scores (observed_core_scores.py) and the null (perm_pos_cycle_caas.tsv.gz) must use the same rule.
+score_aggregation <- parse_arg("--score_aggregation", "cumulative")
+stopifnot("--score_aggregation must be 'mean' or 'cumulative'" = score_aggregation %in% c("mean", "cumulative"))
+# Score of the CAAS rankings of the functional class scoring (params.fcs_caas_score): "raw" keeps gene_caas_score; "fact"
+# ranks by -log10 of the factorized gene p, with the null of the pathway tests on the same scale.
+fcs_caas_score <- parse_arg("--fcs_caas_score", "raw")
+stopifnot("--fcs_caas_score must be 'raw' or 'fact'" = fcs_caas_score %in% c("raw", "fact"))
 # Threshold of flag_caas_significant (fcs_stats.tsv): gene_caas_pperm_adj <= p_emp_thr. It is the value of
 # the scoring_p_emp_thr param of 11.Scoring_report.Rmd (conf/scoring.config), so the "% significant"
 # figures of the enrichment reports agree with the Scoring report.
@@ -94,6 +105,50 @@ file_exists <- function(f) {
 # arithmetic can differ by rounding noise. Comparisons against the null count values within
 # TIE_TOL as ties (same constant as core.scores.TIE_TOL).
 TIE_TOL <- 1e-12
+
+# ── Factorized empirical p ─────────────────────────────────────────────────────
+# "Detects and exceeds" splits exactly into P(detect) x P(score >= s | detect). The first factor is the gene's or
+# position's own: (cycles of the null that score it + 1) / (N + 1). The second is estimated with the detections of
+# all the units of the same class, so the p is not limited to 1/(N + 1). A class groups units with a similar
+# propensity to be scored under permutation (cycles that score the unit) and, for genes, a similar size (positions
+# the gene can score). Pooling units of different propensity is not valid: the units the null scores often are
+# also the ones that reach high scores by chance.
+FACT_PROP_BREAKS <- c(0, 5, 20, 100, Inf)      # cycles of the null that score the unit
+FACT_SIZE_BREAKS <- c(-1, 1, 5, 20, Inf)       # positions of the gene: 1, 2-5, 6-20, > 20
+FACT_MIN_POOL    <- 200L                       # detections a propensity x size class needs; fewer fall back to propensity
+.fact_class <- function(nd, size = NULL) {
+  prop <- as.integer(cut(pmax(nd, 1), FACT_PROP_BREAKS))
+  if (is.null(size)) return(prop)
+  sz <- as.integer(cut(size, FACT_SIZE_BREAKS))
+  ifelse(is.na(sz), prop, prop * 10L + sz)
+}
+.fact_fit <- function(stat, nd, size = NULL) {
+  cls <- .fact_class(nd, size)
+  n_cls <- table(cls)
+  codes <- as.integer(names(n_cls))
+  small <- codes[codes > 9L & as.integer(n_cls) < FACT_MIN_POOL]
+  cls[cls %in% small] <- cls[cls %in% small] %/% 10L
+  list(drop = small, pools = lapply(split(stat, cls), sort))
+}
+.fact_assign <- function(fit, nd, size = NULL) {
+  cls <- .fact_class(nd, size)
+  d <- cls %in% fit$drop
+  cls[d] <- cls[d] %/% 10L
+  cls
+}
+.fact_p <- function(obs, nd, cls, fit, N) {
+  S <- rep(1, length(obs))
+  for (k in unique(cls)) {
+    v <- fit$pools[[as.character(k)]]
+    if (is.null(v)) next
+    i <- which(cls == k)
+    S[i] <- (1 + length(v) - findInterval(obs[i] - TIE_TOL, v, left.open = TRUE)) / (1 + length(v))
+  }
+  p <- pmin(1, (nd + 1) / (N + 1) * S)
+  p[obs <= TIE_TOL] <- 1
+  p
+}
+.gene_fam_size <- NULL   # positions of each gene in the permutation family (set with the position null)
 
 # Correlation over the complete pairs; NA when fewer than 3 remain.
 safe_cor <- function(x, y, method = "pearson") {
@@ -317,6 +372,8 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
 # pc["all"] on the null. The null's per-cycle score is the caas_score column, the same core.scores value the
 # observed position gets. Values within TIE_TOL of the observed score count as ties (>=).
 pos_scores$p.emp <- NA_real_
+pos_scores$p.emp_fact <- NA_real_
+pos_scores$p.adj_bh_fact <- NA_real_
 has_caas_pos_cycle_caas <- file_exists(caas_pos_cycle_caas_file)
 # A null table with a header and no row (N = 0, or no permuted cycle re-detected any position) has no cycle to count:
 # (k + 1) / (N + 1) would read 1 for every position, a value rather than the absence of one. p.emp and p.adj_bh
@@ -426,6 +483,25 @@ if (has_caas_pos_cycle_caas) {
   pos_scores <- pos_scores %>%
     select(-any_of("p.emp")) %>%
     left_join(.k_emp %>% select(Gene, Position, p.emp), by = c("Gene", "Position"))
+
+  # p.emp_fact: the factorized p of the position (see the helpers above). Its class is the propensity of the
+  # position, the cycles of the null that score it; a position that no cycle scores has propensity 0 and takes the
+  # lowest class. Where p.emp is left NA by the coordinate guard, so is p.emp_fact.
+  .nd_pos <- cyc_pooled %>% count(Gene, Position, name = "nd")
+  .fit_pos <- .fact_fit(cyc_pooled$caas_max, .nd_pos$nd[match(paste(cyc_pooled$Gene, cyc_pooled$Position),
+                                                              paste(.nd_pos$Gene, .nd_pos$Position))])
+  .fact_pos <- .k_emp %>%
+    select(Gene, Position, .obs, p.emp) %>%
+    left_join(.nd_pos, by = c("Gene", "Position")) %>%
+    mutate(nd = dplyr::coalesce(nd, 0L))
+  .fact_pos$p.emp_fact <- .fact_p(.fact_pos$.obs, .fact_pos$nd, .fact_assign(.fit_pos, .fact_pos$nd), .fit_pos, N_emp)
+  .fact_pos$p.emp_fact[is.na(.fact_pos$p.emp)] <- NA_real_
+  pos_scores <- pos_scores %>%
+    select(-p.emp_fact) %>%
+    left_join(.fact_pos %>% select(Gene, Position, p.emp_fact), by = c("Gene", "Position"))
+  # Positions each gene can score: those the null scores in some cycle plus the observed ones (the BH family)
+  .gene_fam_size <- dplyr::bind_rows(distinct(cyc_pooled, Gene, Position), distinct(obs_max, Gene, Position)) %>%
+    distinct() %>% count(Gene) %>% { stats::setNames(.$n, .$Gene) }
 } else if (!file_exists(caas_pos_cycle_caas_file)) {
   cat("  no --caas_pos_cycle_caas provided, skipping p.emp\n")
 }
@@ -458,27 +534,16 @@ if (has_caas_pos_cycle_caas) {
   cat(sprintf("  p.adj_bh: BH over %d positions (%d observed, %d null-only at p = 1)\n",
               nrow(.fam_e), sum(.fam_e$observed), sum(!.fam_e$observed)))
 
-  .sam <- obs_max %>%
-    semi_join(.k_emp %>% filter(!is.na(p.emp)), by = c("Gene", "Position"))
-  if (nrow(.sam) > 0) {
-    .null_sorted <- sort(cyc_pooled$caas_max)
-    .s   <- .sam$.obs
-    .ord <- order(.s, decreasing = TRUE)
-    .s_d <- .s[.ord]
-    # null pairs with score >= t, per cycle; observed positions with score >= t
-    .exp_null <- (length(.null_sorted) -
-                    findInterval(.s_d - TIE_TOL, .null_sorted, left.open = TRUE)) / N_emp
-    .n_obs    <- vapply(.s_d, function(t) sum(.s >= t - TIE_TOL), numeric(1))
-    .fdr      <- pmin(1, .exp_null / .n_obs)
-    .q        <- rev(cummin(rev(.fdr)))
-    .sam$p.adj_sam <- NA_real_
-    .sam$p.adj_sam[.ord] <- .q
-    pos_scores <- pos_scores %>%
-      select(-p.adj_sam) %>%
-      left_join(.sam %>% select(Gene, Position, p.adj_sam), by = c("Gene", "Position"))
-  }
-  cat(sprintf("  p.adj_sam: permutation FDR over %d observed positions, %d null (cycle, position) pairs, N=%d\n",
-              nrow(.sam), nrow(cyc_pooled), N_emp))
+  # BH of the factorized p over the same family
+  .fam_f <- .fam_e %>%
+    select(Gene, Position, observed) %>%
+    left_join(.fact_pos %>% select(Gene, Position, p.emp_fact), by = c("Gene", "Position")) %>%
+    mutate(p.emp_fact = dplyr::coalesce(p.emp_fact, 1))
+  .fam_f$p.adj_bh_fact <- p.adjust(.fam_f$p.emp_fact, method = "BH")
+  pos_scores <- pos_scores %>%
+    select(-p.adj_bh_fact) %>%
+    left_join(.fam_f %>% filter(observed) %>% select(Gene, Position, p.adj_bh_fact), by = c("Gene", "Position"))
+
   rm(cyc_pooled)
 }
 
@@ -909,7 +974,9 @@ if (nrow(gene_fade) > 0) {
 # itself. A gene absent from the null's universe gets NA, never the implicit-zero-row value 1/(N+1).
 cat("\n─── CAAS permulation gene p (Tier 1A) ─────────────────────────\n")
 for (col in c("gene_caas_pperm", "gene_caas_pperm_top", "gene_caas_pperm_bottom",
-              "gene_caas_pperm_adj", "gene_caas_pperm_adj_top", "gene_caas_pperm_adj_bottom")) {
+              "gene_caas_pperm_adj", "gene_caas_pperm_adj_top", "gene_caas_pperm_adj_bottom",
+              "gene_caas_pperm_fact", "gene_caas_pperm_fact_top", "gene_caas_pperm_fact_bottom",
+              "gene_caas_pperm_fact_adj", "gene_caas_pperm_fact_adj_top", "gene_caas_pperm_fact_adj_bottom")) {
   gene_scores[[col]] <- NA_real_
 }
 
@@ -962,7 +1029,77 @@ if (!file_exists(caas_perms_file)) {
                       list("gene_caas_pperm_bottom", "gene_caas_pperm_adj_bottom", "bottom"))) {
       p <- gene_scores[[spec[[1]]]]
       tested <- !is.na(p)
-      if (any(tested)) gene_scores[[pair[2]]][tested] <- p.adjust(p[tested], method = "BH")
+      mat <- byrank[[spec[[3]]]]
+      if (!any(tested) || is.null(mat)) next
+      n_untested <- length(setdiff(rownames(mat), gene_scores$Gene[tested]))
+      gene_scores[[spec[[2]]]][tested] <- p.adjust(c(p[tested], rep(1, n_untested)), method = "BH")[seq_len(sum(tested))]
+    }
+    # Factorized gene p (helpers of section 2f-ter): (cycles that score the gene + 1) / (N + 1) times the share of
+    # the detections of genes of the same class (propensity x size) with a statistic >= the observed one. The
+    # statistic given detection is size_adj_max, a probability-integral transform, so genes of different n share a
+    # pool within their class. The gene size is the number of positions of its permutation family.
+    .fact_gene_direction <- function(obs_col, mat) {
+      out <- rep(NA_real_, nrow(gene_scores))
+      if (is.null(mat) || nrow(mat) == 0) return(out)
+      gnames <- rownames(mat)
+      nd_all <- rowSums(!is.na(mat) & mat > 0)
+      size_all <- if (is.null(.gene_fam_size)) NULL else as.numeric(.gene_fam_size[gnames])
+      hit <- which(!is.na(mat) & mat > 0, arr.ind = TRUE)
+      fit <- .fact_fit(mat[hit], nd_all[hit[, 1]], if (is.null(size_all)) NULL else size_all[hit[, 1]])
+      idx <- match(gene_scores$Gene, gnames)
+      ok <- which(!is.na(idx) & !is.na(gene_scores[[obs_col]]))
+      if (length(ok) == 0) return(out)
+      nd <- nd_all[idx[ok]]
+      sz <- if (is.null(size_all)) NULL else size_all[idx[ok]]
+      out[ok] <- .fact_p(gene_scores[[obs_col]][ok], nd, .fact_assign(fit, nd, sz), fit, ncol(mat))
+      out
+    }
+    gene_scores$gene_caas_pperm_fact        <- .fact_gene_direction("gene_caas_score",            byrank[["global"]])
+    gene_scores$gene_caas_pperm_fact_top    <- .fact_gene_direction("gene_caas_score_top_all",    byrank[["top"]])
+    gene_scores$gene_caas_pperm_fact_bottom <- .fact_gene_direction("gene_caas_score_bottom_all", byrank[["bottom"]])
+    for (spec in list(list("gene_caas_pperm_fact",        "gene_caas_pperm_fact_adj",        "global"),
+                      list("gene_caas_pperm_fact_top",    "gene_caas_pperm_fact_adj_top",    "top"),
+                      list("gene_caas_pperm_fact_bottom", "gene_caas_pperm_fact_adj_bottom", "bottom"))) {
+      p <- gene_scores[[spec[[1]]]]
+      tested <- !is.na(p)
+      mat <- byrank[[spec[[3]]]]
+      if (!any(tested) || is.null(mat)) next
+      n_untested <- length(setdiff(rownames(mat), gene_scores$Gene[tested]))
+      gene_scores[[spec[[2]]]][tested] <- p.adjust(c(p[tested], rep(1, n_untested)), method = "BH")[seq_len(sum(tested))]
+    }
+    # The null of the pathway tests on the scale of the factorized p. Every detection of the null matrix (a gene that is
+    # scored in a cycle) gets -log10 of its factorized p against the detections of the other cycles: the cycle is left
+    # out of the class pool and of the propensity of the gene, as the observed p does not count itself. Cells where the
+    # gene is not scored stay 0, p = 1. Returned with the dimnames of the matrix.
+    .fact_null_matrix <- function(mat) {
+      gnames <- rownames(mat); N <- ncol(mat)
+      nd_all <- rowSums(!is.na(mat) & mat > 0)
+      size_all <- if (is.null(.gene_fam_size)) NULL else as.numeric(.gene_fam_size[gnames])
+      hit <- which(!is.na(mat) & mat > 0, arr.ind = TRUE)
+      out <- matrix(0, nrow(mat), N, dimnames = dimnames(mat))
+      if (nrow(hit) == 0) return(out)
+      stat <- mat[hit]; nd <- nd_all[hit[, 1]]; sz <- if (is.null(size_all)) NULL else size_all[hit[, 1]]
+      fit <- .fact_fit(stat, nd, sz); cls <- .fact_assign(fit, nd, sz)
+      S <- rep(1, length(stat))
+      for (k in unique(cls)) {
+        v <- fit$pools[[as.character(k)]]; if (is.null(v)) next
+        i <- which(cls == k)
+        ge_tot <- length(v) - findInterval(stat[i] - TIE_TOL, v, left.open = TRUE)
+        ge_cyc <- ave(stat[i], hit[i, 2], FUN = function(x) length(x) - rank(x, ties.method = "min") + 1)   # >= in the cycle, itself included
+        n_cyc  <- ave(stat[i], hit[i, 2], FUN = length)
+        S[i] <- (1 + ge_tot - ge_cyc) / (1 + length(v) - n_cyc)
+      }
+      out[hit] <- -log10(pmin(1, nd / N * S))
+      out
+    }
+    if (fcs_caas_score == "fact") {
+      .perms_fcs <- caas_perms
+      for (.d in c("global", "top", "bottom")) {
+        if (!is.null(byrank[[.d]])) .perms_fcs[["caas_corStat_byrank"]][[.d]] <- .fact_null_matrix(byrank[[.d]])
+      }
+      .perms_fcs[["fcs_scale"]] <- "fact_log10p"
+      saveRDS(.perms_fcs, "caas_perms_fcs.rds")
+      cat("  caas_perms_fcs.rds: the CAAS null on the scale of the factorized gene p (-log10), for the FCS\n")
     }
     .n_cycles <- if (!is.null(byrank[["global"]])) ncol(byrank[["global"]]) else NA_integer_
     cat(sprintf("  gene_caas_pperm: %d/%d genes scored (N=%s cycles, floor~%.4g)\n",
@@ -1039,10 +1176,10 @@ pos_out <- pos_scores %>%
                   "top_species_residues", "bottom_species_residues",
                   "n_top_species", "n_bottom_species", "n_conserved_pairs")), CAAS_score,
          side,
-         any_of("caas"), any_of(c("ancestral_aa", "derived_aa")),
-         # p.emp: the pooled "detects AND exceeds" position p; p.adj_bh and
-         # p.adj_sam: its BH and permutation-FDR adjustments (§2h).
-         any_of(c("p.emp", "p.adj_bh", "p.adj_sam"))) %>%
+         any_of(c("caas", "amino_encoded")), any_of(c("ancestral_aa", "derived_aa")),
+         # p.emp: the pooled "detects AND exceeds" position p; p.adj_bh: its BH adjustment (§2h); p.emp_fact and
+         # p.adj_bh_fact: the factorized p of the position and its BH adjustment.
+         any_of(c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact"))) %>%
   arrange(desc(CAAS_score))
 
 write_tsv(pos_out, "position_scores.tsv")
@@ -1057,7 +1194,8 @@ gene_out <- gene_scores %>%
     gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
     any_of(c("gene_caas_pperm", "gene_caas_pperm_top", "gene_caas_pperm_bottom",
              "gene_caas_pperm_adj", "gene_caas_pperm_adj_top", "gene_caas_pperm_adj_bottom",
-             "gene_caas_pperm_pooled", "gene_caas_pperm_pooled_top", "gene_caas_pperm_pooled_bottom")),
+             "gene_caas_pperm_fact", "gene_caas_pperm_fact_top", "gene_caas_pperm_fact_bottom",
+             "gene_caas_pperm_fact_adj", "gene_caas_pperm_fact_adj_top", "gene_caas_pperm_fact_adj_bottom")),
     any_of(c("accum_cct_p", "accum_fdr", "accum_significant",
              "accum_pval_us", "accum_pval_gs4", "accum_pval_gs3",
              "accum_pval_gs2", "accum_pval_gs1",
@@ -1086,11 +1224,19 @@ cat(sprintf("  gene_scores.tsv: %d rows\n", nrow(gene_out)))
 .istrue <- function(x) !is.na(x) & x %in% c(TRUE, "TRUE", "True", "true", 1, "1")
 .rer_dir <- tolower(as.character(.col(gene_scores, "rer_acceleration")))
 
+# The CAAS rankings: gene_caas_score, or -log10 of the factorized gene p when the null of the pathway tests was
+# rebuilt on that scale (caas_perms_fcs.rds). Without the null (no p to rank by) the raw scores stay.
+.fcs_fact <- fcs_caas_score == "fact" && file.exists("caas_perms_fcs.rds")
+if (fcs_caas_score == "fact" && !.fcs_fact) cat("  fcs_caas_score = fact needs the CAAS permulation null: the raw gene scores are kept\n")
+.fcs_rank <- function(raw_col, p_col) {
+  if (.fcs_fact) suppressWarnings(-log10(as.numeric(.col(gene_scores, p_col))))
+  else suppressWarnings(as.numeric(.col(gene_scores, raw_col)))
+}
 fcs_stats <- tibble(
   gene             = gene_scores$Gene,
-  score_global     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score"))),
-  score_top        = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_top_all"))),
-  score_bottom     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_bottom_all"))),
+  score_global     = .fcs_rank("gene_caas_score",            "gene_caas_pperm_fact"),
+  score_top        = .fcs_rank("gene_caas_score_top_all",    "gene_caas_pperm_fact_top"),
+  score_bottom     = .fcs_rank("gene_caas_score_bottom_all", "gene_caas_pperm_fact_bottom"),
   flag_fade_top    = .istrue(.col(gene_scores, "fade_significant_top")),
   flag_fade_bottom = .istrue(.col(gene_scores, "fade_significant_bottom")),
   flag_rer_acc     = .istrue(.col(gene_scores, "rer_significant")) & grepl("acc", .rer_dir),

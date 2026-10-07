@@ -754,6 +754,15 @@ print(.gene_null_plot("asr_path_score", .obs_gene_asr_dist, "CAAS Score (q90)",
 # gene_caas_pperm_adj and the significance report, so it is one parameter
 # across all three.
 has_p_emp <- "p.emp" %in% names(pos_df) && any(!is.na(pos_df$p.emp))
+# p.emp is add-one smoothed, so its minimum is 1/(N + 1). A value at that floor is reported as "< 1/N" (with 1000
+# permulations "<0.001"), the convention of Saputra et al. 2021; the TSV keeps the number. N is read from the floor.
+.p_floor <- if (has_p_emp) min(pos_df$p.emp, na.rm = TRUE) else NA_real_
+.n_perm  <- if (is.finite(.p_floor) && .p_floor > 0) round(1 / .p_floor) - 1 else NA_real_
+.fmt_p <- function(p) vapply(p, function(x) {
+  if (is.na(x)) return(NA_character_)
+  if (is.finite(.n_perm) && x <= .p_floor * (1 + 1e-9)) return(sprintf("<%s", format(1 / .n_perm, digits = 3)))
+  format(signif(x, 3), scientific = FALSE, trim = TRUE)
+}, character(1))
 p_emp_thr <- suppressWarnings(as.numeric(params$scoring_p_emp_thr))
 if (!is.finite(p_emp_thr) || p_emp_thr <= 0 || p_emp_thr > 1) p_emp_thr <- 0.05
 ```
@@ -766,23 +775,33 @@ n_sig_raw <- sum(pos_df$p.emp <= p_emp_thr, na.rm = TRUE)
 pct_sig_raw <- 100 * mean(pos_df$p.emp <= p_emp_thr, na.rm = TRUE)
 n_sig_bh <- sum(pos_df$p.adj_bh <= p_emp_thr, na.rm = TRUE)
 pct_sig_bh <- 100 * mean(pos_df$p.adj_bh <= p_emp_thr, na.rm = TRUE)
-has_sam <- "p.adj_sam" %in% names(pos_df)
-n_sig_sam <- if (has_sam) sum(pos_df$p.adj_sam <= p_emp_thr, na.rm = TRUE) else NA_integer_
-pct_sig_sam <- if (has_sam) 100 * mean(pos_df$p.adj_sam <= p_emp_thr, na.rm = TRUE) else NA_real_
+n_floor <- sum(pos_df$p.emp <= .p_floor * (1 + 1e-9), na.rm = TRUE)
+has_fact <- all(c("p.emp_fact", "p.adj_bh_fact") %in% names(pos_df))
+n_sig_fact <- if (has_fact) sum(pos_df$p.emp_fact <= p_emp_thr, na.rm = TRUE) else NA_integer_
+n_sig_fact_bh <- if (has_fact) sum(pos_df$p.adj_bh_fact <= p_emp_thr, na.rm = TRUE) else NA_integer_
+min_fact <- if (has_fact) suppressWarnings(min(pos_df$p.emp_fact, na.rm = TRUE)) else NA_real_
 
 cat(sprintf(paste0(
   "`p.emp` counts the permuted-labeling cycles that BOTH re-detect the position ",
   "(on either phenotype side) AND match or beat its observed `CAAS_score`, add-one ",
   "smoothed over N cycles. `p.adj_bh` is its BH adjustment over one test per position, ",
   "across every position the null detects (null-detected positions not detected in the ",
+  "observed data enter at p = 1). A position with an observed score of 0 has p.emp = 1. A `p.emp` at its floor ",
+  "is reported as `< 1/N`. `p.emp_fact` is the factorized p: the share of permuted labelings that score the ",
+  "position times the share of detections of positions of the same propensity class that reach its score, so it is ",
+  "not limited by the floor; `p.adj_bh_fact` is its BH adjustment.\n\n",
   "- **Scored positions with p.emp**: %d/%d (%.1f%%)\n",
   "- **Significant at uncorrected p.emp <= %.3g**: %d/%d (%.1f%%)\n",
   "- **Significant at BH-adjusted p.adj_bh <= %.3g**: %d/%d (%.1f%%)\n",
+  "- **At the permulation floor (p.emp %s)**: %d positions\n",
+  "- **Factorized p.emp_fact <= %.3g**: %s positions; **p.adj_bh_fact <= %.3g**: %s; smallest p.emp_fact: %s\n\n"),
   n_val, n_tot, 100 * n_val / max(1, n_tot),
   p_emp_thr, n_sig_raw, n_tot, pct_sig_raw,
   p_emp_thr, n_sig_bh, n_tot, pct_sig_bh,
-  p_emp_thr, if (has_sam) as.character(n_sig_sam) else "NA", n_tot,
-  if (has_sam) sprintf("%.1f%%", pct_sig_sam) else "NA"))
+  .fmt_p(.p_floor), n_floor,
+  p_emp_thr, if (has_fact) as.character(n_sig_fact) else "NA", p_emp_thr,
+  if (has_fact) as.character(n_sig_fact_bh) else "NA",
+  if (has_fact && is.finite(min_fact)) format(min_fact, digits = 3) else "NA"))
 ```
 
 ```{r p-emp-dist, eval=has_p_emp, fig.height=4.5, fig.width=9}

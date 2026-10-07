@@ -348,6 +348,7 @@ Usage:
 --fcs_max_genes                        <INTEGER>                1000  (0 = no cap)
 --fcs_fdr                                <FLOAT 0-1>              0.15
 --fcs_pperm_thr                            <FLOAT 0-1>              0.025
+--fcs_caas_score                           <raw|fact>               raw    (score of the CAAS rankings of the FCS: gene_caas_score, or -log10 of the factorized gene p with the permulation null rebuilt on that scale; needs --scoring and the CAAS permulation null)
 --fcs_top_n                                  <INTEGER>                20
 --caas_permulation_enrichment                    <true|false>             true
 

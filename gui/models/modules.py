@@ -286,6 +286,7 @@ class EnrichmentConfig(ModuleConfigBase):
     fcs_fdr_permsum: str = "0.05"  # --fcs_fdr_permsum
     pfam_cache_dir: str = ""  # --pfam_cache_dir (blank -> ~/.cache/phylophere/pfam)
     fcs_pperm_thr: str = "0.025"  # --fcs_pperm_thr
+    fcs_caas_score: str = "raw"  # --fcs_caas_score (raw|fact): score of the CAAS rankings of the FCS
     fcs_top_n: str = "20"  # --fcs_top_n
     fcs_batch_size: str = "4"  # --fcs_batch_size (GMTs per FCS_COMPUTE_BATCHED task)
     # caas_permulation_enrichment (conf/enrichment.config) is a field of CaasConfig, not

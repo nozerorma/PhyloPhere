@@ -52,7 +52,16 @@ p.emp = (k_emp + 1) / (N + 1)          add-one, cola derecha
   Para `T_obs > 0` el resultado no cambia: un ciclo que no detecta la posición (−Inf, o 0 como
   en el nulo de gen) nunca iguala un observado positivo. Entra en la familia de BH con `p = 1`.
 - **Las dos filas de lado** de una posición detectada en ambos lados llevan el
-  mismo `p.emp`, `p.adj_bh` y `p.adj_sam`.
+  mismo `p.emp` y `p.adj_bh`.
+
+---
+
+### 1.1 Convención de reporte
+
+El mínimo de `p.emp` es `1/(N + 1)`. En tablas y gráficos de los informes un valor en
+ese suelo se muestra «< 1/N» («<0.001» con 1000 ciclos), como en Saputra et al. 2021 (con
+1000 permulaciones el mínimo reportable es 0.001 y un p calculado como 0 se escribe
+«<0.001»). Los ficheros TSV conservan el valor numérico.
 
 ---
 
@@ -102,6 +111,31 @@ la mitad aparecen en el nulo, se asume un desajuste de coordenadas entre
 en NA y se emite un aviso. Con menos de 10 posiciones la tasa no es
 informativa y las posiciones sin correspondencia se puntúan con `k_emp = 0`.
 
+### 2.3 `p.emp_fact`: p factorizado de posición
+
+«Detecta y supera» se descompone exactamente en
+`P(detecta) × P(score ≥ s | detecta)`. `p.emp_fact` estima el primer factor con los
+ciclos de la propia posición y el segundo con las detecciones de las posiciones de su
+clase, de modo que no queda limitado por el suelo `1/(N + 1)`:
+
+```
+p.emp_fact = (nd + 1) / (N + 1)  ×  (1 + #{detecciones de la clase con score >= s}) / (1 + #{detecciones de la clase})
+```
+
+- `nd` = ciclos del nulo que puntúan la posición (en cualquier lado). La **clase** es la
+  propensión de la posición: `nd` ≤ 5 (incluida la posición que ningún ciclo puntúa),
+  6 a 20, 21 a 100 y > 100. Agrupar posiciones de propensión distinta no es válido: las
+  que el nulo puntúa a menudo también alcanzan scores altos más a menudo por azar.
+- Un score observado 0 da `p.emp_fact = 1`. Donde el guard de coordenadas deja `p.emp` en
+  NA, `p.emp_fact` también.
+- `p.adj_bh_fact` es BH sobre la misma familia que `p.adj_bh` (§3.1), con las posiciones
+  sólo-nulo en `p = 1`.
+- **Supuestos y comprobación.** Los ciclos nulos son intercambiables con el observado, y
+  las clases se definen con el propio nulo. Tomando cada ciclo nulo como observado frente
+  a los demás, la tasa de pares (posición, ciclo) con `p.emp_fact ≤ α` no supera α en
+  ninguna clase de propensión. La prueba está en `PhyloPhere_validation`
+  (`test_factorized_p_calibration.py`).
+
 ---
 
 ## 3. Comparaciones múltiples (§2h)
@@ -148,8 +182,8 @@ sigue a `p.adj_bh`. El mismo parámetro controla `gene_caas_pperm_adj`. Ninguno 
 
 | | detección / conteo | detección + score |
 |---|---|---|
-| **posición** | | `p.emp` / `p.adj_bh` / `p.adj_sam` |
-| **gen** | `accum_cct_p` / `accum_fdr` (§4b) | `gene_caas_pperm(_adj)` (§4f) |
+| **posición** | | `p.emp` / `p.adj_bh`, `p.emp_fact` / `p.adj_bh_fact` |
+| **gen** | `accum_cct_p` / `accum_fdr` (§4b) | `gene_caas_pperm(_adj)`, `gene_caas_pperm_fact(_adj)` (§4f) |
 
 - **`gene_caas_pperm` (§4f).** Estadístico `size_adj_max = F(max)^n` sobre los
   `CAAS_score` de las posiciones del gen, contra su fila en
@@ -158,6 +192,16 @@ sigue a `p.adj_bh`. El mismo parámetro controla `gene_caas_pperm_adj`. Ninguno 
   observado, con `p = 1`, como la familia de posiciones de §3.1). No tiene compuerta de detección: la no detección
   entra como ceros estructurales de `gene_cycle_scores.tsv`. El guard numérico
   de §4 mantiene `size_adj_max` (R) y `_size_adj_max_null` (Python) idénticos.
+- **`gene_caas_pperm_fact` (§4f).** La misma factorización sobre el estadístico del gen:
+  `(ciclos que puntúan el gen + 1)/(N + 1)` por la fracción de detecciones de los genes de
+  su clase con estadístico ≥ el observado. Dado que el gen puntúa, `size_adj_max` es una
+  transformación integral de probabilidad y es casi uniforme, de modo que genes de
+  distinto `n` comparten reserva dentro de una clase. La clase combina la propensión del
+  gen (ciclos que lo puntúan: ≤ 5, 6 a 20, 21 a 100, > 100) y su tamaño (posiciones de su
+  familia: 1, 2 a 5, 6 a 20, > 20); una clase con menos de 200 detecciones vuelve a la
+  clase de propensión. Se calcula por dirección (global, top, bottom) con su propia matriz
+  nula y su BH (`_fact_adj*`) sobre el universo del nulo de la dirección, con los genes
+  sin score en `p = 1`. Un score 0 da `p = 1`.
 - **`accum_cct_p` (§4b).** Conteo de posiciones detectadas por gen y esquema,
   combinado con Cauchy (CCT/ACAT). Con `accumulation_randomization_type =
   "cons_decile"` (por defecto) su nulo es de ocupación por deciles de
@@ -200,7 +244,8 @@ Resultados en `validation/tier1/reports/pepc_genotypic_vs_phenotypic.md` §6.
   del nulo. En los controles negativos el ritmo de falsos positivos por
   ejecución es nominal, pero el mecanismo existe.
 - **Exceso en la cola de `p.emp`** en los controles negativos (§5), de causa no
-  identificada.
+  identificada. `p.emp_fact` lo hereda: en los controles de PEPC el número de posiciones con
+  p ≤ 0.01 es de 11 a 13 frente a 5.2 esperadas como máximo (mismo orden que `p.emp`: 14).
 - **Resolución.** El mínimo de `p.emp` es `1/(N + 1)`; con familias de decenas
   de posiciones, una llamada BH a 0.05 exige estar en ese suelo o cerca, y los
   rangos entre las posiciones más fuertes dependen de unos pocos ciclos.
@@ -211,5 +256,6 @@ Resultados en `validation/tier1/reports/pepc_genotypic_vs_phenotypic.md` §6.
 
 ## Referencias
 
+- Saputra E, Kowalczyk A, Cusick L, Clark N, Chikina M. 2021. Phylogenetic permulations: a statistically rigorous approach to measure confidence in associations in a phylogenetic context. Mol Biol Evol 38(7):3004–3021. doi:10.1093/molbev/msab068.
 - Bourgon R, Gentleman R, Huber W. 2010. Independent filtering increases detection power for high-throughput experiments. Proc Natl Acad Sci USA 107(21):9546–9551. doi:10.1073/pnas.0914005107.
 - Davison AC, Hinkley DV. 1997. Bootstrap Methods and Their Application. Cambridge University Press.

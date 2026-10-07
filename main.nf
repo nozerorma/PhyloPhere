@@ -711,6 +711,12 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // CAAS_PERMS_PREP and CAAS_CORE.
 
 
+        if (!((params.fcs_caas_score ?: 'raw') in ['raw', 'fact'])) {
+            error "fcs_caas_score must be 'raw' or 'fact', not '${params.fcs_caas_score}'."
+        }
+        if (!((params.caas_score_aggregation ?: 'cumulative') in ['mean', 'cumulative'])) {
+            error "caas_score_aggregation must be 'mean' or 'cumulative', not '${params.caas_score_aggregation}'."
+        }
         def evidence_top_n = (params.caas_evidence_top_n ?: 0) as int
         if (evidence_top_n > 0 && !params.scoring) {
             error "caas_evidence_top_n > 0 explains the best positions of position_scores.tsv: it needs --scoring."

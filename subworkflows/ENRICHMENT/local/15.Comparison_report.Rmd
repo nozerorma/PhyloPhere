@@ -1353,12 +1353,12 @@ build_interesting_positions <- function(direction) {
   # position_significant: p.adj_bh <= scoring_p_emp_thr, computed directly on base
   has_pe_raw <- "p.emp" %in% names(base)
   has_pe_bh  <- "p.adj_bh" %in% names(base)
-  has_pe_sam <- "p.adj_sam" %in% names(base)
+  has_pe_bhf <- "p.adj_bh_fact" %in% names(base)
   p_emp_thr <- suppressWarnings(as.numeric(params$scoring_p_emp_thr))
   if (!is.finite(p_emp_thr) || p_emp_thr <= 0 || p_emp_thr > 1) p_emp_thr <- 0.05
   base$position_significant_raw <- if (has_pe_raw) !is.na(base$`p.emp`) & base$`p.emp` <= p_emp_thr else FALSE
   base$position_significant_bh  <- if (has_pe_bh) !is.na(base$`p.adj_bh`) & base$`p.adj_bh` <= p_emp_thr else FALSE
-  base$position_significant_sam <- if (has_pe_sam) !is.na(base$`p.adj_sam`) & base$`p.adj_sam` <= p_emp_thr else FALSE
+  base$position_significant_bh_fact <- if (has_pe_bhf) !is.na(base$`p.adj_bh_fact`) & base$`p.adj_bh_fact` <= p_emp_thr else FALSE
   base$position_significant     <- base$position_significant_bh
 
   # Position-native FADE-site overlap.
@@ -1456,13 +1456,13 @@ build_interesting_positions <- function(direction) {
     dplyr::mutate(dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_overlap, RER_acc, RER_decc, RER_dir, Accum_dir,
                                  CAAS_FCS_sig, RER_FCS_sig, CAAS_AMI_net, RER_AMI_net, FADE_AMI_net, PE_sig,
                                  position_significant, position_significant_raw, position_significant_bh,
-                                 position_significant_sam),
+                                 position_significant_bh_fact),
                                  ~ dplyr::coalesce(.x, FALSE)))
 
   out <- all_positions %>%
     dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_overlap | Accum_dir | RER_dir |
                   CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig |
-                  position_significant | position_significant_raw | position_significant_sam)
+                  position_significant | position_significant_raw | position_significant_bh_fact)
   if (nrow(out) == 0) return(out)
 
   out <- out %>%
@@ -1507,7 +1507,7 @@ build_interesting_positions <- function(direction) {
                   FADE_overlap, RER_acc, RER_decc, Accum_dir,
                   `Pos sig (uncorrected)` = position_significant_raw,
                   `Pos sig (p.adj_bh)` = position_significant_bh,
-                  `Pos sig (p.adj_sam)` = position_significant_sam,
+                  `Pos sig (p.adj_bh_fact)` = position_significant_bh_fact,
                   position_significant,
                   CAAS_FCS_sig, `CAAS FCS term(s)`, `CAAS evidence`,
                   RER_FCS_sig, `RER FCS term(s)`, `RER evidence`,
