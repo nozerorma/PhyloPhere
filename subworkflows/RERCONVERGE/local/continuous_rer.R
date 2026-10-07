@@ -173,9 +173,10 @@ message(sprintf("[RER] Correlation done: %d genes tested.", nrow(res)))
 
 # ── Permulation null (Brownian-motion phenotypes) ─────────────────────────────
 
-# Null phenotypes are simulated under Brownian motion; the configured default (conf/
-# rerconverge.config) is 10 batches x 100 permutations, as in Valenzuela et al. (2024).
-# p.perm is the empirical p-value computed by permpvalcor() from the null correlations.
+# Null phenotypes are simulated under Brownian motion (permulations, Saputra et al. 2021, who typically
+# use 1,000); the configured default (conf/rerconverge.config) is 10 batches x 100 permutations.
+# p.perm is the empirical p-value computed by permpvalcor() from the null correlations, centred on the median of
+# each gene's null, so its smallest value is about 1 / (N/2 + 1).
 num_batches      <- as.integer(args[9])
 perms_per_batch  <- as.integer(args[10])
 

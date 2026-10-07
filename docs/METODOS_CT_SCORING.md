@@ -595,7 +595,7 @@ de genes, más ancho que el CAAS) con:
 - **Accumulation**: por dirección (`all`/`top`/`bottom`), Cauchy Combination Test
   (CCT/ACAT) sobre las p empíricas de los 5 esquemas → `accum_cct_p`, BH → `accum_fdr`,
   `accum_significant` (< 0.05) sobre genes con ≥ 1 CAAS.
-- **RER**: `rer_min_pval` (usa `p.perm` si existe), `rer_significant` (≤ 0.05), `rer_rho`,
+- **RER**: `rer_min_pval` (usa `p.perm` si existe), `rer_significant` (≤ 0.05, **sin corregir** por tests múltiples; es la llamada que usan las listas de genes RER y los flags AMI), `rer_perm_padj` (BH de `p.perm` sobre todos los genes) y `rer_significant_fdr` (`rer_perm_padj` ≤ 0.05; Saputra et al. 2021 corrigen el p de permulación antes de llamar genes), `rer_rho`,
   `rer_acceleration`.
 - **FADE**: `fade_max_bf_{top,bottom}` (máx Bayes Factor por dirección), `fade_significant`
   (BF ≥ 100).

@@ -106,11 +106,19 @@ The analysis uses the following key statistics:
 |-----------|---------|
 | **Rho**     | Pearson correlation between trait path values and gene RER path values |
 | **N**       | Number of branches (species) with data for the gene |
-| **P**       | Raw p-value from the correlation test |
-| **p.adj**   | Benjamini–Hochberg FDR-adjusted parametric p-value (computed internally by `correlateWithContinuousPhenotype()`) |
-| **p.perm**  | Empirical permutation p-value (if run): proportion of null correlations ≥ \|Rho\| from Brownian-Motion null phenotypes. Floor = 1/n_perms. |
+| **P**       | Raw **parametric** p-value of the Pearson correlation test (it treats the branches as independent observations) |
+| **p.adj**   | Benjamini–Hochberg FDR-adjusted **parametric** p-value over all genes (computed internally by `correlateWithContinuousPhenotype()`, Kowalczyk _et al._ 2019) |
+| **p.perm**  | Empirical **permulation** p-value (if run): per gene, the null correlations of Brownian-Motion null phenotypes are compared with the observed Rho, centred on the median of the gene's own null (`permpvalcor()`, Saputra _et al._ 2021). Its minimum is about 1/(N/2 + 1) for N permulations, not 1/(N + 1) (the observed minimum is shown below). |
+| **p.perm.adj** | Benjamini–Hochberg adjustment of `p.perm` over all genes |
 
-> **Note:** Significance is defined by raw `p.perm < 0.05` when permutations are available, and by `p.adj < 0.05` otherwise.
+> **Note:** The parametric `P` and `p.adj` can be miscalibrated in either direction depending on the phenotype
+> (Saputra _et al._ 2021, Fig. 1A): anti-conservative for a binary marine phenotype and conservative for a
+> continuous long-lived large-bodied one. They rank genes, but they are not a calibrated FDR.
+> Genes called **significant** here (the `Call` column and the gene lists) are those with a raw permulation p-value
+> `p.perm < pval_threshold`, which is **not corrected for multiple testing**; the BH-adjusted `p.perm.adj` is
+> shown next to it. Saputra _et al._ correct the permulation p-values (Storey, or BH) and use up to ~1,000
+> permulations; with fewer than ~125 the permulation does not improve on the parametric p (their Fig. 5C).
+> Without permulations, significance falls back to `p.adj < pval_threshold`.
 > Trait transformations (e.g. logit, arcsin, log10, or none) can be configured via the `rer_transform` parameter.
 
 ---
@@ -139,15 +147,8 @@ cat(sprintf("Loaded RERconverge results: %d genes.\n", nrow(res)))
 ```{r process-results, results='hide'}
 has_perm <- "p.perm" %in% colnames(res) && any(!is.na(res$p.perm))
 
-# Format p.perm: replace 0 with "< 1/N" when total permutation count is known
-fmt_pperm <- function(x) {
-  if (!is.null(n_perms_total) && !is.na(n_perms_total) && n_perms_total > 0) {
-    ifelse(is.na(x), NA_character_,
-           ifelse(x == 0, paste0("< ", sprintf("%.4f", 1 / n_perms_total)), as.character(signif(x, 3))))
-  } else {
-    as.character(signif(x, 3))
-  }
-}
+# p.perm carries a pseudo-count, so it is never 0
+fmt_pperm <- function(x) ifelse(is.na(x), NA_character_, as.character(signif(x, 3)))
 
 rer_df <- res %>%
   as.data.frame() %>%
@@ -155,6 +156,11 @@ rer_df <- res %>%
   {if (!("p.perm" %in% colnames(.))) mutate(., p.perm = NA_real_) else .} %>%
   mutate(gene = rownames(res)) %>%   # row names ARE gene IDs
   relocate(gene)
+
+# BH adjustment of p.perm over all genes (continuous_rer.R writes it; an older RDS gets it here)
+if (has_perm && !("p.perm.adj" %in% colnames(rer_df))) {
+  rer_df$p.perm.adj <- p.adjust(rer_df$p.perm, method = "BH")
+}
 
 # Compute significance flags based on whether permutation p-values exist
 if (has_perm) {
@@ -164,6 +170,8 @@ if (has_perm) {
       signif_param = !is.na(p.adj) & p.adj < params$pval_threshold,
       # Significance is defined directly by raw p.perm when permutations are available
       signif       = !is.na(p.perm) & p.perm < params$pval_threshold,
+      # FDR-based call: BH-adjusted permulation p-value
+      signif_perm_fdr = !is.na(p.perm.adj) & p.perm.adj < params$pval_threshold,
       pos_corr     = signif &  Rho >  0,
       neg_corr     = signif &  Rho <  0
     ) %>%
@@ -231,9 +239,14 @@ cat(sprintf(
 ))
 if (has_perm) {
   cat(sprintf(
-    "Significant by raw permutation p-value (p.perm < %g): %d genes.\n",
+    "Significant by raw permutation p-value (p.perm < %g, not corrected for multiple testing): %d genes.\n",
     params$pval_threshold,
     sum(rer_df$signif, na.rm = TRUE)
+  ))
+  cat(sprintf(
+    "Significant by BH-adjusted permutation p-value (p.perm.adj < %g): %d genes.\n",
+    params$pval_threshold,
+    sum(rer_df$signif_perm_fdr, na.rm = TRUE)
   ))
 }
 ```
@@ -248,18 +261,20 @@ display_df <- rer_df %>%
     Rho   = round(Rho, 4),
     P     = signif(P,    3),
     p.adj = signif(p.adj, 3),
-    p.perm = if (has_perm) signif(p.perm, 3) else NA_real_
+    p.perm = if (has_perm) signif(p.perm, 3) else NA_real_,
+    p.perm.adj = if (has_perm) signif(p.perm.adj, 3) else NA_real_
   )
 
 # Include p.perm column only when permutations were run
 if (has_perm) {
   display_df <- display_df %>%
-    select(gene, Rho, N, P, p.adj, p.perm, Call) %>%
-    rename(Gene = gene, `Raw P` = P, `BH p.adj` = p.adj, `p.perm` = p.perm)
+    select(gene, Rho, N, P, p.adj, p.perm, p.perm.adj, Call) %>%
+    rename(Gene = gene, `Raw P (parametric)` = P, `p.adj (parametric BH)` = p.adj,
+           `p.perm (permulation)` = p.perm, `p.perm.adj (permulation BH)` = p.perm.adj)
 } else {
   display_df <- display_df %>%
     select(gene, Rho, N, P, p.adj, Call) %>%
-    rename(Gene = gene, `Raw P` = P, `BH p.adj` = p.adj)
+    rename(Gene = gene, `Raw P (parametric)` = P, `p.adj (parametric BH)` = p.adj)
 }
 
 DT::datatable(
@@ -423,10 +438,10 @@ perm_label_df <- rer_df %>%
   arrange(p.perm) %>%
   slice_head(n = params$top_n_labels)
 
-# Permutation floor: the minimum possible value is 1 / (n_perms + 1) due to pseudo-count correction.
-# We represent this floor as a dashed line in the plot.
-perm_floor_val <- if (!is.null(n_perms_total) && !is.na(n_perms_total) && n_perms_total > 0)
-  1 / (n_perms_total + 1) else NA_real_
+# Permutation floor: permpvalcor() centres each gene's null on its median and divides by the null values on the
+# observed side, about N/2, so the smallest p.perm is about 1 / (N/2 + 1), not 1 / (N + 1). The floor drawn is the
+# smallest p.perm of the table, which does not depend on that rule.
+perm_floor_val <- if (has_perm) min(rer_df$p.perm, na.rm = TRUE) else NA_real_
 perm_floor_log10 <- if (!is.na(perm_floor_val)) -log10(perm_floor_val) else NA_real_
 n_floor_genes <- if (!is.na(perm_floor_val)) sum(!is.na(rer_df$p.perm) & rer_df$p.perm <= perm_floor_val * 1.01) else 0
 
@@ -449,7 +464,7 @@ p1 <- ggplot(rer_df, aes(x = -log10(P + 1e-300), y = -log10(p.perm))) +
    else list()} +
   {if (!is.na(perm_floor_log10) && n_floor_genes > 0)
      annotate("text", x = Inf, y = perm_floor_log10,
-              label = sprintf(" floor: p < %.4f  (%d genes)", perm_floor_val, n_floor_genes),
+              label = sprintf(" floor: p = %.4f  (%d genes)", perm_floor_val, n_floor_genes),
               hjust = 1.05, vjust = -0.4, size = 3, colour = "#d62728")
    else list()} +
   geom_text_repel(data = perm_label_df, aes(label = gene),
@@ -484,12 +499,12 @@ p2 <- ggplot(perm_df_hist, aes(x = p.perm, fill = at_floor)) +
              linetype = "dashed", colour = "grey40", linewidth = 0.7) +
   scale_fill_manual(
     values = c(`FALSE` = .tableau10[5], `TRUE` = "#d62728"),
-    labels = c(`FALSE` = "Observed p.perm", `TRUE` = sprintf("Floor (p < %.4f)", if (!is.na(perm_floor_val)) perm_floor_val else 0)),
+    labels = c(`FALSE` = "Observed p.perm", `TRUE` = sprintf("Floor (p = %.4f)", if (!is.na(perm_floor_val)) perm_floor_val else 0)),
     name   = NULL
   ) +
   labs(
     title    = "Distribution of permutation p-values",
-    subtitle = if (n_floor_genes > 0) sprintf("%d genes at permutation floor (p.perm = 0)", n_floor_genes) else NULL,
+    subtitle = if (n_floor_genes > 0) sprintf("%d genes at the permutation floor (p.perm = %.4f)", n_floor_genes, perm_floor_val) else NULL,
     x = "p.perm",
     y = "Number of genes"
   ) +
@@ -535,12 +550,12 @@ top_pos <- rer_df %>%
 
 if (has_perm) {
   top_pos <- top_pos %>%
-    mutate(p.perm = fmt_pperm(p.perm)) %>%
-    select(gene, Rho, N, p.adj, p.perm)
-  col_names <- c("Gene", "Rho", "N", "BH p.adj", "p.perm")
+    mutate(p.perm = fmt_pperm(p.perm), p.perm.adj = signif(p.perm.adj, 3)) %>%
+    select(gene, Rho, N, p.adj, p.perm, p.perm.adj)
+  col_names <- c("Gene", "Rho", "N", "p.adj (parametric BH)", "p.perm", "p.perm.adj")
 } else {
   top_pos <- top_pos %>% select(gene, Rho, N, p.adj)
-  col_names <- c("Gene", "Rho", "N", "BH p.adj")
+  col_names <- c("Gene", "Rho", "N", "p.adj (parametric BH)")
 }
 
 if (nrow(top_pos) == 0) {
@@ -565,8 +580,8 @@ top_neg <- rer_df %>%
 
 if (has_perm) {
   top_neg <- top_neg %>%
-    mutate(p.perm = fmt_pperm(p.perm)) %>%
-    select(gene, Rho, N, p.adj, p.perm)
+    mutate(p.perm = fmt_pperm(p.perm), p.perm.adj = signif(p.perm.adj, 3)) %>%
+    select(gene, Rho, N, p.adj, p.perm, p.perm.adj)
 } else {
   top_neg <- top_neg %>% select(gene, Rho, N, p.adj)
 }
@@ -588,9 +603,9 @@ if (nrow(top_neg) == 0) {
 
 ## Methods
 
-**Tool:** RERconverge (Clark _et al._, 2012–2019;
+**Tool:** RERconverge (Kowalczyk _et al._, 2019, _Bioinformatics_ 35:4815;
 https://github.com/nclark-lab/RERconverge) via the `correlateWithContinuousPhenotype()`
-function.
+function. Permulations: Saputra _et al._ 2021, _Mol. Biol. Evol._ 38:3004, doi:10.1093/molbev/msab068.
 
 **Trait:** `r params$traitname`
 
@@ -606,11 +621,13 @@ Shapiro-Wilk. If the null hypothesis of normality was rejected (p < 0.05), a log
 was applied (log10(x + ε), ε = min non-zero value / 10), following Valenzuela _et al._ (2024).
 
 **Statistical inference:** Pearson correlation between trait paths and RER paths per gene.
-P-values are Benjamini–Hochberg FDR-corrected within `correlateWithContinuousPhenotype()`
-and reported as `p.adj`. Significance is assessed based on `pval_threshold`. A gene is called **positively correlated** if
+The parametric p-values are Benjamini–Hochberg corrected within `correlateWithContinuousPhenotype()`
+and reported as `p.adj` (Kowalczyk _et al._ 2019); they treat the branches as independent and can be miscalibrated
+in either direction (Saputra _et al._ 2021). Significance is assessed against `pval_threshold`, on the raw permulation
+p-value `p.perm` when permulations were run, and on `p.adj` otherwise. A gene is called **positively correlated** if
 it is significant and Rho > 0, and **negatively correlated** if it is significant and Rho < 0.
 
-**Permutation statistics:** `r if (has_perm) { n_str <- if (!is.null(n_perms_total) && !is.na(n_perms_total)) paste0(n_perms_total, " total permutations (minimum detectable p.perm = 1/", n_perms_total + 1, " = ", round(1/(n_perms_total + 1), 4), ")") else "N permutations (count not stored in this RDS)"; paste0("Empirical p-values (p.perm) were computed by generating null phenotypes under a Brownian Motion model of evolution using getPermsContinuous(). The empirical p-value is the proportion of null correlations with |Rho| ≥ the observed value, pseudo-count corrected as (num + 1) / (denom + 1) to prevent exact zero values. ", n_str, ". Batches combined with combinePermData().") } else "Not run (rer_perm_batches = 0). Re-run with rer_perm_batches > 0 to enable (recommended: 10 batches × 100 permutations = 1,000 total, following Valenzuela et al., 2024)."`
+**Permutation statistics:** `r if (has_perm) { n_str <- if (!is.null(n_perms_total) && !is.na(n_perms_total)) paste0(n_perms_total, " total permulations; the smallest p.perm is ", signif(perm_floor_val, 3), " (permpvalcor() divides by the null values on the observed side of the median, about N/2, so the floor is about 1/(N/2 + 1))") else "N permulations (count not stored in this RDS)"; paste0("Empirical p-values (p.perm) were computed by generating null phenotypes under a Brownian Motion model of evolution using getPermsContinuous() (permulations, Saputra et al. 2021). Per gene, permpvalcor() compares the observed correlation with the gene's own null correlations, centred on their median, with a pseudo-count (num + 1) / (denom + 1). ", n_str, ". Batches combined with combinePermData(). p.perm.adj is the Benjamini-Hochberg adjustment of p.perm over all genes. Saputra et al. typically use 1,000 permulations and correct the permulation p-values (Storey, or BH) before calling genes; with fewer than about 125 permulations the permulation does not improve on the parametric p (their Fig. 5C).") } else "Not run (rer_perm_batches = 0). Re-run with rer_perm_batches > 0 to enable (Saputra et al. 2021 typically use 1,000 permulations, here 10 batches × 100)."`
 
 ---
 

@@ -16,7 +16,10 @@
  *             rer_decelerating.txt (significant, Rho < 0),
  *             fcs_stats.tsv (gene, score_global, score_accelerating, score_decelerating,
  *             flag_rer_acc, flag_rer_decc, plus the cross-module columns found in the
- *             gene-scores table)
+ *             gene-scores table). The scores are the signed -log10 of the empirical
+ *             permulation p-value p.perm (Saputra et al. 2021; the signed log p of Kowalczyk
+ *             et al. 2019), or of the parametric P when no permulation was run; FCS builds its
+ *             null on the same scale (fcs_empirical_corstat in fcs_enrich.R).
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -66,11 +69,17 @@ process RER_GENE_LISTS {
         flag_rer_acc  <- rer_sig & df\$Rho > 0
         flag_rer_decc <- rer_sig & df\$Rho < 0
 
+        # Gene score: empirical permulation p when permulations were run (a gene without one has no evidence:
+        # p = 1, score 0), the parametric P otherwise.
+        use_perm <- "p.perm" %in% colnames(df) && any(!is.na(df\$p.perm))
+        p_score  <- if (use_perm) ifelse(is.na(df\$p.perm), 1, df\$p.perm) else df\$P
+        log_p    <- -log10(pmax(p_score, 1e-300))
+
         fcs_stats <- data.frame(
             gene = df\$gene,
-            score_global = sign(df\$Rho) * -log10(pmax(df\$P, 1e-300)),
-            score_accelerating = ifelse(df\$Rho > 0, -log10(pmax(df\$P, 1e-300)), 0),
-            score_decelerating = ifelse(df\$Rho < 0, -log10(pmax(df\$P, 1e-300)), 0),
+            score_global = sign(df\$Rho) * log_p,
+            score_accelerating = ifelse(df\$Rho > 0, log_p, 0),
+            score_decelerating = ifelse(df\$Rho < 0, log_p, 0),
             flag_rer_acc = flag_rer_acc,
             flag_rer_decc = flag_rer_decc,
             stringsAsFactors = FALSE

@@ -697,6 +697,32 @@ fcs_classify_evidence <- function(enrich_df, fdr_wilcoxon, fdr_lachenbruch, fdr_
     ) %>% dplyr::select(-lacks_null)
 }
 
+# ── RER null on the scale of the observed gene scores ─────────────────────────
+
+# The observed RER scores are sign(Rho) * -log10(p.perm), p.perm being the empirical permulation p of the gene
+# (RERconverge::permpvalcor(): the observed correlation against the gene's own null correlations, on its side of
+# the null median, pseudo-count (num + 1) / (denom + 1)). The null of the pathway tests must be on that scale, so
+# every null correlation gets the same p against the other null correlations of its gene (it is left out of its
+# own row): p = #(null >= x) / #(null >= median) on the upper side, #(null <= x) / #(null <= median) on the
+# lower one. The sign is the side of the median. Genes x N matrix like corStat, with the same dimnames.
+fcs_empirical_corstat <- function(corRho) {
+  Z   <- as.matrix(corRho)
+  out <- matrix(0, nrow(Z), ncol(Z), dimnames = dimnames(Z))
+  for (i in seq_len(nrow(Z))) {
+    ok <- !is.na(Z[i, ])
+    if (sum(ok) < 2L) next
+    x    <- Z[i, ok]
+    m    <- stats::median(x)
+    up   <- x >= m
+    ge   <- length(x) - rank(x, ties.method = "min") + 1   # null values >= x, itself included
+    le   <- rank(x, ties.method = "max")                   # null values <= x, itself included
+    p    <- ifelse(up, ge / sum(x >= m), le / sum(x <= m))
+    out[i, ok] <- ifelse(up, 1, -1) * -log10(p)
+  }
+  out
+}
+
+
 # ── Full run ──────────────────────────────────────────────────────────────────
 
 # Runs the three tests on every ranking and classifies the evidence.
@@ -779,6 +805,13 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
     if (!is.null(corperms) && (!is.null(corperms[["corStat"]]) || !is.null(corStat_byrank))) {
       base_corStat <- if (!is.null(corperms[["corStat"]])) as.matrix(corperms[["corStat"]]) else NULL
       base_corRho  <- if (!is.null(corperms[["corRho"]])) as.matrix(corperms[["corRho"]]) else NULL
+      # RER: the null is the signed -log10 empirical p of each null correlation (the scale of the observed scores,
+      # see fcs_empirical_corstat); its sign, the side of the gene's null median, gives the direction of the
+      # accelerating and decelerating rankings. Without corRho the parametric corStat is kept.
+      if (!is.null(base_corStat) && !is.null(base_corRho)) {
+        base_corStat <- fcs_empirical_corstat(base_corRho)
+        base_corRho  <- base_corStat
+      }
       n_perms      <- if (!is.null(base_corStat)) ncol(base_corStat)
                       else if (length(corStat_byrank)) ncol(corStat_byrank[[1]]) else 0L
       fcs_progress(sprintf("Vectorized pathway permulations: N=%d, %d GMTs, %d rankings",

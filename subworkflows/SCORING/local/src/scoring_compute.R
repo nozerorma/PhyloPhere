@@ -780,11 +780,24 @@ if (has_rer) {
   }
   cat(sprintf("  Using %s for rer_rho\n", rho_col))
 
+  # rer_significant is the nominal call (p.perm <= 0.05, not corrected for multiple testing), which RER gene lists
+  # and the AMI flags use. rer_perm_padj is its BH adjustment over all genes (Saputra et al. 2021 correct the
+  # permulation p-values before calling genes) and rer_significant_fdr the call on it. With few permulations the
+  # floor of p.perm keeps rer_perm_padj high: it is about 1 / (N/2 + 1) per gene, so BH cannot go below
+  # floor * genes / (genes at the floor).
+  if (pval_col == "p.perm") {
+    rer$rer_perm_padj <- if ("p.perm.adj" %in% names(rer)) as.numeric(rer[["p.perm.adj"]]) else
+      p.adjust(as.numeric(rer[["p.perm"]]), method = "BH")
+  } else {
+    rer$rer_perm_padj <- NA_real_
+  }
+
   gene_rer <- rer %>%
     filter(!is.na(.data[[pval_col]])) %>%
     mutate(
       rer_min_pval     = as.numeric(.data[[pval_col]]),
       rer_significant  = rer_min_pval <= 0.05,
+      rer_significant_fdr = !is.na(rer_perm_padj) & rer_perm_padj <= 0.05,
       rer_rho          = as.numeric(.data[[rho_col]]),
       rer_acceleration = case_when(
         is.na(rer_rho) ~ NA_character_,
@@ -793,15 +806,17 @@ if (has_rer) {
         TRUE           ~ "neutral"
       )
     ) %>%
-    select(Gene = gene, rer_min_pval, rer_significant, rer_rho, rer_acceleration) %>%
+    select(Gene = gene, rer_min_pval, rer_significant, rer_perm_padj, rer_significant_fdr, rer_rho, rer_acceleration) %>%
     mutate(Gene = as.character(Gene))
 
-  cat(sprintf("  RERConverge: %d genes, %d significant (p <= 0.05)\n",
-              nrow(gene_rer), sum(gene_rer$rer_significant, na.rm = TRUE)))
+  cat(sprintf("  RERConverge: %d genes, %d significant (p <= 0.05, uncorrected), %d with BH-adjusted p <= 0.05\n",
+              nrow(gene_rer), sum(gene_rer$rer_significant, na.rm = TRUE),
+              sum(gene_rer$rer_significant_fdr, na.rm = TRUE)))
 } else {
   cat("RERConverge: not available, skipping\n")
   gene_rer <- tibble(Gene = character(), rer_min_pval = numeric(),
-                     rer_significant = logical(), rer_rho = numeric(),
+                     rer_significant = logical(), rer_perm_padj = numeric(),
+                     rer_significant_fdr = logical(), rer_rho = numeric(),
                      rer_acceleration = character())
 }
 
@@ -859,6 +874,8 @@ if (nrow(gene_rer) > 0) {
 } else {
   gene_scores$rer_min_pval      <- NA_real_
   gene_scores$rer_significant   <- NA
+  gene_scores$rer_perm_padj     <- NA_real_
+  gene_scores$rer_significant_fdr <- NA
   gene_scores$rer_rho           <- NA_real_
   gene_scores$rer_acceleration  <- NA_character_
 }
@@ -1074,7 +1091,7 @@ gene_out <- gene_scores %>%
              "accum_cct_p_bottom", "accum_fdr_bottom", "accum_significant_bottom",
              "accum_pval_us_bottom", "accum_pval_gs4_bottom", "accum_pval_gs3_bottom",
              "accum_pval_gs2_bottom", "accum_pval_gs1_bottom")),
-    any_of(c("rer_min_pval", "rer_significant", "rer_rho", "rer_acceleration")),
+    any_of(c("rer_min_pval", "rer_significant", "rer_perm_padj", "rer_significant_fdr", "rer_rho", "rer_acceleration")),
     any_of(c("fade_max_bf_top", "fade_significant_top",
              "fade_max_bf_bottom", "fade_significant_bottom"))
   ) %>%
