@@ -113,27 +113,41 @@ TIE_TOL <- 1e-12
 # propensity to be scored under permutation (cycles that score the unit) and, for genes, a similar size (positions
 # the gene can score). Pooling units of different propensity is not valid: the units the null scores often are
 # also the ones that reach high scores by chance.
-FACT_PROP_BREAKS <- c(0, 5, 20, 100, Inf)      # cycles of the null that score the unit
-FACT_SIZE_BREAKS <- c(-1, 1, 5, 20, Inf)       # positions of the gene: 1, 2-5, 6-20, > 20
-FACT_MIN_POOL    <- 200L                       # detections a propensity x size class needs; fewer fall back to propensity
-.fact_class <- function(nd, size = NULL) {
-  prop <- as.integer(cut(pmax(nd, 1), FACT_PROP_BREAKS))
-  if (is.null(size)) return(prop)
-  sz <- as.integer(cut(size, FACT_SIZE_BREAKS))
-  ifelse(is.na(sz), prop, prop * 10L + sz)
+#
+# The classes are percentiles of the detections of the null: the propensity of a unit (cycles that score it) is cut so
+# that each of the FACT_PROP_CLASSES classes holds about 1 / FACT_PROP_CLASSES of all the detections, and the same for
+# the size of a gene (FACT_SIZE_CLASSES). Units with the same value are never split, so a class can hold more.
+FACT_PROP_CLASSES <- 20L                       # propensity classes: percentiles of the detections of the null
+FACT_SIZE_CLASSES <- 4L                        # gene size classes (positions of the gene): percentiles of the detections
+FACT_MIN_POOL     <- 200L                      # detections a propensity x size class needs; fewer fall back to propensity
+FACT_CELL         <- 100L                      # class code of a propensity x size cell: propensity * FACT_CELL + size class
+# Upper limits of the classes of x (the value of the unit of every detection), without the last one. A value lies in
+# class 1 + the number of limits below it.
+.fact_breaks <- function(x, K) {
+  v <- sort(unique(x))
+  n <- tabulate(match(x, v), length(v))
+  cls <- pmin(K, ceiling(K * cumsum(n) / sum(n) - 1e-9))
+  head(as.numeric(tapply(v, cls, max)), -1L)
+}
+.fact_class <- function(fit, nd, size = NULL) {
+  prop <- findInterval(pmax(nd, 1), fit$pb, left.open = TRUE) + 1L
+  if (is.null(size) || is.null(fit$sb)) return(prop)
+  ifelse(is.na(size), prop, prop * FACT_CELL + findInterval(size, fit$sb, left.open = TRUE) + 1L)
 }
 .fact_fit <- function(stat, nd, size = NULL) {
-  cls <- .fact_class(nd, size)
+  fit <- list(pb = .fact_breaks(pmax(nd, 1), FACT_PROP_CLASSES),
+              sb = if (is.null(size)) NULL else .fact_breaks(size[!is.na(size)], FACT_SIZE_CLASSES))
+  cls <- .fact_class(fit, nd, size)
   n_cls <- table(cls)
   codes <- as.integer(names(n_cls))
-  small <- codes[codes > 9L & as.integer(n_cls) < FACT_MIN_POOL]
-  cls[cls %in% small] <- cls[cls %in% small] %/% 10L
-  list(drop = small, pools = lapply(split(stat, cls), sort))
+  small <- codes[codes > FACT_CELL & as.integer(n_cls) < FACT_MIN_POOL]
+  cls[cls %in% small] <- cls[cls %in% small] %/% FACT_CELL
+  c(fit, list(drop = small, pools = lapply(split(stat, cls), sort)))
 }
 .fact_assign <- function(fit, nd, size = NULL) {
-  cls <- .fact_class(nd, size)
+  cls <- .fact_class(fit, nd, size)
   d <- cls %in% fit$drop
-  cls[d] <- cls[d] %/% 10L
+  cls[d] <- cls[d] %/% FACT_CELL
   cls
 }
 .fact_p <- function(obs, nd, cls, fit, N) {

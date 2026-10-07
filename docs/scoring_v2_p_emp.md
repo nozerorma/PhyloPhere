@@ -123,8 +123,11 @@ p.emp_fact = (nd + 1) / (N + 1)  ×  (1 + #{detecciones de la clase con score >=
 ```
 
 - `nd` = ciclos del nulo que puntúan la posición (en cualquier lado). La **clase** es la
-  propensión de la posición: `nd` ≤ 5 (incluida la posición que ningún ciclo puntúa),
-  6 a 20, 21 a 100 y > 100. Agrupar posiciones de propensión distinta no es válido: las
+  propensión de la posición, cortada en percentiles de las detecciones del nulo: cada una de
+  las `FACT_PROP_CLASSES` = 20 clases reúne en torno a 1/20 de todas las detecciones (pares
+  posición-ciclo con score), y las posiciones con el mismo `nd` no se parten, de modo que una
+  clase puede tener más. La posición que ningún ciclo puntúa va a la primera clase. Los cortes
+  salen del propio nulo, sin valores fijados a mano. Agrupar posiciones de propensión distinta no es válido: las
   que el nulo puntúa a menudo también alcanzan scores altos más a menudo por azar.
 - Un score observado 0 da `p.emp_fact = 1`. Donde el guard de coordenadas deja `p.emp` en
   NA, `p.emp_fact` también.
@@ -197,9 +200,10 @@ sigue a `p.adj_bh`. El mismo parámetro controla `gene_caas_pperm_adj`. Ninguno 
   su clase con estadístico ≥ el observado. Dado que el gen puntúa, `size_adj_max` es una
   transformación integral de probabilidad y es casi uniforme, de modo que genes de
   distinto `n` comparten reserva dentro de una clase. La clase combina la propensión del
-  gen (ciclos que lo puntúan: ≤ 5, 6 a 20, 21 a 100, > 100) y su tamaño (posiciones de su
-  familia: 1, 2 a 5, 6 a 20, > 20); una clase con menos de 200 detecciones vuelve a la
-  clase de propensión. Se calcula por dirección (global, top, bottom) con su propia matriz
+  gen (ciclos que lo puntúan, en 20 percentiles de las detecciones como en las posiciones) y su
+  tamaño (posiciones de su familia, en 4 percentiles de las detecciones); una celda
+  propensión × tamaño con menos de 200 detecciones se junta con las demás celdas pequeñas de
+  su propensión. Se calcula por dirección (global, top, bottom) con su propia matriz
   nula y su BH (`_fact_adj*`) sobre el universo del nulo de la dirección, con los genes
   sin score en `p = 1`. Un score 0 da `p = 1`.
 - **`accum_cct_p` (§4b).** Conteo de posiciones detectadas por gen y esquema,
@@ -243,6 +247,15 @@ Resultados en `validation/tier1/reports/pepc_genotypic_vs_phenotypic.md` §6.
 - **Familia de BH (§3.1).** m depende de qué columnas alcanzó la muestra finita
   del nulo. En los controles negativos el ritmo de falsos positivos por
   ejecución es nominal, pero el mecanismo existe.
+- **Calibración condicional por propensión.** Con las clases por percentiles, la fracción de
+  detecciones del nulo con S ≤ u (S = segundo factor) tomando cada ciclo como observado frente
+  a los demás debería valer u. En el nulo de Carn (agregación `mean`, N = 1000, 100 652
+  posiciones, 375 061 detecciones) se cumple dentro de ±10 % (u ≥ 0.01) para `nd` de 3 a 57, salvo
+  `nd` de 5-6 a u = 0.01 (+19 %); queda exacta para `nd` = 0 y liberal para `nd` = 1 y 2 (+17 a
+  +25 % a u = 0.01 y 0.05). La última clase (`nd` ≥ 58, 53 posiciones en Carn) mezcla un tramo
+  conservador (58 a 100: 0.8) y otro liberal (101 a 220: 1.26 a u = 0.01 y 0.05), de modo que
+  los p de las posiciones muy puntuadas por el nulo no se pueden leer a su valor nominal. Las
+  posiciones con BH ≤ 0.05 en ese run son todas de `nd` ≤ 5.
 - **Exceso en la cola de `p.emp`** en los controles negativos (§5), de causa no
   identificada. `p.emp_fact` lo hereda: en los controles de PEPC el número de posiciones con
   p ≤ 0.01 es de 11 a 13 frente a 5.2 esperadas como máximo (mismo orden que `p.emp`: 14).
