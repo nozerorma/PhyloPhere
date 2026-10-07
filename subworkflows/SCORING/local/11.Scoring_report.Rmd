@@ -1119,13 +1119,13 @@ gridExtra::grid.arrange(
 has_caas_col <- "caas" %in% names(pos_df)
 
 dir_display_cols <- c("Gene", "Position", "CAAS_score",
-                      if (has_caas_col) "caas",
+                      if (has_caas_col) c("caas", "amino_encoded"),
                       "n_schemes", "scheme_set",
                       "n_hypotheses", "participating_hypotheses",
                       "side",
                       "derived_residues",
                       "top_species_residues", "bottom_species_residues",
-                      "n_top_species", "n_bottom_species",
+                      "n_top_species", "n_bottom_species", "n_conserved_pairs",
                       "is_top_10pct", "is_top_5pct", "is_top_1pct",
                       "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
 

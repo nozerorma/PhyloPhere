@@ -480,7 +480,15 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             def background_genes_ch = core_observed ? core_observed.background_genes : null
             // Pass full ct_disambiguation/ directory for ASR robustness diagnostics (null = standalone mode)
             def disambiguation_dir_ch = observed_results ? observed_results.results_dir : null
-            postproc_results = CT_POSTPROC(disambiguation_ch, background_genes_ch, disambiguation_dir_ch)
+            // Contrast design (top / bottom species per hypothesis) for the species tally of the position table
+            def postproc_hyp_pairs_ch = contrast_out
+                ? (contrast_out.trait_dir_out ?: Channel.empty())
+                      .map { d ->
+                          def f = d ? file("${d}/contrast_hypotheses_pairs.tsv") : null
+                          (f && f.exists()) ? f : file('NO_HYP_PAIRS')
+                      }
+                : null
+            postproc_results = CT_POSTPROC(disambiguation_ch, background_genes_ch, disambiguation_dir_ch, postproc_hyp_pairs_ch)
             ran_any = true
 
             // Capture postproc outputs as reusable references.

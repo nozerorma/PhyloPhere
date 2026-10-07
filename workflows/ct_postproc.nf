@@ -39,6 +39,7 @@ workflow CT_POSTPROC {
         disambiguation_input_channel      // Post-disambiguation master CSV (optional, can use --disambiguation_input instead)
         background_genes_channel     // Global background genes file from CT module (preferred)
         disambiguation_dir_channel   // Full ct_disambiguation/ directory for ASR robustness diagnostics (optional)
+        hyp_pairs_channel            // contrast_hypotheses_pairs.tsv of this run's contrast selection (null: auto-discover in outdir)
 
     main:
         def filter_dir_ch = Channel.value("${params.outdir}/postproc")
@@ -82,7 +83,15 @@ workflow CT_POSTPROC {
 
         // Normalize discovery/disambiguation schema and apply the current
         // precluster hard filters used by CT post-processing.
-        prepared_inputs = CAAS_PREPARE_POSTPROC_INPUT(discovery_file_ch)
+        // Contrast design for the species tally: this run's contrast selection, else the file in outdir, else the sentinel.
+        def hyp_pairs_file
+        if (hyp_pairs_channel != null) {
+            hyp_pairs_file = hyp_pairs_channel.ifEmpty(file('NO_HYP_PAIRS')).first()
+        } else {
+            def auto_hp = file("${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv")
+            hyp_pairs_file = Channel.value(auto_hp.exists() ? auto_hp : file('NO_HYP_PAIRS'))
+        }
+        prepared_inputs = CAAS_PREPARE_POSTPROC_INPUT(discovery_file_ch, hyp_pairs_file)
         def prepared_discovery_ch = prepared_inputs.prepared_discovery
 
         log.info "📂 Post-processing input normalized from disambiguation master CSV"

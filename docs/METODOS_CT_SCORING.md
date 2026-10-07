@@ -376,9 +376,13 @@ filas de la `(Gene, Position)` (todo esquema, toda hipótesis):
   distintos** (un par resuelve a nodos distintos bajo hipótesis distintas → mezcla nº de
   pares con multiplicidad de hipótesis; vista secundaria, no un conteo de evidencia).
 - `n_conserved_pairs` = nº de `conserved_<j>_node` distintos.
-- (`add_species_tally`) `top_species_residues` / `n_top_species` = tally real de especies
-  del contraste que portan cada residuo en la columna del alineamiento (chequeo "X de N
-  especies", independiente de hipótesis).
+- (`add_species_tally`) `top_species_residues` / `bottom_species_residues` / `n_top_species` /
+  `n_bottom_species` = tally real de especies del contraste que portan cada residuo en la
+  columna del alineamiento (chequeo "X de N especies"), sobre las especies de las hipótesis
+  que llaman a la posición (`participating_hypotheses`, unión sobre esquemas y lados), leídas
+  de `contrast_hypotheses_pairs.tsv` (no depende de FADE). `n_conserved_pairs` = `"k/n"`: pares
+  de contraste con el mismo residuo en top y bottom sobre pares con residuo en ambos lados
+  (`"k1-k2/n"` si cambia entre hipótesis).
 
 *Ejemplo — `(OPN1, 210)`:* pares 1 y 2 portan W en todas las hipótesis; el par 3 porta W
 (en H1/H2) o F (en H3/H4). `top_residue_support = "W:3,F:1"` (W: pares {1,2,3}; F: par {3}).

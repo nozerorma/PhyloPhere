@@ -158,7 +158,7 @@ if (!"n_hypotheses" %in% names(df))          df$n_hypotheses <- 1L
 if (!"participating_hypotheses" %in% names(df)) df$participating_hypotheses <- ""
 # Descriptors of the species that carry the change; empty text when the input has none.
 for (.c in c("top_species_residues", "bottom_species_residues",
-             "n_top_species", "n_bottom_species")) {
+             "n_top_species", "n_bottom_species", "n_conserved_pairs")) {
   if (!.c %in% names(df)) df[[.c]] <- ""
 }
 df$asr_path_score <- suppressWarnings(as.numeric(df$asr_path_score))
@@ -233,6 +233,14 @@ pos_scores <- df %>%
     },
     n_top_species           = if ("n_top_species" %in% names(df)) dplyr::first(n_top_species) else "",
     n_bottom_species        = if ("n_bottom_species" %in% names(df)) dplyr::first(n_bottom_species) else "",
+    n_conserved_pairs       = if ("n_conserved_pairs" %in% names(df)) dplyr::first(n_conserved_pairs) else "",
+    # Scheme-encoded pattern, one "scheme:top/bottom" entry per detecting scheme (e.g. "GS2:h/s"); `caas` is the raw
+    # residues of the divergent pairs, this is what the scheme saw.
+    amino_encoded           = if ("amino_encoded" %in% names(df)) {
+      .ae <- !is.na(amino_encoded) & nzchar(amino_encoded)
+      .o  <- order(match(caap_group[.ae], c("US", "GS1", "GS2", "GS3", "GS4")))
+      paste(paste0(caap_group[.ae], ":", amino_encoded[.ae])[.o], collapse = " ")
+    } else "",
     # The per-scheme factors (asr_score / caas_row) and the ASR diagnostic columns (asr_path_score,
     # derived_agreement) are not carried to the position level: CAAS_score is the mean of asr_path_score
     # over the schemes, and a position-level mean of each sub-factor would hide scheme disagreement (a
@@ -1053,15 +1061,15 @@ cat("\n─── Writing outputs ───────────────�
 
 # Position scores. The per-scheme factors (asr_score, derived_agreement) and asr_path_score are not
 # written: CAAS_score is the position-level number (the asr_path_score of a position equals it), and
-# the per-scheme breakdown lives in filtered_discovery.tsv. top_species_residues and
-# bottom_species_residues (alignment-based, independent of the hypothesis) are the raw-residue
-# descriptors.
+# the per-scheme breakdown lives in filtered_discovery.tsv. top_species_residues, bottom_species_residues
+# and n_conserved_pairs (alignment-based, over the contrast pairs of the hypotheses that call the position)
+# are the raw-residue descriptors.
 pos_out <- pos_scores %>%
   select(Gene, Position,
          n_schemes, any_of("scheme_set"),
          any_of(c("n_hypotheses", "participating_hypotheses",
                   "top_species_residues", "bottom_species_residues",
-                  "n_top_species", "n_bottom_species")), CAAS_score,
+                  "n_top_species", "n_bottom_species", "n_conserved_pairs")), CAAS_score,
          side,
          any_of("caas"), any_of(c("ancestral_aa", "derived_aa")),
          # p.emp: the pooled "detects AND exceeds" position p; p.adj_bh and

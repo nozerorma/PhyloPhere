@@ -4,12 +4,12 @@
 
 """
 Input preparation of CT post-processing: standardizes the key columns of the disambiguation
-master table and, when the alignments and contrast species are given, adds the extant-species
+master table and, when the alignments and the contrast design are given, adds the extant-species
 residue tally (residue_descriptors.py).
 
 Called by:  CAAS_PREPARE_POSTPROC_INPUT process (ctpp_clustfilter.nf)
 Inputs:     --input  disambiguation master CSV/TSV (the separator is detected from the header)
-            --alignment, --alignment-format, --fg-species, --bg-species  optional, for the tally
+            --alignment, --alignment-format, --hyp-pairs  optional, for the tally
 Outputs:    --output  normalized TSV (Gene, Position, caap_group, ...)
             --removed-output  TSV of precluster removals (header only: no row is removed)
 """
@@ -56,17 +56,15 @@ def main() -> int:
         default="removed_patterns_precluster.tsv",
         help="Precluster removal output TSV",
     )
-    # Optional extant-species residue tally (top/bottom_species_residues, n_top/bottom_species).
-    # It needs the alignment directory and both contrast species lists; without them the
-    # columns stay empty.
+    # Optional extant-species residue tally (top/bottom_species_residues, n_top/bottom_species,
+    # n_conserved_pairs). It needs the alignment directory and the contrast design; without them
+    # the columns stay empty.
     parser.add_argument("--alignment", default=None,
                         help="Alignment directory (flat, gene = basename up to first '.')")
     parser.add_argument("--alignment-format", default="fasta",
                         help="Bio.AlignIO format for --alignment (default: fasta)")
-    parser.add_argument("--fg-species", default=None,
-                        help="top_species.txt (foreground contrast species, one per line)")
-    parser.add_argument("--bg-species", default=None,
-                        help="bottom_species.txt (background contrast species, one per line)")
+    parser.add_argument("--hyp-pairs", default=None,
+                        help="contrast_hypotheses_pairs.tsv (hypothesis_id, species1 = top, species2 = bottom)")
     args = parser.parse_args()
 
     # keep_default_na=False + na_values=[""]: the disambiguation master has categorical
@@ -89,15 +87,14 @@ def main() -> int:
     cleaned = df.copy()
     cleaned["Position"] = pd.to_numeric(cleaned["Position"], errors="raise").astype(int)
 
-    # Extant-species residue tally: a no-op when the alignment or the species lists are not
+    # Extant-species residue tally: a no-op when the alignment or the contrast design is not
     # supplied (e.g. a standalone --disambiguation_input run).
     def _opt(p):
         return p if p and os.path.exists(p) else None
     cleaned = add_species_tally(
         cleaned,
         _opt(args.alignment),
-        _opt(args.fg_species),
-        _opt(args.bg_species),
+        _opt(args.hyp_pairs),
         ali_format=args.alignment_format,
     )
 

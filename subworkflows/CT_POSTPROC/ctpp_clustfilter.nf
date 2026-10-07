@@ -9,7 +9,7 @@
  *  extreme and dubious genes, and clean the background gene list. Called from
  *  workflows/ct_postproc.nf.
  *
- *  Consumes:  disambiguation master table, optional alignments and contrast species lists,
+ *  Consumes:  disambiguation master table, optional alignments and contrast design,
  *             gene annotation (lengths), global background gene list
  *  Produces:  postproc_disambiguation_input.tsv, per-pair cluster files
  *             (*.filtered.minlen*.maxcaas*.tsv), filter_summary.tsv, discarded_summary.tsv,
@@ -37,12 +37,6 @@ def clusterFileSuffix(minlen, maxcaas) {
     return ".filtered.minlen${minlen}.maxcaas${(maxcaas * 100).toInteger()}.tsv"
 }
 
-// .../selection/fade/<direction>/json -> .../selection/species_sets, or null when it does not resolve
-def resolveSourceSpDir(json_dir) {
-    if (!json_dir) return null
-    def selection_dir = file(json_dir).parent?.parent?.parent
-    return selection_dir ? selection_dir.resolve('species_sets') : null
-}
 
 // ── Processes ────────────────────────────────────────────────────────────────
 
@@ -53,43 +47,27 @@ process CAAS_PREPARE_POSTPROC_INPUT {
 
     input:
     path(disambiguation_input)
+    path(hyp_pairs)   // contrast_hypotheses_pairs.tsv, or the NO_HYP_PAIRS sentinel
 
     output:
     path "postproc_disambiguation_input.tsv", emit: prepared_discovery
     path "removed_patterns_precluster.tsv", emit: removed_patterns
 
     script:
-    // Optional extant-species residue tally: it needs the alignment directory
-    // (params.alignment) and the contrast species lists, which are read from the
-    // species_sets/ directory that the selection step publishes.
-    //
-    // A live --fade run publishes species_sets/ under this run's own outdir (via
-    // SELECTION_PREP -> EXTRACT_EXTREME_SPECIES). With precomputed FADE results
-    // (--fade_json_dir_top / _bottom, no live --fade) the directory exists only under the
-    // outdir of the source run of the JSON files. That directory is derived as
-    // main.nf's resolve_fg_species does (.../selection/fade/<direction>/json ->
-    // .../selection/species_sets), and this run's own directory is the fallback. Without
-    // the files, prepare_postproc_input.py leaves the tally columns empty.
-    def own_sp_dir = file("${params.outdir}/selection/species_sets")
-    def source_sp_dir = resolveSourceSpDir(params.fade_json_dir_top) ?:
-                         resolveSourceSpDir(params.fade_json_dir_bottom)
-    def sp_dir   = own_sp_dir.exists() ? own_sp_dir : (source_sp_dir?.exists() ? source_sp_dir : own_sp_dir)
-    def ali_dir  = params.alignment ?: ''
-    def ali_fmt  = params.ali_format ?: 'fasta'
-    def ali_flag = ali_dir ? "--alignment '${ali_dir}' --alignment-format '${ali_fmt}'" : ''
+    // Optional extant-species residue tally: it needs the alignment directory (params.alignment)
+    // and the contrast design (contrast_hypotheses_pairs.tsv: the top / bottom species of each
+    // hypothesis), so it does not depend on FADE. Without them prepare_postproc_input.py leaves
+    // the tally columns empty.
+    def ali_dir   = params.alignment ?: ''
+    def ali_fmt   = params.ali_format ?: 'fasta'
+    def ali_flag  = ali_dir ? "--alignment '${ali_dir}' --alignment-format '${ali_fmt}'" : ''
+    def hyp_flag  = (hyp_pairs.name =~ /^NO_/) ? '' : "--hyp-pairs '${hyp_pairs}'"
     """
-    FG="${sp_dir}/top_species.txt"
-    BG="${sp_dir}/bottom_species.txt"
-    SP_FLAGS=""
-    if [ -f "\$FG" ] && [ -f "\$BG" ]; then
-        SP_FLAGS="--fg-species \$FG --bg-species \$BG"
-    fi
-
     python3 ${baseDir}/subworkflows/CT_POSTPROC/local/src/prepare_postproc_input.py \
         --input ${disambiguation_input} \
         --output postproc_disambiguation_input.tsv \
         --removed-output removed_patterns_precluster.tsv \
-        ${ali_flag} \$SP_FLAGS
+        ${ali_flag} ${hyp_flag}
     """
 }
 

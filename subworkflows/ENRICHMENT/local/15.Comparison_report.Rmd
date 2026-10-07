@@ -1480,6 +1480,7 @@ build_interesting_positions <- function(direction) {
       `CAAS evidence`       = .evidence_badge(evidence_label_caas),
       `RER evidence`        = .evidence_badge(evidence_label_rer),
       `CAAS`                = if ("caas" %in% names(.)) caas else NA_character_,
+      `CAAS encoded`        = if ("amino_encoded" %in% names(.)) dplyr::na_if(as.character(amino_encoded), "") else NA_character_,
       `Top species residues`    = {
         .ts <- if ("top_species_residues" %in% names(.)) top_species_residues else NA_character_
         .cs <- if ("caas" %in% names(.)) caas else NA_character_
@@ -1487,6 +1488,7 @@ build_interesting_positions <- function(direction) {
                        dplyr::if_else(grepl("/", .cs), sub("/.*", "", .cs), .cs),
                        .ts)
       },
+      `Conserved pairs` = if ("n_conserved_pairs" %in% names(.)) dplyr::na_if(as.character(n_conserved_pairs), "") else NA_character_,
       `Bottom species residues` = {
         .bs <- if ("bottom_species_residues" %in% names(.)) bottom_species_residues else NA_character_
         .cs <- if ("caas" %in% names(.)) caas else NA_character_
@@ -1498,8 +1500,8 @@ build_interesting_positions <- function(direction) {
 
   out %>%
     dplyr::arrange(dplyr::desc(`Composite score`)) %>%
-    dplyr::select(Gene = gene, Position, CAAS, `CAAS Score` = CAAS_score,
-                  `Top species residues`, `Bottom species residues`,
+    dplyr::select(Gene = gene, Position, CAAS, `CAAS encoded`, `CAAS Score` = CAAS_score,
+                  `Top species residues`, `Bottom species residues`, `Conserved pairs`,
                   `N Hypotheses`,
                   `Hypotheses`,
                   `25%`, `10%`, `5%`, `1%`,
