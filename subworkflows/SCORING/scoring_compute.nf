@@ -82,7 +82,6 @@ process SCORING_COMPUTE {
     def hp_arg            = hypotheses_pairs.name =~ /^NO_/ ? 'NO_HYP_PAIRS' : "${hypotheses_pairs}"
     def cp_arg            = caas_perms.name =~ /^NO_/ ? 'NO_FILE' : "${caas_perms}"
     def cpcc_arg          = caas_pos_cycle_caas.name =~ /^NO_/ ? 'NO_FILE' : "${caas_pos_cycle_caas}"
-    def gene_perm_pooled  = params.scoring_gene_perm_pooled ?: false
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -108,7 +107,6 @@ process SCORING_COMPUTE {
             --hypotheses_pairs '${hp_arg}' \
             --caas_perms      '${cp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
-            --gene_perm_pooled '${gene_perm_pooled}' \
             --p_emp_thr             ${params.scoring_p_emp_thr ?: 0.05} \
             --top_pct              ${top_pct} \
             --top25_pct            0.25 \
@@ -143,7 +141,6 @@ process SCORING_COMPUTE {
             --hypotheses_pairs '${hp_arg}' \
             --caas_perms      '${cp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
-            --gene_perm_pooled '${gene_perm_pooled}' \
             --p_emp_thr             ${params.scoring_p_emp_thr ?: 0.05} \
             --top_pct              ${top_pct} \
             --top25_pct            0.25 \

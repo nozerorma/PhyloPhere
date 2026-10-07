@@ -3,8 +3,8 @@
 `p.emp` es el p-valor de posición del nulo de permulación CAAS. Combina en un
 único estadístico la **detección** de una posición y la **magnitud** de su
 `CAAS_score`, sobre el mismo remuestreo (relabelado del fenotipo) que usan los
-p-valores de gen. Sus dos ajustes por comparaciones múltiples, `p.adj_bh` y
-`p.adj_sam`, se escriben junto a él en `scoring/position_scores.tsv`.
+p-valores de gen. Su ajuste por comparaciones múltiples, `p.adj_bh`, se escribe
+junto a él en `scoring/position_scores.tsv`.
 
 Código de referencia:
 [`scoring_compute.R`](../subworkflows/SCORING/local/src/scoring_compute.R)
@@ -46,6 +46,11 @@ p.emp = (k_emp + 1) / (N + 1)          add-one, cola derecha
   corregir. `(k_emp − 1)/(N − 1)` trataría al observado como un ciclo nulo.
 - **Una posición que ningún ciclo re-detecta** tiene `k_emp = 0` y
   `p.emp = 1/(N + 1)`, el mínimo alcanzable.
+- **Una posición con `T_obs = 0`** (detectada, sin convergencia: ningún par de dominios comparte
+  residuo derivado) tiene `p.emp = 1`. Sin evidencia de convergencia el p no puede ser menor, y
+  contado como «detecta y supera» solo mediría la frecuencia con que el nulo detecta la columna.
+  Para `T_obs > 0` el resultado no cambia: un ciclo que no detecta la posición (−Inf, o 0 como
+  en el nulo de gen) nunca iguala un observado positivo. Entra en la familia de BH con `p = 1`.
 - **Las dos filas de lado** de una posición detectada en ambos lados llevan el
   mismo `p.emp`, `p.adj_bh` y `p.adj_sam`.
 
@@ -121,36 +126,21 @@ de detección, con lo que m queda infraestimado. El control negativo nc13 de
 Tier 1 (§5) es un ejemplo: una única posición observada, nunca re-detectada,
 en una familia de 17 posiciones, da `p.adj_bh = 0.017`.
 
-### 3.2 `p.adj_sam`
+### 3.2 Sin FDR por permutación sobre el score
 
-FDR por permutación (Tusher et al. 2001) sobre el score agrupado. Para un
-umbral `t`:
+No se calcula un FDR por permutación sobre el score agrupado (la idea de SAM,
+Tusher et al. 2001). Estima la fracción de falsas entre las llamadas por encima
+de un corte de score con una distribución nula agrupada sobre todas las
+posiciones, de modo que es un FDR de conjunto: las llamadas falsas se
+concentran en las posiciones que el nulo detecta muchas veces, y su valor
+depende de la elección entre media y mediana del número de falsos y de cómo se
+fija el corte. Las afirmaciones por posición descansan en `p.emp`.
 
-```
-FDR(t) = [ #pares (ciclo, posición) nulos con score >= t ] / N
-         / #{ posiciones observadas con score >= t }
-```
+### 3.3 Umbral
 
-con π0 = 1. El valor de una posición es el mínimo de `FDR(t)` sobre los
-umbrales `t` iguales o inferiores a su score. El conteo nulo esperado recorre
-todas las posiciones que detecta cada ciclo, incluidas las que el observado no
-detecta, así que no necesita definir una familia.
-
-### 3.3 Diferencias entre ambos
-
-`p.adj_bh` ordena por el nulo propio de cada posición (`p.emp`); `p.adj_sam`
-ordena por el score observado frente a la distribución nula de todo el run.
-Una posición con score alto cuyo nulo lo alcanza a menudo sale mejor en
-`p.adj_sam`; una posición con score bajo que su nulo casi nunca alcanza, mejor
-en `p.adj_bh`. En PEPC (§5) ambos coinciden en el núcleo de llamadas y
-difieren en dos o tres posiciones por run.
-
-### 3.4 Umbral
-
-`scoring_p_emp_thr` (por defecto 0.05, `conf/scoring.config`) se aplica a los
-dos ajustes en los informes. `position_significant` en los informes 15 y 16
-sigue a `p.adj_bh`; `position_significant_sam` acompaña a SAM. El mismo
-parámetro controla `gene_caas_pperm_adj`. Ninguno filtra `position_scores.tsv`.
+`scoring_p_emp_thr` (por defecto 0.05, `conf/scoring.config`) se aplica a
+`p.adj_bh` en los informes. `position_significant` en los informes 15 y 16
+sigue a `p.adj_bh`. El mismo parámetro controla `gene_caas_pperm_adj`. Ninguno filtra `position_scores.tsv`.
 
 ---
 
@@ -164,7 +154,8 @@ parámetro controla `gene_caas_pperm_adj`. Ninguno filtra `position_scores.tsv`.
 - **`gene_caas_pperm` (§4f).** Estadístico `size_adj_max = F(max)^n` sobre los
   `CAAS_score` de las posiciones del gen, contra su fila en
   `caas_corStat_byrank` (`scoring_caas_perms.R`); add-one, cola derecha, BH
-  dentro de cada dirección. No tiene compuerta de detección: la no detección
+  dentro de cada dirección sobre todo el universo del nulo (los genes sin score
+  observado, con `p = 1`, como la familia de posiciones de §3.1). No tiene compuerta de detección: la no detección
   entra como ceros estructurales de `gene_cycle_scores.tsv`. El guard numérico
   de §4 mantiene `size_adj_max` (R) y `_size_adj_max_null` (Python) idénticos.
 - **`accum_cct_p` (§4b).** Conteo de posiciones detectadas por gen y esquema,
@@ -193,14 +184,10 @@ Resultados en `validation/tier1/reports/pepc_genotypic_vs_phenotypic.md` §6.
   candidatos son anticonservadores, y Storey sobre ese conjunto estima
   π0 ≈ 0.1 y declara significativos todos los candidatos. Por eso la familia de
   `p.adj_bh` incluye las posiciones sólo-nulo con `p = 1`.
-- **Calibración de `p.adj_sam`.** Tomando cada ciclo nulo como observado frente
-  a los 999 restantes, P(≥ 1 llamada) a q < 0.1 es 0.104 (genotípico) y 0.097
-  (fenotípico). BH sobre la familia a 0.1 da 0.011 y 0.067: con `N = 1000` el
-  suelo `1/(N + 1)` limita la potencia de BH.
 - **Controles negativos.** Veinte rasgos generados con el propio generador del
   nulo y pasados por el camino observado: el número de detecciones es el de un
   ciclo nulo más (mediana P = 0.40); las ejecuciones con alguna llamada son
-  1/20 a `p.adj_bh < 0.05`, 4/20 a `p.adj_bh < 0.1` y 1/20 a `p.adj_sam < 0.1`.
+  1/20 a `p.adj_bh < 0.05` y 4/20 a `p.adj_bh < 0.1`.
   Sobre las familias agrupadas, P(p ≤ 0.01 / 0.05 / 0.10) = 0.028 / 0.069 /
   0.093: exceso en la cola extrema, repartido entre controles, sin explicar
   por las posiciones de baja detección ni por el modelo (OU/BM) del nulo.
@@ -226,4 +213,3 @@ Resultados en `validation/tier1/reports/pepc_genotypic_vs_phenotypic.md` §6.
 
 - Bourgon R, Gentleman R, Huber W. 2010. Independent filtering increases detection power for high-throughput experiments. Proc Natl Acad Sci USA 107(21):9546–9551. doi:10.1073/pnas.0914005107.
 - Davison AC, Hinkley DV. 1997. Bootstrap Methods and Their Application. Cambridge University Press.
-- Tusher VG, Tibshirani R, Chu G. 2001. Significance analysis of microarrays applied to the ionizing radiation response. Proc Natl Acad Sci USA 98(9):5116–5121. doi:10.1073/pnas.091062498.

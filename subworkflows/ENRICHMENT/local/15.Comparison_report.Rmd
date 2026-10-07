@@ -60,7 +60,7 @@ params:
   gene_lists_dir:     NULL
   position_lists_dir: NULL
   seed:               "1998"
-  # CAAS permulation-null significance threshold for p.adj_bh / p.adj_sam (position) /
+  # CAAS permulation-null significance threshold for p.adj_bh (position) /
   # gene_caas_pperm_adj (gene), same param name + default as 11.Scoring_report.Rmd
   # (conf/scoring.config:47) - reused so "significant" means the same thing
   # across reports. Drives the Interesting Positions table's position_significant
@@ -1350,8 +1350,7 @@ build_interesting_positions <- function(direction) {
   # Ensure Gene and Position are deduplicated
   base <- base %>% dplyr::distinct(gene, Position, .keep_all = TRUE)
 
-  # position_significant: p.adj_bh <= scoring_p_emp_thr, computed directly on base;
-  # the permutation-FDR call (p.adj_sam) is shown alongside
+  # position_significant: p.adj_bh <= scoring_p_emp_thr, computed directly on base
   has_pe_raw <- "p.emp" %in% names(base)
   has_pe_bh  <- "p.adj_bh" %in% names(base)
   has_pe_sam <- "p.adj_sam" %in% names(base)

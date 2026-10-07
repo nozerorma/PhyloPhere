@@ -581,12 +581,17 @@ notable que uno de 12 (que casi siempre tiene alguna posición por encima del pe
 
 `gene_caas_score{,_top_all,_bottom_all}` contra la fila del gen en
 `caas_corStat_byrank[[global|top|bottom]]`: p nominal **de cola derecha**
-`(Σ null ≥ obs + 1)/(N + 1)`, BH-ajustada por dirección (`gene_caas_pperm_adj*`). Gen fuera
-del universo del null → `NA`, nunca `1/(N+1)` implícito. En `caas_full_perms` de producción
-se satura hacia `1/(N+1)`: es **priorización con contexto FDR**, no significación
-genome-wide por sí sola. Variante opcional `_pooled` = null poolado dentro del decil de
-`n_positions` del gen (válido solo dentro de un estrato-n, porque `size_adj_max` es
-n-dependiente).
+`(Σ null ≥ obs + 1)/(N + 1)`, BH-ajustada por dirección (`gene_caas_pperm_adj*`) sobre **todo el
+universo del null** de la dirección: un gen del null sin score observado en esa dirección es un
+gen contrastado con `p = 1` (su estadístico observado es 0). Restringir BH a los genes con score
+observado selecciona sobre el propio estadístico. Gen fuera del universo del null → `NA`,
+nunca `1/(N+1)` implícito. En `caas_full_perms` de producción se satura hacia `1/(N+1)`: es
+**priorización con contexto FDR**, no significación genome-wide por sí sola.
+
+No hay variante poolada entre genes: compara cada gen con su propia fila nula, que conserva su
+propensión a puntuar al permutar. Un nulo poolado por estrato de `n_positions` calibra en
+promedio sobre los genes, pero es anticonservador en los de alta propensión (en Carn, 3.9 % de
+falsos positivos a α = 0.01 en el 1 % de mayor propensión, y 0 % por gen con la fila propia).
 
 *Ejemplo:* `gene_caas_score(OPN1) = 0.48`; en 1000 ciclos, 12 dan null ≥ 0.48 →
 `gene_caas_pperm = 13/1001 ≈ 0.013`.

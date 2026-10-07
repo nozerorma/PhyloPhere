@@ -75,7 +75,7 @@ process CAAS_META_CAAS_REPORT {
 // ── Significance report ──────────────────────────────────────────────────────
 
 // Renders 16.CAAS_significance_report.Rmd; called from main.nf. It runs after SCORING, because it joins the
-// p.emp / p.adj_bh / p.adj_sam of position_scores.tsv and the gene_caas_pperm / gene_caas_pperm_adj of
+// p.emp / p.adj_bh of position_scores.tsv and the gene_caas_pperm / gene_caas_pperm_adj of
 // gene_scores.tsv onto the CAAS table; the join logic is in the Rmd. Not to be confused with
 // CAAS_META_CAAS_REPORT, which runs upstream of SCORING.
 process CAAS_SIGNIFICANCE_REPORT {

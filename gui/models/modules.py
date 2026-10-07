@@ -256,9 +256,9 @@ class ScoringConfig(ModuleConfigBase):
 
     # Advanced parameters (conf/scoring.config)
     scoring_window_size_bp: str = "1000000"  # --scoring_window_size_bp
-    scoring_p_emp_thr: str = "0.05"  # --scoring_p_emp_thr (position-level CAAS permulation p.adj_bh / p.adj_sam; also gates gene_caas_pperm_adj)
+    caas_score_aggregation: str = "cumulative"  # --caas_score_aggregation (mean|cumulative): scheme aggregation of the position CAAS score; the permulation null must use the same
+    scoring_p_emp_thr: str = "0.05"  # --scoring_p_emp_thr (position-level CAAS permulation p.adj_bh; also gates gene_caas_pperm_adj)
     caas_evidence_top_n: str = "0"  # --caas_evidence_top_n (evidence table of the N best positions after SCORING; 0 = off)
-    scoring_gene_perm_pooled: bool = False  # --scoring_gene_perm_pooled (opt-in n-stratified pooled-null gene permulation p)
     scoring_hypotheses_pairs: str = ""  # --scoring_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for SCORING)
 
     # Precomputed inputs (scoring_postproc_input, scoring_accum_dir, scoring_vep_primateai,

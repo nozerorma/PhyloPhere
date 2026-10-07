@@ -182,7 +182,6 @@
       "scoring_window_size_bp": "1000000",
       "scoring_p_emp_thr": "0.05",
       "caas_evidence_top_n": "20",
-      "scoring_gene_perm_pooled": true,
       "scoring_hypotheses_pairs": ""
     },
     "enrichment": {

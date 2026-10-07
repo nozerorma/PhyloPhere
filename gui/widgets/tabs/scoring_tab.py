@@ -70,10 +70,9 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="scoring_window_size_bp", label="Genomic window size (bp)", importance="optional"),
         FieldSpec(
             name="scoring_p_emp_thr",
-            label="Position-level permulation p.adj_bh / p.adj_sam threshold",
+            label="Position-level permulation p.adj_bh threshold",
             importance="default",
         ),
-        FieldSpec(name="scoring_gene_perm_pooled", label="Pooled-null gene permulation p (n-stratified, opt-in)", kind="bool", importance="optional"),
     ),
 )
 

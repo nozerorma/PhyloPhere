@@ -748,8 +748,8 @@ print(.gene_null_plot("asr_path_score", .obs_gene_asr_dist, "CAAS Score (q90)",
 ```{r pos-perm-p-setup}
 # p.emp is the position-level permulation p: the "detects AND exceeds score"
 # permulation p, pooled to (Gene, Position) over the max-over-sides axis, with
-# its BH (p.adj_bh) and permutation-FDR (p.adj_sam) adjustments.
-# scoring_compute.R writes all three into position_scores.tsv
+# its BH adjustment (p.adj_bh).
+# scoring_compute.R writes both into position_scores.tsv
 # whenever --caas_pos_cycle_caas is set. scoring_p_emp_thr also gates
 # gene_caas_pperm_adj and the significance report, so it is one parameter
 # across all three.
@@ -775,13 +775,9 @@ cat(sprintf(paste0(
   "(on either phenotype side) AND match or beat its observed `CAAS_score`, add-one ",
   "smoothed over N cycles. `p.adj_bh` is its BH adjustment over one test per position, ",
   "across every position the null detects (null-detected positions not detected in the ",
-  "observed data enter at p = 1). `p.adj_sam` is the permutation FDR on the pooled score: ",
-  "at each score threshold, the mean number of positions per null cycle at or above it over ",
-  "the number of observed positions at or above it.\n\n",
   "- **Scored positions with p.emp**: %d/%d (%.1f%%)\n",
   "- **Significant at uncorrected p.emp <= %.3g**: %d/%d (%.1f%%)\n",
   "- **Significant at BH-adjusted p.adj_bh <= %.3g**: %d/%d (%.1f%%)\n",
-  "- **Significant at permutation-FDR p.adj_sam <= %.3g**: %s/%d (%s)\n\n"),
   n_val, n_tot, 100 * n_val / max(1, n_tot),
   p_emp_thr, n_sig_raw, n_tot, pct_sig_raw,
   p_emp_thr, n_sig_bh, n_tot, pct_sig_bh,
@@ -794,9 +790,8 @@ ggplot(pos_df %>% filter(!is.na(p.emp)), aes(x = p.emp)) +
   geom_histogram(bins = 40, fill = "grey60", colour = "grey30") +
   geom_vline(xintercept = p_emp_thr, colour = "#E15759", linewidth = 1, linetype = "dashed") +
   labs(title = "p.emp distribution across scored positions",
-       subtitle = sprintf("Dashed line: uncorrected p.emp threshold = %.3g (%d positions significant; %d after BH (p.adj_bh), %s after permutation FDR (p.adj_sam)).",
-                          p_emp_thr, n_sig_raw, n_sig_bh,
-                          if (has_sam) as.character(n_sig_sam) else "NA"),
+       subtitle = sprintf("Dashed line: uncorrected p.emp threshold = %.3g (%d positions significant; %d after BH (p.adj_bh)).",
+                          p_emp_thr, n_sig_raw, n_sig_bh),
        x = "p.emp", y = "positions") +
   theme_minimal(base_size = 12)
 ```

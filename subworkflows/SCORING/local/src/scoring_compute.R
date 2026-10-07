@@ -22,7 +22,6 @@
 #   --accum_dir           directory with accumulation_<direction>_<scheme>_aggregated_results.csv
 #   --caas_perms          caas_perms.rds, the gene-level null (scoring_caas_perms.R)
 #   --caas_pos_cycle_caas perm_pos_cycle_caas.tsv.gz, the position-level null for p.emp
-#   --gene_perm_pooled    true|false: also write the n-stratified pooled gene p (default false)
 #   --p_emp_thr           threshold of flag_caas_significant (default 0.05)
 #   --hypotheses_pairs, --top_pct, --gene_top_pct   parsed but not used by the computation
 #
@@ -65,7 +64,6 @@ caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permul
 core_positions_file  <- parse_arg("--core_positions")  # observed_core_scores.py: CAAS_score per (Gene, Position, side)
 core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: size-adjusted gene CAAS scores
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
-gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
 # Threshold of flag_caas_significant (fcs_stats.tsv): gene_caas_pperm_adj <= p_emp_thr. It is the value of
 # the scoring_p_emp_thr param of 11.Scoring_report.Rmd (conf/scoring.config), so the "% significant"
 # figures of the enrichment reports agree with the Scoring report.
@@ -80,7 +78,6 @@ gene_top_pct      <- as.numeric(parse_arg("--gene_top_pct",  "0.10"))
 gene_top25_pct    <- 0.25
 gene_top5_pct     <- 0.05
 gene_top1_pct     <- 0.01
-gene_perm_pooled      <- tolower(as.character(gene_perm_pooled_raw)) %in% c("true", "1", "yes")
 # Direction is not a parameter: scoring runs on the full pool and the `side` column carries it.
 
 # TRUE for a real file; a sentinel (basename starting with NO_) or an empty name counts as absent.
@@ -322,10 +319,10 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
 pos_scores$p.emp <- NA_real_
 has_caas_pos_cycle_caas <- file_exists(caas_pos_cycle_caas_file)
 # A null table with a header and no row (N = 0, or no permuted cycle re-detected any position) has no cycle to count:
-# (k + 1) / (N + 1) would read 1 for every position, a value rather than the absence of one. p.emp, p.adj_bh and
-# p.adj_sam stay NA, as when no null is given.
+# (k + 1) / (N + 1) would read 1 for every position, a value rather than the absence of one. p.emp and p.adj_bh
+# stay NA, as when no null is given.
 if (has_caas_pos_cycle_caas && length(read_lines(caas_pos_cycle_caas_file, n_max = 2)) < 2) {
-  cat("  perm_pos_cycle_caas.tsv.gz has no row: no null cycle, so p.emp, p.adj_bh and p.adj_sam stay NA\n")
+  cat("  perm_pos_cycle_caas.tsv.gz has no row: no null cycle, so p.emp and p.adj_bh stay NA\n")
   has_caas_pos_cycle_caas <- FALSE
 }
 # caas_perms.rds is loaded here when present (its columns are the cycle roster for N below) and
@@ -387,13 +384,18 @@ if (has_caas_pos_cycle_caas) {
 
   # An observed position that no null cycle re-detects has k_emp = 0 (its
   # null statistic is -Inf in every cycle), hence the left join from obs_max.
+  # An observed score of 0 (detected, but no pair of domains shares a derived residue) is no evidence of
+  # convergence: p.emp = 1. Counted as "detects and exceeds" it would only measure how often the null
+  # detects the column. For a positive observed score the rule changes nothing, since a null that does not
+  # detect the position (score -Inf, or 0 as in the gene-level null) never reaches it.
   .k_emp <- obs_max %>%
     left_join(cyc_pooled, by = c("Gene", "Position")) %>%
     group_by(Gene, Position) %>%
     summarise(k_emp    = sum(caas_max >= .obs - TIE_TOL, na.rm = TRUE),
               null_hit = any(!is.na(caas_max)),
+              .obs     = dplyr::first(.obs),
               .groups  = "drop") %>%
-    mutate(p.emp = (k_emp + 1) / (N_emp + 1))
+    mutate(p.emp = dplyr::if_else(.obs <= TIE_TOL, 1, (k_emp + 1) / (N_emp + 1)))
 
   .n_obs_pos_e <- nrow(.k_emp)
   .n_matched_e <- sum(.k_emp$null_hit)
@@ -418,7 +420,7 @@ if (has_caas_pos_cycle_caas) {
                        "positions (filtered_discovery.tsv) and the null's ",
                        "perm_pos_cycle_caas.tsv.gz positions are likely on different ",
                        "coordinate systems. Unmatched positions left NA; treat ",
-                       "p.emp/p.adj_bh/p.adj_sam as unreliable.\n"),
+                       "p.emp/p.adj_bh as unreliable.\n"),
                 100 * .rate_e), file = stderr())
   }
   pos_scores <- pos_scores %>%
@@ -428,7 +430,7 @@ if (has_caas_pos_cycle_caas) {
   cat("  no --caas_pos_cycle_caas provided, skipping p.emp\n")
 }
 
-# ── 2h. Position-level multiple testing: p.adj_bh and p.adj_sam ───────────────
+# ── 2h. Position-level multiple testing: p.adj_bh ─────────────────────────────
 # p.adj_bh: BH over the permutation family, one test per (Gene, Position) (the
 # side rows of a position share one pooled p.emp and enter BH once). The
 # family is every position the null detects in >= 1 cycle plus every observed
@@ -438,17 +440,7 @@ if (has_caas_pos_cycle_caas) {
 # positions would select on the statistic itself. Positions detected neither
 # by the null nor by the observed data are left out, so m counts only columns
 # the finite null sample happened to reach.
-#
-# p.adj_sam: permutation FDR (SAM-style, Tusher et al. 2001) on the pooled
-# max-over-sides score. For a threshold t,
-#   FDR(t) = [#(cycle, position) null pairs with score >= t] / N
-#            / #{observed positions with score >= t},
-# with pi0 = 1; a position's value is the minimum FDR(t) over thresholds t at or
-# below its own score. The expected null count is taken over every position
-# each cycle detects, so it needs no family definition and counts columns the
-# observed data did not detect.
 pos_scores$p.adj_bh  <- NA_real_
-pos_scores$p.adj_sam <- NA_real_
 if (has_caas_pos_cycle_caas) {
   .fam_e <- cyc_pooled %>%
     distinct(Gene, Position) %>%
@@ -908,19 +900,17 @@ if (nrow(gene_fade) > 0) {
 # ── 4f. Per-gene CAAS permulation p ───────────────────────────────────────────
 # gene_caas_score{,_top_all,_bottom_all} against the matching direction's matrix of
 # caas_corStat_byrank in caas_perms.rds (genes × N cycles; zeros are kept, so N is always the full cycle
-# count). Per gene, p is right-tailed, (k + 1) / (N + 1), and BH-adjusted within direction. It floors
-# near 1/(N+1) per gene, so it ranks genes with FDR context and is not a genome-wide-significant call
-# by itself; the optional pooled variant below trades that floor for validity only within an
-# n-stratum. A gene absent from the null's universe gets NA, never the implicit-zero-row value 1/(N+1).
+# count). Per gene, p is right-tailed, (k + 1) / (N + 1), against the gene's own null row, which keeps
+# the gene's own propensity to be scored under permutation. It floors at 1/(N+1) per gene, so it ranks
+# genes with FDR context and is not a genome-wide-significant call by itself. The BH adjustment runs
+# within direction over the whole universe of the null: a gene of the null with no observed score in
+# that direction is a tested gene with p = 1 (the observed statistic is 0), as in the position family
+# of section 2h. Restricting BH to the genes with an observed score would select on the statistic
+# itself. A gene absent from the null's universe gets NA, never the implicit-zero-row value 1/(N+1).
 cat("\n─── CAAS permulation gene p (Tier 1A) ─────────────────────────\n")
 for (col in c("gene_caas_pperm", "gene_caas_pperm_top", "gene_caas_pperm_bottom",
               "gene_caas_pperm_adj", "gene_caas_pperm_adj_top", "gene_caas_pperm_adj_bottom")) {
   gene_scores[[col]] <- NA_real_
-}
-if (gene_perm_pooled) {
-  for (col in c("gene_caas_pperm_pooled", "gene_caas_pperm_pooled_top", "gene_caas_pperm_pooled_bottom")) {
-    gene_scores[[col]] <- NA_real_
-  }
 }
 
 if (!file_exists(caas_perms_file)) {
@@ -965,10 +955,12 @@ if (!file_exists(caas_perms_file)) {
     gene_scores$gene_caas_pperm_top    <- .apply_direction("gene_caas_score_top_all",    byrank[["top"]])
     gene_scores$gene_caas_pperm_bottom <- .apply_direction("gene_caas_score_bottom_all", byrank[["bottom"]])
 
-    for (pair in list(c("gene_caas_pperm",        "gene_caas_pperm_adj"),
-                       c("gene_caas_pperm_top",    "gene_caas_pperm_adj_top"),
-                       c("gene_caas_pperm_bottom", "gene_caas_pperm_adj_bottom"))) {
-      p <- gene_scores[[pair[1]]]
+    # BH over the null's universe of the direction: the scored genes with their p, every other gene of the
+    # null matrix at p = 1.
+    for (spec in list(list("gene_caas_pperm",        "gene_caas_pperm_adj",        "global"),
+                      list("gene_caas_pperm_top",    "gene_caas_pperm_adj_top",    "top"),
+                      list("gene_caas_pperm_bottom", "gene_caas_pperm_adj_bottom", "bottom"))) {
+      p <- gene_scores[[spec[[1]]]]
       tested <- !is.na(p)
       if (any(tested)) gene_scores[[pair[2]]][tested] <- p.adjust(p[tested], method = "BH")
     }
@@ -977,38 +969,6 @@ if (!file_exists(caas_perms_file)) {
                 sum(!is.na(gene_scores$gene_caas_pperm)), nrow(gene_scores),
                 ifelse(is.na(.n_cycles), "?", as.character(.n_cycles)),
                 if (!is.na(.n_cycles) && .n_cycles > 0) 1 / (.n_cycles + 1) else NA_real_))
-
-    if (gene_perm_pooled) {
-      # Optional n-stratified pooled null: all genes' null rows within the same n_positions decile as the
-      # tested gene are pooled, for higher resolution than the per-gene-row floor above. It is valid only
-      # within an n-stratum: the size_adj_max null depends on n by construction (F(max)^n), so pooling
-      # across strata would compare a gene with a null it was never drawn from. Off by default
-      # (params.scoring_gene_perm_pooled).
-      .pooled_direction <- function(obs_col, n_col, mat) {
-        out <- rep(NA_real_, nrow(gene_scores))
-        if (is.null(mat) || nrow(mat) == 0 || !(n_col %in% names(gene_scores))) return(out)
-        n_vals <- gene_scores[[n_col]]
-        strata <- suppressWarnings(dplyr::ntile(n_vals, 10))
-        idx <- match(gene_scores$Gene, rownames(mat))
-        for (s in sort(unique(strata[!is.na(strata)]))) {
-          members <- which(strata == s & !is.na(idx))
-          if (length(members) == 0) next
-          pool <- as.vector(mat[idx[members], , drop = FALSE])
-          pool <- pool[!is.na(pool)]
-          if (length(pool) == 0) next
-          for (i in members) {
-            obs <- gene_scores[[obs_col]][i]
-            if (!is.na(obs)) out[i] <- (sum(pool >= obs) + 1) / (length(pool) + 1)
-          }
-        }
-        out
-      }
-      gene_scores$gene_caas_pperm_pooled        <- .pooled_direction("gene_caas_score",            "n_positions",        byrank[["global"]])
-      gene_scores$gene_caas_pperm_pooled_top    <- .pooled_direction("gene_caas_score_top_all",    "n_positions_top",    byrank[["top"]])
-      gene_scores$gene_caas_pperm_pooled_bottom <- .pooled_direction("gene_caas_score_bottom_all", "n_positions_bottom", byrank[["bottom"]])
-      cat(sprintf("  gene_caas_pperm_pooled: %d/%d genes scored (n-stratified pooled null)\n",
-                  sum(!is.na(gene_scores$gene_caas_pperm_pooled)), nrow(gene_scores)))
-    }
   }
 }
 
