@@ -341,6 +341,14 @@ if (has_caas_pos_cycle_caas) {
     stop("perm_pos_cycle_caas.tsv.gz has no caas_score column: it predates the shared position score. ",
          "Regenerate the CAAS permulation null.")
   }
+  # The null records the rule of its caas_score. A null without the column predates the option and is a "mean" null.
+  .null_agg <- if ("score_aggregation" %in% names(cyc_caas)) unique(as.character(cyc_caas$score_aggregation)) else "mean"
+  if (!identical(.null_agg, score_aggregation)) {
+    stop(sprintf(paste0("the CAAS permulation null was scored with score_aggregation = '%s' and the observed scores with '%s': ",
+                        "p.emp and p.adj_bh would compare different statistics. Rebuild the null (CAAS_CORE_MERGE) ",
+                        "with --caas_score_aggregation %s, or score with --caas_score_aggregation %s."),
+                 paste(.null_agg, collapse = "/"), score_aggregation, score_aggregation, paste(.null_agg, collapse = "/")))
+  }
   cyc_caas <- cyc_caas %>%
     mutate(Position = as.integer(Position),
            caas_score = suppressWarnings(as.numeric(caas_score))) %>%

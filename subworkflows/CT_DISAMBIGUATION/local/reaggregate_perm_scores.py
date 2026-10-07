@@ -48,6 +48,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src.convergence.fop_pool import base_cycle  # noqa: E402
+from src.core.scores import AGGREGATIONS, DEFAULT_AGGREGATION  # noqa: E402
 from src.utils.gene_wrapper import (  # noqa: E402
     _cycle_gene_removal_from_detail,
     _finalize_perm_scores,
@@ -106,6 +107,9 @@ def main() -> int:
                     help="directory to write gene_cycle_scores.tsv (and the sample/quantile files)")
     ap.add_argument("--seed", type=int, default=1998,
                     help="pipeline seed (params.seed): perm_pos_sample.tsv reservoir sampling")
+    ap.add_argument("--score-aggregation", default=DEFAULT_AGGREGATION, choices=AGGREGATIONS,
+                    help="scheme aggregation of the position score (params.caas_score_aggregation); "
+                         "the observed score must use the same")
     # Gene removal is genome-wide (per-cycle IQR / density thresholds over all genes), so it
     # can only be computed here, on the merged detail, never inside a per-batch worker.
     ap.add_argument("--gene-lengths", default=None,
@@ -143,7 +147,8 @@ def main() -> int:
             fh.write("")
         try:
             _finalize_perm_scores(detail_path=empty_detail, output_dir=args.output_dir, cycle_tags=[], removed=set(),
-                                  seed=args.seed, remove_clusters=not args.keep_clusters)
+                                  seed=args.seed, remove_clusters=not args.keep_clusters,
+                                  aggregation=args.score_aggregation)
         finally:
             empty_detail.unlink()
         logger.warning("[reaggregate] empty null (no permuted labeling): no gene x cycle scores were written")
@@ -188,6 +193,7 @@ def main() -> int:
         removed=removed,
         seed=args.seed,
         remove_clusters=not args.keep_clusters,
+        aggregation=args.score_aggregation,
     )
     logger.info("[reaggregate] wrote %s", args.output_dir / "gene_cycle_scores.tsv")
     # _finalize_perm_scores also writes perm_pos_cycle_caas.tsv.gz: the per-cycle position

@@ -8,8 +8,11 @@ Imported by: src/utils/gene_wrapper.py
 Inputs: per-scheme (or per-side) score mappings and the reference pools of position scores
 Outputs: position scores, per-direction values and gene scores (in memory)
 
-* The score of a row (``caas_row``) is its ``asr_path_score`` (identity), so a position's score is the
-  mean of ``asr_path_score`` over the caap_group schemes that detected it, per side.
+* The score of a row (``caas_row``) is its ``asr_path_score`` (identity). A position's score, per side,
+  aggregates ``asr_path_score`` over the caap_group schemes with one of two rules (``AGGREGATIONS``):
+  ``mean`` divides the sum by the schemes that detected the position, ``cumulative`` by the five schemes
+  of the design (``N_SCHEMES``), so a scheme that did not detect it counts as 0 and a position detected
+  by one scheme cannot exceed 1/5.
 * Directions: ``top`` and ``bottom`` use only that side's rows; ``all`` keeps one entry per
   position, its best side, so a position detected on both sides is not counted twice.
 * Gene score: ``size_adj_max(x) = F(max(x)) ** len(x)`` with F the ECDF of the reference
@@ -30,10 +33,16 @@ import bisect
 import math
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-__all__ = ["DIRECTIONS", "TIE_TOL", "position_sum", "position_score", "collapse_sides",
-           "direction_values", "size_adj_max", "gene_scores"]
+__all__ = ["DIRECTIONS", "TIE_TOL", "AGGREGATIONS", "DEFAULT_AGGREGATION", "N_SCHEMES", "check_aggregation", "position_sum",
+           "position_score", "collapse_sides", "direction_values", "size_adj_max", "gene_scores"]
 
 DIRECTIONS = ("all", "top", "bottom")
+
+# Scheme aggregation of a position score. Observed and null must use the same rule.
+AGGREGATIONS = ("mean", "cumulative")
+DEFAULT_AGGREGATION = "cumulative"
+# Schemes of the design: US and GS1 to GS4.
+N_SCHEMES = 5
 
 # Absolute; scores lie in [0, 1]. Rounding noise of a mean of <= 5 values is ~1e-16, and real
 # differences between position scores are orders of magnitude larger.
@@ -53,10 +62,24 @@ def position_sum(scheme_scores: Mapping[str, float]) -> Tuple[float, int]:
     return math.fsum(vals), len(vals)
 
 
-def position_score(scheme_scores: Mapping[str, float]) -> Optional[float]:
-    """Mean over the schemes that scored the position; None when none did."""
+def check_aggregation(aggregation: str) -> str:
+    """``aggregation`` if it is one of ``AGGREGATIONS``; ValueError otherwise."""
+    if aggregation not in AGGREGATIONS:
+        raise ValueError(f"score aggregation must be one of {AGGREGATIONS}, not {aggregation!r}")
+    return aggregation
+
+
+def position_score(scheme_scores: Mapping[str, float], aggregation: str = DEFAULT_AGGREGATION) -> Optional[float]:
+    """Score of a position side from its per-scheme scores; None when no scheme scored it.
+
+    ``mean``: sum over the schemes that scored the position, divided by their number.
+    ``cumulative``: the same sum divided by ``N_SCHEMES``, so the schemes that did not detect the
+    position count as 0.
+    """
     total, n = position_sum(scheme_scores)
-    return total / n if n else None
+    if not n:
+        return None
+    return total / (N_SCHEMES if check_aggregation(aggregation) == "cumulative" else n)
 
 
 def collapse_sides(side_scores: Mapping[str, float]) -> Dict[str, float]:

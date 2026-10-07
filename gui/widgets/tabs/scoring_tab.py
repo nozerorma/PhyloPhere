@@ -60,6 +60,13 @@ SPEC = ModuleTabSpec(
     ),
     advanced_fields=(
         Section("Genomic windows and position-level significance"),
+        FieldSpec(
+            name="caas_score_aggregation",
+            label="Scheme aggregation of the position score (cumulative: sum over the 5 schemes, missing = 0)",
+            kind="choice",
+            choices=("cumulative", "mean"),
+            importance="default",
+        ),
         FieldSpec(name="scoring_window_size_bp", label="Genomic window size (bp)", importance="optional"),
         FieldSpec(
             name="scoring_p_emp_thr",

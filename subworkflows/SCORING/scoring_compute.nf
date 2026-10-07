@@ -92,7 +92,8 @@ process SCORING_COMPUTE {
         /usr/local/bin/_entrypoint.sh python3 observed_core_scores.py \
             --input '${postproc_file}' \
             --positions-out core_positions.tsv \
-            --genes-out core_genes.tsv
+            --genes-out core_genes.tsv \
+            --score-aggregation '${score_agg}'
 
         /usr/local/bin/_entrypoint.sh Rscript scoring_compute.R \
             --postproc       '${postproc_file}' \
@@ -126,7 +127,8 @@ process SCORING_COMPUTE {
         python3 observed_core_scores.py \
             --input '${postproc_file}' \
             --positions-out core_positions.tsv \
-            --genes-out core_genes.tsv
+            --genes-out core_genes.tsv \
+            --score-aggregation '${score_agg}'
 
         Rscript scoring_compute.R \
             --postproc       '${postproc_file}' \

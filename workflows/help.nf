@@ -308,6 +308,7 @@ Usage:
 --scoring_position_top_pct                <FLOAT 0-1>             0.10
 --scoring_gene_top_pct                       <FLOAT 0-1>             0.10
 --scoring_gene_perm_pooled                <true|false>            false  (opt-in n-stratified pooled-null variant of gene_caas_pperm, higher resolution than the per-gene-row floor -- valid only within an n_positions stratum)
+--caas_score_aggregation                       <cumulative|mean>       cumulative   (scheme aggregation of the position CAAS score: the sum over the five schemes, a scheme that did not detect the position counting 0, or the mean over the schemes that detected it; the permulation null and the observed score must use the same, so changing it needs the null rebuilt)
 --scoring_window_size_bp                       <INTEGER>               1000000
 --caas_evidence_top_n                          <INTEGER>               0      (evidence table of the N best positions of position_scores.tsv, written after SCORING to scoring/evidence/: MRCA, tip species and residues and the score of each domain of each hypothesis; 0 = off; needs --scoring, the observed discovery.tab and ct_disambig_asr_cache_dir)
 

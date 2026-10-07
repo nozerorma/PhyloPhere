@@ -255,15 +255,20 @@ characterization is a separate evidence line handled by ENRICHMENT
 
 ### Position-level score (`CAAS_score`)
 
-For each alignment position, `CAAS_score` is the mean of `caas_row` across the
-biochemical schemes (US, GS1-GS4) that detected the substitution. `caas_row`
+For each alignment position, `CAAS_score` aggregates `caas_row` across the
+biochemical schemes (US, GS1-GS4), as set by `caas_score_aggregation`. `caas_row`
 is `asr_score`/`asr_path_score`, the ancestral-state-reconstruction path score of the row.
 
-How many of the five schemes detect a position (`n_schemes`) and which ones
-(`scheme_set`) are reported as descriptors, not inputs to the score: a
-substitution can trip 1 to 5 schemes purely as a function of which amino acids
-are involved, so summing (rather than averaging) would let that breadth
-inflate the score independently of evidence strength.
+- `cumulative` (default): the sum over the five schemes divided by 5, so a scheme that did not detect the
+  position counts as 0. A position detected by one scheme cannot exceed 0.2, and the top of the
+  ranking is made of positions that converge at the residue level in every scheme.
+- `mean`: the mean over the schemes that detected the substitution. `n_schemes` and `scheme_set` are then
+  descriptors, not inputs to the score: a substitution can trip 1 to 5 schemes purely as a function of
+  which amino acids are involved, so the mean does not let that breadth inflate the score.
+
+The permulation null and the observed score must use the same rule: scoring stops when the null
+(`perm_pos_cycle_caas.tsv.gz`, column `score_aggregation`) was built with the other one, and a change of
+rule needs the null rebuilt (`CAAS_CORE_MERGE`, no ASR replay).
 
 > The hypergeometric p-value (`pvalue`) is deliberately excluded from the core
 > score and instead acts as a significance gate (`gate_sig`: `pvalue < 0.05`).
@@ -405,6 +410,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 
 | Parameter | Default | Purpose & Description |
 |---|---|---|
+| `caas_score_aggregation` | `cumulative` | Scheme aggregation of the position CAAS score. `cumulative`: the sum of the `asr_path_score` over the five schemes (US, GS1-GS4) divided by 5, so a scheme that did not detect the position counts as 0 (a position detected by one scheme cannot exceed 0.2). `mean`: their mean over the schemes that detected the position. The permulation null and the observed score must use the same value; changing it needs the null rebuilt. |
 | `scoring_gene_top_pct` | `0.10` | Top percentile fraction of genes extracted for candidate lists (0.10 = top 10%). |
 | `scoring_position_top_pct` | `0.10` | Top percentile fraction of positions extracted for downstream position enrichment. |
 

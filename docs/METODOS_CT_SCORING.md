@@ -182,7 +182,7 @@ Con `overlap` = min(residuos fg también en bg, residuos bg también en fg), y
 `US` (residuo literal) y `GS1..GS4` (agrupaciones bioquímicas progresivamente más gruesas).
 **Cuántos esquemas disparan es una propiedad determinista de qué aminoácidos intervienen**
 (distancia bioquímica discretizada), no una medida de fuerza de evidencia. Por eso el
-scoring (H.4) agrega esquemas con una **media**, sin pesos.
+scoring (H.4) agrega esquemas, sin pesos, con la **suma sobre los cinco** dividida por 5 (`caas_score_aggregation = cumulative`, por defecto: el esquema que no detecta aporta 0) o con una **media** sobre los esquemas que detectan (`mean`).
 
 *Ejemplo — columna 210, patrón fg/bg por hipótesis:*
 

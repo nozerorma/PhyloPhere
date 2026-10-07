@@ -139,7 +139,7 @@ gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
 # position_scores.tsv carries no per-scheme factor: a position-level mean of asr_score would hide
-# scheme disagreement, and CAAS_score is already the mean of asr_path_score over the schemes.
+# scheme disagreement, and CAAS_score is already the aggregate (mean or cumulative) of asr_path_score over the schemes.
 # `asr_score` is aliased to asr_path_score when the table has it and to CAAS_score otherwise, so
 # that the panels below always find the column.
 if (!"asr_score" %in% names(pos_df)) {
@@ -458,8 +458,9 @@ Voronoi domain, built from the per-node ASR posteriors (full definitions in
 
 A substitution is tested against five biochemical partitions (US, GS1-GS4); a
 scheme "detects" the position if the substitution crosses one of its group
-boundaries. `CAAS_score` is the mean of `asr_score` over the
-schemes that detected the position:
+boundaries. With `caas_score_aggregation = cumulative` (default) `CAAS_score` is the sum of `asr_score` over the five schemes
+divided by 5 (a scheme that did not detect the position counts as 0); with `mean` it is the mean over the schemes
+that detected the position:
 
 $$\text{caas\_row} = \text{asr\_path\_score}$$
 

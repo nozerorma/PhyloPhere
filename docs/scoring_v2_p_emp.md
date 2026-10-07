@@ -27,7 +27,8 @@ T = max_lado CAAS_score   si la posición se detecta en algún lado
 T = -Inf                  si no se detecta
 ```
 
-donde `CAAS_score` de un lado es la media §2g sobre los esquemas detectados
+donde `CAAS_score` de un lado es la agregación §2g sobre los esquemas (suma sobre los cinco esquemas, o media sobre los
+detectados con `caas_score_aggregation = mean`; el nulo y el observado usan la misma)
 (US, GS4, GS3, GS2, GS1). El score de la posición es el máximo sobre los lados
 detectados (el eje "all", `.pos_undirected` de §4a).
 

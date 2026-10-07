@@ -552,6 +552,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring_position_top_pct": "${SCORING_POSITION_TOP_PCT:-0.10}",
   "scoring_gene_top_pct": "${SCORING_GENE_TOP_PCT:-0.10}",
   "scoring_p_emp_thr": "${SCORING_P_EMP_THR:-0.05}",
+  "caas_score_aggregation": "${CAAS_SCORE_AGGREGATION:-cumulative}",
   "caas_evidence_top_n": "${CAAS_EVIDENCE_TOP_N:-0}",
   "scoring_gene_perm_pooled": {{ run_defaults.scoring_gene_perm_pooled }},
   "scoring_hypotheses_pairs": "${SCORING_HYPOTHESES_PAIRS:-}",
