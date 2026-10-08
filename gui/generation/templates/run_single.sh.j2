@@ -95,6 +95,7 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     CAAS_POS_QUANTILES_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
     CAAS_GENE_CYCLE_SCORES_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/gene_cycle_scores.tsv"
     CAAS_PERM_MANIFEST_FILE="${EXPLORATORY_OUTDIR}/caastools/permulation_manifest.tsv"
+    CAAS_PERM_HARVEST_FILE="${EXPLORATORY_OUTDIR}/caastools/permulation_harvest.tsv"
     for _f in "$CAAS_PERMS_FILE" "$CAAS_POS_CYCLE_CAAS_FILE" "$CAAS_POS_SAMPLE_FILE" "$CAAS_POS_QUANTILES_FILE" "$CAAS_GENE_CYCLE_SCORES_FILE"; do
         [ -f "$_f" ] || echo "[WARN] expected permulation output missing, p.perm will be empty: $_f" >&2
     done
@@ -196,6 +197,7 @@ if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     CAAS_POS_QUANTILES_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
     CAAS_GENE_CYCLE_SCORES_FILE="${PRECOMP_OUTDIR}/caas_permulation/gene_cycle_scores.tsv"
     CAAS_PERM_MANIFEST_FILE="${PRECOMP_OUTDIR}/caastools/permulation_manifest.tsv"
+    CAAS_PERM_HARVEST_FILE="${PRECOMP_OUTDIR}/caastools/permulation_harvest.tsv"
     # Triggers CAAS_CORE_MERGE in SCORING (see the reuse_exploratory branch).
     CAAS_POS_DETAIL_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_detail"
     [ -d "$CAAS_POS_DETAIL_FILE" ] || CAAS_POS_DETAIL_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_detail.tsv.gz"  # a single file in place of the shard directory
@@ -555,7 +557,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring_window_size_bp": "${SCORING_WINDOW_SIZE_BP:-1000000}",
   "scoring_position_top_pct": "${SCORING_POSITION_TOP_PCT:-0.10}",
   "scoring_gene_top_pct": "${SCORING_GENE_TOP_PCT:-0.10}",
-  "caas_score_aggregation": "${CAAS_SCORE_AGGREGATION:-cumulative}",
   "caas_evidence_top_n": "${CAAS_EVIDENCE_TOP_N:-0}",
   "scoring_hypotheses_pairs": "${SCORING_HYPOTHESES_PAIRS:-}",
   "ct_disambig_hypotheses_pairs": "${CT_DISAMBIG_HYPOTHESES_PAIRS:-}",
@@ -574,6 +575,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "caas_pos_sample_file": "${CAAS_POS_SAMPLE_FILE:-}",
   "caas_pos_quantiles_file": "${CAAS_POS_QUANTILES_FILE:-}",
   "caas_perm_manifest_file": "${CAAS_PERM_MANIFEST_FILE:-}",
+  "caas_perm_harvest_file": "${CAAS_PERM_HARVEST_FILE:-}",
   "caas_pos_detail_file": "${CAAS_POS_DETAIL_FILE:-}",
   "caas_gene_cycle_scores_file": "${CAAS_GENE_CYCLE_SCORES_FILE:-}",
 

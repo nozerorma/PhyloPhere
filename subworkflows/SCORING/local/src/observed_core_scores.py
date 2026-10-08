@@ -12,9 +12,8 @@ Inputs:     --input  filtered_discovery.tsv, one row per (Gene, Position, side, 
                      an asr_path_score column; only the five scoring schemes are read, and an
                      asr_path_score that is not numeric counts as missing
 Outputs:    --positions-out  TSV [Gene, Position, side, CAAS_score]; CAAS_score aggregates the
-                             asr_path_score of the schemes per side: their mean over the schemes that
-                             scored the position (--score-aggregation mean) or their sum over the five
-                             schemes (cumulative)
+                             asr_path_score of the schemes per side as US + mean(GS): the US score plus
+                             the mean over the GS1-GS4 schemes that scored the position (core.scores)
             --genes-out      TSV [Gene, gene_caas_score, gene_caas_score_top,
                              gene_caas_score_bottom]; size_adj_max against the pool of the
                              same direction (all positions of the run), NA when the gene has no
@@ -37,7 +36,7 @@ for _cand in (_here.parent, _here.parents[3] / "CT_DISAMBIGUATION" / "local"):
     if (_cand / "src" / "core" / "scores.py").exists():
         sys.path.insert(0, str(_cand))
         break
-from src.core.scores import AGGREGATIONS, DEFAULT_AGGREGATION, direction_values, gene_scores, position_score  # noqa: E402
+from src.core.scores import direction_values, gene_scores, position_score  # noqa: E402
 
 # The five grouping schemes that enter a position score (US is identity, GS1-GS4 are recodings).
 SCHEMES = ("US", "GS4", "GS3", "GS2", "GS1")
@@ -82,9 +81,6 @@ def main():
     ap.add_argument("--input", required=True, help="filtered_discovery.tsv")
     ap.add_argument("--positions-out", required=True)
     ap.add_argument("--genes-out", required=True)
-    ap.add_argument("--score-aggregation", default=DEFAULT_AGGREGATION, choices=AGGREGATIONS,
-                    help="scheme aggregation of the position score (params.caas_score_aggregation); "
-                         "the permulation null must use the same")
     a = ap.parse_args()
 
     try:
@@ -93,7 +89,7 @@ def main():
         print(f"Error: duplicate scheme rows: {e}", file=sys.stderr)
         return 1
 
-    scores = {k: position_score(s, a.score_aggregation) for k, s in rows.items()}
+    scores = {k: position_score(s) for k, s in rows.items()}
     with open(a.positions_out, "w", newline="") as f:
         w = csv.writer(f, delimiter="\t", lineterminator="\n")
         w.writerow(["Gene", "Position", "side", "CAAS_score"])

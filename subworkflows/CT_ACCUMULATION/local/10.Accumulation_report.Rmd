@@ -133,8 +133,13 @@ if ("Gene" %in% names(raw) && !"gene" %in% names(raw)) raw <- rename(raw, gene =
 # that correlation, which lives in the observed data. The heavy Cauchy tail of CCT
 # keeps its null valid under arbitrary dependence between the combined p-values,
 # whereas a combiner that assumes independence inflates the type-I rate.
-.cct_combine <- function(ps) {
-  ps <- ps[!is.na(ps)]
+# Weights follow the position score (US + mean(GS)): US 0.5 and each GS 0.125, renormalized over the
+# groups present, so the GS block weighs as much as US.
+.cct_weights <- c(us = 0.5, gs1 = 0.125, gs2 = 0.125, gs3 = 0.125, gs4 = 0.125)
+.cct_combine <- function(ps, schemes) {
+  valid <- !is.na(ps)
+  w  <- .cct_weights[as.character(schemes)][valid]
+  ps <- ps[valid]
   if (length(ps) == 0) return(NA_real_)
   # Missing p-values are dropped (an absent group is not a p of 1). When every
   # remaining group reports p = 1 the result is 1. Otherwise the p-values are
@@ -143,7 +148,7 @@ if ("Gene" %in% names(raw) && !"gene" %in% names(raw)) raw <- rename(raw, gene =
   # p towards 1 whatever the other groups report.
   if (all(ps >= 1)) return(1.0)
   ps   <- pmin(pmax(ps, 1e-15), 1 - 1e-15)
-  stat <- sum((1 / length(ps)) * tan((0.5 - ps) * pi))
+  stat <- sum(w / sum(w) * tan((0.5 - ps) * pi))
   pcauchy(stat, lower.tail = FALSE)
 }
 
@@ -153,7 +158,7 @@ cct_df <- raw %>%
   filter(scheme %in% group_schemes, !is.na(PValueEmpirical)) %>%
   group_by(gene, direction) %>%
   summarise(
-    PValueEmpirical = .cct_combine(PValueEmpirical),
+    PValueEmpirical = .cct_combine(PValueEmpirical, scheme),
     ActualCount     = sum(ActualCount, na.rm = TRUE),
     # MeanSim and SD are pooled as if the groups were independent: a descriptive
     # summary only, not the basis of the p-value above (CCT works on the p-values

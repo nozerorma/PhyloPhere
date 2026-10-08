@@ -2,7 +2,7 @@
 # Calibration of the position p-values against the run's own permulation null.
 #
 # Each null cycle is taken in turn as the "observed" data and judged against the other N - 1 cycles, with the rules of
-# scoring_compute.R: p.emp = (k + 1) / N and the factorized p of .fact_fit / .fact_assign / .fact_p. If the null is
+# scoring_compute.R: p.emp = (k + 1) / N and the factorized p of .fact_fit / .fact_assign_obs / .fact_p. If the null is
 # exchangeable with the observed data, the share of (position, cycle) pairs with p <= alpha cannot exceed alpha, overall
 # or within a class of propensity (cycles that score the position). A position the pseudo-observed cycle does not score
 # has p = 1. The helpers are read from scoring_compute.R itself, so the check follows the code and not a copy of it.
@@ -15,12 +15,12 @@ repo <- normalizePath(file.path(dirname(sub("--file=", "", grep("--file=", comma
 
 # Helpers (TIE_TOL, FACT_*, .fact_*) taken verbatim from the scoring step
 src <- readLines(file.path(repo, "subworkflows/SCORING/local/src/scoring_compute.R"))
-a <- grep("^TIE_TOL <- ", src); b <- grep("^\\.gene_fam_size <- NULL", src) - 1L
+a <- grep("^TIE_TOL <- ", src); b <- grep("^# ── end of the factorized p helpers", src) - 1L
 eval(parse(text = src[a:b]))
 
 nul <- read.delim(gzfile(file.path(res_dir, "caas_permulation/perm_pos_cycle_caas.tsv.gz")), stringsAsFactors = FALSE,
                   colClasses = c(caas_score = "character"))
-stopifnot(all(nul$score_aggregation == "cumulative"))
+stopifnot(all(nul$score_aggregation == "us_plus_gs_mean"))
 nul$caas_score <- suppressWarnings(as.numeric(nul$caas_score))
 nul <- nul[!is.na(nul$caas_score), ]
 nul$cyc <- sub("~H.*$", "", nul$cycle)                      # mirror labels collapse to the base cycle
@@ -50,7 +50,7 @@ for (cy in seq_len(N)) {
   nd_m <- nd_all - det[, cy]                                 # cycles other than c that score each position
   oth <- long[long[, 2] != cy, , drop = FALSE]
   fit <- .fact_fit(S[oth], nd_m[oth[, 1]])
-  p2 <- .fact_p(s, nd_m[d], .fact_assign(fit, nd_m[d]), fit, N - 1L)
+  p2 <- .fact_p(s, nd_m[d], .fact_assign_obs(fit, nd_m[d]), fit, N - 1L)
   pe[d, cy] <- p1; pf[d, cy] <- p2
   # BH over the null universe, pairs not scored by this cycle at p = 1
   for (j in 1:2) {

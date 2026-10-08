@@ -35,7 +35,7 @@ sys.path.insert(0, str(project_root / "src"))
 from src.utils.concurrency import plan_concurrency, init_worker
 from src.utils.amino import normalize_amino_list
 from src.core.driver import load_gene_context, pool_labelings, score_labelings
-from src.core.scores import DEFAULT_AGGREGATION, DIRECTIONS, check_aggregation, collapse_sides, direction_values, gene_scores, position_score
+from src.core.scores import DIRECTIONS, SCORE_RULE, collapse_sides, direction_values, gene_scores, position_score
 from src.data.models import CAASPosition
 
 logger = logging.getLogger(__name__)
@@ -279,9 +279,9 @@ def build_cycle_inputs(
     return target_cycles, cycle_labelings
 
 
-# A position's score is the mean of caas_row over its schemes (core.scores.position_score), not a
-# weighted sum: the number of schemes that detect a substitution reflects its biochemical distance
-# rather than the strength of the evidence. The observed side (scoring_compute.R) uses the same score.
+# A position's score is US + mean(GS) of caas_row (core.scores.position_score): the number of GS schemes that
+# detect a substitution reflects its biochemical distance rather than the strength of the evidence, so it is
+# averaged, not summed. The observed side (scoring_compute.R) uses the same score.
 
 
 @functools.lru_cache(maxsize=8)
@@ -627,7 +627,6 @@ def _build_cycle_score_pools(
     detail_path: Path,
     removed: Optional[Set[Tuple[str, str, str]]] = None,
     remove_clusters: bool = True,
-    aggregation: str = DEFAULT_AGGREGATION,
 ) -> Dict[str, Dict[str, Any]]:
     """Sub-pass B1: per-cycle, per-direction pool of position-level null scores.
 
@@ -667,7 +666,7 @@ def _build_cycle_score_pools(
         # side), so a "both" position is not counted twice.
         by_pos: Dict[Tuple[str, int], Dict[str, float]] = {}
         for (cyc, pos, side), schemes in agg.items():
-            score = position_score(schemes, aggregation)
+            score = position_score(schemes)
             if score is not None:
                 by_pos.setdefault((cyc, pos), {})[side] = score
         for (cyc, pos), sides in by_pos.items():
@@ -705,15 +704,14 @@ def _finalize_perm_scores(
     removed: Optional[Set[Tuple[str, str, str]]] = None,
     seed: int = 1998,
     remove_clusters: bool = True,
-    aggregation: str = DEFAULT_AGGREGATION,
 ) -> None:
     """Pass B: score the detail rows and aggregate them to gene x cycle statistics.
 
     Follows the observed pipeline of scoring_compute.R:
 
         null_row_caas   = asr_path_score
-        position score  = mean(null_row_caas) over that position's schemes, or their sum over the five
-                          schemes when aggregation == "cumulative" (core.scores.position_score)
+        position score  = US + mean(null_row_caas over the GS schemes that detected it)
+                          (core.scores.position_score)
         gene x cycle    = size_adj_max over the cycle's positions, per direction
                           (CAAS axis; the ASR axis is the 90th percentile of the position scores)
 
@@ -731,7 +729,6 @@ def _finalize_perm_scores(
     import csv as _csv
     import numpy as np
 
-    check_aggregation(aggregation)
     scores_path = output_dir / "gene_cycle_scores.tsv"
     sample_path = output_dir / "perm_pos_sample.tsv"
     quant_path = output_dir / "perm_pos_quantiles.tsv"
@@ -739,8 +736,8 @@ def _finalize_perm_scores(
     # definition shared by the readers: scoring_compute.R (p.emp, SAM) and the position
     # enrichment. caas_score is empty when no scheme scored the position.
     cycle_caas_path = output_dir / "perm_pos_cycle_caas.tsv.gz"
-    # score_aggregation records the rule of caas_score, so that scoring_compute.R can refuse an observed
-    # score built with another one.
+    # score_aggregation records the rule of caas_score (core.scores.SCORE_RULE), so that scoring_compute.R can
+    # refuse an observed score built with another one.
     cycle_caas_fields = ["Gene", "Position", "side", "cycle", "caas_score", "n_schemes", "score_aggregation"]
 
     # Reservoir size per (cycle, scheme). It bounds the sample and the quantile summaries
@@ -758,8 +755,7 @@ def _finalize_perm_scores(
     _rm = removed or set()
 
     # ── Sub-pass B1: per-cycle reference pools for the size-adjusted max ──────
-    cycle_pools = _build_cycle_score_pools(detail_path, removed=_rm, remove_clusters=remove_clusters,
-                                           aggregation=aggregation)
+    cycle_pools = _build_cycle_score_pools(detail_path, removed=_rm, remove_clusters=remove_clusters)
     logger.info("[perms] pass B1 done: size-adjust reference pools built for %d cycles",
                 len(cycle_pools))
 
@@ -779,9 +775,9 @@ def _finalize_perm_scores(
         by_pos: Dict[Tuple[str, int], Dict[str, float]] = {}
         cc_rows = []
         for (cyc, pos, side), schemes in pos_scheme.items():
-            score = position_score(schemes, aggregation)
+            score = position_score(schemes)
             cc_rows.append({"Gene": gene, "Position": pos, "side": side, "cycle": cyc,
-                            "caas_score": score, "n_schemes": len(schemes), "score_aggregation": aggregation})
+                            "caas_score": score, "n_schemes": len(schemes), "score_aggregation": SCORE_RULE})
             if score is not None:
                 by_pos.setdefault((cyc, pos), {})[side] = score
         if writer_cc is not None and cc_rows:
@@ -928,7 +924,6 @@ def process_all_genes_perms(
     train_map_dir: Optional[str] = None,
     train_map_suffix: str = ".map.tsv",
     detail_only: bool = False,
-    aggregation: str = DEFAULT_AGGREGATION,
 ) -> Path:
     """Genome-wide CAAS permulation null: load the ASR once per gene, replay N permuted
     labelings, and score them as the observed pipeline scores itself.
@@ -1215,7 +1210,6 @@ def process_all_genes_perms(
         removed=removed,
         seed=seed,
         remove_clusters=remove_clusters,
-        aggregation=aggregation,
     )
 
     logger.info(f"[perms] successfully aggregated {n_genes} genes to summaries inside {output_dir}")

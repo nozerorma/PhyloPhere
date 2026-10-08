@@ -36,6 +36,7 @@ workflow SCORING {
         caas_pos_quantiles_ch    // Channel<path> or null — per (cycle,scheme) null distribution shape
         hypotheses_pairs_ch      // Channel<path> or null — contrast_hypotheses_pairs.tsv (FOP domain-pool weights)
         perm_manifest_ch         // Channel<path> or null — permulation_manifest.tsv (design of the canonical pairs of each null cycle)
+        perm_harvest_ch          // Channel<path> or null — permulation_harvest.tsv (draws, rejections, acceptance by PSS tolerance, capacity)
 
     main:
         assert params.traitname : "SCORING requires --traitname"
@@ -150,6 +151,18 @@ workflow SCORING {
             resolved_perm_manifest = Channel.value(file('NO_PERM_MANIFEST'))
         }
 
+        // Audit of the null harvest (permulation_harvest.tsv), for the "Null harvest" tab of the report.
+        // NO_PERM_HARVEST -> the report omits the tab. --caas_perm_harvest_file overrides.
+        def ph_param = params.caas_perm_harvest_file ?: ''
+        def resolved_perm_harvest
+        if (ph_param && file(ph_param).exists()) {
+            resolved_perm_harvest = Channel.value(file(ph_param))
+        } else if (perm_harvest_ch != null) {
+            resolved_perm_harvest = perm_harvest_ch.ifEmpty(file('NO_PERM_HARVEST')).first()
+        } else {
+            resolved_perm_harvest = Channel.value(file('NO_PERM_HARVEST'))
+        }
+
         // CAAS permulation null (corStat_byrank rds) — resolved ONCE, before
         // SCORING_COMPUTE, so both it (Tier 1A per-gene p.perm) and the scoring
         // report / FCS report (p.perm) consume the SAME null. Hoisted above the
@@ -246,7 +259,8 @@ workflow SCORING {
             resolved_postproc,
             resolved_background,
             resolved_perm_manifest,
-            resolved_hyp_pairs
+            resolved_hyp_pairs,
+            resolved_perm_harvest
         )
 
         def final_reports = report_out.report

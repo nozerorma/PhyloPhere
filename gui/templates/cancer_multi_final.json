@@ -90,7 +90,9 @@
       "chunk_size": "500",
       "resample_use_n": true,
       "multi_hypothesis": true,
-      "max_fop": "50"
+      "max_fop": "50",
+      "perm_match_pss": true,
+      "perm_match_pss_tol": "0.25"
     },
     "disambiguation": {
       "enabled": true,
@@ -188,7 +190,7 @@
       "gene_ensembl_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output",
       "auto_generate_ensembl": false,
       "ensembl_dataset": "",
-      "scoring_window_size_bp": "1000000",
+      "scoring_window_size_bp": "100000",
       "caas_evidence_top_n": "20",
       "scoring_hypotheses_pairs": ""
     },

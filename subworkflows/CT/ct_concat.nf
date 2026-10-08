@@ -5,10 +5,10 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *  CONCAT_RESAMPLE: joins the resample_*.tab files that RESAMPLE writes (version-sorted
  *  by name, no header line in them) into resample.tab for reporting, and carries
- *  permulation_manifest.tsv through when the staged directory has one.
+ *  permulation_manifest.tsv and permulation_harvest.tsv through when the staged directory has them.
  *
  *  Consumes:  resample directory (RESAMPLE output, or a directory given by resample_from)
- *  Produces:  resample.tab, permulation_manifest.tsv (optional), published to
+ *  Produces:  resample.tab, permulation_manifest.tsv and permulation_harvest.tsv (optional), published to
  *             caastools/
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
@@ -30,6 +30,9 @@ process CONCAT_RESAMPLE {
     // the pool can be checked from the results directory. Optional: a directory given by
     // resample_from may have no manifest.
     path("permulation_manifest.tsv"), emit: resample_manifest, optional: true
+    // Audit of the harvest (draws, rejections by reason, acceptance by PSS tolerance, pool and capacity of a
+    // sample of the draws), written by permulations.R; the "Null harvest" tab of the scoring report reads it.
+    path("permulation_harvest.tsv"), emit: resample_harvest, optional: true
 
     script:
     """
@@ -42,6 +45,10 @@ process CONCAT_RESAMPLE {
         echo "Manifest carried through: \$(wc -l < permulation_manifest.tsv) lines"
     else
         echo "No permulation_manifest.tsv in staged dir (precomputed or legacy resample)"
+    fi
+
+    if [ -f "${resample_dir}/permulation_harvest.tsv" ]; then
+        cp "${resample_dir}/permulation_harvest.tsv" permulation_harvest.tsv
     fi
 
     echo "=== CONCAT_RESAMPLE ==="

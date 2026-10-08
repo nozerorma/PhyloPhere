@@ -262,6 +262,13 @@ sobre una propiedad del etiquetado (su perfil de PSS) que el observado cumple po
 `permulation_manifest.tsv` registra por ciclo la distancia media, la diferencia media, el PSS medio y el desajuste
 máximo de los pares canónicos (`mean_distance`, `mean_abs_diff`, `mean_pss`, `pss_mismatch`).
 
+`permulation_harvest.tsv` (formato largo: `section`, `key`, `x`, `value`) audita la cosecha completa: sorteos,
+aceptados por tier, rechazados por motivo, sorteos con un conjunto completo de K pares aceptables a cada tolerancia de
+PSS (el desajuste del peor par se guarda para todos los sorteos, también los rechazados), rondas del emparejamiento por
+número de hipótesis, y el tamaño del pool con y sin la puerta `pss_top_pct` y la capacidad (pares independientes
+máximos bajo la regla del observado) del rasgo observado y de una muestra de los 200 primeros sorteos. La pestaña
+«Null harvest» del informe de scoring lo representa.
+
 ### 3.2 Tabla comparativa
 
 | Eje | RERconverge 0.3.0 categórico (§1) | RERconverge *legacy* `simBinPhenoCC` | PhyloPhere `permulations.R` |

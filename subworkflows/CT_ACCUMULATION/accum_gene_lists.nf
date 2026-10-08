@@ -91,12 +91,17 @@ process ACCUMULATION_GENE_LISTS {
         # diverges to a large negative value, so feeding in a p of exactly 1 would
         # drag T down and cancel genuine signal from the groups that did report.
         # Rows where every group reports p=1 short-circuit to 1.
+        # Weights follow the position score: US 0.5 and each GS 0.125, renormalized over the groups present.
+        w_scheme <- c(us = 0.5, gs1 = 0.125, gs2 = 0.125, gs3 = 0.125, gs4 = 0.125)
+        w_of     <- w_scheme[substring(pval_cols, 6)]
         cct_p <- apply(df_wide[, pval_cols, drop = FALSE], 1, function(ps) {
-            ps <- ps[!is.na(ps)]
+            valid <- !is.na(ps)
+            ps <- ps[valid]
             if (length(ps) == 0) return(NA_real_)
             if (all(ps >= 1)) return(1.0)
             ps   <- pmin(pmax(ps, 1e-15), 1 - 1e-15)
-            stat <- sum((1 / length(ps)) * tan((0.5 - ps) * pi))
+            w    <- w_of[valid] / sum(w_of[valid])
+            stat <- sum(w * tan((0.5 - ps) * pi))
             pcauchy(stat, lower.tail = FALSE)
         })
 

@@ -31,6 +31,7 @@ params:
   caas_pos_cycle_caas_file: NULL
   perm_manifest_file: NULL
   hypotheses_pairs_file: NULL
+  perm_harvest_file: NULL
   caas_pos_sample_file: NULL
   caas_pos_quantiles_file: NULL
   filtered_discovery_file: NULL
@@ -140,7 +141,7 @@ gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
 # position_scores.tsv carries no per-scheme factor: a position-level mean of asr_score would hide
-# scheme disagreement, and CAAS_score is already the aggregate (mean or cumulative) of asr_path_score over the schemes.
+# scheme disagreement, and CAAS_score is already the aggregate (US + mean of the GS schemes) of asr_path_score.
 # `asr_score` is aliased to asr_path_score when the table has it and to CAAS_score otherwise, so
 # that the panels below always find the column.
 if (!"asr_score" %in% names(pos_df)) {
@@ -397,7 +398,7 @@ reproduced independently of the pipeline code.
 
 ### Position-Level Score
 
-`CAAS_score` is built from one evidence axis, on a continuous [0, 1] scale:
+`CAAS_score` is built from one evidence axis; `caas_row` lies in [0, 1] and the position score `US + mean(GS)` in [0, 2]:
 
 #### 1. Position evolution: `asr_path_score` (`asr_score`)
 
@@ -417,14 +418,14 @@ Voronoi domain, built from the per-node ASR posteriors (full definitions in
 
 A substitution is tested against five biochemical partitions (US, GS1-GS4); a
 scheme "detects" the position if the substitution crosses one of its group
-boundaries. With `caas_score_aggregation = cumulative` (default) `CAAS_score` is the sum of `asr_score` over the five schemes
-divided by 5 (a scheme that did not detect the position counts as 0); with `mean` it is the mean over the schemes
-that detected the position:
+boundaries. `CAAS_score` is the US score (0 when US did not detect the position) plus the mean over the GS1-GS4
+schemes that detected it (0 when none did), so it lies in [0, 2]. The GS term is the bonus for a divergence in
+chemistry, and a position detected only by GS schemes keeps it instead of dropping out:
 
 $$\text{caas\_row} = \text{asr\_path\_score}$$
 
 (`caas_row` carries no permutation-rank phenotype factor, on the observed or the null side.)
-$$\text{CAAS\_score} = \operatorname{mean}_{s \in \text{detected schemes}} \text{caas\_row}_s$$
+$$\text{CAAS\_score} = \text{caas\_row}_{US} + \operatorname{mean}_{s \in \text{detected GS}} \text{caas\_row}_s$$
 
 `n_schemes` (how many partitions detected the position) and `scheme_set`
 (which ones) are reported as descriptors and do not scale the score. See the
@@ -700,6 +701,110 @@ knitr::kable(dplyr::bind_rows(lapply(names(.vol_n), function(m) {
 The plot shows how far a cycle departs from the median cycle, in folds, and the red line is where the run falls.
 The table gives the same spread in numbers and the share of null cycles that detect at least as much as the run.
 
+### Null harvest
+
+How many permulated labelings the harvest drew, how many it kept, why it discarded the others, and how much of the
+candidate space the selection rule leaves out. These are the figures of the harvest that built the null, not of the
+scored data.
+
+```{r null-harvest-na, eval=!.file_ok(params$perm_harvest_file), results='asis'}
+cat("_No `permulation_harvest.tsv` is available for this run: the harvest was made before the audit was recorded, ",
+    "or its summary was not carried through (`--caas_perm_harvest_file`)._\n\n")
+```
+
+```{r null-harvest-setup, eval=.file_ok(params$perm_harvest_file)}
+.hv <- readr::read_tsv(params$perm_harvest_file, show_col_types = FALSE,
+                       col_types = readr::cols(section = "c", key = "c", x = "d", value = "d"))
+.hv_get <- function(sec, key) { v <- .hv$value[.hv$section == sec & .hv$key == key]; if (length(v)) v[[1]] else NA_real_ }
+.hv_draws <- .hv_get("run", "draws"); .hv_t1 <- .hv_get("run", "tier1"); .hv_t2 <- .hv_get("run", "tier2")
+.hv_pool <- .hv_get("run", "pool"); .hv_match <- isTRUE(.hv_get("settings", "match_pss") == 1)
+.hv_tol <- .hv_get("settings", "match_pss_tol"); .hv_K <- .hv_get("settings", "target_pairs")
+.hv_rej <- .hv %>% filter(section == "reject") %>% transmute(reason = key, draws = value)
+.theme_h <- ggplot2::theme_minimal(base_size = 11)
+```
+
+#### Draws and rejections
+
+```{r null-harvest-funnel, eval=.file_ok(params$perm_harvest_file), fig.height=3.6, fig.width=10}
+.fun <- dplyr::bind_rows(
+  tibble::tibble(outcome = "accepted, Tier 1 (all pairs independent)", draws = .hv_t1, kind = "accepted"),
+  tibble::tibble(outcome = "accepted, Tier 2 (one pair below Dunn 1)", draws = .hv_t2, kind = "accepted"),
+  .hv_rej %>% transmute(outcome = reason, draws, kind = "rejected")) %>%
+  filter(draws > 0) %>% mutate(share = draws / .hv_draws, outcome = factor(outcome, levels = rev(outcome)))
+ggplot(.fun, aes(draws, outcome, fill = kind)) +
+  geom_col(width = .7) +
+  geom_text(aes(label = sprintf("%s (%.1f%%)", format(draws, big.mark = ","), 100 * share)), hjust = -0.05, size = 3.3) +
+  scale_fill_manual(values = c(accepted = "grey55", rejected = "#E15759"), guide = "none") +
+  scale_x_continuous(expand = ggplot2::expansion(mult = c(0, .35))) +
+  labs(x = sprintf("draws (of %s)", format(.hv_draws, big.mark = ",")), y = NULL) + .theme_h
+```
+
+```{r null-harvest-run-table, eval=.file_ok(params$perm_harvest_file)}
+knitr::kable(tibble::tibble(
+  `draws` = .hv_draws, `Tier 1` = .hv_t1, `Tier 2` = .hv_t2,
+  `acceptance` = sprintf("%.1f%%", 100 * (.hv_t1 + .hv_t2) / .hv_draws),
+  `kept in the pool` = .hv_pool, `target pairs (K)` = .hv_K,
+  `budget escalations` = .hv_get("run", "escalations")), caption = "Permulation harvest")
+.dm <- .hv %>% filter(section == "design") %>% select(round = x, key, value) %>% tidyr::pivot_wider(names_from = key, values_from = value)
+if (nrow(.dm)) knitr::kable(.dm %>% transmute(round, `candidate target` = target, `candidates drawn` = candidates,
+  `reach the observed number of hypotheses` = reach, rate = sprintf("%.1f%%", 100 * reach / candidates)),
+  caption = "Design matching: candidates that reach the number of FOP hypotheses of the run")
+```
+
+A draw is rejected when it cannot give `K` mutually independent pairs, or, with the PSS matching, when the pairs it
+can give do not follow the PSS of the observed pairs. Tier 1 draws beyond the pool, and the candidates that do not
+reach the number of hypotheses of the run, are drawn and not kept.
+
+#### What the PSS rule discards
+
+```{r null-harvest-tolerance, eval=.file_ok(params$perm_harvest_file) && .hv_match && any(.hv$section == "tolerance"), fig.height=3.8, fig.width=7}
+.tol <- .hv %>% filter(section == "tolerance", key == "complete_within_tol") %>% transmute(tol = x, accepted = value / .hv_draws)
+.cmp <- .hv_get("tolerance", "complete") / .hv_draws
+ggplot(.tol, aes(tol, accepted)) +
+  geom_hline(yintercept = .cmp, linetype = "dotted", colour = "grey40") +
+  geom_line(linewidth = .8, colour = "#4E79A7") + geom_point(size = 1.4, colour = "#4E79A7") +
+  geom_vline(xintercept = .hv_tol, colour = "#E15759", linewidth = .8) +
+  annotate("text", x = .hv_tol, y = 0, label = sprintf(" tolerance %g", .hv_tol), hjust = 0, vjust = -0.6, colour = "#E15759", size = 3.4) +
+  annotate("text", x = max(.tol$tol), y = .cmp, label = "draws with K independent pairs", hjust = 1, vjust = -0.5, size = 3.2, colour = "grey30") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0, 1)) +
+  labs(x = "relative PSS tolerance of each pair", y = "draws accepted") + .theme_h
+```
+
+```{r null-harvest-tolerance-na, eval=.file_ok(params$perm_harvest_file) && !(.hv_match && any(.hv$section == "tolerance")), results='asis'}
+cat("_This harvest did not match the PSS profile of the observed pairs (`perm_match_pss` off, or count trait), so no pair was discarded by it._\n\n")
+```
+
+The curve is the share of all draws that would be accepted at each tolerance; the dotted line is the share that has
+`K` independent pairs at all, which no tolerance can exceed. The gap between the chosen tolerance and that line is
+what the PSS rule discards.
+
+#### Candidate pairs and capacity
+
+```{r null-harvest-capacity, eval=.file_ok(params$perm_harvest_file) && any(.hv$section == "capacity"), fig.height=3.4, fig.width=7}
+.cap <- .hv %>% filter(section == "capacity") %>% select(draw = x, key, value) %>% tidyr::pivot_wider(names_from = key, values_from = value) %>%
+  filter(is.finite(capacity))
+.obs <- c(pool_gated = .hv_get("observed", "pool_gated"), pool_ungated = .hv_get("observed", "pool_ungated"), capacity = .hv_get("observed", "capacity"))
+ggplot(.cap, aes(capacity)) +
+  geom_histogram(binwidth = 1, boundary = 0, fill = "grey65", colour = "grey35") +
+  geom_vline(xintercept = .obs[["capacity"]], colour = "#E15759", linewidth = 1) +
+  labs(x = "independent pairs the trait can give (capacity)", y = "sampled draws",
+       title = "Capacity of the null traits (grey) and of the run (red)") + .theme_h
+knitr::kable(tibble::tibble(
+  quantity = c("independent pairs (capacity)", "candidate pairs after the PSS gate", "candidate pairs before the PSS gate", "pairs the PSS gate discards"),
+  run = c(.obs[["capacity"]], .obs[["pool_gated"]], .obs[["pool_ungated"]], .obs[["pool_ungated"]] - .obs[["pool_gated"]]),
+  `null median` = c(median(.cap$capacity), median(.cap$pool_gated), median(.cap$pool_ungated), median(.cap$pool_ungated - .cap$pool_gated)),
+  `null q05` = c(quantile(.cap$capacity, .05), quantile(.cap$pool_gated, .05), quantile(.cap$pool_ungated, .05), quantile(.cap$pool_ungated - .cap$pool_gated, .05)),
+  `null q95` = c(quantile(.cap$capacity, .95), quantile(.cap$pool_gated, .95), quantile(.cap$pool_ungated, .95), quantile(.cap$pool_ungated - .cap$pool_gated, .95))),
+  digits = 1, caption = sprintf("Pool and capacity, run against a sample of %d null draws", nrow(.cap)))
+```
+
+The run assembles its pairs until the Dunn index stops it, so its `K` is the capacity of its trait: the most mutually
+independent pairs its candidate pool gives. A null trait with a larger capacity than `K` has pairs that a draw of exactly
+`K` pairs leaves out; this is the choice the PSS matching makes explicit, by taking among them the ones whose PSS follows
+the run. The PSS gate keeps the top fraction of the candidate pairs of each trait (`top_pct`); the table gives how many pairs it
+discards in the run and in the null (the pool sizes hardly vary between permulations, because the permulated trait
+keeps the values of the observed one). Capacity is computed on a sample of the draws, not on all.
+
 ### Design comparability
 
 A null cycle is a permulated labeling, and the number of positions it detects depends on the design of its contrasts:
@@ -946,8 +1051,8 @@ given position identifies what kind of physicochemical property changed, not
 merely how much evidence exists.
 
 `n_schemes` and `scheme_set` are descriptors of the substitution's chemistry,
-not inputs to `CAAS_score` (mean over detected schemes, Scoring Methodology
-above). How many schemes fire is largely a property of where the ancestral
+not inputs to `CAAS_score` (US + mean over the detected GS schemes, Scoring
+Methodology above). How many schemes fire is largely a property of where the ancestral
 residue sits in each partition: an amino acid alone in its group (e.g.
 threonine under `GS1`) is displaced by almost any substitution, while one in a
 five-member group needs a larger change to cross out. The group-size plot below
@@ -1103,8 +1208,8 @@ pos_chr_label_positions <- pos_chr_offsets %>%
 
 ```{r pos-caas-manhattan-plot, eval=has_genomic, fig.height=5, fig.width=14}
 pos_genomic <- pos_genomic %>%
-  mutate(caas_log = -log10(1 - pmin(CAAS_score, 0.9999)))
-pos_thr_log <- -log10(1 - pmin(thr_10, 0.9999))
+  mutate(caas_log = -log10(1 - pmin(CAAS_score / 2, 0.9999)))   # CAAS_score lies in [0, 2]
+pos_thr_log <- -log10(1 - pmin(thr_10 / 2, 0.9999))
 
 ggplot(pos_genomic, aes(x = manhattan_x, y = caas_log, colour = chr_even)) +
   geom_point(alpha = 0.45, size = 0.6, show.legend = FALSE) +
@@ -1123,7 +1228,7 @@ ggplot(pos_genomic, aes(x = manhattan_x, y = caas_log, colour = chr_even)) +
     title    = "Position-Level CAAS Score - Manhattan View",
     subtitle = sprintf("%d positions with genomic coordinates | dashed = top %g%% threshold",
                        nrow(pos_genomic), params$top_pct * 100),
-    x = "Chromosome", y = "-log10(1 - CAAS Score)"
+    x = "Chromosome", y = "-log10(1 - CAAS Score / 2)"
   ) +
   theme(
     plot.title         = element_text(face = "bold"),
@@ -2142,8 +2247,8 @@ pos_wins <- pos_genomic %>%
   mutate(n_positions = n_genes,
          win_x       = win_mid + offset,
          chr_even    = chr_order %% 2 == 0,
-         mean_log    = -log10(1 - pmin(mean_score, 0.9999)),
-         max_log     = -log10(1 - pmin(max_score,  0.9999)))
+         mean_log    = -log10(1 - pmin(mean_score / 2, 0.9999)),   # position score in [0, 2]
+         max_log     = -log10(1 - pmin(max_score / 2,  0.9999)))
 
 # Label the top windows as genomic regions, not gene names.
 # Ranked by n_positions (window density) rather than mean_log, to surface the
@@ -2178,7 +2283,7 @@ ggplot(pos_wins, aes(x = win_x, y = mean_log, fill = chr_even)) +
     title    = sprintf("Position-Level CAAS Score - %s Window Accumulation", win_size_label),
     subtitle = sprintf("Bars = mean | Points = max | %d windows across %d chromosomes",
                        nrow(pos_wins), length(unique(pos_wins$chr_order))),
-    x = "Chromosome", y = "-log10(1 - mean CAAS score)"
+    x = "Chromosome", y = "-log10(1 - mean CAAS score / 2)"
   ) +
   theme(
     plot.title         = element_text(face = "bold"),

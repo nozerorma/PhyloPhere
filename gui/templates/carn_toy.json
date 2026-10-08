@@ -81,7 +81,9 @@
       "chunk_size": "500",
       "resample_use_n": true,
       "multi_hypothesis": true,
-      "max_fop": "100"
+      "max_fop": "100",
+      "perm_match_pss": true,
+      "perm_match_pss_tol": "0.25"
     },
     "disambiguation": {
       "enabled": true,
@@ -114,7 +116,7 @@
       "accumulation_fdr": "0.05"
     },
     "rer": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "rer_tool_build_trait": true,
       "rer_tool_build_tree": true,
@@ -180,6 +182,7 @@
       "auto_generate_ensembl": false,
       "ensembl_dataset": "",
       "scoring_window_size_bp": "1000000",
+      "caas_score_aggregation": "cumulative",
       "caas_evidence_top_n": "20",
       "scoring_hypotheses_pairs": ""
     },

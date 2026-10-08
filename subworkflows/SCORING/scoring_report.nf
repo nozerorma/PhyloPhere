@@ -10,7 +10,8 @@
  *  Consumes:  position_scores.tsv, gene_scores.tsv, gene_correlations.tsv; optional
  *             per-site FADE tables (top and bottom), gene coordinates, the CAAS
  *             position-level permulation null (perm_pos_cycle_caas.tsv.gz), the design of the
- *             null cycles (permulation_manifest.tsv) and of the observed pairs
+ *             null cycles (permulation_manifest.tsv), the audit of the null harvest
+ *             (permulation_harvest.tsv) and the design of the observed pairs
  *             (contrast_hypotheses_pairs.tsv), filtered_discovery.tsv. The
  *             optional inputs are NO_* sentinel files when absent and reach the report
  *             as NULL; caas_pos_sample, caas_pos_quantiles and background_file are
@@ -49,6 +50,7 @@ process SCORING_REPORT {
     path background_file     // background gene list (NO_BACKGROUND or NO_FILE sentinel when absent); passed to the report, which does not read it
     path perm_manifest       // optional: permulation_manifest.tsv, design of the canonical pairs of each null cycle (NO_PERM_MANIFEST sentinel when absent)
     path hyp_pairs           // optional: contrast_hypotheses_pairs.tsv, design of the observed canonical pairs (NO_HYP_PAIRS sentinel when absent)
+    path perm_harvest        // optional: permulation_harvest.tsv, what the null harvest tried and discarded (NO_PERM_HARVEST sentinel when absent)
 
     output:
     path "11.Scoring_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -71,6 +73,7 @@ process SCORING_REPORT {
     def bg_file_arg = (background_file.name =~ /^NO_BACKGROUND|^NO_FILE/) ? 'NULL' : "'${background_file}'"
     def perm_manifest_arg = (perm_manifest.name =~ /^NO_PERM_MANIFEST|^NO_FILE/) ? 'NULL' : "'${perm_manifest}'"
     def hyp_pairs_arg = (hyp_pairs.name =~ /^NO_HYP_PAIRS|^NO_FILE/) ? 'NULL' : "'${hyp_pairs}'"
+    def perm_harvest_arg = (perm_harvest.name =~ /^NO_PERM_HARVEST|^NO_FILE/) ? 'NULL' : "'${perm_harvest}'"
     def win_size = params.scoring_window_size_bp ?: 1000000
 
     if (params.use_singularity || params.use_apptainer) {
@@ -98,6 +101,7 @@ process SCORING_REPORT {
                     background_file      = ${bg_file_arg},
                     perm_manifest_file   = ${perm_manifest_arg},
                     hypotheses_pairs_file = ${hyp_pairs_arg},
+                    perm_harvest_file    = ${perm_harvest_arg},
                     window_size_bp       = ${win_size},
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'
@@ -131,6 +135,7 @@ process SCORING_REPORT {
                     background_file      = ${bg_file_arg},
                     perm_manifest_file   = ${perm_manifest_arg},
                     hypotheses_pairs_file = ${hyp_pairs_arg},
+                    perm_harvest_file    = ${perm_harvest_arg},
                     window_size_bp       = ${win_size},
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'

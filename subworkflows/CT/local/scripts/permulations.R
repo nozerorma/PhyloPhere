@@ -42,8 +42,9 @@
 #   Tier 2 : exactly one pair falls below mod_dunn 1 (only used to fill a shortfall)
 #
 # Outputs (outdir): resample_NNN.tab (cycle, fg, bg; no header), permulation_manifest.tsv
-# (one row per cycle: tier, pair count, Dunn, trait values), and with multi_hypothesis
-# fop_labelings.tab and fop_pairs.tsv.
+# (one row per cycle: tier, pair count, Dunn, trait values, design of the canonical pairs) and
+# permulation_harvest.tsv (draws, rejections by reason, acceptance by PSS tolerance, pool and capacity of a
+# sample of the draws), and with multi_hypothesis fop_labelings.tab and fop_pairs.tsv.
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -358,6 +359,17 @@ if (match_pss && use_ci) {
   }
 }
 
+# Pool and capacity of the observed trait under its own selection rule, for the harvest audit.
+obs_cap <- tryCatch(
+  lean_draw_capacity(
+    starting.values, D, pruned.tree, cov_bm, cov_ou, selected_model,
+    if (use_ci) setNames(phenotype.df$ci_lb, phenotype.df$species)[names(starting.values)] else NULL,
+    if (use_ci) setNames(phenotype.df$ci_ub, phenotype.df$species)[names(starting.values)] else NULL,
+    pss_top_pct,
+    if (trait_type == "ordinal") TRUE else if (trait_type == "continuous") FALSE else NULL,
+    if (use_ci) setNames(phenotype.df$n_pop, phenotype.df$species)[names(starting.values)] else NULL),
+  error = function(err) c(pool_gated = NA_real_, pool_ungated = NA_real_, capacity = NA_real_))
+
 # ── Harvest ───────────────────────────────────────────────────────────────────
 # Draws are permulations of the observed trait: each is graded by
 # evaluate_lean_contrast_selection() into Tier 1, Tier 2 or a rejection. The pool is the
@@ -385,6 +397,13 @@ tier2 <- vector("list", number.of.cycles)
 n1 <- 0L; n2 <- 0L
 total_draws <- 0L
 reject_reasons <- character(0)
+# Harvest audit: the worst PSS mismatch of every draw (NA where no complete set of pairs was found), the
+# design-matching rounds, and the pool and capacity of a sample of the draws (written to permulation_harvest.tsv).
+draw_mm  <- rep(NA_real_, 10000L)
+dm_rows  <- list()
+cap_rows <- list()
+CAP_SAMPLE <- 200L
+ordinal_arg <- if (trait_type == "ordinal") TRUE else if (trait_type == "continuous") FALSE else NULL
 
 # Budget escalation is target-aware. `max_tries` is meant to abort a trait whose Dunn
 # geometry makes a full pool essentially unreachable (low Tier-1 acceptance), not to cap a
@@ -481,6 +500,15 @@ repeat {
                                    n_below = NA_integer_, fg = NULL, bg = NULL,
                                    reason = paste0("error: ", conditionMessage(err)))
       )
+
+      if (total_draws > length(draw_mm)) draw_mm <- c(draw_mm, rep(NA_real_, length(draw_mm)))
+      if (!is.null(e$mismatch)) draw_mm[total_draws] <- e$mismatch
+      if (total_draws <= CAP_SAMPLE) {
+        cap_rows[[total_draws]] <- tryCatch(
+          lean_draw_capacity(pvec, D, pruned.tree, cov_bm, cov_ou, selected_model, ci_lb_draw, ci_ub_draw,
+                             pss_top_pct, ordinal_arg, n_draw),
+          error = function(err) c(pool_gated = NA_real_, pool_ungated = NA_real_, capacity = NA_real_))
+      }
 
       # Accepted cycles keep their permuted vector (and CI/n draws), so that the FOP mirror
       # can harvest alternative hypotheses around this exact labeling once the pool is assembled.
@@ -601,6 +629,7 @@ repeat {
   match_rate <- length(qual) / length(cands)
   log_msg("INFO", sprintf("Design matching: %d/%d candidates reach >= %d FOP hypotheses (%.1f%%)",
                           length(qual), length(cands), n_hyp_obs, 100 * match_rate))
+  dm_rows[[length(dm_rows) + 1L]] <- c(target = pool_target, candidates = length(cands), reach = length(qual))
 
   if (length(qual) >= number.of.cycles) {
     pool <- cands[qual[seq_len(number.of.cycles)]]
@@ -635,6 +664,36 @@ rbind_fast <- function(lst) {
   as.data.frame(data.table::rbindlist(lst, use.names = TRUE, fill = TRUE),
                 stringsAsFactors = FALSE)
 }
+
+# ── Harvest summary ───────────────────────────────────────────────────────────
+# permulation_harvest.tsv, long format (section, key, x, value): what the harvest tried and discarded, for the
+# "Null harvest" tab of the scoring report. Aggregates only; the per-cycle design is in permulation_manifest.tsv.
+.hv <- list()
+.add <- function(section, key, x = NA_real_, value = NA_real_)
+  .hv[[length(.hv) + 1L]] <<- data.frame(section = section, key = key, x = x, value = value, stringsAsFactors = FALSE)
+.add("run", "draws", value = total_draws)
+.add("run", "tier1", value = n1)
+.add("run", "tier2", value = n2)
+.add("run", "pool", value = length(pool))
+.add("run", "escalations", value = escalations)
+.add("settings", "match_pss", value = as.numeric(!is.null(pss_profile)))
+.add("settings", "match_pss_tol", value = match_pss_tol)
+.add("settings", "top_pct", value = pss_top_pct)
+.add("settings", "n_hyp_obs", value = n_hyp_obs)
+.add("settings", "target_pairs", value = target_pairs)
+.rt <- table(reject_reasons)
+for (i in seq_along(.rt)) .add("reject", names(.rt)[i], value = as.numeric(.rt[[i]]))
+.mm <- draw_mm[seq_len(total_draws)]
+if (!is.null(pss_profile)) {
+  .add("tolerance", "complete", value = sum(!is.na(.mm)))
+  for (t in sort(unique(c(seq(0.05, 1, by = 0.05), seq(1.25, 3, by = 0.25), match_pss_tol))))
+    .add("tolerance", "complete_within_tol", x = t, value = sum(.mm <= log1p(t), na.rm = TRUE))
+  for (i in seq_along(pss_profile)) .add("observed", "pss", x = i, value = pss_profile[i])
+}
+for (i in seq_along(dm_rows)) for (k in names(dm_rows[[i]])) .add("design", k, x = i, value = dm_rows[[i]][[k]])
+for (i in seq_along(cap_rows)) if (!is.null(cap_rows[[i]])) for (k in names(cap_rows[[i]])) .add("capacity", k, x = i, value = cap_rows[[i]][[k]])
+for (k in names(obs_cap)) .add("observed", k, value = obs_cap[[k]])
+write.table(data.table::rbindlist(.hv), file.path(outdir, "permulation_harvest.tsv"), sep = "\t", quote = FALSE, row.names = FALSE)
 
 # Streamed writers: only the current chunk is held in memory, never the whole pool. Each
 # resample file holds `chunk.size` cycles; the manifest is appended chunk by chunk to a

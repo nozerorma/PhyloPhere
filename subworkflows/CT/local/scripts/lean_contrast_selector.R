@@ -345,8 +345,25 @@ match_pss_select <- function(ranked, D, target_pss, tol = 0.25, max_probe = 60L)
   sel <- ranked[picked, , drop = FALSE]
   mismatch <- max(abs(log(pmax(sel$pss_score, 1e-12)) - lt))
   if (mismatch > log1p(tol)) return(list(selected = NULL, members = members, mismatch = mismatch,
-                                         reason = sprintf("PSS profile not matched (worst pair off by %.0f%%)", 100 * expm1(mismatch))))
+                                         reason = "PSS profile not matched within the tolerance"))
   list(selected = sel, members = members, mismatch = mismatch, reason = NULL)
+}
+
+#' Pool and capacity of one trait vector under the observed selection rule.
+#'
+#' The observed selector assembles pairs until the Dunn index stops it, so its K is the capacity of the trait:
+#' the most mutually independent pairs its candidate pool can give. This returns the size of the pool with the
+#' PSS top_pct gate and without it (the pairs the gate discards), and that capacity on the gated pool.
+#' Costly (an exhaustive greedy assembly): meant for the observed trait and a sample of the null draws.
+#' @return c(pool_gated, pool_ungated, capacity); NA where the trait has no candidate pair.
+lean_draw_capacity <- function(trait_vec, D, tree, cov_bm, cov_ou, selected_model,
+                               ci_lb = NULL, ci_ub = NULL, top_pct = 0.01, ordinal = NULL, n_vec = NULL) {
+  D <- as.matrix(D)
+  gated   <- lean_candidate_df(trait_vec, D, 1L, tree, cov_bm, cov_ou, selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec)$cand_df
+  ungated <- lean_candidate_df(trait_vec, D, 1L, tree, cov_bm, cov_ou, selected_model, ci_lb, ci_ub, 1,       ordinal, n_vec)$cand_df
+  if (is.null(gated) || is.null(ungated)) return(c(pool_gated = NA_real_, pool_ungated = NA_real_, capacity = NA_real_))
+  cap <- nrow(greedy_dunn_select(gated, D, target = Inf, enforce_dunn = TRUE)$selected)
+  c(pool_gated = nrow(gated), pool_ungated = nrow(ungated), capacity = cap)
 }
 
 #' FOP multi-hypothesis harvest, shared by the observed selector
@@ -550,9 +567,9 @@ evaluate_lean_contrast_selection <- function(trait_vec,
                                              pss_profile = NULL,
                                              pss_tol = 0.25) {
 
-  reject <- function(reason, n_pairs = 0L, dunn = 0, n_below = NA_integer_) {
+  reject <- function(reason, n_pairs = 0L, dunn = 0, n_below = NA_integer_, mismatch = NA_real_) {
     list(tier = 0L, n_pairs = n_pairs, dunn_min = dunn, n_below = n_below,
-         fg = NULL, bg = NULL, reason = reason)
+         fg = NULL, bg = NULL, mismatch = mismatch, reason = reason)
   }
 
   if (target_pairs <= 0L) return(reject("target_pairs <= 0"))
@@ -567,7 +584,7 @@ evaluate_lean_contrast_selection <- function(trait_vec,
 
   if (use_match) {
     mt <- match_pss_select(ranked, D, pss_profile, pss_tol)
-    if (is.null(mt$selected)) return(reject(mt$reason, length(mt$members)))
+    if (is.null(mt$selected)) return(reject(mt$reason, length(mt$members), mismatch = mt$mismatch))
     sel <- mt$selected; members <- mt$members
     return(list(tier = 1L, n_pairs = length(members), dunn_min = overall_dunn_lean(D, members), n_below = 0L,
                 fg = sel$species1, bg = sel$species2,

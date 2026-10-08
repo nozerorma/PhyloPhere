@@ -81,7 +81,9 @@
       "chunk_size": "500",
       "resample_use_n": true,
       "multi_hypothesis": true,
-      "max_fop": "100"
+      "max_fop": "100",
+      "perm_match_pss": true,
+      "perm_match_pss_tol": "0.25"
     },
     "disambiguation": {
       "enabled": true,
@@ -179,7 +181,7 @@
       "gene_ensembl_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output",
       "auto_generate_ensembl": false,
       "ensembl_dataset": "",
-      "scoring_window_size_bp": "1000000",
+      "scoring_window_size_bp": "100000",
       "caas_evidence_top_n": "20",
       "scoring_hypotheses_pairs": ""
     },
@@ -218,8 +220,8 @@
       "ucr_positions_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/variability/ucr_positions.tsv",
       "posenrich_eggnog": true,
       "eggnog_taxid": "",
-      "egg_members_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_members.tsv",
-      "egg_annotations_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_annotations.tsv",
+      "egg_members_file": "",
+      "egg_annotations_file": "",
       "fubar_sites_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/positive_selection/fubar_sites.tsv",
       "posenrich_min_size": "5",
       "posenrich_max_size": "0",

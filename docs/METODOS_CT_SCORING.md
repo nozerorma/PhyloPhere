@@ -182,7 +182,7 @@ Con `overlap` = min(residuos fg también en bg, residuos bg también en fg), y
 `US` (residuo literal) y `GS1..GS4` (agrupaciones bioquímicas progresivamente más gruesas).
 **Cuántos esquemas disparan es una propiedad determinista de qué aminoácidos intervienen**
 (distancia bioquímica discretizada), no una medida de fuerza de evidencia. Por eso el
-scoring (H.4) agrega esquemas, sin pesos, con la **suma sobre los cinco** dividida por 5 (`caas_score_aggregation = cumulative`, por defecto: el esquema que no detecta aporta 0) o con una **media** sobre los esquemas que detectan (`mean`).
+scoring (H.4) puntúa la posición como `US + media(GS)`: el score de US (0 si no detecta) más la **media** de los scores de los GS1-GS4 que detectan (0 si ninguno). US es el test estricto sobre residuos y cada GS repite el test tras recodificar los residuos en clases bioquímicas; el término GS es el bonus por divergencia química. Una posición detectada solo por GS conserva su término GS (el de US es 0) en lugar de desaparecer, y la que detectan ambos suma los dos. Cuántos GS detectan no se premia: las cuatro particiones son ejes distintos, no versiones fina y gruesa de una. El score va de 0 a 2.
 
 *Ejemplo — columna 210, patrón fg/bg por hipótesis:*
 
@@ -543,8 +543,8 @@ esquemas, para que ride en la misma `mean()` de §2g que los demás ejes.
 
 `group_by(Gene, Position)` sobre los esquemas que dispararon:
 
-- **`CAAS_score = mean(caas_row)`** *(no un máximo, no un sum: el nº de esquemas es una
-  propiedad bioquímica del cambio, no evidencia)*.
+- **`CAAS_score = caas_row(US) + media(caas_row sobre los GS que detectan)`** *(el nº de GS es una
+  propiedad bioquímica del cambio, no evidencia, por eso se promedia)*.
 - `asr_score`, `derived_agreement`, `core`, **`pos_perm_p`** =
   **media** sobre esquemas.
 - `n_schemes`, `scheme_set = "GS1+GS2+GS3+GS4+US"`, `n_hypotheses = 4`,
@@ -701,7 +701,7 @@ mismos umbrales que el FCS. Sin nulo, `lach_p.perm` es NA y `sig` es falso.
 | FOP pooling (H.2) | `asr_pooled` ≈ 0.57 (US), 0.86 (GS3); `da_US ≈ 0.67`, `da_GS3 = 1.0`; `convergence_schemes = "GS4,GS3,GS2,GS1"` |
 | `caas_row` (H.3) | = `asr_score`: 0.57 (US) … 0.86 (GS3) |
 | `pos_perm_p` (E.1) | 0.006 |
-| `CAAS_score` posición (H.4) | ≈ 0.74 (media de `asr_score` sobre esquemas), `change_side = "top"` |
+| `CAAS_score` posición (H.4) | ≈ 1.35 (0.57 de US + ≈ 0.78 de media de los GS), `change_side = "top"` |
 | `gene_caas_score` (H.5) | 0.94^12 ≈ 0.48 |
 | `gene_caas_pperm` (H.6) | ≈ 0.013 |
 | Ejes independientes (H.7) | FADE BF 300, RER p.perm 0.02 (acc), accum CCT p 0.04 — columnas separadas |

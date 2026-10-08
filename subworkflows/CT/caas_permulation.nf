@@ -433,7 +433,7 @@ process CAAS_CORE_MERGE {
     ${py} ./reaggregate_perm_scores.py \\
         --detail "\$DETAIL" \\
         --output-dir . \\
-        --seed ${params.seed ?: 1998} --score-aggregation ${params.caas_score_aggregation ?: 'cumulative'} ${empty_null_arg} ${roster_arg} ${removal_args}
+        --seed ${params.seed ?: 1998} ${empty_null_arg} ${roster_arg} ${removal_args}
 
     # b_0 rebuilt from its merged shards as a one-labeling run: same code, own rank/size pools.
     if [ -d "\$DETAIL/b0" ]; then
@@ -441,7 +441,7 @@ process CAAS_CORE_MERGE {
         ${py} ./reaggregate_perm_scores.py \\
             --detail "\$DETAIL/b0" \\
             --output-dir b0 \\
-            --seed ${params.seed ?: 1998} --score-aggregation ${params.caas_score_aggregation ?: 'cumulative'} ${removal_args}
+            --seed ${params.seed ?: 1998} ${removal_args}
         # The b_0 per-gene shards stay next to its scores
         cp -RL "\$DETAIL/b0" b0/perm_pos_detail
     fi

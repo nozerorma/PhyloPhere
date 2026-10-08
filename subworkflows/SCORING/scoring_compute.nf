@@ -82,7 +82,6 @@ process SCORING_COMPUTE {
     def hp_arg            = hypotheses_pairs.name =~ /^NO_/ ? 'NO_HYP_PAIRS' : "${hypotheses_pairs}"
     def cp_arg            = caas_perms.name =~ /^NO_/ ? 'NO_FILE' : "${caas_perms}"
     def cpcc_arg          = caas_pos_cycle_caas.name =~ /^NO_/ ? 'NO_FILE' : "${caas_pos_cycle_caas}"
-    def score_agg         = params.caas_score_aggregation ?: 'cumulative'   // scheme aggregation of the position score; the null must use the same
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -92,8 +91,7 @@ process SCORING_COMPUTE {
         /usr/local/bin/_entrypoint.sh python3 observed_core_scores.py \
             --input '${postproc_file}' \
             --positions-out core_positions.tsv \
-            --genes-out core_genes.tsv \
-            --score-aggregation '${score_agg}'
+            --genes-out core_genes.tsv
 
         /usr/local/bin/_entrypoint.sh Rscript scoring_compute.R \
             --postproc       '${postproc_file}' \
@@ -108,7 +106,6 @@ process SCORING_COMPUTE {
             --hypotheses_pairs '${hp_arg}' \
             --caas_perms      '${cp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
-            --score_aggregation '${score_agg}' \
             --top_pct              ${top_pct} \
             --top25_pct            0.25 \
             --top5_pct             0.05 \
@@ -126,8 +123,7 @@ process SCORING_COMPUTE {
         python3 observed_core_scores.py \
             --input '${postproc_file}' \
             --positions-out core_positions.tsv \
-            --genes-out core_genes.tsv \
-            --score-aggregation '${score_agg}'
+            --genes-out core_genes.tsv
 
         Rscript scoring_compute.R \
             --postproc       '${postproc_file}' \
@@ -142,7 +138,6 @@ process SCORING_COMPUTE {
             --hypotheses_pairs '${hp_arg}' \
             --caas_perms      '${cp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
-            --score_aggregation '${score_agg}' \
             --top_pct              ${top_pct} \
             --top25_pct            0.25 \
             --top5_pct             0.05 \

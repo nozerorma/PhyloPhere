@@ -22,7 +22,6 @@
 #   --accum_dir           directory with accumulation_<direction>_<scheme>_aggregated_results.csv
 #   --caas_perms          caas_perms.rds (scoring_caas_perms.R); its cycle roster gives N for the position p
 #   --caas_pos_cycle_caas perm_pos_cycle_caas.tsv.gz, the position-level null for p.emp
-#   --score_aggregation   mean|cumulative: rule of the observed position score; must match the null's (default cumulative)
 #   --hypotheses_pairs, --top_pct, --gene_top_pct   parsed but not used by the computation
 #
 # Outputs (working directory):
@@ -64,10 +63,9 @@ caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permul
 core_positions_file  <- parse_arg("--core_positions")  # observed_core_scores.py: CAAS_score per (Gene, Position, side)
 core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: size-adjusted gene CAAS scores
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
-# Scheme aggregation of the position score (params.caas_score_aggregation): "mean" or "cumulative". The observed
-# scores (observed_core_scores.py) and the null (perm_pos_cycle_caas.tsv.gz) must use the same rule.
-score_aggregation <- parse_arg("--score_aggregation", "cumulative")
-stopifnot("--score_aggregation must be 'mean' or 'cumulative'" = score_aggregation %in% c("mean", "cumulative"))
+# Rule of the position score: US + mean(GS) (core.scores.SCORE_RULE). The observed scores (observed_core_scores.py)
+# and the null (perm_pos_cycle_caas.tsv.gz, column score_aggregation) must use the same rule.
+score_aggregation <- "us_plus_gs_mean"
 # Rows reach this script already pooled over hypotheses by CT_DISAMBIGUATION (one row per Gene,
 # Position, scheme and side, hypothesis NA), so scoring never pools hypotheses itself.
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
@@ -165,15 +163,14 @@ cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
 # ── 2a. Scheme scope ──────────────────────────────────────────────────────────
 # The five scoring schemes.
 #
-# No per-scheme weight: how many of the five schemes detect a substitution is a
-# deterministic property of which amino acids are involved (a discretised
-# biochemical distance, see the report's Biochemistry tab), not evidence
-# strength. Section 2g aggregates schemes with a mean for this reason.
+# No weight on how many GS schemes detect a substitution: it is a deterministic property of which amino
+# acids are involved (a discretised biochemical distance, see the report's Biochemistry tab), not evidence
+# strength. The position score is US + mean(GS) (core.scores.position_score): US is the strict residue
+# test, and the GS term adds the mean of the GS1-GS4 scores that detected the position.
 scoring_schemes <- c("US", "GS4", "GS3", "GS2", "GS1")
 
 # Priority only picks the representative scheme whose display columns (side, caap_group, ...) the
-# Gene×Position aggregation of section 2g carries. It is separate from the scoring itself, which treats
-# all five schemes symmetrically.
+# Gene×Position aggregation of section 2g carries. It is separate from the scoring itself.
 scheme_priority_int <- c(US = 5, GS4 = 4, GS3 = 3, GS2 = 2, GS1 = 1)
 
 df <- df %>%
@@ -241,7 +238,7 @@ df <- df %>% mutate(Position = suppressWarnings(as.integer(Position)))
 df <- df %>% arrange(desc(scheme_priority))
 
 # `side` belongs to the aggregation key: a position detected on both sides has two rows, and
-# CAAS_score (the mean over the five schemes) is taken per side.
+# CAAS_score (US + mean of the GS schemes that detected it) is taken per side.
 .pos_grp_keys <- c("Gene", "Position", "side")
 
 pos_scores <- df %>%
@@ -282,7 +279,7 @@ pos_scores <- df %>%
       paste(paste0(caap_group[.ae], ":", amino_encoded[.ae])[.o], collapse = " ")
     } else "",
     # The per-scheme factors (asr_score / caas_row) and the ASR diagnostic columns (asr_path_score,
-    # derived_agreement) are not carried to the position level: CAAS_score is the mean of asr_path_score
+    # derived_agreement) are not carried to the position level: CAAS_score is US + mean(GS) of asr_path_score
     # over the schemes, and a position-level mean of each sub-factor would hide scheme disagreement (a
     # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees). They stay per
     # (Gene, Position, caap_group) in `df` for anything that needs the breakdown.
@@ -290,7 +287,7 @@ pos_scores <- df %>%
     .groups = "drop"
   )
 
-# CAAS_score = mean of asr_path_score over the schemes that scored the (Gene, Position, side),
+# CAAS_score = US + mean of asr_path_score over the GS schemes that scored the (Gene, Position, side),
 # computed by core.scores.
 core_pos <- read_tsv(core_positions_file, show_col_types = FALSE,
                      col_types = cols(Gene = col_character(), Position = col_integer(),
@@ -305,8 +302,7 @@ if (anyNA(.hit) || nrow(core_pos) != nrow(pos_scores)) {
 pos_scores$CAAS_score <- core_pos$CAAS_score[.hit]
 rm(core_pos, .hit)
 
-# The asr_path_score of a position row is the mean over its schemes for that side, which is CAAS_score
-# itself (caas_row is the row's asr_path_score).
+# CAAS_score is the position score of that side (US + mean(GS)); caas_row is the row's asr_path_score.
 pos_scores <- pos_scores %>% mutate(asr_path_score = CAAS_score)
 
 # Ancestral and derived residues of each (Gene, Position, side), as the ASR inferred them. They are read from
@@ -382,13 +378,12 @@ if (has_caas_pos_cycle_caas) {
     stop("perm_pos_cycle_caas.tsv.gz has no caas_score column: it predates the shared position score. ",
          "Regenerate the CAAS permulation null.")
   }
-  # The null records the rule of its caas_score. A null without the column predates the option and is a "mean" null.
-  .null_agg <- if ("score_aggregation" %in% names(cyc_caas)) unique(as.character(cyc_caas$score_aggregation)) else "mean"
+  # The null records the rule of its caas_score. A null without the column predates the rule.
+  .null_agg <- if ("score_aggregation" %in% names(cyc_caas)) unique(as.character(cyc_caas$score_aggregation)) else "none"
   if (!identical(.null_agg, score_aggregation)) {
-    stop(sprintf(paste0("the CAAS permulation null was scored with score_aggregation = '%s' and the observed scores with '%s': ",
-                        "p.emp and p.adj_bh would compare different statistics. Rebuild the null (CAAS_CORE_MERGE) ",
-                        "with --caas_score_aggregation %s, or score with --caas_score_aggregation %s."),
-                 paste(.null_agg, collapse = "/"), score_aggregation, score_aggregation, paste(.null_agg, collapse = "/")))
+    stop(sprintf(paste0("the CAAS permulation null was scored with the rule '%s' and the observed scores with '%s': ",
+                        "p.emp and p.adj_bh would compare different statistics. Rebuild the null (CAAS_CORE_MERGE)."),
+                 paste(.null_agg, collapse = "/"), score_aggregation))
   }
   cyc_caas <- cyc_caas %>%
     mutate(Position = as.integer(Position),
@@ -751,8 +746,11 @@ compute_accum_significance <- function(accum_dir, direction, suffix) {
   # The five schemes (US, GS4, GS3, GS2, GS1) partition the amino acids but test the same positions: a
   # position counted under one scheme is frequently counted under others, so the per-scheme p-values
   # are positively correlated. CCT keeps its null valid under arbitrary dependence, which a combiner
-  # that assumes independence does not. Weights are equal (1 / number of schemes available). The same
-  # combiner is applied in accum_gene_lists.nf and 10.Accumulation_report.Rmd.
+  # that assumes independence does not. Weights follow the position score: US 0.5 and each GS 0.125 (the
+  # GS block weighs as much as US), renormalized over the schemes available. The same combiner is applied
+  # in accum_gene_lists.nf and 10.Accumulation_report.Rmd.
+  w_scheme <- c(us = 0.5, gs1 = 0.125, gs2 = 0.125, gs3 = 0.125, gs4 = 0.125)
+  w_of     <- w_scheme[sub("^accum_pval_([a-z0-9]+).*$", "\\1", pval_cols)]
   out <- accum_pval_df %>%
     rowwise() %>%
     mutate(
@@ -763,7 +761,7 @@ compute_accum_significance <- function(accum_dir, direction, suffix) {
         else if (all(pvals[valid] >= 1)) 1.0
         else {
           ps <- pmin(pmax(pvals[valid], 1e-15), 1 - 1e-15)
-          w <- 1 / length(ps)
+          w <- w_of[valid] / sum(w_of[valid])
           stat <- sum(w * tan((0.5 - ps) * pi))
           pcauchy(stat, lower.tail = FALSE)
         }

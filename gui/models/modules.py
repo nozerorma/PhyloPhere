@@ -258,7 +258,6 @@ class ScoringConfig(ModuleConfigBase):
 
     # Advanced parameters (conf/scoring.config)
     scoring_window_size_bp: str = "1000000"  # --scoring_window_size_bp
-    caas_score_aggregation: str = "cumulative"  # --caas_score_aggregation (mean|cumulative): scheme aggregation of the position CAAS score; the permulation null must use the same
     caas_evidence_top_n: str = "0"  # --caas_evidence_top_n (evidence table of the N best positions after SCORING; 0 = off)
     scoring_hypotheses_pairs: str = ""  # --scoring_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for SCORING)
 

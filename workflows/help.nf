@@ -130,9 +130,10 @@ Permulation sizing:
 --max_tries                  <INTEGER>                    1000000 (draw budget; raised 50% up to twice if the pool is short, then fails)
 --caas_full_perms            <INTEGER>                    1000    (accepted permulations harvested AND replayed as the null; 0 = replay only the real labeling)
 
-Output: directory of resample_*.tab files (one per chunk_size cycles) and
+Output: directory of resample_*.tab files (one per chunk_size cycles),
 permulation_manifest.tsv (tier, Dunn index and design of the canonical pairs of
-each cycle).
+each cycle) and permulation_harvest.tsv (draws tried, rejections by reason,
+acceptance by PSS tolerance, pool and capacity of a sample of the draws).
 '''
 }
 
@@ -319,7 +320,6 @@ Usage:
 --scoring_compare_top_n           <INTEGER>               20
 --scoring_position_top_pct                <FLOAT 0-1>             0.10
 --scoring_gene_top_pct                       <FLOAT 0-1>             0.10
---caas_score_aggregation                       <cumulative|mean>       cumulative   (scheme aggregation of the position CAAS score: the sum over the five schemes, a scheme that did not detect the position counting 0, or the mean over the schemes that detected it; the permulation null and the observed score must use the same, so changing it needs the null rebuilt)
 --scoring_window_size_bp                       <INTEGER>               1000000
 --caas_evidence_top_n                          <INTEGER>               0      (evidence table of the N best positions of position_scores.tsv, written after SCORING to scoring/evidence/: MRCA, tip species and residues and the score of each domain of each hypothesis; 0 = off; needs --scoring, the observed discovery.tab and ct_disambig_asr_cache_dir)
 

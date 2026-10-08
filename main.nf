@@ -711,9 +711,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // CAAS_PERMS_PREP and CAAS_CORE.
 
 
-        if (!((params.caas_score_aggregation ?: 'cumulative') in ['mean', 'cumulative'])) {
-            error "caas_score_aggregation must be 'mean' or 'cumulative', not '${params.caas_score_aggregation}'."
-        }
         def evidence_top_n = (params.caas_evidence_top_n ?: 0) as int
         if (evidence_top_n > 0 && !params.scoring) {
             error "caas_evidence_top_n > 0 explains the best positions of position_scores.tsv: it needs --scoring."
@@ -772,6 +769,13 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                   }
                 : null
 
+            def scoring_perm_harvest_ch = (ct_results && ct_results.resample_dir)
+                ? ct_results.resample_dir.map { d ->
+                      def f = d ? file("${d}/permulation_harvest.tsv") : null
+                      (f && f.exists()) ? f : file('NO_PERM_HARVEST')
+                  }
+                : null
+
             SCORING(
                 scoring_postproc_ch,
                 scoring_fade_top_ch,
@@ -788,7 +792,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 scoring_caas_pos_sample_ch,  // cycle-stratified sample for report distribution plots
                 scoring_caas_pos_quantiles_ch, // per (cycle,scheme) null distribution shape
                 scoring_hyp_pairs_ch,          // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
-                scoring_perm_manifest_ch       // permulation_manifest.tsv — design of the null cycles (report panel)
+                scoring_perm_manifest_ch,      // permulation_manifest.tsv — design of the null cycles (report panel)
+                scoring_perm_harvest_ch        // permulation_harvest.tsv — what the null harvest tried and discarded (report tab)
             )
             ran_any = true
 

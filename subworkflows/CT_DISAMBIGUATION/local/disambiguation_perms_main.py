@@ -51,7 +51,6 @@ from typing import Tuple
 # ── Package-internal ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from src.core.scores import AGGREGATIONS, DEFAULT_AGGREGATION
 from src.utils.gene_wrapper import process_all_genes_perms, _read_resample_labelings
 from src.convergence.fop_pool import base_cycle
 from src.utils.logger import configure_logging
@@ -126,9 +125,6 @@ def parse_arguments():
                         "so it runs once over the union of the shards).")
     p.add_argument("--seed", type=int, default=1998,
                    help="Pipeline seed (params.seed): perm_pos_sample.tsv reservoir sampling")
-    p.add_argument("--score-aggregation", default=DEFAULT_AGGREGATION, choices=AGGREGATIONS,
-                   help="scheme aggregation of the position score (params.caas_score_aggregation); "
-                        "the observed score must use the same")
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--log-file", type=Path, default=None)
     return p.parse_args()
@@ -243,7 +239,6 @@ def main():
             gene_sizes=gene_sizes,
             seed=args.seed,
             detail_only=args.detail_only,
-            aggregation=args.score_aggregation,
         )
 
     t0 = time.time()

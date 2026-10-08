@@ -9,10 +9,12 @@ Inputs: per-scheme (or per-side) score mappings and the reference pools of posit
 Outputs: position scores, per-direction values and gene scores (in memory)
 
 * The score of a row (``caas_row``) is its ``asr_path_score`` (identity). A position's score, per side,
-  aggregates ``asr_path_score`` over the caap_group schemes with one of two rules (``AGGREGATIONS``):
-  ``mean`` divides the sum by the schemes that detected the position, ``cumulative`` by the five schemes
-  of the design (``N_SCHEMES``), so a scheme that did not detect it counts as 0 and a position detected
-  by one scheme cannot exceed 1/5.
+  is ``US + mean(GS)``: the score of the US scheme (0 when US did not detect the position) plus the mean
+  of the scores of the GS1-GS4 schemes that detected it (0 when none did). US is the strict test on
+  residues and the GS schemes repeat it on biochemical classes, so the GS term is the bonus for a
+  divergence in chemistry; a position detected only by GS schemes keeps that term. How many GS schemes
+  detect it is not rewarded, because the four partitions are different axes, not finer and coarser
+  versions of one. The score lies in [0, 2].
 * Directions: ``top`` and ``bottom`` use only that side's rows; ``all`` keeps one entry per
   position, its best side, so a position detected on both sides is not counted twice.
 * Gene score: ``size_adj_max(x) = F(max(x)) ** len(x)`` with F the ECDF of the reference
@@ -31,20 +33,20 @@ from __future__ import annotations
 
 import bisect
 import math
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
-__all__ = ["DIRECTIONS", "TIE_TOL", "AGGREGATIONS", "DEFAULT_AGGREGATION", "N_SCHEMES", "check_aggregation", "position_sum",
-           "position_score", "collapse_sides", "direction_values", "size_adj_max", "gene_scores"]
+__all__ = ["DIRECTIONS", "TIE_TOL", "SCORE_RULE", "GS_SCHEMES", "position_score", "collapse_sides", "direction_values",
+           "size_adj_max", "gene_scores"]
 
 DIRECTIONS = ("all", "top", "bottom")
 
-# Scheme aggregation of a position score. Observed and null must use the same rule.
-AGGREGATIONS = ("mean", "cumulative")
-DEFAULT_AGGREGATION = "cumulative"
-# Schemes of the design: US and GS1 to GS4.
-N_SCHEMES = 5
+# Rule of the position score. It is stamped on the null (perm_pos_cycle_caas.tsv.gz, column score_aggregation) so that
+# scoring_compute.R refuses a null scored with another rule.
+SCORE_RULE = "us_plus_gs_mean"
+# Schemes whose scores are averaged; US enters on its own.
+GS_SCHEMES = ("GS1", "GS2", "GS3", "GS4")
 
-# Absolute; scores lie in [0, 1]. Rounding noise of a mean of <= 5 values is ~1e-16, and real
+# Absolute; scores lie in [0, 2]. Rounding noise of a sum of <= 5 values is ~1e-16, and real
 # differences between position scores are orders of magnitude larger.
 TIE_TOL = 1e-12
 
@@ -53,33 +55,19 @@ def _is_value(x) -> bool:
     return x is not None and not (isinstance(x, float) and math.isnan(x))
 
 
-def position_sum(scheme_scores: Mapping[str, float]) -> Tuple[float, int]:
-    """(sum, n) of a position's per-scheme scores, skipping missing values.
-
-    The sum is correctly rounded, hence independent of the order of the mapping.
-    """
-    vals = [v for v in scheme_scores.values() if _is_value(v)]
-    return math.fsum(vals), len(vals)
-
-
-def check_aggregation(aggregation: str) -> str:
-    """``aggregation`` if it is one of ``AGGREGATIONS``; ValueError otherwise."""
-    if aggregation not in AGGREGATIONS:
-        raise ValueError(f"score aggregation must be one of {AGGREGATIONS}, not {aggregation!r}")
-    return aggregation
-
-
-def position_score(scheme_scores: Mapping[str, float], aggregation: str = DEFAULT_AGGREGATION) -> Optional[float]:
+def position_score(scheme_scores: Mapping[str, float]) -> Optional[float]:
     """Score of a position side from its per-scheme scores; None when no scheme scored it.
 
-    ``mean``: sum over the schemes that scored the position, divided by their number.
-    ``cumulative``: the same sum divided by ``N_SCHEMES``, so the schemes that did not detect the
-    position count as 0.
+    ``US + mean(GS)``: the US score (0 if US did not score the position) plus the mean over the GS1-GS4
+    schemes that scored it (0 if none did). The sums are correctly rounded (``math.fsum``), so the result
+    does not depend on the order of the mapping.
     """
-    total, n = position_sum(scheme_scores)
-    if not n:
+    us = scheme_scores.get("US")
+    gs = [v for k, v in scheme_scores.items() if k in GS_SCHEMES and _is_value(v)]
+    has_us = _is_value(us)
+    if not has_us and not gs:
         return None
-    return total / (N_SCHEMES if check_aggregation(aggregation) == "cumulative" else n)
+    return math.fsum([us if has_us else 0.0, math.fsum(gs) / len(gs) if gs else 0.0])
 
 
 def collapse_sides(side_scores: Mapping[str, float]) -> Dict[str, float]:

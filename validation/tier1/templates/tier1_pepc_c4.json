@@ -189,7 +189,6 @@
       "auto_generate_ensembl": false,
       "ensembl_dataset": "",
       "scoring_window_size_bp": "1000000",
-      "caas_score_aggregation": "cumulative",
       "caas_evidence_top_n": "10",
       "scoring_hypotheses_pairs": ""
     },
