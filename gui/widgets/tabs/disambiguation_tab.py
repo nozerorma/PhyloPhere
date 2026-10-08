@@ -123,10 +123,11 @@ SPEC = ModuleTabSpec(
             label="Posterior probability threshold",
             importance="default",
             help=(
-                "Minimum ASR posterior probability for an ancestral state call to be "
-                "trusted; calls below this are treated as ambiguous. Statistical "
-                "parameter — changing it affects which positions get a directional "
-                "call, not just performance."
+                "Residues with an ASR posterior below this value are dropped from the "
+                "recorded distribution of a node (the most probable residue is always "
+                "kept). The dropped mass is charged as worst case in the position "
+                "score, so a higher value can only lower scores. Statistical "
+                "parameter — changing it changes the scores, not just performance."
             ),
         ),
         Section("Post-processing filter thresholds (conf/ct_postproc.config)"),
@@ -169,10 +170,10 @@ SPEC = ModuleTabSpec(
                 "spatial clusters are removed even if Gene filter mode is set to 'none'."
             ),
         ),
-        Section("Sensitivity and robustness testing"),
+        Section("ASR diagnostics"),
         FieldSpec(
-            name="asr_robustness",
-            label="Run ASR Robustness diagnostics report",
+            name="asr_diagnostics",
+            label="Run ASR diagnostics report",
             kind="bool",
             importance="optional",
         ),

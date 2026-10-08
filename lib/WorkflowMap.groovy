@@ -183,9 +183,9 @@ class WorkflowMap {
               filesDirs: ["${outdir}/ct_disambiguation"],
               htmlCandidates: [] ],
 
-            [ id: 'asr_robustness', name: 'ASR Robustness',              type: 'reporting', ran: ctx.asrRobustness,
-              filesDirs: ["${outdir}/asr_robustness"],
-              htmlCandidates: ["${outdir}/html_reports/9.ASR_robustness.html"] ],
+            [ id: 'asr_diagnostics', name: 'ASR Diagnostics',              type: 'reporting', ran: ctx.asrDiagnostics,
+              filesDirs: ["${outdir}/asr_diagnostics"],
+              htmlCandidates: ["${outdir}/html_reports/9.ASR_diagnostics.html"] ],
 
             [ id: 'ct_postproc', name: 'CT post-processing',              type: 'prepost',   ran: ctx.ctPostproc,
               filesDirs: ["${outdir}/postproc",
@@ -236,8 +236,7 @@ class WorkflowMap {
             // CAAS_SIGNIFICANCE_REPORT (16.CAAS_significance_report.Rmd) — a
             // DISTINCT, LATER stage than ct_signif above: it runs after scoring,
             // joining ct_signif's already-published meta_caas table against
-            // scoring's position_scores.tsv/gene_scores.tsv (p.emp/p.adj_bh,
-            // gene_caas_pperm/gene_caas_pperm_adj). See ctpp_meta_caas.nf's
+            // scoring's position_scores.tsv (p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact). See ctpp_meta_caas.nf's
             // CAAS_SIGNIFICANCE_REPORT process and main.nf's post-SCORING call.
             [ id: 'ct_signif_sig', name: 'CT significance (post-scoring)', type: 'reporting', ran: ctx.ctSignifSig,
               filesDirs: ["${outdir}/meta_caas/significance"],
@@ -291,7 +290,7 @@ class WorkflowMap {
         ].collect { st -> st + [color: colors[st.type]] }
 
         def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','ct_signif',
-                        'ct_disambig','asr_robustness','ct_postproc','ct_acc','vep','rer','fade',
+                        'ct_disambig','asr_diagnostics','ct_postproc','ct_acc','vep','rer','fade',
                         'scoring','ct_signif_sig','fcs','ami','posenrich','compare']
         def rows = []
         chainIds.eachWithIndex { sid, idx ->
@@ -426,7 +425,7 @@ class WorkflowMap {
         'ct': 'ct',
         'ct_signif': 'ct_signif',
         'ct_disambig': 'ct_disambig',
-        'asr_robustness': 'asr_robustness',
+        'asr_diagnostics': 'asr_diagnostics',
         'ct_postproc': 'ct_postproc',
         'ct_acc': 'ct_acc',
         'vep': 'vep',
@@ -507,7 +506,7 @@ class WorkflowMap {
         'ct': 'CT (convergence)',
         'ct_signif': 'CAAS Pattern Annotation',
         'ct_disambig': 'CT disambiguation (convergence)',
-        'asr_robustness': 'ASR Robustness',
+        'asr_diagnostics': 'ASR Diagnostics',
         'ct_postproc': 'CT post-processing',
         'ct_acc': 'CT accumulation (convergence)',
         'vep': 'VEP characterization',
@@ -532,7 +531,7 @@ class WorkflowMap {
         'ct': '#F97316',
         'ct_signif': '#7C3AED',
         'ct_disambig': '#F97316',
-        'asr_robustness': '#7C3AED',
+        'asr_diagnostics': '#7C3AED',
         'ct_postproc': '#0EA5E9',
         'ct_acc': '#F97316',
         'vep': '#0EA5E9',
@@ -564,7 +563,7 @@ class WorkflowMap {
             ct           : ['caastools', 'discovery'],
             ct_signif    : ['meta_caas', 'meta_caas/meta_caas'],
             ct_disambig  : ['ct_disambiguation'],
-            asr_robustness : ['asr_robustness'],
+            asr_diagnostics : ['asr_diagnostics'],
             ct_postproc  : ['postproc', 'postproc/preprocessed'],
             ct_acc       : ['accumulation', 'accumulation/aggregation'],
             vep          : ['vep'],
@@ -639,7 +638,7 @@ class WorkflowMap {
             ct            : scanResults.ct ?: false,
             ctSignif      : scanResults.ct_signif ?: false,
             ctDisambig    : scanResults.ct_disambig ?: false,
-            asrRobustness : scanResults.asr_robustness ?: false,
+            asrDiagnostics : scanResults.asr_diagnostics ?: false,
             ctPostproc    : scanResults.ct_postproc ?: false,
             ctAccum       : scanResults.ct_acc ?: false,
             vep           : scanResults.vep ?: false,

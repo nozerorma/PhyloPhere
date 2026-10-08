@@ -1,0 +1,449 @@
+---
+title: "ASR Path Score Characterization"
+subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
+output:
+  html_document:
+    theme: flatly
+    syntax_highlighting: tango
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+    df_print: paged
+    fig_width: 10
+    fig_height: 6
+    self_contained: true
+params:
+  disambig_dir:        NULL   # path to ct_disambiguation/ output directory
+  posterior_threshold: NULL   # params.ct_disambig_posterior_threshold (shown, not applied)
+  output_dir:          "."    # working directory (TSVs → ./tsv/, plots → ./plots/)
+---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .main-container {
+    max-width: 95% !important;
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #2c3e50;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .subtitle {
+    font-size: 24px;
+    font-weight: normal;
+    color: #7f8c8d;
+    margin-top: 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .author, .date {
+    font-size: 16px;
+    color: #7f8c8d;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+</style>
+
+<!-- 9.ASR_diagnostics.Rmd — Distribution of asr_path_score, derived_agreement and the per-domain ancestral posteriors of the scored CAAS rows. -->
+<!-- PhyloPhere | subworkflows/ASR_DIAGNOSTICS/local/ -->
+<!--
+  Called by: ASR_DIAGNOSTICS_REPORT (asr_diagnostics.nf), through rmarkdown::render().
+  Params:    disambig_dir (ct_disambiguation/ with caas_convergence_master.csv),
+             posterior_threshold (shown in the report, not applied), output_dir.
+  A row of the master is one (gene, msa_pos, caap_group, side). asr_path_score is the score of the row on the
+  Voronoi domains (fop_pool.py); derived_agreement is a descriptor and does not enter the score;
+  domain_<k>_posterior is the posterior of the ancestral state of domain k under the scheme of the row.
+-->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width  = 11,
+  fig.height = 6,
+  dpi        = 180,
+  dev        = "png"
+)
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(ggplot2)
+  library(scales)
+  library(knitr)
+  library(kableExtra)
+})
+
+theme_set(
+  theme_bw(base_size = 12) +
+  theme(
+    axis.title.y  = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+    axis.title.x  = element_text(margin = ggplot2::margin(t = 12)),
+    axis.text.x   = element_text(margin = ggplot2::margin(t = 5)),
+    plot.title    = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+    plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10)),
+    strip.background = element_rect(fill = "grey95", colour = "grey80"),
+    strip.text    = element_text(face = "bold")
+  )
+)
+
+# ── Parameters ────────────────────────────────────────────────────────────────
+disambig_dir        <- params$disambig_dir
+posterior_threshold <- if (is.null(params$posterior_threshold)) NA_real_ else as.numeric(params$posterior_threshold)
+output_dir          <- params$output_dir
+
+stopifnot(!is.null(disambig_dir))
+
+# ── Output directories ────────────────────────────────────────────────────────
+# Tables go to tsv/ and figures to plots/, both published by ASR_DIAGNOSTICS_REPORT.
+tsv_dir   <- file.path(output_dir, "tsv")
+plots_dir <- file.path(output_dir, "plots")
+dir.create(tsv_dir,   recursive = TRUE, showWarnings = FALSE)
+dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
+
+write_tsv_safe <- function(df, fname) {
+  readr::write_tsv(df, file.path(tsv_dir, fname))
+  invisible(file.path(tsv_dir, fname))
+}
+
+save_plot <- function(p, fname, width = 11, height = 6) {
+  ggsave(file.path(plots_dir, fname), plot = p, width = width, height = height, dpi = 180)
+  invisible(file.path(plots_dir, fname))
+}
+
+# Categorical palette (Tableau 10)
+.tableau10 <- c(
+  "#1F77B4", "#AEC7E8", "#FF7F0E", "#FFBB78",
+  "#2CA02C", "#98DF8A", "#D62728", "#FF9896",
+  "#9467BD", "#C5B0D5"
+)
+```
+
+## Introduction
+
+`asr_path_score` is the CAAS convergence score of a position on the K fixed Voronoi domains of the contrast design. It is computed for each scheme (US, GS1 to GS4) and each phenotype side, so a position contributes up to ten rows to the master table.
+
+For one hypothesis and one side, a domain is *changed* when its observed foreground residue, encoded in the scheme, differs from the modal ancestral residue at the MRCA of its pair. A changed domain scores the noisy-OR, over the changed domains that carry the same encoded residue, of `1 - P`, where `P` is the posterior mass of that residue at the LCA of the two domains. `P` is the recorded mass of the residue and, when the residue is not in the recorded distribution of the node, the whole unrecorded mass (worst case). A changed domain without a same-residue partner scores 0. The domain scores are averaged over the hypotheses and the score of the row is their mean weighted by the PSS of each domain; domains without a valid reconstruction stay in the denominator with score 0.
+
+`derived_agreement` is `agree_num / agree_den`: the fraction of the changed domains whose modal encoded derived residue is the most frequent one. It describes the row and does not enter the score.
+
+The posterior threshold removes from the recorded distribution of a node every residue below it, except the most probable one. Removed mass is unrecorded, so a higher threshold can only raise `P` and lower the scores. The threshold is applied when the ASR posteriors are read; this report shows its value and does not vary it.
+
+---
+
+```{r load-data}
+master_csv <- file.path(disambig_dir, "caas_convergence_master.csv")
+if (!file.exists(master_csv)) {
+  stop(sprintf("[asr_diagnostics] caas_convergence_master.csv not found in: %s", disambig_dir))
+}
+
+# Only the columns used here are read; the support tallies of the master are large.
+domain_re <- "^domain_[0-9]+_(posterior|score|anc_aa|top_aa|bot_aa)$"
+base_cols <- c("gene", "msa_pos", "caap_group", "side", "convergence_type", "n_hypotheses",
+               "asr_path_score", "derived_agreement", "agreement_ambiguous")
+hdr  <- names(readr::read_csv(master_csv, n_max = 0, show_col_types = FALSE))
+need <- c("gene", "msa_pos", "caap_group", "side", "asr_path_score")
+if (!all(need %in% hdr)) {
+  stop(sprintf("[asr_diagnostics] the master lacks the columns: %s", paste(setdiff(need, hdr), collapse = ", ")))
+}
+keep <- hdr[hdr %in% base_cols | grepl(domain_re, hdr)]
+
+master_df <- readr::read_csv(
+  master_csv, col_select = all_of(keep), show_col_types = FALSE, guess_max = 10000,
+  col_types = readr::cols(.default = readr::col_guess(), gene = "c", caap_group = "c", side = "c",
+                          convergence_type = "c")
+) %>%
+  mutate(across(matches("_(anc|top|bot)_aa$"), as.character))
+# Optional columns are present as NA when the master lacks them
+for (nm in c("derived_agreement", "convergence_type", "agreement_ambiguous", "n_hypotheses")) {
+  if (!nm %in% names(master_df)) master_df[[nm]] <- NA
+}
+master_df <- master_df %>%
+  mutate(agreement_ambiguous = as.logical(as.character(agreement_ambiguous)),
+         derived_agreement   = suppressWarnings(as.numeric(derived_agreement)))
+
+# Rows without an asr_path_score are not scored and are left out
+score_df <- master_df %>% filter(!is.na(asr_path_score))
+if (nrow(score_df) == 0) stop("No ASR path scores found in the provided CSV.")
+
+scheme_levels <- intersect(c("US", "GS1", "GS2", "GS3", "GS4"), unique(score_df$caap_group))
+score_df <- score_df %>% mutate(caap_group = factor(caap_group, levels = scheme_levels))
+
+n_positions <- score_df %>% distinct(gene, msa_pos) %>% nrow()
+```
+
+> **Posterior threshold** (`params.ct_disambig_posterior_threshold`): **`r if (is.na(posterior_threshold)) "not provided" else posterior_threshold`**
+>
+> **Disambiguation directory**: `r disambig_dir`
+>
+> **Rows in the master** (gene × position × scheme × side): `r format(nrow(master_df), big.mark = ",")`
+>
+> **Scored rows**: `r format(nrow(score_df), big.mark = ",")`, over `r format(n_positions, big.mark = ",")` positions in `r n_distinct(score_df$gene)` genes
+
+```{r rows-table}
+score_df %>%
+  count(caap_group, side) %>%
+  pivot_wider(names_from = side, values_from = n, values_fill = 0) %>%
+  rename(Scheme = caap_group) %>%
+  kable(format = "html", caption = "Scored rows per scheme and side") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+---
+
+## 1. Distribution of the ASR path score
+
+The schemes GS1 to GS4 co-encode residues of the same group, so two domains with different residues can agree under them; scores are therefore not expected to be equal across schemes, and each scheme is shown separately.
+
+```{r plot-score-dist, fig.height=9, fig.cap="Distribution of asr_path_score per scheme and side."}
+p_score <- ggplot(score_df, aes(x = asr_path_score)) +
+  geom_histogram(binwidth = 0.02, fill = .tableau10[1], colour = "white", alpha = 0.85) +
+  facet_grid(caap_group ~ side, scales = "free_y") +
+  labs(
+    title = "ASR path score",
+    subtitle = sprintf("%s scored rows, %s positions",
+                       formatC(nrow(score_df), big.mark = ","), formatC(n_positions, big.mark = ",")),
+    x = "asr_path_score",
+    y = "Rows"
+  )
+
+print(p_score)
+save_plot(p_score, "asr_path_score_distribution.png", width = 9, height = 10)
+```
+
+---
+
+## 2. Derived agreement
+
+`derived_agreement` is a descriptor of the row (see Introduction). `agreement_ambiguous` marks rows where a changed domain had two derived residues tied across hypotheses and the smallest residue was taken by convention; for those rows, `derived_agreement` and `convergence_type` rest on that convention.
+
+```{r plot-agreement, fig.height=9, fig.cap="Distribution of derived_agreement per scheme and side."}
+agree_df <- score_df %>% filter(!is.na(derived_agreement))
+
+p_agree <- ggplot(agree_df, aes(x = derived_agreement)) +
+  geom_histogram(binwidth = 0.05, fill = .tableau10[3], colour = "white", alpha = 0.85) +
+  facet_grid(caap_group ~ side, scales = "free_y") +
+  labs(title = "Derived agreement", x = "derived_agreement", y = "Rows")
+
+print(p_agree)
+save_plot(p_agree, "derived_agreement_distribution.png", width = 9, height = 10)
+```
+
+```{r agreement-table}
+agree_tab <- score_df %>%
+  group_by(Scheme = caap_group) %>%
+  summarise(
+    Rows = n(),
+    `Convergent (%)` = 100 * mean(convergence_type == "convergent", na.rm = TRUE),
+    `Divergent (%)`  = 100 * mean(convergence_type == "divergent",  na.rm = TRUE),
+    `Single (%)`     = 100 * mean(convergence_type == "single",     na.rm = TRUE),
+    `Ambiguous agreement (%)` = 100 * mean(agreement_ambiguous, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+write_tsv_safe(agree_tab, "convergence_type_by_scheme.tsv")
+
+agree_tab %>%
+  kable(format = "html", digits = 2, caption = "Convergence type and ambiguous agreement per scheme (convergence_type_by_scheme.tsv)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+The two descriptors against each other: the score depends on how many domains changed and on the posterior at their LCAs, `derived_agreement` only on which residues the changed domains carry.
+
+```{r plot-score-vs-agreement, fig.height=8, fig.cap="asr_path_score against derived_agreement; colour is the number of rows per bin (log scale)."}
+p_sa <- ggplot(agree_df, aes(x = derived_agreement, y = asr_path_score)) +
+  geom_bin2d(bins = 25) +
+  scale_fill_viridis_c(trans = "log10", name = "Rows") +
+  facet_wrap(~ side) +
+  labs(title = "Score against derived agreement", x = "derived_agreement", y = "asr_path_score")
+
+print(p_sa)
+save_plot(p_sa, "asr_path_score_vs_derived_agreement.png", width = 10, height = 6)
+```
+
+---
+
+## 3. Ancestral-state posterior of the domains
+
+`domain_<k>_posterior` is the posterior of the ancestral residue of domain `k` at the MRCA of its pair, summed over the residues of the scheme of the row. A domain without a reconstruction has posterior 0 and cannot be changed. The score reads the ASR at a different place (the mass of the shared residue at the LCA of two domains), so the domain posterior is a descriptor of how well the ancestral residue that defines *changed* is supported, and not a sensitivity test of the score. The tables and plots below describe an association between the two; they do not show what the score would be under another threshold.
+
+```{r domain-long}
+# One domain at a time: only the changed-domain records are kept, plus per-scheme counters of all records.
+score_df$row_id <- seq_len(nrow(score_df))
+dom_ids <- sub("^domain_([0-9]+)_posterior$", "\\1",
+               grep("^domain_[0-9]+_posterior$", names(score_df), value = TRUE))
+
+col_or_na <- function(k, suffix) {
+  nm <- sprintf("domain_%s_%s", k, suffix)
+  if (nm %in% names(score_df)) score_df[[nm]] else rep(NA_character_, nrow(score_df))
+}
+
+per_domain <- lapply(dom_ids, function(k) {
+  # The derived residue of the row's side marks the domain as changed on that side
+  der <- if_else(score_df$side == "top", col_or_na(k, "top_aa"), col_or_na(k, "bot_aa"))
+  d <- tibble(
+    row_id = score_df$row_id, caap_group = score_df$caap_group, side = score_df$side,
+    asr_path_score = score_df$asr_path_score, domain = k,
+    posterior = suppressWarnings(as.numeric(col_or_na(k, "posterior"))),
+    changed = !is.na(der) & der != ""
+  )
+  list(
+    counts  = d %>% group_by(caap_group) %>%
+      summarise(records = n(), not_recorded = sum(is.na(posterior)), no_rec = sum(!is.na(posterior) & posterior <= 0),
+                changed = sum(changed), .groups = "drop"),
+    changed = d %>% filter(changed, !is.na(posterior))
+  )
+})
+
+domain_counts <- bind_rows(lapply(per_domain, `[[`, "counts")) %>%
+  group_by(caap_group) %>% summarise(across(c(records, not_recorded, no_rec, changed), sum), .groups = "drop")
+
+# The posterior columns can be present and empty; the sections below then say so and stop
+has_posterior <- length(dom_ids) > 0 && sum(domain_counts$records - domain_counts$not_recorded) > 0
+changed_df <- bind_rows(lapply(per_domain, `[[`, "changed"))
+```
+
+```{r domain-counts}
+if (!has_posterior) {
+  cat("The master table carries no domain posteriors (the domain_<k>_posterior columns are absent or empty), so this section is skipped.")
+} else {
+  domain_counts %>%
+    transmute(Scheme = caap_group,
+              `Domain records` = records,
+              `Posterior not recorded (%)` = 100 * not_recorded / records,
+              `Without reconstruction (%)` = 100 * no_rec / records,
+              `Changed on the side (%)`    = 100 * changed / records) %>%
+    kable(format = "html", digits = 2, caption = "Domain records per scheme") %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+}
+```
+
+```{r plot-domain-posterior, fig.height=7, fig.cap="Ancestral posterior of the changed domains, per scheme."}
+if (has_posterior && nrow(changed_df) > 0) {
+  p_post <- ggplot(changed_df, aes(x = posterior)) +
+    geom_histogram(binwidth = 0.02, fill = .tableau10[5], colour = "white", alpha = 0.85) +
+    facet_wrap(~ caap_group, ncol = 2, scales = "free_y") +
+    labs(
+      title = "Ancestral posterior of the changed domains",
+      subtitle = sprintf("%s changed domain records", formatC(nrow(changed_df), big.mark = ",")),
+      x = "domain posterior", y = "Domain records"
+    )
+  print(p_post)
+  save_plot(p_post, "domain_posterior_distribution.png", width = 10, height = 7)
+
+  post_summary <- changed_df %>%
+    group_by(caap_group) %>%
+    summarise(
+      n = n(),
+      Mean = mean(posterior), Median = median(posterior),
+      Q05 = quantile(posterior, 0.05), Q25 = quantile(posterior, 0.25),
+      `Fraction < 0.5` = mean(posterior < 0.5),
+      `Fraction < 0.8` = mean(posterior < 0.8),
+      .groups = "drop"
+    ) %>%
+    rename(Scheme = caap_group)
+  write_tsv_safe(post_summary, "domain_posterior_summary.tsv")
+
+  post_summary %>%
+    kable(format = "html", digits = 3, caption = "Posterior of the changed domains (domain_posterior_summary.tsv)") %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+}
+```
+
+### Score against the weakest changed domain
+
+For each row, the lowest posterior among its changed domains is the weakest ancestral call that the row rests on.
+
+```{r plot-score-vs-minpost, fig.height=8, fig.cap="asr_path_score by the lowest posterior among the changed domains of the row."}
+if (has_posterior && nrow(changed_df) > 0) {
+  row_min <- changed_df %>%
+    group_by(row_id, caap_group, side, asr_path_score) %>%
+    summarise(min_posterior = min(posterior), .groups = "drop") %>%
+    mutate(post_bin = cut(min_posterior, breaks = c(0, 0.5, 0.8, 0.95, 1.0000001),
+                          labels = c("<0.5", "0.5-0.8", "0.8-0.95", ">=0.95"), right = FALSE,
+                          include.lowest = TRUE))
+
+  p_min <- ggplot(row_min, aes(x = post_bin, y = asr_path_score)) +
+    geom_boxplot(fill = .tableau10[1], alpha = 0.6, outlier.size = 0.4) +
+    facet_wrap(~ caap_group, ncol = 2) +
+    labs(title = "Score by weakest changed-domain posterior",
+         x = "Lowest posterior among the changed domains", y = "asr_path_score")
+  print(p_min)
+  save_plot(p_min, "asr_path_score_by_min_posterior.png", width = 10, height = 8)
+
+  # Rank correlation, descriptive: rows share positions and genes, so no p-value is given
+  min_tab <- row_min %>%
+    group_by(Scheme = caap_group) %>%
+    summarise(
+      Rows = n(),
+      `Spearman (score, min posterior)` = suppressWarnings(cor(asr_path_score, min_posterior, method = "spearman")),
+      `Median score, min posterior < 0.8` = median(asr_path_score[min_posterior < 0.8]),
+      `Median score, min posterior >= 0.8` = median(asr_path_score[min_posterior >= 0.8]),
+      .groups = "drop"
+    )
+  write_tsv_safe(min_tab, "score_vs_min_posterior.tsv")
+
+  min_tab %>%
+    kable(format = "html", digits = 3, caption = "Score against the weakest changed-domain posterior (score_vs_min_posterior.tsv)") %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+}
+```
+
+---
+
+## 4. Summary statistics
+
+```{r summary-table}
+summary_table <- score_df %>%
+  select(caap_group, side, asr_path_score, derived_agreement) %>%
+  pivot_longer(c(asr_path_score, derived_agreement), names_to = "Variable", values_to = "value") %>%
+  filter(!is.na(value)) %>%
+  group_by(Variable, Scheme = caap_group, Side = side) %>%
+  summarise(
+    n = n(), Mean = mean(value), Median = median(value),
+    SD = sd(value), Min = min(value), Max = max(value),
+    .groups = "drop"
+  )
+
+write_tsv_safe(summary_table, "asr_path_summary_statistics.tsv")
+
+summary_table %>%
+  kable(format = "html", digits = 4, caption = "Summary statistics per scheme and side (asr_path_summary_statistics.tsv)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
+```
+
+---
+
+## Output Files Summary
+
+```{r output_summary, echo=FALSE}
+tsv_files  <- list.files(tsv_dir,   pattern = "\\.tsv$", full.names = FALSE)
+plot_files <- list.files(plots_dir, pattern = "\\.png$", full.names = FALSE)
+
+tibble(
+  Type = c(rep("TSV", length(tsv_files)), rep("Plot", length(plot_files))),
+  File = c(tsv_files, plot_files)
+) %>%
+  kable(format = "html", caption = "Files written under asr_diagnostics/") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+---
+
+<details>
+<summary>Session Info</summary>
+```{r session-info}
+sessionInfo()
+```
+</details>
+
+*Generated by PhyloPhere — ASR Diagnostics Module*
+*Date of generation: `r Sys.Date()`*

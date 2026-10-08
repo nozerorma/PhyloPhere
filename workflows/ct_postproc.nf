@@ -32,13 +32,13 @@
 // Import local processes from subworkflows
 include { CAAS_PREPARE_POSTPROC_INPUT; CT_FILTER; CT_FILTER_SUMMARY; CAAS_FILTER_GENES; CAAS_BACKGROUND_CLEANUP; clusterParameterGrid; clusterFileSuffix } from '../subworkflows/CT_POSTPROC/ctpp_clustfilter'
 include { CT_POSTPROC_REPORT } from '../subworkflows/CT_POSTPROC/ctpp_characterization'
-include { ASR_ROBUSTNESS } from './asr_robustness'
+include { ASR_DIAGNOSTICS } from './asr_diagnostics'
 
 workflow CT_POSTPROC {
     take:
         disambiguation_input_channel      // Post-disambiguation master CSV (optional, can use --disambiguation_input instead)
         background_genes_channel     // Global background genes file from CT module (preferred)
-        disambiguation_dir_channel   // Full ct_disambiguation/ directory for ASR robustness diagnostics (optional)
+        disambiguation_dir_channel   // Full ct_disambiguation/ directory for the ASR diagnostics report (optional)
         hyp_pairs_channel            // contrast_hypotheses_pairs.tsv of this run's contrast selection (null: auto-discover in outdir)
 
     main:
@@ -61,10 +61,10 @@ workflow CT_POSTPROC {
             discovery_file_ch = Channel.value(discovery_file_obj)
         }
         
-        // ── ASR Robustness diagnostics (parallel, does NOT affect clustering path) ────────────
+        // ── ASR diagnostics report (parallel, does NOT affect clustering path) ────────────
         // Resolve the ct_disambiguation/ directory: prefer the upstream channel, then
         // derive from disambiguation_input CSV path when running in standalone mode.
-        if (params.asr_robustness) {
+        if (params.asr_diagnostics) {
             def asr_dir_ch
             if (disambiguation_dir_channel) {
                 asr_dir_ch = disambiguation_dir_channel
@@ -75,9 +75,9 @@ workflow CT_POSTPROC {
                 asr_dir_ch = null
             }
             if (asr_dir_ch) {
-                ASR_ROBUSTNESS(asr_dir_ch)
+                ASR_DIAGNOSTICS(asr_dir_ch)
             } else {
-                log.warn "[asr_robustness] No disambiguation directory available — ASR robustness skipped."
+                log.warn "[asr_diagnostics] No disambiguation directory available — ASR diagnostics skipped."
             }
         }
 
