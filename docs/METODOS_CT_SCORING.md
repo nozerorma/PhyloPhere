@@ -244,7 +244,7 @@ aleatorio filogenéticamente emparejado?"*
      calibrado a nivel de posición. *Ejemplo:* `pos_perm_p(OPN1, 210, US) = 0.006`.
    - `caas_perms.rds` → **`caas_corStat_byrank`**: matriz densa **genes × N ciclos** en
      tres rankings (`global`, `top`, `bottom`); el null de *exceso* genome-wide que usan
-     el `gene_caas_pperm` (H.6) y los tres tests de FCS (I.2). Sello `gene_stat =
+     el `gene_caas_pperm` (H.6) y los dos tests de FCS (I.2). Sello `gene_stat =
      "size_adj_max"` (si no coincide con el observado, el consumidor deja `p.perm = NA` y
      pide reconstruir).
 
@@ -653,39 +653,40 @@ Paso posterior a SCORING que explica de dónde sale el score de las posiciones m
 Ambos del **replay ASR verbatim** de la permulación de fenotipo (E.1) → misma escala que el
 score observado.
 
-### I.2. En los enriquecimientos FCS — `p.perm` en los **3 tests**  (`fcs_enrich.R::fcs_run_all`)
+### I.2. En los enriquecimientos FCS — `p.perm` en los **2 tests**  (`fcs_enrich.R::fcs_run_all`)
 
 Rankings de gen (zero-floored sobre el universo del background limpio): para CAAS
 `global` / `top` / `bottom` (cada uno con su matriz `caas_corStat_byrank`); para RER
 `global` (con signo, `two.sided`) / `accelerating` / `decelerating` (derivados vía
-`corRho`). **Los 3 tests comparten la misma matriz de null** — el mismo modelo nulo de
+`corRho`). **Los 2 tests comparten la misma matriz de null** — el mismo modelo nulo de
 permulación de fenotipo que el `p.perm` de RER.
 
 | test | estadístico observado | `p.perm` |
 |------|----------------------|----------|
-| **1. Wilcoxon** (`sig_wilcoxon`, `fastwilcoxGMTall`) | rank-sum / AUC del set vs resto | `fcs_permpvalenrich_vectorized`: `(#{null ≥ obs} + 1)/(N_valid + 1)` (`greater`, rankings de magnitud) o `(#{|null| ≥ |obs|}+1)/(N+1)` (`two.sided`, RER con signo). Universo = genes anotados en el GMT. Gate: `p.adj < fdr_wilcoxon` **y** (`p.perm` NA o `< p_perm_thr`) **y** `stat > 0` |
-| **2. Lachenbruch two-part** (`sig_lachenbruch`, `fcs_run_lachenbruch`) | Parte 1: **Fisher exacto** en la 2×2 de prevalencia (`score > 0` vs `= 0`) = cola superior **hipergeométrica**, → χ²(1). Parte 2: Wilcoxon `greater` sobre los genes con score > 0, → χ²(1). Suma → χ²(2) → `lach_pval` | `fcs_compute_lach_p_perm`: vectoriza la Parte 1 con **una llamada `phyper()`** por GMT sobre `set × columna-de-null` (universo = dominio completo del ranking) + Parte 2 vectorizada; combina y compara contra el `lach_chi_total` observado. Gate: `lach_p.adj < fdr_lachenbruch` **y** (`lach_p.perm` NA o `< p_perm_thr`) |
-| **3. Path-sum permulation** (`sig_permulation`, `fcs_run_permulation`) | suma de scores de gen del pathway; `NES = (obs − null_mean)/null_sd` | `(rowSums(null ≥ obs) + 1)/(N + 1)`; usa la matriz de null compartida cuando existe, si no un label-shuffle privado. Gate: `perm_p.adj < fdr_permsum` **y** `perm_nes > 0` |
+| **1. Wilcoxon** (`sig_wilcoxon`, `fastwilcoxGMTall`) | rank-sum / AUC del set vs resto; el p unilateral de los rankings de magnitud lleva el **término de empates** de la suma de rangos (`fcs_rank_sum_sd`) | Rankings de magnitud (`greater`): `fcs_null_wilcoxon_p_vectorized` da a cada columna del null el p que el observado tendría si fuera esa columna, y `fcs_permpval_from_p_vectorized` cuenta `(#{p_null ≤ p_obs} + 1)/(N_valid + 1)`; el null se alinea a los genes del ranking (`fcs_align_null`). Rankings con signo (`two.sided`, RER): `(#{|null| ≥ |obs|}+1)/(N+1)` sobre el AUC. Universo = genes anotados en el GMT. Gate: `p.adj < fdr_wilcoxon` **y** (`p.perm` NA o `< p_perm_thr`) **y** `stat > 0` |
+| **2. Lachenbruch two-part** (`sig_lachenbruch`, `fcs_run_lachenbruch`) | Parte 1: **Fisher exacto** en la 2×2 de prevalencia (`score > 0` vs `= 0`) = cola superior **hipergeométrica** sobre todo el ranking, → χ²(1). Parte 2: rank-sum de los scores positivos del set contra los positivos del resto (aproximación normal, corrección de continuidad y término de empates de los positivos; necesita ≥ 2 positivos dentro y ≥ 2 fuera), → χ²(1). Suma → χ²(2) → `lach_pval` | `fcs_compute_lach_p_perm`: el **mismo código** (`fcs_lach_prepare`, `fcs_lach_stats`) sobre cada columna del null alineado al ranking; compara `lach_chi_total` del observado con el de las columnas. Gate: `lach_p.adj < fdr_lachenbruch` **y** (`lach_p.perm` NA o `< p_perm_thr`) |
 
-`evidence_count` = suma de los 3 gates → `evidence_label` ("Hard evidence" = 3,
-"Supported" = 2, "Exploratory" = 1). Lachenbruch y path-sum se saltan para rankings con
-signo (RER global).
+`evidence_count` = suma de los 2 gates → `evidence_label` ("Supported" = 2,
+"Exploratory" = 1, "Not significant" = 0). Lachenbruch se salta en los rankings con
+signo (RER global), que solo tienen el voto de Wilcoxon y por tanto no pasan de "Exploratory".
 
 *Ejemplo:* `OPN1` (con `score_global = 0.48`) es miembro del pathway
 `GO:phototransduction`. En el ranking `global`, ese set obtiene Wilcoxon `stat > 0`,
 `p.adj = 0.03`, `p.perm = 0.008` (8 de 1000 columnas de `caas_corStat_byrank[["global"]]`
 dan un rank-sum ≥ el observado) → `sig_wilcoxon = TRUE`. Lachenbruch Parte 1 (¿el pathway
 está enriquecido en genes con `score > 0`?) `lach_p.adj = 0.04`, `lach_p.perm = 0.02` →
-`sig_lachenbruch = TRUE`. Path-sum `perm_p.adj = 0.06` → `sig_permulation = FALSE`.
+`sig_lachenbruch = TRUE`.
 `evidence_count = 2` → **"Supported"**.
 
 ### I.3. Enriquecimiento posicional (`posenrich_enrich.py`)
 
-Test independiente con **permulación propia** (de **posiciones**, no de fenotipo):
-*path-sum* por término, `rng.choice(N, K, replace=False)` por permutación,
-`M · P` disperso. `perm_nes = (obs − null_mu)/null_sd`;
-`p_value = (Σ null ≥ obs + 1)/(n_perms + 1)`. Direcciones `top`/`bottom`/`global`
-filtradas por `change_side`, ranking sobre posiciones con `CAAS_score > 0`.
+Un test por término sobre posiciones, con el **nulo de ciclos de permulación CAAS**
+(`perm_pos_cycle_caas.tsv.gz`, una columna por ciclo), por dirección (`global`, `top`, `bottom`):
+el **Lachenbruch** del FCS, con la **misma función** (misma fórmula: prevalencia hipergeométrica sobre el fondo de
+posiciones y magnitud por rank-sum entre las posiciones puntuadas, con término de empates), con las columnas
+`lach_chi_binary`, `lach_chi_nonzero`, `lach_chi_total`, `lach_frac_magnitude`, `lach_pval`, `lach_p.adj`,
+`lach_p.perm`. `sig` = `lach_p.adj < fcs_fdr_lachenbruch` **y** `lach_p.perm < fcs_pperm_thr`, los
+mismos umbrales que el FCS. Sin nulo, `lach_p.perm` es NA y `sig` es falso.
 
 ---
 
@@ -704,7 +705,7 @@ filtradas por `change_side`, ranking sobre posiciones con `CAAS_score > 0`.
 | `gene_caas_score` (H.5) | 0.94^12 ≈ 0.48 |
 | `gene_caas_pperm` (H.6) | ≈ 0.013 |
 | Ejes independientes (H.7) | FADE BF 300, RER p.perm 0.02 (acc), accum CCT p 0.04 — columnas separadas |
-| FCS (I.2) | `GO:phototransduction` "Supported" (Wilcoxon + Lachenbruch, no path-sum) |
+| FCS (I.2) | `GO:phototransduction` "Supported" (Wilcoxon + Lachenbruch) |
 
 ---
 

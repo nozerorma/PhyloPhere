@@ -28,14 +28,15 @@ params:
   fade_site_top_file: NULL
   fade_site_bot_file: NULL
   genomic_info_file: NULL
-  caas_perms_file: NULL
+  caas_pos_cycle_caas_file: NULL
+  perm_manifest_file: NULL
+  hypotheses_pairs_file: NULL
   caas_pos_sample_file: NULL
   caas_pos_quantiles_file: NULL
   filtered_discovery_file: NULL
   window_size_bp: 1000000
   direction: "combined"
   background_file: NULL
-  scoring_p_emp_thr: 0.05
   seed: "1998"
 ---
 
@@ -159,7 +160,9 @@ has_rer  <- "rer_min_pval"    %in% names(gene_df) && any(!is.na(gene_df$rer_min_
 .file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
 
 has_genomic       <- .file_ok(params$genomic_info_file)
-has_perms         <- .file_ok(params$caas_perms_file)
+# Position-level null of the permulation: one row per (Gene, Position, side, cycle) detected by a null labeling.
+has_pos_null      <- .file_ok(params$caas_pos_cycle_caas_file) &&
+                     length(readLines(params$caas_pos_cycle_caas_file, n = 2L)) >= 2L
 has_filtered      <- .file_ok(params$filtered_discovery_file) # observed per-scheme asr_path_score
 # FADE site (position-level) data: use top direction if available, otherwise try bottom
 has_fade_pos      <- .file_ok(params$fade_site_top_file) || .file_ok(params$fade_site_bot_file)
@@ -188,41 +191,6 @@ if (has_genomic) {
     )
 } else {
   genomic_raw <- NULL
-}
-
-# ── Gene-level permulation null (caas_perms.rds) ──────────────────────────────
-# Both byrank lists (ASR axis and CAAS axis) become one long frame (metric, direction,
-# null_score), pooled over genes and cycles and subsampled to 100,000 values per matrix, for the
-# gene-level tabs. ASR names are *_asr; the suffix is stripped to give global, top and bottom.
-if (has_perms) {
-  caas_perms_obj <- tryCatch(readRDS(params$caas_perms_file), error = function(e) NULL)
-  .tidy_byrank <- function(cs, metric) {
-    purrr::imap_dfr(cs, function(mat, rank_name) {
-      mat <- as.matrix(mat)
-      val <- as.numeric(mat)
-      if (length(val) > 100000) {
-        set.seed(seed_val)
-        val <- sample(val, 100000)
-      }
-      tibble::tibble(metric = metric, direction = sub("_asr$", "", rank_name),
-                     null_score = val)
-    })
-  }
-  asr_cs  <- if (!is.null(caas_perms_obj)) caas_perms_obj$corStat_byrank      else NULL
-  caas_cs <- if (!is.null(caas_perms_obj)) caas_perms_obj$caas_corStat_byrank else NULL
-  if (is.null(asr_cs) || length(asr_cs) == 0) {
-    has_perms <- FALSE; perm_null_gene <- NULL
-  } else {
-    perm_null_gene <- dplyr::bind_rows(
-        .tidy_byrank(asr_cs, "asr_path_score"),
-        if (!is.null(caas_cs) && length(caas_cs)) .tidy_byrank(caas_cs, "caas_score") else NULL) %>%
-      mutate(direction = factor(direction, levels = c("global", "top", "bottom")),
-             metric    = factor(metric, levels = c("caas_score", "asr_path_score")))
-    perm_n_cycles <- ncol(as.matrix(asr_cs[[1]]))
-    perm_n_genes  <- nrow(as.matrix(asr_cs[[1]]))
-  }
-} else {
-  caas_perms_obj <- NULL; perm_null_gene <- NULL
 }
 
 scheme_levels <- c("US", "GS1", "GS2", "GS3", "GS4")
@@ -269,18 +237,9 @@ pos_bottom <- pos_df %>% filter(side == "bottom")
 # Read from gene_scores.tsv (scoring_compute.R section 4a), never recomputed here, so the report
 # cannot disagree with the pipeline's own output. gene_caas_top and gene_caas_bot are local
 # aliases that keep the later code short.
-#
-# gene_caas_score_{top,bottom} is preferred; the *_all columns, which hold the same values, are
-# the fallback when it is absent or empty.
-.pick_dir <- function(primary, fallback) {
-  v <- if (primary %in% names(gene_df)) gene_df[[primary]] else NULL
-  if (is.null(v) || all(is.na(v))) {
-    v <- if (fallback %in% names(gene_df)) gene_df[[fallback]] else rep(NA_real_, nrow(gene_df))
-  }
-  suppressWarnings(as.numeric(v))
-}
-gene_df$gene_caas_top <- .pick_dir("gene_caas_score_top", "gene_caas_score_top_all")
-gene_df$gene_caas_bot <- .pick_dir("gene_caas_score_bottom", "gene_caas_score_bottom_all")
+.num_col <- function(col) suppressWarnings(as.numeric(if (col %in% names(gene_df)) gene_df[[col]] else rep(NA_real_, nrow(gene_df))))
+gene_df$gene_caas_top <- .num_col("gene_caas_score_top")
+gene_df$gene_caas_bot <- .num_col("gene_caas_score_bottom")
 
 # ── Gene-level accumulation significance ──────────────────────────────────────
 # Accumulation is represented by its CCT combined p-value (accum_cct_p) across
@@ -540,219 +499,278 @@ direction) and `gene_caas_bot` (BOTTOM direction) independently.
 The permulation re-labels the phylogeny `N` times and re-runs discovery and ASR
 scoring under each null labeling. Each cycle is one complete null realisation:
 the positions it discovers are its candidate set, exactly as the real run's
-discovered set is the observed candidate set. The gene-level null and the
-position-level `p.emp` below are both built term-for-term like the observed
-pipeline, from the same `N` cycles.
+discovered set is the observed candidate set. The comparisons below and the
+position-level `p.emp` are built term-for-term like the observed pipeline, from
+the same `N` cycles.
 
 The formal per-pathway `p.perm` (ASR axis) is in the companion **FCS** report.
 
-```{r perm-gene-obs-setup}
-dir_pal <- c(global = "#4E79A7", top = "#E15759", bottom = "#59A14F")
-# Observed gene-level distributions by direction (always computed: used both by the
-# full null-overlay plots when a permulation null exists, and by the standalone
-# summary table below when it doesn't).
-.obs_gene_caas_dist <- dplyr::bind_rows(
-  tibble::tibble(direction = "global", value = gene_df$gene_caas_score),
-  tibble::tibble(direction = "top",    value = gene_df$gene_caas_score_top),
-  tibble::tibble(direction = "bottom", value = gene_df$gene_caas_score_bottom)
-)
-.obs_gene_caas <- .obs_gene_caas_dist %>%
-  group_by(direction) %>% summarise(obs_median = median(value, na.rm = TRUE), .groups = "drop")
+```{r pos-null-setup, eval=has_pos_null}
+.src_pal <- c(Observed = "#E15759", Null = "grey55")
 
-.q90 <- function(v) if (length(v)) as.numeric(quantile(v, .9, na.rm = TRUE)) else NA_real_
-.obs_gene_asr_dist <- pos_df %>%
-  group_by(Gene) %>%
-  summarise(global = .q90(asr_score),
-            top    = .q90(asr_score[side == "top"]),
-            bottom = .q90(asr_score[side == "bottom"]),
-            .groups = "drop") %>%
-  tidyr::pivot_longer(c(global, top, bottom), names_to = "direction", values_to = "value")
-.obs_gene_asr <- .obs_gene_asr_dist %>%
-  group_by(direction) %>% summarise(obs_median = median(value, na.rm = TRUE), .groups = "drop")
+# Null detections: one row per (Gene, Position, side, cycle) a permulated labeling detects (a detected position
+# can score 0); observed rows are the scored positions of the run.
+.null_pos <- readr::read_tsv(params$caas_pos_cycle_caas_file, show_col_types = FALSE,
+                             col_select = c(Gene, Position, side, cycle, caas_score, n_schemes)) %>%
+  filter(side %in% c("top", "bottom")) %>% rename(score = caas_score)
+.obs_pos <- pos_df %>% filter(!is.na(CAAS_score), side %in% c("top", "bottom")) %>%
+  transmute(Gene, Position, side, score = CAAS_score, n_schemes)
 
-.gene_null_table <- function(metric_name, obs_df) {
-  # Both metrics are exactly 0 whenever a permulated labeling produced zero
-  # CAAS/CAAP hits anywhere in the gene that cycle (gene_cycle_scores.tsv holds NA
-  # there and scoring_caas_perms.R fills the dense genes x cycles matrix with 0) -
-  # a structural point mass, not sampling noise. At >=75% zero (typical here) the
-  # unconditional median/IQR are both 0 and say nothing; p_zero plus the
-  # nonzero-conditional median/IQR are what actually separates directions/runs.
-  # null_q90 is kept because a tail quantile stays informative even under heavy
-  # zero-inflation, as long as p_zero < 90%.
-  perm_null_gene %>% filter(metric == metric_name) %>% group_by(direction) %>%
-    summarise(`n (gene×cycle)` = dplyr::n(),
-              p_zero          = mean(null_score == 0, na.rm = TRUE),
-              null_median_nz  = median(null_score[null_score > 0], na.rm = TRUE),
-              null_IQR_nz     = IQR(null_score[null_score > 0], na.rm = TRUE),
-              null_q90        = quantile(null_score, .90, na.rm = TRUE),
-              null_median     = median(null_score, na.rm = TRUE),
-              null_IQR        = IQR(null_score, na.rm = TRUE),
-              .groups = "drop") %>%
-    mutate(direction = as.character(direction)) %>%
-    left_join(obs_df, by = "direction") %>%
-    arrange(factor(direction, levels = c("global", "top", "bottom")))
-}
-# Shared paired observed-vs-null violin. Used by the gene-level tabs and by the
-# position-level phenotype-axis tab, so the two never drift apart visually.
-# `combined` must carry columns: grp (x axis), value, source in {"Null","Observed"}.
-.paired_violin <- function(combined, xlab, ylab, title, subtitle,
-                           drop_zeros = TRUE) {
-  grp_levels <- if (is.factor(combined$grp)) levels(combined$grp) else unique(combined$grp)
-  combined <- combined %>%
-    mutate(source = factor(source, levels = c("Null", "Observed")),
-           grp    = factor(grp, levels = grp_levels)) %>%
-    filter(is.finite(value))
+# Cycles with no detection leave no row, so the number of cycles is taken from the p.emp floor (1/(N + 1))
+# when the table reaches it, and otherwise from the cycles present.
+.null_cycles <- unique(.null_pos$cycle)
+.n_cyc <- max(length(.null_cycles),
+              if ("p.emp" %in% names(pos_df) && any(!is.na(pos_df$p.emp))) round(1 / min(pos_df$p.emp, na.rm = TRUE)) - 1 else 0)
+.n_pad <- .n_cyc - length(.null_cycles)
 
-  # A violin's density estimate is dominated by any point mass at a boundary:
-  # when most of the null sits at exactly 0 the KDE puts almost all its area in a
-  # spike at y=0 and squashes the actual shape of "what happens when there IS a
-  # signal" into an invisible sliver. Plot the conditional (>0) distribution,
-  # which a density can actually represent, and report the discarded zero
-  # fraction as a label under each violin instead, since the two pieces of
-  # information don't fit in one geometry.
-  if (drop_zeros) {
-    zero_frac <- combined %>% group_by(grp, source) %>%
-      summarise(pct_zero = sprintf("0: %.0f%%", 100 * mean(value == 0)), .groups = "drop")
-    dat <- combined %>% filter(value > 0)
-  } else {
-    zero_frac <- NULL
-    dat <- combined
-  }
+# global: one entry per position, its best side, as in the undirected gene score.
+.best_side <- function(d, by) d %>% group_by(across(all_of(by))) %>% summarise(score = max(score), .groups = "drop")
+.sets <- list(
+  global = list(obs = .best_side(.obs_pos, c("Gene", "Position")),
+                null = .best_side(.null_pos, c("Gene", "Position", "cycle"))),
+  top    = list(obs = filter(.obs_pos, side == "top"),    null = filter(.null_pos, side == "top")),
+  bottom = list(obs = filter(.obs_pos, side == "bottom"), null = filter(.null_pos, side == "bottom")))
 
-  dat_null <- dat %>% filter(source == "Null")
-  dat_obs  <- dat %>% filter(source == "Observed")
-
-  # Split observed by directions with >= 5 points (violin) vs < 5 points (dots)
-  obs_counts <- dat_obs %>% group_by(grp) %>% summarise(n = n(), .groups = "drop")
-  grp_violin <- obs_counts %>% filter(n >= 5) %>% pull(grp)
-  grp_points <- obs_counts %>% filter(n < 5)  %>% pull(grp)
-
-  dat_obs_violin <- dat_obs %>% filter(grp %in% grp_violin)
-  dat_obs_points <- dat_obs %>% filter(grp %in% grp_points)
-
-  p <- ggplot()
-
-  # 1. Null violins (always present from permulation null sample)
-  if (nrow(dat_null) > 0) {
-    p <- p + geom_violin(
-      data = dat_null,
-      aes(x = as.numeric(grp) - 0.2, y = value, group = grp, fill = "Null"),
-      width = 0.35, scale = "width", alpha = .7, colour = "grey30"
-    )
-  }
-
-  # 2. Observed violins (for directions with >= 5 points)
-  if (nrow(dat_obs_violin) > 0) {
-    p <- p + geom_violin(
-      data = dat_obs_violin,
-      aes(x = as.numeric(grp) + 0.2, y = value, group = grp, fill = "Observed"),
-      width = 0.35, scale = "width", alpha = .7, colour = "grey30"
-    )
-  }
-
-  # 3. Observed points (for directions with < 5 points, e.g. single-gene runs like PEPC)
-  if (nrow(dat_obs_points) > 0) {
-    has_multi <- any((dat_obs_points %>% count(grp))$n > 1)
-    if (has_multi) {
-      set.seed(seed_val)
-      p <- p + geom_jitter(
-        data = dat_obs_points,
-        aes(x = as.numeric(grp) + 0.2, y = value, fill = "Observed"),
-        width = 0.08, height = 0, size = 3.5, shape = 21, stroke = 1.1, colour = "grey20"
-      )
-    } else {
-      p <- p + geom_point(
-        data = dat_obs_points,
-        aes(x = as.numeric(grp) + 0.2, y = value, fill = "Observed"),
-        size = 3.5, shape = 21, stroke = 1.1, colour = "grey20"
-      )
-    }
-  }
-
-  p <- p +
-    scale_fill_manual(
-      values = c(Null = "grey60", Observed = "#E15759"),
-      limits = c("Null", "Observed"),
-      name = NULL
-    ) +
-    scale_x_continuous(
-      breaks = seq_along(grp_levels),
-      labels = grp_levels,
-      limits = c(0.4, length(grp_levels) + 0.6)
-    ) +
-    labs(title = title, subtitle = subtitle, x = xlab, y = ylab) +
-    theme_minimal(base_size = 12) +
-    theme(
-      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
-      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
-      axis.text.x  = element_text(margin = ggplot2::margin(t = 5)),
-      legend.position = "right"
-    )
-
-  if (!is.null(zero_frac)) {
-    zero_frac <- zero_frac %>%
-      mutate(x_pos = as.numeric(factor(grp, levels = grp_levels)) + if_else(source == "Null", -0.2, 0.2))
-    p <- p + geom_text(
-      data = zero_frac,
-      aes(x = x_pos, y = -Inf, label = pct_zero),
-      vjust = -0.6, size = 3, colour = "grey40"
-    )
-  }
-  p
-}
-
-.gene_null_plot <- function(metric_name, obs_dist_df, ylab, title, show_observed = TRUE) {
-  nd <- perm_null_gene %>% filter(metric == metric_name, is.finite(null_score)) %>%
-    transmute(grp = as.character(direction), value = null_score, source = "Null")
-  combined <- nd
-  if (show_observed) {
-    od <- obs_dist_df %>% transmute(grp = as.character(direction), value, source = "Observed") %>%
-      filter(is.finite(value))
-    combined <- dplyr::bind_rows(nd, od)
-  }
-  combined <- combined %>%
-    mutate(grp = factor(grp, levels = c("global", "top", "bottom")))
-
-  .paired_violin(
-    combined, xlab = "Direction", ylab = ylab, title = title,
-    subtitle = paste0(
-      "Distribution CONDITIONAL on a nonzero score - null: permulation, 100k random sample.\n",
-      "Exact-zero fraction labelled below each violin (not part of the density)."))
+# Per-cycle count of a quantity, with the cycles that detect nothing as 0.
+.per_cycle <- function(d, f) {
+  v <- vapply(split(d, factor(d$cycle, levels = .null_cycles)), f, numeric(1))
+  c(v, rep(0, .n_pad))
 }
 ```
 
-```{r perm-na, eval=!has_perms, results='asis'}
-cat("_No CAAS permulation null available for this run",
-    " (`--caas_permulation_enrichment` off or `caas_perms.rds` absent)._\n\n", sep = "")
-cat("**Observed statistics summary** (no permulation null to compare against):\n\n")
-print(knitr::kable(
-  dplyr::bind_rows(
-    .obs_gene_caas %>% mutate(metric = "gene CAAS_score"),
-    .obs_gene_asr  %>% mutate(metric = "gene CAAS Score (q90 over positions)")
-  ) %>% dplyr::select(metric, direction, obs_median),
-  digits = 4, caption = "Observed gene-level medians by direction"
-))
+```{r pos-null-na, eval=!has_pos_null, results='asis'}
+cat("_No position-level permulation null available for this run",
+    " (`perm_pos_cycle_caas.tsv.gz` absent or empty)._\n\n")
 ```
 
-```{r caas-score-header, eval=has_perms, results='asis'}
-cat("### CAAS Score\n\n")
+### Detected positions vs null
+
+```{r pos-null-excedance, eval=has_pos_null, fig.height=4.8, fig.width=10}
+.grid <- seq(0, ceiling(100 * max(.null_pos$score, .obs_pos$score)) / 100, by = 0.01)
+.cnt  <- function(x) rev(cumsum(rev(tabulate(findInterval(x, .grid), length(.grid)))))  # N(score >= grid)
+.exc <- dplyr::bind_rows(lapply(names(.sets), function(d) {
+  st <- .sets[[d]]
+  m  <- vapply(split(st$null$score, factor(st$null$cycle, levels = .null_cycles)), .cnt, numeric(length(.grid)))
+  m  <- cbind(m, matrix(0, length(.grid), .n_pad))
+  tibble::tibble(direction = d, s = .grid, obs = .cnt(st$obs$score),
+                 med = apply(m, 1, median),
+                 lo = apply(m, 1, quantile, .025), hi = apply(m, 1, quantile, .975))
+})) %>% mutate(direction = factor(direction, levels = c("global", "top", "bottom")))
+
+.fl <- 0.5   # log axis floor for counts of 0
+ggplot(.exc, aes(s)) +
+  geom_ribbon(aes(ymin = pmax(lo, .fl), ymax = pmax(hi, .fl), fill = "null, 95% of cycles"), alpha = .4) +
+  geom_line(aes(y = pmax(med, .fl), colour = "null, median cycle"), linewidth = .7) +
+  geom_line(aes(y = pmax(obs, .fl), colour = "observed"), linewidth = .9) +
+  scale_y_log10() + facet_wrap(~direction) +
+  scale_colour_manual(values = c("null, median cycle" = "grey35", observed = "#E15759"), name = NULL) +
+  scale_fill_manual(values = c("null, 95% of cycles" = "grey65"), name = NULL) +
+  labs(title = "Positions with CAAS Score >= s: observed vs one permulated cycle",
+       subtitle = sprintf("%d null cycles | top, bottom: position-side rows | global: positions (best side)", .n_cyc),
+       x = "score threshold s", y = "positions (log10)") +
+  theme_minimal(base_size = 11) + theme(legend.position = "top")
 ```
 
-```{r perm-gene-asr, eval=has_perms, fig.height=5, fig.width=10}
-knitr::kable(.gene_null_table("asr_path_score", .obs_gene_asr), digits = 4,
-  caption = "Gene-level null CAAS Score by direction (q90 over positions). obs_median = observed q90(CAAS Score).")
-print(.gene_null_plot("asr_path_score", .obs_gene_asr_dist, "CAAS Score (q90)",
-                       "Gene-level CAAS Score (Observed vs Null)", show_observed = TRUE))
+At each threshold `s`, the red line is the number of positions of the run with `CAAS_score >= s`. The grey line is
+the same count in one permulated cycle (median over cycles) and the band holds 95% of the cycles. A red line above
+the band means the run has more positions at that score than almost any null labeling. The number of detections of
+a cycle depends on its own contrasts, so the cycles differ widely in volume, and the band is the range of that
+variation and not a confidence interval.
+
+### Composition of detections
+
+Each plot compares what the null detects (pooling its cycles) with what the run detects. Similar shapes mean that the
+null produces detections of the same kind as the run, so that a difference in the excedance plot comes from how many
+positions are detected and not from what a detection looks like.
+
+```{r pos-null-comp-data, eval=has_pos_null}
+.comp <- dplyr::bind_rows(lapply(names(.sets), function(d)
+  dplyr::bind_rows(tibble::tibble(direction = d, source = "Observed", score = .sets[[d]]$obs$score),
+                   tibble::tibble(direction = d, source = "Null",     score = .sets[[d]]$null$score)))) %>%
+  mutate(direction = factor(direction, levels = c("global", "top", "bottom")),
+         source    = factor(source, levels = c("Null", "Observed")))
+.theme_p <- theme_minimal(base_size = 11)
 ```
+
+#### Score of the detected positions (score > 0)
+
+```{r pos-null-score-density, eval=has_pos_null, fig.height=3.8, fig.width=10}
+ggplot(.comp %>% filter(score > 0), aes(score, colour = source, fill = source)) +
+  geom_density(alpha = .25, adjust = 1.2) + facet_wrap(~direction, scales = "free_y") +
+  scale_colour_manual(values = .src_pal) + scale_fill_manual(values = .src_pal) +
+  labs(x = "CAAS Score", y = "density", colour = NULL, fill = NULL) +
+  .theme_p + theme(legend.position = "top")
+```
+
+#### Detections with score 0
+
+```{r pos-null-zeros, eval=has_pos_null, fig.height=3.5, fig.width=6}
+.comp %>% group_by(direction, source) %>% summarise(zeros = mean(score == 0), .groups = "drop") %>%
+  ggplot(aes(direction, zeros, fill = source)) +
+  geom_col(position = position_dodge(width = .8), width = .7) +
+  scale_fill_manual(values = .src_pal) + scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(x = NULL, y = "share of detections", fill = NULL) + .theme_p
+```
+
+#### Schemes that detect the position
+
+```{r pos-null-schemes, eval=has_pos_null, fig.height=3.5, fig.width=6}
+dplyr::bind_rows(tibble::tibble(source = "Observed", n_schemes = .obs_pos$n_schemes),
+                 tibble::tibble(source = "Null",     n_schemes = .null_pos$n_schemes)) %>%
+  count(source, n_schemes) %>% group_by(source) %>% mutate(prop = n / sum(n)) %>% ungroup() %>%
+  mutate(source = factor(source, levels = c("Null", "Observed"))) %>%
+  ggplot(aes(factor(n_schemes), prop, fill = source)) +
+  geom_col(position = position_dodge(width = .8), width = .7) +
+  scale_fill_manual(values = .src_pal) + scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(x = "n_schemes", y = "share of detections", fill = NULL) + .theme_p
+```
+
+### Top and bottom balance
+
+```{r pos-null-topbottom, eval=has_pos_null, fig.height=4.2, fig.width=10}
+.cnt_cyc <- function(d) .per_cycle(d, nrow)
+.rt <- .cnt_cyc(.sets$top$null); .rb <- .cnt_cyc(.sets$bottom$null)
+.o_t <- nrow(.sets$top$obs); .o_b <- nrow(.sets$bottom$obs)
+.min_rows <- 20   # the ratio is unstable in cycles with a handful of detections
+.ok <- .rt >= .min_rows & .rb >= .min_rows
+p_ratio <- ggplot(tibble::tibble(r = log2(.rb[.ok] / .rt[.ok])), aes(r)) +
+  geom_histogram(bins = 40, fill = "grey65", colour = "grey35") +
+  geom_vline(xintercept = log2(.o_b / .o_t), colour = "#E15759", linewidth = 1) +
+  labs(title = "bottom / top detections per cycle", x = "log2(bottom / top)", y = "cycles",
+       subtitle = sprintf("cycles with >= %d detections on each side (%d of %d)", .min_rows, sum(.ok), .n_cyc)) + .theme_p
+p_sc <- ggplot(tibble::tibble(top = pmax(.rt, 1), bottom = pmax(.rb, 1)), aes(top, bottom)) +
+  geom_abline(slope = 1, intercept = 0, colour = "grey50", linetype = "dashed") +
+  geom_point(alpha = .3, size = 1, colour = "grey35") +
+  geom_point(data = tibble::tibble(top = .o_t, bottom = .o_b), colour = "#E15759", size = 3) +
+  scale_x_log10() + scale_y_log10() +
+  labs(title = "top vs bottom detections per cycle", x = "top (log10)", y = "bottom (log10)") + .theme_p
+gridExtra::grid.arrange(p_ratio, p_sc, ncol = 2)
+```
+
+The left plot is the ratio of detections on the two sides in each cycle, and the red line is the run. The right
+plot has one point per cycle: points along the diagonal mean that a cycle that detects much on one side detects much
+on the other; the run is in red.
+
+### Volume and heterogeneity
+
+#### Volume per cycle
+
+```{r pos-null-volume, eval=has_pos_null, fig.height=5.5, fig.width=10}
+.vol_n <- list(`rows, top`    = .cnt_cyc(.sets$top$null),
+               `rows, bottom` = .cnt_cyc(.sets$bottom$null),
+               `positions, global` = .cnt_cyc(.sets$global$null),
+               `genes with a detection` = .per_cycle(.null_pos, function(d) dplyr::n_distinct(d$Gene)))
+.vol_o <- c(`rows, top` = .o_t, `rows, bottom` = .o_b, `positions, global` = nrow(.sets$global$obs),
+            `genes with a detection` = dplyr::n_distinct(.obs_pos$Gene))
+.vol_long <- dplyr::bind_rows(lapply(names(.vol_n), function(m) tibble::tibble(metric = m, value = .vol_n[[m]]))) %>%
+  mutate(metric = factor(metric, levels = names(.vol_n)))
+ggplot(.vol_long, aes(pmax(value, 1))) +
+  geom_histogram(bins = 40, fill = "grey65", colour = "grey35") +
+  geom_vline(data = tibble::tibble(metric = factor(names(.vol_o), levels = names(.vol_n)), v = unname(.vol_o)),
+             aes(xintercept = v), colour = "#E15759", linewidth = 1) +
+  scale_x_log10() + facet_wrap(~metric, scales = "free", ncol = 2) +
+  labs(x = "per cycle (log10)", y = "cycles") + .theme_p
+```
+
+Each histogram is the quantity over the null cycles, and the red line is the run.
+
+#### Heterogeneity between cycles
+
+```{r pos-null-heterogeneity, eval=has_pos_null, fig.height=3.8, fig.width=10}
+.het <- dplyr::bind_rows(lapply(names(.vol_n)[1:3], function(m) {
+  v <- pmax(.vol_n[[m]], 1); tibble::tibble(metric = m, fold = log2(v / median(v)), obs = log2(max(.vol_o[[m]], 1) / median(v)))
+})) %>% mutate(metric = factor(metric, levels = names(.vol_n)[1:3]))
+ggplot(.het, aes(fold)) +
+  geom_histogram(bins = 40, fill = "grey65", colour = "grey35") +
+  geom_vline(aes(xintercept = obs), colour = "#E15759", linewidth = 1) +
+  facet_wrap(~metric) +
+  scale_x_continuous(labels = function(x) paste0(ifelse(x >= 0, "x", "1/x"), signif(2^abs(x), 2))) +
+  labs(x = "detections relative to the median cycle", y = "cycles") + .theme_p
+```
+
+```{r pos-null-heterogeneity-table, eval=has_pos_null}
+knitr::kable(dplyr::bind_rows(lapply(names(.vol_n), function(m) {
+  v <- .vol_n[[m]]; o <- .vol_o[[m]]
+  tibble::tibble(metric = m, min = min(v), q05 = quantile(v, .05), median = median(v), q95 = quantile(v, .95), max = max(v),
+                 `q95 / q05` = quantile(v, .95) / max(quantile(v, .05), 1), CV = sd(v) / mean(v),
+                 observed = o, `cycles >= observed` = sprintf("%.1f%%", 100 * mean(v >= o)))
+})), digits = 2, caption = "Detections per null cycle: spread of the null and position of the run")
+```
+
+The plot shows how far a cycle departs from the median cycle, in folds, and the red line is where the run falls.
+The table gives the same spread in numbers and the share of null cycles that detect at least as much as the run.
+
+### Design comparability
+
+A null cycle is a permulated labeling, and the number of positions it detects depends on the design of its contrasts:
+pairs of species that are more divergent have more substitutions to share, so they detect more. This panel compares the
+canonical pairs (H1) of each null cycle with those of the run, and shows how the detections of a cycle depend on them.
+If the run lies in the body of the null in these quantities, the null is comparable to it; if it lies in a tail, the
+volume comparison of the previous tabs must be read with that in mind.
+
+```{r pos-null-design, eval=has_pos_null && .file_ok(params$perm_manifest_file) && .file_ok(params$hypotheses_pairs_file), fig.height=6.5, fig.width=10}
+.man <- readr::read_tsv(params$perm_manifest_file, show_col_types = FALSE)
+.hp1 <- readr::read_tsv(params$hypotheses_pairs_file, show_col_types = FALSE) %>% filter(hypothesis_id == "H1")
+# |delta| of the canonical pairs from the trait values of the manifest when the run predates the design columns
+.mean_abs <- function(f, b) mean(abs(as.numeric(strsplit(f, ",")[[1]]) - as.numeric(strsplit(b, ",")[[1]])))
+if (!"mean_abs_diff" %in% names(.man) && all(c("fg_values", "bg_values") %in% names(.man)))
+  .man$mean_abs_diff <- mapply(.mean_abs, .man$fg_values, .man$bg_values)
+.des_obs <- c(mean_distance = mean(.hp1$distance), mean_pss = mean(.hp1$pss_score), mean_abs_diff = mean(.hp1$abs_diff))
+.des_lab <- c(mean_distance = "mean patristic distance of the pairs", mean_pss = "mean PSS of the pairs", mean_abs_diff = "mean |trait difference| of the pairs")
+.des_cols <- intersect(names(.des_lab), names(.man))
+.des_cols <- .des_cols[vapply(.des_cols, function(m) any(is.finite(.man[[m]])), logical(1))]
+
+.des_long <- dplyr::bind_rows(lapply(.des_cols, function(m) tibble::tibble(metric = .des_lab[[m]], value = .man[[m]]))) %>%
+  filter(is.finite(value)) %>% mutate(metric = factor(metric, levels = unname(.des_lab[.des_cols])))
+p_des <- ggplot(.des_long, aes(value)) +
+  geom_histogram(bins = 40, fill = "grey65", colour = "grey35") +
+  geom_vline(data = tibble::tibble(metric = factor(unname(.des_lab[.des_cols]), levels = levels(.des_long$metric)), v = unname(.des_obs[.des_cols])),
+             aes(xintercept = v), colour = "#E15759", linewidth = 1) +
+  facet_wrap(~metric, scales = "free", nrow = 1) +
+  labs(title = "Canonical pairs per null cycle (grey) and in the run (red)", x = NULL, y = "cycles") + .theme_p
+
+# Detections of each cycle against the distance of its pairs
+if ("mean_distance" %in% .des_cols) {
+  .pos_cyc <- .sets$global$null %>% count(cycle, name = "positions")
+  .sc <- .man %>% left_join(.pos_cyc, by = "cycle") %>% mutate(positions = dplyr::coalesce(positions, 0L))
+  .rho <- suppressWarnings(cor(.sc$mean_distance, .sc$positions, method = "spearman", use = "complete.obs"))
+  p_sc2 <- ggplot(.sc, aes(mean_distance, pmax(positions, 1))) +
+    geom_point(alpha = .3, size = 1, colour = "grey35") +
+    geom_point(data = tibble::tibble(mean_distance = .des_obs[["mean_distance"]], positions = max(nrow(.sets$global$obs), 1)), colour = "#E15759", size = 3) +
+    scale_y_log10() +
+    labs(title = sprintf("Positions detected per cycle vs distance of its pairs (Spearman %.2f)", .rho),
+         x = "mean patristic distance of the pairs", y = "positions detected (log10)") + .theme_p
+  gridExtra::grid.arrange(p_des, p_sc2, ncol = 1, heights = c(1, 1.1))
+} else {
+  print(p_des)
+}
+
+.des_tab <- dplyr::bind_rows(lapply(.des_cols, function(m) {
+  v <- .man[[m]]; o <- .des_obs[[m]]
+  tibble::tibble(quantity = .des_lab[[m]], run = o, `null median` = median(v, na.rm = TRUE), q05 = quantile(v, .05, na.rm = TRUE),
+                 q95 = quantile(v, .95, na.rm = TRUE), `cycles >= run` = sprintf("%.1f%%", 100 * mean(v >= o, na.rm = TRUE)))
+}))
+knitr::kable(.des_tab, digits = 3, caption = "Design of the canonical pairs: the run against the null cycles")
+```
+
+```{r pos-null-design-old, eval=exists(".des_cols") && !("mean_distance" %in% .des_cols), results='asis'}
+cat("_This `permulation_manifest.tsv` has no distance or PSS columns (it was written before the permulation harvest recorded the design of the canonical pairs), so only the trait difference is shown._\n\n")
+```
+
+```{r pos-null-design-na, eval=has_pos_null && !(.file_ok(params$perm_manifest_file) && .file_ok(params$hypotheses_pairs_file)), results='asis'}
+cat("_The design panel needs `permulation_manifest.tsv` of the permulation harvest and the observed `contrast_hypotheses_pairs.tsv`; at least one is not available for this run._\n\n")
+```
+
+When the permulations are harvested with `perm_match_pss`, the PSS of the canonical pairs of each cycle follows the PSS of
+the run, so the PSS histogram is centered on the red line by construction; the distance and the trait difference of the
+pairs are not constrained and show whether that matching is enough for the null to resemble the run.
 
 ```{r pos-perm-p-setup}
 # p.emp is the position-level permulation p: the "detects AND exceeds score"
 # permulation p, pooled to (Gene, Position) over the max-over-sides axis, with
-# its BH adjustment (p.adj_bh).
-# scoring_compute.R writes both into position_scores.tsv
-# whenever --caas_pos_cycle_caas is set. scoring_p_emp_thr also gates
-# gene_caas_pperm_adj and the significance report, so it is one parameter
-# across all three.
+# its BH adjustment (p.adj_bh). p.emp_fact is its factorized form, with p.adj_bh_fact.
+# scoring_compute.R writes them into position_scores.tsv
+# whenever --caas_pos_cycle_caas is set.
 has_p_emp <- "p.emp" %in% names(pos_df) && any(!is.na(pos_df$p.emp))
 # p.emp is add-one smoothed, so its minimum is 1/(N + 1). A value at that floor is reported as "< 1/N" (with 1000
 # permulations "<0.001"), the convention of Saputra et al. 2021; the TSV keeps the number. N is read from the floor.
@@ -763,55 +781,49 @@ has_p_emp <- "p.emp" %in% names(pos_df) && any(!is.na(pos_df$p.emp))
   if (is.finite(.n_perm) && x <= .p_floor * (1 + 1e-9)) return(sprintf("<%s", format(1 / .n_perm, digits = 3)))
   format(signif(x, 3), scientific = FALSE, trim = TRUE)
 }, character(1))
-p_emp_thr <- suppressWarnings(as.numeric(params$scoring_p_emp_thr))
-if (!is.finite(p_emp_thr) || p_emp_thr <= 0 || p_emp_thr > 1) p_emp_thr <- 0.05
 ```
 
 ```{r p-emp-header, eval=has_p_emp, results='asis'}
 cat("### p.emp\n\n")
 n_val <- sum(!is.na(pos_df$p.emp))
 n_tot <- nrow(pos_df)
-n_sig_raw <- sum(pos_df$p.emp <= p_emp_thr, na.rm = TRUE)
-pct_sig_raw <- 100 * mean(pos_df$p.emp <= p_emp_thr, na.rm = TRUE)
-n_sig_bh <- sum(pos_df$p.adj_bh <= p_emp_thr, na.rm = TRUE)
-pct_sig_bh <- 100 * mean(pos_df$p.adj_bh <= p_emp_thr, na.rm = TRUE)
 n_floor <- sum(pos_df$p.emp <= .p_floor * (1 + 1e-9), na.rm = TRUE)
 has_fact <- all(c("p.emp_fact", "p.adj_bh_fact") %in% names(pos_df))
-n_sig_fact <- if (has_fact) sum(pos_df$p.emp_fact <= p_emp_thr, na.rm = TRUE) else NA_integer_
-n_sig_fact_bh <- if (has_fact) sum(pos_df$p.adj_bh_fact <= p_emp_thr, na.rm = TRUE) else NA_integer_
 min_fact <- if (has_fact) suppressWarnings(min(pos_df$p.emp_fact, na.rm = TRUE)) else NA_real_
 
 cat(sprintf(paste0(
-  "`p.emp` counts the permuted-labeling cycles that BOTH re-detect the position ",
-  "(on either phenotype side) AND match or beat its observed `CAAS_score`, add-one ",
-  "smoothed over N cycles. `p.adj_bh` is its BH adjustment over one test per position, ",
-  "across every position the null detects (null-detected positions not detected in the ",
-  "observed data enter at p = 1). A position with an observed score of 0 has p.emp = 1. A `p.emp` at its floor ",
-  "is reported as `< 1/N`. `p.emp_fact` is the factorized p: the share of permuted labelings that score the ",
-  "position times the share of detections of positions of the same propensity class that reach its score, so it is ",
-  "not limited by the floor; `p.adj_bh_fact` is its BH adjustment.\n\n",
+  "The position p-values are informative: no threshold or significance call is applied to them.\n\n",
+  "`p.emp` is the empirical permulation p of the position: the proportion of the N permuted-labeling cycles ",
+  "that detect the position (on either phenotype side) and give it a `CAAS_score` at least as high as the ",
+  "observed one, counting the observed run as one more cycle, (k + 1)/(N + 1). Its minimum is 1/(N + 1), ",
+  "reported as `< 1/N`. A position with an observed score of 0 has p.emp = 1. `p.adj_bh` is its Benjamini-Hochberg ",
+  "adjustment over one test per position, across every position the null detects (positions the null detects ",
+  "and the observed data do not enter at p = 1).\n\n",
+  "`p.emp_fact` is the same quantity factorized: the proportion of cycles that detect the position times the ",
+  "proportion of the detections of positions of a similar propensity to be detected (the cycles that detect ",
+  "them) that reach its score. It is not limited by the 1/(N + 1) floor, so it orders positions that `p.emp` ",
+  "ties. `p.adj_bh_fact` is its BH adjustment over the same family.\n\n",
   "- **Scored positions with p.emp**: %d/%d (%.1f%%)\n",
-  "- **Significant at uncorrected p.emp <= %.3g**: %d/%d (%.1f%%)\n",
-  "- **Significant at BH-adjusted p.adj_bh <= %.3g**: %d/%d (%.1f%%)\n",
   "- **At the permulation floor (p.emp %s)**: %d positions\n",
-  "- **Factorized p.emp_fact <= %.3g**: %s positions; **p.adj_bh_fact <= %.3g**: %s; smallest p.emp_fact: %s\n\n"),
+  "- **Smallest p.emp_fact**: %s\n\n"),
   n_val, n_tot, 100 * n_val / max(1, n_tot),
-  p_emp_thr, n_sig_raw, n_tot, pct_sig_raw,
-  p_emp_thr, n_sig_bh, n_tot, pct_sig_bh,
   .fmt_p(.p_floor), n_floor,
-  p_emp_thr, if (has_fact) as.character(n_sig_fact) else "NA", p_emp_thr,
-  if (has_fact) as.character(n_sig_fact_bh) else "NA",
   if (has_fact && is.finite(min_fact)) format(min_fact, digits = 3) else "NA"))
 ```
 
 ```{r p-emp-dist, eval=has_p_emp, fig.height=4.5, fig.width=9}
 ggplot(pos_df %>% filter(!is.na(p.emp)), aes(x = p.emp)) +
   geom_histogram(bins = 40, fill = "grey60", colour = "grey30") +
-  geom_vline(xintercept = p_emp_thr, colour = "#E15759", linewidth = 1, linetype = "dashed") +
   labs(title = "p.emp distribution across scored positions",
-       subtitle = sprintf("Dashed line: uncorrected p.emp threshold = %.3g (%d positions significant; %d after BH (p.adj_bh)).",
-                          p_emp_thr, n_sig_raw, n_sig_bh),
        x = "p.emp", y = "positions") +
+  theme_minimal(base_size = 12)
+```
+
+```{r p-emp-fact-dist, eval=has_p_emp && "p.emp_fact" %in% names(pos_df) && any(!is.na(pos_df$p.emp_fact)), fig.height=4.5, fig.width=9}
+ggplot(pos_df %>% filter(!is.na(p.emp_fact)), aes(x = p.emp_fact)) +
+  geom_histogram(bins = 40, fill = "grey60", colour = "grey30") +
+  labs(title = "p.emp_fact distribution across scored positions",
+       x = "p.emp_fact", y = "positions") +
   theme_minimal(base_size = 12)
 ```
 
@@ -885,6 +897,41 @@ p_combined <- ggplot(pos_df, aes(x = CAAS_score)) +
   theme(plot.title = element_text(face = "bold"))
 
 print(p_combined)
+```
+
+### CAAS Score, nonzero
+
+The score distribution of the positions, by direction, with and without the positions of score exactly 0. A
+zero is a detected position with no ASR support, a point mass that dominates the count scale and hides the
+shape of the positions that carry signal. The `global` panel keeps one entry per position, its best side, as
+the undirected gene score does; `top` and `bottom` use only the positions of that side. The share of zeros of
+each panel is in its label.
+
+```{r caas-score-nonzero, fig.height=7, fig.width=10}
+.dir_scores <- dplyr::bind_rows(
+  pos_df %>% filter(!is.na(CAAS_score)) %>% group_by(Gene, Position) %>%
+    summarise(score = max(CAAS_score), .groups = "drop") %>% mutate(direction = "global"),
+  pos_df %>% filter(!is.na(CAAS_score), side == "top")    %>% transmute(Gene, Position, score = CAAS_score, direction = "top"),
+  pos_df %>% filter(!is.na(CAAS_score), side == "bottom") %>% transmute(Gene, Position, score = CAAS_score, direction = "bottom")
+) %>% mutate(direction = factor(direction, levels = c("global", "top", "bottom")))
+
+dir_pal <- c(global = "#4E79A7", top = "#E15759", bottom = "#59A14F")
+.nz_lab <- .dir_scores %>% group_by(direction) %>%
+  summarise(lab = sprintf("n = %s | zeros: %.1f%%", format(dplyr::n(), big.mark = ","), 100 * mean(score == 0)), .groups = "drop")
+.nz_dat <- dplyr::bind_rows(
+  .dir_scores %>% mutate(variant = "All positions"),
+  .dir_scores %>% filter(score > 0) %>% mutate(variant = "Score > 0")
+) %>% mutate(variant = factor(variant, levels = c("All positions", "Score > 0")))
+
+ggplot(.nz_dat, aes(x = score, fill = direction)) +
+  geom_histogram(bins = 40, boundary = 0, colour = "grey30", alpha = 0.85, show.legend = FALSE) +
+  geom_text(data = .nz_lab %>% mutate(variant = factor("All positions", levels = levels(.nz_dat$variant))),
+            aes(x = Inf, y = Inf, label = lab), inherit.aes = FALSE, hjust = 1.05, vjust = 1.5, size = 3.3) +
+  facet_grid(variant ~ direction, scales = "free_y") +
+  scale_fill_manual(values = dir_pal) +
+  labs(title = "CAAS Score distribution, with and without zeros", x = "CAAS Score", y = "positions") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
 ```
 
 ### Biochemistry
@@ -1883,15 +1930,9 @@ DT::datatable(
 
 ### Top Genes
 
-`gene_caas_pperm` is the CAAS permulation-excess null's per-gene right-tailed
-p-value (fraction of permuted-labeling cycles whose genome-wide gene score
-matches or exceeds this gene's observed `gene_caas_score`), `gene_caas_pperm_adj`
-its BH adjustment across genes. At the pipeline's typical
-`caas_full_perms` this floors around 1/(N+1) (~1e-3 at N=1000), so treat it as a
-**prioritisation** signal with FDR context, not by itself a genome-wide-significant
-call: a gene at the floor is "no cycle beat it", which does not distinguish
-between genes that all cleared every cycle. Blank when no CAAS permulation null
-was supplied to this run.
+`gene_caas_score` is the gene-level CAAS score and the ranking that enters the enrichment. No p-value is
+computed per gene: the CAAS evidence is tested at the position level (`p.emp`, `p.emp_fact` and their BH
+adjustments in `position_scores.tsv`).
 
 ```{r top-genes-table}
 top_genes_df <- gene_df %>%
@@ -1936,8 +1977,7 @@ top_genes_df <- top_genes_df %>%
 gene_display_cols <- c("Gene", "n_positions",
                        "gene_caas_score", "gene_caas_top", "gene_caas_bot",
                        "in_top_10pct", "in_top_50pct",
-                       "in_bot_10pct", "in_bot_50pct",
-                       "gene_caas_pperm", "gene_caas_pperm_adj")
+                       "in_bot_10pct", "in_bot_50pct")
 if (has_accum_score)
   gene_display_cols <- c(gene_display_cols, "accum_cct_p")
 if (has_rer)

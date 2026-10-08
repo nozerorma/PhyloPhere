@@ -1,5 +1,5 @@
 ---
-title: "CAAS Significance Report"
+title: "CAAS Position p-value Report"
 subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else ''`"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 author: "PhyloPhere pipeline"
@@ -18,9 +18,7 @@ output:
 params:
   global_meta_input: NULL
   position_scores_input: NULL
-  gene_scores_input: NULL
   output_dir: "."
-  p_emp_thr: 0.05
   seed: "1998"
 ---
 
@@ -55,15 +53,15 @@ params:
   }
 </style>
 
-<!-- 16.CAAS_significance_report.Rmd — Annotation of the CAAS pattern table with the permulation-null significance of SCORING. -->
+<!-- 16.CAAS_significance_report.Rmd — Annotation of the CAAS pattern table with the empirical position p-values of SCORING. -->
 <!-- PhyloPhere | subworkflows/CT_META_CAAS/local/ -->
 
 <!--
 Rendered by CAAS_SIGNIFICANCE_REPORT (ctpp_meta_caas.nf), after SCORING. The per-position CAAS table
 (global_meta_input: global_meta_caas.tsv, or the post-processed discovery table SCORING evaluated; one row per
 Gene, Position and, when present, pattern and caap_group) is joined with position_scores.tsv (p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact)
-and gene_scores.tsv (gene_caas_pperm, gene_caas_pperm_adj) of the same run. It cannot be merged into
-7.CAAS_pattern_annotation.Rmd, which runs before SCORING, when those tables do not exist yet.
+of the same run. It cannot be merged into 7.CAAS_pattern_annotation.Rmd, which runs before SCORING, when that
+table does not exist yet.
 Outputs: significance/meta_caas_significance.tsv and significance/pattern_significance_summary.tsv.
 -->
 
@@ -97,23 +95,14 @@ names(tableau_10) <- c(
   "brown", "gray"
 )
 
-sig_palette <- c(
-  "Significant"     = tableau_10[["bluish_green"]],
-  "Not significant" = tableau_10[["gray"]]
-)
-
 seed_val <- if (!is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998
 set.seed(seed_val)
-
-p_emp_thr <- suppressWarnings(as.numeric(params$p_emp_thr))
-if (is.na(p_emp_thr)) p_emp_thr <- 0.05
-cat(sprintf("Using p.adj_bh / gene_caas_pperm_adj significance threshold: %s\n", p_emp_thr))
 ```
 
 ## 1. Data Import
 
 Load CT_META_CAAS's published meta_caas table and SCORING's published
-position/gene score tables, all from the same pipeline run.
+position score table, both from the same pipeline run.
 
 ```{r data_import}
 if (is.null(params$global_meta_input) || !file.exists(params$global_meta_input)) {
@@ -122,17 +111,12 @@ if (is.null(params$global_meta_input) || !file.exists(params$global_meta_input))
 if (is.null(params$position_scores_input) || !file.exists(params$position_scores_input)) {
   stop("position_scores_input (position_scores.tsv) not found: ", params$position_scores_input)
 }
-if (is.null(params$gene_scores_input) || !file.exists(params$gene_scores_input)) {
-  stop("gene_scores_input (gene_scores.tsv) not found: ", params$gene_scores_input)
-}
 
 meta_caas <- read_tsv(params$global_meta_input, show_col_types = FALSE)
 position_scores <- read_tsv(params$position_scores_input, show_col_types = FALSE)
-gene_scores <- read_tsv(params$gene_scores_input, show_col_types = FALSE)
 
 cat(sprintf("Loaded meta_caas: %d rows from %s\n", nrow(meta_caas), basename(params$global_meta_input)))
 cat(sprintf("Loaded position_scores: %d rows from %s\n", nrow(position_scores), basename(params$position_scores_input)))
-cat(sprintf("Loaded gene_scores: %d rows from %s\n", nrow(gene_scores), basename(params$gene_scores_input)))
 
 required_meta_cols <- c("Gene", "Position")
 missing_meta_cols <- setdiff(required_meta_cols, names(meta_caas))
@@ -150,9 +134,19 @@ type_col <- if ("convergence_type" %in% names(meta_caas)) {
 type_label <- if (identical(type_col, "convergence_type")) "Convergence Type" else if (identical(type_col, "pattern")) "Pattern" else "Classification"
 ```
 
-## 2. Join SCORING's null-based significance onto the meta_caas rows
+## 2. Join SCORING's position p-values onto the meta_caas rows
 
-### 2a. Position-level: p.emp / p.adj_bh
+The p-values are informative: no threshold or significance call is applied to them.
+
+- `p.emp` is the empirical permulation p of the position: the proportion of the N permuted-labeling cycles that
+  detect the position (on either phenotype side) and give it a CAAS score at least as high as the observed one,
+  counting the observed run as one more cycle, (k + 1)/(N + 1). Its minimum is 1/(N + 1), shown as `< 1/N`.
+  A position with an observed score of 0 has `p.emp` = 1. `p.adj_bh` is its Benjamini-Hochberg adjustment.
+- `p.emp_fact` is the same quantity factorized: the proportion of cycles that detect the position times the
+  proportion of the detections of positions of a similar propensity to be detected that reach its score. It is not
+  limited by the 1/(N + 1) floor. `p.adj_bh_fact` is its Benjamini-Hochberg adjustment.
+
+### Position p-values
 
 `position_scores.tsv` carries one row per (Gene, Position, side); `p.emp` and
 its adjustment `p.adj_bh` (BH over the permutation family) are already pooled across sides (max-over-sides "all" axis --
@@ -178,7 +172,7 @@ if (has_p_emp_cols) {
 }, character(1))
 if (!has_p_emp_cols) {
   warning("position_scores.tsv has no p.emp/p.adj_bh columns -- was it produced by ",
-          "a stale scoring_compute.R build? Significance columns will be all-NA.")
+          "a stale scoring_compute.R build? The p-value columns will be all-NA.")
   pos_dedup <- tibble(Gene = character(), Position = integer(),
                        p.emp = numeric(), p.adj_bh = numeric(), p.emp_fact = numeric(), p.adj_bh_fact = numeric())
 } else {
@@ -199,13 +193,7 @@ if (!has_p_emp_cols) {
 
 meta_caas <- meta_caas %>%
   mutate(Position = as.integer(Position)) %>%
-  left_join(pos_dedup, by = c("Gene", "Position")) %>%
-  mutate(
-    position_significant_raw = !is.na(p.emp) & p.emp <= p_emp_thr,
-    position_significant_bh  = !is.na(p.adj_bh) & p.adj_bh <= p_emp_thr,
-    position_significant_bh_fact = !is.na(p.adj_bh_fact) & p.adj_bh_fact <= p_emp_thr,
-    position_significant     = position_significant_bh
-  )
+  left_join(pos_dedup, by = c("Gene", "Position"))
 
 .n_meta_rows <- nrow(meta_caas)
 .n_pos_matched <- meta_caas %>% filter(!is.na(p.emp)) %>% nrow()
@@ -217,58 +205,16 @@ cat(sprintf("  p.emp position join: matched %d/%d rows (%d/%d unique positions, 
 if (.pos_rate < 0.5 && !("convergence_type" %in% names(meta_caas))) {
   cat(sprintf(paste0("  WARNING: p.emp join rate %.1f%% < 50%% -- the meta_caas positions ",
                      "and position_scores.tsv positions are likely on different coordinate ",
-                     "systems or from different pipeline runs. Treat position_significant as ",
+                     "systems or from different pipeline runs. Treat the p-values as ",
                      "unreliable.\n"), 100 * .pos_rate), file = stderr())
 }
 ```
 
-### 2b. Gene-level: gene_caas_pperm / gene_caas_pperm_adj
+## 3. Position p-values by `r type_label`
 
-`gene_scores.tsv` already has one row per Gene (no dedup needed). Only the
-global/pooled `gene_caas_pperm`/`gene_caas_pperm_adj` columns are used --
-meta_caas rows carry no side/direction column, so joining the `_top`/
-`_bottom` variants would be meaningless at this join's grain (which
-top/bottom pair would a given meta_caas row match against?).
-
-```{r gene_join}
-has_gene_pperm_cols <- all(c("gene_caas_pperm", "gene_caas_pperm_adj") %in% names(gene_scores))
-if (!has_gene_pperm_cols) {
-  warning("gene_scores.tsv has no gene_caas_pperm/gene_caas_pperm_adj columns -- ",
-          "significance columns will be all-NA.")
-  gene_dedup <- tibble(Gene = character(), gene_caas_pperm = numeric(), gene_caas_pperm_adj = numeric())
-} else {
-  gene_dedup <- gene_scores %>%
-    distinct(Gene, gene_caas_pperm, gene_caas_pperm_adj)
-}
-
-meta_caas <- meta_caas %>%
-  left_join(gene_dedup, by = "Gene") %>%
-  mutate(
-    gene_significant_raw = !is.na(gene_caas_pperm) & gene_caas_pperm <= p_emp_thr,
-    gene_significant_adj = !is.na(gene_caas_pperm_adj) & gene_caas_pperm_adj <= p_emp_thr,
-    gene_significant     = gene_significant_adj
-  )
-
-.n_genes_meta <- n_distinct(meta_caas$Gene)
-.n_genes_matched <- meta_caas %>% filter(!is.na(gene_caas_pperm)) %>% distinct(Gene) %>% nrow()
-.gene_rate <- if (.n_genes_meta > 0) .n_genes_matched / .n_genes_meta else 0
-cat(sprintf("  gene_caas_pperm gene join: matched %d/%d genes (%.1f%%)\n",
-            .n_genes_matched, .n_genes_meta, 100 * .gene_rate))
-if (.gene_rate < 0.5) {
-  cat(sprintf(paste0("  WARNING: gene_caas_pperm join rate %.1f%% < 50%% -- the meta_caas ",
-                     "genes and gene_scores.tsv genes are likely from different pipeline runs. ",
-                     "Treat gene_significant as unreliable.\n"), 100 * .gene_rate), file = stderr())
-}
-```
-
-## 3. Prioritization summary by `r type_label`
-
-**This is a prioritization summary, not a hypothesis test.**
-We report, per `r tolower(type_label)` (and per caap_group when present), simple descriptive
-counts driven by both uncorrected (`p.emp <= `r p_emp_thr``, `gene_caas_pperm <= `r p_emp_thr``)
-and BH-adjusted thresholds (`p.adj_bh <= `r p_emp_thr``, `gene_caas_pperm_adj <= `r p_emp_thr``),
-along with the single most extreme drivers (`min_p_emp`, `min_p_adj_bh`) -- never a combined test statistic.
-`position_significant` follows BH.
+Descriptive summary per `r tolower(type_label)` (and per caap_group when present): number of positions, how many
+have a p-value, how many sit at the `p.emp` floor, the smallest p-values and the median of `p.emp_fact`. These are
+not tests and no group-level statistic is combined from them.
 
 ```{r pattern_summary_table, results='asis'}
 group_vars <- c()
@@ -276,94 +222,71 @@ if (has_caap_group) group_vars <- c(group_vars, "caap_group")
 if (!is.null(type_col)) group_vars <- c(group_vars, type_col)
 if (length(group_vars) == 0) group_vars <- "Gene"
 
+.min_na <- function(x) { m <- suppressWarnings(min(x, na.rm = TRUE)); if (is.infinite(m)) NA_real_ else m }
+.med_na <- function(x) if (all(is.na(x))) NA_real_ else median(x, na.rm = TRUE)
+
 pattern_summary <- meta_caas %>%
   group_by(across(all_of(group_vars))) %>%
   summarize(
     n_positions = n(),
-    n_positions_significant_raw = sum(position_significant_raw, na.rm = TRUE),
-    pct_positions_significant_raw = 100 * n_positions_significant_raw / n_positions,
-    n_positions_significant_bh = sum(position_significant_bh, na.rm = TRUE),
-    pct_positions_significant_bh = 100 * n_positions_significant_bh / n_positions,
-    n_positions_significant_bh_fact = sum(position_significant_bh_fact, na.rm = TRUE),
-    min_p_emp = suppressWarnings(min(p.emp, na.rm = TRUE)),
-    min_p_adj_bh = suppressWarnings(min(p.adj_bh, na.rm = TRUE)),
-    min_p_emp_fact = suppressWarnings(min(p.emp_fact, na.rm = TRUE)),
-    min_p_adj_bh_fact = suppressWarnings(min(p.adj_bh_fact, na.rm = TRUE)),
+    n_positions_with_p = sum(!is.na(p.emp)),
+    n_at_p_emp_floor = sum(!is.na(p.emp) & p.emp <= .p_floor * (1 + 1e-9)),
+    min_p_emp = .min_na(p.emp),               median_p_emp = .med_na(p.emp),
+    min_p_adj_bh = .min_na(p.adj_bh),         median_p_adj_bh = .med_na(p.adj_bh),
+    min_p_emp_fact = .min_na(p.emp_fact),     median_p_emp_fact = .med_na(p.emp_fact),
+    min_p_adj_bh_fact = .min_na(p.adj_bh_fact), median_p_adj_bh_fact = .med_na(p.adj_bh_fact),
     n_genes = n_distinct(Gene),
-    n_genes_significant_raw = n_distinct(Gene[gene_significant_raw %in% TRUE]),
-    pct_genes_significant_raw = 100 * n_genes_significant_raw / n_genes,
-    n_genes_significant_adj = n_distinct(Gene[gene_significant_adj %in% TRUE]),
-    pct_genes_significant_adj = 100 * n_genes_significant_adj / n_genes,
     .groups = "drop"
-  ) %>%
-  mutate(
-    min_p_emp = ifelse(is.infinite(min_p_emp), NA_real_, min_p_emp),
-    min_p_adj_bh = ifelse(is.infinite(min_p_adj_bh), NA_real_, min_p_adj_bh),
-    min_p_emp_fact = ifelse(is.infinite(min_p_emp_fact), NA_real_, min_p_emp_fact),
-    min_p_adj_bh_fact = ifelse(is.infinite(min_p_adj_bh_fact), NA_real_, min_p_adj_bh_fact)
   ) %>%
   arrange(across(all_of(group_vars)))
 
-kable(pattern_summary %>% mutate(min_p_emp = .fmt_p(min_p_emp)), digits = 4, format.args = list(big.mark = ",")) %>%
+kable(pattern_summary %>% mutate(min_p_emp = .fmt_p(min_p_emp), median_p_emp = .fmt_p(median_p_emp)),
+      digits = 4, format.args = list(big.mark = ",")) %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
 ```
 
-```{r pattern_summary_plot}
+```{r pattern_summary_plot, fig.height=8}
 x_col <- if (!is.null(type_col)) type_col else "Gene"
 
-plot_df_stacked <- pattern_summary %>%
+plot_df <- meta_caas %>%
+  select(all_of(c(x_col, if (has_caap_group) "caap_group")), p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact) %>%
+  pivot_longer(c(p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact), names_to = "p_value", values_to = "p") %>%
+  filter(!is.na(p)) %>%
   mutate(
-    n_nonsig_raw = n_positions - n_positions_significant_raw,
-    n_nonsig_bh = n_positions - n_positions_significant_bh
-  ) %>%
-  select(
-    all_of(group_vars),
-    `Uncorrected (p.emp): Significant` = n_positions_significant_raw,
-    `Uncorrected (p.emp): Non-significant` = n_nonsig_raw,
-    `BH (p.adj_bh): Significant` = n_positions_significant_bh,
-    `BH (p.adj_bh): Non-significant` = n_nonsig_bh
-  ) %>%
-  pivot_longer(
-    cols = -all_of(group_vars),
-    names_to = c("correction", "status"),
-    names_sep = ": ",
-    values_to = "n_positions_count"
-  ) %>%
-  mutate(
-    status = factor(status, levels = c("Non-significant", "Significant")),
-    correction = factor(correction, levels = c("Uncorrected (p.emp)", "BH (p.adj_bh)"))
+    neg_log10_p = -log10(pmax(p, 1e-300)),
+    p_value = factor(p_value, levels = c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact"))
   )
 
-p_counts_sig <- ggplot(plot_df_stacked, aes(x = factor(.data[[x_col]]), y = n_positions_count, fill = status)) +
-  geom_bar(stat = "identity", position = "stack", width = 0.7) +
-  facet_grid(if (has_caap_group) caap_group ~ correction else ~ correction, scales = "free_y") +
-  scale_fill_manual(values = c("Significant" = "#59A14F", "Non-significant" = "#BAB0AC")) +
-  theme_minimal() +
-  labs(
-    title = sprintf("Position Significance Counts by %s", type_label),
-    subtitle = sprintf("Uncorrected (p.emp <= %s) and BH-adjusted (p.adj_bh <= %s) significant and non-significant counts", p_emp_thr, p_emp_thr),
-    x = type_label,
-    y = "Number of positions",
-    fill = "Status"
-  ) +
-  theme(
-    axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
-    axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
-    plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
-    axis.text.x = element_text(angle = 0, hjust = 0.5),
-    panel.grid.major = element_line(color = "darkgray", linewidth = 0.3),
-    legend.position = "bottom"
-  )
-
-print(p_counts_sig)
+if (nrow(plot_df) > 0) {
+  p_box <- ggplot(plot_df, aes(x = factor(.data[[x_col]]), y = neg_log10_p)) +
+    geom_boxplot(fill = "#BAB0AC", outlier.size = 0.8) +
+    theme_minimal() +
+    labs(
+      title = sprintf("Position p-values by %s", type_label),
+      subtitle = "Empirical p (p.emp), factorized p (p.emp_fact) and their Benjamini-Hochberg adjustments (p.adj_bh, p.adj_bh_fact)",
+      x = type_label,
+      y = "-log10(p)"
+    ) +
+    theme(
+      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
+      plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+      axis.text.x = element_text(angle = 0, hjust = 0.5),
+      panel.grid.major = element_line(color = "darkgray", linewidth = 0.3)
+    )
+  p_box <- if (has_caap_group) p_box + facet_grid(caap_group ~ p_value, scales = "free_y") else p_box + facet_wrap(~ p_value, scales = "free_y")
+  print(p_box)
+} else {
+  cat("No p-values to plot.\n")
+}
 ```
 
-## 4. Row-level significance table
+## 4. Row-level p-value table
 
 ```{r rowlevel_table}
 key_cols <- intersect(
   c("Gene", "Position", "caap_group", "convergence_type", "pattern", "side",
-    "p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact", "position_significant", "gene_caas_pperm", "gene_caas_pperm_adj"),
+    "p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact"),
   names(meta_caas)
 )
 other_cols <- setdiff(names(meta_caas), key_cols)
@@ -379,7 +302,7 @@ if (requireNamespace("DT", quietly = TRUE)) {
     options = list(pageLength = 15, scrollX = TRUE, autoWidth = TRUE),
     caption = htmltools::tags$caption(
       style = "caption-side: top; text-align: left; font-weight: bold;",
-      sprintf("Row-level CAAS significance annotations (%d total positions; full table exported to significance/meta_caas_significance.tsv)", nrow(meta_caas))
+      sprintf("Row-level CAAS position p-values (%d total positions; full table exported to significance/meta_caas_significance.tsv)", nrow(meta_caas))
     )
   )
 } else {
@@ -404,11 +327,9 @@ cat(sprintf("Wrote %s (%d rows)\n", file.path(sig_dir, "pattern_significance_sum
 
 ## Summary
 
-This report annotates the CAAS positions evaluated by SCORING with
-permulation-null significance columns, reporting both uncorrected (`p.emp`,
-`gene_caas_pperm`) and BH-adjusted (`p.adj_bh`, `gene_caas_pperm_adj`)
-values thresholded at `p_emp_thr = `r p_emp_thr``. Group-level numbers are a prioritization
-summary (counts and rates), not a combined hypothesis test.
+This report annotates the CAAS positions evaluated by SCORING with their empirical position p-values (`p.emp`,
+`p.emp_fact`) and the Benjamini-Hochberg adjustments of both (`p.adj_bh`, `p.adj_bh_fact`). The p-values are
+informative and no threshold is applied. Group-level numbers are descriptive.
 
 ---
 
@@ -419,5 +340,5 @@ sessionInfo()
 ```
 </details>
 
-*Generated by PhyloPhere — CT Meta-CAAS Module (post-SCORING significance annotation)*
+*Generated by PhyloPhere — CT Meta-CAAS Module (post-SCORING position p-value annotation)*
 *Date of generation: `r Sys.Date()`*

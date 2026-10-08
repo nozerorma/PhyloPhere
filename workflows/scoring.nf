@@ -30,11 +30,12 @@ workflow SCORING {
         fade_site_bot_ch         // Channel<path> or null — fade_site_bf_bottom.tsv  (optional)
         cleaned_background_ch    // Channel<path> or null — cleaned_background_main.txt (FCS universe)
         rer_perms_ch             // Channel<path> or null — RER permulation RDS (corStat) for RER FCS p.perm
-        caas_perms_ch            // Channel<path> or null — CAAS permulation RDS (asr + caas null) for FCS p.perm + report
+        caas_perms_ch            // Channel<path> or null — CAAS permulation RDS (asr + caas null) for FCS p.perm
         caas_pos_cycle_caas_ch   // Channel<path> or null — perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator)
         caas_pos_sample_ch       // Channel<path> or null — cycle-stratified per-scheme sample for report distribution plots
         caas_pos_quantiles_ch    // Channel<path> or null — per (cycle,scheme) null distribution shape
         hypotheses_pairs_ch      // Channel<path> or null — contrast_hypotheses_pairs.tsv (FOP domain-pool weights)
+        perm_manifest_ch         // Channel<path> or null — permulation_manifest.tsv (design of the canonical pairs of each null cycle)
 
     main:
         assert params.traitname : "SCORING requires --traitname"
@@ -137,6 +138,18 @@ workflow SCORING {
             resolved_hyp_pairs = Channel.value(auto.exists() ? auto : file('NO_HYP_PAIRS'))
         }
 
+        // Design of the null cycles (permulation_manifest.tsv), for the design panel of the report.
+        // NO_PERM_MANIFEST -> the report omits the panel. --caas_perm_manifest_file overrides.
+        def pm_param = params.caas_perm_manifest_file ?: ''
+        def resolved_perm_manifest
+        if (pm_param && file(pm_param).exists()) {
+            resolved_perm_manifest = Channel.value(file(pm_param))
+        } else if (perm_manifest_ch != null) {
+            resolved_perm_manifest = perm_manifest_ch.ifEmpty(file('NO_PERM_MANIFEST')).first()
+        } else {
+            resolved_perm_manifest = Channel.value(file('NO_PERM_MANIFEST'))
+        }
+
         // CAAS permulation null (corStat_byrank rds) — resolved ONCE, before
         // SCORING_COMPUTE, so both it (Tier 1A per-gene p.perm) and the scoring
         // report / FCS report (p.perm) consume the SAME null. Hoisted above the
@@ -227,20 +240,16 @@ workflow SCORING {
             resolved_fade_site_top_ch,
             resolved_fade_site_bot_ch,
             resolved_genomic_info,
-            caas_perms_resolved,
+            caas_pos_cycle_caas_resolved,
             caas_pos_sample_resolved,
             caas_pos_quantiles_resolved,
             resolved_postproc,
-            resolved_background
+            resolved_background,
+            resolved_perm_manifest,
+            resolved_hyp_pairs
         )
 
         def final_reports = report_out.report
-
-        // The null the pathway tests (FCS) consume. With fcs_caas_score = fact it is the null rebuilt on the scale of the
-        // factorized gene p (SCORING_COMPUTE, caas_perms_fcs.rds); otherwise the null resolved above.
-        def caas_perms_fcs = ((params.fcs_caas_score ?: 'raw') == 'fact')
-            ? compute_out.caas_perms_fcs.ifEmpty { file('NO_FILE') }.collect().map { it[0] }
-            : caas_perms_resolved
 
     emit:
         position_scores  = compute_out.position_scores
@@ -257,5 +266,5 @@ workflow SCORING {
         // one, not re-resolve from params, or its FCS p.perm would fall back to the
         // cached (possibly stale) caas_perms.rds while the scoring report used the
         // rebuilt one — two different nulls in the same run.
-        caas_perms       = caas_perms_fcs
+        caas_perms       = caas_perms_resolved
 }

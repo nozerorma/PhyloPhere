@@ -75,8 +75,8 @@ process CAAS_META_CAAS_REPORT {
 // ── Significance report ──────────────────────────────────────────────────────
 
 // Renders 16.CAAS_significance_report.Rmd; called from main.nf. It runs after SCORING, because it joins the
-// p.emp / p.adj_bh of position_scores.tsv and the gene_caas_pperm / gene_caas_pperm_adj of
-// gene_scores.tsv onto the CAAS table; the join logic is in the Rmd. Not to be confused with
+// p.emp, p.adj_bh, p.emp_fact and p.adj_bh_fact of position_scores.tsv onto the CAAS table; the join logic is in
+// the Rmd. The p-values are informative and no threshold is applied. Not to be confused with
 // CAAS_META_CAAS_REPORT, which runs upstream of SCORING.
 process CAAS_SIGNIFICANCE_REPORT {
     label 'process_reporting'
@@ -86,7 +86,6 @@ process CAAS_SIGNIFICANCE_REPORT {
     input:
     path global_meta_caas
     path position_scores
-    path gene_scores
 
     output:
     path "*.html", emit: report
@@ -109,9 +108,7 @@ process CAAS_SIGNIFICANCE_REPORT {
                 params = list(
                     global_meta_input = '${global_meta_caas}',
                     position_scores_input = '${position_scores}',
-                    gene_scores_input = '${gene_scores}',
                     output_dir = '${outdir}',
-                    p_emp_thr = ${params.scoring_p_emp_thr ?: 0.05},
                     seed = '${params.seed ?: 1998}'
                 ),
                 output_file = '16.CAAS_significance_report.html'
@@ -129,9 +126,7 @@ process CAAS_SIGNIFICANCE_REPORT {
                 params = list(
                     global_meta_input = '${global_meta_caas}',
                     position_scores_input = '${position_scores}',
-                    gene_scores_input = '${gene_scores}',
                     output_dir = '${outdir}',
-                    p_emp_thr = ${params.scoring_p_emp_thr ?: 0.05},
                     seed = '${params.seed ?: 1998}'
                 ),
                 output_file = '16.CAAS_significance_report.html'

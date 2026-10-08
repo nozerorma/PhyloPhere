@@ -65,6 +65,7 @@ workflow CT {
         def caas_align_tuple_out = Channel.empty()
         def caas_resample_subset_out = Channel.empty()
         def caas_fop_pairs_out = Channel.value(file('NO_FOP_PAIRS'))
+        def perm_resample_dir_out = Channel.empty()
         def tree_file_emit = Channel.empty()
         
     if (params.ct_tool) {
@@ -145,6 +146,7 @@ workflow CT {
             // resample_dir_out keeps the directory: the permulation core takes the partitioned
             // resample_NNN.tab files, not the concatenated file.
         }
+        perm_resample_dir_out = resample_dir_out
         // Permulation core: b_0 and the first N permuted labelings are subset here; CAAS_CORE (main.nf)
         // replays them over the alignments in align_tuple. Discovery is the b_0 slice of that replay,
         // so it needs the labelings too.
@@ -166,4 +168,6 @@ workflow CT {
         caas_align_tuple = caas_align_tuple_out
         caas_resample_subset = caas_resample_subset_out
         caas_fop_pairs = caas_fop_pairs_out
+        // Directory of the harvest (resample_NNN.tab and permulation_manifest.tsv); empty when no harvest ran.
+        resample_dir = perm_resample_dir_out
 }

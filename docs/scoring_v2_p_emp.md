@@ -127,7 +127,9 @@ p.emp_fact = (nd + 1) / (N + 1)  ×  (1 + #{detecciones de la clase con score >=
   las `FACT_PROP_CLASSES` = 20 clases reúne en torno a 1/20 de todas las detecciones (pares
   posición-ciclo con score), y las posiciones con el mismo `nd` no se parten, de modo que una
   clase puede tener más. La posición que ningún ciclo puntúa va a la primera clase. Los cortes
-  salen del propio nulo, sin valores fijados a mano. Agrupar posiciones de propensión distinta no es válido: las
+  salen del propio nulo, sin valores fijados a mano. La posición observada cuenta como una
+  detección más de sí misma, de modo que se clasifica por `nd + 1`, el número de detecciones
+  que tiene una posición de su clase en la reserva. Agrupar posiciones de propensión distinta no es válido: las
   que el nulo puntúa a menudo también alcanzan scores altos más a menudo por azar.
 - Un score observado 0 da `p.emp_fact = 1`. Donde el guard de coordenadas deja `p.emp` en
   NA, `p.emp_fact` también.
@@ -173,51 +175,31 @@ concentran en las posiciones que el nulo detecta muchas veces, y su valor
 depende de la elección entre media y mediana del número de falsos y de cómo se
 fija el corte. Las afirmaciones por posición descansan en `p.emp`.
 
-### 3.3 Umbral
+### 3.3 Uso de los p-valores
 
-`scoring_p_emp_thr` (por defecto 0.05, `conf/scoring.config`) se aplica a
-`p.adj_bh` en los informes. `position_significant` en los informes 15 y 16
-sigue a `p.adj_bh`. El mismo parámetro controla `gene_caas_pperm_adj`. Ninguno filtra `position_scores.tsv`.
+`p.emp`, `p.emp_fact` y sus ajustes `p.adj_bh` y `p.adj_bh_fact` son informativos: se reportan tal cual,
+cada uno a su nivel, y no se deriva de ellos ningún umbral ni columna de significatividad. Los informes
+muestran los cuatro. Ninguno filtra `position_scores.tsv`.
 
 ---
 
-## 4. Relación con los p-valores de gen
+## 4. Nivel de gen
 
 | | detección / conteo | detección + score |
 |---|---|---|
 | **posición** | | `p.emp` / `p.adj_bh`, `p.emp_fact` / `p.adj_bh_fact` |
-| **gen** | `accum_cct_p` / `accum_fdr` (§4b) | `gene_caas_pperm(_adj)`, `gene_caas_pperm_fact(_adj)` (§4f) |
+| **gen** | `accum_cct_p` / `accum_fdr` (§4b) | (sin p de gen) |
 
-- **`gene_caas_pperm` (§4f).** Estadístico `size_adj_max = F(max)^n` sobre los
-  `CAAS_score` de las posiciones del gen, contra su fila en
-  `caas_corStat_byrank` (`scoring_caas_perms.R`); add-one, cola derecha, BH
-  dentro de cada dirección sobre todo el universo del nulo (los genes sin score
-  observado, con `p = 1`, como la familia de posiciones de §3.1). No tiene compuerta de detección: la no detección
-  entra como ceros estructurales de `gene_cycle_scores.tsv`. El guard numérico
-  de §4 mantiene `size_adj_max` (R) y `_size_adj_max_null` (Python) idénticos.
-- **`gene_caas_pperm_fact` (§4f).** La misma factorización sobre el estadístico del gen:
-  `(ciclos que puntúan el gen + 1)/(N + 1)` por la fracción de detecciones de los genes de
-  su clase con estadístico ≥ el observado. Dado que el gen puntúa, `size_adj_max` es una
-  transformación integral de probabilidad y es casi uniforme, de modo que genes de
-  distinto `n` comparten reserva dentro de una clase. La clase combina la propensión del
-  gen (ciclos que lo puntúan, en 20 percentiles de las detecciones como en las posiciones) y su
-  tamaño (posiciones de su familia, en 4 percentiles de las detecciones); una celda
-  propensión × tamaño con menos de 200 detecciones se junta con las demás celdas pequeñas de
-  su propensión. Se calcula por dirección (global, top, bottom) con su propia matriz
-  nula y su BH (`_fact_adj*`) sobre el universo del nulo de la dirección, con los genes
-  sin score en `p = 1`. Un score 0 da `p = 1`.
+- **Sin p de gen del CAAS.** El CAAS se contrasta a nivel de posición. El gen lleva
+  `gene_caas_score` (`size_adj_max = F(max)^n` sobre los `CAAS_score` de sus posiciones, calculado una
+  vez por `core.scores` y reproducido por `_size_adj_max_null` en el nulo), que es el ranking que entra al
+  enriquecimiento (FCS) con su nulo por permulación en la misma escala (`caas_perms.rds`,
+  `scoring_caas_perms.R`).
 - **`accum_cct_p` (§4b).** Conteo de posiciones detectadas por gen y esquema,
   combinado con Cauchy (CCT/ACAT). Con `accumulation_randomization_type =
   "cons_decile"` (por defecto) su nulo es de ocupación por deciles de
   conservación y no controla la relación árbol-fenotipo; con `"permulation"`
-  lee el mismo `perm_pos_detail/` que §4f.
-- **§4f y §4b son dos ejes y no se combinan.** Responden a preguntas distintas
-  (magnitud de la mejor posición frente a número de posiciones) y, en el modo
-  por defecto, con nulos distintos.
-- **`p.emp` y `gene_caas_pperm` no son evidencia independiente para un mismo
-  locus.** `gene_caas_pperm` es función de los mismos scores nulos de posición
-  que alimentan `p.emp`; un gen significativo y una posición significativa
-  dentro de él son una sola línea de evidencia a dos resoluciones.
+  lee `perm_pos_detail/`.
 
 ---
 
@@ -247,15 +229,6 @@ Resultados en `validation/tier1/reports/pepc_genotypic_vs_phenotypic.md` §6.
 - **Familia de BH (§3.1).** m depende de qué columnas alcanzó la muestra finita
   del nulo. En los controles negativos el ritmo de falsos positivos por
   ejecución es nominal, pero el mecanismo existe.
-- **Calibración condicional por propensión.** Con las clases por percentiles, la fracción de
-  detecciones del nulo con S ≤ u (S = segundo factor) tomando cada ciclo como observado frente
-  a los demás debería valer u. En el nulo de Carn (agregación `mean`, N = 1000, 100 652
-  posiciones, 375 061 detecciones) se cumple dentro de ±10 % (u ≥ 0.01) para `nd` de 3 a 57, salvo
-  `nd` de 5-6 a u = 0.01 (+19 %); queda exacta para `nd` = 0 y liberal para `nd` = 1 y 2 (+17 a
-  +25 % a u = 0.01 y 0.05). La última clase (`nd` ≥ 58, 53 posiciones en Carn) mezcla un tramo
-  conservador (58 a 100: 0.8) y otro liberal (101 a 220: 1.26 a u = 0.01 y 0.05), de modo que
-  los p de las posiciones muy puntuadas por el nulo no se pueden leer a su valor nominal. Las
-  posiciones con BH ≤ 0.05 en ese run son todas de `nd` ≤ 5.
 - **Exceso en la cola de `p.emp`** en los controles negativos (§5), de causa no
   identificada. `p.emp_fact` lo hereda: en los controles de PEPC el número de posiciones con
   p ≤ 0.01 es de 11 a 13 frente a 5.2 esperadas como máximo (mismo orden que `p.emp`: 14).

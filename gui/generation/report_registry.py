@@ -323,7 +323,6 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"caas_pos_quantiles_file = {_r_arg(s['caas_pos_quantiles'])}",
             f"filtered_discovery_file = {_r_arg(s['filtered_discovery'])}",
             f"background_file      = {_r_arg(s['background_file'])}",
-            "scoring_p_emp_thr    = 0.05",
             "window_size_bp       = 1000000",
             "direction            = 'combined'",
             "seed                 = '1998'",
@@ -609,8 +608,6 @@ def _signif_significance_find_slots(outdir: Listing) -> list[InputSlot]:
     )
     slots.append(_slot("position_scores_input", "Position scores TSV", True,
                         _first_match(scoring, "position_scores.tsv")))
-    slots.append(_slot("gene_scores_input", "Gene scores TSV", True,
-                        _first_match(scoring, "gene_scores.tsv")))
     return slots
 
 
@@ -622,9 +619,7 @@ def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, us
         [
             f"global_meta_input = '{s['global_meta_input']}'",
             f"position_scores_input = '{s['position_scores_input']}'",
-            f"gene_scores_input = '{s['gene_scores_input']}'",
             "output_dir = '.'",
-            "p_emp_thr = 0.1",
             "seed = '1998'",
         ],
         output_file,
@@ -641,7 +636,7 @@ def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, us
     )
 
 
-# ── ASR_ROBUSTNESS ────────────────────────────────────────────────────────────
+# ── ASR_DIAGNOSTICS ────────────────────────────────────────────────────────────
 
 
 def _asr_find_slots(outdir: Listing) -> list[InputSlot]:
@@ -653,24 +648,23 @@ def _asr_find_slots(outdir: Listing) -> list[InputSlot]:
 
 def _asr_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
-    output_file = "9.ASR_robustness.html"
+    output_file = "9.ASR_diagnostics.html"
     render = _render_call(
-        "9.ASR_robustness.Rmd",
+        "9.ASR_diagnostics.Rmd",
         [
             f"disambig_dir        = '{s['disambig_dir']}'",
-            "posterior_threshold = 0.8",
             "output_dir          = '.'",
         ],
         output_file,
     )
     return _wrap_script(
-        header_comment="ASR_ROBUSTNESS — 9.ASR_robustness.Rmd",
+        header_comment="ASR_DIAGNOSTICS — 9.ASR_diagnostics.Rmd",
         repo_dir=repo_dir,
-        local_dir="subworkflows/ASR_ROBUSTNESS/local",
+        local_dir="subworkflows/ASR_DIAGNOSTICS/local",
         pre_lines=[],
         render_block=render,
         output_file=output_file,
-        publish_targets=[report.html_path.parent.parent / "asr_robustness", report.html_path.parent],
+        publish_targets=[report.html_path.parent.parent / "asr_diagnostics", report.html_path.parent],
         use_singularity=use_singularity,
     )
 
@@ -835,7 +829,6 @@ def _ami_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
             "species             = 9606",
             "domino_network_score_thr = 700",
             f"gene_scores_file    = {_r_arg(s['gene_scores'])}",
-            "scoring_p_emp_thr   = 0.1",
             "string_db_dir       = NULL",
             f"domino_network_sif  = '{s['domino_network_sif']}'",
             f"domino_modules_dir  = '{s['domino_modules_dir']}'",
@@ -1250,9 +1243,9 @@ REPORTS: list[ReportSpec] = [
         build_script=_signif_significance_build_script,
     ),
     ReportSpec(
-        id="asr_robustness",
-        display_name="ASR_ROBUSTNESS — Robustness report",
-        html_regex=re.compile(r"^9\.ASR_robustness\.html$"),
+        id="asr_diagnostics",
+        display_name="ASR_DIAGNOSTICS — Diagnostics report",
+        html_regex=re.compile(r"^9\.ASR_diagnostics\.html$"),
         find_slots=_asr_find_slots,
         build_script=_asr_build_script,
     ),

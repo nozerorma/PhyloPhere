@@ -478,7 +478,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             // Only wire the background genes when discovery actually ran; otherwise pass null so
             // CT_POSTPROC falls back to the --background_input param.
             def background_genes_ch = core_observed ? core_observed.background_genes : null
-            // Pass full ct_disambiguation/ directory for ASR robustness diagnostics (null = standalone mode)
+            // Pass full ct_disambiguation/ directory for the ASR diagnostics report (null = standalone mode)
             def disambiguation_dir_ch = observed_results ? observed_results.results_dir : null
             // Contrast design (top / bottom species per hypothesis) for the species tally of the position table
             def postproc_hyp_pairs_ch = contrast_out
@@ -711,9 +711,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // CAAS_PERMS_PREP and CAAS_CORE.
 
 
-        if (!((params.fcs_caas_score ?: 'raw') in ['raw', 'fact'])) {
-            error "fcs_caas_score must be 'raw' or 'fact', not '${params.fcs_caas_score}'."
-        }
         if (!((params.caas_score_aggregation ?: 'cumulative') in ['mean', 'cumulative'])) {
             error "caas_score_aggregation must be 'mean' or 'cumulative', not '${params.caas_score_aggregation}'."
         }
@@ -766,6 +763,15 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                       }
                 : null
 
+            // permulation_manifest.tsv of the harvest: design (distance, PSS, difference) of the canonical
+            // pairs of every null cycle, for the design panel of the scoring report.
+            def scoring_perm_manifest_ch = (ct_results && ct_results.resample_dir)
+                ? ct_results.resample_dir.map { d ->
+                      def f = d ? file("${d}/permulation_manifest.tsv") : null
+                      (f && f.exists()) ? f : file('NO_PERM_MANIFEST')
+                  }
+                : null
+
             SCORING(
                 scoring_postproc_ch,
                 scoring_fade_top_ch,
@@ -781,7 +787,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 scoring_caas_pos_cycle_caas_ch, // per (gene,position,side,cycle) caas_score → p.emp
                 scoring_caas_pos_sample_ch,  // cycle-stratified sample for report distribution plots
                 scoring_caas_pos_quantiles_ch, // per (cycle,scheme) null distribution shape
-                scoring_hyp_pairs_ch           // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
+                scoring_hyp_pairs_ch,          // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
+                scoring_perm_manifest_ch       // permulation_manifest.tsv — design of the null cycles (report panel)
             )
             ran_any = true
 
@@ -798,8 +805,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             // CAAS_SIGNIFICANCE_REPORT: a DISTINCT, LATER stage than
             // CAAS_META_CAAS_REPORT (run above inside the run_meta_caas
             // block). It must run after SCORING because it joins
-            // position_scores.tsv (p.emp/p.adj_bh) and gene_scores.tsv
-            // (gene_caas_pperm/gene_caas_pperm_adj) onto the postproc-filtered
+            // position_scores.tsv (p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact) onto the postproc-filtered
             // discovery table (the exact pooled dataset evaluated by SCORING),
             // with fallback to CT_META_CAAS's global_meta_caas.tsv when standalone.
             if (params.scoring) {
@@ -813,8 +819,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 if (signif_caas_upstream) {
                     CAAS_SIGNIFICANCE_REPORT(
                         signif_caas_upstream,
-                        SCORING.out.position_scores,
-                        SCORING.out.gene_scores
+                        SCORING.out.position_scores
                     )
                     ran_any = true
                 }

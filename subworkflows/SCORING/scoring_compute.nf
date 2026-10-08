@@ -39,9 +39,6 @@ process SCORING_COMPUTE {
                pattern: '*.tsv'
     publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
-               pattern: 'caas_perms_fcs.rds'
-    publishDir path: "${params.outdir}/scoring",
-               mode: 'copy', overwrite: true,
                pattern: 'gene_lists'
     publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
@@ -56,14 +53,13 @@ process SCORING_COMPUTE {
     path rer_summary
     path accum_files
     path hypotheses_pairs   // optional: contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS sentinel otherwise
-    path caas_perms         // optional: caas_perms.rds, the gene-level permulation null; NO_FILE sentinel otherwise
+    path caas_perms         // optional: caas_perms.rds; its cycle roster gives N for the position p; NO_FILE sentinel otherwise
     path caas_pos_cycle_caas // optional: perm_pos_cycle_caas.tsv.gz, the position-level null for p.emp; NO_FILE sentinel otherwise
 
     output:
     path "position_scores.tsv",                              emit: position_scores
     path "gene_scores.tsv",                                  emit: gene_scores
     path "fcs_stats.tsv",                                    emit: fcs_stats
-    path "caas_perms_fcs.rds",                         optional: true, emit: caas_perms_fcs
     path "fcs_stats_rer.tsv",                          optional: true, emit: fcs_stats_rer
     path "fcs_stats_fade.tsv",                         optional: true, emit: fcs_stats_fade
     path "fcs_stats_accum.tsv",                        optional: true, emit: fcs_stats_accum
@@ -86,7 +82,6 @@ process SCORING_COMPUTE {
     def hp_arg            = hypotheses_pairs.name =~ /^NO_/ ? 'NO_HYP_PAIRS' : "${hypotheses_pairs}"
     def cp_arg            = caas_perms.name =~ /^NO_/ ? 'NO_FILE' : "${caas_perms}"
     def cpcc_arg          = caas_pos_cycle_caas.name =~ /^NO_/ ? 'NO_FILE' : "${caas_pos_cycle_caas}"
-    def fcs_score_mode    = params.fcs_caas_score ?: 'raw'   // what the CAAS rankings of the FCS hold: gene_caas_score or -log10 of the factorized gene p
     def score_agg         = params.caas_score_aggregation ?: 'cumulative'   // scheme aggregation of the position score; the null must use the same
 
     if (params.use_singularity || params.use_apptainer) {
@@ -114,8 +109,6 @@ process SCORING_COMPUTE {
             --caas_perms      '${cp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
             --score_aggregation '${score_agg}' \
-            --fcs_caas_score '${fcs_score_mode}' \
-            --p_emp_thr             ${params.scoring_p_emp_thr ?: 0.05} \
             --top_pct              ${top_pct} \
             --top25_pct            0.25 \
             --top5_pct             0.05 \
@@ -150,8 +143,6 @@ process SCORING_COMPUTE {
             --caas_perms      '${cp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
             --score_aggregation '${score_agg}' \
-            --fcs_caas_score '${fcs_score_mode}' \
-            --p_emp_thr             ${params.scoring_p_emp_thr ?: 0.05} \
             --top_pct              ${top_pct} \
             --top25_pct            0.25 \
             --top5_pct             0.05 \

@@ -15,8 +15,8 @@ Outputs:    --positions-out  TSV [Gene, Position, side, CAAS_score]; CAAS_score 
                              asr_path_score of the schemes per side: their mean over the schemes that
                              scored the position (--score-aggregation mean) or their sum over the five
                              schemes (cumulative)
-            --genes-out      TSV [Gene, gene_caas_score, gene_caas_score_top_all,
-                             gene_caas_score_bottom_all]; size_adj_max against the pool of the
+            --genes-out      TSV [Gene, gene_caas_score, gene_caas_score_top,
+                             gene_caas_score_bottom]; size_adj_max against the pool of the
                              same direction (all positions of the run), NA when the gene has no
                              scored position in that direction
 
@@ -110,7 +110,7 @@ def main():
         per_gene.setdefault(g, []).append(sides)
     with open(a.genes_out, "w", newline="") as f:
         w = csv.writer(f, delimiter="\t", lineterminator="\n")
-        w.writerow(["Gene", "gene_caas_score", "gene_caas_score_top_all", "gene_caas_score_bottom_all"])
+        w.writerow(["Gene", "gene_caas_score", "gene_caas_score_top", "gene_caas_score_bottom"])
         for g in sorted(per_gene):
             s = gene_scores(per_gene[g], pools)
             w.writerow([g, _fmt(s["all"]), _fmt(s["top"]), _fmt(s["bottom"])])
