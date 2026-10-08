@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Two Tier 1 PEPC runs of the same trait, compared at the position level.
 
-For each trait it reports the headline counts of `scoring/position_scores.tsv` (rows, positions, p.emp < 0.05, BH and SAM
-counts), the positions held by only one run, how far the scores and the empirical p-values of the shared positions are apart,
+For each trait it reports the headline counts of `scoring/position_scores.tsv` (rows, positions, p.emp and p.emp_fact < 0.05,
+BH counts of both), the positions held by only one run, how far the scores and the empirical p-values of the shared positions are apart,
 the 10 truth-set sites side by side, and the cycles of the permulation null each run holds. Exit code 1 when `--require-equal`
 is given and the runs differ beyond `--tol`.
 
@@ -21,15 +21,22 @@ TRAITS = ("c4", "c4_phenotypic")
 
 
 def positions(results, trait):
-    """Per position: best score over the sides, smallest p.emp, smallest adjusted p-values (position_scores.tsv)."""
+    """Per position: best score over the sides, smallest p.emp and factorized p, smallest adjusted p-values (position_scores.tsv).
+
+    A column the table lacks (a run without the factorized p) is read as missing."""
     d = pd.read_csv(Path(results) / f"{trait}_complete/scoring/position_scores.tsv", sep="\t", keep_default_na=False, na_values=["NA"])
-    u = d.groupby("Position").agg(score=("CAAS_score", "max"), p=("p.emp", "min"), bh=("p.adj_bh", "min"), sam=("p.adj_sam", "min"))
+    for c in ("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact"):
+        if c not in d:
+            d[c] = float("nan")
+    u = d.groupby("Position").agg(score=("CAAS_score", "max"), p=("p.emp", "min"), bh=("p.adj_bh", "min"), pf=("p.emp_fact", "min"),
+                                  bhf=("p.adj_bh_fact", "min"))
     return d, u
 
 
 def headline(d, u):
-    return {"rows": len(d), "positions": len(u), "p.emp < 0.05": int((u.p < .05).sum()), "BH < 0.05": int((u.bh < .05).sum()), "BH < 0.1": int((u.bh < .1).sum()),
-            "SAM < 0.05": int((u.sam < .05).sum()), "SAM < 0.1": int((u.sam < .1).sum())}
+    return {"rows": len(d), "positions": len(u), "p.emp < 0.05": int((u.p < .05).sum()), "p.emp_fact < 0.05": int((u.pf < .05).sum()),
+            "BH < 0.05": int((u.bh < .05).sum()), "BH < 0.1": int((u.bh < .1).sum()),
+            "BH_fact < 0.05": int((u.bhf < .05).sum()), "BH_fact < 0.1": int((u.bhf < .1).sum())}
 
 
 def null_cycles(results, trait):
@@ -43,9 +50,11 @@ def compare(a, b, trait, tol=1e-9):
     out = {"trait": trait, "a": headline(da, ua), "b": headline(db, ub), "only_a": sorted(ua.index.difference(ub.index)), "only_b": sorted(ub.index.difference(ua.index)),
            "n_shared": len(shared), "max_dscore": float((ub.loc[shared, "score"] - ua.loc[shared, "score"]).abs().max()),
            "p_emp_equal": int((ua.loc[shared, "p"] == ub.loc[shared, "p"]).sum()), "max_dp": float((ub.loc[shared, "p"] - ua.loc[shared, "p"]).abs().max()),
-           "max_dadj": float(max((ub.loc[shared, c] - ua.loc[shared, c]).abs().max() for c in ("bh", "sam"))),
+           "max_dp_fact": float((ub.loc[shared, "pf"] - ua.loc[shared, "pf"]).abs().max()),
+           "max_dadj": float(max((ub.loc[shared, c] - ua.loc[shared, c]).abs().max() for c in ("bh", "bhf"))),
            "cycles_a": null_cycles(a, trait), "cycles_b": null_cycles(b, trait)}
     out["equal"] = (not out["only_a"] and not out["only_b"] and out["max_dscore"] <= tol and out["max_dp"] <= tol and out["max_dadj"] <= tol
+                    and not out["max_dp_fact"] > tol
                     and out["cycles_a"] == out["cycles_b"])
     truth = pd.read_csv(TRUTH, sep="\t", comment="#")
     rows = []
@@ -53,7 +62,8 @@ def compare(a, b, trait, tol=1e-9):
         col = t.position - 1
         cell = lambda u, c: "-" if col not in u.index else f"{u.loc[col, c]:.4g}"
         rows.append({"position": t.position, "change": f"{t.ref_aa}>{t.alt_aa}", "tier": t.tier, "score": (cell(ua, "score"), cell(ub, "score")),
-                     "p.emp": (cell(ua, "p"), cell(ub, "p")), "BH": (cell(ua, "bh"), cell(ub, "bh")), "SAM": (cell(ua, "sam"), cell(ub, "sam"))})
+                     "p.emp": (cell(ua, "p"), cell(ub, "p")), "p.emp_fact": (cell(ua, "pf"), cell(ub, "pf")),
+                     "BH": (cell(ua, "bh"), cell(ub, "bh")), "BH_fact": (cell(ua, "bhf"), cell(ub, "bhf"))})
     out["truth"] = rows
     return out
 
@@ -62,7 +72,8 @@ def show(r):
     print(f"== {r['trait']}")
     print(pd.DataFrame({"a": r["a"], "b": r["b"]}).to_string())
     print(f"positions only in a: {r['only_a']} | only in b: {r['only_b']} | shared: {r['n_shared']}")
-    print(f"shared: max |d score| {r['max_dscore']:.3g}; p.emp equal {r['p_emp_equal']}/{r['n_shared']} (max |d| {r['max_dp']:.3g}); max |d adjusted p| {r['max_dadj']:.3g}")
+    print(f"shared: max |d score| {r['max_dscore']:.3g}; p.emp equal {r['p_emp_equal']}/{r['n_shared']} (max |d| {r['max_dp']:.3g}); max |d p.emp_fact| {r['max_dp_fact']:.3g}; "
+          f"max |d adjusted p| {r['max_dadj']:.3g}")
     print(f"null cycles with a row: a {r['cycles_a']}, b {r['cycles_b']}")
     print(pd.DataFrame(r["truth"]).to_string(index=False))
 

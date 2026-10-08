@@ -22,11 +22,12 @@ All commands start from the repository root.
 
 1. **Build the fixture.** `python3 validation/tier1/input/pepc/scripts/build.py`, then `build_cds.py` for the codon alignment. The built files are ignored by git and rebuilt by these scripts.
 2. **Render the run scripts.** `python3 validation/tier1/scripts/render_tier1_scripts.py --template gui/templates/tier1_pepc_c4.json --outdir validation/tier1/output/<run> --evidence-top-n 30` writes the scripts of the GUI template into a fresh directory, with new results, work and ASR-cache directories, so a rerun never reuses an earlier run.
-3. **Run them.** Locally with `bash`, or on a cluster with `sbatch`.
+3. **Run them.** Copy the two generated scripts to the repository root (`/run_*.sh` is git-ignored): the batch script looks for the single-trait script there, and the latter takes its `REPO_DIR` (`main.nf`, `bin/`) from its own location. Then run the batch script locally with `bash`, or on a cluster with `sbatch`, from `output/<run>/` so that `run.log`, `started.at` and `exit.code` stay with the run.
 4. **Compare runs.** `python3 validation/tier1/scripts/compare_pepc_runs.py --a <results A> --b <results B> --require-equal` reports the positions, scores and empirical p-values of two runs of the same trait, the ten truth sites side by side and the cycles of the permulation null each run holds. It exits with 1 when the runs differ beyond `--tol`.
-5. **Resource report.** `pepc_resources_tables.py` prints the tables of `tier1/reports/pepc_resources.md` from the trace and log files a run leaves behind.
-6. **Independent check.** `tier1/input/pepc/scripts/run_ortholog_characterizator.sh` runs `ortholog_characterizator` (FUBAR and MEME) on the codon alignment, which gives a positive-selection call set that does not depend on PhyloPhere.
-7. **Negative controls.** The 20 controls of `tier1/previous_work/input/pepc_negctrl/` were run with the previous pipeline and have not been repeated with the current one; `previous_work/README.md` says how to repeat them.
+5. **Position tables and calibration.** `python3 validation/tier1/scripts/pepc_pvalue_tables.py --results <results> [--previous <dir>]` prints the truth-set table, the tail counts of `p.emp` and `p.emp_fact`, the null of each truth site and the multiple-testing families, and compares with the position tables of another run. `Rscript validation/tier1/scripts/pepc_null_calibration.R <results>/<trait>_complete <out_prefix>` takes each null cycle as observed data against the others, with the `.fact_*` functions of `scoring_compute.R`, and writes the share of (position, cycle) pairs with p <= alpha by propensity class and the share of cycles with at least one adjusted call.
+6. **Resource report.** `pepc_resources_tables.py` prints the tables of `tier1/reports/pepc_resources.md` from the trace and log files a run leaves behind.
+7. **Independent check.** `tier1/input/pepc/scripts/run_ortholog_characterizator.sh` runs `ortholog_characterizator` (FUBAR and MEME) on the codon alignment, which gives a positive-selection call set that does not depend on PhyloPhere.
+8. **Negative controls.** The 20 controls of `tier1/previous_work/input/pepc_negctrl/` were run with the previous pipeline and have not been repeated with the current one; `previous_work/README.md` says how to repeat them.
 
 ## What a run covers
 

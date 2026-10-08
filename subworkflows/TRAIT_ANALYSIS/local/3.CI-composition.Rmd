@@ -88,10 +88,11 @@ params:
 ```
 
 # Trait Composition Analysis
-This script computes contrasting species pairs for the trait of interest using one of two methods:
+This script computes contrasting species pairs for the trait of interest. The rule that makes a pair eligible depends on the trait type:
 
-- **Jeffreys CI method** (when `n_trait` and `c_trait` count columns exist): computes 95% credibility intervals using a Beta(0.5,0.5) prior and identifies species pairs whose CIs do not overlap.
-- **Discrete categorization** (fallback when count columns are absent): assigns each species to *top*, *bottom*, or *intermediate* groups using one of several threshold strategies (`quartile`, `quintile`, `decile`, `median_sd`, `parameterized`), and treats top–bottom pairs as non-overlapping.
+- **Count trait** (`n_trait` and `c_trait` columns exist): computes 95% Jeffreys credible intervals with a Beta(0.5, 0.5) prior; a pair is eligible when its intervals do not overlap.
+- **Ordinal trait** (coded levels): the highest level is *top*, the lowest is *bottom* and the levels in between are *intermediate*; a pair is eligible when one species is *top* and the other *bottom*, so intermediate species form no pair.
+- **Continuous trait**: the median splits *top* from *bottom*; a pair is eligible when it falls in the top `pss_top_pct` of the pairs by Phylogenetic Shift Score (PSS).
 
 ---
 

@@ -332,7 +332,7 @@ process {
         cpus   = { 2 }
         memory = { 2.GB * task.attempt }
     }
-    withName: 'ASR_ROBUSTNESS_REPORT' {
+    withName: 'ASR_DIAGNOSTICS_REPORT' {
         cpus   = { 6 }
         memory = { 4.GB * task.attempt }
     }
@@ -511,7 +511,7 @@ _RUN_SCORING="${RUN_SCORING:-true}"
 _RUN_SCORING_STRESS="${RUN_SCORING_STRESS:-true}"
 _RUN_ENRICHMENT="${RUN_ENRICHMENT:-true}"
 _RUN_POSENRICH="${RUN_POSENRICH:-false}"
-_ASR_ROBUSTNESS="${ASR_ROBUSTNESS:-true}"
+_ASR_DIAGNOSTICS="${ASR_DIAGNOSTICS:-true}"
 _TOY_MODE="${TOY_MODE:-false}"
 
 # CAAS: when enabled, pass the tool string; when off, an empty ct_tool disables the
@@ -699,7 +699,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
 
   "ct_disambiguation": $_RUN_DISAMBIGUATION,
   "ct_postproc": $_RUN_CT_POSTPROC,
-  "asr_robustness": $_ASR_ROBUSTNESS,
+  "asr_diagnostics": $_ASR_DIAGNOSTICS,
   "ct_disambig_asr_mode": "$ASR_MODE",
   "ct_disambig_asr_model": "${ASR_MODEL:-lg}",
   "ct_disambig_asr_cache_dir": "${ASR_CACHE_DIR:-$REPO_DIR/caches/.asr_cache}",
@@ -843,7 +843,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "fubar_sites_file": "${FUBAR_SITES_FILE:-}",
   "posenrich_min_size": "${POSENRICH_MIN_SIZE:-5}",
   "posenrich_max_size": "${POSENRICH_MAX_SIZE:-0}",
-  "posenrich_padj_thr": "${POSENRICH_PADJ_THR:-0.15}",
   "posenrich_p_perm_thr": "${POSENRICH_P_PERM_THR:-0.025}",
   "posenrich_batch_size": "${POSENRICH_BATCH_SIZE:-4}",
   "posenrich_background_file": "${POSENRICH_BACKGROUND_FILE:-}"
