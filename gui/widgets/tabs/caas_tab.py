@@ -27,6 +27,21 @@ from gui.models.modules import CaasConfig
 from gui.widgets.common.module_tab import ModuleTabWidget
 from gui.widgets.common.specs import FieldSpec, ModuleTabSpec, Section
 
+# Texts of the two --ct_tool checkboxes (translated in gui/i18n.py, keyed by the English text).
+_CT_TOOL_DISCOVERY_TIP = (
+    "Replays the real labeling (b_0) and the permulated labelings over the alignments, in one pass of the "
+    "permulation core; the discovery of the real labeling is its b_0 slice. It needs the labelings that "
+    "'resample' harvests. With 0 permulation cycles (--caas_full_perms 0) it replays only the real labeling."
+)
+_CT_TOOL_RESAMPLE_TIP = (
+    "Harvests the permulated labelings (the null) from the tree and the trait. It reads no alignments and "
+    "can run alone, for example to inspect the null before replaying it."
+)
+_CT_TOOL_NOTE = (
+    "discovery needs the labelings of resample: check both, or reuse a previous harvest from the "
+    "Precomputed Run tab."
+)
+
 SPEC = ModuleTabSpec(
     title="CAAS / Contrast Selection",
     blurb=(
@@ -74,9 +89,21 @@ SPEC = ModuleTabSpec(
             importance="default",
         ),
         FieldSpec(
+            name="perm_match_pss",
+            label="Match observed PSS profile in the null",
+            kind="bool",
+            importance="default",
+        ),
+        FieldSpec(
+            name="perm_match_pss_tol",
+            label="PSS matching tolerance",
+            placeholder="relative tolerance of each pair; default 0.25",
+            importance="optional",
+        ),
+        FieldSpec(
             name="caas_full_perms",
             label="Permulations",
-            placeholder="accepted permulations to harvest AND replay for the CAAS FCS null",
+            placeholder="accepted permulations to harvest AND replay for the CAAS FCS null; 0 replays only the real labeling",
             importance="default",
         ),
         # Rated "optional" although borderline: it is a draw-budget cap (raised 50%
@@ -139,8 +166,13 @@ class CaasTab(ModuleTabWidget):
         self.ct_tool_resample.toggled.connect(self._on_ct_tool_resample)
 
         self._ct_tool_label = QLabel("CT tools (--ct_tool)")
+        self._ct_tool_note = QLabel(_CT_TOOL_NOTE)
+        self._ct_tool_note.setWordWrap(True)
         self._essential_form.insertRow(0, self._ct_tool_label, self.ct_tool_discovery)
         self._essential_form.insertRow(1, "", self.ct_tool_resample)
+        self._essential_form.insertRow(2, "", self._ct_tool_note)
+        self.ct_tool_discovery.setToolTip(_CT_TOOL_DISCOVERY_TIP)
+        self.ct_tool_resample.setToolTip(_CT_TOOL_RESAMPLE_TIP)
 
     def retranslate(self, lang: str = "en") -> None:
         super().retranslate(lang)
@@ -148,6 +180,9 @@ class CaasTab(ModuleTabWidget):
         self._ct_tool_label.setText(tr("CT tools (--ct_tool)", lang))
         self.ct_tool_discovery.setText(tr("discovery", lang))
         self.ct_tool_resample.setText(tr("resample", lang))
+        self._ct_tool_note.setText(tr(_CT_TOOL_NOTE, lang))
+        self.ct_tool_discovery.setToolTip(tr(_CT_TOOL_DISCOVERY_TIP, lang))
+        self.ct_tool_resample.setToolTip(tr(_CT_TOOL_RESAMPLE_TIP, lang))
 
     def _on_ct_tool_discovery(self, value: bool) -> None:
         self._config.ct_tool_discovery = value

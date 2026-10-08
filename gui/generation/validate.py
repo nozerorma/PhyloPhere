@@ -103,6 +103,16 @@ def validate(project: ProjectConfig) -> list[str]:
     # enabled and nothing is reused in its place.
     caas = project.modules.caas
     disambig = project.modules.disambiguation
+    # 'discovery' replays the real labeling and the null over the alignments, and the labelings come from
+    # 'resample' (this run) or from --resample_from. The GUI wires --resample_from only through the Resample
+    # box of the Precomputed Run tab, which turns CAAS off, so with CAAS on 'discovery' needs 'resample'.
+    caas_live = caas.enabled and not (pc.use_discovery or pc.use_resample or pc.use_ct)
+    if caas_live and caas.ct_tool_discovery and not caas.ct_tool_resample:
+        errors.append(
+            "CAAS: 'discovery' replays the labelings that 'resample' harvests, so it cannot run alone. "
+            "Check 'resample' too, or disable CAAS and reuse a previous harvest with the Resample box of "
+            "the Precomputed Run tab."
+        )
     if not caas.enabled and disambig.enabled:
         if not any([pc.use_discovery, pc.use_resample]):
             errors.append(

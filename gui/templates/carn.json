@@ -91,7 +91,7 @@
       "ct_disambig_hypotheses_pairs": "",
       "ct_disambig_posterior_threshold": "0.1",
       "ct_disambig_max_tasks_per_child": "50",
-      "asr_robustness": true,
+      "asr_diagnostics": true,
       "run_postproc_exploratory": false,
       "run_postproc_filter": true,
       "caas_postproc_mode": "filter",
@@ -180,7 +180,6 @@
       "auto_generate_ensembl": false,
       "ensembl_dataset": "",
       "scoring_window_size_bp": "1000000",
-      "scoring_p_emp_thr": "0.05",
       "caas_evidence_top_n": "20",
       "scoring_hypotheses_pairs": ""
     },
@@ -197,7 +196,6 @@
       "fcs_fdr": "0.15",
       "fcs_fdr_wilcoxon": "",
       "fcs_fdr_lachenbruch": "",
-      "fcs_fdr_permsum": "0.05",
       "pfam_cache_dir": "",
       "fcs_pperm_thr": "0.025",
       "fcs_top_n": "25",
@@ -225,7 +223,6 @@
       "fubar_sites_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/positive_selection/fubar_sites.tsv",
       "posenrich_min_size": "5",
       "posenrich_max_size": "0",
-      "posenrich_padj_thr": "0.15",
       "posenrich_batch_size": "4"
     }
   },

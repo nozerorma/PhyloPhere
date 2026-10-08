@@ -669,6 +669,30 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "it": "ricampionamento",
         "de": "Neuabtastung",
     },
+    "Replays the real labeling (b_0) and the permulated labelings over the alignments, in one pass of the permulation core; the discovery of the real labeling is its b_0 slice. It needs the labelings that 'resample' harvests. With 0 permulation cycles (--caas_full_perms 0) it replays only the real labeling.": {
+        "en": "Replays the real labeling (b_0) and the permulated labelings over the alignments, in one pass of the permulation core; the discovery of the real labeling is its b_0 slice. It needs the labelings that 'resample' harvests. With 0 permulation cycles (--caas_full_perms 0) it replays only the real labeling.",
+        "es": "Reproduce el etiquetado real (b_0) y los etiquetados permulados sobre los alineamientos, en una sola pasada del núcleo de permulación; el descubrimiento del etiquetado real es su rebanada b_0. Necesita los etiquetados que cosecha 'resample'. Con 0 ciclos de permulación (--caas_full_perms 0) reproduce solo el etiquetado real.",
+        "ca": "Reprodueix l'etiquetatge real (b_0) i els etiquetatges permulats sobre els alineaments, en una sola passada del nucli de permulació; el descobriment de l'etiquetatge real n'és la llesca b_0. Necessita els etiquetatges que collita 'resample'. Amb 0 cicles de permulació (--caas_full_perms 0) reprodueix només l'etiquetatge real.",
+        "fr": "Rejoue l'étiquetage réel (b_0) et les étiquetages permulés sur les alignements, en un seul passage du noyau de permulation ; la découverte de l'étiquetage réel en est la tranche b_0. Il a besoin des étiquetages récoltés par 'resample'. Avec 0 cycle de permulation (--caas_full_perms 0), il ne rejoue que l'étiquetage réel.",
+        "it": "Riesegue l'etichettatura reale (b_0) e le etichettature permulate sugli allineamenti, in un unico passaggio del nucleo di permulazione; la scoperta dell'etichettatura reale ne è la fetta b_0. Richiede le etichettature raccolte da 'resample'. Con 0 cicli di permulazione (--caas_full_perms 0) riesegue solo l'etichettatura reale.",
+        "de": "Spielt die reale Beschriftung (b_0) und die permulierten Beschriftungen über die Alignments ab, in einem Durchgang des Permulationskerns; die Entdeckung der realen Beschriftung ist dessen b_0-Teil. Sie benötigt die von 'resample' gewonnenen Beschriftungen. Mit 0 Permulationszyklen (--caas_full_perms 0) wird nur die reale Beschriftung abgespielt.",
+    },
+    "Harvests the permulated labelings (the null) from the tree and the trait. It reads no alignments and can run alone, for example to inspect the null before replaying it.": {
+        "en": "Harvests the permulated labelings (the null) from the tree and the trait. It reads no alignments and can run alone, for example to inspect the null before replaying it.",
+        "es": "Cosecha los etiquetados permulados (la nula) a partir del árbol y del rasgo. No lee alineamientos y puede ejecutarse solo, por ejemplo para inspeccionar la nula antes de reproducirla.",
+        "ca": "Collita els etiquetatges permulats (la nul·la) a partir de l'arbre i del tret. No llegeix alineaments i es pot executar sol, per exemple per inspeccionar la nul·la abans de reproduir-la.",
+        "fr": "Récolte les étiquetages permulés (le nul) à partir de l'arbre et du trait. Il ne lit aucun alignement et peut s'exécuter seul, par exemple pour examiner le nul avant de le rejouer.",
+        "it": "Raccoglie le etichettature permulate (il nullo) dall'albero e dal tratto. Non legge allineamenti e può essere eseguito da solo, per esempio per ispezionare il nullo prima di riprodurlo.",
+        "de": "Gewinnt die permulierten Beschriftungen (die Nullverteilung) aus Baum und Merkmal. Es liest keine Alignments und kann allein laufen, zum Beispiel um die Nullverteilung vor dem Abspielen zu prüfen.",
+    },
+    "discovery needs the labelings of resample: check both, or reuse a previous harvest from the Precomputed Run tab.": {
+        "en": "discovery needs the labelings of resample: check both, or reuse a previous harvest from the Precomputed Run tab.",
+        "es": "discovery necesita los etiquetados de resample: marca ambos, o reutiliza una cosecha previa desde la pestaña Precomputed Run.",
+        "ca": "discovery necessita els etiquetatges de resample: marca'ls tots dos, o reutilitza una collita prèvia des de la pestanya Precomputed Run.",
+        "fr": "discovery a besoin des étiquetages de resample : cochez les deux, ou réutilisez une récolte précédente depuis l'onglet Precomputed Run.",
+        "it": "discovery richiede le etichettature di resample: seleziona entrambi, oppure riutilizza una raccolta precedente dalla scheda Precomputed Run.",
+        "de": "discovery benötigt die Beschriftungen von resample: beide aktivieren oder eine frühere Ernte über den Tab Precomputed Run wiederverwenden.",
+    },
     # ── Module tabs: titles, blurbs, disclaimers, field labels ────────────────
     # CAAS / Contrast Selection Tab
     'CAAS / Contrast Selection': {
@@ -849,13 +873,13 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Directory cache ASR',
         'de': 'ASR-Cache-Verzeichnis',
     },
-    'Run ASR Robustness diagnostics report': {
-        'en': 'Run ASR Robustness diagnostics report',
-        'es': 'Ejecutar informe de diagnóstico de robustez ASR',
-        'ca': 'Executar informe de diagnòstic de robustesa ASR',
-        'fr': 'Générer le rapport de diagnostic de robustesse ASR',
-        'it': 'Esegui report diagnostico di robustezza ASR',
-        'de': 'ASR-Robustheitsdiagnosebericht ausführen',
+    'Run ASR diagnostics report': {
+        'en': 'Run ASR diagnostics report',
+        'es': 'Ejecutar informe de diagnóstico ASR',
+        'ca': 'Executar informe de diagnòstic ASR',
+        'fr': 'Générer le rapport de diagnostic ASR',
+        'it': 'Esegui report diagnostico ASR',
+        'de': 'ASR-Diagnosebericht ausführen',
     },
     'Run Exploratory Post-Processing Sweep': {
         'en': 'Run Exploratory Post-Processing Sweep',
@@ -1448,14 +1472,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'fr': 'Seuil FDR de FCS, Lachenbruch (vide = FDR de FCS)',
         'it': 'Soglia FDR di FCS, Lachenbruch (vuoto = FDR di FCS)',
         'de': 'FCS-FDR-Schwelle, Lachenbruch (leer = FCS-FDR)',
-    },
-    'FCS FDR gate, path-sum permulation': {
-        'en': 'FCS FDR gate, path-sum permulation',
-        'es': 'Umbral FDR de FCS, permulación de suma por vía',
-        'ca': 'Llindar FDR de FCS, permulació de suma per via',
-        'fr': 'Seuil FDR de FCS, permulation de somme par voie',
-        'it': 'Soglia FDR di FCS, permulazione della somma per via',
-        'de': 'FCS-FDR-Schwelle, Pfadsummen-Permulation',
     },
     'Pfam cache directory (optional)': {
         'en': 'Pfam cache directory (optional)',

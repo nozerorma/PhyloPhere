@@ -84,8 +84,6 @@ if [ "{{ run_defaults.toy_mode }}" = true ]; then
     # plus two escalations before failing, which would defeat a smoke test.
     export MAX_TRIES="$(( CAAS_FULL_PERMS > 0 ? CAAS_FULL_PERMS * 200 : 200 ))"
     export N_RANDOMIZATIONS="1000"
-    export RER_PERM_BATCHES="10"
-    export RER_PERMS_PER_BATCH="10"
 else
     export TAG=""
     export TOY_MODE=false
@@ -93,9 +91,10 @@ else
     export CAAS_FULL_PERMS="${CAAS_FULL_PERMS:-{{ modules.caas.caas_full_perms }}}"
     export MAX_TRIES="{{ modules.caas.max_tries }}"
     export N_RANDOMIZATIONS="{{ modules.accumulation.accumulation_n_randomizations }}"
-    export RER_PERM_BATCHES="{{ modules.rer.rer_perm_batches }}"
-    export RER_PERMS_PER_BATCH="{{ modules.rer.rer_perms_per_batch }}"
 fi
+# RERconverge permulations: the values of the RERconverge tab, in toy mode too.
+export RER_PERM_BATCHES="{{ modules.rer.rer_perm_batches }}"
+export RER_PERMS_PER_BATCH="{{ modules.rer.rer_perms_per_batch }}"
 
 # ── Module toggles ────────────────────────────────────────────────────────────
 # There is no global RUN_PRUNE: pruning is per phenotype row and is triggered by the
@@ -154,6 +153,7 @@ export PERM_STRATEGY="{{ modules.caas.perm_strategy }}"
 # MAX_TRIES is set in the toy-mode branch above, where it tracks CAAS_FULL_PERMS.
 export CHUNK_SIZE="{{ modules.caas.chunk_size }}"
 export MAX_FOP="{{ modules.caas.max_fop }}"
+export PERM_MATCH_PSS_TOL="{{ modules.caas.perm_match_pss_tol }}"
 export PRECOMP_BASE_PATH="{{ precomputed.base_path }}"
 export PRECOMP_USE_DISCOVERY="{{ 'true' if precomputed.use_discovery else 'false' }}"
 export PRECOMP_USE_RESAMPLE="{{ 'true' if precomputed.use_resample else 'false' }}"
@@ -242,7 +242,6 @@ export AUTO_GENERATE_ENSEMBL="{{ run_defaults.auto_generate_ensembl }}"
 export ENSEMBL_DATASET="{{ modules.scoring.ensembl_dataset }}"
 export SCORING_POSITION_TOP_PCT="{{ modules.scoring.scoring_position_top_pct }}"
 export SCORING_GENE_TOP_PCT="{{ modules.scoring.scoring_gene_top_pct }}"
-export SCORING_P_EMP_THR="{{ modules.scoring.scoring_p_emp_thr }}"
 export CAAS_SCORE_AGGREGATION="{{ modules.scoring.caas_score_aggregation }}"
 export CAAS_EVIDENCE_TOP_N="{{ modules.scoring.caas_evidence_top_n }}"
 export SCORING_HYPOTHESES_PAIRS="{{ modules.scoring.scoring_hypotheses_pairs }}"
@@ -256,10 +255,8 @@ export GMT_DIR="{{ modules.enrichment.gmt_dir }}"
 export FCS_MIN_GENES="{{ modules.enrichment.fcs_min_genes }}"
 export FCS_MAX_GENES="{{ modules.enrichment.fcs_max_genes }}"
 export FCS_FDR="{{ modules.enrichment.fcs_fdr }}"
-export FCS_FDR_PERMSUM="{{ modules.enrichment.fcs_fdr_permsum }}"
 export PFAM_CACHE_DIR="{{ modules.enrichment.pfam_cache_dir }}"
 export FCS_PPERM_THR="{{ modules.enrichment.fcs_pperm_thr }}"
-export FCS_CAAS_SCORE="{{ modules.enrichment.fcs_caas_score }}"
 export FCS_TOP_N="{{ modules.enrichment.fcs_top_n }}"
 export FCS_BATCH_SIZE="{{ modules.enrichment.fcs_batch_size }}"
 export STRING_DB_DIR="{{ modules.enrichment.string_db_dir }}"
@@ -282,7 +279,6 @@ export EGG_ANNOTATIONS_FILE="{{ modules.enrichment.egg_annotations_file }}"
 export FUBAR_SITES_FILE="{{ modules.enrichment.fubar_sites_file }}"
 export POSENRICH_MIN_SIZE="{{ modules.enrichment.posenrich_min_size }}"
 export POSENRICH_MAX_SIZE="{{ modules.enrichment.posenrich_max_size }}"
-export POSENRICH_PADJ_THR="{{ modules.enrichment.posenrich_padj_thr }}"
 export POSENRICH_BATCH_SIZE="{{ modules.enrichment.posenrich_batch_size }}"
 
 REPO_DIR="{{ general.repo_dir }}"

@@ -135,6 +135,7 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         entries.append(("caas_pos_sample_file", os.path.join(perm_dir, "perm_pos_sample.tsv"), "file"))
         entries.append(("caas_pos_quantiles_file", os.path.join(perm_dir, "perm_pos_quantiles.tsv"), "file"))
         entries.append(("caas_gene_cycle_scores_file", os.path.join(perm_dir, "gene_cycle_scores.tsv"), "file"))
+        entries.append(("caas_perm_manifest_file", os.path.join(outdir, "caastools", "permulation_manifest.tsv"), "file"))
         # caas_pos_detail_file makes SCORING rebuild the null (CAAS_CORE_MERGE)
         # instead of importing caas_perms.rds as a cached artifact. A cached null is
         # valid only while it holds the same gene-level statistic as the observed

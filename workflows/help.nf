@@ -45,8 +45,11 @@ Module flag              Description
                           (independent of CAAS discovery).
 --contrast_selection      Prune data and select foreground/background
                           contrasts from a continuous or discrete trait.
---ct_tool <tools>         CAAStools discovery and/or resample
-                          (comma-separated, e.g. "discovery,resample").
+--ct_tool <tools>         CAAStools stages (comma-separated, e.g.
+                          "discovery,resample"). resample harvests the
+                          permulated labelings (the null) and can run alone;
+                          discovery replays the real labeling and the null
+                          over the alignments and needs those labelings.
                           See: --help --ct_tool <discovery|resample>
 --ct_disambiguation       Classify CAAS as convergent/parallel/divergent via ASR.
 --ct_postproc             Cluster/gene-level filtering + characterization report.
@@ -75,6 +78,13 @@ CT Discovery — Help
 Detects Candidate Amino Acid Substitutions (CAAS) from Multiple Sequence
 Alignments (MSA) against a foreground/background trait split.
 
+The permulation core replays the real labeling (b_0) and the harvested
+permulated labelings over the alignments in one pass; the discovery of the real
+labeling is its b_0 slice, and the permulated ones are the null. The labelings
+come from the resample stage of the same run or from --resample_from, so
+discovery cannot run without them. With --caas_full_perms 0 only the real
+labeling is replayed (no null).
+
 Usage:
 --alignment                <"input_dir">                null
 --caas_config               <"caas_config_file">         null
@@ -100,27 +110,29 @@ def resample_help() {
     return '''
 CT Resample — Help
 =============================================
-Resamples virtual phenotypes for CAAS permutation-based analyses.
+Harvests the permulated foreground/background labelings that make the CAAS null.
+The trait is simulated under BM (or OU) on the species tree, its ranks are mapped
+back onto the observed values, and each labeling is kept if its contrast pairs
+are Dunn-independent. It reads no alignments and can run alone, for example to
+inspect the null before replaying it with the discovery stage.
 
 Usage:
 --tree                      <"nwtree_file">              null
---perm_strategy              <"FGBG|BM|lambda">            "BM"
+--traitname                  <"column_name">               null   (trait column of --my_traits)
+--perm_strategy              <"auto|OU|BM">               "auto"  (evolutionary model of the simulation)
+--perm_match_pss             <true|false>                 true   (each permulation builds its canonical pairs so that their PSS follows the PSS of the observed pairs; accepted only if every pair is within the tolerance. Not applied to count traits)
+--perm_match_pss_tol          <FLOAT>                      0.25   (relative PSS tolerance of that matching)
 --resample_use_n             <true|false>                 true   (use N/C sample size count traits for Jeffreys CI filtering if available)
---fgsize                     <INTEGER>                    6
---bgsize                     <INTEGER>                    6
---traitvalues                 <"traitvalues_file">          null   (required for BM/lambda)
---perm_pheno_col             <STRING>                     ""     (trait column in --traitvalues; empty = auto-detect)
+--max_fop                    <INTEGER>                    100    (alternative hypotheses per contrast, observed and null)
 --chunk_size                  <INTEGER>                    500
 
 Permulation sizing:
 --max_tries                  <INTEGER>                    1000000 (draw budget; raised 50% up to twice if the pool is short, then fails)
---caas_full_perms            <INTEGER>                    1000    (accepted permulations harvested AND replayed through the CAAS FCS null)
+--caas_full_perms            <INTEGER>                    1000    (accepted permulations harvested AND replayed as the null; 0 = replay only the real labeling)
 
-Output: directory of resample_*.tab files (one per chunk_size cycles).
-
-Strategy requirements:
-FGBG                        --fgsize --bgsize
-BM                           --traitvalues
+Output: directory of resample_*.tab files (one per chunk_size cycles) and
+permulation_manifest.tsv (tier, Dunn index and design of the canonical pairs of
+each cycle).
 '''
 }
 
@@ -165,7 +177,7 @@ Usage:
 --ct_disambig_asr_cache_dir          <"cache_dir">                   null
 --ct_disambig_posterior_threshold      <FLOAT 0-1>                     0.1
 --ct_disambig_max_tasks_per_child       <INTEGER>                       50
---asr_robustness                        <true|false>                    true   (parallel diagnostic report)
+--asr_diagnostics                        <true|false>                    true   (parallel ASR diagnostics report)
 '''
 }
 
@@ -348,7 +360,6 @@ Usage:
 --fcs_max_genes                        <INTEGER>                1000  (0 = no cap)
 --fcs_fdr                                <FLOAT 0-1>              0.15
 --fcs_pperm_thr                            <FLOAT 0-1>              0.025
---fcs_caas_score                           <raw|fact>               raw    (score of the CAAS rankings of the FCS: gene_caas_score, or -log10 of the factorized gene p with the permulation null rebuilt on that scale; needs --scoring and the CAAS permulation null)
 --fcs_top_n                                  <INTEGER>                20
 --caas_permulation_enrichment                    <true|false>             true
 
@@ -363,7 +374,6 @@ POSENRICH (position-level):
 --posenrich                        <true|false>          true
 --posenrich_min_size                 <INTEGER>                5
 --posenrich_max_size                   <INTEGER>                0    (0 = no cap)
---posenrich_padj_thr                     <FLOAT 0-1>              0.15
 --posenrich_background_file                  <"background_file">      null
 --domain_variability_file, --ucr_positions_file      (position-level annotation
                                               sources; leave blank to auto-generate

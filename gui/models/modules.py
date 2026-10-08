@@ -74,6 +74,8 @@ class CaasConfig(ModuleConfigBase):
     resample_use_n: bool = True  # --resample_use_n
     multi_hypothesis: bool = True  # --multi_hypothesis
     max_fop: str = "100"  # --max_fop (max FOP alternative hypotheses H1..Hn per contrast)
+    perm_match_pss: bool = True  # --perm_match_pss (null canonical pairs follow the observed PSS profile)
+    perm_match_pss_tol: str = "0.25"  # --perm_match_pss_tol (relative PSS tolerance of that matching)
 
     # Precomputed discovery/resample inputs (discovery_from, resample_from) are
     # derived from PrecomputedConfig.
@@ -89,8 +91,8 @@ class DisambiguationConfig(ModuleConfigBase):
     ct_disambig_hypotheses_pairs: str = ""  # --ct_disambig_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for the observed scoring)
     ct_disambig_posterior_threshold: str = "0.1"  # --ct_disambig_posterior_threshold
     ct_disambig_max_tasks_per_child: str = "50"  # --ct_disambig_max_tasks_per_child
-    # ASR robustness diagnostics report, a separate stage (conf/ct_disambiguation.config).
-    asr_robustness: bool = True  # --asr_robustness
+    # ASR diagnostics report, a separate stage (conf/ct_disambiguation.config).
+    asr_diagnostics: bool = True  # --asr_diagnostics
 
     # Post-processing (--ct_postproc) has no toggle of its own: it runs whenever
     # Disambiguation is enabled, unless PrecomputedConfig.use_postproc supplies its
@@ -257,7 +259,6 @@ class ScoringConfig(ModuleConfigBase):
     # Advanced parameters (conf/scoring.config)
     scoring_window_size_bp: str = "1000000"  # --scoring_window_size_bp
     caas_score_aggregation: str = "cumulative"  # --caas_score_aggregation (mean|cumulative): scheme aggregation of the position CAAS score; the permulation null must use the same
-    scoring_p_emp_thr: str = "0.05"  # --scoring_p_emp_thr (position-level CAAS permulation p.adj_bh; also gates gene_caas_pperm_adj)
     caas_evidence_top_n: str = "0"  # --caas_evidence_top_n (evidence table of the N best positions after SCORING; 0 = off)
     scoring_hypotheses_pairs: str = ""  # --scoring_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for SCORING)
 
@@ -283,10 +284,8 @@ class EnrichmentConfig(ModuleConfigBase):
     fcs_fdr: str = "0.15"  # --fcs_fdr
     fcs_fdr_wilcoxon: str = ""  # --fcs_fdr_wilcoxon (blank -> the FCS FDR)
     fcs_fdr_lachenbruch: str = ""  # --fcs_fdr_lachenbruch (blank -> the FCS FDR)
-    fcs_fdr_permsum: str = "0.05"  # --fcs_fdr_permsum
     pfam_cache_dir: str = ""  # --pfam_cache_dir (blank -> ~/.cache/phylophere/pfam)
     fcs_pperm_thr: str = "0.025"  # --fcs_pperm_thr
-    fcs_caas_score: str = "raw"  # --fcs_caas_score (raw|fact): score of the CAAS rankings of the FCS
     fcs_top_n: str = "20"  # --fcs_top_n
     fcs_batch_size: str = "4"  # --fcs_batch_size (GMTs per FCS_COMPUTE_BATCHED task)
     # caas_permulation_enrichment (conf/enrichment.config) is a field of CaasConfig, not
@@ -332,10 +331,9 @@ class EnrichmentConfig(ModuleConfigBase):
 
     fubar_sites_file: str = ""  # --fubar_sites_file
 
-    # POSENRICH thresholds (position-wise Path Sum Permulation, not the gene FCS above)
+    # POSENRICH thresholds (position-wise Lachenbruch test, same gates as the gene FCS above)
     posenrich_min_size: str = "5"  # --posenrich_min_size
     posenrich_max_size: str = "0"  # --posenrich_max_size
-    posenrich_padj_thr: str = "0.05"  # --posenrich_padj_thr (Permsum-family test: no independent analytic estimate to dual-gate against, same 0.05 fdr_permsum uses in FCS)
     posenrich_batch_size: str = "4"  # --posenrich_batch_size (GMTs per POSENRICH_RUN_BATCHED task; 1 = no batching)
 
     # posenrich_background_file (CT's background.output, used when CT is off) is derived

@@ -47,7 +47,7 @@ nextflow run main.nf \
   --alignment       alignments/ \
   --caas_config     caas_config.tab \
   --contrast_selection \
-  --ct_tool         discovery,resample,bootstrap \
+  --ct_tool         discovery,resample \
   --ct_disambiguation --ct_postproc --ct_accumulation \
   --scoring --enrichment \
   -profile slurm \
@@ -91,7 +91,7 @@ flowchart TD
     B --> C[CT\ndiscovery / resample / bootstrap]
     C --> D[CT_META_CAAS\ngenome-wide characterization of hypergeometric significance. Metafile production.]
     D --> E[Observed scoring\nASR: convergent/parallel/divergent]
-    E --> E2[ASR_ROBUSTNESS\nposterior sensitivity, parallel diagnostic]
+    E --> E2[ASR_DIAGNOSTICS\nscore and ancestral-posterior description, parallel report]
     E --> F[CT_POSTPROC\ncluster/gene filtering + characterization]
     E --> G[CT_ACCUMULATION\nper-gene CAAS burden test]
     E --> H[VEP\nPrimateAI-3D / COSMIC annotation]
@@ -111,10 +111,10 @@ Execution order as wired in `main.nf`:
 
 1. **REPORTING** (`--reporting`) — optional preliminary trait/tree exploration reports; skipped if `--contrast_selection` is also set (it produces its own reports).
 2. **CONTRAST_SELECTION** (`--contrast_selection`) — pruning + independent-contrasts extreme selection; aborts cleanly via `--min_contrasts` if too few foreground pairs exist.
-3. **CT** (`--ct_tool discovery,resample,bootstrap`) — CAAStools discovery/resample/bootstrap.
+3. **CT** (`--ct_tool discovery,resample`) — `resample` harvests the permulated labelings (the null) from the tree and the trait and reads no alignments; `discovery` replays the real labeling (`b_0`) and the harvested labelings over the alignments in one pass of the permulation core. `discovery` needs the labelings of `resample` (this run, or `--resample_from`); `--caas_full_perms 0` replays only the real labeling.
 4. **CT_META_CAAS** — genome-wide significance/FDR of discovered CAAS (runs whenever bootstrap ran, or standalone via `--bootstrap_from`).
 5. **Observed scoring** (`--ct_disambiguation`): ASR-based convergent/parallel/divergent classification; the observed labeling is the `b_0` slice of the permulation core (**CAAS_CORE**), or **CAAS_OBSERVED** for a discovery table given with `--discovery_from`.
-6. **CT_POSTPROC** (`--ct_postproc`) — cluster/gene filtering, background cleanup, characterization report; also fans out **ASR_ROBUSTNESS** in parallel as an independent posterior-confidence diagnostic.
+6. **CT_POSTPROC** (`--ct_postproc`) — cluster/gene filtering, background cleanup, characterization report; also fans out **ASR_DIAGNOSTICS** in parallel as an independent descriptive report of the observed scores and of the ancestral-state posteriors of the domains.
 7. **CT_ACCUMULATION** (`--ct_accumulation`), **VEP** (`--vep`), **FADE** (`--fade`), **RER_MAIN** (`--rer_tool`) — four largely independent evidence-generating stages that can run in any combination.
 8. **SCORING** (`--scoring`): integrates all of the above into composite position- and gene-level scores; optionally triggers the permulation core (**CAAS_CORE**, **CAAS_CORE_MERGE**) for a genome-wide permutation null (`--caas_permulation_enrichment`).
 9. **ENRICHMENT** (`--enrichment`, nested under `--scoring`) — FCS ranked gene-set enrichment, DOMINO active-module + STRING functional enrichment, and POSENRICH position-level enrichment.
@@ -139,7 +139,7 @@ alignments to detect Candidate Amino Acid Substitutions (CAAS): positions
 where the phenotype's extremes carry distinct, convergent amino acids.
 Inputs: `--alignment`, `--caas_config`/`--traitvalues`, `--tree`. Supports
 batching large gene sets into fewer Nextflow tasks (`--ct_core_batch_size`) and a `--toy_mode`/`--toy_n` subsampling mode for
-quick smoke tests. Gated by `--ct_tool` (comma list of `discovery,resample,bootstrap`).
+quick smoke tests. Gated by `--ct_tool` (comma list of `discovery,resample`).
 
 ### CONTRAST_SELECTION — trait/tree preprocessing
 Prunes the alignment/tree to the species with usable trait data and selects
@@ -165,9 +165,9 @@ Standalone via `--discovery_from` + `--caas_config`/`--tree` (CAAS_OBSERVED).
 ### CT_POSTPROC — filtering & characterization
 Applies cluster/gene-level filtering (`--caas_postproc_mode filter|exploratory`),
 cleans the gene background, and renders the Characterization report. Also
-triggers **ASR_ROBUSTNESS**, an independent diagnostic that stress-tests the
-disambiguation posterior threshold (τ = 0.90/0.95/0.99) without altering the
-main data path. Emits gene lists consumed by FADE's `gene_set` mode.
+triggers **ASR_DIAGNOSTICS**, an independent report that describes the observed
+`asr_path_score`, `derived_agreement` and the ancestral-state posteriors of the
+Voronoi domains, without altering the main data path. Emits gene lists consumed by FADE's `gene_set` mode.
 
 ### CT_ACCUMULATION — per-gene CAAS burden
 Permutation test for whether a gene accumulates more CAAS than expected by
@@ -372,13 +372,15 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 
 | Parameter | Default | Purpose & Description |
 |---|---|---|
-| `ct_tool` | `"discovery,resample,bootstrap"` | Defines which CAAStools execution stages to run (`discovery`, `resample`, `bootstrap`). |
+| `ct_tool` | `"discovery,resample"` | CT stages to run. `resample` harvests the permulated labelings (the null) and can run alone; `discovery` replays the real labeling and the harvested labelings over the alignments, so it needs the labelings of `resample` in the same run or through `--resample_from`. |
 | `patterns` | `"1,2,3"` | Comma-separated list of CAAS substitution patterns to search for. |
 | `min_divergent_fraction` | `0.5` | Minimum fraction of foreground/background pairs that must show amino-acid divergence (0.5 = at least 50%). |
 | `caap_mode` | `true` | Enables CAAP (Candidate Amino Acid Properties) grouping mode based on physicochemical properties. |
 | `perm_strategy` | `"BM"` | Permutation strategy for background null generation: `"BM"` (Brownian Motion) or `"FGBG"` (FG/BG swap). |
 | `perms_cycles` | `"100"` | Number of resampling cycles used to evaluate significance. |
 | `caas_full_perms` | `1000` | Number of full-pool permulations generated for the CAAS FCS null. |
+| `perm_match_pss` | `true` | The canonical pairs of each permulation are chosen one by one so that their PSS follows the PSS of the observed canonical pairs, and a permulation is accepted only if all pairs are Dunn-independent and within `perm_match_pss_tol` of their observed counterpart. Without it, the null keeps its best Dunn-independent pairs, which are systematically closer than the observed ones. Not applied to count traits (CI gate). |
+| `perm_match_pss_tol` | `0.25` | Relative PSS tolerance of that matching: each pair must satisfy \|log(PSS_null / PSS_obs)\| ≤ log(1 + tol). |
 | `max_fop` | `100` | Maximum FOP alternative hypotheses (`H1..Hn`) harvested per contrast, applied identically to the observed selection and the permulation null. |
 | `fgsize` / `bgsize` | `"6"` / `"6"` | Foreground and background species sizes when using random strategy. |
 | `traitvalues` | `""` | Path to trait values file when using Brownian Motion (`BM`) permutation strategy. |
@@ -457,11 +459,9 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `fcs_min_genes` / `fcs_max_genes` | `5` / `1000` | Minimum / maximum gene set size required for FCS enrichment evaluation (`0` = no upper limit). |
 | `fcs_fdr` | `0.15` | Benjamini-Hochberg FDR threshold for FCS gene-set significance. |
 | `fcs_pperm_thr` | `0.025` | Permulation p-value threshold for filtering phylogenetic non-independence. |
-| `fcs_caas_score` | `raw` | Score of the CAAS rankings (global, top, bottom) tested by the FCS. `raw`: `gene_caas_score`. `fact`: `-log10` of the factorized gene p (`gene_caas_pperm_fact*`), with the permulation null rebuilt on the same scale (`scoring/caas_perms_fcs.rds`: each null detection takes its factorized p against the other cycles). The FCS is rank based, so the choice changes the order of the genes, not the scale. Needs `--scoring` and the CAAS permulation null; without them the raw scores are kept. |
 | `fcs_top_n` | `20` | Number of top-ranked gene sets highlighted in report tables. |
 | `caas_permulation_enrichment` | `true` | Runs the permulation core (CAAS_CORE, CAAS_CORE_MERGE) to build the genome-wide null used for CAAS's FCS permulation p-value. |
 | `posenrich_min_size` / `posenrich_max_size` | `5` / `0` | Position set size boundaries for POSENRICH (0 = un-capped). |
-| `posenrich_padj_thr` | `0.15` | Adjusted p-value threshold for POSENRICH position enrichment (NES > 0 also required). |
 | `posenrich_background_file` | `""` | Optional static background override file. |
 | `fubar_sites_file` | `""` | Upstream position annotation file (generated by `ortholog_characterizator`; required for POSENRICH). |
 | `domain_variability_file`, `ucr_positions_file` | `""` | Leave blank to auto-generate from the alignment (cached Pfam-A + hmmscan; Valdar variability + UCR detection). |
@@ -578,9 +578,9 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `meta_caas_from` | `""` | Standalone CT_META_CAAS output directory input. |
 | `ct_disambig_asr_model` | `"lg"` | Substitution matrix model used for ASR reconstruction. |
 | `ct_disambig_asr_cache_dir` | `""` | Directory containing precomputed ASR state files. |
-| `ct_disambig_posterior_threshold` | `0.1` | Canonical posterior probability threshold ($\tau = 0.10$). |
+| `ct_disambig_posterior_threshold` | `0.1` | Residues with an ASR posterior below $\tau$ are dropped from each node's recorded distribution (the most probable residue is always kept); their mass counts as unrecorded in the score. |
 | `ct_disambig_max_tasks_per_child` | `50` | Worker task recycling cap for memory hygiene. |
-| `asr_robustness` | `true` | Enables parallel ASR robustness sensitivity diagnostic module. |
+| `asr_diagnostics` | `true` | Enables the parallel ASR diagnostics report (distribution of `asr_path_score`, `derived_agreement` and the per-domain ancestral posteriors). |
 
 </details>
 
