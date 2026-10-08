@@ -6,8 +6,8 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *  SCORING_FCS_REPORT, RER_FCS_REPORT, FCS_COMPUTE_BATCHED, FCS_CONCAT, FCS_COMPUTE:
  *  rank-based, threshold-free gene-set enrichment (Wilcoxon-AUC through
- *  RERconverge::fastwilcoxGMTall, plus the Lachenbruch and path-sum permulation
- *  tests of fcs_enrich.R) over the GMT files of subworkflows/ENRICHMENT/dat.
+ *  RERconverge::fastwilcoxGMTall, plus the Lachenbruch two-part test of
+ *  fcs_enrich.R) over the GMT files of subworkflows/ENRICHMENT/dat.
  *
  *  The report processes render 12.FCS_general_report.Rmd against a generic stats TSV
  *  (gene, score_<ranking> and flag_<name> columns) and a universe file (the
@@ -63,7 +63,6 @@ process SCORING_FCS_REPORT {
     def fdr_thr   = params.fcs_fdr
     def fdr_wilcoxon    = params.fcs_fdr_wilcoxon    ?: params.fcs_fdr
     def fdr_lachenbruch = params.fcs_fdr_lachenbruch ?: params.fcs_fdr
-    def fdr_permsum     = params.fcs_fdr_permsum     ?: params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     // Published gene_lists/ of the scoring module. This is the CAAS report, so the
@@ -84,14 +83,12 @@ process SCORING_FCS_REPORT {
                 fdr_thr       = ${fdr_thr},
                 fdr_wilcoxon    = ${fdr_wilcoxon},
                 fdr_lachenbruch = ${fdr_lachenbruch},
-                fdr_permsum     = ${fdr_permsum},
                 pperm_thr     = ${pperm_thr},
                 top_n         = ${top_n},
                 traitname     = '${traitname}',
                 perms_file    = '${perms_file}',
                 gene_lists_dir = ${gene_lists_arg},
-                enrich_file   = ${enrich_file_arg},
-                seed          = '${params.seed ?: 1998}'
+                enrich_file   = ${enrich_file_arg}
             ),
             output_file = '12.FCS_scoring_${traitname}.html'
         )
@@ -145,7 +142,6 @@ process RER_FCS_REPORT {
     def fdr_thr   = params.fcs_fdr
     def fdr_wilcoxon    = params.fcs_fdr_wilcoxon    ?: params.fcs_fdr
     def fdr_lachenbruch = params.fcs_fdr_lachenbruch ?: params.fcs_fdr
-    def fdr_permsum     = params.fcs_fdr_permsum     ?: params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     def enrich_file_arg = (enrich_file.name =~ /^NO_/) ? 'NULL' : "'${enrich_file}'"
@@ -162,14 +158,12 @@ process RER_FCS_REPORT {
                 fdr_thr       = ${fdr_thr},
                 fdr_wilcoxon    = ${fdr_wilcoxon},
                 fdr_lachenbruch = ${fdr_lachenbruch},
-                fdr_permsum     = ${fdr_permsum},
                 pperm_thr     = ${pperm_thr},
                 top_n         = ${top_n},
                 traitname     = '${params.traitname ?: "trait"}',
                 perms_file    = '${perms_file}',
                 annot_file    = '${annot_file}',
-                enrich_file   = ${enrich_file_arg},
-                seed          = '${params.seed ?: 1998}'
+                enrich_file   = ${enrich_file_arg}
             ),
             output_file = '${report_label}.html'
         )
@@ -189,7 +183,7 @@ process RER_FCS_REPORT {
 
 // ── Batched FCS statistics ───────────────────────────────────────────────────
 // fcs_run_all() over every GMT database is the expensive step behind both report
-// processes (Wilcoxon-AUC, Lachenbruch and path-sum permulation for every
+// processes (Wilcoxon-AUC and Lachenbruch for every
 // score_<ranking> column against every GMT). The BH correction of fcs_enrich.R is
 // scoped per database, so the GMT set can be split across independent tasks and the
 // partial tables row-concatenated without any reconciliation: the result is exact.
@@ -221,7 +215,6 @@ process FCS_COMPUTE_BATCHED {
     def fdr_thr   = params.fcs_fdr
     def fdr_wilcoxon    = params.fcs_fdr_wilcoxon    ?: params.fcs_fdr
     def fdr_lachenbruch = params.fcs_fdr_lachenbruch ?: params.fcs_fdr
-    def fdr_permsum     = params.fcs_fdr_permsum     ?: params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def rscript_cmd = (params.use_singularity || params.use_apptainer) ?
         "/usr/local/bin/_entrypoint.sh Rscript" : "Rscript"
@@ -237,9 +230,7 @@ process FCS_COMPUTE_BATCHED {
         --fdr-thr ${fdr_thr} \
         --fdr-wilcoxon ${fdr_wilcoxon} \
         --fdr-lachenbruch ${fdr_lachenbruch} \
-        --fdr-permsum ${fdr_permsum} \
         --pperm-thr ${pperm_thr} \
-        --seed ${params.seed ?: 1998} \
         --output fcs_enrich_partial.tsv
     """
 }

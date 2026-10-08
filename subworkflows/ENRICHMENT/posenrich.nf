@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-// posenrich.nf — Position-level enrichment of CAAS score magnitudes (Position-Level Path Sum Permulation).
+// posenrich.nf — Position-level enrichment of CAAS scores by the Lachenbruch two-part test.
 // PhyloPhere | subworkflows/ENRICHMENT/
 
 /*
@@ -8,13 +8,14 @@
  *
  *  Builds position-level GMTs (Pfam, bins, orthogroups, COSMIC, PrimateAI-3D, UCR
  *  core/flank, FUBAR positive/purifying selection, FADE sites) plus the broad
- *  functional characterization layers, and tests them with Position-Level Path Sum
- *  Permulation (posenrich_enrich.py). Raw CAAS score magnitudes are summed per term
- *  and compared with a null over the whole tested-position background, per
- *  direction (global, top, bottom). The null is the CAAS permulation cycles
- *  (perm_pos_cycle_caas.tsv.gz), the same null fcs_enrich.R gives FCS's own Permsum
- *  test. Without a null, p_value, p_adj and perm_nes are NA and no term is
- *  significant. A term is significant when p_adj < posenrich_padj_thr with NES > 0.
+ *  functional characterization layers, and tests them with the Lachenbruch two-part
+ *  test (posenrich_enrich.py), the test of the gene-level FCS: the prevalence of the
+ *  scored positions in the term plus the magnitude of their CAAS scores, over the
+ *  whole tested-position background, per direction (global, top, bottom). The null
+ *  is the CAAS permulation cycles (perm_pos_cycle_caas.tsv.gz), passed through the
+ *  same function as the observed scores. Without a null, lach_p.perm is NA and no
+ *  term is significant. A term is significant when lach_p.adj < fcs_fdr_lachenbruch
+ *  and lach_p.perm < fcs_pperm_thr, the gates of the Lachenbruch vote of the FCS.
  *
  *  Consumes:  position scores, SCORING's position_lists/, tested-position background,
  *             cleaned background, functional annotation inputs, CAAS permulation null
@@ -114,10 +115,10 @@ process POSENRICH_RUN {
     path "posenrich_leading_edge.tsv", emit: leading_edge
 
     script:
-    // Raw CAAS score magnitudes are summed per term and compared with a null. When
-    // caas_cycle_null is supplied, its permulation cycles are the null; without one,
-    // p_value, p_adj and perm_nes are NA and no term is significant. Significance is
-    // p_adj < posenrich_padj_thr with NES > 0.
+    // The Lachenbruch two-part test of every term. When caas_cycle_null is supplied, its
+    // permulation cycles are the null of lach_p.perm; without one, it is NA and no term
+    // is significant. Significance is lach_p.adj < fcs_fdr_lachenbruch and
+    // lach_p.perm < fcs_pperm_thr.
     def annot_arg = annot_file.name != 'NO_FILE' ? "--annot-file ${annot_file}" : ""
     // The cosmic_orthogroups and pai3d_orthogroups GMTs come from external databases
     // that do not cover every gene. Their background is restricted to the genes the
@@ -147,8 +148,8 @@ process POSENRICH_RUN {
         --min-size ${min_size} \
         --max-size ${max_size} \
         ${caas_null_arg} \
-        --seed ${params.seed ?: 1998} \
-        --padj-thr ${params.posenrich_padj_thr} \
+        --fdr-lachenbruch ${params.fcs_fdr_lachenbruch ?: params.fcs_fdr} \
+        --pperm-thr ${params.fcs_pperm_thr} \
         --output-dir .
     """
 }
@@ -230,8 +231,8 @@ process POSENRICH_RUN_BATCHED {
         --min-size ${min_size} \
         --max-size ${max_size} \
         ${caas_null_arg} \
-        --seed ${params.seed ?: 1998} \
-        --padj-thr ${params.posenrich_padj_thr} \
+        --fdr-lachenbruch ${params.fcs_fdr_lachenbruch ?: params.fcs_fdr} \
+        --pperm-thr ${params.fcs_pperm_thr} \
         --output-dir .
     """
 }
@@ -335,7 +336,7 @@ process POSENRICH_REPORT {
                 results_file = '${results}',
                 leading_edge_file = '${leading_edge}',
                 traitname = '${traitname}',
-                padj_thr = ${params.posenrich_padj_thr},
+                padj_thr = ${params.fcs_fdr_lachenbruch ?: params.fcs_fdr},
                 position_scores_file = ${pos_scores_arg},
                 gene_scores_file     = ${gene_scores_arg},
                 vep_primateai_file   = ${vep_pai_arg},

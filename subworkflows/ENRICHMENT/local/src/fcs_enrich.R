@@ -1,22 +1,23 @@
 #!/usr/bin/env Rscript
-# fcs_enrich.R — Functional class scoring (FCS) core: three gene-set tests per ranking.
+# fcs_enrich.R — Functional class scoring (FCS) core: two gene-set tests per ranking.
 # PhyloPhere | subworkflows/ENRICHMENT/local/src/
 # =============================================================================
 # Sourced by: fcs_compute.R (FCS_COMPUTE_BATCHED process, fcs.nf) and 12.FCS_general_report.Rmd.
 # Defines functions only.
 #
-# Tests the gene sets of GMT files against a gene ranking with three complementary tests:
-#   1. Wilcoxon-AUC (RERconverge::fastwilcoxGMTall): rank shift of the set.
-#   2. Lachenbruch two-part: prevalence of nonzero scorers (Fisher) plus magnitude among
-#      them (Wilcoxon), combined as chi-square with 2 df. Safe for zero-inflated scores.
-#   3. Path-sum permulation: observed sum of the scores of the set against a null; NES is
-#      the z-score of the observed sum. Safe for zero-inflated scores.
-# Each test casts one vote (FDR below its threshold plus a direction check, and the
-# permulation p-value gate where a null exists). A term is "Hard evidence" with 3 votes,
-# "Supported" with 2, and "Exploratory" with 1: "(relative)" for a lone Wilcoxon or
-# Lachenbruch pass, "(phylogenetic)" for a lone permulation pass, which makes no claim
-# relative to the other genes. Tests 2 and 3 run only on non-negative (zero-floored)
-# rankings; signed rankings (RER, two-sided) use the Wilcoxon test alone.
+# Tests the gene sets of GMT files against a gene ranking with two complementary tests:
+#   1. Wilcoxon-AUC (RERconverge::fastwilcoxGMTall): rank shift of the set. On a zero-floored
+#      ranking its one-sided p carries the tie term of the rank sum, and its permulation p
+#      compares that p (not the AUC) with the same p of every null column, so that columns
+#      with a different number of tied genes share one scale.
+#   2. Lachenbruch two-part: prevalence of nonzero scorers (hypergeometric) plus magnitude among
+#      them (rank-sum), combined as chi-square with 2 df. Safe for zero-inflated scores. The
+#      observed ranking and every null column go through one code (fcs_lach_prepare,
+#      fcs_lach_stats), which POSENRICH (posenrich_enrich.py, lachenbruch_columns) repeats.
+# Each test casts one vote (FDR below its threshold, a direction check for the Wilcoxon, and
+# the permulation p-value gate where a null exists). A term is "Supported" with 2 votes and
+# "Exploratory" with 1. Lachenbruch runs only on non-negative (zero-floored) rankings; signed
+# rankings (RER, two-sided) use the Wilcoxon test alone.
 #
 # Design:
 #   * The universe is the full tested background (cleaned_background). Genes without
@@ -122,6 +123,22 @@ fcs_build_vals <- function(scores, universe, floor = 0) {
   vals
 }
 
+# ── Ties ──────────────────────────────────────────────────────────────────────
+
+# Tie term of the variance of a rank-sum statistic: sum over the groups of equal values of t^3 - t. A zero-floored
+# ranking has most of its genes tied at 0, and the variance of the statistic shrinks with that term.
+fcs_tie_term <- function(x) {
+  l <- rle(sort(x))$lengths
+  sum(as.numeric(l)^3 - l)
+}
+
+# Standard deviation of the rank-sum U of n1 genes against n2 others, N = n1 + n2, corrected for ties. Without ties
+# (tie = 0) it is sqrt(n1 * n2 * (N + 1) / 12), the one of RERconverge::simpleAUCgenesRanks.
+fcs_rank_sum_sd <- function(n1, n2, tie) {
+  N <- n1 + n2
+  sqrt(n1 * n2 / 12 * ((N + 1) - tie / pmax(N * (N - 1), 1)))
+}
+
 # ── Wilcoxon-AUC test ─────────────────────────────────────────────────────────
 
 # Wilcoxon-AUC test of one ranking over all GMTs.
@@ -167,15 +184,18 @@ fcs_run_ranking <- function(vals, gmts, num_g = 10, max_g = 500, alternative = "
     # accumulation scores, RER accelerating and decelerating) the analytic p-value is
     # recomputed one-sided from the AUC, so a depleted set (stat < 0) is not flagged,
     # and BH is applied again per GMT. The background is the annotated genes of the
-    # GMT, as in fastwilcoxGMT.
+    # GMT, as in fastwilcoxGMT. The variance of the rank sum carries the tie term of
+    # that background: a zero-floored ranking is mostly ties, and the variance without
+    # the term is several times too large.
     if (alternative == "greater") {
       gmt  <- gmts_to_run[[db]]
-      n_db <- length(intersect(unique(unlist(gmt$genesets)), names(vals)))
+      bg   <- vals[intersect(unique(unlist(gmt$genesets)), names(vals))]
+      n_db <- length(bg)
       n1   <- res$num.genes
       n2   <- n_db - n1
       U    <- (res$stat + 0.5) * n1 * n2
       mu   <- n1 * n2 / 2
-      sdv  <- sqrt(n1 * n2 * (n1 + n2 + 1) / 12)
+      sdv  <- fcs_rank_sum_sd(n1, n2, fcs_tie_term(bg))
       res$pval  <- pnorm(U, mu, sdv, lower.tail = FALSE)
       res$p.adj <- p.adjust(res$pval, method = "BH")
     }
@@ -198,148 +218,85 @@ fcs_alternative <- function(vals) if (any(vals < 0, na.rm = TRUE)) "two.sided" e
 # ── Lachenbruch two-part test ─────────────────────────────────────────────────
 
 # Enrichment in a zero-inflated distribution, as the combination of two parts:
-#   Part 1: one-sided Fisher exact test of the 2x2 prevalence table (score > 0 or = 0).
-#   Part 2: one-sided Wilcoxon test on the positive-scoring genes only (magnitude).
-# Each p-value (floored at 1e-15) becomes chi-square with 1 df; their sum is chi-square
-# with 2 df, which gives the combined p-value. BH per GMT. Only for non-negative,
-# zero-floored vals.
-# Returns per pathway: lach_pval, lach_p.adj, lach_chi_binary (Part 1), lach_chi_nonzero
-#   (Part 2; 0 when Part 2 cannot run), lach_chi_total and lach_frac_magnitude
-#   (lach_chi_nonzero / lach_chi_total; high when magnitude and not prevalence drives it).
-fcs_run_lachenbruch <- function(vals, gmts, num_g = 10, max_g = 500) {
-  vals[is.na(vals)] <- 0
-  universe   <- names(vals)
-  hits       <- names(vals[vals > 0])
-  pos_scores <- vals[vals > 0]
+#   Part 1 (prevalence): one-sided Fisher exact test of the 2x2 table (score > 0 or = 0, in the set or not), the upper tail
+#     of a hypergeometric distribution over the whole ranking.
+#   Part 2 (magnitude): one-sided Wilcoxon rank-sum of the positive scores of the set against the positive scores of the
+#     rest of the ranking, by the normal approximation with continuity correction and with the tie term of the positives.
+#     It needs at least 2 positives in the set and 2 outside it.
+# Each p-value (floored at 1e-15) becomes chi-square with 1 df; their sum is chi-square with 2 df, which gives the combined
+# p-value. BH per GMT. Only for non-negative, zero-floored vals.
+# The observed ranking and every permulation column go through the same code (fcs_lach_prepare, fcs_lach_stats), so a null
+# value is the value the observed ranking would have if it were that column.
 
-  out <- list()
-  for (db in names(gmts)) {
-    gmt <- gmts[[db]]
-    gs  <- gmt$genesets
-    if (is.null(names(gs))) names(gs) <- gmt$geneset.names
-
-    rows <- list()
-    for (pname in names(gs)) {
-      p_genes <- intersect(gs[[pname]], universe)
-      n1 <- length(p_genes)
-      if (n1 < num_g || (!is.null(max_g) && is.finite(max_g) && max_g > 0 && n1 > max_g)) next
-
-      k1 <- length(intersect(p_genes, hits))
-      k0 <- n1 - k1
-      b1 <- length(hits) - k1
-      b0 <- (length(universe) - n1) - b1
-
-      mat  <- matrix(c(k1, k0, b1, b0), nrow = 2, byrow = TRUE)
-      ft   <- tryCatch(fisher.test(mat, alternative = "greater"), error = function(e) NULL)
-      if (is.null(ft)) next
-      p1   <- max(ft$p.value, 1e-15)
-      chi1 <- qchisq(p1, df = 1, lower.tail = FALSE)
-
-      p_pos  <- intersect(p_genes, names(pos_scores))
-      n1_pos <- length(p_pos)
-      chi2   <- 0
-      if (n1_pos >= 2 && (length(pos_scores) - n1_pos) >= 2) {
-        bg_pos <- setdiff(names(pos_scores), p_pos)
-        wt     <- tryCatch(
-          wilcox.test(pos_scores[p_pos], pos_scores[bg_pos], alternative = "greater"),
-          error = function(e) NULL)
-        if (!is.null(wt)) {
-          p2   <- max(wt$p.value, 1e-15)
-          chi2 <- qchisq(p2, df = 1, lower.tail = FALSE)
-        }
-      }
-
-      chi_total <- chi1 + chi2
-      rows[[pname]] <- tibble::tibble(
-        database            = db,
-        pathway             = pname,
-        lach_pval           = pchisq(chi_total, df = 2, lower.tail = FALSE),
-        lach_chi_binary     = chi1,
-        lach_chi_nonzero    = chi2,
-        lach_chi_total      = chi_total,
-        lach_frac_magnitude = if (chi_total > 0) chi2 / chi_total else NA_real_
-      )
-    }
-    if (length(rows) == 0) next
-    db_df <- dplyr::bind_rows(rows)
-    db_df$lach_p.adj <- p.adjust(db_df$lach_pval, method = "BH")
-    out[[db]] <- db_df
+# Positives of every column of X (genes x columns; NA and 0 are no signal), their ranks among the positives of the column
+# (average ties) and the tie term of those ranks.
+fcs_lach_prepare <- function(X) {
+  X <- as.matrix(X)
+  X[is.na(X)] <- 0
+  ii <- vector("list", ncol(X)); xx <- vector("list", ncol(X)); tie <- numeric(ncol(X))
+  for (j in seq_len(ncol(X))) {
+    p <- which(X[, j] > 0)
+    ii[[j]] <- p
+    if (length(p)) { xx[[j]] <- rank(X[p, j]); tie[j] <- fcs_tie_term(X[p, j]) } else xx[[j]] <- numeric(0)
   }
-  if (length(out) == 0) return(tibble::tibble())
-  dplyr::bind_rows(out)
+  jj <- rep(seq_len(ncol(X)), lengths(ii)); iv <- as.integer(unlist(ii)); rv <- as.numeric(unlist(xx))
+  dims <- dim(X)
+  list(pos  = Matrix::sparseMatrix(i = iv, j = jj, x = rep(1, length(iv)), dims = dims),
+       rank = Matrix::sparseMatrix(i = iv, j = jj, x = rv, dims = dims),
+       m = lengths(ii), tie = tie, n_genes = nrow(X))
 }
 
-# ── Path-sum permulation ──────────────────────────────────────────────────────
+# Sets of one GMT inside a universe: the sets with num_g to max_g genes of the universe, as a sparse membership matrix
+# (sets x universe) and the size of each. NULL when no set passes.
+fcs_lach_index <- function(gmt, universe, num_g = 10, max_g = 500) {
+  gs <- gmt$genesets
+  if (is.null(names(gs))) names(gs) <- gmt$geneset.names
+  n1 <- vapply(gs, function(set) length(intersect(set, universe)), 1L)
+  has_max <- !is.null(max_g) && is.finite(max_g) && max_g > 0
+  keep <- n1 >= num_g & (!has_max | n1 <= max_g)
+  if (!any(keep)) return(NULL)
+  gs <- gs[keep]
+  list(names = names(gs), n1 = as.numeric(n1[keep]), M = fcs_membership_matrix(gs, names(gs), universe))
+}
 
-# Score accumulation: the observed sum of the scores of a set against a null of sums.
-# Zero-floored genes add 0 and do not distort the sums. BH per GMT.
-# NES = (obs_sum - null_mean) / null_sd; NES > 0 means enrichment.
-# p = (1 + number of null sums >= obs_sum) / (n_perms + 1), so its floor is 1 / (n_perms + 1).
-# Only for non-negative vals.
-# null_mat: genes x N permulation null (CAAS or RER). Without it, vals are shuffled
-# n_perms times. fcs_run_all always passes a null_mat.
-# Returns per pathway: perm_pval, perm_p.adj, perm_nes.
-fcs_run_permulation <- function(vals, gmts, num_g = 10, max_g = 500, n_perms = 2000, seed = 1998,
-                                null_mat = NULL) {
+# Lachenbruch chi-squares of the sets of one GMT in every column prepared by fcs_lach_prepare. Returns matrices sets x
+# columns: chi1 (prevalence), chi2 (magnitude, 0 where it cannot run) and chi = chi1 + chi2.
+fcs_lach_stats <- function(prep, M, n1) {
+  nc <- length(prep$m)
+  k1 <- as.matrix(M %*% prep$pos)
+  mm <- matrix(prep$m, nrow(M), nc, byrow = TRUE)
+  p1 <- phyper(as.vector(k1) - 1, as.vector(mm), prep$n_genes - as.vector(mm), rep(n1, nc), lower.tail = FALSE)
+  chi1 <- matrix(qchisq(pmax(p1, 1e-15), df = 1, lower.tail = FALSE), nrow(M), nc)
+  n2p <- mm - k1
+  U2 <- as.matrix(M %*% prep$rank) - k1 * (k1 + 1) / 2
+  z <- (U2 - k1 * n2p / 2 - 0.5) / fcs_rank_sum_sd(k1, n2p, matrix(prep$tie, nrow(M), nc, byrow = TRUE))
+  chi2 <- matrix(qchisq(pmax(pnorm(z, lower.tail = FALSE), 1e-15), df = 1, lower.tail = FALSE), nrow(M), nc)
+  chi2[!(k1 >= 2 & n2p >= 2) | is.na(chi2)] <- 0
+  list(chi1 = chi1, chi2 = chi2, chi = chi1 + chi2)
+}
+
+# Observed side. Returns per pathway: lach_pval, lach_p.adj, lach_chi_binary (Part 1), lach_chi_nonzero (Part 2; 0 when
+#   Part 2 cannot run), lach_chi_total and lach_frac_magnitude (lach_chi_nonzero / lach_chi_total; high when magnitude and
+#   not prevalence drives it).
+fcs_run_lachenbruch <- function(vals, gmts, num_g = 10, max_g = 500) {
   vals[is.na(vals)] <- 0
-  genes_all <- names(vals)
-  N_genes   <- length(genes_all)
-
-  if (!is.null(null_mat)) {
-    # The shared CAAS or RER permulation null, the one behind the Wilcoxon p.perm, is
-    # preferred over a label shuffle. Its rows are aligned to the genes of this ranking:
-    # a gene of `vals` missing from null_mat gets an all-0 row (an unscored gene adds
-    # nothing to the observed sum either), and a gene of null_mat missing from `vals`
-    # is dropped.
-    common   <- intersect(genes_all, rownames(null_mat))
-    perm_mat <- matrix(0, nrow = N_genes, ncol = ncol(null_mat),
-                       dimnames = list(genes_all, NULL))
-    perm_mat[common, ] <- null_mat[common, , drop = FALSE]
-    n_perms <- ncol(perm_mat)   # the size of the null itself, not the n_perms argument
-  } else {
-    set.seed(seed)
-    perm_mat <- vapply(seq_len(n_perms), function(i) sample(vals), numeric(N_genes))
-    rownames(perm_mat) <- genes_all
-  }
-
+  prep <- fcs_lach_prepare(matrix(vals, ncol = 1, dimnames = list(names(vals), NULL)))
   out <- list()
   for (db in names(gmts)) {
-    gmt <- gmts[[db]]
-    gs  <- gmt$genesets
-    if (is.null(names(gs))) names(gs) <- gmt$geneset.names
-
-    valid <- sapply(gs, function(g) {
-      n <- length(intersect(g, genes_all))
-      n >= num_g && (is.null(max_g) || !is.finite(max_g) || max_g <= 0 || n <= max_g)
-    })
-    gs_v  <- gs[valid]
-    if (length(gs_v) == 0) next
-    pnames <- names(gs_v)
-
-    gene_idx <- setNames(seq_along(genes_all), genes_all)
-    ri <- integer(0); ci <- integer(0)
-    for (i in seq_along(gs_v)) {
-      g_in <- intersect(gs_v[[i]], genes_all)
-      if (length(g_in)) { ri <- c(ri, rep(i, length(g_in))); ci <- c(ci, gene_idx[g_in]) }
-    }
-    M <- Matrix::sparseMatrix(i = ri, j = ci, x = 1,
-                              dims = c(length(gs_v), N_genes),
-                              dimnames = list(pnames, genes_all))
-
-    obs_sums  <- as.numeric(M %*% vals)
-    null_sums <- as.matrix(M %*% perm_mat)   # pathways × n_perms
-    null_mu   <- rowMeans(null_sums)
-    null_sd   <- apply(null_sums, 1, sd)
-    nes       <- (obs_sums - null_mu) / ifelse(null_sd == 0, 1, null_sd)
-    pvals     <- (rowSums(null_sums >= obs_sums) + 1) / (n_perms + 1)
-
+    idx <- fcs_lach_index(gmts[[db]], names(vals), num_g, max_g)
+    if (is.null(idx)) next
+    st <- fcs_lach_stats(prep, idx$M, idx$n1)
+    chi <- st$chi[, 1]
     db_df <- tibble::tibble(
-      database   = db,
-      pathway    = pnames,
-      perm_pval  = pvals,
-      perm_p.adj = p.adjust(pvals, method = "BH"),
-      perm_nes   = nes
+      database            = db,
+      pathway             = idx$names,
+      lach_pval           = pchisq(chi, df = 2, lower.tail = FALSE),
+      lach_chi_binary     = st$chi1[, 1],
+      lach_chi_nonzero    = st$chi2[, 1],
+      lach_chi_total      = chi,
+      lach_frac_magnitude = ifelse(chi > 0, st$chi2[, 1] / chi, NA_real_)
     )
+    db_df$lach_p.adj <- p.adjust(db_df$lach_pval, method = "BH")
     out[[db]] <- db_df
   }
   if (length(out) == 0) return(tibble::tibble())
@@ -466,141 +423,83 @@ fcs_permpvalenrich_vectorized <- function(realenrich, enrichStat, alternative = 
   out
 }
 
-# ── Lachenbruch null, Part 1 ──────────────────────────────────────────────────
+# ── Wilcoxon: null of the tie-corrected p ─────────────────────────────────────
 
-# Null of the prevalence part (Fisher). A one-sided "greater" Fisher exact test of a 2x2
-# table equals the upper tail of the hypergeometric distribution,
-# phyper(k1 - 1, m = k1 + b1, n = k0 + b0, k = k1 + k0, lower.tail = FALSE), so one
-# phyper() call per database vectorizes it exactly over every (set, null column) cell.
-#
-# The universe is the whole ranking (rownames(corStat_rk)), as in the observed side of
-# fcs_run_lachenbruch (universe = names(vals)), and not the GMT-annotated genes that
-# fcs_null_enrichstat_vectorized uses for the Wilcoxon background. Each test's null must
-# share the background of its own observed side.
-#
-# Returns a named list db -> (sets x N) matrix of chi-square values (1 df), NA where the
-# set fails num_g or max_g, as in fcs_null_enrichstat_vectorized.
-fcs_null_lachenbruch_binary_vectorized <- function(corStat_rk, gmts, realenrich, num_g = 10, max_g = 500) {
-  chi1 <- list()
-  genes_all  <- rownames(corStat_rk)
-  N          <- ncol(corStat_rk)
-  n_universe <- length(genes_all)
-
-  hitmat <- (corStat_rk > 0) * 1.0
-  hitmat[is.na(hitmat)] <- 0        # NA scores treated as non-hit (zero-floor convention)
-  m_col <- Matrix::colSums(hitmat)  # total hits in universe, per column
-
+# The null of the one-sided p of the Wilcoxon-AUC test: for every permulation column, the p that fcs_run_ranking gives a set
+# if that column were the ranking (normal approximation with the tie term of the column over the annotated genes of the GMT).
+# A column of a zero-floored ranking has its own number of tied genes, so the AUC is not on one scale across the columns of
+# the null and across the observed ranking; the standardized p is. Built from the null of the statistic (enrichStat, from
+# fcs_null_enrichstat_vectorized) and the tie term of every column.
+# Returns a named list db -> (sets x N) matrix, NA where the statistic is NA.
+fcs_null_wilcoxon_p_vectorized <- function(corStat, gmts, realenrich, enrichStat, num_g = 10, max_g = 500) {
+  out <- list()
+  genes_all <- rownames(corStat)
   for (db in names(realenrich)) {
+    stat <- enrichStat[[db]]
     gmt <- gmts[[db]]
     set_names <- rownames(realenrich[[db]])
-    if (is.null(gmt) || length(set_names) == 0) {
-      chi1[[db]] <- matrix(NA_real_, nrow = length(set_names), ncol = N,
-                           dimnames = list(set_names, NULL))
-      next
-    }
+    if (is.null(gmt) || is.null(stat) || length(set_names) == 0) { out[[db]] <- stat; next }
     gs <- gmt$genesets; names(gs) <- gmt$geneset.names
-    M  <- fcs_membership_matrix(gs, set_names, genes_all)   # sets x genes_all
-
-    n1 <- as.numeric(Matrix::rowSums(M))          # geneset size within universe, constant per set
-    k1 <- as.matrix(M %*% hitmat)                 # sets x N -- hits within set, per column
-    m  <- matrix(m_col, nrow = nrow(M), ncol = N, byrow = TRUE)
-    n  <- n_universe - m
-    k  <- matrix(n1, nrow = nrow(M), ncol = N)
-
-    p1 <- matrix(
-      phyper(as.vector(k1) - 1, m = as.vector(m), n = as.vector(n), k = as.vector(k),
-             lower.tail = FALSE),
-      nrow = nrow(M), ncol = N, dimnames = list(set_names, NULL))
-    p1  <- pmax(p1, 1e-15)                         # same floor as Part 1 of fcs_run_lachenbruch
-    chi <- qchisq(p1, df = 1, lower.tail = FALSE)
-    fail <- (n1 < num_g) | (!is.null(max_g) & is.finite(max_g) & max_g > 0 & n1 > max_g) | (n1 == 0)
-    chi[fail, ] <- NA_real_
-    chi1[[db]] <- chi
+    if (!is.null(max_g) && is.finite(max_g) && max_g > 0) {
+      gs <- gs[vapply(gs, function(set) length(intersect(set, genes_all)) <= max_g, logical(1))]
+    }
+    genes_db <- intersect(unique(unlist(gs)), genes_all)
+    if (length(genes_db) < 3) { out[[db]] <- stat * NA_real_; next }
+    M     <- fcs_membership_matrix(gs, set_names, genes_db)
+    sub   <- corStat[genes_db, , drop = FALSE]
+    notNA <- !is.na(sub)
+    n1    <- as.matrix(M %*% (notNA * 1.0))
+    n2    <- matrix(colSums(notNA), nrow(M), ncol(sub), byrow = TRUE) - n1
+    tie   <- matrix(vapply(seq_len(ncol(sub)), function(j) fcs_tie_term(sub[notNA[, j], j]), 0), nrow(M), ncol(sub), byrow = TRUE)
+    out[[db]] <- pnorm((stat + 0.5) * n1 * n2, n1 * n2 / 2, fcs_rank_sum_sd(n1, n2, tie), lower.tail = FALSE)
   }
-  chi1
+  out
 }
 
-# ── Lachenbruch null, Part 2 ──────────────────────────────────────────────────
-
-# Null of the magnitude part (Wilcoxon on the positive-scoring genes). Which genes are
-# positive varies by null column (a gene can be 0 in one permuted labeling and positive
-# in another), the case that the NA branch of fcs_null_enrichstat_vectorized handles by
-# masking the other genes to NA before ranking. That function is called with a copy of
-# corStat_rk restricted to its positive entries.
-#
-# Its num_g is fixed at 2, not the caller's, because Part 2 of fcs_run_lachenbruch
-# requires only 2 positive members (n1_pos >= 2), independently of and below the num_g
-# of Part 1. The caller's num_g would set to NA sets with 2 to num_g - 1 positive
-# scorers that the observed side accepts.
-#
-# Returns a named list db -> (sets x N) matrix of chi-square values (1 df) from the
-# normal approximation of the Wilcoxon U statistic. It is 0, not NA, where Part 2 cannot
-# run, as in fcs_run_lachenbruch, so that chi_total is defined whenever Part 1 is.
-fcs_null_lachenbruch_magnitude_vectorized <- function(corStat_rk, gmts, realenrich, max_g = 500) {
-  corStat_pos <- corStat_rk
-  corStat_pos[corStat_rk <= 0] <- NA
-
-  auc_pos <- fcs_null_enrichstat_vectorized(corStat_pos, gmts, realenrich, num_g = 2, max_g = max_g)
-
-  chi2 <- list()
+# Empirical permulation p-value of the one-sided Wilcoxon p, per set: (1 + #{null p <= observed p}) / (N_valid + 1); the
+# smaller p is the more extreme.
+fcs_permpval_from_p_vectorized <- function(realenrich, nullP) {
+  out <- list()
   for (db in names(realenrich)) {
-    auc <- auc_pos[[db]]
-    if (is.null(auc) || nrow(auc) == 0) { chi2[[db]] <- auc; next }
-
-    gmt <- gmts[[db]]
-    set_names <- rownames(realenrich[[db]])
-    gs <- gmt$genesets; names(gs) <- gmt$geneset.names
-    genes_db <- intersect(unique(unlist(gs)), rownames(corStat_pos))
-    M_pos    <- fcs_membership_matrix(gs, set_names, genes_db)
-    sub_pos  <- corStat_pos[genes_db, , drop = FALSE]
-
-    # n1 and n2 per column, as fcs_null_enrichstat_vectorized derives them internally from
-    # the NA pattern of sub_pos (that function returns only the statistic).
-    notNA <- !is.na(sub_pos)
-    n1n   <- as.matrix(M_pos %*% (notNA * 1.0))
-    ntot  <- matrix(colSums(notNA), nrow = nrow(M_pos), ncol = ncol(sub_pos), byrow = TRUE)
-    n2n   <- ntot - n1n
-
-    U    <- (auc + 0.5) * n1n * n2n
-    mu   <- n1n * n2n / 2
-    sdv  <- sqrt(n1n * n2n * (n1n + n2n + 1) / 12)
-    # Continuity correction of 0.5, as in the normal approximation of wilcox.test() for
-    # alternative = "greater"; without it the observed and null values diverge, even at
-    # large n1 and n2, because qchisq is steep at small p.
-    z    <- (U - mu - 0.5) / sdv
-    p2   <- pmax(pnorm(z, lower.tail = FALSE), 1e-15)   # same floor as Part 2 of fcs_run_lachenbruch
-    chi  <- qchisq(p2, df = 1, lower.tail = FALSE)
-    chi[is.na(auc)] <- 0   # Part 2 unavailable: 0, never NA, as on the observed side
-    chi2[[db]] <- chi
+    null <- nullP[[db]]
+    if (is.null(null) || nrow(null) == 0) next
+    obs   <- realenrich[[db]]$pval[match(rownames(null), rownames(realenrich[[db]]))]
+    count <- rowSums(null <= obs * (1 + 1e-9), na.rm = TRUE)
+    p <- (count + 1) / (rowSums(!is.na(null)) + 1)
+    p[is.na(obs)] <- NA_real_
+    names(p) <- rownames(null)
+    out[[db]] <- p
   }
-  chi2
+  out
+}
+
+# The null of a ranking on the genes of that ranking: rows in the order of `genes`, and a gene without a row in the null has
+# no signal (0) in every permulation. Observed and null then share the universe, so a set has the same genes on both sides.
+fcs_align_null <- function(m, genes) {
+  m <- as.matrix(m)
+  out <- matrix(0, length(genes), ncol(m), dimnames = list(genes, colnames(m)))
+  common <- intersect(genes, rownames(m))
+  out[common, ] <- m[common, , drop = FALSE]
+  out
 }
 
 # ── Lachenbruch empirical p-value ─────────────────────────────────────────────
 
-# Empirical lach_p.perm of every row of lach_rk: the null chi-square of both parts is
-# summed per column and compared with the observed lach_chi_total through
-# fcs_permpvalenrich_vectorized. Returns a vector aligned to the rows of lach_rk, next
-# to the analytic lach_pval and lach_p.adj.
+# Empirical lach_p.perm of every row of lach_rk: the chi-square of the set in every column of the null, computed as for the
+# observed ranking, against the observed lach_chi_total: (1 + #{null >= observed}) / (N + 1). The null has the genes of
+# the ranking as rows (fcs_align_null). Returns a vector aligned to the rows of lach_rk, next to the analytic lach_pval and
+# lach_p.adj.
 fcs_compute_lach_p_perm <- function(lach_rk, corStat_rk, gmts, num_g = 10, max_g = 500) {
-  realenrich <- list()
+  prep <- fcs_lach_prepare(corStat_rk)
+  out  <- rep(NA_real_, nrow(lach_rk))
   for (db in unique(lach_rk$database)) {
-    db_df <- lach_rk[lach_rk$database == db, , drop = FALSE]
-    realenrich[[db]] <- data.frame(stat = db_df$lach_chi_total, row.names = db_df$pathway)
-  }
-
-  chi1_null <- fcs_null_lachenbruch_binary_vectorized(corStat_rk, gmts, realenrich, num_g = num_g, max_g = max_g)
-  chi2_null <- fcs_null_lachenbruch_magnitude_vectorized(corStat_rk, gmts, realenrich, max_g = max_g)
-  chi_total_null <- setNames(
-    lapply(names(realenrich), function(db) chi1_null[[db]] + chi2_null[[db]]),
-    names(realenrich))
-
-  ppv <- fcs_permpvalenrich_vectorized(realenrich, chi_total_null, alternative = "greater")
-
-  out <- rep(NA_real_, nrow(lach_rk))
-  for (db in names(ppv)) {
-    idx <- which(lach_rk$database == db)
-    out[idx] <- ppv[[db]][lach_rk$pathway[idx]]
+    idx <- fcs_lach_index(gmts[[db]], rownames(corStat_rk), num_g, max_g)
+    if (is.null(idx)) next
+    nullchi <- fcs_lach_stats(prep, idx$M, idx$n1)$chi
+    rows <- which(lach_rk$database == db)
+    k    <- match(lach_rk$pathway[rows], idx$names)
+    cnt  <- vapply(seq_along(rows), function(i) if (is.na(k[i])) NA_real_ else sum(nullchi[k[i], ] >= lach_rk$lach_chi_total[rows[i]] - 1e-12), 0)
+    out[rows] <- (cnt + 1) / (ncol(nullchi) + 1)
   }
   out
 }
@@ -646,9 +545,7 @@ fcs_enrich_col_types <- function() {
     lach_chi_binary = readr::col_double(), lach_chi_nonzero = readr::col_double(),
     lach_chi_total = readr::col_double(), lach_frac_magnitude = readr::col_double(),
     lach_p.perm = readr::col_double(),
-    perm_pval = readr::col_double(), perm_p.adj = readr::col_double(), perm_nes = readr::col_double(),
     sig_wilcoxon = readr::col_logical(), sig_lachenbruch = readr::col_logical(),
-    sig_permulation = readr::col_logical(),
     evidence_count = readr::col_integer(), evidence_label = readr::col_character(),
     .default = readr::col_guess()
   )
@@ -657,17 +554,14 @@ fcs_enrich_col_types <- function() {
 # ── Evidence classification ───────────────────────────────────────────────────
 
 # Evidence gates and labels. The FDR threshold of each test is set in conf/enrichment.config
-# (fdr_wilcoxon, fdr_lachenbruch, fdr_permsum).
+# (fdr_wilcoxon, fdr_lachenbruch).
 #   sig_wilcoxon: FDR gate, direction (stat > 0) and, when p.perm exists, the permulation
 #     gate p.perm < p_perm_thr. p.perm is NA without a perms file or null, and the gate is skipped.
 #   sig_lachenbruch: FDR gate and, when lach_p.perm exists, the same permulation gate on the shared null.
-#   sig_permulation: FDR gate and direction (NES > 0) against the shared null; without one
-#     its columns are NA (no label shuffle stands in for it).
 # A ranking without a permulation null (no perms file, an empty null, a stale one) has no
-# phylogenetic gate: its sig_permulation cannot pass, and a row that passes the gates that
-# exist is "Exploratory (relative)", never "Supported", "Hard evidence" or "(phylogenetic)".
+# phylogenetic gate: a row that passes the gates that exist is "Exploratory", never "Supported".
 # no_null_rankings lists those rankings.
-fcs_classify_evidence <- function(enrich_df, fdr_wilcoxon, fdr_lachenbruch, fdr_permsum, p_perm_thr, no_null_rankings = character(0)) {
+fcs_classify_evidence <- function(enrich_df, fdr_wilcoxon, fdr_lachenbruch, p_perm_thr, no_null_rankings = character(0)) {
   enrich_df %>%
     dplyr::mutate(
       sig_wilcoxon    = !is.na(p.adj)       & p.adj       < fdr_wilcoxon &
@@ -676,22 +570,13 @@ fcs_classify_evidence <- function(enrich_df, fdr_wilcoxon, fdr_lachenbruch, fdr_
       sig_lachenbruch = !is.na(lach_p.adj)  & lach_p.adj  < fdr_lachenbruch &
                         (is.na(lach_p.perm) | lach_p.perm < p_perm_thr),
       lacks_null      = ranking %in% no_null_rankings,
-      sig_permulation = !lacks_null & !is.na(perm_p.adj)  & perm_p.adj  < fdr_permsum &
-                        !is.na(perm_nes) & perm_nes > 0,
-      evidence_count  = as.integer(sig_wilcoxon) +
-                        as.integer(sig_lachenbruch) +
-                        as.integer(sig_permulation),
+      evidence_count  = as.integer(sig_wilcoxon) + as.integer(sig_lachenbruch),
       evidence_label  = dplyr::case_when(
         # no null for this ranking: no phylogenetic gate was applied, whatever else passed
-        lacks_null & evidence_count >= 1L ~ "Exploratory (relative)",
+        lacks_null & evidence_count >= 1L ~ "Exploratory",
         lacks_null                        ~ "Not significant",
-        evidence_count == 3L ~ "Hard evidence",
         evidence_count == 2L ~ "Supported",
-        # Permulation has no relative-to-other-genes requirement (Wilcoxon and Lachenbruch
-        # have it besides their own phylogenetic gate): a lone permulation pass is a
-        # different claim and gets its own label.
-        evidence_count == 1L & sig_permulation ~ "Exploratory (phylogenetic)",
-        evidence_count == 1L                   ~ "Exploratory (relative)",
+        evidence_count == 1L ~ "Exploratory",
         TRUE                 ~ "Not significant"
       )
     ) %>% dplyr::select(-lacks_null)
@@ -725,7 +610,7 @@ fcs_empirical_corstat <- function(corRho) {
 
 # ── Full run ──────────────────────────────────────────────────────────────────
 
-# Runs the three tests on every ranking and classifies the evidence.
+# Runs the tests on every ranking and classifies the evidence.
 # rankings: named list of named numeric vectors (zero-floored, see fcs_build_vals).
 # gmts: named list of RERconverge gmt objects (fcs_load_gmts).
 # perms_file: RDS of the permulation null, or "NO_FILE". Two shapes are read: RER
@@ -733,10 +618,9 @@ fcs_empirical_corstat <- function(corRho) {
 #   CAAS (caas_corStat_byrank, one genes x N matrix per ranking global, top and bottom).
 # Returns one row per (ranking, database, pathway): the columns of fcs_enrich_col_types.
 fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "NO_FILE",
-                        fdr_thr = 0.15, p_perm_thr = 0.025, n_perms_sum = 10000,
-                        fdr_wilcoxon = fdr_thr, fdr_lachenbruch = fdr_thr,
-                        fdr_permsum = fdr_thr, seed = 1998) {
-  # Defined even without a perms file, because the Lachenbruch and path-sum loop below
+                        fdr_thr = 0.15, p_perm_thr = 0.025,
+                        fdr_wilcoxon = fdr_thr, fdr_lachenbruch = fdr_thr) {
+  # Defined even without a perms file, because the Lachenbruch loop below
   # runs regardless and reads corStat_byrk (all NULL here). It is replaced by the
   # per-ranking resolution once a perms file loads.
   corStat_byrank <- NULL; base_corStat <- NULL; base_corRho <- NULL
@@ -755,8 +639,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
       lach_pval = numeric(), lach_p.adj = numeric(), lach_chi_binary = numeric(),
       lach_chi_nonzero = numeric(), lach_chi_total = numeric(), lach_frac_magnitude = numeric(),
       lach_p.perm = numeric(),
-      perm_pval = numeric(), perm_p.adj = numeric(), perm_nes = numeric(),
-      sig_wilcoxon = logical(), sig_lachenbruch = logical(), sig_permulation = logical(),
+      sig_wilcoxon = logical(), sig_lachenbruch = logical(),
       evidence_count = integer(), evidence_label = character()
     ))
   }
@@ -818,11 +701,18 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
                            n_perms, length(gmts), length(rankings)))
 
       # Null matrix of every ranking, resolved once for this loop and for the
-      # Lachenbruch and path-sum loop below.
+      # Lachenbruch loop below.
       corStat_byrk <- setNames(
         lapply(names(rankings), fcs_resolve_corstat_rk,
                corStat_byrank = corStat_byrank, base_corStat = base_corStat, base_corRho = base_corRho),
         names(rankings))
+      # The null of a magnitude ranking on the genes of that ranking: observed and null share the universe, so a set has
+      # the same genes on both sides and the ties of the null are counted over the same genes.
+      for (rk in names(corStat_byrk)) {
+        if (!is.null(corStat_byrk[[rk]]) && alts[[rk]] == "greater") {
+          corStat_byrk[[rk]] <- fcs_align_null(corStat_byrk[[rk]], names(rankings[[rk]]))
+        }
+      }
 
       for (rk in names(rankings)) {
         obs_rk <- enrich_df %>% dplyr::filter(ranking == rk)
@@ -847,7 +737,14 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
           error = function(e) { fcs_progress(sprintf("null stats failed [%s]: %s", rk, e$message)); NULL })
         if (is.null(enrichStat)) next
 
-        ppv <- fcs_permpvalenrich_vectorized(realenrich, enrichStat, alternative = alt)
+        # Magnitude rankings: the permulated statistic is the tie-corrected p of the AUC, on one scale across the columns
+        # of the null whatever their number of tied genes. Signed rankings have no ties: the AUC itself, as RERconverge.
+        if (alt == "greater") {
+          nullP <- fcs_null_wilcoxon_p_vectorized(corStat_rk, gmts, realenrich, enrichStat, num_g = num_g, max_g = max_g)
+          ppv   <- fcs_permpval_from_p_vectorized(realenrich, nullP)
+        } else {
+          ppv <- fcs_permpvalenrich_vectorized(realenrich, enrichStat, alternative = alt)
+        }
         for (db in names(ppv)) {
           idx <- which(enrich_df$ranking == rk & enrich_df$database == db)
           if (length(idx)) enrich_df$p.perm[idx] <- ppv[[db]][enrich_df$pathway[idx]]
@@ -859,16 +756,15 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
     }
   }
 
-  # ── Lachenbruch two-part and path-sum permulation (non-negative rankings) ──
+  # ── Lachenbruch two-part (non-negative rankings) ──
   # Skipped for two-sided rankings (signed RER values), where score > 0 does not mean
   # "signal present"; those get the Wilcoxon test only.
   lach_res <- list()
-  perm_res <- list()
   for (rk in names(rankings)) {
     if (alts[[rk]] != "greater") next
     vals_rk <- rankings[[rk]]
     # The null the Wilcoxon loop uses (corStat_byrk). NULL without a perms file or a null
-    # for this ranking; the empirical p-values of both tests below then stay NA.
+    # for this ranking; the empirical p-value below then stays NA.
     corStat_rk <- corStat_byrk[[rk]]
 
     fcs_progress(sprintf("Lachenbruch two-part test: ranking %s", rk))
@@ -889,26 +785,9 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
       } else NA_real_
       lach_res[[rk]] <- dplyr::mutate(lach_rk, ranking = rk)
     }
-
-    if (is.null(corStat_rk)) {
-      # A label shuffle ignores the phylogeny: it would fill the permulation columns with a
-      # weaker null under the same names, so they stay NA.
-      fcs_progress(sprintf("Path sum permulation: ranking %s skipped (no permulation null for this ranking)", rk))
-      next
-    }
-    fcs_progress(sprintf("Path sum permulation: ranking %s (CAAS/RER null, %d perms)", rk, ncol(corStat_rk)))
-    perm_rk <- tryCatch(
-      fcs_run_permulation(vals_rk, gmts, num_g = num_g, max_g = max_g, n_perms = n_perms_sum,
-                          seed = seed, null_mat = corStat_rk),
-      error = function(e) {
-        fcs_progress(sprintf("  Permulation failed [%s]: %s", rk, e$message))
-        tibble::tibble()
-      })
-    if (nrow(perm_rk) > 0) perm_res[[rk]] <- dplyr::mutate(perm_rk, ranking = rk)
   }
 
   lach_df <- if (length(lach_res) > 0) dplyr::bind_rows(lach_res) else tibble::tibble()
-  perm_df <- if (length(perm_res) > 0) dplyr::bind_rows(perm_res) else tibble::tibble()
 
   if (nrow(lach_df) > 0) {
     enrich_df <- dplyr::left_join(enrich_df, lach_df, by = c("ranking", "database", "pathway"))
@@ -918,16 +797,10 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
       lach_chi_nonzero = NA_real_, lach_chi_total = NA_real_, lach_frac_magnitude = NA_real_,
       lach_p.perm = NA_real_)
   }
-  if (nrow(perm_df) > 0) {
-    enrich_df <- dplyr::left_join(enrich_df, perm_df, by = c("ranking", "database", "pathway"))
-  } else {
-    enrich_df <- dplyr::mutate(enrich_df,
-      perm_pval = NA_real_, perm_p.adj = NA_real_, perm_nes = NA_real_)
-  }
 
   # ── Evidence gates and classification ──
   enrich_df <- fcs_classify_evidence(enrich_df, fdr_wilcoxon = fdr_wilcoxon, fdr_lachenbruch = fdr_lachenbruch,
-                                     fdr_permsum = fdr_permsum, p_perm_thr = p_perm_thr,
+                                     p_perm_thr = p_perm_thr,
                                      no_null_rankings = names(corStat_byrk)[vapply(corStat_byrk, is.null, logical(1))])
 
   enrich_df %>% dplyr::relocate(ranking, database, pathway,

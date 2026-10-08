@@ -60,13 +60,6 @@ params:
   gene_lists_dir:     NULL
   position_lists_dir: NULL
   seed:               "1998"
-  # CAAS permulation-null significance threshold for p.adj_bh (position) /
-  # gene_caas_pperm_adj (gene), same param name + default as 11.Scoring_report.Rmd
-  # (conf/scoring.config:47) - reused so "significant" means the same thing
-  # across reports. Drives the Interesting Positions table's position_significant
-  # column below (flag_caas_significant, the gene-level analogue, arrives
-  # pre-computed via fcs_stats_file and needs no threshold here).
-  scoring_p_emp_thr:  0.05
 ---
 
 <style type="text/css">
@@ -146,12 +139,10 @@ kbl_html <- function(df, height = NULL, escape = TRUE, caption = NULL, ...) {
 # evidence_label_caas/evidence_label_rer in Interesting Genes/Positions), so
 # the same tier always reads the same colour everywhere. Any table using
 # .evidence_badge() must be rendered via kbl_html(..., escape = FALSE).
-.exploratory_labels <- c("Exploratory", "Exploratory (relative)", "Exploratory (phylogenetic)")
+.exploratory_labels <- c("Exploratory")
 .evidence_weight_of <- function(lbl) dplyr::case_when(
-  lbl == "Hard evidence" ~ 3L, lbl == "Supported" ~ 2L, lbl %in% .exploratory_labels ~ 1L, TRUE ~ 0L)
-.evidence_colours <- c("Hard evidence" = "#27ae60", "Supported" = "#e67e22",
-                       "Exploratory" = "#7f8c8d", "Exploratory (relative)" = "#7f8c8d",
-                       "Exploratory (phylogenetic)" = "#9b59b6", "None" = "#dcdcdc")
+  lbl == "Supported" ~ 2L, lbl %in% .exploratory_labels ~ 1L, TRUE ~ 0L)
+.evidence_colours <- c("Supported" = "#e67e22", "Exploratory" = "#7f8c8d", "None" = "#dcdcdc")
 .evidence_badge <- function(x) {
   x <- dplyr::coalesce(x, "None")
   kableExtra::cell_spec(x, "html",
@@ -489,7 +480,7 @@ ami_genes <- if (has_ami && !is.null(ami_df) && nrow(ami_df) > 0) {
 }
 
 # Posenrich angle: posenrich_leading_edge.tsv is ALREADY restricted to
-# significant (p_adj < posenrich's own padj_thr) terms by posenrich_enrich.py
+# significant terms (Lachenbruch gates of posenrich_enrich.py)
 # itself (only rows with r["sig"] get written), no additional gate needed
 # here, just direction mapping (now including "global"). Also carries the
 # actual Position(s) behind each hit (kept for the Interesting Genes/Positions tables' Position
@@ -537,7 +528,7 @@ below and as weighted criteria in the Interesting Genes/Positions tables further
 down. A gene set is "significant" at BH < `r params$fdr_thr` (and permulation p
 < threshold where available) with AUC > 0.5 - see
 [12.FCS_general_report.Rmd](12.FCS_general_report.Rmd)'s Methods section for the
-full three-method definition (Wilcoxon-AUC / Lachenbruch / Permulation) and the
+two-method definition (Wilcoxon-AUC / Lachenbruch) and the
 `evidence_label`/`evidence_score` ranking convention this report's own tables follow.
 
 DOMINO active-module (AMI) results and posenrich's position-level enrichment are
@@ -551,10 +542,10 @@ tables shown here match the per-module reports exactly. For each significantly-
 enriched set, the **percentage of its leading-edge genes** carrying each attribute:
 significance gates, directional score percentiles, and cross-module support.
 Rows follow the same ranking convention as the source FCS report: **evidence
-tier first** (Hard > Supported > Exploratory evidence, from the Wilcoxon-AUC /
-Lachenbruch / Permulation vote), **then `evidence_score`** - each *passing*
-method's own statistic (AUC, `L.frac_mag`, NES) converted to a percentile
-rank so the three are comparable on one scale, zeroed for a method that
+tier first** (Supported > Exploratory evidence, from the Wilcoxon-AUC /
+Lachenbruch vote), **then `evidence_score`** - each *passing*
+method's own statistic (AUC, `L.frac_mag`) converted to a percentile
+rank so the two are comparable on one scale, zeroed for a method that
 didn't pass, then summed - **then alphabetical** as a tie-break, already
 baked into the row order of the imported table, not recomputed here. Faceted
 Global/Top/Bottom, each module in its own sub-tab, capped at `r params$top_n`
@@ -605,13 +596,13 @@ for (dr in c("Global", "Top", "Bottom")) {
 # directly, since older exports may predate them.
 thr <- params$fdr_thr
 .evidence_rank_of <- function(lbl) dplyr::case_when(
-  lbl == "Hard evidence" ~ 1L, lbl == "Supported" ~ 2L, lbl %in% .exploratory_labels ~ 3L, TRUE ~ 4L)
+  lbl == "Supported" ~ 1L, lbl %in% .exploratory_labels ~ 2L, TRUE ~ 3L)
 
 if (!"evidence_label" %in% names(fcs_dir_mod)) fcs_dir_mod$evidence_label <- NA_character_
-for (cl in c("lach_frac_magnitude", "perm_nes")) {
+for (cl in c("lach_frac_magnitude")) {
   if (!cl %in% names(fcs_dir_mod)) fcs_dir_mod[[cl]] <- NA_real_
 }
-for (cl in c("sig_wilcoxon", "sig_lachenbruch", "sig_permulation")) {
+for (cl in c("sig_wilcoxon", "sig_lachenbruch")) {
   if (!cl %in% names(fcs_dir_mod)) fcs_dir_mod[[cl]] <- FALSE
 }
 
@@ -622,29 +613,25 @@ permod_best <- fcs_dir_mod %>%
   summarise(AUC = max(stat, na.rm = TRUE) + 0.5,
             p.adj = min(p.adj, na.rm = TRUE),
             lach_frac_magnitude = suppressWarnings({ v <- na.omit(lach_frac_magnitude); if (length(v)) v[1] else NA_real_ }),
-            perm_nes = suppressWarnings({ v <- na.omit(perm_nes); if (length(v)) v[1] else NA_real_ }),
             sig_wilcoxon    = any(sig_wilcoxon %in% TRUE),
             sig_lachenbruch = any(sig_lachenbruch %in% TRUE),
-            sig_permulation = any(sig_permulation %in% TRUE),
             evidence_label = dplyr::first(evidence_label),
             description = dplyr::first(dplyr::coalesce(description, pathway)),
             .groups = "drop") %>%
   # evidence_score: each PASSING method's statistic converted to its own
   # percentile rank within this (module, direction) tab, zeroed when that
   # method didn't pass, see 12.FCS_general_report.Rmd's Methods section
-  # for why (raw AUC/L.frac_mag/NES are on incompatible scales).
+  # for why (raw AUC and L.frac_mag are on incompatible scales).
   dplyr::group_by(module, direction) %>%
   dplyr::mutate(.auc_pct = dplyr::percent_rank(AUC),
-                .lfm_pct = dplyr::percent_rank(lach_frac_magnitude),
-                .nes_pct = dplyr::percent_rank(perm_nes)) %>%
+                .lfm_pct = dplyr::percent_rank(lach_frac_magnitude)) %>%
   dplyr::ungroup() %>%
   dplyr::mutate(
     evidence_rank = .evidence_rank_of(evidence_label),
     evidence_score = dplyr::if_else(sig_wilcoxon,    dplyr::coalesce(.auc_pct, 0), 0) +
-                     dplyr::if_else(sig_lachenbruch, dplyr::coalesce(.lfm_pct, 0), 0) +
-                     dplyr::if_else(sig_permulation, dplyr::coalesce(.nes_pct, 0), 0)
+                     dplyr::if_else(sig_lachenbruch, dplyr::coalesce(.lfm_pct, 0), 0)
   ) %>%
-  dplyr::select(-.auc_pct, -.lfm_pct, -.nes_pct) %>%
+  dplyr::select(-.auc_pct, -.lfm_pct) %>%
   dplyr::left_join(fcs_sig_terms %>% dplyr::select(-description) %>% dplyr::mutate(sig = TRUE),
                     by = c("module", "direction", "database", "pathway")) %>%
   dplyr::mutate(sig = dplyr::coalesce(sig, FALSE))
@@ -658,8 +645,8 @@ for (dr in c("global", "top", "bottom")) {
       arrange(evidence_rank, dplyr::desc(evidence_score), description) %>%
       mutate(Description = stringr::str_trunc(description, 60),
              AUC = round(AUC, 3), p.adj = signif(p.adj, 3),
-             L.frac_mag = round(lach_frac_magnitude, 2), NES = round(perm_nes, 2)) %>%
-      select(database, pathway, Description, evidence_label, AUC, p.adj, any_of(c("L.frac_mag", "NES"))) %>%
+             L.frac_mag = round(lach_frac_magnitude, 2)) %>%
+      select(database, pathway, Description, evidence_label, AUC, p.adj, any_of("L.frac_mag")) %>%
       head(params$top_n)
     if (nrow(d) == 0) {
       cat(sprintf("_No gene set is significant in %s (%s) at BH < %.2g._\n\n", toupper(m), dr, thr))
@@ -806,11 +793,11 @@ auditable rather than a silent black box.
 
 `Cutoffs`/`N cutoffs` show which top-fraction cutoffs (10/5/1%) the term
 recurred significant at *before* merging - a plain recurrence count, unioned
-across merged aliases. `NES`/`p.adj` (best across merged aliases: highest
-NES, lowest p.adj) come straight from
+across merged aliases. `χ²`/`p.adj` (best across merged aliases: highest
+χ², lowest p.adj) come straight from
 [14.Position_enrichment_report.Rmd](14.Position_enrichment_report.Rmd)'s own
 Leading edge table (`posenrich_leading_edge_summary.tsv`, imported below);
-this report runs one test (Position-Level Path Sum Permulation), so there's
+this report runs one test (Lachenbruch two-part test on the position scores), so there's
 no multi-method vote to combine here, unlike the gene-level FCS tables above.
 
 ```{r posenrich_dotplot_prep, eval=has_posenrich_le_summary}
@@ -850,7 +837,7 @@ fuzzy_merge_terms <- function(df) {
 ```
 
 ```{r posenrich_dotplot_tabs, eval=has_posenrich_le_summary, results='asis'}
-has_nes_col <- "NES" %in% names(posenrich_dotplot_disp)
+has_chi_col <- "χ²" %in% names(posenrich_dotplot_disp)
 for (dr in c("Global", "Top", "Bottom")) {
   cat(sprintf("\n### %s\n\n", dr))
   dr_df <- posenrich_dotplot_disp %>% dplyr::filter(.direction == dr)
@@ -864,7 +851,7 @@ for (dr in c("Global", "Top", "Bottom")) {
       Cutoffs       = paste(unique(unlist(strsplit(Cutoffs, ",\\s*"))), collapse = ", "),
       `N cutoffs`   = suppressWarnings(max(`N cutoffs`, na.rm = TRUE)),
       `N merged`    = dplyr::n(),
-      NES           = if (has_nes_col) round(suppressWarnings(max(NES, na.rm = TRUE)), 3) else NA_real_,
+      `χ²`          = if (has_chi_col) round(suppressWarnings(max(`χ²`, na.rm = TRUE)), 3) else NA_real_,
       `p.adj`       = signif(suppressWarnings(min(p_adj, na.rm = TRUE)), 3),
       .groups = "drop"
     ) %>%
@@ -872,7 +859,7 @@ for (dr in c("Global", "Top", "Bottom")) {
     # membership" table: recurrence (N cutoffs) first, alphabetical tie-break.
     dplyr::arrange(dplyr::desc(`N cutoffs`), Description) %>%
     dplyr::select(-.merge_id) %>%
-    { if (!has_nes_col) dplyr::select(., -NES) else . } %>%
+    { if (!has_chi_col) dplyr::select(., -`χ²`) else . } %>%
     head(params$top_n)
 
   print(kbl_html(merged, height = if (nrow(merged) > 15) "460px" else NULL))
@@ -923,8 +910,8 @@ own module-significance cutoff - posenrich's leading edge is already
 significance-restricted at the source), and collapse behind a `<details>`
 toggle when a gene carries more than one. `CAAS evidence`/`RER evidence`
 (`evidence_label_caas`/`evidence_label_rer`) show the **strongest** FCS
-evidence tier the gene's best CAAS/RER gene set reached - Hard (weight 3) >
-Supported (2) > Exploratory (1) > None (0), same tiers and colours as
+evidence tier the gene's best CAAS/RER gene set reached - Supported (weight 2) >
+Exploratory (1) > None (0), same tiers and colours as
 [12.FCS_general_report.Rmd](12.FCS_general_report.Rmd)'s Multi-Method
 Evidence table - a strictly more informative sibling of the plain
 `CAAS_FCS_sig`/`RER_FCS_sig` booleans (which only say "belongs to ≥1
@@ -989,7 +976,7 @@ direction of its own, so either side counts there).
   }, character(1), USE.NAMES = FALSE)
 }
 
-# Per-gene best evidence tier per module (Hard=3/Supported=2/Exploratory=1/
+# Per-gene best evidence tier per module (Supported=2/Exploratory=1/
 # none=0), alongside the existing term-description text, evidence_label_caas/
 # evidence_label_rer surface in Interesting Genes/Positions below as their own
 # weighted criterion, distinct from the plain CAAS_FCS_sig/RER_FCS_sig boolean
@@ -1043,7 +1030,7 @@ direction of its own, so either side counts there).
 # CAAS, RER, AMI+FADE (network/module + direct FADE-site evidence travel
 # together, since AMI's own gene lists are themselves seeded from FADE
 # significance), and posenrich, each contributing the plain count of
-# criteria it satisfies (weighted 0-3 by evidence tier where a tier exists),
+# criteria it satisfies (weighted 0-2 by evidence tier where a tier exists),
 # summed across families with NO further weighting. `fade_col` is "FADE_dir"
 # (genes) or "FADE_overlap" (positions), same shape, different column name
 # at the two granularities.
@@ -1195,16 +1182,6 @@ build_interesting_genes <- function(direction) {
   # has no direction of its own, so either counts. RER_acc/RER_decc themselves
   # stay in the display below (both are still shown, just not both scored).
   base$RER_dir <- switch(direction, Top = base$RER_acc, Bottom = base$RER_decc, base$RER_acc | base$RER_decc)
-  # CAAS_sig: gene_caas_pperm_adj <= p_emp_thr (flag_caas_significant from
-  # scoring_compute.R), the CAAS permutation-null's OWN significance call on
-  # the gene's composite score. Deliberately kept OUT of .grouped_composite()'s
-  # caas_family sum below (and out of N criteria) - it measures something
-  # different from the percentile-quartet/Accum_dir/evidence-tier signals
-  # already in that family (a calibrated null p-value vs. a rank-based
-  # threshold), and this task does not introduce any new statistical
-  # combination method. Shown as its own plain boolean column instead, non-
-  # directional (same flag for Top/Bottom/Global) like RER_acc/RER_decc.
-  base$CAAS_sig <- .gcol(gene_attr_df, "flag_caas_significant")
 
   all_genes <- base %>%
     dplyr::left_join(.fcs_terms_for(rk_set), by = "gene") %>%
@@ -1226,7 +1203,7 @@ build_interesting_genes <- function(direction) {
 
   out <- all_genes %>%
     dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_dir | Accum_dir | RER_dir |
-                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig | CAAS_sig)
+                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig)
   if (nrow(out) == 0) return(out)
 
   out <- out %>%
@@ -1245,7 +1222,6 @@ build_interesting_genes <- function(direction) {
   out %>%
     dplyr::arrange(dplyr::desc(`Composite score`)) %>%
     dplyr::select(Gene = gene, `25%`, `10%`, `5%`, `1%`, FADE_dir, RER_acc, RER_decc, Accum_dir,
-                  CAAS_sig,
                   CAAS_FCS_sig, `CAAS FCS term(s)`, `CAAS evidence`,
                   RER_FCS_sig, `RER FCS term(s)`, `RER evidence`,
                   CAAS_AMI_net, `CAAS AMI desc(s)`, RER_AMI_net, `RER AMI desc(s)`, FADE_AMI_net, `FADE AMI desc(s)`,
@@ -1350,17 +1326,6 @@ build_interesting_positions <- function(direction) {
   # Ensure Gene and Position are deduplicated
   base <- base %>% dplyr::distinct(gene, Position, .keep_all = TRUE)
 
-  # position_significant: p.adj_bh <= scoring_p_emp_thr, computed directly on base
-  has_pe_raw <- "p.emp" %in% names(base)
-  has_pe_bh  <- "p.adj_bh" %in% names(base)
-  has_pe_bhf <- "p.adj_bh_fact" %in% names(base)
-  p_emp_thr <- suppressWarnings(as.numeric(params$scoring_p_emp_thr))
-  if (!is.finite(p_emp_thr) || p_emp_thr <= 0 || p_emp_thr > 1) p_emp_thr <- 0.05
-  base$position_significant_raw <- if (has_pe_raw) !is.na(base$`p.emp`) & base$`p.emp` <= p_emp_thr else FALSE
-  base$position_significant_bh  <- if (has_pe_bh) !is.na(base$`p.adj_bh`) & base$`p.adj_bh` <= p_emp_thr else FALSE
-  base$position_significant_bh_fact <- if (has_pe_bhf) !is.na(base$`p.adj_bh_fact`) & base$`p.adj_bh_fact` <= p_emp_thr else FALSE
-  base$position_significant     <- base$position_significant_bh
-
   # Position-native FADE-site overlap.
   fade_df <- switch(direction,
     Top = fade_sites_top_cmp_df, Bottom = fade_sites_bottom_cmp_df,
@@ -1454,15 +1419,12 @@ build_interesting_positions <- function(direction) {
 
   all_positions <- base %>%
     dplyr::mutate(dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_overlap, RER_acc, RER_decc, RER_dir, Accum_dir,
-                                 CAAS_FCS_sig, RER_FCS_sig, CAAS_AMI_net, RER_AMI_net, FADE_AMI_net, PE_sig,
-                                 position_significant, position_significant_raw, position_significant_bh,
-                                 position_significant_bh_fact),
+                                 CAAS_FCS_sig, RER_FCS_sig, CAAS_AMI_net, RER_AMI_net, FADE_AMI_net, PE_sig),
                                  ~ dplyr::coalesce(.x, FALSE)))
 
   out <- all_positions %>%
     dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_overlap | Accum_dir | RER_dir |
-                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig |
-                  position_significant | position_significant_raw | position_significant_bh_fact)
+                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig)
   if (nrow(out) == 0) return(out)
 
   out <- out %>%
@@ -1505,10 +1467,7 @@ build_interesting_positions <- function(direction) {
                   `Hypotheses`,
                   `25%`, `10%`, `5%`, `1%`,
                   FADE_overlap, RER_acc, RER_decc, Accum_dir,
-                  `Pos sig (uncorrected)` = position_significant_raw,
-                  `Pos sig (p.adj_bh)` = position_significant_bh,
-                  `Pos sig (p.adj_bh_fact)` = position_significant_bh_fact,
-                  position_significant,
+                  dplyr::any_of(c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact")),
                   CAAS_FCS_sig, `CAAS FCS term(s)`, `CAAS evidence`,
                   RER_FCS_sig, `RER FCS term(s)`, `RER evidence`,
                   CAAS_AMI_net, `CAAS AMI desc(s)`, RER_AMI_net, `RER AMI desc(s)`, FADE_AMI_net, `FADE AMI desc(s)`,

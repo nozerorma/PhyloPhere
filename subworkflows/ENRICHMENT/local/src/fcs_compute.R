@@ -4,7 +4,7 @@
 # =============================================================================
 # Called by:  FCS_COMPUTE_BATCHED Nextflow process (fcs.nf → Rscript fcs_compute.R ...)
 #
-# Runs fcs_run_all() (Wilcoxon-AUC, Lachenbruch and path-sum permulation tests) over
+# Runs fcs_run_all() (Wilcoxon-AUC and Lachenbruch tests) over
 # every GMT database of --gmt-dir, so the expensive part can run as independent tasks
 # batched by GMT file. The BH correction of fcs_enrich.R is scoped per database, so the
 # rows of one batch never need reconciling with another and a row-concat of all batches
@@ -19,11 +19,11 @@
 #   --stats-file        gene scores, one score_<ranking> column per ranking
 #   --universe-file     gene universe, or NO_FILE (then the genes of --stats-file)
 #   --gmt-dir           directory of the *.gmt files of this batch
-#   --perms-file        null permutations for the path-sum test, or NO_FILE
+#   --perms-file        null permutations for the permulation p of both tests, or NO_FILE
 #   --num-g, --max-g    minimum and maximum gene-set size (max-g 0 = no limit)
-#   --fdr-thr           default FDR; --fdr-wilcoxon, --fdr-lachenbruch and --fdr-permsum override it per test
-#   --pperm-thr         permutation p-value threshold; --n-perms-sum number of path-sum permutations
-#   --seed, --output    random seed and output TSV
+#   --fdr-thr           default FDR; --fdr-wilcoxon and --fdr-lachenbruch override it per test
+#   --pperm-thr         permutation p-value threshold
+#   --output            output TSV
 # =============================================================================
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
@@ -51,15 +51,11 @@ max_g         <- as.numeric(get_arg("--max-g", "0"))
 fdr_thr       <- as.numeric(get_arg("--fdr-thr", "0.15"))
 fdr_wilcoxon  <- as.numeric(get_arg("--fdr-wilcoxon", as.character(fdr_thr)))
 fdr_lachenbruch <- as.numeric(get_arg("--fdr-lachenbruch", as.character(fdr_thr)))
-fdr_permsum   <- as.numeric(get_arg("--fdr-permsum", as.character(fdr_thr)))
 pperm_thr     <- as.numeric(get_arg("--pperm-thr", "0.025"))
-n_perms_sum   <- as.numeric(get_arg("--n-perms-sum", "10000"))
-seed_val      <- as.integer(get_arg("--seed", "1998"))
 out_file      <- get_arg("--output", "fcs_enrich_partial.tsv")
 
 stopifnot(!is.null(stats_file), file.exists(stats_file))
 stopifnot(!is.null(gmt_dir), dir.exists(gmt_dir))
-set.seed(seed_val)
 
 
 # ── Load fcs_enrich.R ─────────────────────────────────────────────────────────
@@ -106,8 +102,7 @@ gmts <- fcs_load_gmts(gmt_dir)
 enrich <- fcs_run_all(rankings, gmts, num_g = num_g, max_g = max_g,
                       perms_file = perms_file, fdr_thr = fdr_thr,
                       fdr_wilcoxon = fdr_wilcoxon, fdr_lachenbruch = fdr_lachenbruch,
-                      fdr_permsum = fdr_permsum, p_perm_thr = pperm_thr,
-                      n_perms_sum = n_perms_sum, seed = seed_val)
+                      p_perm_thr = pperm_thr)
 
 
 # ── Output ────────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 ---
-title: "Position-level Enrichment (Path Sum Permulation) - `r params$traitname`"
+title: "Position-level Enrichment (Lachenbruch Two-Part) - `r params$traitname`"
 subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 author: "PhyloPhere pipeline"
@@ -89,7 +89,7 @@ params:
   }
 </style>
 
-<!-- 14.Position_enrichment_report.Rmd — Position-level path-sum permulation enrichment and characterization of the CAAS positions. -->
+<!-- 14.Position_enrichment_report.Rmd — Position-level Lachenbruch two-part enrichment and characterization of the CAAS positions. -->
 <!-- PhyloPhere | subworkflows/ENRICHMENT/local/ -->
 
 ```{r setup, include=FALSE}
@@ -158,15 +158,22 @@ if (!is.null(res) && "top_frac" %in% names(res)) {
 }
 if (!is.null(res)) {
   if (!"foreground_size" %in% names(res)) res$foreground_size <- if ("n_pos_with_score" %in% names(res)) res$n_pos_with_score else NA_real_
-  if (!"observed" %in% names(res)) res$observed <- if ("obs_sum" %in% names(res)) res$obs_sum else NA_real_
-  if (!"expected" %in% names(res)) res$expected <- if ("null_mean" %in% names(res)) res$null_mean else NA_real_
-  if (!"fold_enrichment" %in% names(res)) res$fold_enrichment <- if ("perm_nes" %in% names(res)) res$perm_nes else NA_real_
+  # The Lachenbruch columns under the names the sections below use: the BH-adjusted p, the analytic p, and the chi-square
+  # of the test as the strength of a term.
+  if ("lach_chi_total" %in% names(res)) {
+    res$p_adj    <- res[["lach_p.adj"]]
+    res$p_value  <- res$lach_pval
+    res$strength <- res$lach_chi_total
+  }
+  if (!"fold_enrichment" %in% names(res)) res$fold_enrichment <- if ("strength" %in% names(res)) res$strength else NA_real_
+  # The Lachenbruch test is one-sided (a term can only be enriched).
+  if (!"direction" %in% names(res)) res$direction <- "enriched"
 }
 has_res <- !is.null(res) && nrow(res) > 0
 RANKING_ORDER <- c("global", "top", "bottom")
 if (has_res && !"sig" %in% names(res)) {
-  # Significant: p_adj < padj_thr and NES > 0.
-  res$sig <- res$p_adj < PADJ & (!"perm_nes" %in% names(res) | res$perm_nes > 0)
+  # Significant: the BH-adjusted p of the Lachenbruch test below padj_thr.
+  res$sig <- res$p_adj < PADJ
 }
 
 # Truncate a "gene1, gene2, ..." string to its first n_show entries; the remainder sits
@@ -244,7 +251,7 @@ fade_sites_bottom_df <- if (has_fade_sites_bottom) {
 > **Proof of concept - not validated for standalone significance claims.** This
 > module has not had a real end-to-end production run, and its GMT construction,
 > its handling of the very large (~1.47M-position) background, and its
-> significance gating (`p_adj < padj_thr` with `NES > 0`) have not been
+> significance gating (`lach_p.adj` and the permulation p of the Lachenbruch test) have not been
 > checked against any known-truth signal. Treat everything in this report as
 > descriptive characterization only (e.g. "does this term show up near
 > CAAS-high positions") - do not cite it as evidence for a biological claim on
@@ -255,11 +262,14 @@ This report summarises **position-level enrichment** for `r params$traitname`. U
 the gene-level FCS (a Wilcoxon-AUC rank-shift test over genes), the position background is a
 sea of invariant columns where <0.2% of positions carry a non-zero CAAS score. A rank-shift test
 degenerates there, and fixed-cutoff Fisher tests suffer from extreme sample-size sensitivity at $N \approx 1.47\text{M}$.
-Instead, we use **Position-Level Path Sum Permulation**: accumulating continuous CAAS score magnitudes per term ($T_\text{obs} = \sum_{p \in \text{term}} s_p$)
-and comparing against a label-permuted null distribution across the full ~1.47M position background ($N_\text{perms} = 2,000$).
+Instead, we use the **Lachenbruch two-part test**, the same one the gene-level FCS runs: the *prevalence* of the scored
+positions in the term (upper tail of a hypergeometric distribution over the whole background) plus the *magnitude* of their
+CAAS scores (rank-sum of the scored positions of the term against the other scored positions), combined as χ² with 2 df.
+The observed scores and every cycle of the CAAS permulation null go through the same function, so the permulation p
+(`lach_p.perm`) compares like with like.
 
-A set is flagged **significant** when `p.adj < `r PADJ`` (BH-adjusted per
-ranking × database) and `NES > 0`.
+A set is flagged **significant** when `lach_p.adj < `r PADJ`` (BH-adjusted per
+ranking × database) and `lach_p.perm` is below the permulation gate of the FCS.
 
 ```{r overview, echo=FALSE, results='asis'}
 if (!has_res) {
@@ -321,14 +331,14 @@ if (!has_res) {
         if (n_total_tf > TOP_N) {
           cat(sprintf("_Showing top %d of %d tested pathways (sorted by significance)._\n\n", TOP_N, n_total_tf))
         }
-        if ("perm_nes" %in% names(tf_src)) {
+        if ("lach_chi_total" %in% names(tf_src)) {
           tf_df <- tf_src %>%
             transmute(Pathway = pathway, Description = description,
                       `Layer size` = layer_size, `N scored` = n_pos_with_score,
-                      `Observed sum` = round(obs_sum, 2), `Null mean` = round(null_mean, 2),
-                      NES = round(perm_nes, 3), Direction = direction,
-                      `p (Perm)` = signif(p_value, 3),
-                      `p.adj` = signif(p_adj, 3), Sig = ifelse(sig, "*", ""))
+                      `χ² prevalence` = round(lach_chi_binary, 2), `χ² magnitude` = round(lach_chi_nonzero, 2),
+                      `χ² total` = round(lach_chi_total, 2),
+                      `p (Lach)` = signif(lach_pval, 3),
+                      `p.adj` = signif(p_adj, 3), `p (perm)` = signif(`lach_p.perm`, 3), Sig = ifelse(sig, "*", ""))
         } else {
           tf_df <- tf_src %>%
             transmute(Pathway = pathway, Description = description,
@@ -416,21 +426,21 @@ if (!has_res) {
 # Overall dotplot {.tabset .tabset-fade}
 
 Pooled across all databases and threshold cutoffs, ranked by BH-adjusted p
-(the one test this report runs - Position-Level Path Sum Permulation - so
+(the one test this report runs - the Lachenbruch two-part test - so
 there is no multi-method vote to combine, unlike the gene-level FCS report).
 One dotplot per direction, restricted to the top `r params$table_top_n`
 terms, on a **shared x-axis of `-log10(BH-adjusted p)`**. Each term's segment
-colour encodes its own **NES** (light-to-dark, darker = larger NES among the
+colour encodes its own **χ²** (light-to-dark, darker = larger χ² among the
 terms shown); the **tip marker** is drawn in a fixed dark shade - always
-darker than any point on the segment's own NES gradient - so the
-significance endpoint stands out regardless of that term's NES. `list
+darker than any point on the segment's own χ² gradient - so the
+significance endpoint stands out regardless of that term's χ². `list
 _threshold`/`n_occurrences` (also in the table export) record which
 10%/5%/1% cutoffs recovered the term and how many, as a simple, auditable
 recurrence count - not a weighted score.
 
 ```{r overall-dotplot, echo=FALSE, results='asis', fig.height=6}
-.NES_HUE_LIGHT <- "#e7d4e8"  # color family of the Permulation method in 12.FCS_general_report.Rmd,
-.NES_HUE_DARK  <- "#4a148c"  # the one test of this report.
+.CHI_HUE_LIGHT <- "#fee0b6"  # color family of the Lachenbruch method in 12.FCS_general_report.Rmd,
+.CHI_HUE_DARK  <- "#8c2d04"  # the one test of this report.
 
 # Darken a hex color toward black by `amount` (0-1); the tip marker takes a deeper shade
 # of the color of its own segment.
@@ -485,7 +495,7 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
     term_meta <- rk_sig %>%
       dplyr::group_by(database, pathway) %>%
       dplyr::summarise(p_adj = min(p_adj, na.rm = TRUE),
-                        perm_nes = { v <- stats::na.omit(perm_nes); if (length(v)) max(v) else NA_real_ },
+                        strength = { v <- stats::na.omit(strength); if (length(v)) max(v) else NA_real_ },
                         description = dplyr::first(dplyr::coalesce(description, pathway)),
                         list_threshold = if (.has_tf_col) paste(sort(100 * unique(na.omit(top_frac)), decreasing = TRUE), "%", sep = "", collapse = ", ") else "N/A",
                         n_occurrences = if (.has_tf_col) dplyr::n_distinct(top_frac, na.rm = TRUE) else 1L,
@@ -520,9 +530,9 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
       dplyr::mutate(
         y_base = as.numeric(factor(label, levels = term_levels)),
         test_signal = -log10(pmax(p_adj, 1e-300)),
-        .nes_pct = dplyr::percent_rank(perm_nes),
-        arm_colour = grDevices::colorRampPalette(c(.NES_HUE_LIGHT, .NES_HUE_DARK))(101)[
-          pmax(1, pmin(101, round(dplyr::coalesce(.nes_pct, 0.7) * 100) + 1))],
+        .chi_pct = dplyr::percent_rank(strength),
+        arm_colour = grDevices::colorRampPalette(c(.CHI_HUE_LIGHT, .CHI_HUE_DARK))(101)[
+          pmax(1, pmin(101, round(dplyr::coalesce(.chi_pct, 0.7) * 100) + 1))],
         # Tip marker: darkened shade of the color of the row, tying the dot to its bar.
         tip_colour = .darken_hex(arm_colour)
       )
@@ -536,7 +546,7 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
       scale_size_continuous(name = "N positions") +
       geom_vline(xintercept = -log10(PADJ), linetype = "dashed", colour = "grey50") +
       labs(title = sprintf("%s - %s (pooled across databases)", params$traitname, toupper(rk)),
-           subtitle = "Position-Level Path Sum Permulation - tip at the BH-adjusted p",
+           subtitle = "Position-level Lachenbruch two-part test - tip at the BH-adjusted p",
            x = expression(-log[10]~"BH-adjusted p"), y = NULL) +
       theme_minimal(base_size = 11) +
       theme(axis.text.y = element_text(colour = "black",
@@ -545,10 +555,10 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
             legend.position = "bottom",
             legend.box = "horizontal")
 
-    # Method legend: the gradient bar of the one test of this report (Permulation NES),
+    # Method legend: the gradient bar of the one test of this report (Lachenbruch χ²),
     # directly under p, which carries its own "N positions" size legend at the bottom
     # (legend.position = "bottom"), so the whole legend reads as one column.
-    gradient_bar <- .method_gradient_legend("Permulation (NES)", .NES_HUE_LIGHT, .NES_HUE_DARK)
+    gradient_bar <- .method_gradient_legend("Lachenbruch (χ²)", .CHI_HUE_LIGHT, .CHI_HUE_DARK)
     # The gradient bar has a fixed absolute height (0.18 in): a relative split would make
     # it grow with the main plot on reports with many terms.
     combo <- p / gradient_bar + patchwork::plot_layout(heights = grid::unit(c(1, 0.18), c("null", "in")))
@@ -560,26 +570,26 @@ if (length(.overall_dotplot_rows) > 0) {
 }
 ```
 
-# Direction triangle (NES)
+# Direction triangle (χ²)
 
 One point per **term** - merged across near-duplicate descriptions the same
 way as the Term recurrence table below (so a term split across two GMT
 databases, or two slightly-differently-worded entries, is one point here
 too, not two incomplete ones) - positioned by **which direction(s)** it is
-significant in and **how strongly** (NES, clipped to ≥ 0) in each: **Global**
+significant in and **how strongly** (χ², clipped to ≥ 0) in each: **Global**
 at the top vertex, **Bottom** at the left vertex, **Top** at the right
 vertex. A term significant in only one direction sits exactly at that
-vertex (there is no second direction to weigh it against, so its exact NES
+vertex (there is no second direction to weigh it against, so its exact χ²
 value cannot move it off the vertex); a term significant in two sits
 somewhere along the edge between them, positioned by the relative size of
-the two NES values; a term significant in **all three** sits inside the
+the two χ² values; a term significant in **all three** sits inside the
 triangle. Colour marks which of the seven possible combinations a term
 falls into (three single-direction, three two-direction edges, one
 three-direction interior).
 
 Terms sharing an exact vertex/edge position (most commonly every
 single-direction term, which all collapse to the same vertex) are fanned out
-around it rather than randomly jittered, **ordered by total raw NES**
+around it rather than randomly jittered, **ordered by total raw χ²**
 (stronger terms sit closer to the vertex, weaker ones further along the
 fan) - the fan position is not itself a magnitude axis, but its *order* is,
 so two overlapping dots are never placed arbitrarily relative to each other.
@@ -596,7 +606,7 @@ if (nrow(sc_all) == 0) {
   # Near-duplicate descriptions are merged before pivoting to directions, so that a term
   # split across two databases or two wordings is one point, as in the Recurrence Table
   # and Heatmap below. Rows that merge into the same Term and ranking (two databases
-  # both significant under "top") keep the higher NES, the "best across merged aliases"
+  # both significant under "top") keep the higher χ², the "best across merged aliases"
   # convention of 15.Comparison_report.Rmd.
   desc_levels <- unique(dplyr::coalesce(sc_all$description, sc_all$pathway))
   cluster_map <- setNames(.cluster_terms(desc_levels), desc_levels)
@@ -604,27 +614,27 @@ if (nrow(sc_all) == 0) {
     dplyr::mutate(Term = unname(cluster_map[dplyr::coalesce(description, pathway)])) %>%
     dplyr::group_by(Term, ranking) %>%
     # max(na.rm = TRUE) of an all-NA group returns -Inf with a warning. The guard keeps NA
-    # for a pathway with p_adj but no recorded NES.
-    dplyr::summarise(perm_nes = if (all(is.na(perm_nes))) NA_real_ else max(perm_nes, na.rm = TRUE),
+    # for a pathway with p_adj but no recorded χ².
+    dplyr::summarise(strength = if (all(is.na(strength))) NA_real_ else max(strength, na.rm = TRUE),
                       .groups = "drop")
 
   sc <- sc_all %>%
     tidyr::pivot_wider(
       id_cols = Term,
-      names_from = ranking, values_from = perm_nes, names_prefix = "nes_"
+      names_from = ranking, values_from = strength, names_prefix = "chi_"
     )
-  for (rc in setdiff(c("nes_global", "nes_top", "nes_bottom"), names(sc))) sc[[rc]] <- NA_real_
+  for (rc in setdiff(c("chi_global", "chi_top", "chi_bottom"), names(sc))) sc[[rc]] <- NA_real_
 
   sc <- sc %>%
     dplyr::mutate(
-      has_g = !is.na(nes_global), has_t = !is.na(nes_top), has_b = !is.na(nes_bottom),
-      w_g = pmax(dplyr::coalesce(nes_global, 0), 0),
-      w_t = pmax(dplyr::coalesce(nes_top, 0), 0),
-      w_b = pmax(dplyr::coalesce(nes_bottom, 0), 0)
+      has_g = !is.na(chi_global), has_t = !is.na(chi_top), has_b = !is.na(chi_bottom),
+      w_g = pmax(dplyr::coalesce(chi_global, 0), 0),
+      w_t = pmax(dplyr::coalesce(chi_top, 0), 0),
+      w_b = pmax(dplyr::coalesce(chi_bottom, 0), 0)
     ) %>%
     dplyr::filter(has_g | has_t | has_b) %>%
     dplyr::mutate(
-      # A direction with NES <= 0 still counts for the category (it passed its own gate)
+      # A direction with χ² <= 0 still counts for the category (it passed its own gate)
       # but has zero barycentric weight. When all weights are 0 the weight is split
       # equally among the significant directions, so that the point does not collapse
       # to the origin.
@@ -646,11 +656,11 @@ if (nrow(sc_all) == 0) {
       Category = factor(Category, levels = c("global", "top", "bottom", "top_bottom",
                                               "global_bottom", "global_top", "all")),
       n_dirs = has_g + has_t + has_b,
-      # Total NES over the significant directions. It only orders the points that land on
+      # Total χ² over the significant directions. It only orders the points that land on
       # the same vertex or edge position; it is not a coordinate.
-      strength = pmax(dplyr::coalesce(nes_global, 0), 0) +
-                 pmax(dplyr::coalesce(nes_top, 0), 0) +
-                 pmax(dplyr::coalesce(nes_bottom, 0), 0)
+      strength = pmax(dplyr::coalesce(chi_global, 0), 0) +
+                 pmax(dplyr::coalesce(chi_top, 0), 0) +
+                 pmax(dplyr::coalesce(chi_bottom, 0), 0)
     )
 
   if (nrow(sc) == 0) {
@@ -693,8 +703,8 @@ if (nrow(sc_all) == 0) {
       annotate("text", x = 1.05, y = -0.04, label = "Top", fontface = "bold", hjust = 0) +
       scale_colour_manual(values = cat_colours, name = "Significant in", drop = FALSE) +
       coord_equal(clip = "off") +
-      labs(title = sprintf("Position enrichment - direction triangle (NES) - %s", params$traitname),
-           subtitle = "Vertex = single direction, edge = two directions, interior = all three, overlapping terms fanned out by total NES, not jittered") +
+      labs(title = sprintf("Position enrichment - direction triangle (χ²) - %s", params$traitname),
+           subtitle = "Vertex = single direction, edge = two directions, interior = all three, overlapping terms fanned out by total χ², not jittered") +
       theme_void(base_size = 12) +
       theme(plot.subtitle = element_text(margin = margin(b = 12), colour = "grey40"),
             legend.position = "right",
@@ -748,10 +758,10 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
     want <- flag_cols_by_rk[[rk]]
     if (is.null(want)) want <- character(0)
     present_flags <- intersect(want, names(rk_sig_raw))
-    has_nes <- "perm_nes" %in% names(rk_sig_raw)
+    has_strength <- "strength" %in% names(rk_sig_raw)
     .has_tf <- "top_frac" %in% names(rk_sig_raw) && !all(is.na(rk_sig_raw$top_frac))
 
-    # One row per pathway: the smallest p.adj, the largest NES or fold over the cutoffs at
+    # One row per pathway: the smallest p.adj, the largest χ² or fold over the cutoffs at
     # which it recurs, and the mean of the flag percentages over those cutoffs.
     rk_sig <- rk_sig_raw %>%
       dplyr::group_by(database, pathway) %>%
@@ -759,8 +769,8 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
         description = dplyr::first(dplyr::coalesce(description, pathway)),
         direction = dplyr::first(direction),
         p_adj = min(p_adj, na.rm = TRUE),
-        perm_nes = if (has_nes) { v <- stats::na.omit(perm_nes); if (length(v)) max(v) else NA_real_ } else NA_real_,
-        fold_enrichment = if (!has_nes) { v <- stats::na.omit(fold_enrichment); if (length(v)) max(v) else NA_real_ } else NA_real_,
+        strength = if (has_strength) { v <- stats::na.omit(strength); if (length(v)) max(v) else NA_real_ } else NA_real_,
+        fold_enrichment = if (!has_strength) { v <- stats::na.omit(fold_enrichment); if (length(v)) max(v) else NA_real_ } else NA_real_,
         n_occurrences = if (.has_tf) dplyr::n_distinct(top_frac, na.rm = TRUE) else 1L,
         `Cutoffs` = if (.has_tf) paste(sort(100 * unique(na.omit(top_frac)), decreasing = TRUE), "%", sep = "", collapse = ", ") else "N/A",
         dplyr::across(dplyr::all_of(present_flags), ~round(mean(.x, na.rm = TRUE), 1)),
@@ -773,10 +783,10 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
       rk_sig <- rk_sig %>% dplyr::left_join(le_rk_summary, by = c("database", "pathway"))
     }
 
-    if (has_nes) {
+    if (has_strength) {
       le_df <- rk_sig %>%
         transmute(Database = database, Pathway = pathway, Description = description,
-                  NES = round(perm_nes, 3), Direction = direction,
+                  `χ²` = round(strength, 3), Direction = direction,
                   `p.adj` = signif(p_adj, 3), `N cutoffs` = n_occurrences, Cutoffs)
     } else {
       le_df <- rk_sig %>%
@@ -1740,19 +1750,18 @@ readr::write_tsv(region_export,
 
 # Methods
 
-- **Test**: Position-Level Path Sum Permulation test. Raw CAAS score magnitude
-  is summed for every position in a set ($T_\text{obs} = \sum_{p \in \text{term}} s_p$),
-  and compared against a null built from the real cycles of the CAAS
-  permulation null (`perm_pos_cycle_caas.tsv.gz`) when supplied — same
-  preference gene-level FCS's Path Sum Permulation test gives that null
-  (`12.FCS_general_report.Rmd`). Without a CAAS null the null-based values
-  (NES, p-values) are `NA` and no set is called significant; a label shuffle of
-  the non-zero position scores runs only when requested (`--allow-label-shuffle`).
-  Normalized Enrichment Score
-  ($\text{NES} = (T_\text{obs} - \mu_\text{null}) / \sigma_\text{null}$) and
-  empirical p-values ($p = \frac{\#\{T_\text{null} \ge T_\text{obs}\} + 1}{N_\text{draws} + 1}$)
-  are computed per term against whichever null was used. Run separately for
-  the **global / top / bottom** directions (`side`).
+- **Test**: the Lachenbruch two-part test, the same function as the gene-level FCS
+  (`fcs_enrich.R`, `fcs_lach_stats`; `posenrich_enrich.py`, `lachenbruch_columns`). Part 1
+  (prevalence) is the upper tail of the hypergeometric distribution of the scored positions
+  of the term among the scored positions of the direction over the background; part 2
+  (magnitude) is the rank-sum of the CAAS scores of the scored positions of the term against
+  those of the other scored positions (normal approximation with continuity correction and
+  the tie term); each p is floored at 1e-15, turned into χ² with 1 df, and the sum is χ² with
+  2 df (`lach_pval`). The observed scores and every cycle of the CAAS permulation null
+  (`perm_pos_cycle_caas.tsv.gz`) go through the same function, and
+  `lach_p.perm = (#{null χ² >= observed χ²} + 1) / (N_cycles + 1)`. Without a CAAS null the
+  permulation p, and so the significance, are `NA`. Run separately for the
+  **global / top / bottom** directions (`side`).
 - **Two background conventions.** Every database above tests against the
   **full honest background** *except* `cosmic_orthogroups` and
   `pai3d_orthogroups`, which test against a **coverage-restricted background**
@@ -1765,7 +1774,7 @@ readr::write_tsv(region_export,
   the broad `characterization` layers (UCR core/flank, FUBAR
   positive/purifying). `min`/`max` set-size filtering applies only to the GMT-style databases.
 - **`p.adj`**: BH-adjusted per (ranking, database).
-- **Significance**: `p.adj < `r PADJ`` and `NES > 0`.
+- **Significance**: `p.adj < `r PADJ`` and `lach_p.perm` below the permulation gate of the FCS.
 
 *Report generated `r Sys.time()`.*
 
@@ -1774,11 +1783,11 @@ readr::write_tsv(region_export,
 ## Summary
 
 This report presents position-level enrichment results for
-**`r params$traitname`** via Position-Level Path Sum Permulation, testing
+**`r params$traitname`** via the Lachenbruch two-part test, testing
 `r if (has_res) dplyr::n_distinct(res$database) else 0` position-set
 database(s) across the global/top/bottom directions.
 `r if (has_res) sum(res$sig, na.rm = TRUE) else 0` (ranking, database,
-pathway, cutoff) combinations passed at `p.adj < ``r PADJ`` with NES > 0.
+pathway, cutoff) combinations passed at `p.adj < ``r PADJ`` and the permulation gate.
 
 ---
 

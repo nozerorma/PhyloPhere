@@ -26,7 +26,7 @@
 # membership comes from there instead of re-ranking score_top/score_bottom
 # here, so this and every other report/module (AMI already does) agree on
 # gene percentile membership by construction. Only valid when score_top/
-# score_bottom actually ARE CAAS's gene_caas_score_top_all/bottom_all (true
+# score_bottom actually ARE CAAS's gene_caas_score_top/bottom (true
 # for CAAS's own report and for 15.Comparison_report.Rmd's gene_attr_df,
 # NEVER for RER's report, which reuses this same function with its own
 # ranking under the same column names), callers must only pass

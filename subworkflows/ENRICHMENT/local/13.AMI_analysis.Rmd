@@ -24,7 +24,6 @@ params:
   project_name: "AMI_Analysis"
   species: 9606
   gene_scores_file: NULL
-  scoring_p_emp_thr: 0.05  # gene_caas_pperm_adj threshold for CAAS-significance node highlight (thick border)
   string_db_dir: NULL
   string_cache_dir: NULL
   min_cluster_genes: 3
@@ -582,8 +581,7 @@ compute_gene_shapes <- function(dir_label, attr_df) {
 
 plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
                                   cluster_labels = NULL, node_signal = NULL,
-                                  active_genes = NULL, vertex_shape = NULL,
-                                  sig_genes = NULL) {
+                                  active_genes = NULL, vertex_shape = NULL) {
   n_clust <- if (!is.null(clusters_df)) length(unique(clusters_df$cluster)) else 1L
   pal     <- .safe_pal(max(n_clust, 2L))
 
@@ -640,13 +638,7 @@ plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
   vertex_colors        <- ifelse(is_active, vertex_colors, scales::alpha(vertex_colors, 0.35))
   vertex_frame_colors  <- ifelse(is_active, "black", "grey55")
 
-  # CAAS-significant genes (gene_caas_pperm_adj <= scoring_p_emp_thr, see
-  # prepare_gene_attributes()) get a thicker border. The extra width adds to the
-  # active-versus-connector width, so it shows for either kind of node, and it leaves
-  # vertex_frame_colors, which encodes that distinction, untouched. Without sig_genes
-  # nothing is flagged.
-  is_sig <- if (!is.null(sig_genes)) igraph::V(net)$name %in% sig_genes else rep(FALSE, igraph::vcount(net))
-  vertex_frame_widths  <- ifelse(is_active, 1.4, 0.6) + ifelse(is_sig, 1.2, 0)
+  vertex_frame_widths  <- ifelse(is_active, 1.4, 0.6)
 
   # Node shape: cross-tool corroboration (CAAS plots only, see compute_gene_shapes());
   # circle otherwise.
@@ -697,12 +689,6 @@ plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
   encoding_lines <- c("Node size = this tool's own gene score (CAAS score / RER -log10(p) / FADE log10(max BF))",
                       "Solid + black border = active input gene",
                       "Faded + grey border = DOMINO connector gene (not in input list)")
-  if (!is.null(sig_genes)) {
-    encoding_lines <- c(encoding_lines,
-      paste0("Thick border = CAAS-significant gene (gene_caas_pperm_adj <= ",
-             if (exists("params") && !is.null(params$scoring_p_emp_thr)) params$scoring_p_emp_thr else 0.05,
-             ")"))
-  }
   if (!is.null(igraph::E(net)$combined_score)) {
     encoding_lines <- c(encoding_lines, "Edge width/opacity = STRING interaction confidence")
   }
@@ -875,11 +861,9 @@ prepare_gene_attributes <- function(df) {
   out <- tibble::tibble(gene = df$Gene)
   
   # CAAS directional scores behind the percentiles.
-  score_top <- suppressWarnings(as.numeric(.col("gene_caas_score_top_all")))
-  if (all(is.na(score_top))) score_top <- suppressWarnings(as.numeric(.col("gene_caas_score_top")))
+  score_top <- suppressWarnings(as.numeric(.col("gene_caas_score_top")))
   
-  score_bot <- suppressWarnings(as.numeric(.col("gene_caas_score_bottom_all")))
-  if (all(is.na(score_bot))) score_bot <- suppressWarnings(as.numeric(.col("gene_caas_score_bottom")))
+  score_bot <- suppressWarnings(as.numeric(.col("gene_caas_score_bottom")))
   
   # Cumulative top 10, 5 and 1% flags per direction.
   breaks <- c(0.10, 0.05, 0.01)
@@ -917,13 +901,6 @@ prepare_gene_attributes <- function(df) {
   out$flag_accum_top    <- .istrue(.col("accum_significant_top"))
   out$flag_accum_bottom <- .istrue(.col("accum_significant_bottom"))
 
-  # CAAS significance: gene_caas_pperm_adj <= scoring_p_emp_thr, the criterion of the FCS
-  # leading-edge tables. The threshold is read from params because the function has a
-  # single call site (.attr_df_global below).
-  p_emp_thr  <- params$scoring_p_emp_thr %||% 0.05
-  pperm_adj  <- suppressWarnings(as.numeric(.col("gene_caas_pperm_adj")))
-  out$flag_caas_significant <- !is.na(pperm_adj) & pperm_adj <= p_emp_thr
-
   out
 }
 
@@ -934,8 +911,7 @@ compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label
       bot10 = NA_real_, bot5 = NA_real_, bot1 = NA_real_,
       fade = NA_real_, fade_top = NA_real_, fade_bottom = NA_real_,
       rer_acc = NA_real_, rer_decc = NA_real_,
-      accum = NA_real_, accum_top = NA_real_, accum_bottom = NA_real_,
-      caas_sig = NA_real_
+      accum = NA_real_, accum_top = NA_real_, accum_bottom = NA_real_
     ))
   }
   genes <- strsplit(preferred_names, "[,;]")[[1]]
@@ -946,8 +922,7 @@ compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label
       bot10 = 0, bot5 = 0, bot1 = 0,
       fade = 0, fade_top = 0, fade_bottom = 0,
       rer_acc = 0, rer_decc = 0,
-      accum = 0, accum_top = 0, accum_bottom = 0,
-      caas_sig = 0
+      accum = 0, accum_top = 0, accum_bottom = 0
     ))
   }
 
@@ -968,8 +943,7 @@ compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label
     rer_decc = round_pct(sub_attr$flag_rer_decc),
     accum_top    = round_pct(sub_attr$flag_accum_top),
     accum_bottom = round_pct(sub_attr$flag_accum_bottom),
-    accum    = round_pct(sub_attr$flag_accum),
-    caas_sig = round_pct(sub_attr$flag_caas_significant)
+    accum    = round_pct(sub_attr$flag_accum)
   )
 }
 ```
@@ -1003,8 +977,8 @@ build_tool_network <- function(sif_path, edge_scores_path = NULL) {
 .attr_df_global <- if (!is.null(gene_scores_df)) prepare_gene_attributes(gene_scores_df) else NULL
 
 # Node size builders. Each returns a named numeric vector (gene to size value) with the
-# primary statistic of one tool: the CAAS gene score (gene_caas_score_top_all or
-# _bottom_all, by direction), the RER significance (rer_min_pval, -log10 so that a
+# primary statistic of one tool: the CAAS gene score (gene_caas_score_top or
+# _bottom, by direction), the RER significance (rer_min_pval, -log10 so that a
 # smaller p gives a bigger node) or the FADE maximum Bayes factor (fade_max_bf_top or
 # _bottom, log10 because Bayes factors span orders of magnitude). The columns come from
 # gene_scores.tsv (gene_scores_df). NULL or NA where a column is missing:
@@ -1013,7 +987,7 @@ build_tool_network <- function(sif_path, edge_scores_path = NULL) {
 
 caas_node_score <- function(dir_label) {
   if (is.null(gene_scores_df)) return(NULL)
-  col <- if (dir_label == "top") "gene_caas_score_top_all" else if (dir_label == "bottom") "gene_caas_score_bottom_all" else NA
+  col <- if (dir_label == "top") "gene_caas_score_top" else if (dir_label == "bottom") "gene_caas_score_bottom" else NA
   if (is.na(col)) return(NULL)
   setNames(.col_num(gene_scores_df, col), gene_scores_df$Gene)
 }
@@ -1200,7 +1174,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
               `Representative genes` = genes, `Top enriched terms` = description,
               `top10% (%)` = top10, `top5% (%)` = top5, `top1% (%)` = top1,
               `fade_top (%)` = fade_top, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
-              `accum_top (%)` = accum_top, `CAAS-sig (%)` = caas_sig
+              `accum_top (%)` = accum_top
             )
         } else if (.pct_dir_label == "bottom") {
           display_df <- .clust_desc_display %>%
@@ -1209,7 +1183,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
               `Representative genes` = genes, `Top enriched terms` = description,
               `bot10% (%)` = bot10, `bot5% (%)` = bot5, `bot1% (%)` = bot1,
               `fade_bottom (%)` = fade_bottom, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
-              `accum_bottom (%)` = accum_bottom, `CAAS-sig (%)` = caas_sig
+              `accum_bottom (%)` = accum_bottom
             )
         } else {
           display_df <- .clust_desc_display %>%
@@ -1219,7 +1193,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
               `top10% (%)` = top10, `top5% (%)` = top5, `top1% (%)` = top1,
               `bot10% (%)` = bot10, `bot5% (%)` = bot5, `bot1% (%)` = bot1,
               `fade (%)` = fade, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
-              `accum (%)` = accum, `CAAS-sig (%)` = caas_sig
+              `accum (%)` = accum
             )
         }
       } else {
@@ -1270,19 +1244,6 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
 
   .node_shape <- if (use_shape_overlay) compute_gene_shapes(.pct_dir_label, .attr_df_global) else NULL
 
-  # The CAAS-significance border follows the scope of the shape overlay (CAAS plots
-  # only): the FADE and RER sections plot the active genes of their own tool, and a
-  # CAAS-derived border would mix a cross-tool judgment into a single-tool view. For
-  # FADE and RER it stays NULL and plot_cluster_network() adds no extra width.
-  .node_sig <- if (use_shape_overlay && !is.null(.attr_df_global) &&
-                    "flag_caas_significant" %in% names(.attr_df_global)) {
-    # flag_caas_significant has no NA (see prepare_gene_attributes()): a boolean index
-    # is enough.
-    .attr_df_global$gene[.attr_df_global$flag_caas_significant]
-  } else {
-    NULL
-  }
-
   .png_path <- file.path(ami_networks_dir, sprintf("%s_%s_domino_network.png", prefix, .list_name))
   png(.png_path, width = 1800, height = 1500, res = 160)
   plot_cluster_network(
@@ -1291,8 +1252,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     cluster_labels = .cl_labels,
     node_signal    = .node_signal,
     active_genes   = .genes_sym,
-    vertex_shape   = .node_shape,
-    sig_genes      = .node_sig
+    vertex_shape   = .node_shape
   )
   dev.off()
   res$png_path <- .png_path
@@ -1584,8 +1544,6 @@ Only nodes with at least one edge at this confidence level (both endpoints in `c
 Module finding + significance: **DOMINO** (Shamir-Lab) - Bonferroni-corrected hypergeometric p-value per module, computed by DOMINO itself.
 
 Network plots additionally mark cross-tool corroboration by node **shape**: circle = none, square = FADE-significant, diamond = RER-accelerating, hexagon = RER-decelerating, star = FADE-significant overlapping either RER direction.
-
-Network plots also mark CAAS-significant genes (gene_caas_pperm_adj &le; `r params$scoring_p_emp_thr`) with a thicker node **border**, independent of and stacked on top of the existing active-vs-connector border width.
 
 Each direction below (**Global**/**Top**/**Bottom**) has four sub-tabs: **Modules**, **Recurrence Heatmap**, **Recurrence Table**, and **Gene lists**.
 

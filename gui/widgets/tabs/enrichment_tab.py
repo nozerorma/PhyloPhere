@@ -88,9 +88,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="fcs_fdr", label="FCS FDR threshold", importance="default"),
         FieldSpec(name="fcs_fdr_wilcoxon", label="FCS FDR gate, Wilcoxon (blank = FCS FDR)", importance="optional"),
         FieldSpec(name="fcs_fdr_lachenbruch", label="FCS FDR gate, Lachenbruch (blank = FCS FDR)", importance="optional"),
-        FieldSpec(name="fcs_fdr_permsum", label="FCS FDR gate, path-sum permulation", importance="optional"),
         FieldSpec(name="fcs_pperm_thr", label="FCS permulation p threshold", importance="default"),
-        FieldSpec(name="fcs_caas_score", label="FCS score of the CAAS rankings (raw gene score, or -log10 of the factorized gene p)", kind="choice", choices=("raw", "fact"), importance="optional"),
         FieldSpec(name="fcs_top_n", label="FCS top-N leading edge", importance="optional"),
         FieldSpec(name="fcs_batch_size", label="FCS GMTs per task", importance="optional"),
         Section("DOMINO active module identification thresholds"),
@@ -177,7 +175,6 @@ SPEC = ModuleTabSpec(
         ),
         FieldSpec(name="posenrich_min_size", label="POSENRICH min set size", importance="default"),
         FieldSpec(name="posenrich_max_size", label="POSENRICH max set size (0 = uncapped)", importance="default"),
-        FieldSpec(name="posenrich_padj_thr", label="POSENRICH adjusted p threshold", importance="default"),
         FieldSpec(
             name="posenrich_batch_size",
             label="POSENRICH GMTs per task (1 = no batching)",

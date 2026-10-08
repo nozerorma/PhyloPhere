@@ -1,29 +1,28 @@
 #!/usr/bin/env python3
-# posenrich_enrich.py — Position-level gene-set enrichment by path-sum permulation.
+# posenrich_enrich.py — Position-level gene-set enrichment by the Lachenbruch two-part test.
 # PhyloPhere | subworkflows/ENRICHMENT/local/src/
 
 """
-PosenrichEnrich: tests whether the CAAS scores of the alignment positions of a gene set
-exceed what the CAAS permulation null produces, for every gene set of the GMT files and
+PosenrichEnrich: tests whether the CAAS scores of the alignment positions of a gene set stand out among the scored
+positions of the background and exceed what the CAAS permulation null produces, for every gene set of the GMT files and
 of the characterization layers, in three directions (global, top, bottom).
 
-Statistic. The score of a term is the sum of the observed CAAS scores of its positions,
-T_obs = sum_{p in term} s_p. Most background positions score 0 and add nothing, so the sum
-is magnitude-weighted and needs no cutoff on the score. A fixed-cutoff test (Fisher) over
-a background of this size would call biologically trivial deviations significant and would
-discard the magnitude.
+Test. The Lachenbruch two-part test, the same as the FCS (fcs_enrich.R, fcs_lach_prepare / fcs_lach_stats), by the same
+formulas. Part 1 (prevalence) is the upper tail of the hypergeometric distribution of the scored positions of the term
+among the m scored positions of the direction over the background. Part 2 (magnitude) is the rank-sum of the CAAS scores
+of the scored positions of the term against those of the other scored positions, by the normal approximation with
+continuity correction and the tie term of the scored positions; it needs at least 2 scored positions in the term and 2
+outside it. Each p is floored at 1e-15, turned into chi-square with 1 df, and the sum is chi-square with 2 df (lach_pval).
+A fixed-cutoff test (Fisher) over a background of this size would call biologically trivial deviations significant and
+would discard the magnitude.
 
-Null. The null is the real permulation cycles of the CAAS null (perm_pos_cycle_caas.tsv.gz),
-the same preference fcs_enrich.R's fcs_run_permulation gives the FCS path-sum test: each
-cycle gives one null sum per term, and p = (1 + number of null sums >= T_obs) / (n_cycles + 1).
-perm_nes is (T_obs - mean) / sd of the null sums. A label shuffle of the nonzero scores
-over the background is run only with --allow-label-shuffle, because it treats the scores
-as independent draws and ignores the phylogenetic dependence the CAAS null accounts for
-(anticonservative, exploratory). Without a null, p_value, p_adj, perm_nes, null_mean and
-null_sd are NA and nothing is significant; the observed sums are still written.
+Null. The null is the real permulation cycles of the CAAS null (perm_pos_cycle_caas.tsv.gz). The observed scores and every
+cycle go through the same function, so lach_p.perm = (1 + number of cycles with chi-square >= observed) / (n_cycles + 1)
+compares like with like. Without a CAAS null lach_p.perm is NA, nothing is significant, and the analytic columns are still
+written.
 
-p_adj is the BH adjustment within each (ranking, database). A term is significant (sig)
-when p_adj < --padj-thr and perm_nes > 0.
+lach_p.adj is the BH adjustment of lach_pval within each (ranking, database). A term is significant (sig) when
+lach_p.adj < --fdr-lachenbruch and lach_p.perm < --pperm-thr, the gates of the Lachenbruch vote of the FCS.
 
 Background. The positions tested by caastools (--background) restricted to the genes of
 --universe, plus any scored position. For the cosmic_orthogroups and pai3d_orthogroups
@@ -37,9 +36,9 @@ Inputs:     --obs-scores        position_scores.tsv (Gene, Position, CAAS_score,
             --universe, --background   gene universe and caastools background.output (gene, tested positions)
             --caas-null-prepped | --caas-cycle-null   the CAAS null (prepped pickle takes precedence)
 Outputs:    posenrich_characterization.tsv  ranking, database, pathway, description, layer_size,
-                n_pos_with_score, obs_sum, null_mean, null_sd, perm_nes, p_value, p_adj,
-                direction (enriched or depleted by the sign of perm_nes; empty without a null),
-                background_n, pct_<flag> (one per flag_* column of --annot-file), n_scored, sig
+                n_pos_with_score, lach_chi_binary, lach_chi_nonzero, lach_chi_total, lach_frac_magnitude,
+                lach_pval, lach_p.adj, lach_p.perm, background_n,
+                pct_<flag> (one per flag_* column of --annot-file), n_scored, sig
             posenrich_leading_edge.tsv      gene:position driver members of the significant terms
 """
 
@@ -54,13 +53,14 @@ import argparse
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+from scipy import stats as st
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Position-level Path Sum Permulation enrichment.")
+    p = argparse.ArgumentParser(description="Position-level Lachenbruch two-part enrichment.")
     p.add_argument("--obs-scores", required=True,
                    help="position_scores.tsv (Gene, Position, CAAS_score, side)")
     p.add_argument("--gmt-dir", required=True)
@@ -86,11 +86,9 @@ def parse_args():
     p.add_argument("--caas-cycle-null", default=None,
                    help="perm_pos_cycle_caas.tsv.gz from CAAS_CORE_MERGE (Gene, Position, "
                         "side, cycle, caas_score, n_schemes) - the CAAS permulation null. When "
-                        "supplied, its real cycles are the null for p_value/p_adj/perm_nes, "
-                        "mirroring fcs_enrich.R's fcs_run_permulation null_mat preference. "
-                        "Omit or pass a NO_FILE* sentinel for no null (those values are NA "
-                        "unless --allow-label-shuffle). Ignored when "
-                        "--caas-null-prepped is given.")
+                        "supplied, its real cycles are the null of the permulation p (lach_p.perm). "
+                        "Omit or pass a NO_FILE* sentinel for no null (the permulation p is then NA). "
+                        "Ignored when --caas-null-prepped is given.")
     p.add_argument("--caas-null-prepped", default=None,
                    help="caas_null_prepped.pkl from POSENRICH_PREP_NULL (posenrich_prep_caas_null.py) "
                         "- the same CAAS permulation null as --caas-cycle-null, already parsed and "
@@ -103,21 +101,10 @@ def parse_args():
                    help="min positions per set in background (GMT sources only)")
     p.add_argument("--max-size", type=int, default=0,
                    help="max positions per set in background (0 = no cap; GMT sources only)")
-    p.add_argument("--n-perms", type=int, default=100000,
-                   help="number of label permutations of the label-shuffle test, used only with --allow-label-shuffle "
-                        "(the permulation test reads its draws from the CAAS null)")
-    p.add_argument("--allow-label-shuffle", action="store_true",
-                   help="when no CAAS permulation null is supplied, run a private label shuffle instead of leaving the "
-                        "null-based values NA. It ignores the phylogeny (anticonservative) and is exploratory.")
-    p.add_argument("--perm-chunk-size", type=int, default=1000,
-                   help="permutations materialized at once as a dense (n_terms x chunk) "
-                        "array before being folded into running sum/sumsq/count accumulators "
-                        "(default 1000). Peak memory scales with this, not with --n-perms -- "
-                        "see run_permulation_for_terms' docstring.")
-    p.add_argument("--seed", type=int, default=1998,
-                   help="random seed for permulations (default 1998)")
-    p.add_argument("--padj-thr", type=float, default=0.15,
-                   help="BH-adjusted p-value significance threshold")
+    p.add_argument("--fdr-lachenbruch", type=float, default=0.15,
+                   help="BH FDR gate of the Lachenbruch test (analytic p), as the FCS")
+    p.add_argument("--pperm-thr", type=float, default=0.025,
+                   help="permulation p gate of the Lachenbruch test (lach_p.perm), as the FCS")
     p.add_argument("--position-lists-dir", required=False, default=None,
                    help="Accepted for backward compatibility (unused in continuous permulation)")
     p.add_argument("--char-fracs", default=None, help="Accepted for backward compatibility (unused)")
@@ -324,28 +311,66 @@ def null_direction_subset(long_df, direction):
     return collapse_null_sides(sub)
 
 
-def caas_null_term_sums(M_mat, bg_idx_map, N, null_sub, all_cycle_levels):
-    """Term sums under the CAAS permulation null, as an (n_terms x n_cycles) array.
+def caas_null_matrix(bg_idx_map, N, null_sub, all_cycle_levels):
+    """The CAAS permulation null as a sparse (N background positions x n_cycles) matrix of scores, or None without a null.
 
-    M_mat is the term indicator matrix (n_terms x N) shared with the label-shuffle null.
-    The columns span all_cycle_levels, every cycle of the file, not only cycles with a
-    nonzero row in this direction and background, so a cycle without hits is a null draw
-    contributing 0 instead of being dropped. Returns None when no CAAS null was supplied;
-    the caller then leaves the null-based values undefined (or, on request, runs a label
-    shuffle).
+    The columns span all_cycle_levels, every cycle of the file, so a cycle without hits is a null draw of zeros.
     """
     if null_sub is None or len(all_cycle_levels) == 0:
         return None
     sub = null_sub[null_sub["pos_id"].isin(bg_idx_map)]
-    n_cycles = len(all_cycle_levels)
     cycle_to_col = {c: i for i, c in enumerate(all_cycle_levels)}
     row_idx = sub["pos_id"].map(bg_idx_map).to_numpy(dtype=np.int64)
     col_idx = sub["cycle"].map(cycle_to_col).to_numpy(dtype=np.int64)
-    null_mat = sp.csr_matrix(
-        (sub["score"].to_numpy(dtype=np.float32), (row_idx, col_idx)),
-        shape=(N, n_cycles)
-    )
-    return M_mat.dot(null_mat).toarray()  # (n_terms x n_cycles)
+    return sp.csr_matrix((sub["score"].to_numpy(dtype=np.float32), (row_idx, col_idx)),
+                         shape=(N, len(all_cycle_levels)))
+
+
+# ── Lachenbruch two-part test (the definition of fcs_enrich.R: fcs_lach_prepare, fcs_lach_stats) ──
+
+
+def rank_sum_sd(n1, n2, tie):
+    """Standard deviation of the rank sum of n1 values against n2, with the tie term (sum of t^3 - t over the tied groups)."""
+    n = n1 + n2
+    return np.sqrt(n1 * n2 / 12.0 * ((n + 1) - tie / np.maximum(n * (n - 1), 1)))
+
+
+def lachenbruch_columns(X, M, n1, n_genes):
+    """Lachenbruch chi-squares of the terms M (n_terms x n_genes, 0/1) in every column of X (n_genes x n_cols, sparse, >= 0).
+
+    A value of 0 is no signal. Part 1 is the upper tail of the hypergeometric distribution of the scored positions of the
+    term (n1 positions) among the m scored positions of the column over n_genes; part 2 is the rank-sum of the scored
+    positions of the term against the other scored positions of the column, normal approximation with continuity correction
+    and the tie term of the scored positions, defined when the term has at least 2 scored positions and so do the others.
+    Each p is floored at 1e-15 and turned into chi-square with 1 df. Returns (chi1, chi2) as (n_terms x n_cols) arrays.
+    """
+    X = sp.csc_matrix(X, dtype=np.float64)
+    X.data[~(X.data > 0)] = 0.0
+    X.eliminate_zeros()
+    ranks = X.copy()
+    tie = np.zeros(X.shape[1])
+    m = np.diff(X.indptr).astype(np.float64)
+    for j in range(X.shape[1]):
+        a, b = X.indptr[j], X.indptr[j + 1]
+        if b > a:
+            v = X.data[a:b]
+            ranks.data[a:b] = st.rankdata(v)
+            _, c = np.unique(v, return_counts=True)
+            tie[j] = np.sum(c.astype(np.float64) ** 3 - c)
+    pos = X.copy()
+    pos.data[:] = 1.0
+    n1 = np.asarray(n1, dtype=np.float64)
+    k1 = M.dot(pos).toarray()
+    mm = m[None, :]
+    p1 = st.hypergeom.sf(k1 - 1, n_genes, mm, n1[:, None])
+    chi1 = st.chi2.isf(np.maximum(p1, 1e-15), 1)
+    n2p = mm - k1
+    u2 = M.dot(ranks).toarray() - k1 * (k1 + 1) / 2
+    with np.errstate(divide="ignore", invalid="ignore"):
+        z = (u2 - k1 * n2p / 2 - 0.5) / rank_sum_sd(k1, n2p, tie[None, :])
+    chi2 = st.chi2.isf(np.maximum(st.norm.sf(z), 1e-15), 1)
+    chi2[~((k1 >= 2) & (n2p >= 2)) | np.isnan(chi2)] = 0.0
+    return chi1, chi2
 
 
 def annotate_overlap(overlap, annot, flag_names):
@@ -385,23 +410,17 @@ def bh_adjust(pvals):
     return out
 
 
-# ── Path-sum permulation ──────────────────────────────────────────────────────
+# ── Terms ─────────────────────────────────────────────────────────────────────
 
 
-def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_size, max_size,
-                             n_perms=10000, seed=1998, annot=None, flag_names=None,
-                             perm_chunk_size=1000, caas_null_sub=None, caas_null_cycles=None, allow_label_shuffle=False):
-    """Path-sum permulation test of every term of one database in one direction.
+def run_enrichment_for_terms(terms, descs, obs_scores_dict, background, min_size, max_size,
+                             annot=None, flag_names=None, caas_null_sub=None, caas_null_cycles=None):
+    """Lachenbruch test of every term of one database in one direction.
 
-    Observed and null term sums are sparse matrix products of the term indicator matrix
-    (n_terms x N background positions) with the score vector or the null matrix. Returns
-    one dict per term (rows of the characterization table before p_adj, n_scored and sig;
-    "_overlap" holds the scored member positions) or [] when no term passes the size filters.
-
-    With the label shuffle, permutations are generated and multiplied in chunks of
-    perm_chunk_size, so peak memory scales with the chunk and not with n_perms or N. The
-    null mean, sd and exceedance count are accumulated across chunks (sum, sum of squares,
-    count), which gives the same values as one unchunked permutation matrix.
+    The term indicator matrix (n_terms x N background positions) is multiplied with the observed score vector and with
+    every cycle of the CAAS null (lachenbruch_columns). Returns one dict per term (the rows of the characterization table
+    before lach_p.adj, n_scored and sig; "_overlap" holds the scored member positions) or [] when no term passes the size
+    filters. Without a null, lach_p.perm is NaN and the analytic columns are still defined.
     """
     N = len(background)
     if N == 0:
@@ -421,7 +440,7 @@ def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_siz
             continue
         if max_size and mm > max_size:
             continue
-        
+
         term_idx_list = [bg_idx_map[p] for p in m_bg]
         if not term_idx_list:
             continue
@@ -443,100 +462,17 @@ def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_siz
         if pos_id in bg_idx_map:
             V_obs[bg_idx_map[pos_id]] = float(score)
 
-    obs_sums = M_mat.dot(V_obs)
-
-    # 3. Null source. The CAAS permulation null is preferred over a label shuffle, as
-    # fcs_run_permulation does for the FCS path-sum test: a shuffle treats every position
-    # score as an independent draw and ignores the phylogenetic dependence the CAAS null
-    # accounts for. When the CAAS null is available it replaces the shuffle instead of
-    # being combined with it, because an anticonservative test adds no independent
-    # evidence. p_value and p_adj reflect whichever null was used.
-    null_cycle_sums = caas_null_term_sums(M_mat, bg_idx_map, N, caas_null_sub, caas_null_cycles)
-
-    if null_cycle_sums is None and not allow_label_shuffle:
-        # No phylogenetic null: the observed sums are reported and every value that needs a null is undefined. A label
-        # shuffle would put a weaker, anticonservative test under the names of the permulation test (it is opt-in).
-        out = []
-        for i, (term, desc, m_bg) in enumerate(valid_terms):
-            driver_positions = {p for p in m_bg if obs_scores_dict.get(p, 0.0) > 0}
-            row = dict(
-                pathway=term, description=desc, layer_size=len(m_bg), n_pos_with_score=len(driver_positions),
-                obs_sum=float(obs_sums[i]), null_mean=np.nan, null_sd=np.nan, perm_nes=np.nan, p_value=np.nan,
-                direction="", background_n=N, _overlap=driver_positions,
-            )
-            row.update(annotate_overlap(driver_positions, annot or {}, flag_names or []))
-            out.append(row)
-        return out
-
-    if null_cycle_sums is not None:
-        n_draws = null_cycle_sums.shape[1]
-        null_mu = null_cycle_sums.mean(axis=1)
-        null_var = np.maximum(np.square(null_cycle_sums).mean(axis=1) - null_mu**2, 0.0)
-        null_sd = np.sqrt(null_var)
-        null_sd_safe = np.where(null_sd == 0, 1.0, null_sd)
-        perm_nes = (obs_sums - null_mu) / null_sd_safe
-        counts = np.sum(null_cycle_sums >= obs_sums[:, None], axis=1)
-        pvals = (counts + 1.0) / (n_draws + 1.0)
+    # 3. The test. Column 0 is the observed ranking and the other columns are the cycles of the CAAS null.
+    null_mat = caas_null_matrix(bg_idx_map, N, caas_null_sub, caas_null_cycles)
+    X = sp.csc_matrix(V_obs.reshape(-1, 1)) if null_mat is None else sp.hstack([sp.csc_matrix(V_obs.reshape(-1, 1)), null_mat], format="csc")
+    sizes = np.asarray(M_mat.sum(axis=1)).ravel()
+    chi1, chi2 = lachenbruch_columns(X, M_mat, sizes, N)
+    chi = chi1 + chi2
+    pval = st.chi2.sf(chi[:, 0], 2)
+    if null_mat is None:
+        perm = np.full(n_terms, np.nan)
     else:
-        # Label shuffle: the nonzero scores of this direction are placed at random
-        # positions of the background (chunked, see the docstring).
-        nz_idx = np.where(V_obs > 0)[0]
-        nz_vals = V_obs[nz_idx]
-        K = len(nz_idx)
-
-        if K == 0:
-            # All scores 0 -> no signal
-            out = []
-            for i, (term, desc, m_bg) in enumerate(valid_terms):
-                row = dict(
-                    pathway=term, description=desc, layer_size=len(m_bg),
-                    n_pos_with_score=0, obs_sum=0.0, null_mean=0.0, null_sd=0.0,
-                    perm_nes=0.0, p_value=1.0,
-                    direction="depleted", background_n=N,
-                    _overlap=set()
-                )
-                row.update(annotate_overlap(set(), annot or {}, flag_names or []))
-                out.append(row)
-            return out
-
-        rng = np.random.default_rng(seed)
-
-        # Each chunk builds its own sparse permutation matrix and is folded into the
-        # running accumulators, so peak memory is bounded by perm_chunk_size.
-        sum_null = np.zeros(n_terms, dtype=np.float64)
-        sumsq_null = np.zeros(n_terms, dtype=np.float64)
-        counts = np.zeros(n_terms, dtype=np.int64)
-
-        done = 0
-        while done < n_perms:
-            chunk = min(perm_chunk_size, n_perms - done)
-
-            p_rows = np.empty(K * chunk, dtype=np.int32)
-            p_cols = np.empty(K * chunk, dtype=np.int32)
-            p_vals = np.tile(nz_vals, chunk)
-            for j in range(chunk):
-                rnd_idx = rng.choice(N, size=K, replace=False)
-                p_rows[j*K : (j+1)*K] = rnd_idx
-                p_cols[j*K : (j+1)*K] = j
-
-            P_chunk = sp.csr_matrix((p_vals, (p_rows, p_cols)), shape=(N, chunk))
-            null_chunk = M_mat.dot(P_chunk).toarray()  # (n_terms x chunk)
-
-            sum_null += null_chunk.sum(axis=1)
-            sumsq_null += np.square(null_chunk).sum(axis=1)
-            counts += np.sum(null_chunk >= obs_sums[:, None], axis=1)
-
-            done += chunk
-
-        null_mu = sum_null / n_perms
-        # Population variance from sum-of-squares (matches np.std's default ddof=0);
-        # clip at 0 to guard float round-off pushing a near-zero variance negative.
-        null_var = np.maximum(sumsq_null / n_perms - null_mu**2, 0.0)
-        null_sd = np.sqrt(null_var)
-        null_sd_safe = np.where(null_sd == 0, 1.0, null_sd)
-
-        perm_nes = (obs_sums - null_mu) / null_sd_safe
-        pvals = (counts + 1.0) / (n_perms + 1.0)
+        perm = (np.sum(chi[:, 1:] >= chi[:, [0]] - 1e-12, axis=1) + 1.0) / (chi.shape[1] - 1 + 1.0)
 
     # 4. Format results
     out = []
@@ -547,15 +483,15 @@ def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_siz
             description=desc,
             layer_size=len(m_bg),
             n_pos_with_score=len(driver_positions),
-            obs_sum=float(obs_sums[i]),
-            null_mean=float(null_mu[i]),
-            null_sd=float(null_sd[i]),
-            perm_nes=float(perm_nes[i]),
-            p_value=float(pvals[i]),
-            direction=("enriched" if perm_nes[i] > 0 else "depleted"),
+            lach_chi_binary=float(chi1[i, 0]),
+            lach_chi_nonzero=float(chi2[i, 0]),
+            lach_chi_total=float(chi[i, 0]),
+            lach_frac_magnitude=float(chi2[i, 0] / chi[i, 0]) if chi[i, 0] > 0 else np.nan,
+            lach_pval=float(pval[i]),
             background_n=N,
             _overlap=driver_positions
         )
+        row["lach_p.perm"] = float(perm[i])
         row.update(annotate_overlap(driver_positions, annot or {}, flag_names or []))
         out.append(row)
 
@@ -635,8 +571,7 @@ def main():
         else:
             print("[posenrich] no CAAS permulation null supplied", flush=True)
     if caas_null_by_direction is None and caas_null_long is None:
-        print("[posenrich] without a null, p_value, p_adj, perm_nes and the null columns are NA and nothing is significant"
-              + ("" if args.allow_label_shuffle else " (--allow-label-shuffle runs the weaker label-shuffle test instead)"), flush=True)
+        print("[posenrich] without a null, lach_p.perm is NA and nothing is significant", flush=True)
 
     directions = ["global", "top", "bottom"]
     rows = []
@@ -650,7 +585,7 @@ def main():
         n_scored = sum(1 for s in obs_scores.values() if s > 0)
         if n_scored == 0:
             continue
-        print(f"[posenrich] {direction}: {n_scored} scored positions | running Path Sum Permulation (N_perms={args.n_perms})...", flush=True)
+        print(f"[posenrich] {direction}: {n_scored} scored positions | running the Lachenbruch two-part test...", flush=True)
 
         if caas_null_by_direction is not None:
             null_sub = caas_null_by_direction.get(direction)
@@ -661,25 +596,21 @@ def main():
 
         for db, (terms, descs, apply_size_filter) in sources.items():
             db_bg = coverage_restricted_bg.get(db, background)
-            res = run_permulation_for_terms(
+            res = run_enrichment_for_terms(
                 terms, descs, obs_scores, db_bg,
                 args.min_size if apply_size_filter else 0,
                 args.max_size if apply_size_filter else 0,
-                n_perms=args.n_perms, seed=args.seed,
                 annot=annot, flag_names=flag_names,
-                perm_chunk_size=args.perm_chunk_size,
-                caas_null_sub=null_sub, caas_null_cycles=caas_null_cycles,
-                allow_label_shuffle=args.allow_label_shuffle
+                caas_null_sub=null_sub, caas_null_cycles=caas_null_cycles
             )
             if not res:
                 continue
 
-            no_null = null_sub is None and not args.allow_label_shuffle
-            padj = np.full(len(res), np.nan) if no_null else bh_adjust([r["p_value"] for r in res])
+            lach_adj = bh_adjust([r["lach_pval"] for r in res])
             for i, r in enumerate(res):
-                r["p_adj"] = padj[i]
+                r["lach_p.adj"] = lach_adj[i]
                 r["n_scored"] = n_scored
-                r["sig"] = bool(r["p_adj"] < args.padj_thr and r["perm_nes"] > 0)
+                r["sig"] = bool(lach_adj[i] < args.fdr_lachenbruch and r["lach_p.perm"] < args.pperm_thr)
                 overlap = r.pop("_overlap")
                 if r["sig"]:
                     for pos_id in sorted(overlap):
@@ -695,14 +626,14 @@ def main():
 
     result_cols = (
         ["ranking", "database", "pathway", "description", "layer_size", "n_pos_with_score",
-         "obs_sum", "null_mean", "null_sd", "perm_nes", "p_value", "p_adj",
-         "direction", "background_n"]
+         "lach_chi_binary", "lach_chi_nonzero", "lach_chi_total", "lach_frac_magnitude",
+         "lach_pval", "lach_p.adj", "lach_p.perm", "background_n"]
         + [f"pct_{f[len('flag_'):]}" for f in flag_names]
         + ["n_scored", "sig"]
     )
     results = pd.DataFrame(rows, columns=result_cols) if not rows else pd.DataFrame(rows, columns=result_cols)
     if not results.empty:
-        results = results.sort_values(["p_adj", "p_value"], na_position="last")
+        results = results.sort_values(["lach_p.adj", "lach_pval"], na_position="last")
     out_path = os.path.join(args.output_dir, "posenrich_characterization.tsv")
     results.to_csv(out_path, sep="\t", index=False)
     print(f"[posenrich] wrote {out_path} ({len(results)} rows)", flush=True)
