@@ -52,15 +52,14 @@ params:
   }
 </style>
 
-<!-- 9.ASR_diagnostics.Rmd — Distribution of asr_path_score, derived_agreement and the per-domain ancestral posteriors of the scored CAAS rows. -->
+<!-- 9.ASR_diagnostics.Rmd — Distribution of asr_path_score, derived_agreement of the scored CAAS rows. -->
 <!-- PhyloPhere | subworkflows/ASR_DIAGNOSTICS/local/ -->
 <!--
   Called by: ASR_DIAGNOSTICS_REPORT (asr_diagnostics.nf), through rmarkdown::render().
   Params:    disambig_dir (ct_disambiguation/ with caas_convergence_master.csv),
              posterior_threshold (shown in the report, not applied), output_dir.
   A row of the master is one (gene, msa_pos, caap_group, side). asr_path_score is the score of the row on the
-  Voronoi domains (fop_pool.py); derived_agreement is a descriptor and does not enter the score;
-  domain_<k>_posterior is the posterior of the ancestral state of domain k under the scheme of the row.
+  Voronoi domains (fop_pool.py); derived_agreement is a descriptor and does not enter the score.
 -->
 
 ```{r setup, include=FALSE}
@@ -146,7 +145,6 @@ if (!file.exists(master_csv)) {
 }
 
 # Only the columns used here are read; the support tallies of the master are large.
-domain_re <- "^domain_[0-9]+_(posterior|score|anc_aa|top_aa|bot_aa)$"
 base_cols <- c("gene", "msa_pos", "caap_group", "side", "convergence_type", "n_hypotheses",
                "asr_path_score", "derived_agreement", "agreement_ambiguous")
 hdr  <- names(readr::read_csv(master_csv, n_max = 0, show_col_types = FALSE))
@@ -154,14 +152,13 @@ need <- c("gene", "msa_pos", "caap_group", "side", "asr_path_score")
 if (!all(need %in% hdr)) {
   stop(sprintf("[asr_diagnostics] the master lacks the columns: %s", paste(setdiff(need, hdr), collapse = ", ")))
 }
-keep <- hdr[hdr %in% base_cols | grepl(domain_re, hdr)]
+keep <- hdr[hdr %in% base_cols]
 
 master_df <- readr::read_csv(
   master_csv, col_select = all_of(keep), show_col_types = FALSE, guess_max = 10000,
   col_types = readr::cols(.default = readr::col_guess(), gene = "c", caap_group = "c", side = "c",
                           convergence_type = "c")
-) %>%
-  mutate(across(matches("_(anc|top|bot)_aa$"), as.character))
+)
 # Optional columns are present as NA when the master lacks them
 for (nm in c("derived_agreement", "convergence_type", "agreement_ambiguous", "n_hypotheses")) {
   if (!nm %in% names(master_df)) master_df[[nm]] <- NA
@@ -271,135 +268,7 @@ save_plot(p_sa, "asr_path_score_vs_derived_agreement.png", width = 10, height = 
 
 ---
 
-## 3. Ancestral-state posterior of the domains
-
-`domain_<k>_posterior` is the posterior of the ancestral residue of domain `k` at the MRCA of its pair, summed over the residues of the scheme of the row. A domain without a reconstruction has posterior 0 and cannot be changed. The score reads the ASR at a different place (the mass of the shared residue at the LCA of two domains), so the domain posterior is a descriptor of how well the ancestral residue that defines *changed* is supported, and not a sensitivity test of the score. The tables and plots below describe an association between the two; they do not show what the score would be under another threshold.
-
-```{r domain-long}
-# One domain at a time: only the changed-domain records are kept, plus per-scheme counters of all records.
-score_df$row_id <- seq_len(nrow(score_df))
-dom_ids <- sub("^domain_([0-9]+)_posterior$", "\\1",
-               grep("^domain_[0-9]+_posterior$", names(score_df), value = TRUE))
-
-col_or_na <- function(k, suffix) {
-  nm <- sprintf("domain_%s_%s", k, suffix)
-  if (nm %in% names(score_df)) score_df[[nm]] else rep(NA_character_, nrow(score_df))
-}
-
-per_domain <- lapply(dom_ids, function(k) {
-  # The derived residue of the row's side marks the domain as changed on that side
-  der <- if_else(score_df$side == "top", col_or_na(k, "top_aa"), col_or_na(k, "bot_aa"))
-  d <- tibble(
-    row_id = score_df$row_id, caap_group = score_df$caap_group, side = score_df$side,
-    asr_path_score = score_df$asr_path_score, domain = k,
-    posterior = suppressWarnings(as.numeric(col_or_na(k, "posterior"))),
-    changed = !is.na(der) & der != ""
-  )
-  list(
-    counts  = d %>% group_by(caap_group) %>%
-      summarise(records = n(), not_recorded = sum(is.na(posterior)), no_rec = sum(!is.na(posterior) & posterior <= 0),
-                changed = sum(changed), .groups = "drop"),
-    changed = d %>% filter(changed, !is.na(posterior))
-  )
-})
-
-domain_counts <- bind_rows(lapply(per_domain, `[[`, "counts")) %>%
-  group_by(caap_group) %>% summarise(across(c(records, not_recorded, no_rec, changed), sum), .groups = "drop")
-
-# The posterior columns can be present and empty; the sections below then say so and stop
-has_posterior <- length(dom_ids) > 0 && sum(domain_counts$records - domain_counts$not_recorded) > 0
-changed_df <- bind_rows(lapply(per_domain, `[[`, "changed"))
-```
-
-```{r domain-counts}
-if (!has_posterior) {
-  cat("The master table carries no domain posteriors (the domain_<k>_posterior columns are absent or empty), so this section is skipped.")
-} else {
-  domain_counts %>%
-    transmute(Scheme = caap_group,
-              `Domain records` = records,
-              `Posterior not recorded (%)` = 100 * not_recorded / records,
-              `Without reconstruction (%)` = 100 * no_rec / records,
-              `Changed on the side (%)`    = 100 * changed / records) %>%
-    kable(format = "html", digits = 2, caption = "Domain records per scheme") %>%
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-}
-```
-
-```{r plot-domain-posterior, fig.height=7, fig.cap="Ancestral posterior of the changed domains, per scheme."}
-if (has_posterior && nrow(changed_df) > 0) {
-  p_post <- ggplot(changed_df, aes(x = posterior)) +
-    geom_histogram(binwidth = 0.02, fill = .tableau10[5], colour = "white", alpha = 0.85) +
-    facet_wrap(~ caap_group, ncol = 2, scales = "free_y") +
-    labs(
-      title = "Ancestral posterior of the changed domains",
-      subtitle = sprintf("%s changed domain records", formatC(nrow(changed_df), big.mark = ",")),
-      x = "domain posterior", y = "Domain records"
-    )
-  print(p_post)
-  save_plot(p_post, "domain_posterior_distribution.png", width = 10, height = 7)
-
-  post_summary <- changed_df %>%
-    group_by(caap_group) %>%
-    summarise(
-      n = n(),
-      Mean = mean(posterior), Median = median(posterior),
-      Q05 = quantile(posterior, 0.05), Q25 = quantile(posterior, 0.25),
-      `Fraction < 0.5` = mean(posterior < 0.5),
-      `Fraction < 0.8` = mean(posterior < 0.8),
-      .groups = "drop"
-    ) %>%
-    rename(Scheme = caap_group)
-  write_tsv_safe(post_summary, "domain_posterior_summary.tsv")
-
-  post_summary %>%
-    kable(format = "html", digits = 3, caption = "Posterior of the changed domains (domain_posterior_summary.tsv)") %>%
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-}
-```
-
-### Score against the weakest changed domain
-
-For each row, the lowest posterior among its changed domains is the weakest ancestral call that the row rests on.
-
-```{r plot-score-vs-minpost, fig.height=8, fig.cap="asr_path_score by the lowest posterior among the changed domains of the row."}
-if (has_posterior && nrow(changed_df) > 0) {
-  row_min <- changed_df %>%
-    group_by(row_id, caap_group, side, asr_path_score) %>%
-    summarise(min_posterior = min(posterior), .groups = "drop") %>%
-    mutate(post_bin = cut(min_posterior, breaks = c(0, 0.5, 0.8, 0.95, 1.0000001),
-                          labels = c("<0.5", "0.5-0.8", "0.8-0.95", ">=0.95"), right = FALSE,
-                          include.lowest = TRUE))
-
-  p_min <- ggplot(row_min, aes(x = post_bin, y = asr_path_score)) +
-    geom_boxplot(fill = .tableau10[1], alpha = 0.6, outlier.size = 0.4) +
-    facet_wrap(~ caap_group, ncol = 2) +
-    labs(title = "Score by weakest changed-domain posterior",
-         x = "Lowest posterior among the changed domains", y = "asr_path_score")
-  print(p_min)
-  save_plot(p_min, "asr_path_score_by_min_posterior.png", width = 10, height = 8)
-
-  # Rank correlation, descriptive: rows share positions and genes, so no p-value is given
-  min_tab <- row_min %>%
-    group_by(Scheme = caap_group) %>%
-    summarise(
-      Rows = n(),
-      `Spearman (score, min posterior)` = suppressWarnings(cor(asr_path_score, min_posterior, method = "spearman")),
-      `Median score, min posterior < 0.8` = median(asr_path_score[min_posterior < 0.8]),
-      `Median score, min posterior >= 0.8` = median(asr_path_score[min_posterior >= 0.8]),
-      .groups = "drop"
-    )
-  write_tsv_safe(min_tab, "score_vs_min_posterior.tsv")
-
-  min_tab %>%
-    kable(format = "html", digits = 3, caption = "Score against the weakest changed-domain posterior (score_vs_min_posterior.tsv)") %>%
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-}
-```
-
----
-
-## 4. Summary statistics
+## 3. Summary statistics
 
 ```{r summary-table}
 summary_table <- score_df %>%
