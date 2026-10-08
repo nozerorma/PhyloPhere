@@ -27,8 +27,8 @@ T = max_lado CAAS_score   si la posición se detecta en algún lado
 T = -Inf                  si no se detecta
 ```
 
-donde `CAAS_score` de un lado es la agregación §2g sobre los esquemas, `US + media(GS)`: el score de US (0 si no detecta)
-más la media de los scores de GS1-GS4 que detectan (0 si ninguno; el nulo y el observado usan la misma regla). El score de la posición es el máximo sobre los lados
+donde `CAAS_score` de un lado es la agregación §2g sobre los esquemas, `(US + media(GS)) / 2`: la mitad del score de US (0 si no detecta)
+más la mitad de la media de los scores de GS1-GS4 que detectan (0 si ninguno; el nulo y el observado usan la misma regla); va de 0 a 1. El score de la posición es el máximo sobre los lados
 detectados (el eje "all", `.pos_undirected` de §4a).
 
 Un ciclo nulo `i` cuenta a favor de la hipótesis nula si **(a)** re-detecta la

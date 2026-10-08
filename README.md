@@ -255,10 +255,10 @@ characterization is a separate evidence line handled by ENRICHMENT
 
 ### Position-level score (`CAAS_score`)
 
-For each alignment position and side, `CAAS_score = US + mean(GS)`: the `caas_row` of the US scheme (0 when US
-did not detect the position) plus the mean of the `caas_row` of the GS1-GS4 schemes that detected it (0 when none
+For each alignment position and side, `CAAS_score = (US + mean(GS)) / 2`: half the `caas_row` of the US scheme (0 when US
+did not detect the position) plus half the mean of the `caas_row` of the GS1-GS4 schemes that detected it (0 when none
 did). `caas_row` is `asr_score`/`asr_path_score`, the ancestral-state-reconstruction path score of the row. The
-score lies in [0, 2].
+score lies in [0, 1].
 
 US is the strict test on residues, and a GS scheme tests the same substitution after recoding the residues into
 biochemical classes, so the GS term is the bonus for a divergence in chemistry. A position detected only by GS

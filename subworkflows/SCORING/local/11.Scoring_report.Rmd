@@ -141,7 +141,7 @@ gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
 # position_scores.tsv carries no per-scheme factor: a position-level mean of asr_score would hide
-# scheme disagreement, and CAAS_score is already the aggregate (US + mean of the GS schemes) of asr_path_score.
+# scheme disagreement, and CAAS_score is already the aggregate ((US + mean of the GS schemes) / 2) of asr_path_score.
 # `asr_score` is aliased to asr_path_score when the table has it and to CAAS_score otherwise, so
 # that the panels below always find the column.
 if (!"asr_score" %in% names(pos_df)) {
@@ -398,7 +398,7 @@ reproduced independently of the pipeline code.
 
 ### Position-Level Score
 
-`CAAS_score` is built from one evidence axis; `caas_row` lies in [0, 1] and the position score `US + mean(GS)` in [0, 2]:
+`CAAS_score` is built from one evidence axis; `caas_row` and the position score `(US + mean(GS)) / 2` both lie in [0, 1]:
 
 #### 1. Position evolution: `asr_path_score` (`asr_score`)
 
@@ -418,14 +418,14 @@ Voronoi domain, built from the per-node ASR posteriors (full definitions in
 
 A substitution is tested against five biochemical partitions (US, GS1-GS4); a
 scheme "detects" the position if the substitution crosses one of its group
-boundaries. `CAAS_score` is the US score (0 when US did not detect the position) plus the mean over the GS1-GS4
-schemes that detected it (0 when none did), so it lies in [0, 2]. The GS term is the bonus for a divergence in
+boundaries. `CAAS_score` is half the US score (0 when US did not detect the position) plus half the mean over the GS1-GS4
+schemes that detected it (0 when none did), so it lies in [0, 1]. The GS term is the bonus for a divergence in
 chemistry, and a position detected only by GS schemes keeps it instead of dropping out:
 
 $$\text{caas\_row} = \text{asr\_path\_score}$$
 
 (`caas_row` carries no permutation-rank phenotype factor, on the observed or the null side.)
-$$\text{CAAS\_score} = \text{caas\_row}_{US} + \operatorname{mean}_{s \in \text{detected GS}} \text{caas\_row}_s$$
+$$\text{CAAS\_score} = \tfrac{1}{2}\left(\text{caas\_row}_{US} + \operatorname{mean}_{s \in \text{detected GS}} \text{caas\_row}_s\right)$$
 
 `n_schemes` (how many partitions detected the position) and `scheme_set`
 (which ones) are reported as descriptors and do not scale the score. See the
@@ -1051,7 +1051,7 @@ given position identifies what kind of physicochemical property changed, not
 merely how much evidence exists.
 
 `n_schemes` and `scheme_set` are descriptors of the substitution's chemistry,
-not inputs to `CAAS_score` (US + mean over the detected GS schemes, Scoring
+not inputs to `CAAS_score` ((US + mean over the detected GS schemes) / 2, Scoring
 Methodology above). How many schemes fire is largely a property of where the ancestral
 residue sits in each partition: an amino acid alone in its group (e.g.
 threonine under `GS1`) is displaced by almost any substitution, while one in a
@@ -1208,8 +1208,8 @@ pos_chr_label_positions <- pos_chr_offsets %>%
 
 ```{r pos-caas-manhattan-plot, eval=has_genomic, fig.height=5, fig.width=14}
 pos_genomic <- pos_genomic %>%
-  mutate(caas_log = -log10(1 - pmin(CAAS_score / 2, 0.9999)))   # CAAS_score lies in [0, 2]
-pos_thr_log <- -log10(1 - pmin(thr_10 / 2, 0.9999))
+  mutate(caas_log = -log10(1 - pmin(CAAS_score, 0.9999)))   # CAAS_score lies in [0, 1]
+pos_thr_log <- -log10(1 - pmin(thr_10, 0.9999))
 
 ggplot(pos_genomic, aes(x = manhattan_x, y = caas_log, colour = chr_even)) +
   geom_point(alpha = 0.45, size = 0.6, show.legend = FALSE) +
@@ -2247,8 +2247,8 @@ pos_wins <- pos_genomic %>%
   mutate(n_positions = n_genes,
          win_x       = win_mid + offset,
          chr_even    = chr_order %% 2 == 0,
-         mean_log    = -log10(1 - pmin(mean_score / 2, 0.9999)),   # position score in [0, 2]
-         max_log     = -log10(1 - pmin(max_score / 2,  0.9999)))
+         mean_log    = -log10(1 - pmin(mean_score, 0.9999)),   # position score in [0, 1]
+         max_log     = -log10(1 - pmin(max_score,  0.9999)))
 
 # Label the top windows as genomic regions, not gene names.
 # Ranked by n_positions (window density) rather than mean_log, to surface the
@@ -2283,7 +2283,7 @@ ggplot(pos_wins, aes(x = win_x, y = mean_log, fill = chr_even)) +
     title    = sprintf("Position-Level CAAS Score - %s Window Accumulation", win_size_label),
     subtitle = sprintf("Bars = mean | Points = max | %d windows across %d chromosomes",
                        nrow(pos_wins), length(unique(pos_wins$chr_order))),
-    x = "Chromosome", y = "-log10(1 - mean CAAS score / 2)"
+    x = "Chromosome", y = "-log10(1 - mean CAAS score)"
   ) +
   theme(
     plot.title         = element_text(face = "bold"),

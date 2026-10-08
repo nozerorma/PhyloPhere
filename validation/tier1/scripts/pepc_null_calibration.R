@@ -20,7 +20,7 @@ eval(parse(text = src[a:b]))
 
 nul <- read.delim(gzfile(file.path(res_dir, "caas_permulation/perm_pos_cycle_caas.tsv.gz")), stringsAsFactors = FALSE,
                   colClasses = c(caas_score = "character"))
-stopifnot(all(nul$score_aggregation == "us_plus_gs_mean"))
+stopifnot(all(nul$score_aggregation == "us_gs_mean_half"))
 nul$caas_score <- suppressWarnings(as.numeric(nul$caas_score))
 nul <- nul[!is.na(nul$caas_score), ]
 nul$cyc <- sub("~H.*$", "", nul$cycle)                      # mirror labels collapse to the base cycle

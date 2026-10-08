@@ -279,7 +279,7 @@ def build_cycle_inputs(
     return target_cycles, cycle_labelings
 
 
-# A position's score is US + mean(GS) of caas_row (core.scores.position_score): the number of GS schemes that
+# A position's score is (US + mean(GS)) / 2 of caas_row (core.scores.position_score): the number of GS schemes that
 # detect a substitution reflects its biochemical distance rather than the strength of the evidence, so it is
 # averaged, not summed. The observed side (scoring_compute.R) uses the same score.
 
@@ -710,7 +710,7 @@ def _finalize_perm_scores(
     Follows the observed pipeline of scoring_compute.R:
 
         null_row_caas   = asr_path_score
-        position score  = US + mean(null_row_caas over the GS schemes that detected it)
+        position score  = (US + mean(null_row_caas over the GS schemes that detected it)) / 2
                           (core.scores.position_score)
         gene x cycle    = size_adj_max over the cycle's positions, per direction
                           (CAAS axis; the ASR axis is the 90th percentile of the position scores)

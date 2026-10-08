@@ -63,9 +63,9 @@ caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permul
 core_positions_file  <- parse_arg("--core_positions")  # observed_core_scores.py: CAAS_score per (Gene, Position, side)
 core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: size-adjusted gene CAAS scores
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
-# Rule of the position score: US + mean(GS) (core.scores.SCORE_RULE). The observed scores (observed_core_scores.py)
+# Rule of the position score: (US + mean(GS)) / 2, in [0, 1] (core.scores.SCORE_RULE). The observed scores (observed_core_scores.py)
 # and the null (perm_pos_cycle_caas.tsv.gz, column score_aggregation) must use the same rule.
-score_aggregation <- "us_plus_gs_mean"
+score_aggregation <- "us_gs_mean_half"
 # Rows reach this script already pooled over hypotheses by CT_DISAMBIGUATION (one row per Gene,
 # Position, scheme and side, hypothesis NA), so scoring never pools hypotheses itself.
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
@@ -165,8 +165,8 @@ cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
 #
 # No weight on how many GS schemes detect a substitution: it is a deterministic property of which amino
 # acids are involved (a discretised biochemical distance, see the report's Biochemistry tab), not evidence
-# strength. The position score is US + mean(GS) (core.scores.position_score): US is the strict residue
-# test, and the GS term adds the mean of the GS1-GS4 scores that detected the position.
+# strength. The position score is (US + mean(GS)) / 2 (core.scores.position_score): US is the strict residue
+# test, and the GS term adds the mean of the GS1-GS4 scores that detected the position; each term weighs 0.5.
 scoring_schemes <- c("US", "GS4", "GS3", "GS2", "GS1")
 
 # Priority only picks the representative scheme whose display columns (side, caap_group, ...) the
@@ -238,7 +238,7 @@ df <- df %>% mutate(Position = suppressWarnings(as.integer(Position)))
 df <- df %>% arrange(desc(scheme_priority))
 
 # `side` belongs to the aggregation key: a position detected on both sides has two rows, and
-# CAAS_score (US + mean of the GS schemes that detected it) is taken per side.
+# CAAS_score ((US + mean of the GS schemes that detected it) / 2) is taken per side.
 .pos_grp_keys <- c("Gene", "Position", "side")
 
 pos_scores <- df %>%
@@ -279,7 +279,7 @@ pos_scores <- df %>%
       paste(paste0(caap_group[.ae], ":", amino_encoded[.ae])[.o], collapse = " ")
     } else "",
     # The per-scheme factors (asr_score / caas_row) and the ASR diagnostic columns (asr_path_score,
-    # derived_agreement) are not carried to the position level: CAAS_score is US + mean(GS) of asr_path_score
+    # derived_agreement) are not carried to the position level: CAAS_score is (US + mean(GS)) / 2 of asr_path_score
     # over the schemes, and a position-level mean of each sub-factor would hide scheme disagreement (a
     # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees). They stay per
     # (Gene, Position, caap_group) in `df` for anything that needs the breakdown.
@@ -287,7 +287,7 @@ pos_scores <- df %>%
     .groups = "drop"
   )
 
-# CAAS_score = US + mean of asr_path_score over the GS schemes that scored the (Gene, Position, side),
+# CAAS_score = (US + mean of asr_path_score over the GS schemes that scored the (Gene, Position, side)) / 2,
 # computed by core.scores.
 core_pos <- read_tsv(core_positions_file, show_col_types = FALSE,
                      col_types = cols(Gene = col_character(), Position = col_integer(),
@@ -302,7 +302,7 @@ if (anyNA(.hit) || nrow(core_pos) != nrow(pos_scores)) {
 pos_scores$CAAS_score <- core_pos$CAAS_score[.hit]
 rm(core_pos, .hit)
 
-# CAAS_score is the position score of that side (US + mean(GS)); caas_row is the row's asr_path_score.
+# CAAS_score is the position score of that side ((US + mean(GS)) / 2); caas_row is the row's asr_path_score.
 pos_scores <- pos_scores %>% mutate(asr_path_score = CAAS_score)
 
 # Ancestral and derived residues of each (Gene, Position, side), as the ASR inferred them. They are read from

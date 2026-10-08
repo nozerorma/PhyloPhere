@@ -12,8 +12,8 @@ Inputs:     --input  filtered_discovery.tsv, one row per (Gene, Position, side, 
                      an asr_path_score column; only the five scoring schemes are read, and an
                      asr_path_score that is not numeric counts as missing
 Outputs:    --positions-out  TSV [Gene, Position, side, CAAS_score]; CAAS_score aggregates the
-                             asr_path_score of the schemes per side as US + mean(GS): the US score plus
-                             the mean over the GS1-GS4 schemes that scored the position (core.scores)
+                             asr_path_score of the schemes per side as (US + mean(GS)) / 2: half the US score
+                             plus half the mean over the GS1-GS4 schemes that scored the position (core.scores)
             --genes-out      TSV [Gene, gene_caas_score, gene_caas_score_top,
                              gene_caas_score_bottom]; size_adj_max against the pool of the
                              same direction (all positions of the run), NA when the gene has no

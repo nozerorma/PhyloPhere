@@ -182,7 +182,7 @@ Con `overlap` = min(residuos fg también en bg, residuos bg también en fg), y
 `US` (residuo literal) y `GS1..GS4` (agrupaciones bioquímicas progresivamente más gruesas).
 **Cuántos esquemas disparan es una propiedad determinista de qué aminoácidos intervienen**
 (distancia bioquímica discretizada), no una medida de fuerza de evidencia. Por eso el
-scoring (H.4) puntúa la posición como `US + media(GS)`: el score de US (0 si no detecta) más la **media** de los scores de los GS1-GS4 que detectan (0 si ninguno). US es el test estricto sobre residuos y cada GS repite el test tras recodificar los residuos en clases bioquímicas; el término GS es el bonus por divergencia química. Una posición detectada solo por GS conserva su término GS (el de US es 0) en lugar de desaparecer, y la que detectan ambos suma los dos. Cuántos GS detectan no se premia: las cuatro particiones son ejes distintos, no versiones fina y gruesa de una. El score va de 0 a 2.
+scoring (H.4) puntúa la posición como `(US + media(GS)) / 2`: la mitad del score de US (0 si no detecta) más la mitad de la **media** de los scores de los GS1-GS4 que detectan (0 si ninguno). US es el test estricto sobre residuos y cada GS repite el test tras recodificar los residuos en clases bioquímicas; el término GS es el bonus por divergencia química. Una posición detectada solo por GS conserva su término GS (el de US es 0) en lugar de desaparecer, y la que detectan ambos suma los dos, cada uno con peso 0.5. Cuántos GS detectan no se premia: las cuatro particiones son ejes distintos, no versiones fina y gruesa de una. El score va de 0 a 1.
 
 *Ejemplo — columna 210, patrón fg/bg por hipótesis:*
 
