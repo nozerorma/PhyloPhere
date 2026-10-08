@@ -306,6 +306,49 @@ lean_candidate_df <- function(trait_vec, D, target_pairs,
        reason = NULL)
 }
 
+#' Canonical pairs of a permulated trait whose PSS profile matches the observed one.
+#'
+#' The observed run assembles its pairs until the Dunn index stops it, so its last pairs are the
+#' poorest the trait offers; a null that keeps the K best pairs of a richer pool is systematically
+#' closer. Here the null builds its K pairs one by one: for observed pair i (in the order the
+#' observed selector chose them) it takes the candidate whose PSS is closest to the observed PSS_i
+#' (in log scale) among those that keep every pair Dunn-independent (modified Dunn >= 1).
+#' The draw is comparable when the worst pair is within `tol` of its target, i.e.
+#' max_i |log(PSS_i / target_i)| <= log(1 + tol).
+#'
+#' @param ranked      candidate pairs (lean_candidate_df()$cand_df), with species1, species2, pss_score.
+#' @param D           patristic distance matrix.
+#' @param target_pss  PSS of the observed canonical pairs, in selection order.
+#' @param tol         relative tolerance of the PSS of each pair.
+#' @param max_probe   nearest candidates tested against the Dunn gate before giving up on a pair.
+#' @return list(selected = rows of `ranked` in selection order | NULL, members, mismatch = max |log ratio|,
+#'              reason)
+match_pss_select <- function(ranked, D, target_pss, tol = 0.25, max_probe = 60L) {
+  D <- as.matrix(D)
+  fail <- function(reason) list(selected = NULL, members = list(), mismatch = NA_real_, reason = reason)
+  if (is.null(ranked) || nrow(ranked) == 0L) return(fail("no candidate pairs"))
+  lp <- log(pmax(ranked$pss_score, 1e-12)); lt <- log(pmax(target_pss, 1e-12))
+  members <- list(); used <- character(0); picked <- integer(0)
+  for (i in seq_along(lt)) {
+    avail <- which(!(ranked$species1 %in% used | ranked$species2 %in% used))
+    if (!length(avail)) return(fail("could not form target_pairs non-overlapping pairs"))
+    ord <- avail[order(abs(lp[avail] - lt[i]))]
+    pick <- NA_integer_
+    for (j in utils::head(ord, max_probe)) {
+      m2 <- c(members, list(c(ranked$species1[j], ranked$species2[j])))
+      if (length(members) == 0L || (mod_dunn_lean(D, m2, length(m2)) >= 1 && overall_dunn_lean(D, m2) >= 1)) { pick <- j; break }
+    }
+    if (is.na(pick)) return(fail("no Dunn-independent candidate for a pair of the PSS profile"))
+    members <- c(members, list(c(ranked$species1[pick], ranked$species2[pick])))
+    used <- c(used, ranked$species1[pick], ranked$species2[pick]); picked <- c(picked, pick)
+  }
+  sel <- ranked[picked, , drop = FALSE]
+  mismatch <- max(abs(log(pmax(sel$pss_score, 1e-12)) - lt))
+  if (mismatch > log1p(tol)) return(list(selected = NULL, members = members, mismatch = mismatch,
+                                         reason = sprintf("PSS profile not matched (worst pair off by %.0f%%)", 100 * expm1(mismatch))))
+  list(selected = sel, members = members, mismatch = mismatch, reason = NULL)
+}
+
 #' FOP multi-hypothesis harvest, shared by the observed selector
 #' (selection_algorithm.R::fop_pair_sel.f) and the permulation null.
 #'
@@ -356,7 +399,7 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
                   else cand_df$distance[hit],
       abs_diff  = if ("abs_diff" %in% names(canon_pairs)) canon_pairs$abs_diff
                   else cand_df$abs_diff[hit],
-      pss_score = cand_df$pss_score[hit],
+      pss_score = if ("pss_score" %in% names(canon_pairs)) canon_pairs$pss_score else cand_df$pss_score[hit],
       stringsAsFactors = FALSE
     )
     canon <- list(selected = cp,
@@ -470,9 +513,10 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
 #' Lean contrast selection + tiered Dunn validation for one permulated vector.
 #'
 #' Candidate gate + ranking are the observed selector's (lean_candidate_df +
-#' greedy_dunn_select). The only deliberate difference: the null runs to
-#' exactly `target_pairs` and grades independence into tiers, rather than
-#' stopping when overall Dunn drops below 1.
+#' greedy_dunn_select). Without `pss_profile`, the null runs to exactly
+#' `target_pairs` and grades independence into tiers, rather than stopping when
+#' overall Dunn drops below 1. With `pss_profile`, the canonical pairs follow the
+#' PSS of the observed pairs (match_pss_select) and the draw is Tier 1 or rejected.
 #'
 #' @param trait_vec       Named numeric vector of permulated trait values.
 #' @param D               Patristic distance matrix on the REAL tree.
@@ -485,7 +529,12 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
 #' @param top_pct         Top PSS fraction kept as the gate (params.pss_top_pct).
 #' @param ordinal         TRUE/FALSE to force the ordinal level gate; NULL = auto.
 #' @param n_vec           Optional named per-tip sample sizes → pair_n tiebreak.
-#' @return list(tier, n_pairs, dunn_min, n_below, fg, bg, reason)
+#' @param pss_profile     NULL, or the PSS of the observed canonical pairs in selection order. The canonical pairs
+#'                        are then chosen by match_pss_select() from the pool without the PSS top_pct gate
+#'                        (the pairs themselves set the PSS range), and the draw is accepted (Tier 1) only if
+#'                        every pair is within `pss_tol` of its target. Ignored for count (CI) traits.
+#' @param pss_tol         Relative PSS tolerance of the matching.
+#' @return list(tier, n_pairs, dunn_min, n_below, fg, bg, canon, mean_pss, mismatch, reason)
 evaluate_lean_contrast_selection <- function(trait_vec,
                                              D,
                                              target_pairs,
@@ -497,7 +546,9 @@ evaluate_lean_contrast_selection <- function(trait_vec,
                                              ci_ub = NULL,
                                              top_pct = 0.01,
                                              ordinal = NULL,
-                                             n_vec = NULL) {
+                                             n_vec = NULL,
+                                             pss_profile = NULL,
+                                             pss_tol = 0.25) {
 
   reject <- function(reason, n_pairs = 0L, dunn = 0, n_below = NA_integer_) {
     list(tier = 0L, n_pairs = n_pairs, dunn_min = dunn, n_below = n_below,
@@ -507,10 +558,25 @@ evaluate_lean_contrast_selection <- function(trait_vec,
   if (target_pairs <= 0L) return(reject("target_pairs <= 0"))
   D <- as.matrix(D)
 
+  use_match <- !is.null(pss_profile) && is.null(ci_lb)
+  if (use_match && length(pss_profile) != target_pairs) return(reject("pss_profile length differs from target_pairs"))
   cc <- lean_candidate_df(trait_vec, D, target_pairs, tree, cov_bm, cov_ou,
-                          selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec)
+                          selected_model, ci_lb, ci_ub, if (use_match) 1 else top_pct, ordinal, n_vec)
   if (is.null(cc$cand_df)) return(reject(cc$reason))
   ranked <- cc$cand_df
+
+  if (use_match) {
+    mt <- match_pss_select(ranked, D, pss_profile, pss_tol)
+    if (is.null(mt$selected)) return(reject(mt$reason, length(mt$members)))
+    sel <- mt$selected; members <- mt$members
+    return(list(tier = 1L, n_pairs = length(members), dunn_min = overall_dunn_lean(D, members), n_below = 0L,
+                fg = sel$species1, bg = sel$species2,
+                canon = sel[, c("species1", "species2", "distance", "abs_diff", "pss_score")],
+                fg_values = unname(trait_vec[sel$species1]), bg_values = unname(trait_vec[sel$species2]),
+                mean_pd = mean(sel$distance), mean_df = mean(sel$abs_diff), mean_pss = mean(sel$pss_score),
+                mismatch = mt$mismatch, mode = cc$mode, reason = "accepted"))
+  }
+
   res <- greedy_dunn_select(ranked, D, target = target_pairs, enforce_dunn = FALSE)
 
   members <- res$members
@@ -531,9 +597,11 @@ evaluate_lean_contrast_selection <- function(trait_vec,
   list(tier = if (n_below == 0L) 1L else 2L,
        n_pairs = n_pairs, dunn_min = dunn_min, n_below = n_below,
        fg = sel_fg, bg = sel_bg,
+       canon = res$selected[, c("species1", "species2", "distance", "abs_diff", "pss_score")],
        fg_values = unname(trait_vec[sel_fg]), bg_values = unname(trait_vec[sel_bg]),
        mean_pd = mean(vapply(members, function(x) D[x[1], x[2]], numeric(1))),
        mean_df = mean(vapply(members, function(x) abs(trait_vec[x[1]] - trait_vec[x[2]]), numeric(1))),
+       mean_pss = mean(res$selected$pss_score), mismatch = NA_real_,
        mode = cc$mode,
        reason = "accepted")
 }

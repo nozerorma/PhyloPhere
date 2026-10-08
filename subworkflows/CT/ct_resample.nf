@@ -28,7 +28,9 @@
  *  RESAMPLE: runs permulations.R, which permulates the observed trait on the species
  *  tree and keeps params.caas_full_perms labelings that have the same number of
  *  independent pairs as the observed contrast (and, with params.multi_hypothesis, the
- *  same number of FOP hypotheses). The strategy is params.perm_strategy and the
+ *  same number of FOP hypotheses). The strategy is params.perm_strategy, the canonical pairs
+ *  follow the PSS profile of the observed ones (params.perm_match_pss, tolerance
+ *  params.perm_match_pss_tol; not for count traits) and the
  *  randomness is seeded with params.seed (1998 when unset).
  *
  *  Consumes:  species tree, observed traitfile (or a directory of traitfile_H*.tab,
@@ -118,7 +120,9 @@ process RESAMPLE {
         ${params.multi_hypothesis ?: false} \\
         ${params.max_fop ?: 100} \\
         ${task.cpus} \\
-        ${params.seed ?: 1998}
+        ${params.seed ?: 1998} \\
+        ${params.perm_match_pss != null ? params.perm_match_pss : true} \\
+        ${params.perm_match_pss_tol ?: 0.25}
         """
     } else {
         """
@@ -177,7 +181,9 @@ process RESAMPLE {
         ${params.multi_hypothesis ?: false} \\
         ${params.max_fop ?: 100} \\
         ${task.cpus} \\
-        ${params.seed ?: 1998}
+        ${params.seed ?: 1998} \\
+        ${params.perm_match_pss != null ? params.perm_match_pss : true} \\
+        ${params.perm_match_pss_tol ?: 0.25}
         """
     }
 }

@@ -239,6 +239,29 @@ El *pool* se llena con Tier 1; Tier 2 solo entra si Tier 1 se agota. Escalado de
 según la tasa de aceptación Tier 1 (`MIN_VIABLE_TIER1_RATE = 0.05`, tope duro
 `HARVEST_HARD_CAP = 50 * pool_size`).
 
+**Emparejamiento del perfil de PSS (`perm_match_pss`, por defecto activo; no se aplica a rasgos de conteo).**
+El selector observado ensambla sus pares hasta que el índice de Dunn se detiene, de modo que su K es la
+capacidad del rasgo y sus últimos pares son los peores que el rasgo ofrece; la nula de arriba se detiene en K y
+conserva los K mejores de un pool más rico, con lo que sus pares son sistemáticamente más cercanos. Con el
+emparejamiento, los pasos 3 a 6 se sustituyen por `match_pss_select()`:
+
+```
+3'. sin puerta top `pss_top_pct` (los propios pares fijan el rango de PSS)
+4'. para el par observado i (en el orden de selección del observado, ids de par del traitfile):
+       candidatos disponibles = parejas que no reutilizan especies ya elegidas
+       se toma el de PSS más próximo a PSS_i (escala log) que mantiene todos los pares Dunn-independientes
+       (mod_dunn >= 1 y Dunn global >= 1); se prueban los 60 más próximos
+5'. el draw se acepta (siempre Tier 1) si max_i |log(PSS_nulo_i / PSS_obs_i)| <= log(1 + perm_match_pss_tol);
+       si no se forman K pares independientes, o alguno queda fuera de tolerancia, se rechaza (tier 0)
+```
+
+El PSS observado se recalcula con la misma función de candidatos sobre el rasgo observado (y se contrasta con el H1
+de `contrast_hypotheses_pairs.tsv` cuando está junto al traitfile). Las hipótesis H2..Hn se cosechan como antes,
+alrededor de los pares canónicos emparejados y con la puerta `pss_top_pct`. El aceptar un draw condiciona la nula
+sobre una propiedad del etiquetado (su perfil de PSS) que el observado cumple por construcción; no usa alineamientos.
+`permulation_manifest.tsv` registra por ciclo la distancia media, la diferencia media, el PSS medio y el desajuste
+máximo de los pares canónicos (`mean_distance`, `mean_abs_diff`, `mean_pss`, `pss_mismatch`).
+
 ### 3.2 Tabla comparativa
 
 | Eje | RERconverge 0.3.0 categórico (§1) | RERconverge *legacy* `simBinPhenoCC` | PhyloPhere `permulations.R` |

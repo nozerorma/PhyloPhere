@@ -24,14 +24,20 @@
 #   args[16] max_fop              maximum FOP hypotheses (H1..Hn) per cycle (default 100)
 #   args[17] n_cpus               workers of the FOP harvest (default: SLURM allocation, else cores)
 #   args[18] seed                 RNG seed; required with multi_hypothesis
+#   args[19] match_pss            match the PSS profile of the observed canonical pairs (default true; not applied to count traits)
+#   args[20] match_pss_tol        relative PSS tolerance of that matching (default 0.25)
 #
 # Method: the trait is simulated under BM on the species tree (rescaled to the fitted OU
 # when OU is the selected model), and the simulated ranks are mapped back onto the observed
 # values, so each permulation has the observed marginal distribution. Strategy auto
 # selects BM or OU by AIC, as the observed selector does.
 #
-# Pool harvesting: every accepted permulation carries exactly N_pairs_obs pairs, graded by
-# the modified Dunn index (the contrast selection is lean_contrast_selector.R):
+# Pool harvesting: every accepted permulation carries exactly N_pairs_obs pairs (the contrast
+# selection is lean_contrast_selector.R). By default (match_pss) the pairs are chosen one by one so
+# that their PSS follows the PSS of the observed canonical pairs, and a permulation is accepted only
+# if every pair is within match_pss_tol of its observed counterpart and all pairs are independent
+# (Tier 1). Without matching, or for count traits, the pairs are the N_pairs_obs best ones, graded
+# by the modified Dunn index:
 #   Tier 1 : all pairs have mod_dunn >= 1 (fully independent)
 #   Tier 2 : exactly one pair falls below mod_dunn 1 (only used to fill a shortfall)
 #
@@ -123,6 +129,9 @@ n_cpus <- max(1L, min(as.integer(n_cpus), .detected_cores))
 # With a seed (the pipeline passes params.seed, 1998 by default) the parallel streams are
 # reproducible; without one the RNG is left unseeded.
 seed_arg <- arg_or(18, NA_integer_, as.integer)
+match_pss     <- tolower(arg_or(19, "true")) %in% c("1", "true", "t", "yes", "y")
+match_pss_tol <- arg_or(20, 0.25, as.numeric)
+if (!is.finite(match_pss_tol) || match_pss_tol <= 0) stop("match_pss_tol must be a positive number.")
 if (!is.na(seed_arg)) {
   set.seed(seed_arg)
   log_msg("INFO", sprintf("RNG seeded with %d (L'Ecuyer-CMRG); FOP mirror uses %d core(s)",
@@ -310,6 +319,45 @@ if (selected_model == "OU") {
   simulation_tree <- pruned.tree
 }
 
+# ── PSS profile of the observed canonical pairs ───────────────────────────────
+# The observed selector chooses its pairs until the Dunn index stops it, so they are the pairs the
+# trait offers; the permulations are matched to their PSS (see match_pss_select). The profile is
+# computed with the same candidate function on the observed trait, in the order of the pair ids of
+# the observed traitfile (the order of selection). Count traits (Jeffreys CI gate) are not matched.
+pss_profile <- NULL
+if (match_pss && use_ci) {
+  log_msg("INFO", "PSS matching is not applied to count traits (CI gate): the null keeps the best Dunn-independent pairs")
+} else if (match_pss) {
+  obs_cand <- lean_candidate_df(
+    starting.values, D, target_pairs, pruned.tree, cov_bm, cov_ou, selected_model,
+    top_pct = 1,
+    ordinal = if (trait_type == "ordinal") TRUE else if (trait_type == "continuous") FALSE else NULL)$cand_df
+  pid <- sort(unique(as.integer(cfg$V3)))
+  obs_pss <- vapply(pid, function(i) {
+    f <- cfg$V1[cfg$V2 == "1" & as.integer(cfg$V3) == i]; b <- cfg$V1[cfg$V2 == "0" & as.integer(cfg$V3) == i]
+    if (length(f) != 1L || length(b) != 1L || is.null(obs_cand)) return(NA_real_)
+    hit <- which((obs_cand$species1 == f & obs_cand$species2 == b) | (obs_cand$species1 == b & obs_cand$species2 == f))
+    if (length(hit)) obs_cand$pss_score[hit[1]] else NA_real_
+  }, numeric(1))
+  if (length(obs_pss) != target_pairs || anyNA(obs_pss)) {
+    log_msg("WARN", "the PSS of the observed pairs could not be recovered; PSS matching is off")
+  } else {
+    pss_profile <- obs_pss
+    log_msg("INFO", sprintf("PSS matching on: observed PSS (selection order) %s, tolerance %.0f%%",
+                            paste(format(obs_pss, digits = 4), collapse = " "), 100 * match_pss_tol))
+    # Consistency with the hypotheses table written by the observed run, when it sits next to the config.
+    .hpf <- file.path(if (dir.exists(config.file)) config.file else dirname(config.file), "contrast_hypotheses_pairs.tsv")
+    if (file.exists(.hpf)) {
+      .hp1 <- read.delim(.hpf, stringsAsFactors = FALSE)
+      .hp1 <- .hp1[.hp1$hypothesis_id == "H1", ]
+      if (nrow(.hp1) == target_pairs && "pss_score" %in% names(.hp1) &&
+          max(abs(.hp1$pss_score[order(.hp1$pair)] - obs_pss)) > 1e-6) {
+        log_msg("WARN", "the recomputed PSS of the observed pairs differs from contrast_hypotheses_pairs.tsv (H1)")
+      }
+    }
+  }
+}
+
 # ── Harvest ───────────────────────────────────────────────────────────────────
 # Draws are permulations of the observed trait: each is graded by
 # evaluate_lean_contrast_selection() into Tier 1, Tier 2 or a rejection. The pool is the
@@ -373,8 +421,8 @@ fop_hypotheses <- function(e, label) {
       top_pct = pss_top_pct, max_fop = max_fop, seed = seed_arg,
       ordinal = if (trait_type == "ordinal") TRUE
                 else if (trait_type == "continuous") FALSE else NULL,
-      canon_pairs = data.frame(species1 = e$fg, species2 = e$bg,
-                               stringsAsFactors = FALSE)),
+      canon_pairs = if (!is.null(e$canon)) e$canon
+                    else data.frame(species1 = e$fg, species2 = e$bg, stringsAsFactors = FALSE)),
     error = function(err) { log_msg("WARN", sprintf("FOP harvest %s: %s", label, conditionMessage(err))); NULL })
 }
 # Hypotheses a cycle contributes; an empty harvest falls back to H1 only.
@@ -424,6 +472,7 @@ repeat {
           selected_model = selected_model,
           ci_lb = ci_lb_draw, ci_ub = ci_ub_draw,
           top_pct = pss_top_pct, n_vec = n_draw,
+          pss_profile = pss_profile, pss_tol = match_pss_tol,
           ordinal = if (trait_type == "ordinal") TRUE
                     else if (trait_type == "continuous") FALSE
                     else NULL
@@ -596,7 +645,8 @@ chunk_manifest <- list()
 
 man_con <- file(file.path(outdir, "permulation_manifest.tsv"), "w")
 writeLines(paste(c("cycle", "tier", "n_pairs", "dunn_min", "n_below", "mode",
-                   "fg_values", "bg_values"), collapse = "\t"), man_con)
+                   "fg_values", "bg_values", "mean_distance", "mean_abs_diff", "mean_pss", "pss_mismatch"),
+                 collapse = "\t"), man_con)
 
 flush_chunk <- function() {
   fp <- file.path(outdir, sprintf("resample_%03d.tab", file.counter))
@@ -624,6 +674,8 @@ for (b in seq_along(pool)) {
     n_below = e$n_below, mode = e$mode,
     fg_values = fmt(e$fg_values),
     bg_values = fmt(e$bg_values),
+    mean_distance = e$mean_pd, mean_abs_diff = e$mean_df, mean_pss = e$mean_pss,
+    pss_mismatch = if (is.null(e$mismatch)) NA_real_ else e$mismatch,
     stringsAsFactors = FALSE)
   if (b - chunk.start + 1L >= chunk.size || b == length(pool)) {
     flush_chunk()
