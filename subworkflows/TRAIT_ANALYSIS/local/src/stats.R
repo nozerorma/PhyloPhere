@@ -69,7 +69,7 @@ compute_trait_summary <- function(trait_values) {
 # ── Per-species statistics table ──────────────────────────────────────────────
 
 # Per-species table of the trait with its descriptive context. Keeps species,
-# taxon, trait and the optional n / c / tax_id / secondary / branch columns that
+# taxon, trait and the optional n / c / secondary / branch columns that
 # exist in `df`, drops rows with NA trait, and adds:
 #   g_*               global mean, median, sd, quantiles (q10 to q90) and IQR
 #   taxa_*            within-taxon mean, median, sd, q25 and q75
@@ -81,16 +81,14 @@ compute_trait_summary <- function(trait_values) {
 stats.f <- function(df) {
   c_trait_name <- if (exists("c_trait", inherits = TRUE)) c_trait else ""
   n_trait_name <- if (exists("n_trait", inherits = TRUE)) n_trait else ""
-  tax_id <- if (exists("tax_id", inherits = TRUE)) tax_id else ""
   secondary_trait <- if (exists("secondary_trait", inherits = TRUE)) secondary_trait else ""
   branch_trait <- if (exists("branch_trait", inherits = TRUE)) branch_trait else ""
   taxa_col <- taxon_of_interest
   trait_col <- trait
-  debug_log("stats.f rows = %d, trait = %s, taxon = %s, n_trait = %s, c_trait = %s, tax_id = %s", 
+  debug_log("stats.f rows = %d, trait = %s, taxon = %s, n_trait = %s, c_trait = %s, secondary = %s, branch = %s", 
             nrow(df), trait_col, taxa_col, 
             ifelse(nzchar(n_trait_name), n_trait_name, "<none>"), 
             ifelse(nzchar(c_trait_name), c_trait_name, "<none>"),
-            ifelse(nzchar(tax_id), tax_id, "<none>"),
             ifelse(nzchar(secondary_trait), secondary_trait, "<none>"),
             ifelse(nzchar(branch_trait), branch_trait, "<none>"))
 
@@ -100,9 +98,6 @@ stats.f <- function(df) {
   }
   if (nzchar(c_trait_name) && c_trait_name %in% names(df)) {
     base_cols <- c(base_cols, c_trait_name)
-  }
-  if (nzchar(tax_id) && tax_id %in% names(df)) {
-    base_cols <- c(base_cols, tax_id)
   }
   if (nzchar(secondary_trait) && secondary_trait %in% names(df)) {
     base_cols <- c(base_cols, secondary_trait)

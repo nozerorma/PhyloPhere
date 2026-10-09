@@ -206,7 +206,6 @@ def load_and_match_tree(
             matched_alignment,
             tree_taxid_to_sp,
             aln_taxid_to_sp,
-            synthetic_taxids,
         ) = match_tree_alignment_by_taxid(tree, alignment_data.alignment, taxid_mapping)
 
         tree = matched_tree
@@ -234,10 +233,7 @@ def load_and_match_tree(
 
         taxid_mapping = aln_taxid_to_sp
 
-        logger.debug(
-            f"After matching: {len(tree.get_terminals())} tips, "
-            f"{len(synthetic_taxids)} synthetic taxids created"
-        )
+        logger.debug(f"After matching: {len(tree.get_terminals())} tips")
 
     # Build tree structure data (use matched tree tips as valid taxids)
     taxid_mapping_dict = taxid_mapping

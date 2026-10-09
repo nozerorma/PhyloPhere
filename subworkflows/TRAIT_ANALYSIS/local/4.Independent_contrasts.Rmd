@@ -27,7 +27,6 @@ params:
   max_fop: 100
   n_trait: ""
   c_trait: ""
-  tax_id: ""
   secondary_trait: ""
   branch_trait: ""
   pss_top_pct: "0.05"

@@ -31,6 +31,7 @@ process CAAS_OBSERVED {
     path trait_file    // observed design: trait file, or the directory of traitfile_H*.tab
     path tree_file
     path hyp_pairs     // contrast_hypotheses_pairs.tsv or a NO_* sentinel (equal-weight node pooling)
+    path taxid_map     // tax_id map of the species (curated by NAME_CURATION, or params.tax_id) or the NO_FILE sentinel
 
     output:
     path "ct_disambiguation", emit: results_dir
@@ -40,7 +41,7 @@ process CAAS_OBSERVED {
 
     script:
     def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
-    def taxid_mapping = params.tax_id ?: ''
+    def taxid_mapping = taxid_map.name != 'NO_FILE' ? taxid_map : ''
     def ensembl_file = params.gene_ensembl_file ?: ''
     def asr_cache_dir = params.ct_disambig_asr_cache_dir ?: ''
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'

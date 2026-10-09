@@ -51,6 +51,7 @@ workflow RER_MAIN {
         // Kept for backwards-compatible signature; currently unused.
         pp_top_ch
         pp_bottom_ch
+        taxid_map_input   // value channel: tax_id map (curated by NAME_CURATION, or params.tax_id) or the NO_FILE sentinel
 
     main:
 
@@ -96,10 +97,7 @@ workflow RER_MAIN {
             }
 
             if (toolsToRun.contains('build_tree')) {
-                def tax_id_ch = params.tax_id
-                    ? Channel.value(file(params.tax_id))
-                    : Channel.value(file('NO_FILE'))
-                def trees_out = RER_TREES(my_traitfile_ch, effective_gene_trees_ch, tax_id_ch)
+                def trees_out = RER_TREES(my_traitfile_ch, effective_gene_trees_ch, taxid_map_input)
                 masterTrees_out = trees_out[0]
             }
 

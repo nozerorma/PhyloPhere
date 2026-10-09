@@ -29,14 +29,14 @@
  *  reports and selects the independent contrast pairs that define the foreground
  *  and background species of the CAAS discovery.
  *
- *  Steps: tree-tip curation against the alignments (NAME_CURATION, when
- *  params.ali_sp_names or params.alignment is set); optional data pruning
+ *  Steps: optional data pruning
  *  (params.prune_data) and exploration reports (params.reporting), or a bare
  *  dataset exploration that generates the trait statistics; the composition
  *  report (CI_COMPOSITION_REPORT) and the selection of the contrast pairs
  *  (CONTRAST_ALGORITHM); and the minimum-contrast gate (CHECK_MIN_CONTRASTS).
  *
- *  Consumes:  params.my_traits (trait table), params.tree (species tree)
+ *  Consumes:  the trait table and species tree curated by NAME_CURATION (main.nf), which
+ *             settles the species names once from params.my_traits and params.tree
  *  Produces:  traitfile, permulation traitfile and traitfile directory (gated by
  *             CHECK_MIN_CONTRASTS), tree, trait statistics, candidate species,
  *             contrast results directory, the low_contrasts skip flag and, when
@@ -53,33 +53,20 @@ include { REPORTING } from './reporting'
 include { CI_COMPOSITION_REPORT } from '../subworkflows/TRAIT_ANALYSIS/ct_ci'
 include { CONTRAST_ALGORITHM } from '../subworkflows/TRAIT_ANALYSIS/ct_independent-contrasts'
 include { CHECK_MIN_CONTRASTS } from '../subworkflows/CT/ct_check_min_contrasts'
-include { NAME_CURATION } from '../subworkflows/TRAIT_ANALYSIS/ta_name_curation'
 
 // ── Workflow ─────────────────────────────────────────────────────────────────
 
 workflow CONTRAST_SELECTION {
+    take:
+        curated_trait_ch   // value channel: trait table curated by NAME_CURATION (main.nf)
+        curated_tree_ch    // value channel: tree curated by NAME_CURATION (main.nf)
+
     main:
-    assert params.my_traits : "Contrast selection workflow requires --my_traits."
-    assert params.tree : "Contrast selection workflow requires --tree."
-
-    def trait_file = file(params.my_traits)
-    def tree_file_ch = Channel.value(file(params.tree))
-
-    // NAME_CURATION renames the tree tips to the alignment species names and prunes the
-    // tips with no alignment counterpart. It runs here whenever alignment names are
-    // available, regardless of params.reporting and params.prune_data. REPORTING() curates
-    // the tree too, but only for its own reports (its emit: block does not return the
-    // curated tree), so without this call the contrast pairs would be selected on the raw
-    // params.tree and could include a species that has no alignment coverage.
-    if (params.ali_sp_names || params.alignment) {
-        def tax_id_param = params.tax_id
-        def tax_id_ch = tax_id_param
-            ? Channel.value(file(tax_id_param))
-            : Channel.value(file('NO_FILE'))
-        name_curation_out = NAME_CURATION(tree_file_ch, tax_id_ch)
-        tree_file_ch = name_curation_out.curated_tree
-        log.info "[CONTRAST_SELECTION] NAME_CURATION enabled — using curated tree as canonical tree."
-    }
+    // The names are settled by NAME_CURATION, run once by main.nf: the contrast pairs are
+    // selected on the curated tree and trait table, so every species has an alignment and
+    // carries the name the alignments use.
+    def trait_file = curated_trait_ch
+    def tree_file_ch = curated_tree_ch
 
     def tree_file = tree_file_ch
 
@@ -106,7 +93,7 @@ workflow CONTRAST_SELECTION {
         contrast_stats_file = dataset_exploration_out.stats_file
     } else if (params.reporting){
         log.info "stats_df generated during reporting"
-        reporting_out = REPORTING()
+        reporting_out = REPORTING(curated_trait_ch, curated_tree_ch)
         dataset_out = reporting_out.dataset_out
         contrast_stats_file = reporting_out.stats_file
     } else if (params.prune_data) {

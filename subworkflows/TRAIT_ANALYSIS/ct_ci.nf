@@ -50,7 +50,6 @@ process CI_COMPOSITION_REPORT {
     def trait = params.traitname ?: ''
     def n_trait = params.n_trait ?: ''
     def c_trait = params.c_trait ?: ''
-    def tax_id = params.tax_id ?: ''
     def branch_trait = params.branch_trait ?: ''
     def secondary_trait = params.secondary_trait ?: ''
     def pss_top_pct = params.pss_top_pct ?: '0.05'
@@ -80,7 +79,6 @@ process CI_COMPOSITION_REPORT {
                     traitname = '${trait}',
                     n_trait = '${n_trait}',
                     c_trait = '${c_trait}',
-                    tax_id = '${tax_id}',
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
                     trait_type = '${trait_type}',
@@ -115,7 +113,6 @@ process CI_COMPOSITION_REPORT {
                     traitname = '${trait}',
                     n_trait = '${n_trait}',
                     c_trait = '${c_trait}',
-                    tax_id = '${tax_id}',
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
                     trait_type = '${trait_type}',

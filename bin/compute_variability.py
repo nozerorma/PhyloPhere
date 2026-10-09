@@ -151,6 +151,9 @@ def load_taxonomy(taxid_tsv, family_order_tsv):
             family = parts[2].strip()
             order = family_to_order.get(family, 'Unknown')
             tax[species.lower()] = {'order': order, 'family': family}
+    if not tax:
+        print(f"WARNING: no usable row in {taxid_tsv} (rows need at least 5 columns, with the name class "
+              "'scientific name' in column 5): the clade variability is empty.", file=sys.stderr)
     return tax
 
 # ── Henikoff & Henikoff (1994) sequence weights ───────────────────────────────

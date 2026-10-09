@@ -133,6 +133,7 @@ workflow ENRICHMENT {
         fade_gene_lists_bg_bottom_ch  // FADE bottom direction's own background.txt
         fade_gene_lists_sig_top_ch    // fade_top_significant.txt
         fade_gene_lists_sig_bottom_ch // fade_bottom_significant.txt
+        taxid_map_ch                  // tax_id map (curated by NAME_CURATION) for the clade variability of UCR, or NO_FILE
 
     main:
         def fcs_universe_ch = (cleaned_background_ch ?: Channel.empty())
@@ -381,7 +382,7 @@ workflow ENRICHMENT {
                 log.info "[ENRICHMENT] ucr_positions_file not set — auto-generating from the alignment (Valdar variability + UCR detection)."
                 UCR_GENERATION(
                     Channel.value(file(params.alignment, type: 'dir')),
-                    Channel.value(file(params.tax_id)),
+                    taxid_map_ch,
                 )
                 pos_ucr_positions_ch = UCR_GENERATION.out.ucr_positions_file
             } else {

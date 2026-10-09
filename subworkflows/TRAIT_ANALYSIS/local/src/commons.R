@@ -184,7 +184,7 @@ if (!trait %in% names(trait_df)) {
 # Detects the optional count columns (n_trait, c_trait) and the sample-size column.
 source(file.path(objDir, "sample_size.R"))
 
-# tax_id mapping of the tree tips, when a tax_id file was given.
+# Match the trait table to the tree tips.
 source(file.path(objDir, "phylo.R"))
 
 # ── Secondary and branch traits ───────────────────────────────────────────────

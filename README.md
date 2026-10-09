@@ -324,7 +324,7 @@ These parameters define the primary input data files, phenotype target, and modu
 | `alignment` | `""` | **Required.** Path to the multiple sequence alignment (MSA) directory or `.tar.gz` archive. |
 | `tree` | `""` | **Required.** Path to the reference species tree in Newick format. |
 | `traitname` | `""` | **Required.** Column header name in `my_traits` corresponding to the phenotype to analyze. |
-| `tax_id` | `""` | Path to the NCBI taxonomy ID mapping file (`taxid` to species name). |
+| `tax_id` | `""` | Path to the NCBI taxonomy ID mapping file (`taxid` to species name; a `family` column feeds the clade variability). `NAME_CURATION` reads it once to rename synonyms, then writes `name_curation/species_taxid_map.tsv`, with one unique tax_id per species, which the stages that need a map use. |
 | `reporting` | `true` | Enables generation of HTML exploratory and summary reports via RMarkdown. |
 | `sp_colname` | `"species"` | Name of the column in `my_traits` containing species names matching the tree tips. |
 | `clade_name` | `"primates"` | Focal clade name for report titles and taxonomic grouping (e.g. `primates`). |

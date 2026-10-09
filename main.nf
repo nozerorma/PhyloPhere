@@ -45,6 +45,7 @@ include {listAlignmentFiles; sampleAlignmentFiles} from './subworkflows/CT/ct_al
 include {RER_MAIN} from './workflows/rerconverge.nf'
 include {REPORTING} from './workflows/reporting.nf'
 include {CONTRAST_SELECTION} from './workflows/contrast_selection.nf'
+include {NAME_CURATION} from './subworkflows/TRAIT_ANALYSIS/ta_name_curation.nf'
 include {CT_META_CAAS} from './workflows/ct_meta_caas.nf'
 include {CT_POSTPROC} from './workflows/ct_postproc.nf'
 include {CT_OBSERVED} from './workflows/ct_observed.nf'
@@ -109,13 +110,16 @@ Author:         Miguel Ramon (miguel.ramon@upf.edu)
 
     // Post-completion: write workflow_map.html again after all publishDir copies are done.
     // WorkflowMap lives in lib/WorkflowMap.groovy (compiled and loaded by Nextflow).
+    // `params` is read into a local variable first: inside the hook closure the script binding
+    // can be gone when the session shuts down, which made `params.outdir` fail on a null object.
+    def run_params = params
     workflow.onComplete {
         try {
             // Resolve to an absolute canonical path so the file is always written
             // to the correct location regardless of JVM working directory at hook time.
-            def outdirRaw = params.outdir ? params.outdir.toString() : "${workflow.projectDir}/out"
+            def outdirRaw = run_params.outdir ? run_params.outdir.toString() : "${workflow.projectDir}/out"
             def outdirAbs = new File(outdirRaw).canonicalPath
-            def ctx = WorkflowMap.buildCtx(outdirAbs, params, workflow)
+            def ctx = WorkflowMap.buildCtx(outdirAbs, run_params, workflow)
             def outdirFile = new File(outdirAbs)
             if (!outdirFile.exists()) outdirFile.mkdirs()
             def html = WorkflowMap.buildWorkflowMapHtml(ctx)
@@ -159,6 +163,35 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             log.warn "params.gene_ensembl_file is empty. To auto-generate it, run bin/resolve_core_inputs.py before this pipeline (see its docstring) — it cannot be generated from inside main.nf."
         }
 
+        // NAME_CURATION settles the species names once, before any stage: it renames the tree tips
+        // and the trait species to the names of the alignments (through the shared tax_id), removes
+        // what has no counterpart, and gives each canonical species one unique tax_id. Every stage
+        // below takes the curated tree, trait table or tax_id map from here instead of matching names
+        // again. The curated channels are value channels (every input of NAME_CURATION is one), so any number of stages can read them.
+        // It runs whenever --tree is given; the trait table is curated too when --my_traits is given,
+        // and otherwise (runs on precomputed inputs) the trait channel stays null.
+        def curated_trait_ch = null
+        def curated_tree_ch = null
+        def curated_taxid_map_ch = null
+        if (params.tree && file(params.tree).exists()) {
+            def curation_tax_id_ch = params.tax_id
+                ? Channel.value(file(params.tax_id))
+                : Channel.value(file('NO_FILE'))
+            def has_traits = params.my_traits && file(params.my_traits).exists()
+            def curation = NAME_CURATION(Channel.value(file(params.tree)), curation_tax_id_ch,
+                                         Channel.value(has_traits ? file(params.my_traits) : file('NO_FILE')))
+            curated_trait_ch = has_traits ? curation.curated_traits : null
+            curated_tree_ch = curation.curated_tree
+            curated_taxid_map_ch = params.tax_id ? curation.taxid_map : null
+            log.info "NAME_CURATION: the stages use the curated tree${has_traits ? ', trait table' : ''} and tax_id map."
+        }
+        // The tax_id map of every stage that reads one (the Python stages of CT, RER_TREES, the clade
+        // variability of the entropy and the UCR): the curated one, which holds one unique tax_id and the
+        // family per species. Only a run without --tree has no curation; it reads params.tax_id as given,
+        // or the NO_FILE sentinel when that is empty.
+        def taxid_map_ch = curated_taxid_map_ch
+            ?: (params.tax_id ? Channel.value(file(params.tax_id)) : Channel.value(file('NO_FILE')))
+
         // Run any combination of tools requested
         def ran_any = false
         def reporting_results = null
@@ -174,13 +207,15 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // REPORTING() itself when --reporting is set. Skip the standalone call
         // here in that case to avoid invoking REPORTING() twice.
         if (params.reporting && !params.contrast_selection && !params.fade) {
-            reporting_results = REPORTING()
+            assert curated_trait_ch : "REPORTING requires --my_traits and --tree."
+            reporting_results = REPORTING(curated_trait_ch, curated_tree_ch)
             ran_any = true
         }
         def ct_results
         if (params.ct_tool) {
             if (params.contrast_selection) {
-                contrast_out = CONTRAST_SELECTION()
+                assert curated_trait_ch : "CONTRAST_SELECTION requires --my_traits and --tree."
+                contrast_out = CONTRAST_SELECTION(curated_trait_ch, curated_tree_ch)
 
                 // Hard stop: if CHECK_MIN_CONTRASTS emits low_contrasts.skip,
                 // terminate the current trait run gracefully (exit 0).
@@ -189,18 +224,19 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 }
 
                 def trait_input_for_ct = (contrast_out && contrast_out.trait_dir_out) ? contrast_out.trait_dir_out : contrast_out.trait_file_out
-                ct_results = CT(trait_input_for_ct, contrast_out.permulation_trait_file_out, contrast_out.tree_file_out)
+                ct_results = CT(trait_input_for_ct, contrast_out.permulation_trait_file_out, contrast_out.tree_file_out, curated_trait_ch)
 
             } else {
                 def trait_file_in = null
                 def permulation_trait_file_in = null
                 def tree_file_in = null
-                ct_results = CT (trait_file_in, permulation_trait_file_in, tree_file_in)
+                ct_results = CT (trait_file_in, permulation_trait_file_in, tree_file_in, curated_trait_ch)
             }
             ran_any = true
         }
         if (params.contrast_selection && !params.ct_tool) {
-            contrast_out = CONTRAST_SELECTION()
+            assert curated_trait_ch : "CONTRAST_SELECTION requires --my_traits and --tree."
+            contrast_out = CONTRAST_SELECTION(curated_trait_ch, curated_tree_ch)
 
             // Same graceful stop as the CT branch above. This path is reached when
             // CAAStools output is reused but contrast selection still runs to supply
@@ -221,7 +257,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // fg/bg partition directly (candidate_species.tab format), since that
         // bypasses PSS/Dunn contrast selection for FADE.
         if (params.fade && !contrast_out && !params.fade_species_file) {
-            contrast_out = CONTRAST_SELECTION()
+            assert curated_trait_ch : "CONTRAST_SELECTION requires --my_traits and --tree."
+            contrast_out = CONTRAST_SELECTION(curated_trait_ch, curated_tree_ch)
             contrast_out.low_contrasts_skip.view { skip_file ->
                 exit 0, "Minimum contrast threshold not met for trait '${params.traitname ?: 'unknown'}' (flag: ${skip_file}). Stopping pipeline gracefully."
             }
@@ -403,7 +440,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     perm_subset_ch,
                     perm_tree_ch,
                     perm_fop_pairs_ch,
-                    caas_gene_lengths_ch
+                    caas_gene_lengths_ch,
+                    taxid_map_ch
                 )
                 // The b_0 slice of a replay is the observed labeling. A discovery.tab given with --discovery_from
                 // is scored by CT_OBSERVED instead, so the two never write the same files.
@@ -460,7 +498,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
 
                 def discovery_file_obj = file(params.discovery_from)
                 assert discovery_file_obj.exists() : "Error: discovery_from file not found: ${params.discovery_from}"
-                def observed_run = CT_OBSERVED(Channel.value(discovery_file_obj), trait_for_observed, tree_for_observed, hyp_pairs_for_observed)
+                def observed_run = CT_OBSERVED(Channel.value(discovery_file_obj), trait_for_observed, tree_for_observed, hyp_pairs_for_observed, taxid_map_ch)
                 observed_results = [master_csv: observed_run.master_csv, results_dir: observed_run.results_dir]
                 observed_meta = observed_run
                 evidence_inputs = [discovery: Channel.value(discovery_file_obj), design: observed_run.design, tree: observed_run.tree]
@@ -545,7 +583,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             def acc_caas_ch       = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
             def acc_background_ch = pp_cleaned_bg    ?: Channel.empty()
             def acc_trait_file_ch = ct_results       ? ct_results.trait_file
-                : (contrast_out ? (contrast_out.trait_dir_out ?: contrast_out.trait_file_out) : Channel.empty())
+                : (contrast_out ? (contrast_out.trait_dir_out ?: contrast_out.trait_file_out) : (curated_trait_ch ?: Channel.empty()))
             // background.output = the positions CAAStools actually TESTED. This is the
             // accumulation null's eligible pool (intersected with the cleaned-background
             // genes inside the subworkflow). Resolved exactly like POSENRICH's own
@@ -569,7 +607,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 .ifEmpty { file(params.caas_gene_cycle_scores_file ?: 'NO_FILE') }
 
             accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch, acc_trait_file_ch,
-                                            acc_tested_pos_ch, acc_pos_detail_ch, acc_gene_cycle_scores_ch)
+                                            acc_tested_pos_ch, acc_pos_detail_ch, acc_gene_cycle_scores_ch,
+                                            taxid_map_ch)
             ran_any = true
 
         }
@@ -603,7 +642,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             // CT-pruned tree exists in that path).
             def tree_source_ch = contrast_out
                 ? contrast_out.tree_file_out
-                : Channel.empty()
+                : (curated_tree_ch ?: Channel.empty())
 
             // CT discovery output for toy_mode gene reuse (null when CT didn't run)
             def ct_discovery_source_ch = core_observed
@@ -692,11 +731,12 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         if (params.rer_tool || params.rer_continuous_file) {
             // NOTE: RER_TRAIT requires the original phenotype file (with proper column
             // headers), NOT the caastools traitfile (headerless 3-col format).
-            def rer_traitfile_ch = Channel.empty()
+            def rer_traitfile_ch = curated_trait_ch ?: Channel.empty()
             RER_MAIN(
                 rer_traitfile_ch,
                 Channel.empty(),
-                Channel.empty()
+                Channel.empty(),
+                taxid_map_ch
             )
             ran_any = true
         }
@@ -804,7 +844,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     error "caas_evidence_top_n > 0 needs the observed discovery.tab: run the alignments through the core (ct_tool 'discovery') or give --discovery_from."
                 }
                 CAAS_EVIDENCE(evidence_inputs.discovery.first(), SCORING.out.position_scores.first(),
-                              evidence_inputs.design.first(), evidence_inputs.tree.first())
+                              evidence_inputs.design.first(), evidence_inputs.tree.first(), taxid_map_ch)
             }
 
             // CAAS_SIGNIFICANCE_REPORT: a DISTINCT, LATER stage than
@@ -924,7 +964,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     fade_gene_lists_bg_top_ch,
                     fade_gene_lists_bg_bottom_ch,
                     fade_gene_lists_sig_top_ch,
-                    fade_gene_lists_sig_bottom_ch
+                    fade_gene_lists_sig_bottom_ch,
+                    taxid_map_ch
                 )
             }
         }

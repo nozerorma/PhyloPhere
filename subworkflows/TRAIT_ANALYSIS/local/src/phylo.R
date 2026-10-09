@@ -1,15 +1,15 @@
-# phylo.R — Match the trait table to the species tree (tax_id mapping, pruning, clade MRCAs).
+# phylo.R — Match the trait table to the species tree (pruning, clade MRCAs).
 # PhyloPhere | subworkflows/TRAIT_ANALYSIS/local/src/
 # =============================================================================
 # Sourced by: commons.R (itself sourced by the trait-analysis Rmd reports)
 #
-# Requires `trait_df`, `tree`, `tree_species`, `trait`, `resultsDir` (commons.R)
-# and, optionally, `params$tax_id` (a CSV/TSV with `tax_id` and `species`
-# columns, giving tree-side species names). Defines:
-#   has.TAX_ID      TRUE when trait_df carries a usable `tax_id` column
+# Requires `trait_df`, `tree`, `tree_species`, `trait`, `resultsDir` (commons.R).
+# The trait table and the tree come from NAME_CURATION, which settles the species names
+# before this stage, so trait species are matched to tree tips by exact name (spaces read as
+# underscores). Defines:
 #   pruned_tree     the tree reduced to the species of trait_df
-#   trait_df        reduced to the species of the tree (tip names, via tax_id
-#                   when available); rows with an NA phenotype or count removed
+#   trait_df        reduced to the species of the tree; rows with an NA phenotype or
+#                   count removed. Every row removed is reported with message()
 #   find_taxon_mrca()  MRCA node and species count per taxon, for clade labels
 # When 0.Data-pruning/ holds a pruned tree and trait table (written by
 # 0.Data_pruning.Rmd), these are loaded instead of recomputed.
@@ -23,123 +23,6 @@ if (!exists("debug_log", inherits = TRUE)) {
     msg <- sprintf(...)
     cat("[DEBUG] ", msg, "\n", sep = "")
   }
-}
-
-# ── tax_id mapping ────────────────────────────────────────────────────────────
-
-# TAX_ID mode needs either a tax_id column in trait_df or a mapping file.
-has.TAX_ID <- FALSE
-tax_id_file <- if (exists("params")) params$tax_id else ""
-debug_log("tax_id_file = %s", ifelse(nzchar(tax_id_file), tax_id_file, "<none>"))
-# Separator from the file extension (comma when it is neither .csv nor .tsv).
-if (endsWith(tax_id_file, ".csv")) {
-  sep_char <- ","
-} else if (endsWith(tax_id_file, ".tsv")) {
-  sep_char <- "\t"
-} else {
-  sep_char <- ","
-}
-
-# Give a distinct tax_id to every species that shares one (e.g. several GenBank
-# accessions of the same organism as distinct tree tips). Mirrors the synthetic
-# tax_id assignment of CT_DISAMBIGUATION/local/src/phylo/species_mapping.py: the
-# first species (alphabetically) keeps the original tax_id and every other one
-# gets tax_id + i, probing forward when that id is taken. A tax_id shared by N
-# tips would otherwise map every trait_df row of those tips onto a single tip,
-# producing duplicate `species` rows (with possibly conflicting trait values)
-# that break the PSS computation and the CI heatmap.
-resolve_duplicate_taxids <- function(df) {
-  dup_taxids <- df$tax_id[duplicated(df$tax_id)]
-  if (length(dup_taxids) == 0) return(df)
-
-  all_existing <- as.character(unique(df$tax_id))
-  resolved <- df
-
-  for (tid in unique(dup_taxids)) {
-    species_list <- sort(df$species[df$tax_id == tid])
-    kept <- species_list[1]
-    duplicates <- species_list[-1]
-
-    debug_log("TAXONOMY CONFLICT: tax_id %s shared by: %s. Assigning synthetic tax_ids to duplicates.",
-              tid, paste(species_list, collapse = ", "))
-
-    for (i in seq_along(duplicates)) {
-      dup_sp <- duplicates[i]
-      synthetic_tid <- as.character(as.integer(tid) + i)
-      attempts <- 0
-      while (synthetic_tid %in% all_existing && attempts < 1000) {
-        synthetic_tid <- as.character(as.integer(synthetic_tid) + 1)
-        attempts <- attempts + 1
-      }
-      if (attempts >= 1000) {
-        stop(sprintf("Could not find unused synthetic tax_id for %s (tried 1000 IDs)", dup_sp))
-      }
-      resolved$tax_id[resolved$species == dup_sp] <- synthetic_tid
-      all_existing <- c(all_existing, synthetic_tid)
-      debug_log("Synthetic tax_id %s assigned to '%s' (original: %s, kept: %s)",
-                synthetic_tid, dup_sp, tid, kept)
-    }
-  }
-
-  resolved
-}
-
-if (nzchar(tax_id_file) && file.exists(tax_id_file)) {
-  tax_id_df <- read.csv(tax_id_file, sep = sep_char, stringsAsFactors = FALSE) %>%
-    dplyr::mutate(across(everything(), ~ if(is.character(.)) trimws(.) else .))
-  if ("tax_id" %in% names(tax_id_df) && "species" %in% names(tax_id_df)) {
-    tax_id_df <- tax_id_df %>% dplyr::select(tax_id, species) %>% dplyr::distinct()
-    tax_id_df$tax_id <- as.character(tax_id_df$tax_id)
-    tax_id_df <- resolve_duplicate_taxids(tax_id_df)
-    has.TAX_ID <- TRUE
-    debug_log("tax_id_df rows = %d, distinct taxa = %d", nrow(tax_id_df), length(unique(tax_id_df$tax_id)))
-  } else {
-    message("TAX_ID file provided but missing required columns; proceeding without TAX_ID mapping.")
-  }
-} else {
-  message("No TAX_ID file provided.")
-  # A tax_id column in trait_df alone sets has.TAX_ID but does not create
-  # tax_id_df, which needs an external file mapping tree-side species names
-  # (which may differ from trait_df's naming) to tax_id. Every later
-  # `if (has.TAX_ID)` block that reads tax_id_df therefore also checks
-  # `exists("tax_id_df")`.
-  if ("tax_id" %in% names(trait_df)) {
-    has.TAX_ID <- TRUE
-  }
-}
-debug_log("has.TAX_ID = %s", has.TAX_ID)
-
-# With a mapping file, attach its tax_id to the trait table by species name.
-if (has.TAX_ID && exists("tax_id_df")) {
-  trait_df <- merge(trait_df, tax_id_df, by = "species", all.x = TRUE)
-  debug_log("trait_df merged with tax_id_df: rows = %d, missing tax_id = %d",
-            nrow(trait_df), sum(is.na(trait_df$tax_id)))
-}
-
-# Collapse tax_id.x / tax_id.y (created by the merge when both tables have the column) into one tax_id.
-if (has.TAX_ID && !"tax_id" %in% names(trait_df)) {
-  tax_id_cols <- intersect(c("tax_id.x", "tax_id.y"), names(trait_df))
-  if (length(tax_id_cols) > 0) {
-    if (length(tax_id_cols) == 1) {
-      trait_df$tax_id <- as.character(trait_df[[tax_id_cols[1]]])
-    } else {
-      trait_df$tax_id <- dplyr::coalesce(
-        as.character(trait_df[[tax_id_cols[1]]]),
-        as.character(trait_df[[tax_id_cols[2]]])
-      )
-    }
-    trait_df <- trait_df %>% dplyr::select(-dplyr::all_of(tax_id_cols))
-    debug_log("normalized tax_id from merged columns, missing tax_id = %d", sum(is.na(trait_df$tax_id)))
-  } else {
-    message("TAX_ID requested but no tax_id column found; proceeding without TAX_ID mapping.")
-    has.TAX_ID <- FALSE
-  }
-}
-
-# Leave TAX_ID mode when no tax_id column survives the steps above.
-if (has.TAX_ID && !"tax_id" %in% names(trait_df)) {
-  message("TAX_ID column missing after setup; proceeding without TAX_ID mapping.")
-  has.TAX_ID <- FALSE
 }
 
 # ── Tree and trait pruning ────────────────────────────────────────────────────
@@ -168,56 +51,25 @@ if (file.exists(pruned_tree_path) && file.exists(pruned_trait_path)) {
   pruned_tree <- ape::read.tree(file = pruned_tree_path)
   debug_log("Loaded pruned tree tips = %d, pruned trait rows = %d", length(pruned_tree$tip.label), nrow(trait_df))
 } else {
-  if (has.TAX_ID && exists("tax_id_df")) {
-    # tax_id_df holds tree-side species names, which may differ from the trait
-    # names after taxonomic reclassification (e.g. Nycticebus_pygmaeus ->
-    # Xanthonycticebus_pygmaeus), so tips are matched to traits through tax_id.
-    tree_tip_to_taxid <- tax_id_df %>%
-      dplyr::filter(species %in% tree_species) %>%
-      dplyr::rename(tree_name = species)
-    debug_log("tree_tip_to_taxid rows = %d, missing tax_id = %d",
-              nrow(tree_tip_to_taxid), sum(is.na(tree_tip_to_taxid$tax_id)))
+  trait_df_ori <- trait_df # Table before pruning
+  sp_norm <- gsub(" ", "_", trait_df$species)
+  target <- ifelse(sp_norm %in% tree_species, sp_norm, NA_character_)
+  discards <- sprintf("%s: no tree tip with this name", sp_norm[is.na(target)])
 
-    # tax_ids present in both the tree (via tax_id_df) and the traits (trait_df$tax_id)
-    common_tax_ids <- intersect(tree_tip_to_taxid$tax_id, trait_df$tax_id)
-    debug_log("common_tax_ids = %d", length(common_tax_ids))
+  # One row per tip: the first row in table order wins.
+  rank_in_tip <- ave(seq_along(target), target, FUN = seq_along)
+  dup <- !is.na(target) & rank_in_tip > 1
+  discards <- c(discards, sprintf("%s: duplicate of the row kept for %s", sp_norm[dup], target[dup]))
 
-    # Keep the tips whose tax_id is in common_tax_ids.
-    tips_to_keep <- tree_tip_to_taxid$tree_name[tree_tip_to_taxid$tax_id %in% common_tax_ids]
-    pruned_tree <- ape::drop.tip(tree, setdiff(tree$tip.label, tips_to_keep))
-    debug_log("pruned_tree tips (TAX_ID) = %d, nodes = %d", length(pruned_tree$tip.label), pruned_tree$Nnode)
-  } else {
-    # Without tax_ids, match by species name (spaces read as underscores).
-    pruned_tree <- ape::drop.tip(tree, setdiff(tree$tip.label, gsub(" ", "_", trait_df$species)))
-    debug_log("pruned_tree tips (species match) = %d, nodes = %d", length(pruned_tree$tip.label), pruned_tree$Nnode)
-  }
+  keep <- !is.na(target) & !dup
+  trait_df$species <- target
+  trait_df <- trait_df[keep, , drop = FALSE]
+  pruned_tree <- ape::drop.tip(tree, setdiff(tree$tip.label, trait_df$species))
+  debug_log("trait rows kept = %d, pruned tree tips = %d", nrow(trait_df), length(pruned_tree$tip.label))
 
-  # Reduce trait_df to the species of the pruned tree. With tax_ids, the species
-  # name is replaced by the tree-side name.
-  if (has.TAX_ID && exists("tax_id_df")) {
-    trait_df_ori <- trait_df # Table before pruning
-    tree_tax_map <- tax_id_df %>%
-      dplyr::filter(species %in% pruned_tree$tip.label) %>%
-      dplyr::transmute(tax_id, tree_species = species) %>%
-      dplyr::distinct(tax_id, .keep_all = TRUE)
-
-    if (nrow(tree_tax_map) > 0) {
-      trait_df <- trait_df %>%
-        dplyr::left_join(tree_tax_map, by = "tax_id") %>%
-        dplyr::mutate(species = dplyr::coalesce(tree_species, species)) %>%
-        dplyr::filter(species %in% pruned_tree$tip.label) %>%
-        dplyr::select(-tree_species)
-      debug_log("trait_df remapped to tree/alignment species using tax_id: rows = %d", nrow(trait_df))
-    } else {
-      trait_df <- trait_df %>%
-        dplyr::filter(tax_id %in% common_tax_ids)
-      debug_log("trait_df filtered by common_tax_ids only: rows = %d", nrow(trait_df))
-    }
-  } else {
-    trait_df_ori <- trait_df # Table before pruning
-    trait_df <- trait_df %>%
-      dplyr::filter(gsub(" ", "_", species) %in% pruned_tree$tip.label)
-    debug_log("trait_df after species tree filter rows = %d", nrow(trait_df))
+  if (length(discards) > 0) {
+    message(sprintf("[phylo.R] WARNING: %d trait row(s) removed while matching to the tree:\n  %s",
+                    length(discards), paste(discards, collapse = "\n  ")))
   }
 }
 

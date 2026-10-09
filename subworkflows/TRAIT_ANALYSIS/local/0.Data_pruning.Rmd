@@ -26,7 +26,6 @@ params:
   traitname: "trait"
   n_trait: ""
   c_trait: ""
-  tax_id: ""
   secondary_trait: ""
   branch_trait: ""
   prune_list: ""

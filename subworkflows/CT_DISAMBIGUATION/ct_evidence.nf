@@ -33,6 +33,7 @@ process CAAS_EVIDENCE {
     path position_scores    // scoring/position_scores.tsv
     path design             // observed design: trait file, or the directory of traitfile_H*.tab
     path tree_file
+    path taxid_map          // tax_id map of the species (curated by NAME_CURATION, or params.tax_id) or the NO_FILE sentinel
 
     output:
     path "evidence",                  emit: evidence_dir
@@ -41,7 +42,7 @@ process CAAS_EVIDENCE {
 
     script:
     def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
-    def taxid_mapping = params.tax_id ?: ''
+    def taxid_mapping = taxid_map.name != 'NO_FILE' ? taxid_map : ''
     def ensembl_file = params.gene_ensembl_file ?: ''
     def asr_cache_dir = params.ct_disambig_asr_cache_dir ?: ''
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'

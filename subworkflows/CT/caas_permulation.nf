@@ -165,6 +165,7 @@ process CAAS_CORE_BATCHED {
     path tree_file
     path fop_pairs    // fop_pairs.tsv (FOP mirror) or NO_FOP_PAIRS sentinel
     path gene_lengths // gene_ensembl_file (CT_POSTPROC filters) or NO_FILE
+    path taxid_map    // tax_id map of the species (curated by NAME_CURATION, or params.tax_id) or the NO_FILE sentinel
 
     output:
     path "perm_pos_detail", emit: pos_detail
@@ -179,7 +180,7 @@ process CAAS_CORE_BATCHED {
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def replay = manifestText.trim() ? true : false
     def asr_cache_dir = params.ct_disambig_asr_cache_dir ?: ''
-    def taxid_mapping = params.tax_id ?: ''
+    def taxid_mapping = taxid_map.name != 'NO_FILE' ? taxid_map : ''
     def ensembl_file = params.gene_ensembl_file ?: ''
     def max_tasks_per_child = params.ct_disambig_max_tasks_per_child ?: 50
     def postproc_args = caasPostprocArgs(gene_lengths)
@@ -288,6 +289,7 @@ workflow CAAS_CORE {
         tree_file        // species tree
         fop_pairs
         gene_lengths
+        taxid_map        // tax_id map of the species (curated by NAME_CURATION, or params.tax_id) or NO_FILE
 
     main:
         def batchSize = (params.ct_core_batch_size ?: 20) as int
@@ -319,7 +321,8 @@ workflow CAAS_CORE {
         def lengths_bc = gene_lengths.collect().map { items -> items[0] }
         def config_bc = caas_config.collect().map { items -> items[0] }
         def tree_bc   = tree_file.collect().map { items -> items[0] }
-        def core = CAAS_CORE_BATCHED(live.mix(reuse), subset_bc, config_bc, tree_bc, fop_bc, lengths_bc)
+        def taxid_bc  = taxid_map.collect().map { items -> items[0] }
+        def core = CAAS_CORE_BATCHED(live.mix(reuse), subset_bc, config_bc, tree_bc, fop_bc, lengths_bc, taxid_bc)
 
     emit:
         labelings      = subset_bc                 // the labelings file the batches replayed (the null's cycle roster)

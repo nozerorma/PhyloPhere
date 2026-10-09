@@ -14,6 +14,7 @@ workflow CT_OBSERVED {
         trait_file_in
         tree_file_in
         hyp_pairs_in   // Channel<path> or null: contrast_hypotheses_pairs.tsv of this run's contrast selection
+        taxid_map_in   // value channel: tax_id map of the species (curated by NAME_CURATION, or params.tax_id) or NO_FILE
 
     main:
         // The observed design and tree: those of the integrated run when given, --caas_config and --tree otherwise.
@@ -53,7 +54,7 @@ workflow CT_OBSERVED {
             hyp_pairs_file = Channel.value(auto.exists() ? auto : file('NO_HYP_PAIRS'))
         }
 
-        def observed = CAAS_OBSERVED(discovery_in, trait_file, tree_file, hyp_pairs_file)
+        def observed = CAAS_OBSERVED(discovery_in, trait_file, tree_file, hyp_pairs_file, taxid_map_in)
 
     emit:
         results_dir = observed.results_dir

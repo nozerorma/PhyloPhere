@@ -23,7 +23,8 @@
 
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  REPORTING Workflow: Preliminary reporting pipeline for trait analysis Rmarkdowns.
+ *  REPORTING Workflow: Preliminary reporting pipeline for trait analysis Rmarkdowns, run on
+ *  the trait table and species tree curated by NAME_CURATION (main.nf).
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -31,26 +32,17 @@
 include { DATASET_EXPLORATION } from '../subworkflows/TRAIT_ANALYSIS/ta_dataset_exploration'
 include { PHENOTYPE_EXPLORATION } from '../subworkflows/TRAIT_ANALYSIS/ta_phenotype_exploration'
 include { DATASET_PRUNE } from '../subworkflows/TRAIT_ANALYSIS/ta_data_prune'
-include { NAME_CURATION } from '../subworkflows/TRAIT_ANALYSIS/ta_name_curation'
 
 workflow REPORTING {
+    take:
+        curated_trait_ch   // value channel: trait table curated by NAME_CURATION (main.nf)
+        curated_tree_ch    // value channel: tree curated by NAME_CURATION (main.nf)
+
     main:
-    assert params.my_traits : "Reporting workflow requires --my_traits."
-    assert params.tree : "Reporting workflow requires --tree."
-
-    def trait_file = file(params.my_traits)
-    def tree_file_ch = Channel.value(file(params.tree))
-
-    // NAME_CURATION: normalise tree tip labels to alignment-canonical species names.
-    // Runs when ali_sp_names or alignment is provided; replaces the raw tree downstream.
-    if (params.ali_sp_names || params.alignment) {
-        def tax_id_ch = params.tax_id
-            ? Channel.value(file(params.tax_id))
-            : Channel.value(file('NO_FILE'))
-        name_curation_out = NAME_CURATION(tree_file_ch, tax_id_ch)
-        tree_file_ch = name_curation_out.curated_tree
-        log.info "[REPORTING] NAME_CURATION enabled — using curated tree as canonical tree."
-    }
+    // The names are settled by NAME_CURATION, run once by main.nf: the curated tree and trait
+    // table replace --tree and --my_traits here.
+    def trait_file = curated_trait_ch
+    def tree_file_ch = curated_tree_ch
 
     def tree_file = tree_file_ch
     def reporting_stats_file

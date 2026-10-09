@@ -31,6 +31,7 @@ workflow CT_ACCUMULATION {
                                  // permulation randomization type's null (or Channel.empty())
         gene_cycle_scores_channel // gene_cycle_scores.tsv from the SAME CAAS_CORE_MERGE run;
                                  // authoritative cycle count for the permulation null (or Channel.empty())
+        taxid_map_channel        // tax_id map (curated by NAME_CURATION) for the clade variability, or the NO_FILE sentinel
 
     main:
         // ── Resolve CAAS source (filtered_discovery.tsv from postproc) ────────
@@ -159,7 +160,7 @@ workflow CT_ACCUMULATION {
             entropy_dir_val = Channel.value(params.accumulation_entropy_dir)
         } else if (params.tax_id) {
             log.info "[CT_ACCUMULATION] accumulation_entropy_dir not set — auto-generating Valdar variability from the alignment."
-            COMPUTE_ALIGNMENT_ENTROPY(alignment_dir_val.map { file(it, type: 'dir') }, Channel.value(file(params.tax_id)))
+            COMPUTE_ALIGNMENT_ENTROPY(alignment_dir_val.map { file(it, type: 'dir') }, taxid_map_channel)
             entropy_dir_val = COMPUTE_ALIGNMENT_ENTROPY.out.entropy_dir.map { it.toString() }
         } else {
             log.warn "[CT_ACCUMULATION] accumulation_entropy_dir not set and params.tax_id is empty — compute_variability.py requires --taxid_tsv, so entropy auto-generation is skipped. Falling back to raw majority-residue conservation."

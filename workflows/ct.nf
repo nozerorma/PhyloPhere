@@ -56,6 +56,7 @@ workflow CT {
         trait_file_in
         permulation_trait_file_in
         tree_file_in
+        curated_trait_in   // value channel: trait table curated by NAME_CURATION, or null
     main:
         // Output channels of the emit block, defined at workflow level.
         def trait_file_emit = Channel.empty()
@@ -136,7 +137,7 @@ workflow CT {
             } else {
                 nw_tree = Channel.value(file(tree_file_out))
                 caas_config = Channel.value(file(trait_file_out))
-                trait_values = Channel.value(file(trait_val))
+                trait_values = curated_trait_in ?: Channel.value(file(trait_val))
             }
             resample_dir_out = RESAMPLE(nw_tree, caas_config, trait_values)
 
