@@ -289,7 +289,7 @@ pos_scores <- df %>%
     # position-level mean of each sub-factor over the schemes would hide scheme disagreement (a
     # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees). They stay per
     # (Gene, Position, caap_group) in `df` for anything that needs the breakdown.
-    caap_group         = first(caap_group),
+    caap_group         = dplyr::first(caap_group),
     .groups = "drop"
   )
 
@@ -519,7 +519,7 @@ if (has_caas_pos_cycle_caas) {
   pos_scores <- pos_scores %>%
     select(-p.emp_fact) %>%
     left_join(.fact_pos %>% select(Gene, Position, p.emp_fact), by = c("Gene", "Position"))
-} else if (!file_exists(caas_pos_cycle_caas_file)) {
+} else if (!file.exists(caas_pos_cycle_caas_file)) {
   cat("  no --caas_pos_cycle_caas provided, skipping p.emp\n")
 }
 

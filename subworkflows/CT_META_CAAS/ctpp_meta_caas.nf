@@ -97,7 +97,7 @@ process CAAS_SIGNIFICANCE_REPORT {
     def local_dir = "${baseDir}/subworkflows/CT_META_CAAS/local"
     def outdir = "${params.outdir}/meta_caas/significance"
 
-    if (params.use_singularity | params.use_apptainer) {
+    if (params.use_singularity || params.use_apptainer) {
         """
         cp -R ${local_dir}/* .
 

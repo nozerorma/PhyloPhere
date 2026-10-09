@@ -158,20 +158,32 @@ the undeduped table (or on `side`, which meta_caas doesn't have) would
 silently duplicate every meta_caas row once per side.
 
 ```{r position_join}
-has_p_emp_cols <- all(c("p.emp", "p.adj_bh") %in% names(position_scores))
-if (has_p_emp_cols) {
+# Ensure p-value columns are strictly numeric
+for (.c in c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact")) {
+  if (.c %in% names(position_scores)) {
+    position_scores[[.c]] <- suppressWarnings(as.numeric(position_scores[[.c]]))
+  }
+}
+
+has_p_emp_cols <- all(c("p.emp", "p.adj_bh") %in% names(position_scores)) &&
+                  any(!is.na(position_scores$p.emp) & is.finite(position_scores$p.emp))
+if (all(c("p.emp", "p.adj_bh") %in% names(position_scores))) {
   for (.c in c("p.emp_fact", "p.adj_bh_fact")) if (!.c %in% names(position_scores)) position_scores[[.c]] <- NA_real_
 }
+
 # p.emp is add-one smoothed: its minimum is 1/(N + 1). A value at that floor is displayed as "< 1/N" (Saputra et al.
 # 2021: with 1000 permulations the lowest reportable p is 0.001 and a p of 0 is written "<0.001"); the TSV keeps the number.
-.p_floor <- if (has_p_emp_cols) suppressWarnings(min(position_scores$p.emp, na.rm = TRUE)) else NA_real_
-.n_perm  <- if (is.finite(.p_floor) && .p_floor > 0) round(1 / .p_floor) - 1 else NA_real_
+.valid_p <- if (has_p_emp_cols) position_scores$p.emp[!is.na(position_scores$p.emp) & is.finite(position_scores$p.emp)] else numeric(0)
+.p_floor <- if (length(.valid_p) > 0) min(.valid_p) else NA_real_
+.n_perm  <- if (!is.na(.p_floor) && is.finite(.p_floor) && .p_floor > 0) round(1 / .p_floor) - 1 else NA_real_
 .fmt_p <- function(p) vapply(p, function(x) {
-  if (is.na(x)) return(NA_character_)
-  if (is.finite(.n_perm) && x <= .p_floor * (1 + 1e-9)) return(sprintf("<%s", format(1 / .n_perm, digits = 3)))
+  if (is.na(x) || !is.numeric(x) || !is.finite(x)) return(NA_character_)
+  if (!is.na(.p_floor) && is.finite(.p_floor) && is.finite(.n_perm) && x <= .p_floor * (1 + 1e-9)) {
+    return(sprintf("<%s", format(1 / .n_perm, digits = 3)))
+  }
   format(signif(x, 3), scientific = FALSE, trim = TRUE)
 }, character(1))
-if (!has_p_emp_cols) {
+if (!all(c("p.emp", "p.adj_bh") %in% names(position_scores))) {
   warning("position_scores.tsv has no p.emp/p.adj_bh columns -- was it produced by ",
           "a stale scoring_compute.R build? The p-value columns will be all-NA.")
   pos_dedup <- tibble(Gene = character(), Position = integer(),
@@ -194,12 +206,13 @@ if (!has_p_emp_cols) {
 
 meta_caas <- meta_caas %>%
   mutate(Position = as.integer(Position)) %>%
+  select(-any_of(c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact"))) %>%
   left_join(pos_dedup, by = c("Gene", "Position"))
 
 .n_meta_rows <- nrow(meta_caas)
-.n_pos_matched <- meta_caas %>% filter(!is.na(p.emp)) %>% nrow()
+.n_pos_matched <- meta_caas %>% filter(!is.na(p.emp) & is.finite(p.emp)) %>% nrow()
 .n_unique_pos <- n_distinct(meta_caas$Position)
-.n_unique_pos_matched <- meta_caas %>% filter(!is.na(p.emp)) %>% distinct(Position) %>% nrow()
+.n_unique_pos_matched <- meta_caas %>% filter(!is.na(p.emp) & is.finite(p.emp)) %>% distinct(Position) %>% nrow()
 .pos_rate <- if (.n_meta_rows > 0) .n_pos_matched / .n_meta_rows else 0
 cat(sprintf("  p.emp position join: matched %d/%d rows (%d/%d unique positions, %.1f%%)\n",
             .n_pos_matched, .n_meta_rows, .n_unique_pos_matched, .n_unique_pos, 100 * .pos_rate))
@@ -223,15 +236,23 @@ if (has_caap_group) group_vars <- c(group_vars, "caap_group")
 if (!is.null(type_col)) group_vars <- c(group_vars, type_col)
 if (length(group_vars) == 0) group_vars <- "Gene"
 
-.min_na <- function(x) { m <- suppressWarnings(min(x, na.rm = TRUE)); if (is.infinite(m)) NA_real_ else m }
-.med_na <- function(x) if (all(is.na(x))) NA_real_ else median(x, na.rm = TRUE)
+.min_na <- function(x) {
+  x_num <- suppressWarnings(as.numeric(x))
+  x_clean <- x_num[!is.na(x_num) & is.finite(x_num)]
+  if (length(x_clean) == 0) NA_real_ else min(x_clean)
+}
+.med_na <- function(x) {
+  x_num <- suppressWarnings(as.numeric(x))
+  x_clean <- x_num[!is.na(x_num) & is.finite(x_num)]
+  if (length(x_clean) == 0) NA_real_ else median(x_clean)
+}
 
 pattern_summary <- meta_caas %>%
   group_by(across(all_of(group_vars))) %>%
   summarize(
     n_positions = n(),
-    n_positions_with_p = sum(!is.na(p.emp)),
-    n_at_p_emp_floor = sum(!is.na(p.emp) & p.emp <= .p_floor * (1 + 1e-9)),
+    n_positions_with_p = sum(!is.na(p.emp) & is.finite(p.emp)),
+    n_at_p_emp_floor = if (!is.na(.p_floor) && is.finite(.p_floor)) sum(!is.na(p.emp) & is.finite(p.emp) & p.emp <= .p_floor * (1 + 1e-9)) else 0L,
     min_p_emp = .min_na(p.emp),               median_p_emp = .med_na(p.emp),
     min_p_adj_bh = .min_na(p.adj_bh),         median_p_adj_bh = .med_na(p.adj_bh),
     min_p_emp_fact = .min_na(p.emp_fact),     median_p_emp_fact = .med_na(p.emp_fact),
@@ -251,8 +272,9 @@ x_col <- if (!is.null(type_col)) type_col else "Gene"
 
 plot_df <- meta_caas %>%
   select(all_of(c(x_col, if (has_caap_group) "caap_group")), p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact) %>%
+  mutate(across(c(p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact), ~ suppressWarnings(as.numeric(.x)))) %>%
   pivot_longer(c(p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact), names_to = "p_value", values_to = "p") %>%
-  filter(!is.na(p)) %>%
+  filter(!is.na(p) & is.finite(p)) %>%
   mutate(
     neg_log10_p = -log10(pmax(p, 1e-300)),
     p_value = factor(p_value, levels = c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact"))

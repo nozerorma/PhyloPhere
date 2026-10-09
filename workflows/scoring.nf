@@ -133,7 +133,7 @@ workflow SCORING {
         if (hp_param && file(hp_param).exists()) {
             resolved_hyp_pairs = Channel.value(file(hp_param))
         } else if (hypotheses_pairs_ch != null) {
-            resolved_hyp_pairs = hypotheses_pairs_ch.ifEmpty(file('NO_HYP_PAIRS')).first()
+            resolved_hyp_pairs = hypotheses_pairs_ch.ifEmpty(file('NO_HYP_PAIRS')).collect().map { it[0] }
         } else {
             def auto = file("${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv")
             resolved_hyp_pairs = Channel.value(auto.exists() ? auto : file('NO_HYP_PAIRS'))
@@ -146,7 +146,7 @@ workflow SCORING {
         if (pm_param && file(pm_param).exists()) {
             resolved_perm_manifest = Channel.value(file(pm_param))
         } else if (perm_manifest_ch != null) {
-            resolved_perm_manifest = perm_manifest_ch.ifEmpty(file('NO_PERM_MANIFEST')).first()
+            resolved_perm_manifest = perm_manifest_ch.ifEmpty(file('NO_PERM_MANIFEST')).collect().map { it[0] }
         } else {
             resolved_perm_manifest = Channel.value(file('NO_PERM_MANIFEST'))
         }
@@ -158,7 +158,7 @@ workflow SCORING {
         if (ph_param && file(ph_param).exists()) {
             resolved_perm_harvest = Channel.value(file(ph_param))
         } else if (perm_harvest_ch != null) {
-            resolved_perm_harvest = perm_harvest_ch.ifEmpty(file('NO_PERM_HARVEST')).first()
+            resolved_perm_harvest = perm_harvest_ch.ifEmpty(file('NO_PERM_HARVEST')).collect().map { it[0] }
         } else {
             resolved_perm_harvest = Channel.value(file('NO_PERM_HARVEST'))
         }

@@ -843,8 +843,11 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 if (!evidence_inputs) {
                     error "caas_evidence_top_n > 0 needs the observed discovery.tab: run the alignments through the core (ct_tool 'discovery') or give --discovery_from."
                 }
-                CAAS_EVIDENCE(evidence_inputs.discovery.first(), SCORING.out.position_scores.first(),
-                              evidence_inputs.design.first(), evidence_inputs.tree.first(), taxid_map_ch)
+                CAAS_EVIDENCE(evidence_inputs.discovery.collect().map { it[0] },
+                              SCORING.out.position_scores.collect().map { it[0] },
+                              evidence_inputs.design.collect().map { it[0] },
+                              evidence_inputs.tree.collect().map { it[0] },
+                              taxid_map_ch)
             }
 
             // CAAS_SIGNIFICANCE_REPORT: a DISTINCT, LATER stage than

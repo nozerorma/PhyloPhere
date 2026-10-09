@@ -86,7 +86,7 @@ workflow CT_POSTPROC {
         // Contrast design for the species tally: this run's contrast selection, else the file in outdir, else the sentinel.
         def hyp_pairs_file
         if (hyp_pairs_channel != null) {
-            hyp_pairs_file = hyp_pairs_channel.ifEmpty(file('NO_HYP_PAIRS')).first()
+            hyp_pairs_file = hyp_pairs_channel.ifEmpty(file('NO_HYP_PAIRS')).collect().map { it[0] }
         } else {
             def auto_hp = file("${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv")
             hyp_pairs_file = Channel.value(auto_hp.exists() ? auto_hp : file('NO_HYP_PAIRS'))

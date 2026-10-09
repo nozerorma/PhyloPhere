@@ -48,7 +48,7 @@ workflow CT_OBSERVED {
         if (hp_param && file(hp_param).exists()) {
             hyp_pairs_file = Channel.value(file(hp_param))
         } else if (hyp_pairs_in != null) {
-            hyp_pairs_file = hyp_pairs_in.ifEmpty(file('NO_HYP_PAIRS')).first()
+            hyp_pairs_file = hyp_pairs_in.ifEmpty(file('NO_HYP_PAIRS')).collect().map { it[0] }
         } else {
             def auto = file("${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv")
             hyp_pairs_file = Channel.value(auto.exists() ? auto : file('NO_HYP_PAIRS'))

@@ -16,7 +16,7 @@
     "toy_n": "1000",
     "toy_perms": "100",
     "runtime_type": "slurm",
-    "script_base_name": "cancer_multi_def",
+    "script_base_name": "cancer_def",
     "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_cancer_def",
     "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_multi_def",
     "use_tower": true,
@@ -90,7 +90,7 @@
       "chunk_size": "500",
       "resample_use_n": true,
       "multi_hypothesis": true,
-      "max_fop": "50",
+      "max_fop": "100",
       "perm_match_pss": true,
       "perm_match_pss_tol": "0.25"
     },
