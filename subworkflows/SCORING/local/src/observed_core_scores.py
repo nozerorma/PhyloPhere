@@ -9,11 +9,11 @@ permulation null (core.scores), so observed and null statistics are built by one
 Called by:  SCORING_COMPUTE Nextflow process (scoring_compute.nf → observed_core_scores.py);
             its two outputs are read by scoring_compute.R (--core_positions, --core_genes)
 Inputs:     --input  filtered_discovery.tsv, one row per (Gene, Position, side, caap_group) with
-                     an asr_path_score column; only the five scoring schemes are read, and an
-                     asr_path_score that is not numeric counts as missing
-Outputs:    --positions-out  TSV [Gene, Position, side, CAAS_score]; CAAS_score aggregates the
-                             asr_path_score of the schemes per side as (US + mean(GS)) / 2: half the US score
-                             plus half the mean over the GS1-GS4 schemes that scored the position (core.scores)
+                     an asr_path_score column; only the US rows are read (the GS schemes describe a
+                     position and do not score it), and an asr_path_score that is not numeric counts
+                     as missing
+Outputs:    --positions-out  TSV [Gene, Position, side, CAAS_score]; one row per position side that
+                             US detected, CAAS_score being its US asr_path_score (core.scores)
             --genes-out      TSV [Gene, gene_caas_score, gene_caas_score_top,
                              gene_caas_score_bottom]; size_adj_max against the pool of the
                              same direction (all positions of the run), NA when the gene has no
@@ -38,8 +38,8 @@ for _cand in (_here.parent, _here.parents[3] / "CT_DISAMBIGUATION" / "local"):
         break
 from src.core.scores import direction_values, gene_scores, position_score  # noqa: E402
 
-# The five grouping schemes that enter a position score (US is identity, GS1-GS4 are recodings).
-SCHEMES = ("US", "GS4", "GS3", "GS2", "GS1")
+# The only scheme that enters a position score: US, the exact residue identity. GS1-GS4 are recodings that only describe it.
+SCHEMES = ("US",)
 
 
 def _num(x):
@@ -52,7 +52,7 @@ def _num(x):
 
 
 def read_position_scores(path):
-    """{(gene, position, side): {scheme: asr_path_score or None}} for the scoring schemes.
+    """{(gene, position, side): {scheme: asr_path_score or None}} for the scoring scheme(s).
 
     A position is scored once per scheme; a repeated (position, side, scheme) row raises
     ValueError instead of being averaged silently.

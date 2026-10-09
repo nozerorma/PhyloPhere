@@ -119,8 +119,9 @@ workflow ENRICHMENT {
         rer_perms_ch
         caas_perms_ch
         caas_pos_sample_ch
-        caas_pos_cycle_caas_ch  // perm_pos_cycle_caas.tsv.gz (Gene,Position,side,cycle,caas_score,n_schemes) -> POSENRICH's p.perm
+        caas_pos_cycle_caas_ch  // perm_pos_cycle_caas.tsv.gz (Gene,Position,side,cycle,caas_score,n_schemes,scheme_set) -> POSENRICH's p.perm and biochemistry section
         position_scores
+        position_biochem     // position_biochem.tsv: scheme profile of every detected position (biochemistry section of report 14)
         position_lists       // SCORING's published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv dir
         background_output_ch
         vep_primateai_ch     // optional: PrimateAI-3D score TSV (null when --vep not run)
@@ -415,9 +416,10 @@ workflow ENRICHMENT {
             def pos_map_dir_ch = params.caas_map_dir ? Channel.fromPath(params.caas_map_dir).ifEmpty { file('NO_FILE_MAP_DIR') } : file('NO_FILE_MAP_DIR')
             def pos_cosmic_db_ch = params.cosmic_db ? Channel.fromPath(params.cosmic_db).ifEmpty { file('NO_FILE_COSMIC_DB') } : file('NO_FILE_COSMIC_DB')
             def pos_pai3d_db_ch = params.vep_primateai_db ? Channel.fromPath(params.vep_primateai_db).ifEmpty { file('NO_FILE_PAI3D_DB') } : file('NO_FILE_PAI3D_DB')
-            def pos_cleaned_background_ch = cleaned_background_ch ? cleaned_background_ch : file('NO_FILE_BACKGROUND')
+            def pos_cleaned_background_ch = (cleaned_background_ch ?: Channel.empty()).ifEmpty { file('NO_FILE_BACKGROUND') }
 
-            def pos_caas_file_ch = position_scores ? position_scores : file('NO_FILE_CAAS')
+            def pos_caas_file_ch = (position_scores ?: Channel.empty()).ifEmpty { file('NO_FILE_CAAS') }
+            def pos_biochem_ch = (position_biochem ?: Channel.empty()).ifEmpty { file('NO_FILE_BIOCHEM') }
             // SCORING's own published position percentile slices -- posenrich's
             // SOLE foreground source (no local re-ranking fallback: SCORING is a
             // mandatory upstream dependency of posenrich, not optional). If
@@ -443,7 +445,7 @@ workflow ENRICHMENT {
             // resolved_vep_primateai/resolved_vep_cosmic), so a precomputed-
             // VEP run (--scoring_vep_primateai set, no live --vep) still
             // reaches Position Characterisation instead of silently going NULL.
-            def pos_gene_scores_ch = gene_scores ? gene_scores : file('NO_FILE_GENE_SCORES')
+            def pos_gene_scores_ch = (gene_scores ?: Channel.empty()).ifEmpty { file('NO_FILE_GENE_SCORES') }
             def pos_vep_primateai_ch = (vep_primateai_ch ?: Channel.empty())
                 .ifEmpty { params.scoring_vep_primateai ? file(params.scoring_vep_primateai) : file('NO_FILE_VEP_PAI') }
             def pos_vep_cosmic_ch   = (vep_cosmic_ch ?: Channel.empty())
@@ -483,7 +485,8 @@ workflow ENRICHMENT {
                 pos_gene_ensembl_ch,
                 pos_fade_sites_top_ch,
                 pos_fade_sites_bottom_ch,
-                pos_caas_cycle_null_ch
+                pos_caas_cycle_null_ch,
+                pos_biochem_ch
             )
             final_reports = final_reports.mix(posenrich_out.report)
         }

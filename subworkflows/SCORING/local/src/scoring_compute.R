@@ -1,12 +1,14 @@
 #!/usr/bin/env Rscript
-# scoring_compute.R — Position-level and gene-level CAAS scores, integrated with FADE, RER and accumulation.
+# scoring_compute.R — Position-level and gene-level CAAS scores, integrated with FADE, RER and accumulation, and the
+# biochemical profile of each detected position.
 # PhyloPhere | subworkflows/SCORING/local/src/
 # =============================================================================
 # Called by:  SCORING_COMPUTE Nextflow process (scoring_compute.nf → Rscript scoring_compute.R ...),
 #             after observed_core_scores.py, whose two tables it reads
 #
-# The position score (CAAS_score) and the gene score (size_adj_max) come from core.scores via
-# observed_core_scores.py. This script adds the empirical permulation p-values of positions (p.emp, p.emp_fact and
+# The position score (CAAS_score, the US score of the position) and the gene score (size_adj_max) come from core.scores
+# via observed_core_scores.py. The GS1-GS4 schemes do not enter either score: they describe each detected position
+# (which schemes detect it) and that profile is written apart. This script adds the empirical permulation p-values of positions (p.emp, p.emp_fact and
 # their BH adjustments), joins the per-gene evidence of
 # FADE, RERConverge and accumulation, and writes the tables, the ranked slices and the enrichment
 # curves that the ENRICHMENT subworkflow and the reports read. It runs once on the full pool of
@@ -25,7 +27,11 @@
 #   --hypotheses_pairs, --top_pct, --gene_top_pct   parsed but not used by the computation
 #
 # Outputs (working directory):
-#   position_scores.tsv            one row per Gene, Position and side
+#   position_scores.tsv            one row per Gene, Position and side that US detects; GS_schemes and is_biochem
+#                                  carry its biochemical profile
+#   position_biochem.tsv           one row per Gene, Position and side that any scheme detects: US, GS1-GS4 flags,
+#                                  GS_schemes, is_biochem, anc_aa (ancestral residue) and CAAS_score (NA when US
+#                                  does not detect it)
 #   gene_scores.tsv                one row per Gene
 #   gene_correlations.tsv          pairwise correlations between gene scores (header only while one score exists)
 #   fcs_stats.tsv                  gene scores and flags for the FCS reports
@@ -63,9 +69,9 @@ caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permul
 core_positions_file  <- parse_arg("--core_positions")  # observed_core_scores.py: CAAS_score per (Gene, Position, side)
 core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: size-adjusted gene CAAS scores
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
-# Rule of the position score: (US + mean(GS)) / 2, in [0, 1] (core.scores.SCORE_RULE). The observed scores (observed_core_scores.py)
+# Rule of the position score: the US score, in [0, 1] (core.scores.SCORE_RULE). The observed scores (observed_core_scores.py)
 # and the null (perm_pos_cycle_caas.tsv.gz, column score_aggregation) must use the same rule.
-score_aggregation <- "us_gs_mean_half"
+score_aggregation <- "us"
 # Rows reach this script already pooled over hypotheses by CT_DISAMBIGUATION (one row per Gene,
 # Position, scheme and side, hypothesis NA), so scoring never pools hypotheses itself.
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
@@ -163,10 +169,10 @@ cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
 # ── 2a. Scheme scope ──────────────────────────────────────────────────────────
 # The five scoring schemes.
 #
-# No weight on how many GS schemes detect a substitution: it is a deterministic property of which amino
-# acids are involved (a discretised biochemical distance, see the report's Biochemistry tab), not evidence
-# strength. The position score is (US + mean(GS)) / 2 (core.scores.position_score): US is the strict residue
-# test, and the GS term adds the mean of the GS1-GS4 scores that detected the position; each term weighs 0.5.
+# The position score is the US score (core.scores.position_score): US is the strict residue test. The GS1-GS4
+# schemes recode the residues into biochemical classes; which of them detect a substitution is a deterministic
+# property of the amino acids involved (a discretised biochemical distance), so they describe the position
+# (GS_schemes, is_biochem, position_biochem.tsv) and do not score it.
 scoring_schemes <- c("US", "GS4", "GS3", "GS2", "GS1")
 
 # Priority only picks the representative scheme whose display columns (side, caap_group, ...) the
@@ -238,7 +244,7 @@ df <- df %>% mutate(Position = suppressWarnings(as.integer(Position)))
 df <- df %>% arrange(desc(scheme_priority))
 
 # `side` belongs to the aggregation key: a position detected on both sides has two rows, and
-# CAAS_score ((US + mean of the GS schemes that detected it) / 2) is taken per side.
+# CAAS_score (the US score) is taken per side.
 .pos_grp_keys <- c("Gene", "Position", "side")
 
 pos_scores <- df %>%
@@ -279,30 +285,62 @@ pos_scores <- df %>%
       paste(paste0(caap_group[.ae], ":", amino_encoded[.ae])[.o], collapse = " ")
     } else "",
     # The per-scheme factors (asr_score / caas_row) and the ASR diagnostic columns (asr_path_score,
-    # derived_agreement) are not carried to the position level: CAAS_score is (US + mean(GS)) / 2 of asr_path_score
-    # over the schemes, and a position-level mean of each sub-factor would hide scheme disagreement (a
+    # derived_agreement) are not carried to the position level: CAAS_score is the US asr_path_score, and a
+    # position-level mean of each sub-factor over the schemes would hide scheme disagreement (a
     # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees). They stay per
     # (Gene, Position, caap_group) in `df` for anything that needs the breakdown.
     caap_group         = first(caap_group),
     .groups = "drop"
   )
 
-# CAAS_score = (US + mean of asr_path_score over the GS schemes that scored the (Gene, Position, side)) / 2,
-# computed by core.scores.
+# Biochemical profile of every detected (Gene, Position, side): which schemes detect it. A position that only GS schemes
+# detect has no US row, hence no CAAS_score, and stays out of position_scores.tsv; position_biochem.tsv keeps it.
+position_biochem <- df %>%
+  group_by(Gene, Position, side) %>%
+  summarise(US  = any(caap_group == "US"),  GS1 = any(caap_group == "GS1"), GS2 = any(caap_group == "GS2"),
+            GS3 = any(caap_group == "GS3"), GS4 = any(caap_group == "GS4"), .groups = "drop") %>%
+  mutate(GS_schemes = paste0(ifelse(GS1, "GS1+", ""), ifelse(GS2, "GS2+", ""), ifelse(GS3, "GS3+", ""), ifelse(GS4, "GS4+", "")),
+         GS_schemes = sub("\\+$", "", GS_schemes),
+         is_biochem = GS1 | GS2 | GS3 | GS4)
+
+# Ancestral residue (single-letter state of the MRCA), when the rows carry it: the group-size diagnostic of the biochemistry
+# section needs it for positions that only GS schemes detect, which have no US row in position_scores.tsv.
+if ("all_mrca_state" %in% names(df)) {
+  .anc <- df %>%
+    filter(!is.na(all_mrca_state), nchar(as.character(all_mrca_state)) == 1) %>%
+    distinct(Gene, Position, side, .keep_all = TRUE) %>%
+    transmute(Gene, Position, side, anc_aa = as.character(all_mrca_state))
+  position_biochem <- position_biochem %>% left_join(.anc, by = c("Gene", "Position", "side"))
+  rm(.anc)
+} else {
+  position_biochem$anc_aa <- NA_character_
+}
+
+# CAAS_score = asr_path_score of the US row of the (Gene, Position, side), computed by core.scores.
 core_pos <- read_tsv(core_positions_file, show_col_types = FALSE,
                      col_types = cols(Gene = col_character(), Position = col_integer(),
                                       side = col_character(), CAAS_score = col_double()))
 .pk  <- function(g, p, sd) paste(g, p, sd, sep = "\r")
+pos_scores <- pos_scores %>%
+  left_join(position_biochem %>% select(Gene, Position, side, US, GS_schemes, is_biochem),
+            by = c("Gene", "Position", "side")) %>%
+  filter(US) %>%
+  select(-US)
 .hit <- match(.pk(pos_scores$Gene, pos_scores$Position, pos_scores$side),
               .pk(core_pos$Gene, core_pos$Position, core_pos$side))
 if (anyNA(.hit) || nrow(core_pos) != nrow(pos_scores)) {
-  stop(sprintf("core positions (%d) and scored positions (%d) disagree: observed_core_scores.py and this script read different rows",
+  stop(sprintf("core positions (%d) and US-detected positions (%d) disagree: observed_core_scores.py and this script read different rows",
                nrow(core_pos), nrow(pos_scores)))
 }
 pos_scores$CAAS_score <- core_pos$CAAS_score[.hit]
+position_biochem$CAAS_score <- core_pos$CAAS_score[match(.pk(position_biochem$Gene, position_biochem$Position, position_biochem$side),
+                                                         .pk(core_pos$Gene, core_pos$Position, core_pos$side))]
 rm(core_pos, .hit)
+cat(sprintf("  %d detected position sides, %d of them by US; %d of the US-detected also by a GS scheme, %d by GS schemes only\n",
+            nrow(position_biochem), sum(position_biochem$US), sum(position_biochem$US & position_biochem$is_biochem),
+            sum(!position_biochem$US)))
 
-# CAAS_score is the position score of that side ((US + mean(GS)) / 2); caas_row is the row's asr_path_score.
+# CAAS_score is the US score of that side; asr_path_score repeats it.
 pos_scores <- pos_scores %>% mutate(asr_path_score = CAAS_score)
 
 # Ancestral and derived residues of each (Gene, Position, side), as the ASR inferred them. They are read from
@@ -681,106 +719,60 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
             sum(!is.na(gene_caas$gene_caas_score_bottom))))
 
 # ── 4b. Gene Accumulation Score (optional) ────────────────────────────────────
-# Reads accumulation_<direction>_<scheme>_aggregated_results.csv for direction in {all, top, bottom};
+# Reads accumulation_<direction>_us_aggregated_results.csv for direction in {all, top, bottom};
 # ct_accumulation.nf runs the three directions and stages all of them in accum_dir. "all" pools every
 # position with side != "none"; "top" / "bottom" restrict to that side, so the flag is
-# direction-aware like FADE and RER. Per direction, the per-scheme PValueEmpirical columns are combined
-# into one p per gene (Cauchy combination below), BH-adjusted over the genes with at least one CAAS,
-# and flagged at FDR < 0.05.
+# direction-aware like FADE and RER. Accumulation is evaluated under the Unweighted Scheme (US) only.
 #
-# Returns a tibble with Gene + accum_cct_p<suffix> / accum_fdr<suffix> / accum_significant<suffix> and
-# accum_pval_<scheme><suffix> (suffix = "" for "all", "_top" / "_bottom" otherwise); the suffixes let
-# the three directions full_join onto gene_scores without colliding.
+# Returns a tibble with Gene + accum_p<suffix> (and accum_cct_p<suffix> for alias compatibility),
+# accum_fdr<suffix> / accum_significant<suffix> and accum_pval_us<suffix> (suffix = "" for "all",
+# "_top" / "_bottom" otherwise); the suffixes let the three directions full_join onto gene_scores without colliding.
 compute_accum_significance <- function(accum_dir, direction, suffix) {
-  scheme_names <- c("us", "gs4", "gs3", "gs2", "gs1")
   empty <- tibble(
     Gene = character(),
-    !!paste0("accum_cct_p", suffix) := numeric(),
-    !!paste0("accum_fdr", suffix)      := numeric(),
+    !!paste0("accum_pval_us", suffix) := numeric(),
+    !!paste0("accum_p", suffix)       := numeric(),
+    !!paste0("accum_cct_p", suffix)   := numeric(),
+    !!paste0("accum_fdr", suffix)     := numeric(),
     !!paste0("accum_significant", suffix) := logical()
   )
 
-  files_found <- list.files(accum_dir, pattern = paste0("^accumulation_", direction, "_"), full.names = TRUE)
-  if (length(files_found) == 0) {
-    cat(sprintf("Accumulation (%s): no accumulation_%s_* files found, skipping\n", direction, direction))
+  pattern <- paste0("accumulation_", direction, "_us_aggregated_results.csv")
+  f <- list.files(accum_dir, pattern = pattern, full.names = TRUE)
+  if (length(f) == 0) {
+    cat(sprintf("Accumulation (%s): file not found (%s), skipping\n", direction, pattern))
     return(list(df = empty, ok = FALSE))
   }
 
-  cat(sprintf("Loading accumulation (%s) from: %s\n", direction, accum_dir))
-  accum_pval_df <- NULL  # will hold Gene + one pval col per scheme
+  cat(sprintf("Loading accumulation (%s) from: %s\n", direction, basename(f[1])))
+  d <- read_csv(f[1], show_col_types = FALSE)
 
-  for (scheme in scheme_names) {
-    pattern <- paste0("accumulation_", direction, "_", scheme, "_aggregated_results.csv")
-    f <- list.files(accum_dir, pattern = pattern, full.names = TRUE)
-    if (length(f) == 0) {
-      cat(sprintf("    %s: file not found, skipping\n", scheme))
-      next
-    }
-    cat(sprintf("    %s: %s\n", scheme, basename(f[1])))
-    d <- read_csv(f[1], show_col_types = FALSE)
-
-    pval_col <- grep("PValueEmpirical", names(d), value = TRUE)[1]
-    if (is.na(pval_col)) {
-      cat(sprintf("    %s: no PValueEmpirical column found, skipping\n", scheme))
-      next
-    }
-
-    scheme_pvals <- d %>%
-      select(Gene, !!paste0("accum_pval_", scheme, suffix) := all_of(pval_col))
-
-    if (is.null(accum_pval_df)) {
-      accum_pval_df <- scheme_pvals
-    } else {
-      accum_pval_df <- accum_pval_df %>% full_join(scheme_pvals, by = "Gene")
-    }
+  gcol <- intersect(c("Gene", "gene"), names(d))[1]
+  pval_col <- grep("PValueEmpirical", names(d), value = TRUE)[1]
+  if (is.na(gcol) || is.na(pval_col)) {
+    cat(sprintf("  Accumulation (%s): missing Gene or PValueEmpirical column, skipping\n", direction))
+    return(list(df = empty, ok = FALSE))
   }
 
-  if (is.null(accum_pval_df)) return(list(df = empty, ok = FALSE))
+  pvals <- as.numeric(d[[pval_col]])
+  out <- tibble(
+    Gene = d[[gcol]],
+    !!paste0("accum_pval_us", suffix) := pvals,
+    !!paste0("accum_p", suffix)       := pvals,
+    !!paste0("accum_cct_p", suffix)   := pvals
+  )
 
-  pval_cols <- grep(paste0("^accum_pval_.*", suffix, "$"), names(accum_pval_df), value = TRUE)
-
-  # Cauchy Combination Test (CCT / ACAT) across the available per-group schemes,
-  # collapsing the per-scheme accumulation p-values into one value per gene.
-  # Stat: T = sum(w_i * tan((0.5 - p_i) * pi)), p_CCT = pcauchy(T, lower.tail = FALSE).
-  #
-  # The five schemes (US, GS4, GS3, GS2, GS1) partition the amino acids but test the same positions: a
-  # position counted under one scheme is frequently counted under others, so the per-scheme p-values
-  # are positively correlated. CCT keeps its null valid under arbitrary dependence, which a combiner
-  # that assumes independence does not. Weights follow the position score: US 0.5 and each GS 0.125 (the
-  # GS block weighs as much as US), renormalized over the schemes available. The same combiner is applied
-  # in accum_gene_lists.nf and 10.Accumulation_report.Rmd.
-  w_scheme <- c(us = 0.5, gs1 = 0.125, gs2 = 0.125, gs3 = 0.125, gs4 = 0.125)
-  w_of     <- w_scheme[sub("^accum_pval_([a-z0-9]+).*$", "\\1", pval_cols)]
-  out <- accum_pval_df %>%
-    rowwise() %>%
-    mutate(
-      !!paste0("accum_cct_p", suffix) := {
-        pvals <- c_across(all_of(pval_cols))
-        valid <- !is.na(pvals)
-        if (sum(valid) == 0) NA_real_
-        else if (all(pvals[valid] >= 1)) 1.0
-        else {
-          ps <- pmin(pmax(pvals[valid], 1e-15), 1 - 1e-15)
-          w <- w_of[valid] / sum(w_of[valid])
-          stat <- sum(w * tan((0.5 - ps) * pi))
-          pcauchy(stat, lower.tail = FALSE)
-        }
-      }
-    ) %>%
-    ungroup() %>%
-    select(Gene, !!paste0("accum_cct_p", suffix), all_of(pval_cols))
-
-  fp_col <- paste0("accum_cct_p", suffix)
+  fp_col <- paste0("accum_p", suffix)
   # BH FDR on genes with at least one observed CAAS (p < 1 strictly). Genes
-  # with no CAAS in any group have accum_cct_p = 1 by construction - they
-  # are background members only and must not enter the FDR denominator.
+  # with no CAAS in US have p = 1 by construction - they are background members
+  # only and must not enter the FDR denominator.
   tested <- !is.na(out[[fp_col]]) & out[[fp_col]] < 1
   fdr_q  <- rep(NA_real_, nrow(out))
   if (any(tested)) fdr_q[tested] <- p.adjust(out[[fp_col]][tested], method = "BH")
   out[[paste0("accum_fdr", suffix)]] <- fdr_q
   out[[paste0("accum_significant", suffix)]] <- !is.na(fdr_q) & fdr_q < 0.05
 
-  cat(sprintf("  Accumulation (%s): %d genes, %d significant (Cauchy CCT p, BH FDR < 0.05)\n",
+  cat(sprintf("  Accumulation (%s): %d genes, %d significant (US empirical p, BH FDR < 0.05)\n",
               direction, nrow(out), sum(out[[paste0("accum_significant", suffix)]], na.rm = TRUE)))
   list(df = out, ok = TRUE)
 }
@@ -909,13 +901,16 @@ gene_scores <- gene_caas
 if (nrow(gene_rand) > 0) {
   gene_scores <- gene_scores %>% full_join(gene_rand, by = "Gene")
 } else {
-  gene_scores$accum_cct_p           <- NA_real_
+  gene_scores$accum_p                  <- NA_real_
+  gene_scores$accum_cct_p              <- NA_real_
   gene_scores$accum_fdr                <- NA_real_
   gene_scores$accum_significant        <- NA
-  gene_scores$accum_cct_p_top       <- NA_real_
+  gene_scores$accum_p_top              <- NA_real_
+  gene_scores$accum_cct_p_top          <- NA_real_
   gene_scores$accum_fdr_top            <- NA_real_
   gene_scores$accum_significant_top    <- NA
-  gene_scores$accum_cct_p_bottom    <- NA_real_
+  gene_scores$accum_p_bottom           <- NA_real_
+  gene_scores$accum_cct_p_bottom       <- NA_real_
   gene_scores$accum_fdr_bottom         <- NA_real_
   gene_scores$accum_significant_bottom <- NA
 }
@@ -1002,7 +997,7 @@ cat("\n─── Writing outputs ───────────────�
 # are the raw-residue descriptors.
 pos_out <- pos_scores %>%
   select(Gene, Position,
-         n_schemes, any_of("scheme_set"),
+         n_schemes, any_of("scheme_set"), GS_schemes, is_biochem,
          any_of(c("n_hypotheses", "participating_hypotheses",
                   "top_species_residues", "bottom_species_residues",
                   "n_top_species", "n_bottom_species", "n_conserved_pairs")), CAAS_score,
@@ -1016,21 +1011,22 @@ pos_out <- pos_scores %>%
 write_tsv(pos_out, "position_scores.tsv")
 cat(sprintf("  position_scores.tsv: %d rows\n", nrow(pos_out)))
 
+# Biochemical profile of every detected position, GS-only ones included (read by the position enrichment report).
+write_tsv(position_biochem %>% arrange(Gene, Position, side), "position_biochem.tsv")
+cat(sprintf("  position_biochem.tsv: %d rows\n", nrow(position_biochem)))
+
 # Gene scores
 gene_out <- gene_scores %>%
   select(
     Gene,
     n_positions, n_positions_top, n_positions_bottom,
     gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
-    any_of(c("accum_cct_p", "accum_fdr", "accum_significant",
-             "accum_pval_us", "accum_pval_gs4", "accum_pval_gs3",
-             "accum_pval_gs2", "accum_pval_gs1",
-             "accum_cct_p_top", "accum_fdr_top", "accum_significant_top",
-             "accum_pval_us_top", "accum_pval_gs4_top", "accum_pval_gs3_top",
-             "accum_pval_gs2_top", "accum_pval_gs1_top",
-             "accum_cct_p_bottom", "accum_fdr_bottom", "accum_significant_bottom",
-             "accum_pval_us_bottom", "accum_pval_gs4_bottom", "accum_pval_gs3_bottom",
-             "accum_pval_gs2_bottom", "accum_pval_gs1_bottom")),
+    any_of(c("accum_p", "accum_cct_p", "accum_fdr", "accum_significant",
+             "accum_pval_us",
+             "accum_p_top", "accum_cct_p_top", "accum_fdr_top", "accum_significant_top",
+             "accum_pval_us_top",
+             "accum_p_bottom", "accum_cct_p_bottom", "accum_fdr_bottom", "accum_significant_bottom",
+             "accum_pval_us_bottom")),
     any_of(c("rer_min_pval", "rer_significant", "rer_perm_padj", "rer_significant_fdr", "rer_rho", "rer_acceleration")),
     any_of(c("fade_max_bf_top", "fade_significant_top",
              "fade_max_bf_bottom", "fade_significant_bottom"))
@@ -1098,15 +1094,15 @@ if (.nonempty("fade_max_bf_top") || .nonempty("fade_max_bf_bottom")) {
   cat("  fcs_stats_fade.tsv written (FADE BF rankings)\n")
 }
 
-if (.nonempty("accum_cct_p")) {
-  # FCS ranks in descending order (higher = more significant) while the CCT p runs the other way, so
-  # the ranking axis is -log10(accum_cct_p), derived here and not stored as a column of gene_scores.
-  .afp <- suppressWarnings(as.numeric(.col(gene_scores, "accum_cct_p")))
+if (.nonempty("accum_p") || .nonempty("accum_cct_p")) {
+  # FCS ranks in descending order (higher = more significant) while empirical p runs the other way, so
+  # the ranking axis is -log10(accum_p), derived here and not stored as a column of gene_scores.
+  .afp <- suppressWarnings(as.numeric(.col(gene_scores, if ("accum_p" %in% names(gene_scores)) "accum_p" else "accum_cct_p")))
   write_tsv(tibble(
     gene         = gene_scores$Gene,
     score_global = ifelse(is.na(.afp), NA_real_, -log10(pmax(.afp, 1e-300)))
   ), "fcs_stats_accum.tsv")
-  cat("  fcs_stats_accum.tsv written (accumulation rankings, -log10 CCT p)\n")
+  cat("  fcs_stats_accum.tsv written (accumulation rankings, -log10 US p)\n")
 }
 
 # Correlations

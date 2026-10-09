@@ -22,7 +22,7 @@ Columns: `Gene, Position, n_schemes, scheme_set, n_hypotheses, participating_hyp
 - `p.emp_fact`: `(nd + 1)/(N + 1) × (1 + #{detections of the class with score ≥ s})/(1 + #{detections of the class})`, where `nd` is the number of null cycles that score the position and the class is one of 20 percentile classes of the null detections. It is not bounded below by `1/(N + 1)`.
 - `p.adj_bh_fact`: BH of `p.emp_fact` over the same null universe as `p.adj_bh`.
 - Null design: every null cycle is matched to the observed design, 100 FOP hypotheses of K pairs each (K = 4 genotypic, 3 phenotypic); `caas_permulation/resample_perms.tab` holds 100 hypothesis labellings for each of the 1000 cycles.
-- The four p-values (`p.emp`, `p.adj_bh`, `p.emp_fact`, `p.adj_bh_fact`) are informative: the pipeline derives no threshold or significance column from them. This report marks values below 0.05 in bold and counts positions below 0.05 and 0.1 only to describe them; `p.emp` at its floor `1/(N + 1)` is written `<0.001`. `CAAS_score` is `US + mean(GS)`: the exact-identity score (US) plus the mean of the grouping-scheme scores (GS1 to GS4) of the schemes that scored the position, each term 0 when absent; it lies between 0 and 2.
+- The four p-values (`p.emp`, `p.adj_bh`, `p.emp_fact`, `p.adj_bh_fact`) are informative: the pipeline derives no threshold or significance column from them. This report marks values below 0.05 in bold and counts positions below 0.05 and 0.1 only to describe them; `p.emp` at its floor `1/(N + 1)` is written `<0.001`. `CAAS_score` is `(US + mean(GS)) / 2`: half the exact-identity score (US) plus half the mean of the grouping-scheme scores (GS1 to GS4) of the schemes that scored the position, each term 0 when absent; it lies between 0 and 1.
 
 Note for ad hoc pandas reads: the `caas` value `N/A` (maize 573) is parsed as missing under pandas defaults; read with `keep_default_na=False`.
 
@@ -65,35 +65,35 @@ Score rank = competition rank of `CAAS_score` among unique candidate positions (
 
 | position | ref>alt | tier | residues C4 \| C3 | CAAS_score | score rank /59 | n_hyp /100 | p.emp | p.adj_bh | BH rank | p.emp_fact | p.adj_bh_fact |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 780 | A→S | mutagenesis | S:22 \| A:53 | 2.000 | 1 | 49 | <0.001 | **0.026** | 1 (4) | **0.0010** | **0.021** |
-| 665 | H→N | mutagenesis | N:23 \| H:52,N:2 | 2.000 | 1 | 100 | <0.001 | **0.026** | 1 (4) | **0.0005** | **0.013** |
-| 540 | P→T | selection | T:23 \| P:53,S:1 | 2.000 | 1 | 100 | <0.001 | **0.026** | 1 (4) | **0.0005** | **0.013** |
-| 572 | E→Q | selection | Q:18,K:5 \| E:52,Q:2 | 0.707 | 20 | 100 | 0.276 | 0.75 | 39 (1) | 0.43 | 1.00 |
+| 780 | A→S | mutagenesis | S:22 \| A:53 | 1.000 | 1 | 49 | <0.001 | **0.026** | 1 (4) | **0.0010** | **0.021** |
+| 665 | H→N | mutagenesis | N:23 \| H:52,N:2 | 1.000 | 1 | 100 | <0.001 | **0.026** | 1 (4) | **0.0005** | **0.013** |
+| 540 | P→T | selection | T:23 \| P:53,S:1 | 1.000 | 1 | 100 | <0.001 | **0.026** | 1 (4) | **0.0005** | **0.013** |
+| 572 | E→Q | selection | Q:18,K:5 \| E:52,Q:2 | 0.353 | 20 | 100 | 0.276 | 0.75 | 39 (1) | 0.43 | 1.00 |
 | 733 | F→V | parallel | not in candidate set | | | | | | | | |
-| 761 | S→A | parallel | A:14,S:8 \| S:53 | 0.779 | 18 | 49 | 0.182 | 0.58 | 32 (3) | 0.15 | 0.58 |
-| 749 | L→T | weak | L:9,M:9,T:4 \| L:52,P:1 | 0.502 | 31 | 34 | 0.059 | 0.44 | 8 (10) | 0.13 | 0.54 |
-| 505 | F→L | weak | L:17,F:6 \| F:54 | 1.221 | 8 | 100 | 0.043 | 0.44 | 8 (10) | **0.037** | 0.24 |
-| 573 | A→N | weak | N:15,A:8 \| A:52,G:2 | 0.400 | 39 | 100 | 0.429 | 1.00 | 40 (20) | 0.64 | 1.00 |
-| 731 | I→V | weak | V:17,Y:5 \| I:51,V:3 | 1.407 | 6 | 76 | 0.0020 | **0.042** | 5 (1) | **0.0030** | 0.053 |
+| 761 | S→A | parallel | A:14,S:8 \| S:53 | 0.390 | 18 | 49 | 0.182 | 0.58 | 32 (3) | 0.15 | 0.58 |
+| 749 | L→T | weak | L:9,M:9,T:4 \| L:52,P:1 | 0.251 | 31 | 34 | 0.059 | 0.44 | 8 (10) | 0.13 | 0.54 |
+| 505 | F→L | weak | L:17,F:6 \| F:54 | 0.611 | 8 | 100 | 0.043 | 0.44 | 8 (10) | **0.037** | 0.24 |
+| 573 | A→N | weak | N:15,A:8 \| A:52,G:2 | 0.200 | 39 | 100 | 0.429 | 1.00 | 40 (20) | 0.64 | 1.00 |
+| 731 | I→V | weak | V:17,Y:5 \| I:51,V:3 | 0.704 | 6 | 76 | 0.0020 | **0.042** | 5 (1) | **0.0030** | 0.053 |
 
-**Adjusted p below 0.05:** `p.adj_bh` 4/10 (540, 665, 731, 780), `p.adj_bh_fact` 3/10 (540, 665, 780; 731 at 0.053); **9/10 present, 1/10 absent** (733). 540, 665 and 780 share the maximum score of the scale (2.000) and rank 1; non-truth 611 and 751 rank 4 and 5 (1.802 and 1.679), 731 ranks 6, and 572 (rank 20, `p.adj_bh` 0.75) is not below 0.05.
+**Adjusted p below 0.05:** `p.adj_bh` 4/10 (540, 665, 731, 780), `p.adj_bh_fact` 3/10 (540, 665, 780; 731 at 0.053); **9/10 present, 1/10 absent** (733). 540, 665 and 780 share the maximum score of the scale (1.000) and rank 1; non-truth 611 and 751 rank 4 and 5 (0.901 and 0.840), 731 ranks 6, and 572 (rank 20, `p.adj_bh` 0.75) is not below 0.05.
 
 ### Phenotypic trait (`c4_phenotypic`)
 
 | position | ref>alt | tier | residues C4 \| C3 | CAAS_score | score rank /57 | n_hyp /100 | p.emp | p.adj_bh | BH rank | p.emp_fact | p.adj_bh_fact |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 780 | A→S | mutagenesis | S:16,A:2 \| A:49,S:1 | 1.830 | 1 | 73 | <0.001 | **0.016** | 1 (6) | **0.0003** | **0.015** |
-| 665 | H→N | mutagenesis | N:17,H:3 \| H:47,N:3 | 1.824 | 2 | 92 | <0.001 | **0.016** | 1 (6) | **0.0005** | **0.016** |
-| 540 | P→T | selection | T:17,P:3 \| P:48,S:1,T:1 | 1.812 | 3 | 97 | <0.001 | **0.016** | 1 (6) | **0.0056** | 0.088 |
-| 572 | E→Q | selection | Q:17,E:3 \| E:47,Q:3 | 1.809 | 4 | 97 | <0.001 | **0.016** | 1 (6) | **0.0024** | **0.045** |
+| 780 | A→S | mutagenesis | S:16,A:2 \| A:49,S:1 | 0.915 | 1 | 73 | <0.001 | **0.016** | 1 (6) | **0.0003** | **0.015** |
+| 665 | H→N | mutagenesis | N:17,H:3 \| H:47,N:3 | 0.912 | 2 | 92 | <0.001 | **0.016** | 1 (6) | **0.0005** | **0.016** |
+| 540 | P→T | selection | T:17,P:3 \| P:48,S:1,T:1 | 0.906 | 3 | 97 | <0.001 | **0.016** | 1 (6) | **0.0056** | 0.088 |
+| 572 | E→Q | selection | Q:17,E:3 \| E:47,Q:3 | 0.904 | 4 | 97 | <0.001 | **0.016** | 1 (6) | **0.0024** | **0.045** |
 | 733 | F→V | parallel | not in candidate set | | | | | | | | |
-| 761 | S→A | parallel | A:13,S:5 \| S:49,A:1 | 1.006 | 19 | 47 | 0.211 | 0.62 | 31 (2) | 0.098 | 0.34 |
-| 749 | L→T | weak | M:9,L:6,T:3 \| L:48,P:1,T:1 | 0.376 | 39 | 29 | 0.297 | 0.77 | 36 (1) | 0.43 | 0.98 |
-| 505 | F→L | weak | L:16,F:4 \| F:49,L:1 | 1.597 | 8 | 84 | 0.016 | 0.17 | 9 (1) | **0.022** | 0.16 |
-| 573 | A→N | weak | N:14,A:6 \| A:49,N:1 | 0.994 | 20 | 58 | 0.254 | 0.68 | 33 (3) | 0.15 | 0.47 |
-| 731 | I→V | weak | V:16,I:3 \| I:46,V:4 | 1.786 | 6 | 85 | <0.001 | **0.016** | 1 (6) | **0.0013** | **0.031** |
+| 761 | S→A | parallel | A:13,S:5 \| S:49,A:1 | 0.503 | 19 | 47 | 0.211 | 0.62 | 31 (2) | 0.098 | 0.34 |
+| 749 | L→T | weak | M:9,L:6,T:3 \| L:48,P:1,T:1 | 0.188 | 39 | 29 | 0.297 | 0.77 | 36 (1) | 0.43 | 0.98 |
+| 505 | F→L | weak | L:16,F:4 \| F:49,L:1 | 0.798 | 8 | 84 | 0.016 | 0.17 | 9 (1) | **0.022** | 0.16 |
+| 573 | A→N | weak | N:14,A:6 \| A:49,N:1 | 0.497 | 20 | 58 | 0.254 | 0.68 | 33 (3) | 0.15 | 0.47 |
+| 731 | I→V | weak | V:16,I:3 \| I:46,V:4 | 0.893 | 6 | 85 | <0.001 | **0.016** | 1 (6) | **0.0013** | **0.031** |
 
-**Adjusted p below 0.05:** `p.adj_bh` 5/10 (540, 572, 665, 731, 780), `p.adj_bh_fact` 4/10 (572, 665, 731, 780; 540 at 0.088); **9/10 present, 1/10 absent** (733). The four mutagenesis- and selection-tier sites hold score ranks 1 to 4 (780, 665, 540, 572: 1.830 to 1.809); 518 (non-truth) and 731 follow at ranks 5 and 6 (1.800 and 1.786), and the next position, 611, scores 1.624.
+**Adjusted p below 0.05:** `p.adj_bh` 5/10 (540, 572, 665, 731, 780), `p.adj_bh_fact` 4/10 (572, 665, 731, 780; 540 at 0.088); **9/10 present, 1/10 absent** (733). The four mutagenesis- and selection-tier sites hold score ranks 1 to 4 (780, 665, 540, 572: 0.915 to 0.904); 518 (non-truth) and 731 follow at ranks 5 and 6 (0.900 and 0.893), and the next position, 611, scores 0.812.
 
 ### Position 733
 
@@ -103,17 +103,17 @@ Absent from the candidate set under both traits because the fixture carries no C
 
 | trait | position | residues C4 \| C3 | schemes | CAAS_score | n_hyp /100 | p.emp | p.adj_bh | p.adj_bh_fact |
 |---|---|---|---|---|---|---|---|---|
-| genotypic | 611 | L:22,F:1 \| F:44,L:10 | GS3+GS4+US | 1.802 | 87 | 0.0070 | 0.11 | **0.013** |
-| genotypic | 620 | C:17,A:3,F:1,S:1,T:1 \| S:51,T:3 | GS1–GS4+US | 1.266 | 100 | 0.0050 | 0.088 | 0.20 |
-| genotypic | 751 | F:11,Y:11 \| Y:53 | GS2+GS4+US | 1.679 | 49 | <0.001 | **0.026** | **0.013** |
-| phenotypic | 460 | E:11,D:1 \| D:20,E:3,X:2 | US | 0.901 | 2 | 0.0070 | 0.082 | 0.16 |
-| phenotypic | 474 | G:10,E:2 \| E:16,D:4,G:4,K:1 | GS1–GS4+US | 0.844 | 1 | 0.0040 | 0.054 | 0.16 |
-| phenotypic | 518 | F:20 \| L:42,F:8 | GS3+GS4+US | 1.800 | 100 | <0.001 | **0.016** | **0.015** |
-| phenotypic | 620 | C:13,S:4,A:2,T:1 \| S:46,T:3,A:1 | GS1–GS4+US | 1.254 | 86 | 0.018 | 0.17 | 0.100 |
+| genotypic | 611 | L:22,F:1 \| F:44,L:10 | GS3+GS4+US | 0.901 | 87 | 0.0070 | 0.11 | **0.013** |
+| genotypic | 620 | C:17,A:3,F:1,S:1,T:1 \| S:51,T:3 | GS1–GS4+US | 0.633 | 100 | 0.0050 | 0.088 | 0.20 |
+| genotypic | 751 | F:11,Y:11 \| Y:53 | GS2+GS4+US | 0.840 | 49 | <0.001 | **0.026** | **0.013** |
+| phenotypic | 460 | E:11,D:1 \| D:20,E:3,X:2 | US | 0.450 | 2 | 0.0070 | 0.082 | 0.16 |
+| phenotypic | 474 | G:10,E:2 \| E:16,D:4,G:4,K:1 | GS1–GS4+US | 0.422 | 1 | 0.0040 | 0.054 | 0.16 |
+| phenotypic | 518 | F:20 \| L:42,F:8 | GS3+GS4+US | 0.900 | 100 | <0.001 | **0.016** | **0.015** |
+| phenotypic | 620 | C:13,S:4,A:2,T:1 \| S:46,T:3,A:1 | GS1–GS4+US | 0.627 | 86 | 0.018 | 0.17 | 0.100 |
 
 The two adjustments rank positions differently. `p.adj_bh` follows each position's own null (`p.emp`); `p.adj_bh_fact` follows the observed score against the scores of the null detections of positions with a similar detection frequency. In the genotypic run 751 is below 0.05 under both (0.026 and 0.013), 611 only under `p.adj_bh_fact` (0.013; `p.adj_bh` 0.11), and 620 only near 0.09 under `p.adj_bh` (0.088; `p.adj_bh_fact` 0.20). In the phenotypic run 518 is below 0.05 under both (0.0157 and 0.0154); 474 and 460 are above 0.05 under `p.adj_bh` (0.054 and 0.082) and above 0.1 under `p.adj_bh_fact`; 620 is nearest under `p.adj_bh_fact` (0.100). A position below 0.05 under only one adjustment is the least secure call.
 
-- **518** is present in all 100 phenotypic hypotheses; every phenotypic-C4 tip carries F. Under the genotypic trait the C4 group is `F:18, L:5` and the position is weak (`CAAS_score` 0.525, 14 hypotheses, `p.adj_bh` 0.61). The five L tips are the Ser780-carrying *E. baldwinii* (FM208014/015/016) and *E. vivipara* (AB085948, FM208029) accessions, which the phenotypic run prunes as C3/C4 intermediates. F therefore marks the C4 lineages other than *Eleocharis*; it is not associated with the C4-type ppc-1 copy in *Eleocharis*. Within C4 *Fimbristylis* both ppc-1 copies carry F (the non-C4 paralogs FM208032/034/036 included), so at 518 F is a lineage state rather than a property of the C4-recruited copy. CT_DISAMBIGUATION's ancestral reconstruction (`ct_disambiguation/caas_convergence_master.csv`, US scheme, top side) places L at the MRCA of the three C4 domains carrying F in 100, 93 and 74 of the 100 hypotheses (posterior 0.94 to 1.0; in the other hypotheses the third domain's MRCA is F, with posterior 0.56 to 0.57), and FADE maps three L→F substitutions on foreground branches, so the association reflects repeated gains of F rather than its retention. F also occurs in the outgroup and in early-diverging C3 lineages (*Coleochloa*, *Microdracoides*, *Carpha*), consistent with an early shift to L in the in-group followed by returns to F in the C4 lineages.
+- **518** is present in all 100 phenotypic hypotheses; every phenotypic-C4 tip carries F. Under the genotypic trait the C4 group is `F:18, L:5` and the position is weak (`CAAS_score` 0.263, 14 hypotheses, `p.adj_bh` 0.61). The five L tips are the Ser780-carrying *E. baldwinii* (FM208014/015/016) and *E. vivipara* (AB085948, FM208029) accessions, which the phenotypic run prunes as C3/C4 intermediates. F therefore marks the C4 lineages other than *Eleocharis*; it is not associated with the C4-type ppc-1 copy in *Eleocharis*. Within C4 *Fimbristylis* both ppc-1 copies carry F (the non-C4 paralogs FM208032/034/036 included), so at 518 F is a lineage state rather than a property of the C4-recruited copy. CT_DISAMBIGUATION's ancestral reconstruction (`ct_disambiguation/caas_convergence_master.csv`, US scheme, top side) places L at the MRCA of the three C4 domains carrying F in 100, 93 and 74 of the 100 hypotheses (posterior 0.94 to 1.0; in the other hypotheses the third domain's MRCA is F, with posterior 0.56 to 0.57), and FADE maps three L→F substitutions on foreground branches, so the association reflects repeated gains of F rather than its retention. F also occurs in the outgroup and in early-diverging C3 lineages (*Coleochloa*, *Microdracoides*, *Carpha*), consistent with an early shift to L in the in-group followed by returns to F in the C4 lineages.
 - **460** and **474** are detected in 2 and 1 of 100 hypotheses and have low coverage (460: 12 of 20 C4 and 25 of 50 C3 tips carry a residue). Hypothesis recurrence is a descriptor in `scoring_compute.R` (§2g) and does not enter `CAAS_score` or `p.emp`, so narrow detection is not penalised. Their null detection rates are low, which is what lets a call in one or two hypotheses reach a `p.emp` of 0.004 to 0.007.
 
 ## Method 3: PhyloPhere FADE

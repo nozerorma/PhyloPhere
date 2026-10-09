@@ -889,6 +889,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 def gene_lists_ch = params.scoring ? SCORING.out.gene_lists : Channel.empty()
                 def gene_scores_ch = params.scoring ? SCORING.out.gene_scores : Channel.empty()
                 def position_scores_ch = params.scoring ? SCORING.out.position_scores : Channel.empty()
+                def position_biochem_ch = params.scoring ? SCORING.out.position_biochem : Channel.empty()
                 def position_lists_ch = params.scoring ? SCORING.out.position_lists : Channel.empty()
                 def scoring_vep_pai_ch    = params.vep ? VEP.out.primateai_tsv : null
                 def scoring_vep_cosmic_ch = params.vep ? VEP.out.cosmic_tsv    : null
@@ -953,6 +954,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     scoring_caas_pos_sample_ch,
                     scoring_caas_pos_cycle_caas_ch,
                     position_scores_ch,
+                    position_biochem_ch,
                     position_lists_ch,
                     posenrich_background_ch,
                     scoring_vep_pai_ch,

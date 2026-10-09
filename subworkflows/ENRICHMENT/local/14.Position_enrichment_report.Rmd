@@ -42,6 +42,13 @@ params:
   # BF >= fade_bf_threshold only). Direction-specific, unlike PAI3D/COSMIC.
   fade_sites_top_file:    NULL
   fade_sites_bottom_file: NULL
+  # Biochemistry section. position_biochem.tsv: scheme profile (US, GS1-GS4) of every detected position, the
+  # GS-only ones included. caas_pos_cycle_caas_file: CAAS permulation null, whose rows carry the scheme_set of each
+  # detection. position_background_file: caastools background.output (tested positions), the universe of the
+  # overlap tests.
+  position_biochem_file:    NULL
+  caas_pos_cycle_caas_file: NULL
+  position_background_file: NULL
   # SCORING's fcs_stats.tsv (gene + flag_* columns), same file already
   # consumed as --annot-file by posenrich_enrich.py. Unused by this report
   # directly (kept declared for pipeline-wiring compatibility; the Overall
@@ -960,12 +967,17 @@ gene_df <- if (has_gene_scores)     readr::read_tsv(params$gene_scores_file,    
 has_vep_primateai <- .file_ok(params$vep_primateai_file)
 has_vep_cosmic    <- .file_ok(params$vep_cosmic_file)
 has_genomic       <- .file_ok(params$genomic_info_file)
+# Observed scheme profile of the detected position sides (top and bottom).
+biochem_df <- if (.file_ok(params$position_biochem_file)) {
+  readr::read_tsv(params$position_biochem_file, show_col_types = FALSE) %>% dplyr::filter(side %in% c("top", "bottom"))
+} else NULL
+has_biochem <- !is.null(biochem_df) && nrow(biochem_df) > 0
 # has_fade_sites_top/bottom and fade_sites_top_df/bottom_df are loaded in the `load` chunk.
 # Position scores are required by every sub-tab below (PAI3D, COSMIC and FADE joins,
 # regional accumulation), so they gate the whole section together with at least one
 # external layer.
 has_pos_char <- has_position_scores &&
-  (has_vep_primateai || has_vep_cosmic || has_genomic || has_fade_sites_top || has_fade_sites_bottom)
+  (has_vep_primateai || has_vep_cosmic || has_genomic || has_fade_sites_top || has_fade_sites_bottom || has_biochem)
 
 if (has_vep_primateai) {
   vep_pai_df <- readr::read_tsv(params$vep_primateai_file, show_col_types = FALSE)
@@ -1096,23 +1108,23 @@ if (has_pos_char) {
 ```{r pos-char-header, results='asis'}
 if (has_pos_char) cat(r"(# Position Characterisation {.tabset #position-characterisation}
 
-This section examines how ranked positions behave in relation to external
-signals that do **not** contribute to the `CAAS_score`. PrimateAI-3D, COSMIC
-Mutant Census, and FADE branch-site selection evidence are treated as
-independent characterisation layers.
+This section examines how ranked positions behave in relation to signals that
+do **not** contribute to the `CAAS_score`. PrimateAI-3D, COSMIC Mutant Census,
+FADE branch-site selection evidence and the biochemical grouping schemes
+(GS1-GS4) are treated as independent characterisation layers.
 
 PrimateAI-3D and COSMIC both describe specific amino acid transitions, so the
-biochemical Grantham Score (GS) groupings are out of scope for those two (as
-they group transitions by biochemical radicalness rather than modeling the
-specific substitution directly). We restrict those two layers strictly to the
-**Unweighted Scheme (US)**, with all scores and mutation overlaps derived
-solely from US transitions. FADE evidence is not transition-specific (it is a
-per-site test of dN/dS shift along phenotype-associated branches) and so is
-not restricted to the US scheme.
+biochemical groupings are out of scope for those two (they group transitions
+into classes instead of modeling the specific substitution). We restrict those
+two layers strictly to the **Unweighted Scheme (US)**, with all scores and
+mutation overlaps derived solely from US transitions. FADE evidence is not
+transition-specific (it is a per-site test of dN/dS shift along
+phenotype-associated branches) and so is not restricted to the US scheme.
 
 - **`pai_char_score`**: The pathogenicity score of mutating the ancestral human reference amino acid to the derived US alternative amino acid(s) in PrimateAI-3D.
 - **COSMIC Overlap**: The presence and recurrence of somatic mutations mapped to the specific codon under the US transition.
 - **FADE Overlap**: Whether the position falls within the direction-specific FADE_top_sig/FADE_bottom_sig significant site set (BF ≥ `fade_bf_threshold`), and its maximum Bayes Factor.
+- **Biochemistry**: Which of the grouping schemes GS1-GS4 detect the position besides US, how that profile compares with what the permulations produce, and how much of the US set each scheme recovers.
 
 )")
 ```
@@ -1657,6 +1669,239 @@ knitr::kable(
   align = c("l", "l", rep("r", ncol(fade_fisher) - 2))
 )
 ```
+
+```{r biochem-subsec, results='asis'}
+if (has_biochem) cat(r"(## Biochemistry
+
+Every detected substitution is tested against five schemes: `US` (exact amino acid identity) and four biochemical
+groupings, `GS1`-`GS4`, each partitioning the 20 amino acids by a different combination of physicochemical criteria
+(charge, polarity, volume, thiol chemistry). A scheme detects a position when the substitution crosses one of its group
+boundaries. The partitions are independent axes, not nested, so which schemes detect a position identifies the kind of
+property that changed, and how many of them do is mostly a property of where the ancestral residue sits in each partition.
+
+`CAAS_score` and everything ranked on it are the US score alone. The GS schemes enter nowhere in the score: this section
+describes which positions they detect, whether the permulations detect the same kind of positions, and how much of the US
+set each scheme recovers. Detections are position sides (`Gene`, `Position`, `side`) in the plots against the null, whose
+rows are per side, and positions (`Gene`, `Position`) in the overlap tests.
+)")
+```
+
+```{r biochem-setup, eval=has_biochem}
+.schemes <- c("US", "GS1", "GS2", "GS3", "GS4")
+.src_pal <- c(Observed = "#E15759", Null = "grey55")
+.min_rows <- 20   # shares of a cycle with fewer detections are unstable and are left out of the null range
+
+.has_scheme <- function(set, s) grepl(paste0("(^|\\+)", s, "($|\\+)"), set)
+
+# Observed: one row per detected position side.
+bio <- biochem_df %>% dplyr::mutate(anyGS = GS1 | GS2 | GS3 | GS4, n_schemes = US + GS1 + GS2 + GS3 + GS4)
+.scheme_lv <- c(.schemes, "any GS")
+.obs_n <- c(vapply(.schemes, function(s) sum(bio[[s]]), numeric(1)), `any GS` = sum(bio$anyGS))
+
+# Null: detections per (cycle, side, scheme_set). A null written before the scheme_set column existed has no per-scheme
+# profile and the comparisons below show the observed side only.
+has_bio_null <- FALSE
+.f_null <- params$caas_pos_cycle_caas_file
+if (.file_ok(.f_null) && "scheme_set" %in% names(readr::read_tsv(.f_null, n_max = 0, show_col_types = FALSE))) {
+  null_cnt <- readr::read_tsv(.f_null, col_select = c(cycle, side, scheme_set),
+                              col_types = readr::cols(.default = readr::col_character())) %>%
+    dplyr::filter(side %in% c("top", "bottom"), !is.na(scheme_set)) %>%
+    dplyr::count(cycle, scheme_set, name = "n")
+  has_bio_null <- nrow(null_cnt) > 0
+}
+if (has_bio_null) {
+  .cycles <- unique(null_cnt$cycle)
+  # Detections of each scheme (and of any GS) per cycle; a cycle with none counts 0.
+  null_n <- dplyr::bind_rows(lapply(.scheme_lv, function(s) {
+    hit <- if (s == "any GS") grepl("GS", null_cnt$scheme_set) else .has_scheme(null_cnt$scheme_set, s)
+    null_cnt[hit, ] %>% dplyr::group_by(cycle) %>% dplyr::summarise(n = sum(n), .groups = "drop") %>%
+      tidyr::complete(cycle = .cycles, fill = list(n = 0)) %>% dplyr::mutate(scheme = s)
+  })) %>% dplyr::mutate(scheme = factor(scheme, levels = .scheme_lv))
+  null_tot <- null_cnt %>% dplyr::group_by(cycle) %>% dplyr::summarise(total = sum(n), .groups = "drop")
+  null_share <- null_n %>% dplyr::left_join(null_tot, by = "cycle") %>%
+    dplyr::filter(total >= .min_rows) %>% dplyr::mutate(share = n / total)
+}
+```
+
+```{r biochem-rate, eval=has_biochem, fig.height=4.2, fig.width=8}
+# Share of the detections in which each scheme fires: the run against the permulated cycles.
+obs_share <- tibble::tibble(scheme = factor(.scheme_lv, levels = .scheme_lv), share = unname(.obs_n) / nrow(bio))
+p <- ggplot(obs_share, aes(scheme)) +
+  geom_point(aes(y = share, colour = "observed"), size = 3.4, shape = 18)
+if (has_bio_null) {
+  null_rng <- null_share %>% dplyr::group_by(scheme) %>%
+    dplyr::summarise(med = median(share), lo = quantile(share, .025), hi = quantile(share, .975), .groups = "drop")
+  p <- p + geom_pointrange(data = null_rng, aes(y = med, ymin = lo, ymax = hi, colour = "null, median and 95% of cycles"),
+                           position = position_nudge(x = -0.18), size = .5)
+}
+p + scale_colour_manual(values = c(observed = .src_pal[["Observed"]], `null, median and 95% of cycles` = .src_pal[["Null"]]), name = NULL) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0, 1)) +
+  labs(title = "Share of detections in which each scheme fires",
+       subtitle = if (has_bio_null) sprintf("%d position sides in the run | %d null cycles (%d with >= %d detections)",
+                                            nrow(bio), length(.cycles), dplyr::n_distinct(null_share$cycle), .min_rows) else
+                                    sprintf("%d position sides in the run | no per-scheme null available", nrow(bio)),
+       x = NULL, y = "share of detections") +
+  theme(legend.position = "top")
+```
+
+A scheme fires in a share of the detections that depends on the residues involved, and the permulated labelings pick
+substitutions of their own. A red diamond outside the grey range means the run's detections involve that scheme more or
+less often than any null labeling does, which is evidence about the chemistry of the convergence and not about its
+strength. The share of `any GS` includes the detections made by GS schemes only.
+
+```{r biochem-breadth, eval=has_biochem, fig.height=3.8, fig.width=7}
+# Number of schemes that detect each position side.
+.breadth <- dplyr::bind_rows(
+  bio %>% dplyr::count(k = n_schemes) %>% dplyr::mutate(source = "Observed"),
+  if (has_bio_null) null_cnt %>% dplyr::mutate(k = lengths(strsplit(scheme_set, "+", fixed = TRUE))) %>%
+    dplyr::group_by(k) %>% dplyr::summarise(n = sum(n), .groups = "drop") %>% dplyr::mutate(source = "Null")) %>%
+  dplyr::group_by(source) %>% dplyr::mutate(prop = n / sum(n)) %>% dplyr::ungroup() %>%
+  dplyr::mutate(source = factor(source, levels = c("Null", "Observed")))
+ggplot(.breadth, aes(factor(k), prop, fill = source)) +
+  geom_col(position = position_dodge(width = .8), width = .7) +
+  scale_fill_manual(values = .src_pal) + scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(title = "Schemes that detect the position", x = "number of schemes (US + GS)", y = "share of detections", fill = NULL)
+```
+
+```{r biochem-combos, eval=has_biochem, fig.height=5, fig.width=8}
+# Which combination of schemes fired, not just how many. US is part of the label.
+.combo <- bio %>%
+  dplyr::mutate(combo = paste0(ifelse(US, "US+", ""), GS_schemes), combo = sub("\\+$", "", combo)) %>%
+  dplyr::count(combo, sort = TRUE) %>% dplyr::slice_head(n = 15)
+ggplot(.combo, aes(x = reorder(combo, n), y = n)) +
+  geom_col(fill = .tableau10[6], alpha = 0.85) + coord_flip() +
+  labs(title = "Most common scheme combinations", x = NULL, y = "position sides")
+```
+
+```{r biochem-group-size, eval=has_biochem && any(!is.na(biochem_df$anc_aa)), fig.width=11, fig.height=4.5}
+# Firing rate of each GS scheme against the size of the group the ancestral residue belongs to in that scheme. Group
+# definitions mirror src/biochem/grouping.py / CT/local/modules/caas_id.py.
+.aa_groups <- list(
+  GS1 = list("CV", "AGPS", "NDQE", "RHK", "ILMFWY", "T"),
+  GS2 = list("C", "AGV", "DE", "NQHW", "RK", "ILFP", "YMTS"),
+  GS3 = list("C", "AGPST", "NDQE", "RHK", "ILMV", "FWY"),
+  GS4 = list("C", "AILV", "ST", "NQ", "DE", "RH", "G", "P", "K", "M", "F", "WY")
+)
+.group_size_of <- function(aa, scheme) {
+  hit <- Filter(function(g) grepl(aa, g, fixed = TRUE), .aa_groups[[scheme]])
+  if (length(hit) == 0) NA_integer_ else nchar(hit[[1]])
+}
+.fired <- bio %>% dplyr::filter(!is.na(anc_aa)) %>%
+  dplyr::group_by(Gene, Position) %>%
+  dplyr::summarise(anc = dplyr::first(anc_aa), GS1 = any(GS1), GS2 = any(GS2), GS3 = any(GS3), GS4 = any(GS4), .groups = "drop")
+gsz <- dplyr::bind_rows(lapply(names(.aa_groups), function(sch)
+  tibble::tibble(scheme = sch, group_size = vapply(.fired$anc, .group_size_of, integer(1), scheme = sch), fires = .fired[[sch]]))) %>%
+  dplyr::filter(!is.na(group_size))
+gsz_summary <- gsz %>% dplyr::group_by(scheme, group_size) %>%
+  dplyr::summarise(rate = mean(fires), n = dplyr::n(), .groups = "drop") %>% dplyr::filter(n >= 20)
+if (nrow(gsz_summary) > 0) {
+  print(ggplot(gsz_summary, aes(x = factor(group_size), y = rate, fill = scheme)) +
+    geom_col(position = position_dodge(width = 0.8), alpha = 0.85) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0, 1)) +
+    labs(title = "Scheme firing rate vs ancestral residue's group size",
+         x = "Group size of the ancestral residue under that scheme",
+         y = "% of positions where the scheme fires", fill = "Scheme"))
+} else cat("_Not enough positions per (scheme, group-size) cell to plot the firing rate._\n")
+```
+
+An amino acid alone in its group (e.g. threonine under `GS1`) is displaced by almost any substitution, while one in a
+five-member group needs a larger change to cross out. The firing rate of a scheme is therefore a property of the
+ancestral residue before it is a property of the convergence, and the comparison with the null above conditions on it
+only through the composition of the null detections.
+
+```{r biochem-recovery, eval=has_biochem && has_bio_null, fig.height=3.8, fig.width=13}
+# Positions detected by US against positions detected by each GS scheme (and by any GS), one point per null cycle.
+.sc <- null_n %>% dplyr::select(cycle, scheme, n) %>% tidyr::pivot_wider(names_from = scheme, values_from = n) %>%
+  tidyr::pivot_longer(c(GS1, GS2, GS3, GS4, `any GS`), names_to = "gs", values_to = "n_gs")
+.sc_obs <- tibble::tibble(gs = c("GS1", "GS2", "GS3", "GS4", "any GS"), US = unname(.obs_n["US"]), n_gs = unname(.obs_n[c("GS1", "GS2", "GS3", "GS4", "any GS")]))
+ggplot(.sc, aes(pmax(US, 1), pmax(n_gs, 1))) +
+  geom_abline(slope = 1, intercept = 0, colour = "grey50", linetype = "dashed") +
+  geom_point(alpha = .3, size = 1, colour = .src_pal[["Null"]]) +
+  geom_point(data = .sc_obs, colour = .src_pal[["Observed"]], size = 3) +
+  scale_x_log10() + scale_y_log10() + facet_wrap(~factor(gs, levels = c("GS1", "GS2", "GS3", "GS4", "any GS")), nrow = 1) +
+  labs(title = "Recovery of the US detections by the GS schemes",
+       subtitle = sprintf("one point per null cycle (%d), run in red | dashed: as many detections as US", length(.cycles)),
+       x = "position sides detected by US (log10)", y = "position sides detected by the scheme (log10)")
+```
+
+Each point is a permulated cycle (grey) or the run (red). Points below the diagonal are cycles in which the scheme detects
+fewer position sides than US. The position of the red point relative to the grey cloud at the same US volume (the position
+along the x axis) says whether the run recovers more or fewer detections through the scheme than a labeling without the
+phenotype does. Cycles with no detection by a scheme are drawn at 1.
+
+```{r biochem-fisher, eval=has_biochem}
+# Overlap of the US detections with each GS scheme and with any GS, over the tested positions. Unit: (Gene, Position),
+# pooled over the sides. Universe: the positions tested by caastools (restricted to the genes of the universe file) plus
+# every detected position. Without the tested positions the cells "neither" cannot be counted and the test is not run.
+.pos_b <- bio %>% dplyr::group_by(Gene, Position) %>%
+  dplyr::summarise(dplyr::across(c(US, GS1, GS2, GS3, GS4), any), .groups = "drop") %>%
+  dplyr::mutate(anyGS = GS1 | GS2 | GS3 | GS4)
+bio_universe_n <- NA_integer_
+if (.file_ok(params$position_background_file)) {
+  .bg <- strsplit(readLines(params$position_background_file), "\t", fixed = TRUE)
+  .bg <- .bg[vapply(.bg, length, 1L) >= 2 & vapply(.bg, function(x) x[1] != "Gene" && !x[2] %in% c("", "NULL", "Position"), logical(1))]
+  .ids <- unlist(lapply(.bg, function(x) paste0(x[1], ":", trimws(strsplit(x[2], ",", fixed = TRUE)[[1]]))))
+  if (has_background) .ids <- .ids[sub(":.*", "", .ids) %in% bg_genes]
+  bio_universe_n <- dplyr::n_distinct(c(.ids, paste0(.pos_b$Gene, ":", .pos_b$Position)))
+}
+.cmp <- c("GS1", "GS2", "GS3", "GS4", "anyGS")
+bio_fisher <- dplyr::bind_rows(lapply(.cmp, function(g) {
+  both <- sum(.pos_b$US & .pos_b[[g]]); us_only <- sum(.pos_b$US & !.pos_b[[g]]); g_only <- sum(!.pos_b$US & .pos_b[[g]])
+  neither <- if (is.na(bio_universe_n)) NA_real_ else bio_universe_n - both - us_only - g_only
+  ft <- if (is.na(neither) || neither < 0) NULL else
+    tryCatch(fisher.test(matrix(c(both, g_only, us_only, neither), nrow = 2)), error = function(e) NULL)
+  tibble::tibble(Scheme = if (g == "anyGS") "any GS" else g, `US and scheme` = both, `US only` = us_only, `Scheme only` = g_only,
+                 Neither = neither, `% of US detected by the scheme` = 100 * both / max(sum(.pos_b$US), 1),
+                 `Odds ratio` = if (is.null(ft)) NA_real_ else unname(ft$estimate),
+                 `CI low` = if (is.null(ft)) NA_real_ else ft$conf.int[1], `CI high` = if (is.null(ft)) NA_real_ else ft$conf.int[2],
+                 `P value` = if (is.null(ft)) NA_real_ else ft$p.value)
+})) %>% dplyr::mutate(`P (BH)` = p.adjust(`P value`, method = "BH"))
+knitr::kable(bio_fisher %>% dplyr::mutate(
+  `% of US detected by the scheme` = sprintf("%.1f%%", `% of US detected by the scheme`),
+  dplyr::across(c(`Odds ratio`, `CI low`, `CI high`), ~ ifelse(is.na(.x), NA, sprintf("%.2f", .x))),
+  dplyr::across(c(`P value`, `P (BH)`), ~ ifelse(is.na(.x), NA, formatC(.x, format = "e", digits = 2)))),
+  caption = sprintf("Fisher exact test of the overlap between US and each GS scheme over %s tested positions (raw counts of positions)",
+                    if (is.na(bio_universe_n)) "an unknown number of (tested positions not supplied)" else format(bio_universe_n, big.mark = ",")),
+  align = c("l", rep("r", ncol(bio_fisher) - 1)))
+```
+
+Each row is a 2 x 2 table of the tested positions: detected by US or not, against detected by the scheme or not (`Neither`
+are the tested positions that neither detects). An odds ratio above 1 means that the scheme detects the US positions
+more often than it detects the positions US does not detect. The `any GS` row is the same test against the union of the
+four schemes. The five P values are not independent (the schemes overlap), so `P (BH)` is a guide to the family, not a
+calibrated error rate. The schemes recode the same alignment columns, so a positive overlap is expected by construction;
+the test measures how strong it is, not whether it exists.
+
+```{r biochem-table, eval=has_biochem}
+# One table for all of it: detections, share against the null, recovery of US and overlap with it.
+.tab <- tibble::tibble(
+  Scheme = .scheme_lv,
+  `Position sides` = unname(.obs_n),
+  `Share of detections` = sprintf("%.1f%%", 100 * unname(.obs_n) / nrow(bio)))
+if (has_bio_null) {
+  .nr <- null_share %>% dplyr::group_by(scheme) %>%
+    dplyr::summarise(`Null median` = sprintf("%.1f%%", 100 * median(share)),
+                     `Null 95% range` = sprintf("%.1f-%.1f%%", 100 * quantile(share, .025), 100 * quantile(share, .975)),
+                     .groups = "drop")
+  .ge <- vapply(.scheme_lv, function(s) {
+    o <- unname(.obs_n[s]) / nrow(bio); v <- null_share$share[null_share$scheme == s]
+    sprintf("%.1f%%", 100 * mean(v >= o))
+  }, character(1))
+  .tab <- .tab %>% dplyr::left_join(.nr %>% dplyr::mutate(Scheme = as.character(scheme)) %>% dplyr::select(-scheme), by = "Scheme") %>%
+    dplyr::mutate(`Cycles >= run` = unname(.ge))
+}
+.tab <- .tab %>% dplyr::left_join(
+  bio_fisher %>% dplyr::transmute(Scheme, `Positions with US` = `US and scheme`, `Positions without US` = `Scheme only`,
+                                  `OR with US` = ifelse(is.na(`Odds ratio`), NA, sprintf("%.2f", `Odds ratio`)),
+                                  `P (BH)` = ifelse(is.na(`P (BH)`), NA, formatC(`P (BH)`, format = "e", digits = 2))),
+  by = "Scheme")
+.tab$`Positions with US`[.tab$Scheme == "US"] <- sum(.pos_b$US)
+kbl_html(.tab, caption = "Detections by scheme: share against the null cycles, and positions shared with US (positions pooled over the sides)")
+```
+
+`Cycles >= run` is the share of null cycles in which the scheme fires in at least the same share of detections as in
+the run. The null columns need a null written with the scheme profile of each detection; the overlap columns need the
+tested positions.
 
 ```{r reg-accum-subsec, results='asis'}
 if (has_genomic) cat("## Regional Accumulation\n\n")

@@ -13,7 +13,7 @@ Two PhyloPhere runs on the same 970-column ppc-1 alignment and tree, differing i
 | hypotheses × pairs | 100 × 4 | 100 × 3 |
 | null cycles, hypotheses per cycle | 1000, 100 each | 1000, 100 each |
 
-Position numbers are maize PEPC1 (`position_scores.tsv` `Position` + 1). The four position p-values are informative and carry no threshold in the pipeline: `p.emp`, its BH adjustment over the null universe `p.adj_bh` (one test per position), the factorized `p.emp_fact` and its BH adjustment `p.adj_bh_fact` over the same family (§6c). This report marks values below 0.05 and counts positions below 0.05 and 0.1 to describe them. `CAAS_score` is `US + mean(GS)`: the exact-identity score (US) plus the mean of the grouping-scheme scores (GS1 to GS4) of the schemes that scored the position, each term 0 when absent; it lies between 0 and 2. `pepc_pvalue_tables.py` prints the tables of this report from the results directory.
+Position numbers are maize PEPC1 (`position_scores.tsv` `Position` + 1). The four position p-values are informative and carry no threshold in the pipeline: `p.emp`, its BH adjustment over the null universe `p.adj_bh` (one test per position), the factorized `p.emp_fact` and its BH adjustment `p.adj_bh_fact` over the same family (§6c). This report marks values below 0.05 and counts positions below 0.05 and 0.1 to describe them. `CAAS_score` is `(US + mean(GS)) / 2`: half the exact-identity score (US) plus half the mean of the grouping-scheme scores (GS1 to GS4) of the schemes that scored the position, each term 0 when absent; it lies between 0 and 1. `pepc_pvalue_tables.py` prints the tables of this report from the results directory.
 
 ## 1. Truth positions against their nulls
 
@@ -21,21 +21,21 @@ Position numbers are maize PEPC1 (`position_scores.tsv` `Position` + 1). The fou
 
 | pos | trait | observed CAAS | n_hyp /100 | null detects | null q50 | null q90 | null q99 | k_emp | p.emp | p.adj_bh |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 780 | geno | 2.000 | 49 | 867 | 0.910 | 1.243 | 1.490 | 0 | <0.001 | **0.026** |
-| 780 | pheno | 1.830 | 73 | 543 | 1.183 | 1.451 | 1.614 | 0 | <0.001 | **0.016** |
-| 665 | geno | 2.000 | 100 | 936 | 0.902 | 1.241 | 1.427 | 0 | <0.001 | **0.026** |
-| 665 | pheno | 1.824 | 92 | 670 | 1.201 | 1.451 | 1.594 | 0 | <0.001 | **0.016** |
-| 540 | geno | 2.000 | 100 | 931 | 0.829 | 1.191 | 1.418 | 0 | <0.001 | **0.026** |
-| 540 | pheno | 1.812 | 97 | 821 | 0.920 | 1.385 | 1.559 | 0 | <0.001 | **0.016** |
-| 572 | geno | 0.707 | 100 | 907 | 0.472 | 1.008 | 1.265 | 275 | 0.276 | 0.75 |
-| 572 | pheno | 1.809 | 97 | 576 | 1.193 | 1.450 | 1.571 | 0 | <0.001 | **0.016** |
-| 731 | geno | 1.407 | 76 | 875 | 0.554 | 1.014 | 1.253 | 1 | 0.0020 | **0.042** |
-| 731 | pheno | 1.786 | 85 | 563 | 1.191 | 1.450 | 1.559 | 0 | <0.001 | **0.016** |
-| 505 | geno | 1.221 | 100 | 762 | 0.808 | 1.137 | 1.347 | 42 | 0.043 | 0.44 |
-| 505 | pheno | 1.597 | 84 | 577 | 1.199 | 1.505 | 1.645 | 15 | 0.016 | 0.17 |
+| 780 | geno | 1.000 | 49 | 867 | 0.455 | 0.622 | 0.745 | 0 | <0.001 | **0.026** |
+| 780 | pheno | 0.915 | 73 | 543 | 0.592 | 0.725 | 0.807 | 0 | <0.001 | **0.016** |
+| 665 | geno | 1.000 | 100 | 936 | 0.451 | 0.621 | 0.713 | 0 | <0.001 | **0.026** |
+| 665 | pheno | 0.912 | 92 | 670 | 0.601 | 0.726 | 0.797 | 0 | <0.001 | **0.016** |
+| 540 | geno | 1.000 | 100 | 931 | 0.415 | 0.595 | 0.709 | 0 | <0.001 | **0.026** |
+| 540 | pheno | 0.906 | 97 | 821 | 0.460 | 0.693 | 0.779 | 0 | <0.001 | **0.016** |
+| 572 | geno | 0.353 | 100 | 907 | 0.236 | 0.504 | 0.633 | 275 | 0.276 | 0.75 |
+| 572 | pheno | 0.904 | 97 | 576 | 0.597 | 0.725 | 0.785 | 0 | <0.001 | **0.016** |
+| 731 | geno | 0.704 | 76 | 875 | 0.277 | 0.507 | 0.627 | 1 | 0.0020 | **0.042** |
+| 731 | pheno | 0.893 | 85 | 563 | 0.595 | 0.725 | 0.780 | 0 | <0.001 | **0.016** |
+| 505 | geno | 0.611 | 100 | 762 | 0.404 | 0.569 | 0.674 | 42 | 0.043 | 0.44 |
+| 505 | pheno | 0.798 | 84 | 577 | 0.599 | 0.752 | 0.822 | 15 | 0.016 | 0.17 |
 
-- **Under the phenotypic trait the five strongest truth positions (540, 572, 665, 731, 780) exceed all 1000 null cycles** (`k_emp` = 0, `p.emp` at its floor). Under the genotypic trait 780, 665, 540 do; 731 is matched by 1 cycle and 572 (0.707) by 275, so 572 lies below its own null q99 (1.265).
-- **Null scale differs between runs.** Null medians at the truth positions are 0.47 to 0.91 (genotypic) and 0.92 to 1.20 (phenotypic); the pooled null quartiles over all detected positions are 0 / 0.395 / 0.749 and 0 / 0.590 / 1.082, and the observed quartiles 0.223 / 0.506 / 0.941 and 0.181 / 0.738 / 1.248. `CAAS_score` is therefore not comparable across the two runs; the p-values, calibrated within each run, are.
+- **Under the phenotypic trait the five strongest truth positions (540, 572, 665, 731, 780) exceed all 1000 null cycles** (`k_emp` = 0, `p.emp` at its floor). Under the genotypic trait 780, 665, 540 do; 731 is matched by 1 cycle and 572 (0.353) by 275, so 572 lies below its own null q99 (0.633).
+- **Null scale differs between runs.** Null medians at the truth positions are 0.24 to 0.45 (genotypic) and 0.46 to 0.60 (phenotypic); the pooled null quartiles over all detected positions are 0 / 0.197 / 0.374 and 0 / 0.295 / 0.541, and the observed quartiles 0.112 / 0.253 / 0.470 and 0.090 / 0.369 / 0.624. `CAAS_score` is therefore not comparable across the two runs; the p-values, calibrated within each run, are.
 - The phenotypic null detects each of the five strongest truth positions less often (543 to 821 cycles vs 867 to 936), consistent with 3-of-3 all-or-nothing detection per hypothesis (§4).
 
 ## 2. Truth set, side by side
@@ -61,8 +61,8 @@ Position numbers are maize PEPC1 (`position_scores.tsv` `Position` + 1). The fou
 | non-truth positions with `p.adj_bh` below 0.05 | 1 (751) | 1 (518) |
 | non-truth positions with `p.adj_bh_fact` below 0.05 | 2 (611, 751) | 1 (518) |
 
-- **Recovery under the non-circular trait.** Both mutagenesis sites and both selection-tier sites have `p.adj_bh` below 0.05 under the phenotypic trait, and 780, 665 and 572 also under `p.adj_bh_fact` (540: 0.088). They hold score ranks 1 to 4 (1.830 to 1.809); 518 (outside the truth set) and 731 follow at ranks 5 and 6, and the next position scores 1.624.
-- **The genotypic hits are partly circular.** 780 defines the genotypic label; 540 and 665 carry the derived residue in 23/23 genotypic-C4 tips (`pepc_results.md`, caveats). All three share the maximum of the score scale (2.000) and rank 1; their genotypic p-values are close to definitional and are not evidence for the method. Under the genotypic trait 572 is not below 0.05 (`p.adj_bh` 0.75).
+- **Recovery under the non-circular trait.** Both mutagenesis sites and both selection-tier sites have `p.adj_bh` below 0.05 under the phenotypic trait, and 780, 665 and 572 also under `p.adj_bh_fact` (540: 0.088). They hold score ranks 1 to 4 (0.915 to 0.904); 518 (outside the truth set) and 731 follow at ranks 5 and 6, and the next position scores 0.812.
+- **The genotypic hits are partly circular.** 780 defines the genotypic label; 540 and 665 carry the derived residue in 23/23 genotypic-C4 tips (`pepc_results.md`, caveats). All three share the maximum of the score scale (1.000) and rank 1; their genotypic p-values are close to definitional and are not evidence for the method. Under the genotypic trait 572 is not below 0.05 (`p.adj_bh` 0.75).
 - **The weak tier does not separate from the background** in either run, except 731: `p.adj_bh` 0.042 genotypic and 0.016 phenotypic, `p.adj_bh_fact` 0.053 and 0.031. 505 under the phenotypic trait is the nearest of the others (0.17; 0.16).
 - **Limit.** The top-10 cutoff is post hoc and descriptive. With 1000 cycles the floor of `p.emp` is 0.001; positions at the floor share one `p.adj_bh` value, so their order rests on `CAAS_score` and on the factorized p.
 
@@ -149,7 +149,7 @@ Counts of positions below 0.1, except the raw count (below 0.05). "Candidate set
 
 `p.emp_fact = (nd + 1)/(N + 1) × (1 + #{detections of the class with score ≥ s})/(1 + #{detections of the class})`, where `nd` is the number of null cycles that score the position and the class is one of 20 percentile classes of the null detections (`FACT_PROP_CLASSES`). The evaluated position counts as one more detection of its own and is classed by `nd + 1`. It is not bounded below by 1/(N + 1). `p.adj_bh_fact` is its BH over the null universe.
 
-Calibration: each of the 1000 null cycles in turn is treated as observed and scored against the remaining 999, with the `.fact_*` functions of `scoring_compute.R` (`pepc_null_calibration.R`). A position the cycle does not score has p = 1. Under exchangeability the share of (position, cycle) pairs with p ≤ α cannot exceed α. For `p.emp` the share divided by α is 0.84, 0.82 and 0.79 (genotypic) and 0.76, 0.81 and 0.77 (phenotypic) at α = 0.001, 0.01 and 0.05. The share of null cycles, taken as observed, with at least one position below 0.05 and 0.1 after BH of `p.emp` is 0.001 and 0.010 (genotypic) and 0.009 and 0.066 (phenotypic). The script writes the same tables for `p.emp_fact` and `p.adj_bh_fact` to the `calibration/` folder of the run.
+Calibration: each of the 1000 null cycles in turn is treated as observed and scored against the remaining 999, with the `.fact_*` functions of `scoring_compute.R` (`pepc_null_calibration.R`). A position the cycle does not score has p = 1. Under exchangeability the share of (position, cycle) pairs with p ≤ α cannot exceed α. For `p.emp` the share divided by α is 0.84, 0.82 and 0.79 (genotypic) and 0.74, 0.81 and 0.77 (phenotypic) at α = 0.001, 0.01 and 0.05. The share of null cycles, taken as observed, with at least one position below 0.05 and 0.1 after BH of `p.emp` is 0.001 and 0.010 (genotypic) and 0.009 and 0.065 (phenotypic). The script writes the same tables for `p.emp_fact` and `p.adj_bh_fact` to the `calibration/` folder of the run.
 
 - **`p.emp` is conservative** at every α, as expected for a statistic that counts ties and detection at the same time; BH of `p.emp` spends well under its budget, most visibly in the genotypic run where the 1/N floor binds.
 - **Scope.** Null cycles are draws from one generator, so this checks the estimators under exchangeability, not whether the observed labelling is exchangeable with the null ones (§6d). Pairs of the same position or the same cycle are not independent, and no standard error is given for the shares. Behavior under partial nulls and at genome scale is not tested.
@@ -159,7 +159,7 @@ Calibration: each of the 1000 null cycles in turn is treated as observed and sco
 | check | genotypic | phenotypic |
 |---|---|---|
 | observed detections vs null per-cycle detections | 59; null median 44, q95 58; P(null ≥ obs) = 0.049 | 57; null median 32, q95 57; P = 0.056 |
-| observed vs pooled-null `CAAS_score` quartiles | 0.223 / 0.506 / 0.941 vs 0 / 0.395 / 0.749 | 0.181 / 0.738 / 1.248 vs 0 / 0.590 / 1.082 |
+| observed vs pooled-null `CAAS_score` quartiles | 0.112 / 0.253 / 0.470 vs 0 / 0.197 / 0.374 | 0.090 / 0.369 / 0.624 vs 0 / 0.295 / 0.541 |
 | null cycles with the observed design (100 hypotheses) | 1000/1000 | 1000/1000 |
 
 The observed data detect as many positions as the upper tail of the null cycles, and score above their median; this is what signal would produce and is not by itself diagnostic. Because every null cycle carries the same 100-hypothesis design as the observed data, the null is conditioned on design size by construction. The real labelling, routed through the null path as cycle b_0, reproduces every position score of the observed run (maximum difference 1 × 10⁻¹⁶ over 67 and 71 position-side scores), so the scoring is shared between the two paths. Whether the full observed path is exchangeable with the null under no association is tested by the negative controls (§6e).

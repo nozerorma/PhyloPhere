@@ -267,6 +267,7 @@ workflow SCORING {
 
     emit:
         position_scores  = compute_out.position_scores
+        position_biochem = compute_out.position_biochem   // scheme profile of every detected position (GS-only included)
         gene_scores      = compute_out.gene_scores
         fcs_stats        = compute_out.fcs_stats
         fcs_stats_rer    = compute_out.fcs_stats_rer

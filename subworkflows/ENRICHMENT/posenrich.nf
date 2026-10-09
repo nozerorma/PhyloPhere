@@ -301,6 +301,12 @@ process POSENRICH_REPORT {
     path genomic_info
     path fade_sites_top
     path fade_sites_bottom
+    // Biochemistry section: position_biochem.tsv (observed scheme profile of every detected
+    // position), the CAAS null with its per-detection scheme_set, and the tested positions
+    // (caastools background.output) that give the universe of its overlap tests.
+    path position_biochem
+    path caas_cycle_null
+    path position_background
     // SCORING's position_lists/, the foreground source of the enrichment test. The
     // report reads the same 10/5/1% cutoffs instead of recomputing quantiles.
     path position_lists
@@ -326,6 +332,9 @@ process POSENRICH_REPORT {
     def genomic_info_arg = (genomic_info.name =~ /^NO_FILE/) ? 'NULL' : "'${genomic_info}'"
     def fade_sites_top_arg = (fade_sites_top.name =~ /^NO_FILE/) ? 'NULL' : "'${fade_sites_top}'"
     def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_FILE/) ? 'NULL' : "'${fade_sites_bottom}'"
+    def biochem_arg = (position_biochem.name =~ /^NO_FILE/) ? 'NULL' : "'${position_biochem}'"
+    def cycle_null_arg = (caas_cycle_null.name =~ /^NO_FILE/) ? 'NULL' : "'${caas_cycle_null}'"
+    def pos_bg_arg = (position_background.name =~ /^NO_FILE/) ? 'NULL' : "'${position_background}'"
     def fcs_stats_arg = (fcs_stats.name =~ /^NO_FILE/) ? 'NULL' : "'${fcs_stats}'"
     def universe_arg  = (cleaned_background.name =~ /^NO_FILE/) ? 'NULL' : "'${cleaned_background}'"
     def position_lists_arg = (position_lists.name =~ /^NO_/) ? 'NULL' : "'${position_lists}'"
@@ -344,6 +353,9 @@ process POSENRICH_REPORT {
                 genomic_info_file    = ${genomic_info_arg},
                 fade_sites_top_file    = ${fade_sites_top_arg},
                 fade_sites_bottom_file = ${fade_sites_bottom_arg},
+                position_biochem_file = ${biochem_arg},
+                caas_pos_cycle_caas_file = ${cycle_null_arg},
+                position_background_file = ${pos_bg_arg},
                 fcs_stats_file = ${fcs_stats_arg},
                 universe_file  = ${universe_arg},
                 position_lists_dir = ${position_lists_arg},
@@ -393,6 +405,7 @@ workflow POSENRICH {
     fade_sites_top_file     // optional: fade_sites_top.csv (FADE_top_sig position group)
     fade_sites_bottom_file  // optional: fade_sites_bottom.csv (FADE_bottom_sig position group)
     caas_cycle_null_file    // optional: perm_pos_cycle_caas.tsv.gz, the null
+    position_biochem_file   // optional: position_biochem.tsv (Biochemistry section of the report)
 
     main:
     POSENRICH_BUILD_GMT(
@@ -501,6 +514,9 @@ workflow POSENRICH {
         genomic_info_file,
         fade_sites_top_file,
         fade_sites_bottom_file,
+        position_biochem_file,
+        caas_cycle_null_file,
+        background_output,
         position_lists_file,
         annot_file,
         cleaned_background

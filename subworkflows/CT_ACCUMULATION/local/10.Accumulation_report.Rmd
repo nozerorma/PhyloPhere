@@ -87,8 +87,8 @@ theme_set(
     plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
   )
 )
-# Order of the schemes in tables and plots; 'cct' is the combined scheme computed below
-scheme_order <- c("us", "gs1", "gs2", "gs3", "gs4", "cct")
+# Order of schemes: accumulation evaluates the unweighted scheme (US) only
+scheme_order <- c("us")
 
 fdr_thr   <- params$fdr_threshold
 pval_thr  <- fdr_thr
@@ -120,62 +120,9 @@ if (!has_data) stop("No accumulation CSVs found under: ", accum_dir)
 # Standardize the gene column name (Gene / gene)
 if ("Gene" %in% names(raw) && !"gene" %in% names(raw)) raw <- rename(raw, gene = Gene)
 
-# ── Combined p-value across the 5 group schemes (Cauchy Combination Test) ────
-# Produces a single per-(gene, direction) p-value from the five per-scheme ones.
-# The same combiner runs in scoring_compute.R and accum_gene_lists.nf on the same
-# inputs; the three must agree, since they feed the scoring table, the gene lists
-# and this report.
-#
-# CCT is used instead of an independence-based combiner: a single physical
-# position can be a CAAS under several nested grouping schemes, so the per-scheme
-# counts, and therefore their p-values, are positively correlated. Drawing each
-# group's null separately calibrates each p-value marginally but does nothing to
-# that correlation, which lives in the observed data. The heavy Cauchy tail of CCT
-# keeps its null valid under arbitrary dependence between the combined p-values,
-# whereas a combiner that assumes independence inflates the type-I rate.
-# Weights follow the position score (US + mean(GS)): US 0.5 and each GS 0.125, renormalized over the
-# groups present, so the GS block weighs as much as US.
-.cct_weights <- c(us = 0.5, gs1 = 0.125, gs2 = 0.125, gs3 = 0.125, gs4 = 0.125)
-.cct_combine <- function(ps, schemes) {
-  valid <- !is.na(ps)
-  w  <- .cct_weights[as.character(schemes)][valid]
-  ps <- ps[valid]
-  if (length(ps) == 0) return(NA_real_)
-  # Missing p-values are dropped (an absent group is not a p of 1). When every
-  # remaining group reports p = 1 the result is 1. Otherwise the p-values are
-  # clamped to [1e-15, 1 - 1e-15] to keep tan() finite, which makes a group with
-  # p = 1 contribute a very large negative term: one such group pulls the combined
-  # p towards 1 whatever the other groups report.
-  if (all(ps >= 1)) return(1.0)
-  ps   <- pmin(pmax(ps, 1e-15), 1 - 1e-15)
-  stat <- sum(w / sum(w) * tan((0.5 - ps) * pi))
-  pcauchy(stat, lower.tail = FALSE)
-}
-
-group_schemes <- c("us", "gs1", "gs2", "gs3", "gs4")
-
-cct_df <- raw %>%
-  filter(scheme %in% group_schemes, !is.na(PValueEmpirical)) %>%
-  group_by(gene, direction) %>%
-  summarise(
-    PValueEmpirical = .cct_combine(PValueEmpirical, scheme),
-    ActualCount     = sum(ActualCount, na.rm = TRUE),
-    # MeanSim and SD are pooled as if the groups were independent: a descriptive
-    # summary only, not the basis of the p-value above (CCT works on the p-values
-    # directly and makes no independence assumption). RandsAbove and RandsBelow are
-    # counts of one group's own null draws and carry no pooled meaning, so they are NA.
-    MeanSim         = sum(MeanSim, na.rm = TRUE),
-    SD              = sqrt(sum(SD^2, na.rm = TRUE)),
-    RandsAbove      = NA_integer_,
-    RandsBelow      = NA_integer_,
-    NumRands        = max(NumRands, na.rm = TRUE),
-    scheme          = "cct",
-    .groups         = "drop"
-  )
-
-# Append the combined scheme. A `full_pool` row is excluded if present: it would sum
-# counts across groups and so count a position once per grouping scheme it satisfies.
-raw <- bind_rows(raw %>% filter(scheme != "full_pool"), cct_df)
+# Accumulation evaluates the unweighted scheme (US) only; biochemical GS schemes
+# describe positions and are excluded from accumulation.
+raw <- raw %>% filter(scheme == "us")
 
 # ── BH FDR per direction × scheme, excluding genes with ActualCount = 0 ───────
 # Genes with ActualCount = 0 have p = 1 by construction, not by test, and must not
@@ -262,7 +209,7 @@ DT::datatable(
 ```{r scatter-tabs, results='asis'}
 for (dir in directions) {
   cat(sprintf("\n\n### %s\n\n", str_to_title(dir)))
-  sub <- accum %>% filter(direction == dir, scheme != "cct")
+  sub <- accum %>% filter(direction == dir)
   if (nrow(sub) == 0) { cat("*No data.*\n\n"); next }
 
   p <- ggplot(sub, aes(x = MeanSim, y = ActualCount, colour = significant)) +
@@ -273,7 +220,6 @@ for (dir in directions) {
       aes(label = gene), size = 2.5, max.overlaps = 20, show.legend = FALSE
     ) +
     scale_colour_manual(values = c("FALSE" = "grey70", "TRUE" = dir_colours[[dir]])) +
-    facet_wrap(~ scheme, nrow = 2) +
     labs(
       x      = "Mean simulated count",
       y      = "Actual count",
@@ -301,7 +247,6 @@ for (dir in directions) {
   p <- ggplot(sub, aes(x = PValueEmpirical, fill = scheme)) +
     geom_histogram(bins = 40, alpha = 0.7, colour = "white") +
     geom_vline(xintercept = fdr_thr, linetype = "dashed", colour = "red") +
-    facet_wrap(~ scheme, nrow = 2, scales = "free_y") +
     scale_fill_manual(values = setNames(.tableau10[seq_along(scheme_order)], scheme_order)) +
     labs(x = "Empirical p-value", y = "Gene count",
          title = sprintf("Direction: %s", str_to_title(dir))) +
@@ -317,15 +262,7 @@ for (dir in directions) {
 
 ## Significant genes {.tabset}
 
-> **Note on the `cct` scheme:** these rows combine the five group schemes (`us`, `gs1`-`gs4`)
-> into one p-value per gene using the **Cauchy Combination Test**, which stays valid under
-> arbitrary dependence between the p-values it combines. That property is what the data
-> requires: one physical position can be a CAAS under several nested schemes, so the per-scheme
-> p-values are positively correlated, and a combiner assuming independence would report far
-> more significant genes than the evidence supports. `MeanSim`/`SD` are pooled as if the groups
-> were independent and are descriptive only — the combined p-value is computed from the
-> p-values directly, not from these. `RandsAbove`/`RandsBelow` are order statistics of a single
-> group's own null draws, carry no pooled meaning, and are shown as `NA` here.
+> Genes with at least one observed CAAS (ActualCount > 0) are tested; significance is evaluated by empirical p-value under the Unweighted Scheme (US), adjusted by Benjamini-Hochberg FDR (`FDR < 0.05`).
 
 ```{r sig-tables, results='asis'}
 for (dir in directions) {
@@ -349,71 +286,8 @@ for (dir in directions) {
 
 ---
 
-## Gene overlap across schemes {.tabset}
-
-### Overview
-
-```{r overlap}
-sig_genes_by_scheme <- accum %>%
-  filter(significant) %>%
-  group_by(direction, scheme) %>%
-  summarise(genes = list(unique(gene)), .groups = "drop")
-
-overlap_tbl <- sig_genes_by_scheme %>%
-  group_by(direction) %>%
-  summarise(
-    schemes_with_hits = sum(map_int(genes, length) > 0),
-    union_genes       = n_distinct(unlist(genes)),
-    intersection_genes = {
-      gl <- genes[map_int(genes, length) > 0]
-      if (length(gl) == 0) 0L
-      else length(Reduce(intersect, gl))
-    },
-    .groups = "drop"
-  )
-
-knitr::kable(overlap_tbl, rownames = FALSE, caption = "Summary gene overlap counts across schemes per direction") %>%
-  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-```
-
-```{r overlap-details, results='asis'}
-for (dir in directions) {
-  cat(sprintf("\n\n### %s Details\n\n", str_to_title(dir)))
-  
-  sub_sig <- accum %>%
-    filter(direction == dir, significant)
-  
-  if (nrow(sub_sig) == 0) {
-    cat("*No significant genes to show overlap for.*\n\n")
-    next
-  }
-  
-  overlap_detail <- sub_sig %>%
-    mutate(has_sig = "✔") %>%
-    pivot_wider(
-      id_cols = gene,
-      names_from = scheme,
-      values_from = has_sig,
-      values_fill = ""
-    )
-  
-  all_cols <- c("gene", scheme_order)
-  present_cols <- intersect(all_cols, names(overlap_detail))
-  overlap_detail <- overlap_detail %>% select(all_of(present_cols))
-  
-  print(
-    knitr::kable(
-      overlap_detail, rownames = FALSE, format = "html", escape = TRUE,
-      caption = sprintf("Detailed gene overlap matrix across schemes | direction: %s", str_to_title(dir))
-    ) %>% kableExtra::kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = TRUE)
-  )
-  cat("\n\n")
-}
-```
-
-
 ```{r write-summary}
-# Summary TSV: one row per significant (gene, direction) with the schemes that call it
+# Summary TSV: one row per significant (gene, direction)
 sig_summary <- accum %>%
   filter(significant) %>%
   group_by(gene, direction) %>%
@@ -428,15 +302,6 @@ sig_summary <- accum %>%
 
 out_tsv <- file.path(params$output_dir, paste0("accumulation_summary_", params$traitname, ".tsv"))
 write_tsv(sig_summary, out_tsv)
-
-# Combined-scheme TSV: every gene of the cct scheme, sorted by direction and FDR
-cct_export <- accum %>%
-  filter(scheme == "cct") %>%
-  select(gene, direction, ActualCount, PValueEmpirical, FDR, significant) %>%
-  arrange(direction, FDR)
-
-out_cct <- file.path(params$output_dir, paste0("accumulation_summary_cct_", params$traitname, ".tsv"))
-write_tsv(cct_export, out_cct)
 
 invisible(NULL)
 ```

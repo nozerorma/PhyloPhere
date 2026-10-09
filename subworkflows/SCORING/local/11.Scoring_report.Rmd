@@ -141,7 +141,7 @@ gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
 # position_scores.tsv carries no per-scheme factor: a position-level mean of asr_score would hide
-# scheme disagreement, and CAAS_score is already the aggregate ((US + mean of the GS schemes) / 2) of asr_path_score.
+# scheme disagreement, and CAAS_score is already the US asr_path_score of the position.
 # `asr_score` is aliased to asr_path_score when the table has it and to CAAS_score otherwise, so
 # that the panels below always find the column.
 if (!"asr_score" %in% names(pos_df)) {
@@ -154,7 +154,8 @@ if (!"asr_score" %in% names(pos_df)) {
 
 # Provisional availability flags from gene_df; has_rand and has_rer are set again from the same
 # columns further down.
-has_rand <- "accum_cct_p" %in% names(gene_df) && any(!is.na(gene_df$accum_cct_p))
+has_rand <- ("accum_p" %in% names(gene_df) && any(!is.na(gene_df$accum_p))) ||
+            ("accum_cct_p" %in% names(gene_df) && any(!is.na(gene_df$accum_cct_p)))
 has_rer  <- "rer_min_pval"    %in% names(gene_df) && any(!is.na(gene_df$rer_min_pval)) &&
             "rer_rho"         %in% names(gene_df)
 
@@ -193,8 +194,6 @@ if (has_genomic) {
 } else {
   genomic_raw <- NULL
 }
-
-scheme_levels <- c("US", "GS1", "GS2", "GS3", "GS4")
 
 accum_scheme_info <- tibble(
   scheme = c("us", "gs4", "gs3", "gs2", "gs1"),
@@ -243,10 +242,10 @@ gene_df$gene_caas_top <- .num_col("gene_caas_score_top")
 gene_df$gene_caas_bot <- .num_col("gene_caas_score_bottom")
 
 # ── Gene-level accumulation significance ──────────────────────────────────────
-# Accumulation is represented by its CCT combined p-value (accum_cct_p) across
-# the per-scheme accum p-values, with BH FDR (accum_fdr) and accum_significant
-# (accum_fdr < 0.05).
-has_accum_score <- "accum_cct_p" %in% names(gene_df) && any(!is.na(gene_df$accum_cct_p))
+# Accumulation is represented by its US empirical p-value (accum_p / accum_cct_p),
+# with BH FDR (accum_fdr) and accum_significant (accum_fdr < 0.05).
+has_accum_score <- ("accum_p" %in% names(gene_df) && any(!is.na(gene_df$accum_p))) ||
+                   ("accum_cct_p" %in% names(gene_df) && any(!is.na(gene_df$accum_cct_p)))
 has_rand <- has_accum_score
 
 # ── Gene-level direction assignment ───────────────────────────────────────────
@@ -341,20 +340,19 @@ rank_norm <- function(x) {
 
 ## Introduction
 
-CAAS Scoring combines a position's convergence and biochemical evidence into one
-ranked score, then rolls that up to a per-gene score comparable against
+CAAS Scoring ranks the positions by their US convergence score, then rolls that up to a per-gene score comparable against
 independent evolutionary evidence.
 
-1. **Position score (`CAAS_score`)**: the CAAS convergence score on the pair's
-   Voronoi domain, averaged over the biochemical schemes that detected the
-   position. Evidence that the convergence reflects independent origins, not
-   shared ancestry. See Scoring Methodology below and the Biochemistry tab
-   for how the schemes factor in.
+1. **Position score (`CAAS_score`)**: the CAAS convergence score of the US
+   scheme on the pair's Voronoi domain. Evidence that the convergence reflects
+   independent origins, not shared ancestry. The biochemical schemes GS1-GS4 do
+   not enter the score; they are described in the Biochemistry section of the
+   position-level enrichment report.
 
 2. **Gene score (`gene_caas_score_top` / `_bottom`)**: the gene's strongest
    position, adjusted for how many positions the gene has, so genes are not
    rewarded simply for having more of them. Compared against:
-   `r if (has_rand) "- **accum_cct_p**: Cauchy-combined p-value across per-scheme accumulation p-values (+ BH FDR accum_fdr)."`
+   `r if (has_rand) "- **accum_p**: Empirical p-value under the US scheme (+ BH FDR accum_fdr)."`
    `r if (has_rer) "- RERConverge p-value and direction (accelerating / decelerating)."`
    - FADE: gene is significant per direction if any position has BF >= 100.
 
@@ -398,7 +396,7 @@ reproduced independently of the pipeline code.
 
 ### Position-Level Score
 
-`CAAS_score` is built from one evidence axis; `caas_row` and the position score `(US + mean(GS)) / 2` both lie in [0, 1]:
+`CAAS_score` is built from one evidence axis; `caas_row` and the position score (the US `caas_row`) both lie in [0, 1]:
 
 #### 1. Position evolution: `asr_path_score` (`asr_score`)
 
@@ -414,23 +412,18 @@ Voronoi domain, built from the per-node ASR posteriors (full definitions in
 (Core v3 removed the pairwise isolation factor `s_c^s * s_d^s` and the earlier
 `independence` / `mrca_diversity` / `conservation_gate` axes from the score.)
 
-#### 2. Combining schemes
+#### 2. Schemes
 
-A substitution is tested against five biochemical partitions (US, GS1-GS4); a
-scheme "detects" the position if the substitution crosses one of its group
-boundaries. `CAAS_score` is half the US score (0 when US did not detect the position) plus half the mean over the GS1-GS4
-schemes that detected it (0 when none did), so it lies in [0, 1]. The GS term is the bonus for a divergence in
-chemistry, and a position detected only by GS schemes keeps it instead of dropping out:
+A substitution is tested against five partitions of the amino acids (US, GS1-GS4); a scheme "detects" the position if the
+substitution crosses one of its group boundaries. `CAAS_score` is the `caas_row` of the US scheme, so it lies in [0, 1]:
 
-$$\text{caas\_row} = \text{asr\_path\_score}$$
+$$\text{caas\_row} = \text{asr\_path\_score}, \qquad \text{CAAS\_score} = \text{caas\_row}_{US}$$
 
-(`caas_row` carries no permutation-rank phenotype factor, on the observed or the null side.)
-$$\text{CAAS\_score} = \tfrac{1}{2}\left(\text{caas\_row}_{US} + \operatorname{mean}_{s \in \text{detected GS}} \text{caas\_row}_s\right)$$
-
-`n_schemes` (how many partitions detected the position) and `scheme_set`
-(which ones) are reported as descriptors and do not scale the score. See the
-Biochemistry tab for what the five schemes are and why breadth is not treated
-as extra evidence.
+(`caas_row` carries no permutation-rank phenotype factor, on the observed or the null side.) A position that only GS
+schemes detect has no `CAAS_score` and is not in `position_scores.tsv`. `n_schemes` and `scheme_set` list the schemes that
+detect a position, and `GS_schemes` and `is_biochem` its biochemical profile; they are descriptors and do not enter any score.
+`position_biochem.tsv` holds the profile of every detected position, the GS-only ones included, and the Biochemistry
+section of the position-level enrichment report analyses it.
 
 
 ---
@@ -451,10 +444,9 @@ Without the exponent, a gene with more positions would score higher purely
 from having more chances at a high maximum; raising the pool percentile to the
 `n`th power removes that.
 
-#### gene_accum_score (`accum_cct_p`) *(optional)*
+#### gene_accum_score (`accum_p`) *(optional)*
 
-Cauchy Combination Test across the per-scheme accumulation p-values, valid
-under their positive dependence (the schemes test overlapping positions).
+Empirical p-value of CAAS accumulation under the Unweighted Scheme (US).
 Reported with BH FDR (`accum_fdr`); `accum_significant` is `accum_fdr < 0.05`.
 
 #### RERConverge characterisation *(optional)*
@@ -512,10 +504,10 @@ The formal per-pathway `p.perm` (ASR axis) is in the companion **FCS** report.
 # Null detections: one row per (Gene, Position, side, cycle) a permulated labeling detects (a detected position
 # can score 0); observed rows are the scored positions of the run.
 .null_pos <- readr::read_tsv(params$caas_pos_cycle_caas_file, show_col_types = FALSE,
-                             col_select = c(Gene, Position, side, cycle, caas_score, n_schemes)) %>%
+                             col_select = c(Gene, Position, side, cycle, caas_score)) %>%
   filter(side %in% c("top", "bottom")) %>% rename(score = caas_score)
 .obs_pos <- pos_df %>% filter(!is.na(CAAS_score), side %in% c("top", "bottom")) %>%
-  transmute(Gene, Position, side, score = CAAS_score, n_schemes)
+  transmute(Gene, Position, side, score = CAAS_score)
 
 # Cycles with no detection leave no row, so the number of cycles is taken from the p.emp floor (1/(N + 1))
 # when the table reaches it, and otherwise from the cycles present.
@@ -611,19 +603,6 @@ ggplot(.comp %>% filter(score > 0), aes(score, colour = source, fill = source)) 
   geom_col(position = position_dodge(width = .8), width = .7) +
   scale_fill_manual(values = .src_pal) + scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
   labs(x = NULL, y = "share of detections", fill = NULL) + .theme_p
-```
-
-#### Schemes that detect the position
-
-```{r pos-null-schemes, eval=has_pos_null, fig.height=3.5, fig.width=6}
-dplyr::bind_rows(tibble::tibble(source = "Observed", n_schemes = .obs_pos$n_schemes),
-                 tibble::tibble(source = "Null",     n_schemes = .null_pos$n_schemes)) %>%
-  count(source, n_schemes) %>% group_by(source) %>% mutate(prop = n / sum(n)) %>% ungroup() %>%
-  mutate(source = factor(source, levels = c("Null", "Observed"))) %>%
-  ggplot(aes(factor(n_schemes), prop, fill = source)) +
-  geom_col(position = position_dodge(width = .8), width = .7) +
-  scale_fill_manual(values = .src_pal) + scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
-  labs(x = "n_schemes", y = "share of detections", fill = NULL) + .theme_p
 ```
 
 ### Top and bottom balance
@@ -1037,128 +1016,6 @@ ggplot(.nz_dat, aes(x = score, fill = direction)) +
   labs(title = "CAAS Score distribution, with and without zeros", x = "CAAS Score", y = "positions") +
   theme_minimal(base_size = 12) +
   theme(plot.title = element_text(face = "bold"))
-```
-
-### Biochemistry
-
-Every candidate substitution is tested against five schemes: `US` (exact amino
-acid identity) and four biochemical groupings, `GS1`-`GS4`, each partitioning the
-20 amino acids by a different combination of physicochemical criteria (charge,
-polarity, volume, thiol chemistry). A scheme "detects" a position when the
-substitution crosses one of its group boundaries. The schemes are not nested;
-they classify amino acids differently from each other, so which ones detect a
-given position identifies what kind of physicochemical property changed, not
-merely how much evidence exists.
-
-`n_schemes` and `scheme_set` are descriptors of the substitution's chemistry,
-not inputs to `CAAS_score` ((US + mean over the detected GS schemes) / 2, Scoring
-Methodology above). How many schemes fire is largely a property of where the ancestral
-residue sits in each partition: an amino acid alone in its group (e.g.
-threonine under `GS1`) is displaced by almost any substitution, while one in a
-five-member group needs a larger change to cross out. The group-size plot below
-shows this directly.
-
-```{r biochem-scheme-breadth, fig.height=9}
-p_bwsum <- ggplot(pos_df, aes(x = factor(n_schemes))) +
-  geom_bar(fill = .tableau10[4], alpha = 0.8) +
-  labs(title = "Schemes detecting each position",
-       x = "n_schemes", y = "Count") +
-  theme(plot.title = element_text(face = "bold"))
-
-# scheme_set: which combination of schemes fired, not just how many.
-if ("scheme_set" %in% names(pos_df) && any(!is.na(pos_df$scheme_set))) {
-  scheme_combo_df <- pos_df %>%
-    filter(!is.na(scheme_set), scheme_set != "") %>%
-    count(scheme_set, sort = TRUE) %>%
-    slice_head(n = 15)
-  p_scheme_combo <- ggplot(scheme_combo_df, aes(x = reorder(scheme_set, n), y = n)) +
-    geom_col(fill = .tableau10[6], alpha = 0.85) +
-    coord_flip() +
-    labs(title = "Most common scheme combinations",
-         x = "scheme_set", y = "Positions") +
-    theme(plot.title = element_text(face = "bold"))
-  gridExtra::grid.arrange(p_bwsum, p_scheme_combo, ncol = 1, nrow = 2)
-} else {
-  print(p_bwsum)
-}
-
-# Marginal firing rate per scheme.
-if ("scheme_set" %in% names(pos_df) && any(!is.na(pos_df$scheme_set))) {
-  .sets <- pos_df$scheme_set[!is.na(pos_df$scheme_set) & pos_df$scheme_set != ""]
-  scheme_rate_df <- tibble::tibble(
-    scheme = scheme_levels,
-    rate   = vapply(scheme_levels,
-                    function(s) mean(grepl(paste0("(^|\\+)", s, "($|\\+)"), .sets)),
-                    numeric(1))
-  )
-  p_scheme_rate <- ggplot(scheme_rate_df, aes(x = reorder(scheme, -rate), y = rate)) +
-    geom_col(fill = .tableau10[2], alpha = 0.85) +
-    scale_y_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0, 1)) +
-    labs(title = "Per-scheme firing rate",
-         x = "Scheme", y = "% of positions") +
-    theme(plot.title = element_text(face = "bold"))
-
-  print(p_scheme_rate)
-}
-```
-
-```{r biochem-group-size, echo=FALSE, fig.width=11, fig.height=4.5, warning=FALSE, message=FALSE}
-# Group definitions mirror src/biochem/grouping.py / CT/local/modules/caas_id.py.
-.aa_groups <- list(
-  GS1 = list("CV", "AGPS", "NDQE", "RHK", "ILMFWY", "T"),
-  GS2 = list("C", "AGV", "DE", "NQHW", "RK", "ILFP", "YMTS"),
-  GS3 = list("C", "AGPST", "NDQE", "RHK", "ILMV", "FWY"),
-  GS4 = list("C", "AILV", "ST", "NQ", "DE", "RH", "G", "P", "K", "M", "F", "WY")
-)
-.group_size_of <- function(aa, scheme) {
-  gs <- .aa_groups[[scheme]]
-  hit <- Filter(function(g) grepl(aa, g, fixed = TRUE), gs)
-  if (length(hit) == 0) return(NA_integer_)
-  nchar(hit[[1]])
-}
-
-if (isTRUE(has_filtered)) {
-  .fd <- tryCatch(readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE),
-                  error = function(e) NULL)
-} else .fd <- NULL
-
-if (!is.null(.fd) && all(c("caap_group", "all_mrca_state", "Gene", "Position") %in% names(.fd))) {
-  .fired <- .fd %>%
-    filter(caap_group %in% scheme_levels,
-           !is.na(all_mrca_state), nchar(as.character(all_mrca_state)) == 1) %>%
-    group_by(Gene, Position) %>%
-    summarise(anc = first(as.character(all_mrca_state)),
-              fired = list(unique(as.character(caap_group))), .groups = "drop")
-
-  gsz <- lapply(names(.aa_groups), function(sch) {
-    tibble::tibble(
-      scheme     = sch,
-      group_size = vapply(.fired$anc, .group_size_of, integer(1), scheme = sch),
-      fires      = vapply(.fired$fired, function(f) sch %in% f, logical(1))
-    )
-  }) %>% bind_rows() %>% filter(!is.na(group_size))
-
-  gsz_summary <- gsz %>%
-    group_by(scheme, group_size) %>%
-    summarise(rate = mean(fires), n = dplyr::n(), .groups = "drop") %>%
-    filter(n >= 20)
-
-  if (nrow(gsz_summary) > 0) {
-    print(
-      ggplot(gsz_summary, aes(x = factor(group_size), y = rate, fill = scheme)) +
-        geom_col(position = position_dodge(width = 0.8), alpha = 0.85) +
-        scale_y_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0, 1)) +
-        labs(title = "Scheme firing rate vs ancestral residue's group size",
-             x = "Group size of the ancestral residue under that scheme",
-             y = "% of positions where the scheme fires", fill = "Scheme") +
-        theme(plot.title = element_text(face = "bold"))
-    )
-  } else {
-    cat("_Not enough positions per (scheme, group-size) cell to plot firing rate._\n")
-  }
-} else {
-  cat("_filtered_discovery with `all_mrca_state` not available; skipping the group-size diagnostic._\n")
-}
 ```
 
 ### CAAS Score Manhattan (Position Level)
@@ -1983,7 +1840,7 @@ DT::datatable(
 
 ```{r gene-accum-venn, eval=has_accum_score, fig.height=11, fig.width=12}
 accum_sig_genes <- gene_df %>%
-  filter(!is.na(accum_cct_p), accum_significant %in% TRUE) %>% pull(Gene)
+  filter(accum_significant %in% TRUE) %>% pull(Gene)
 
 accum_venn_plots <- list()
 accum_overlap_exports <- list()
@@ -2011,14 +1868,15 @@ gridExtra::grid.arrange(
 
 ```{r gene-accum-table, eval=has_accum_score}
 accum_pval_cols <- grep("^accum_pval_", names(gene_df), value = TRUE)
+.acc_pcol <- intersect(c("accum_p", "accum_cct_p"), names(gene_df))[1]
 accum_tbl <- gene_df %>%
-  filter(!is.na(accum_cct_p)) %>%
+  filter(!is.na(.data[[.acc_pcol]])) %>%
   mutate(
     in_top = Gene %in% gene_top_list,
     in_bot = Gene %in% gene_bot_list
   ) %>%
-  arrange(accum_cct_p) %>%
-  select(Gene, accum_cct_p, any_of("accum_fdr"), accum_significant, any_of(accum_pval_cols),
+  arrange(.data[[.acc_pcol]]) %>%
+  select(Gene, any_of(c("accum_p", "accum_cct_p")), any_of("accum_fdr"), accum_significant, any_of(accum_pval_cols),
          gene_caas_score, gene_caas_top, gene_caas_bot,
          in_top, in_bot) %>%
   mutate(across(where(is.numeric), ~round(., 4)))
@@ -2028,7 +1886,7 @@ DT::datatable(
   options = list(pageLength = 20, scrollX = TRUE),
   caption = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
-    "Accumulation genes ranked by CCT combined p-value (accum_cct_p) - per-scheme p-values and CAAS membership"
+    "Accumulation genes ranked by US empirical p-value - BH FDR and CAAS membership"
   )
 )
 ```
@@ -2084,7 +1942,7 @@ gene_display_cols <- c("Gene", "n_positions",
                        "in_top_10pct", "in_top_50pct",
                        "in_bot_10pct", "in_bot_50pct")
 if (has_accum_score)
-  gene_display_cols <- c(gene_display_cols, "accum_cct_p")
+  gene_display_cols <- c(gene_display_cols, intersect(c("accum_p", "accum_cct_p"), names(top_genes_df))[1])
 if (has_rer)
   gene_display_cols <- c(gene_display_cols, "rer_min_pval", "rer_direction")
 if (has_fade_gene && "fade_top_max_bf" %in% names(top_genes_df))

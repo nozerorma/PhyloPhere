@@ -279,9 +279,9 @@ def build_cycle_inputs(
     return target_cycles, cycle_labelings
 
 
-# A position's score is (US + mean(GS)) / 2 of caas_row (core.scores.position_score): the number of GS schemes that
-# detect a substitution reflects its biochemical distance rather than the strength of the evidence, so it is
-# averaged, not summed. The observed side (scoring_compute.R) uses the same score.
+# A position's score is the caas_row of its US scheme (core.scores.position_score). The GS schemes only describe
+# the detection: the null records which schemes detected it (scheme_set). The observed side (scoring_compute.R)
+# uses the same score.
 
 
 @functools.lru_cache(maxsize=8)
@@ -710,8 +710,7 @@ def _finalize_perm_scores(
     Follows the observed pipeline of scoring_compute.R:
 
         null_row_caas   = asr_path_score
-        position score  = (US + mean(null_row_caas over the GS schemes that detected it)) / 2
-                          (core.scores.position_score)
+        position score  = null_row_caas of the US scheme (core.scores.position_score)
         gene x cycle    = size_adj_max over the cycle's positions, per direction
                           (CAAS axis; the ASR axis is the 90th percentile of the position scores)
 
@@ -733,12 +732,13 @@ def _finalize_perm_scores(
     sample_path = output_dir / "perm_pos_sample.tsv"
     quant_path = output_dir / "perm_pos_quantiles.tsv"
     # Per-(Gene, Position, side, cycle) position score of the null cycle (core.scores), the
-    # definition shared by the readers: scoring_compute.R (p.emp, SAM) and the position
-    # enrichment. caas_score is empty when no scheme scored the position.
+    # definition shared by the readers: scoring_compute.R (p.emp, SAM), the position enrichment and the
+    # biochemistry section of its report. caas_score is empty when US did not detect the position (a
+    # detection by GS schemes only); scheme_set lists the schemes that detected it ("GS1+US").
     cycle_caas_path = output_dir / "perm_pos_cycle_caas.tsv.gz"
     # score_aggregation records the rule of caas_score (core.scores.SCORE_RULE), so that scoring_compute.R can
     # refuse an observed score built with another one.
-    cycle_caas_fields = ["Gene", "Position", "side", "cycle", "caas_score", "n_schemes", "score_aggregation"]
+    cycle_caas_fields = ["Gene", "Position", "side", "cycle", "caas_score", "n_schemes", "scheme_set", "score_aggregation"]
 
     # Reservoir size per (cycle, scheme). It bounds the sample and the quantile summaries
     # at about K x n_cycles x n_schemes rows regardless of the run size; the full detail
@@ -777,7 +777,8 @@ def _finalize_perm_scores(
         for (cyc, pos, side), schemes in pos_scheme.items():
             score = position_score(schemes)
             cc_rows.append({"Gene": gene, "Position": pos, "side": side, "cycle": cyc,
-                            "caas_score": score, "n_schemes": len(schemes), "score_aggregation": SCORE_RULE})
+                            "caas_score": score, "n_schemes": len(schemes),
+                            "scheme_set": "+".join(sorted(schemes)), "score_aggregation": SCORE_RULE})
             if score is not None:
                 by_pos.setdefault((cyc, pos), {})[side] = score
         if writer_cc is not None and cc_rows:

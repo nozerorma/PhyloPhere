@@ -899,41 +899,20 @@ for (dr in c("GLOBAL", "TOP", "BOTTOM")) {
 
 # Interesting Genes {.tabset .tabset-fade}
 
-One row per gene carrying at least one of the criteria below, faceted
-Global/Top/Bottom. Each criterion is a plain boolean (or bool + supporting
-list, e.g. which enriched term(s) a gene belongs to) - deliberately not
-collapsed into a single opaque score, so every claim in this table is
-independently checkable. `FCS term(s)`/`AMI description(s)`/`PE term(s)` show
-each term's **description** (not its bare database id), restricted to terms
-that module itself calls significant (FCS/RER's own BH+p.perm gate, DOMINO's
-own module-significance cutoff - posenrich's leading edge is already
-significance-restricted at the source), and collapse behind a `<details>`
-toggle when a gene carries more than one. `CAAS evidence`/`RER evidence`
-(`evidence_label_caas`/`evidence_label_rer`) show the **strongest** FCS
-evidence tier the gene's best CAAS/RER gene set reached - Supported (weight 2) >
-Exploratory (1) > None (0), same tiers and colours as
-[12.FCS_general_report.Rmd](12.FCS_general_report.Rmd)'s Multi-Method
-Evidence table - a strictly more informative sibling of the plain
-`CAAS_FCS_sig`/`RER_FCS_sig` booleans (which only say "belongs to ≥1
-significant term", not how strong the best one is).
+Prioritized gene candidates faceted by direction (**Global**, **Top**, **Bottom**). Columns are organized into four functional bands:
 
-`Composite score` is a **plain sum of four independent evidence families**:
-no background-rate weighting, no hypergeometric test, just addition: **CAAS**
-(the 25/10/5/1% percentile quartet collapsed to its single deepest tier, 0–4,
-since 1% ⊂ 5% ⊂ 10% ⊂ 25% is one nested signal, not four - plus Accumulation
-significance, plus the CAAS evidence-tier weight above), **RER**
-(direction-matching acceleration/deceleration, plus the RER evidence-tier
-weight), **AMI + FADE** (DOMINO network membership for CAAS/RER/FADE gene
-lists, plus direct FADE-site significance - grouped together because AMI's
-own FADE-seeded gene list and FADE's direct call are two views of the same
-underlying evidence, not independent), and **posenrich** (position-level
-corroboration). The four family subtotals (`caas_family`/`rer_family`/
-`ami_fade_family`/`posenrich_family`) are shown alongside the total so the
-composite is never a black box. Criteria are always restricted to the
-table's own direction - e.g. under **Top**, only `flag_fade_top`/
-`flag_accum_top`/RER *acceleration* count; a Bottom-direction signal never
-leaks into a Top-direction gene's score (and vice versa; **Global** has no
-direction of its own, so either side counts there).
+- **Metadatos** (grey): Gene identifier (`Gene`).
+- **Pondera** (blue): Criteria directly contributing to `Composite score`:
+  - *CAAS percentiles* (`25%`, `10%`, `5%`, `1%`): collapsed to deepest nested tier (0–4).
+  - *CAAS FCS evidence* (`CAAS evidence`): strongest FCS evidence tier reached (Supported = 2, Exploratory = 1, None = 0).
+  - *Accumulation* (`Accum_dir`): directional US accumulation significance (0–1).
+  - *RER direction* (`RER_dir`): direction-matching acceleration/deceleration (0–1).
+  - *RER FCS evidence* (`RER evidence`): strongest RER evidence tier reached (Supported = 2, Exploratory = 1, None = 0).
+  - *FADE direction* (`FADE_dir`): directional excess divergence significance (0–1).
+- **Descriptivas** (amber): Characterization-only annotations that do not contribute to weighting (FCS significant term descriptions, AMI/DOMINO module descriptions, and position-enrichment terms). Neither `posenrich` nor `AMI` contributes to scoring.
+- **Resultados** (green): Family subtotal scores (`caas_family`, `rer_family`, `fade_family`), `N criteria` (count of weighting criteria satisfied), and `Composite score` (total sum).
+
+Only columns corresponding to analyses that were executed are displayed.
 
 ```{r interesting_shared_helpers}
 # Shared by both Interesting Genes AND Interesting Positions below, defined
@@ -1026,28 +1005,105 @@ direction of its own, so either side counts there).
   dplyr::coalesce(p1, FALSE)  ~ 4L, dplyr::coalesce(p5, FALSE)  ~ 3L,
   dplyr::coalesce(p10, FALSE) ~ 2L, dplyr::coalesce(p25, FALSE) ~ 1L, TRUE ~ 0L)
 
-# Simple grouped-sum composite score: four INDEPENDENT evidence families,
-# CAAS, RER, AMI+FADE (network/module + direct FADE-site evidence travel
-# together, since AMI's own gene lists are themselves seeded from FADE
-# significance), and posenrich, each contributing the plain count of
-# criteria it satisfies (weighted 0-2 by evidence tier where a tier exists),
-# summed across families with NO further weighting. `fade_col` is "FADE_dir"
-# (genes) or "FADE_overlap" (positions), same shape, different column name
-# at the two granularities.
-.grouped_composite <- function(df, fade_col) {
+# Gene composite score: CAAS percentiles + directional Accumulation + CAAS FCS evidence tier +
+# direction-matching RER + RER FCS evidence tier + directional FADE.
+# Neither posenrich nor AMI contributes to the score.
+.gene_composite <- function(df, has_accum, has_rer, has_fade, has_fcs_caas, has_fcs_rer) {
   df %>%
     dplyr::mutate(
-      caas_family      = .pct_tier_score(`25%`, `10%`, `5%`, `1%`) + as.integer(Accum_dir) + weight_caas,
-      rer_family        = as.integer(RER_dir) + weight_rer,
-      ami_fade_family    = as.integer(.data[[fade_col]]) + as.integer(CAAS_AMI_net) +
-                            as.integer(RER_AMI_net) + as.integer(FADE_AMI_net),
-      posenrich_family  = as.integer(PE_sig),
-      `Composite score` = caas_family + rer_family + ami_fade_family + posenrich_family,
+      caas_family = .pct_tier_score(`25%`, `10%`, `5%`, `1%`) +
+        (if (has_accum) as.integer(Accum_dir) else 0L) +
+        (if (has_fcs_caas) weight_caas else 0L),
+      rer_family  = if (has_rer) as.integer(RER_dir) + (if (has_fcs_rer) weight_rer else 0L) else 0L,
+      fade_family = if (has_fade) as.integer(FADE_dir) else 0L,
+      `Composite score` = caas_family + rer_family + fade_family,
       `N criteria` = as.integer(`25%`) + as.integer(`10%`) + as.integer(`5%`) + as.integer(`1%`) +
-        as.integer(Accum_dir) + as.integer(.data[[fade_col]]) + as.integer(RER_dir) +
-        as.integer(CAAS_FCS_sig) + as.integer(RER_FCS_sig) +
-        as.integer(CAAS_AMI_net) + as.integer(RER_AMI_net) + as.integer(FADE_AMI_net) + as.integer(PE_sig)
+        (if (has_accum) as.integer(Accum_dir) else 0L) +
+        (if (has_fcs_caas) as.integer(CAAS_FCS_sig) else 0L) +
+        (if (has_rer) as.integer(RER_dir) + (if (has_fcs_rer) as.integer(RER_FCS_sig) else 0L) else 0L) +
+        (if (has_fade) as.integer(FADE_dir) else 0L)
     )
+}
+
+# Position composite score: strictly position-native (CAAS percentiles + FADE site overlap).
+# Zero gene-level weights (RER, Accumulation, FCS, AMI). Posenrich is purely descriptive.
+.position_composite <- function(df, has_fade) {
+  df %>%
+    dplyr::mutate(
+      caas_family = .pct_tier_score(`25%`, `10%`, `5%`, `1%`),
+      fade_family = if (has_fade) as.integer(FADE_overlap) else 0L,
+      `Composite score` = caas_family + fade_family,
+      `N criteria` = as.integer(`25%`) + as.integer(`10%`) + as.integer(`5%`) + as.integer(`1%`) +
+        (if (has_fade) as.integer(FADE_overlap) else 0L)
+    )
+}
+
+# Banded table renderer: renders interactive tables styled into four functional color bands:
+# Metadatos (Charcoal #4A5568), Pondera (Blue #2B6CB0), Descriptivas (Amber #C05621), Resultados (Green #2F855A).
+render_banded_table <- function(res_obj, height = NULL) {
+  if (is.null(res_obj) || !is.list(res_obj) || is.null(res_obj$data) || nrow(res_obj$data) == 0) return(NULL)
+  df <- res_obj$data
+  meta_cols <- intersect(res_obj$meta_cols, names(df))
+  pond_cols <- intersect(res_obj$pond_cols, names(df))
+  desc_cols <- intersect(res_obj$desc_cols, names(df))
+  res_cols  <- intersect(res_obj$res_cols,  names(df))
+
+  ordered_cols <- c(meta_cols, pond_cols, desc_cols, res_cols)
+  df <- df[, ordered_cols, drop = FALSE]
+
+  header_spec <- c()
+  header_colors <- c()
+  col_tints <- list()
+  borders <- c()
+  curr_idx <- 0
+
+  if (length(meta_cols) > 0) {
+    header_spec <- c(header_spec, "Metadatos" = length(meta_cols))
+    header_colors <- c(header_colors, "#4A5568")
+    col_tints[[length(col_tints) + 1]] <- list(idx = (curr_idx + 1):(curr_idx + length(meta_cols)), bg = "#F8F9FA")
+    curr_idx <- curr_idx + length(meta_cols)
+    borders <- c(borders, curr_idx)
+  }
+  if (length(pond_cols) > 0) {
+    header_spec <- c(header_spec, "Pondera" = length(pond_cols))
+    header_colors <- c(header_colors, "#2B6CB0")
+    col_tints[[length(col_tints) + 1]] <- list(idx = (curr_idx + 1):(curr_idx + length(pond_cols)), bg = "#EFF6FF")
+    curr_idx <- curr_idx + length(pond_cols)
+    borders <- c(borders, curr_idx)
+  }
+  if (length(desc_cols) > 0) {
+    header_spec <- c(header_spec, "Descriptivas" = length(desc_cols))
+    header_colors <- c(header_colors, "#C05621")
+    col_tints[[length(col_tints) + 1]] <- list(idx = (curr_idx + 1):(curr_idx + length(desc_cols)), bg = "#FFFBEB")
+    curr_idx <- curr_idx + length(desc_cols)
+    borders <- c(borders, curr_idx)
+  }
+  if (length(res_cols) > 0) {
+    header_spec <- c(header_spec, "Resultados" = length(res_cols))
+    header_colors <- c(header_colors, "#2F855A")
+    col_tints[[length(col_tints) + 1]] <- list(idx = (curr_idx + 1):(curr_idx + length(res_cols)), bg = "#F0FDF4")
+    curr_idx <- curr_idx + length(res_cols)
+  }
+  borders <- borders[borders < ncol(df)]
+
+  k <- kable(df, format = "html", escape = FALSE) %>%
+    kable_styling(bootstrap_options = c("condensed", "hover"), full_width = FALSE)
+
+  if (length(header_spec) > 0) {
+    k <- k %>% add_header_above(header_spec, color = "white", background = header_colors, bold = TRUE)
+  }
+  for (t in col_tints) {
+    k <- k %>% column_spec(t$idx, background = t$bg)
+  }
+  if (length(borders) > 0) {
+    k <- k %>% column_spec(borders, border_right = "2px solid #CBD5E0")
+  }
+  if (!is.null(height)) {
+    k <- k %>% scroll_box(width = "100%", height = height)
+  } else {
+    k <- k %>% scroll_box(width = "100%")
+  }
+  k
 }
 
 .ami_desc_for <- function(dir_filter) {
@@ -1176,17 +1232,44 @@ build_interesting_genes <- function(direction) {
   }
   base$RER_acc  <- .gcol(gene_attr_df, "flag_rer_acc")
   base$RER_decc <- .gcol(gene_attr_df, "flag_rer_decc")
-  # RER_dir: the ONE direction-matching RER flag, Top only counts
-  # acceleration, Bottom only deceleration, so a Bottom-direction gene never
-  # gets credit for an unrelated acceleration call (and vice versa). Global
-  # has no direction of its own, so either counts. RER_acc/RER_decc themselves
-  # stay in the display below (both are still shown, just not both scored).
   base$RER_dir <- switch(direction, Top = base$RER_acc, Bottom = base$RER_decc, base$RER_acc | base$RER_decc)
 
-  all_genes <- base %>%
-    dplyr::left_join(.fcs_terms_for(rk_set), by = "gene") %>%
-    dplyr::left_join(.ami_desc_for(ami_dirf), by = "gene") %>%
-    dplyr::left_join(.posenrich_for(rk_set), by = "gene") %>%
+  # Check active modules for genes
+  has_accum_gene <- any(grepl("^flag_accum", names(gene_attr_df))) &&
+                    any(.gcol(gene_attr_df, "flag_accum") | .gcol(gene_attr_df, "flag_accum_top") | .gcol(gene_attr_df, "flag_accum_bottom"), na.rm = TRUE)
+  has_rer_gene   <- any(grepl("^flag_rer", names(gene_attr_df))) ||
+                    (has_multi && any(fcs_dir_mod$module == "rer"))
+  has_fade_gene  <- any(grepl("^flag_fade", names(gene_attr_df))) &&
+                    any(.gcol(gene_attr_df, "flag_fade") | .gcol(gene_attr_df, "flag_fade_top") | .gcol(gene_attr_df, "flag_fade_bottom"), na.rm = TRUE)
+  has_fcs_caas   <- has_le && has_multi && any(fcs_dir_mod$module == "caas")
+  has_fcs_rer    <- has_le && has_multi && any(fcs_dir_mod$module == "rer")
+  has_ami_gene   <- has_ami && !is.null(ami_disp) && nrow(ami_disp) > 0
+  has_pe_gene    <- has_posenrich_le && !is.null(posenrich_le_df) && nrow(posenrich_le_df) > 0
+
+  all_genes <- base
+  if (has_fcs_caas || has_fcs_rer) {
+    all_genes <- all_genes %>% dplyr::left_join(.fcs_terms_for(rk_set), by = "gene")
+  } else {
+    all_genes$caas_fcs_terms <- NA_character_
+    all_genes$rer_fcs_terms  <- NA_character_
+    all_genes$evidence_label_caas <- "None"
+    all_genes$evidence_label_rer  <- "None"
+  }
+  if (has_ami_gene) {
+    all_genes <- all_genes %>% dplyr::left_join(.ami_desc_for(ami_dirf), by = "gene")
+  } else {
+    all_genes$caas_ami_desc <- NA_character_
+    all_genes$rer_ami_desc  <- NA_character_
+    all_genes$fade_ami_desc <- NA_character_
+  }
+  if (has_pe_gene) {
+    all_genes <- all_genes %>% dplyr::left_join(.posenrich_for(rk_set), by = "gene")
+  } else {
+    all_genes$pe_position <- NA_character_
+    all_genes$pe_terms    <- NA_character_
+  }
+
+  all_genes <- all_genes %>%
     dplyr::mutate(
       dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_dir, Accum_dir, RER_acc, RER_decc, RER_dir), ~ dplyr::coalesce(.x, FALSE)),
       evidence_label_caas = dplyr::coalesce(evidence_label_caas, "None"),
@@ -1201,13 +1284,26 @@ build_interesting_genes <- function(direction) {
       PE_sig       = !is.na(pe_terms)       & nzchar(pe_terms)
     )
 
+  # Grouped composite score: strictly CAAS + RER + FADE. Neither posenrich nor AMI weights!
   out <- all_genes %>%
-    dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_dir | Accum_dir | RER_dir |
-                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig)
-  if (nrow(out) == 0) return(out)
+    .gene_composite(has_accum = has_accum_gene, has_rer = has_rer_gene, has_fade = has_fade_gene,
+                    has_fcs_caas = has_fcs_caas, has_fcs_rer = has_fcs_rer)
+
+  # Filter to genes with any active signal
+  out <- out %>%
+    dplyr::filter(
+      `25%` | `10%` | `5%` | `1%` |
+      (if (has_fade_gene) FADE_dir else FALSE) |
+      (if (has_accum_gene) Accum_dir else FALSE) |
+      (if (has_rer_gene) RER_dir else FALSE) |
+      (if (has_fcs_caas) CAAS_FCS_sig else FALSE) |
+      (if (has_fcs_rer) RER_FCS_sig else FALSE) |
+      (if (has_ami_gene) (CAAS_AMI_net | RER_AMI_net | FADE_AMI_net) else FALSE) |
+      (if (has_pe_gene) PE_sig else FALSE)
+    )
+  if (nrow(out) == 0) return(NULL)
 
   out <- out %>%
-    .grouped_composite(fade_col = "FADE_dir") %>%
     dplyr::mutate(
       `CAAS FCS term(s)`    = .collapsible_list(caas_fcs_terms),
       `RER FCS term(s)`     = .collapsible_list(rer_fcs_terms),
@@ -1219,25 +1315,58 @@ build_interesting_genes <- function(direction) {
       `RER evidence`        = .evidence_badge(evidence_label_rer)
     )
 
-  out %>%
+  # Define the 4 tramos dynamically based on what actually ran
+  meta_cols <- c("Gene")
+
+  pond_cols <- c("25%", "10%", "5%", "1%")
+  if (has_fcs_caas)   pond_cols <- c(pond_cols, "CAAS evidence")
+  if (has_accum_gene) pond_cols <- c(pond_cols, "Accum_dir")
+  if (has_rer_gene)   pond_cols <- c(pond_cols, "RER_dir")
+  if (has_fcs_rer)    pond_cols <- c(pond_cols, "RER evidence")
+  if (has_fade_gene)  pond_cols <- c(pond_cols, "FADE_dir")
+
+  desc_cols <- c()
+  if (has_fcs_caas) desc_cols <- c(desc_cols, "CAAS FCS term(s)")
+  if (has_fcs_rer)  desc_cols <- c(desc_cols, "RER FCS term(s)")
+  if (has_ami_gene) {
+    desc_cols <- c(desc_cols, "CAAS AMI desc(s)")
+    if (has_rer_gene)  desc_cols <- c(desc_cols, "RER AMI desc(s)")
+    if (has_fade_gene) desc_cols <- c(desc_cols, "FADE AMI desc(s)")
+  }
+  if (has_pe_gene) {
+    desc_cols <- c(desc_cols, "PE position", "PE term(s)")
+  }
+
+  res_cols <- c("caas_family")
+  if (has_rer_gene)  res_cols <- c(res_cols, "rer_family")
+  if (has_fade_gene) res_cols <- c(res_cols, "fade_family")
+  res_cols <- c(res_cols, "N criteria", "Composite score")
+
+  out <- out %>%
+    dplyr::rename(Gene = gene, `PE position` = pe_position) %>%
     dplyr::arrange(dplyr::desc(`Composite score`)) %>%
-    dplyr::select(Gene = gene, `25%`, `10%`, `5%`, `1%`, FADE_dir, RER_acc, RER_decc, Accum_dir,
-                  CAAS_FCS_sig, `CAAS FCS term(s)`, `CAAS evidence`,
-                  RER_FCS_sig, `RER FCS term(s)`, `RER evidence`,
-                  CAAS_AMI_net, `CAAS AMI desc(s)`, RER_AMI_net, `RER AMI desc(s)`, FADE_AMI_net, `FADE AMI desc(s)`,
-                  PE_sig, `PE position` = pe_position, `PE term(s)`,
-                  caas_family, rer_family, ami_fade_family, posenrich_family,
-                  `N criteria`, `Composite score`) %>%
+    dplyr::select(dplyr::all_of(c(meta_cols, pond_cols, desc_cols, res_cols))) %>%
     head(params$top_n * 3)
+
+  list(
+    data      = out,
+    meta_cols = meta_cols,
+    pond_cols = pond_cols,
+    desc_cols = desc_cols,
+    res_cols  = res_cols
+  )
 }
 ```
 
 ```{r interesting_genes_tabs, eval=has_fcs_stats_cmp, results='asis'}
 for (dr in c("Global", "Top", "Bottom")) {
   cat(sprintf("\n## %s\n\n", dr))
-  tbl <- build_interesting_genes(dr)
-  if (nrow(tbl) == 0) { cat("_No genes meet any criterion for this direction._\n\n"); next }
-  print(kbl_html(tbl, height = if (nrow(tbl) > 15) "480px" else NULL, escape = FALSE))
+  res <- build_interesting_genes(dr)
+  if (is.null(res) || is.null(res$data) || nrow(res$data) == 0) {
+    cat("_No genes meet any criterion for this direction._\n\n")
+    next
+  }
+  print(render_banded_table(res, height = if (nrow(res$data) > 15) "480px" else NULL))
 }
 ```
 
@@ -1247,46 +1376,21 @@ for (dr in c("Global", "Top", "Bottom")) {
 
 # Interesting Positions {.tabset .tabset-fade}
 
-One row per position carrying at least one of the criteria below, faceted
-Global/Top/Bottom. Same philosophy as Interesting Genes, but at the position's
-own native resolution - each criterion is either **position-native** (this
-exact position: CAAS percentile, FADE-site overlap, posenrich significant-term
-membership) or **gene-inherited** (every position in a flagged gene carries
-the same value: RER acceleration/deceleration, Accumulation significance, FCS
-gene-set membership, AMI module membership). That distinction matters - a
-gene can be FADE-significant overall while this specific position isn't the
-site driving it, so gene-level and position-level FADE overlap are genuinely
-different claims, not duplicated information. `Composite score` is the same
-plain four-family sum (CAAS / RER / AMI+FADE / posenrich, family subtotals
-shown alongside the total) as Interesting Genes above - see that section for
-the full breakdown; `CAAS evidence`/`RER evidence` are the same gene-inherited
-evidence-tier columns too. `COSMIC`/`PAI3D_pathogenic` are
-**EXTRAS**: shown for characterisation only, excluded from `Composite score`
-(they describe a different kind of evidence - external database overlap
-rather than corroboration from this pipeline's own modules - mixing them into
-the same sum would conflate the two). Both are reported as 3-state
-tags rather than TRUE/FALSE, so a real negative is never conflated with "never
-checked": `PAI3D_pathogenic` is `pathogenic` / `benign` / `missing`; `COSMIC`
-is `hit` / `no_hit` / `missing` (COSMIC's own file only ever lists positive
-hits, so "checked, no record" is inferred from PrimateAI-3D's exhaustive
-per-position coverage as the "was this position checkable at all" reference).
+Prioritized amino-acid position candidates evaluated strictly at **position-native resolution**, faceted by direction (**Global**, **Top**, **Bottom**). Gene-level criteria (RER, Accumulation, FCS, AMI) are omitted to prevent gene-wide signals from confounding position ranking. Columns are organized into four functional bands:
 
-`Pfam domain`/`Pfam clan`/`UCR region`/`Position variability`/`FUBAR selection`
-are also **EXTRAS**, position-native this time: posenrich's own per-position
-characterization layers (the same PFAM/UCR/FUBAR layers posenrich tests as
-GMTs, see `build_position_gmt.py`), joined straight onto the exact position
-rather than gene-inherited. `UCR region` is `core` / `flank_up` / `flank_down`
-(blank when the position isn't in an ultraconserved region at all - core and
-flank can, by design, both apply to the same position under different
-detection windows, `core` wins when they do); `Position variability` is the
-per-position variability score from the same UCR track (not the coarser
-per-domain-instance variability PFAM's own file carries); `FUBAR selection` is
-`positive` / `negative` / `neutral` for every position FUBAR actually tested,
-blank for positions FUBAR never scored. None of these have PAI3D's
-exhaustive-coverage guarantee, so unlike `COSMIC`/`PAI3D_pathogenic` above
-they stay a plain blank for "not covered by this layer" rather than a 3-state
-tag - there is no reference set here to distinguish "checked, negative" from
-"never checked".
+- **Metadatos** (grey): Position coordinates (`Gene`, `Position`), ancestral and derived states (`CAAS`, lineage residues, conserved pairs), supporting hypotheses, and continuous `CAAS Score`.
+- **Pondera** (blue): Position-native criteria contributing to `Composite score`:
+  - *CAAS percentiles* (`25%`, `10%`, `5%`, `1%`): collapsed to deepest nested tier (0–4).
+  - *FADE site overlap* (`FADE_overlap`): exact codon site identified by FADE (0–1).
+- **Descriptivas** (amber): Characterization-only annotations excluded from scoring:
+  - *Biochemical profile*: `GS_schemes` (detection across Grantham Score groups GS1–GS4) and `is_biochem` (hit in ≥1 GS scheme).
+  - *PosEnrich*: position-level functional enrichment terms (`PE_sig`, `PE term(s)`). Does not weight.
+  - *Empirical statistics*: permutation p-values (`p.emp`, `p.adj_bh`).
+  - *External annotations*: `COSMIC` somatic hits, `PAI3D_pathogenic` PrimateAI-3D pathogenicity calls.
+  - *Domain & selection*: `Pfam domain`/`Pfam clan`, `UCR region`, `Position variability`, and `FUBAR selection`.
+- **Resultados** (green): Family subtotal scores (`caas_family`, `fade_family`), `N criteria`, and `Composite score` (sum: 0–5).
+
+Only columns corresponding to analyses that were executed are displayed.
 
 ```{r interesting_positions_prep, eval=has_position_scores_cmp}
 build_interesting_positions <- function(direction) {
@@ -1299,8 +1403,6 @@ build_interesting_positions <- function(direction) {
   } else if (direction == "Bottom") {
     base <- base %>% dplyr::filter(side == "bottom")
   } else {
-    # Global: one row per (Gene, Position). If a position appears in both sides,
-    # pick the dominant side by CAAS_score (and hypothesis count if tied).
     base <- base %>%
       dplyr::arrange(
         dplyr::desc(CAAS_score),
@@ -1308,7 +1410,7 @@ build_interesting_positions <- function(direction) {
       ) %>%
       dplyr::distinct(Gene, Position, .keep_all = TRUE)
   }
-  if (nrow(base) == 0) return(base)
+  if (nrow(base) == 0) return(NULL)
 
   # Harmonize hypothesis column names from position_scores.tsv / upstream discovery
   if (!"participating_hypotheses" %in% names(base) && "supporting_hypotheses" %in% names(base)) {
@@ -1322,65 +1424,51 @@ build_interesting_positions <- function(direction) {
   }
 
   base <- .position_pct_flags(base, tolower(direction))
-
-  # Ensure Gene and Position are deduplicated
   base <- base %>% dplyr::distinct(gene, Position, .keep_all = TRUE)
 
-  # Position-native FADE-site overlap.
+  # Position-native FADE-site overlap: check if FADE site analysis was run
+  has_fade_pos <- (has_fade_sites_top_cmp && !is.null(fade_sites_top_cmp_df) && nrow(fade_sites_top_cmp_df) > 0) ||
+                  (has_fade_sites_bottom_cmp && !is.null(fade_sites_bottom_cmp_df) && nrow(fade_sites_bottom_cmp_df) > 0)
   fade_df <- switch(direction,
     Top = fade_sites_top_cmp_df, Bottom = fade_sites_bottom_cmp_df,
     dplyr::bind_rows(fade_sites_top_cmp_df, fade_sites_bottom_cmp_df))
-  base$FADE_overlap <- if (!is.null(fade_df)) {
+  base$FADE_overlap <- if (has_fade_pos && !is.null(fade_df) && nrow(fade_df) > 0) {
     paste(base$gene, base$Position) %in% paste(fade_df$gene, fade_df$Position)
   } else FALSE
 
-  # Gene-inherited flags (every position in a flagged gene shares its value).
-  if (!is.null(gene_attr_df)) {
-    base <- base %>%
-      dplyr::left_join(gene_attr_df %>% dplyr::select(gene, dplyr::any_of(c(
-        "flag_rer_acc", "flag_rer_decc", "flag_accum_top", "flag_accum_bottom", "flag_accum"))),
-        by = "gene")
-  }
-  base$RER_acc  <- .gcol(base, "flag_rer_acc")
-  base$RER_decc <- .gcol(base, "flag_rer_decc")
-  base$RER_dir <- switch(direction, Top = base$RER_acc, Bottom = base$RER_decc, base$RER_acc | base$RER_decc)
-  base$Accum_dir <- switch(direction,
-    Top = .gcol(base, "flag_accum_top"), Bottom = .gcol(base, "flag_accum_bottom"), .gcol(base, "flag_accum"))
-
-  ami_dirf <- switch(direction, Top = "Top", Bottom = "Bottom", NULL)
-  base <- base %>%
-    dplyr::left_join(.fcs_terms_for(rk_set), by = "gene") %>%
-    dplyr::left_join(.ami_desc_for(ami_dirf), by = "gene") %>%
-    dplyr::mutate(
-      evidence_label_caas = dplyr::coalesce(evidence_label_caas, "None"),
-      evidence_label_rer  = dplyr::coalesce(evidence_label_rer, "None"),
-      weight_caas  = .evidence_weight_of(evidence_label_caas),
-      weight_rer   = .evidence_weight_of(evidence_label_rer),
-      CAAS_FCS_sig = !is.na(caas_fcs_terms) & nzchar(caas_fcs_terms),
-      RER_FCS_sig  = !is.na(rer_fcs_terms)  & nzchar(rer_fcs_terms),
-      CAAS_AMI_net = !is.na(caas_ami_desc)  & nzchar(caas_ami_desc),
-      RER_AMI_net  = !is.na(rer_ami_desc)   & nzchar(rer_ami_desc),
-      FADE_AMI_net = !is.na(fade_ami_desc)  & nzchar(fade_ami_desc)
-    )
-
-  # Position-native posenrich significance: exact Gene:Position match, not
-  # just gene, a gene can have OTHER significant positions without this one
-  # being among them.
-  if (has_posenrich_le) {
+  # Position-native posenrich: check if posenrich was run
+  has_pe_pos <- FALSE
+  if (has_posenrich_le && !is.null(posenrich_le_df) && nrow(posenrich_le_df) > 0) {
     pe <- posenrich_le_df %>%
       dplyr::filter(is.null(rk_set) | ranking %in% rk_set) %>%
       dplyr::mutate(gene = sub(":.*", "", gene_position), Position = suppressWarnings(as.integer(sub(".*:", "", gene_position)))) %>%
       dplyr::group_by(gene, Position) %>%
       dplyr::summarise(pe_terms = paste(sort(unique(pathway)), collapse = "; "), .groups = "drop")
     base <- base %>% dplyr::left_join(pe, by = c("gene", "Position"))
+    base$PE_sig <- !is.na(base$pe_terms) & nzchar(base$pe_terms)
+    has_pe_pos <- any(base$PE_sig, na.rm = TRUE)
   } else {
     base$pe_terms <- NA_character_
+    base$PE_sig   <- FALSE
   }
-  base$PE_sig <- !is.na(base$pe_terms) & nzchar(base$pe_terms)
 
-  # EXTRAS, characterisation only, never in the score (see section text).
-  .pai_pos <- NULL
-  if (has_vep_primateai_cmp) {
+  # Biochemical profile flags (GS_schemes and is_biochem)
+  if (!"GS_schemes" %in% names(base)) {
+    if ("scheme_set" %in% names(base)) {
+      base$GS_schemes <- gsub("\\+?US\\+?", "", base$scheme_set)
+      base$GS_schemes <- gsub("^\\+|\\+$", "", base$GS_schemes)
+      base$is_biochem <- grepl("GS", base$GS_schemes)
+    } else {
+      base$GS_schemes <- NA_character_
+      base$is_biochem <- FALSE
+    }
+  }
+  base$is_biochem <- dplyr::coalesce(as.logical(base$is_biochem), FALSE)
+  base$GS_schemes <- dplyr::coalesce(as.character(base$GS_schemes), "")
+
+  # External characterization: PrimateAI-3D
+  has_pai3d_pos <- FALSE
+  if (has_vep_primateai_cmp && !is.null(vep_primateai_cmp_df) && nrow(vep_primateai_cmp_df) > 0) {
     .pai <- vep_primateai_cmp_df
     if ("caap_group" %in% names(.pai)) .pai <- dplyr::filter(.pai, caap_group == "US")
     .pred_col <- intersect(c("prediction"), names(.pai))[1]
@@ -1388,23 +1476,30 @@ build_interesting_positions <- function(direction) {
       .pai_pos <- .pai %>%
         dplyr::mutate(.patho = grepl("pathogenic", .data[[.pred_col]], ignore.case = TRUE)) %>%
         dplyr::group_by(Gene, Position) %>% dplyr::summarise(.patho = any(.patho), .groups = "drop")
+      .m <- .pai_pos[match(paste(base$gene, base$Position), paste(.pai_pos$Gene, .pai_pos$Position)), ]
+      base$PAI3D_pathogenic <- dplyr::case_when(is.na(.m$.patho) ~ "missing", .m$.patho ~ "pathogenic", TRUE ~ "benign")
+      has_pai3d_pos <- any(base$PAI3D_pathogenic != "missing")
     }
   }
-  base$PAI3D_pathogenic <- if (!is.null(.pai_pos)) {
-    .m <- .pai_pos[match(paste(base$gene, base$Position), paste(.pai_pos$Gene, .pai_pos$Position)), ]
-    dplyr::case_when(is.na(.m$.patho) ~ "missing", .m$.patho ~ "pathogenic", TRUE ~ "benign")
-  } else rep("missing", nrow(base))
+  if (!has_pai3d_pos) base$PAI3D_pathogenic <- rep("missing", nrow(base))
 
-  base$COSMIC <- if (has_vep_cosmic_cmp) {
+  # External characterization: COSMIC
+  has_cosmic_pos <- FALSE
+  if (has_vep_cosmic_cmp && !is.null(vep_cosmic_cmp_df) && nrow(vep_cosmic_cmp_df) > 0) {
     .cosmic <- if ("caap_group" %in% names(vep_cosmic_cmp_df)) dplyr::filter(vep_cosmic_cmp_df, caap_group == "US") else vep_cosmic_cmp_df
     .cosmic_hit <- paste(base$gene, base$Position) %in% paste(.cosmic$Gene, .cosmic$Position)
-    .checkable <- if (!is.null(.pai_pos)) {
-      paste(base$gene, base$Position) %in% paste(.pai_pos$Gene, .pai_pos$Position)
-    } else rep(TRUE, nrow(base))
-    dplyr::case_when(.cosmic_hit ~ "hit", .checkable ~ "no_hit", TRUE ~ "missing")
-  } else rep("missing", nrow(base))
+    .checkable <- if (has_pai3d_pos) base$PAI3D_pathogenic != "missing" else rep(TRUE, nrow(base))
+    base$COSMIC <- dplyr::case_when(.cosmic_hit ~ "hit", .checkable ~ "no_hit", TRUE ~ "missing")
+    has_cosmic_pos <- any(base$COSMIC != "missing")
+  }
+  if (!has_cosmic_pos) base$COSMIC <- rep("missing", nrow(base))
 
-  if (has_position_char_cmp) {
+  # Position characterization GMTs: Pfam, UCR, variability, FUBAR
+  has_pfam_pos  <- FALSE
+  has_ucr_pos   <- FALSE
+  has_var_pos   <- FALSE
+  has_fubar_pos <- FALSE
+  if (has_position_char_cmp && !is.null(position_char_cmp_df) && nrow(position_char_cmp_df) > 0) {
     base <- base %>%
       dplyr::left_join(
         position_char_cmp_df %>%
@@ -1416,32 +1511,48 @@ build_interesting_positions <- function(direction) {
   for (.col in c("pfam_domain", "pfam_clan", "ucr_region", "position_variability", "fubar_selection")) {
     if (!.col %in% names(base)) base[[.col]] <- NA
   }
+  has_pfam_pos  <- any(!is.na(base$pfam_domain) & nzchar(as.character(base$pfam_domain))) ||
+                   any(!is.na(base$pfam_clan)   & nzchar(as.character(base$pfam_clan)))
+  has_ucr_pos   <- any(!is.na(base$ucr_region)  & nzchar(as.character(base$ucr_region)))
+  has_var_pos   <- any(!is.na(base$position_variability) & nzchar(as.character(base$position_variability)))
+  has_fubar_pos <- any(!is.na(base$fubar_selection) & nzchar(as.character(base$fubar_selection)))
+
+  # Empirical p-values
+  has_pemp <- "p.emp" %in% names(base) && any(!is.na(base$p.emp))
+  has_padj <- "p.adj_bh" %in% names(base) && any(!is.na(base$p.adj_bh))
+
+  # Hypotheses
+  has_hypotheses <- ("supporting_hypotheses" %in% names(base)) && any(!is.na(base$supporting_hypotheses) & nzchar(as.character(base$supporting_hypotheses)))
+
+  # Format residues
+  has_top_res <- "top_species_residues" %in% names(base) && any(!is.na(base$top_species_residues) & nzchar(as.character(base$top_species_residues)))
+  has_bot_res <- "bottom_species_residues" %in% names(base) && any(!is.na(base$bottom_species_residues) & nzchar(as.character(base$bottom_species_residues)))
+  has_pairs   <- "n_conserved_pairs" %in% names(base) && any(!is.na(base$n_conserved_pairs) & nzchar(as.character(base$n_conserved_pairs)))
 
   all_positions <- base %>%
-    dplyr::mutate(dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_overlap, RER_acc, RER_decc, RER_dir, Accum_dir,
-                                 CAAS_FCS_sig, RER_FCS_sig, CAAS_AMI_net, RER_AMI_net, FADE_AMI_net, PE_sig),
-                                 ~ dplyr::coalesce(.x, FALSE)))
+    dplyr::mutate(
+      dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_overlap, PE_sig), ~ dplyr::coalesce(.x, FALSE))
+    )
 
+  # Position composite: strictly CAAS + FADE site overlap. Zero gene-level weights!
   out <- all_positions %>%
-    dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_overlap | Accum_dir | RER_dir |
-                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig)
-  if (nrow(out) == 0) return(out)
+    .position_composite(has_fade = has_fade_pos)
+
+  # Filter to positions meeting at least one active criterion
+  out <- out %>%
+    dplyr::filter(
+      `Composite score` > 0 | `25%` | is_biochem | (if (has_pe_pos) PE_sig else FALSE) |
+      (if (has_cosmic_pos) COSMIC == "hit" else FALSE) |
+      (if (has_pai3d_pos) PAI3D_pathogenic == "pathogenic" else FALSE)
+    )
+  if (nrow(out) == 0) return(NULL)
 
   out <- out %>%
-    .grouped_composite(fade_col = "FADE_overlap") %>%
     dplyr::mutate(
       `N Hypotheses`        = if ("n_hypotheses" %in% names(.)) as.integer(n_hypotheses) else NA_integer_,
       `Hypotheses`          = if ("supporting_hypotheses" %in% names(.)) .collapsible_hypotheses(supporting_hypotheses) else "",
-      `CAAS FCS term(s)`    = .collapsible_list(caas_fcs_terms),
-      `RER FCS term(s)`     = .collapsible_list(rer_fcs_terms),
-      `CAAS AMI desc(s)`    = .collapsible_list(caas_ami_desc),
-      `RER AMI desc(s)`     = .collapsible_list(rer_ami_desc),
-      `FADE AMI desc(s)`    = .collapsible_list(fade_ami_desc),
       `PE term(s)`          = .collapsible_list(pe_terms),
-      `CAAS evidence`       = .evidence_badge(evidence_label_caas),
-      `RER evidence`        = .evidence_badge(evidence_label_rer),
       `CAAS`                = if ("caas" %in% names(.)) caas else NA_character_,
-      `CAAS encoded`        = if ("amino_encoded" %in% names(.)) dplyr::na_if(as.character(amino_encoded), "") else NA_character_,
       `Top species residues`    = {
         .ts <- if ("top_species_residues" %in% names(.)) top_species_residues else NA_character_
         .cs <- if ("caas" %in% names(.)) caas else NA_character_
@@ -1459,35 +1570,67 @@ build_interesting_positions <- function(direction) {
       }
     )
 
-  out %>%
-    dplyr::arrange(dplyr::desc(`Composite score`)) %>%
-    dplyr::select(Gene = gene, Position, CAAS, `CAAS encoded`, `CAAS Score` = CAAS_score,
-                  `Top species residues`, `Bottom species residues`, `Conserved pairs`,
-                  `N Hypotheses`,
-                  `Hypotheses`,
-                  `25%`, `10%`, `5%`, `1%`,
-                  FADE_overlap, RER_acc, RER_decc, Accum_dir,
-                  dplyr::any_of(c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact")),
-                  CAAS_FCS_sig, `CAAS FCS term(s)`, `CAAS evidence`,
-                  RER_FCS_sig, `RER FCS term(s)`, `RER evidence`,
-                  CAAS_AMI_net, `CAAS AMI desc(s)`, RER_AMI_net, `RER AMI desc(s)`, FADE_AMI_net, `FADE AMI desc(s)`,
-                  PE_sig, `PE term(s)`,
-                  COSMIC, PAI3D_pathogenic,
-                  `Pfam domain` = pfam_domain, `Pfam clan` = pfam_clan,
-                  `UCR region` = ucr_region, `Position variability` = position_variability,
-                  `FUBAR selection` = fubar_selection,
-                  caas_family, rer_family, ami_fade_family, posenrich_family,
-                  `N criteria`, `Composite score`) %>%
+  # Define the 4 tramos dynamically
+  meta_cols <- c("Gene", "Position", "CAAS")
+  if (has_top_res) meta_cols <- c(meta_cols, "Top species residues")
+  if (has_bot_res) meta_cols <- c(meta_cols, "Bottom species residues")
+  if (has_pairs)   meta_cols <- c(meta_cols, "Conserved pairs")
+  if (has_hypotheses) meta_cols <- c(meta_cols, "N Hypotheses", "Hypotheses")
+  meta_cols <- c(meta_cols, "CAAS Score")
+
+  pond_cols <- c("25%", "10%", "5%", "1%")
+  if (has_fade_pos) pond_cols <- c(pond_cols, "FADE_overlap")
+
+  desc_cols <- c("GS_schemes", "is_biochem")
+  if (has_pe_pos)    desc_cols <- c(desc_cols, "PE_sig", "PE term(s)")
+  if (has_pemp)      desc_cols <- c(desc_cols, "p.emp")
+  if (has_padj)      desc_cols <- c(desc_cols, "p.adj_bh")
+  if (has_cosmic_pos) desc_cols <- c(desc_cols, "COSMIC")
+  if (has_pai3d_pos)  desc_cols <- c(desc_cols, "PAI3D_pathogenic")
+  if (has_pfam_pos) {
+    if (any(!is.na(base$pfam_domain) & nzchar(as.character(base$pfam_domain)))) desc_cols <- c(desc_cols, "Pfam domain")
+    if (any(!is.na(base$pfam_clan) & nzchar(as.character(base$pfam_clan)))) desc_cols <- c(desc_cols, "Pfam clan")
+  }
+  if (has_ucr_pos)   desc_cols <- c(desc_cols, "UCR region")
+  if (has_var_pos)   desc_cols <- c(desc_cols, "Position variability")
+  if (has_fubar_pos) desc_cols <- c(desc_cols, "FUBAR selection")
+
+  res_cols <- c("caas_family")
+  if (has_fade_pos) res_cols <- c(res_cols, "fade_family")
+  res_cols <- c(res_cols, "N criteria", "Composite score")
+
+  out$gene <- NULL
+  if ("CAAS_score" %in% names(out)) out$`CAAS Score` <- out$CAAS_score
+  if ("pfam_domain" %in% names(out)) out$`Pfam domain` <- out$pfam_domain
+  if ("pfam_clan" %in% names(out)) out$`Pfam clan` <- out$pfam_clan
+  if ("ucr_region" %in% names(out)) out$`UCR region` <- out$ucr_region
+  if ("position_variability" %in% names(out)) out$`Position variability` <- out$position_variability
+  if ("fubar_selection" %in% names(out)) out$`FUBAR selection` <- out$fubar_selection
+
+  out <- out %>%
+    dplyr::arrange(dplyr::desc(`Composite score`), dplyr::desc(`CAAS Score`)) %>%
+    dplyr::select(dplyr::all_of(c(meta_cols, pond_cols, desc_cols, res_cols))) %>%
     head(params$top_n * 3)
+
+  list(
+    data      = out,
+    meta_cols = meta_cols,
+    pond_cols = pond_cols,
+    desc_cols = desc_cols,
+    res_cols  = res_cols
+  )
 }
 ```
 
 ```{r interesting_positions_tabs, eval=has_position_scores_cmp, results='asis'}
 for (dr in c("Global", "Top", "Bottom")) {
   cat(sprintf("\n## %s\n\n", dr))
-  tbl <- build_interesting_positions(dr)
-  if (nrow(tbl) == 0) { cat("_No positions meet any criterion for this direction._\n\n"); next }
-  print(kbl_html(tbl, height = if (nrow(tbl) > 15) "480px" else NULL, escape = FALSE))
+  res <- build_interesting_positions(dr)
+  if (is.null(res) || is.null(res$data) || nrow(res$data) == 0) {
+    cat("_No positions meet any criterion for this direction._\n\n")
+    next
+  }
+  print(render_banded_table(res, height = if (nrow(res$data) > 15) "480px" else NULL))
 }
 ```
 

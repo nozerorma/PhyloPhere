@@ -44,14 +44,12 @@ alignment column breaks the proportionality gene by gene: poorly covered genes r
 too-high expectation (conservative) and well covered genes a too-low one
 (anti-conservative), which concentrates false positives in the best-covered genes.
 
-Per-group draws are independent
--------------------------------
-Each group draws separately, which keeps each group's marginal p-value calibrated. It does
-not make the five p-values independent of one another: a single physical position can be a
-CAAS under several nested schemes, so the observed counts, and hence the p-values, are
-positively correlated whatever the null does. Evidence is therefore combined across groups
-with the Cauchy Combination Test (scoring_compute.R, accum_gene_lists.nf), which is valid
-under arbitrary dependence between the combined p-values.
+Evaluation is Unweighted Scheme (US) only
+------------------------------------------
+Accumulation is evaluated strictly under the Unweighted Scheme (US); biochemical Grantham Score
+(GS) schemes describe positions and are excluded from accumulation. Each gene's empirical p-value
+is derived from the US null distribution and adjusted directly by Benjamini-Hochberg (BH FDR)
+downstream in accum_gene_lists.nf and scoring_compute.R.
 
 No significance, convergence or divergence category families, FDR or gene lists are
 produced here.
@@ -349,7 +347,7 @@ class RandomizationWorker:
 
             # (start, end) slice of each group's buffer for this key; keys without CAAS are skipped
             cat_slices = {}
-            for cat in ['us', 'gs1', 'gs2', 'gs3', 'gs4']:
+            for cat in self.actual_counts:
                 n_cat = cinfo.get(f'n_{cat}', 0)
                 if n_cat > 0:
                     cat_slices[cat] = (offsets[cat], offsets[cat] + n_cat)
@@ -480,8 +478,8 @@ def _build_caas_payload(merged_df, randomization_type, decile_bins, pool_mask):
 # the same one. The per-gene CAAS count is free in each cycle (not fixed to the observed
 # count), so this is an excess null, not an occupancy null.
 
-_PERM_CATS = ['us', 'gs1', 'gs2', 'gs3', 'gs4']
-_PERM_GROUP_OF_CAT = {'us': 'US', 'gs1': 'GS1', 'gs2': 'GS2', 'gs3': 'GS3', 'gs4': 'GS4'}
+_PERM_CATS = ['us']
+_PERM_GROUP_OF_CAT = {'us': 'US'}
 _PERM_CAT_OF_GROUP = {v: k for k, v in _PERM_GROUP_OF_CAT.items()}
 
 
@@ -674,7 +672,7 @@ def _write_empty_outputs_and_exit(args):
 
     Used when the global/CAAS join is empty, so downstream steps still find their inputs.
     """
-    categories = ['us', 'gs1', 'gs2', 'gs3', 'gs4']
+    categories = ['us']
 
     base_dir = os.path.dirname(args.output_prefix) or '.'
     os.makedirs(base_dir, exist_ok=True)
@@ -889,9 +887,9 @@ def main(args):
             'cons_idx':  np.float32, 'genes': np.int32, 'iscaas': bool,
         }
 
-    # CAAS rows of the five groups, filtered by side
+    # CAAS rows of the US group, filtered by side
     _gu = merged_df['caap_group'].fillna('').astype(str).str.strip().str.upper()
-    pool_groups = {'US', 'GS1', 'GS2', 'GS3', 'GS4'}
+    pool_groups = {'US'}
     pool_group_mask = _gu.isin(pool_groups)
     if args.change_side in ('top', 'bottom'):
         # One row per side (a position on both sides is two rows), so the direction
@@ -910,37 +908,17 @@ def main(args):
             else np.array([float(x) for x in args.decile_bins.split(',')])
         )
 
-    # Counts are kept strictly per group. There is deliberately no pooled count
-    # over all groups: a position can satisfy several grouping schemes, so summing
-    # the five counts would count it once per scheme. Cross-group evidence is
-    # combined at the p-value level downstream (Cauchy Combination Test), which
-    # needs no such sum and tolerates the positive dependence that shared
-    # positions induce.
+    # Accumulation evaluates the unweighted scheme (US) only; biochemical GS schemes
+    # describe positions and are excluded from accumulation.
     pool_mask = caas_filter
+    us_mask   = pool_mask & _gu.eq('US')
 
-    us_mask  = pool_mask & _gu.eq('US')
-    gs1_mask = pool_mask & _gu.eq('GS1')
-    gs2_mask = pool_mask & _gu.eq('GS2')
-    gs3_mask = pool_mask & _gu.eq('GS3')
-    gs4_mask = pool_mask & _gu.eq('GS4')
-
-    logging.info(
-        f"Category sizes: us={us_mask.sum()}, gs1={gs1_mask.sum()}, "
-        f"gs2={gs2_mask.sum()}, gs3={gs3_mask.sum()}, gs4={gs4_mask.sum()}"
-    )
+    logging.info(f"Category size: us={us_mask.sum()}")
 
     def _bc(mask):
         return np.bincount(np.asarray(genes_int[np.asarray(mask, dtype=bool)], dtype=np.int32), minlength=n_genes)
 
-    # Each group gets an independent draw, which calibrates its marginal p-value;
-    # cross-group dependence is handled when the p-values are combined (CCT).
-    actual_counts_masks = dict([
-        ('us',  us_mask),
-        ('gs1', gs1_mask),
-        ('gs2', gs2_mask),
-        ('gs3', gs3_mask),
-        ('gs4', gs4_mask),
-    ])
+    actual_counts_masks = {'us': us_mask}
     actual_counts = {cat: _bc(mask) for cat, mask in actual_counts_masks.items()}
 
     if args.randomization_type == 'permulation':

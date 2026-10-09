@@ -9,24 +9,21 @@ Inputs: per-scheme (or per-side) score mappings and the reference pools of posit
 Outputs: position scores, per-direction values and gene scores (in memory)
 
 * The score of a row (``caas_row``) is its ``asr_path_score`` (identity). A position's score, per side,
-  is ``(US + mean(GS)) / 2``: half the score of the US scheme (0 when US did not detect the position) plus
-  half the mean of the scores of the GS1-GS4 schemes that detected it (0 when none did). US is the strict
-  test on residues and the GS schemes repeat it on biochemical classes, so the GS term is the bonus for a
-  divergence in chemistry; a position detected only by GS schemes keeps that term. How many GS schemes
-  detect it is not rewarded, because the four partitions are different axes, not finer and coarser
-  versions of one. Each term lies in [0, 1] and the two weigh the same, so the score lies in [0, 1].
+  is the score of its US row (exact residue identity), in [0, 1]. A position that US does not detect has
+  no score, whatever the GS schemes say: the GS1-GS4 schemes recode the residues into biochemical classes
+  and describe the chemistry of a position (which schemes detect it), they do not enter the score or
+  any quantity built on it. Their per-position profile is written by scoring_compute.R and the null
+  records the scheme set of each detection (``scheme_set`` of perm_pos_cycle_caas.tsv.gz).
 * Directions: ``top`` and ``bottom`` use only that side's rows; ``all`` keeps one entry per
   position, its best side, so a position detected on both sides is not counted twice.
 * Gene score: ``size_adj_max(x) = F(max(x)) ** len(x)`` with F the ECDF of the reference
   pool of the same direction (and, in the null, of the same labeling). It is None when the
   gene has no scored position in that direction or the pool is empty: no positions, no score.
-  F counts pool values up to ``max + TIE_TOL``: position scores are means of a few values in
-  [0, 1], so means that are equal in exact arithmetic can differ by rounding noise (~1e-16),
-  and the pool is heavily tied. The tolerance makes those ties deterministic.
+  F counts pool values up to ``max + TIE_TOL``: position scores are weighted means of per-domain
+  values in [0, 1], so scores that are equal in exact arithmetic can differ by rounding noise
+  (~1e-16), and the pool is heavily tied. The tolerance makes those ties deterministic.
 
-Pure Python. Sums are correctly rounded (``math.fsum``), so the result does not depend on
-the order the schemes were filled in and the same inputs give the same bits wherever the
-function is called.
+Pure Python. The same inputs give the same bits wherever the functions are called.
 """
 
 from __future__ import annotations
@@ -42,11 +39,11 @@ DIRECTIONS = ("all", "top", "bottom")
 
 # Rule of the position score. It is stamped on the null (perm_pos_cycle_caas.tsv.gz, column score_aggregation) so that
 # scoring_compute.R refuses a null scored with another rule.
-SCORE_RULE = "us_gs_mean_half"
-# Schemes whose scores are averaged; US enters on its own.
+SCORE_RULE = "us"
+# Biochemical schemes: they describe a position and never enter its score.
 GS_SCHEMES = ("GS1", "GS2", "GS3", "GS4")
 
-# Absolute; scores lie in [0, 1]. Rounding noise of a sum of <= 5 values is ~1e-16, and real
+# Absolute; scores lie in [0, 1]. Rounding noise of a weighted mean is ~1e-16, and real
 # differences between position scores are orders of magnitude larger.
 TIE_TOL = 1e-12
 
@@ -56,19 +53,12 @@ def _is_value(x) -> bool:
 
 
 def position_score(scheme_scores: Mapping[str, float]) -> Optional[float]:
-    """Score of a position side from its per-scheme scores; None when no scheme scored it.
+    """Score of a position side: its US score; None when US did not score it.
 
-    ``(US + mean(GS)) / 2``: half the US score (0 if US did not score the position) plus half the mean over
-    the GS1-GS4 schemes that scored it (0 if none did). The sums are correctly rounded (``math.fsum``), so the
-    result does not depend on the order of the mapping; halving is exact in binary floating point, so the
-    score is the half of that sum bit for bit.
+    ``scheme_scores`` maps scheme name to ``caas_row``; the GS entries are ignored.
     """
     us = scheme_scores.get("US")
-    gs = [v for k, v in scheme_scores.items() if k in GS_SCHEMES and _is_value(v)]
-    has_us = _is_value(us)
-    if not has_us and not gs:
-        return None
-    return math.fsum([us if has_us else 0.0, math.fsum(gs) / len(gs) if gs else 0.0]) / 2.0
+    return float(us) if _is_value(us) else None
 
 
 def collapse_sides(side_scores: Mapping[str, float]) -> Dict[str, float]:
