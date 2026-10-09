@@ -20,6 +20,7 @@ params:
   position_scores_input: NULL
   output_dir: "."
   seed: "1998"
+  max_table_rows: 2000
 ---
 
 <style type="text/css">
@@ -290,7 +291,13 @@ key_cols <- intersect(
   names(meta_caas)
 )
 other_cols <- setdiff(names(meta_caas), key_cols)
+# The widget embeds every row as JSON in the HTML, so only the most significant
+# rows are shown; the full table is exported below.
+sort_col <- intersect(c("p.emp", "p.adj_bh"), names(meta_caas))[1]
+n_show <- min(nrow(meta_caas), as.integer(params$max_table_rows))
 meta_caas_display <- meta_caas %>%
+  { if (is.na(sort_col)) . else arrange(., .data[[sort_col]]) } %>%
+  slice_head(n = n_show) %>%
   select(all_of(c(key_cols, other_cols))) %>%
   mutate(across(where(is.numeric), ~ round(., 4)), across(any_of("p.emp"), .fmt_p))
 
@@ -302,7 +309,7 @@ if (requireNamespace("DT", quietly = TRUE)) {
     options = list(pageLength = 15, scrollX = TRUE, autoWidth = TRUE),
     caption = htmltools::tags$caption(
       style = "caption-side: top; text-align: left; font-weight: bold;",
-      sprintf("Row-level CAAS position p-values (%d total positions; full table exported to significance/meta_caas_significance.tsv)", nrow(meta_caas))
+      sprintf("Row-level CAAS position p-values (top %d of %d positions by %s; full table exported to significance/meta_caas_significance.tsv)", n_show, nrow(meta_caas), if (is.na(sort_col)) "file order" else sort_col)
     )
   )
 } else {
