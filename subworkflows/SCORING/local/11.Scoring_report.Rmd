@@ -140,6 +140,27 @@ pos_df  <- read_tsv(params$position_scores_file, show_col_types = FALSE)
 gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
+# Force numeric types for columns that may be guessed as character due to leading NAs
+.num_cols_pos <- c(
+  "CAAS_score", "asr_score", "asr_path_score", "p.emp", "p.adj_bh",
+  "p.emp_fact", "p.adj_bh_fact", "q_emp", "fubar_prob", "pos_var_mean",
+  "fade_site_bf", "max_site_bf", "alpha", "beta", "omega",
+  "fold_change", "delta_loglik"
+)
+for (.cn in intersect(.num_cols_pos, names(pos_df))) {
+  pos_df[[.cn]] <- suppressWarnings(as.numeric(pos_df[[.cn]]))
+}
+
+.num_cols_gene <- c(
+  "gene_caas_score", "gene_caas_score_top", "gene_caas_score_bottom",
+  "accum_p", "accum_cct_p", "accum_fdr", "accum_score",
+  "rer_min_pval", "rer_rho", "rer_p.adj", "ami_score", "fcs_score",
+  "fade_max_bf_top", "fade_max_bf_bottom"
+)
+for (.cn in intersect(.num_cols_gene, names(gene_df))) {
+  gene_df[[.cn]] <- suppressWarnings(as.numeric(gene_df[[.cn]]))
+}
+
 # position_scores.tsv carries no per-scheme factor: a position-level mean of asr_score would hide
 # scheme disagreement, and CAAS_score is already the US asr_path_score of the position.
 # `asr_score` is aliased to asr_path_score when the table has it and to CAAS_score otherwise, so
@@ -504,20 +525,34 @@ The formal per-pathway `p.perm` (ASR axis) is in the companion **FCS** report.
 # Null detections: one row per (Gene, Position, side, cycle) a permulated labeling detects (a detected position
 # can score 0); observed rows are the scored positions of the run.
 .null_pos <- readr::read_tsv(params$caas_pos_cycle_caas_file, show_col_types = FALSE,
-                             col_select = c(Gene, Position, side, cycle, caas_score)) %>%
-  filter(side %in% c("top", "bottom")) %>% rename(score = caas_score)
-.obs_pos <- pos_df %>% filter(!is.na(CAAS_score), side %in% c("top", "bottom")) %>%
+                             col_select = c(Gene, Position, side, cycle, caas_score),
+                             col_types = readr::cols(caas_score = readr::col_character(), .default = readr::col_guess()),
+                             na = c("", "NA", "NaN", "null", "NULL")) %>%
+  filter(side %in% c("top", "bottom")) %>%
+  rename(score = caas_score) %>%
+  mutate(score = suppressWarnings(as.numeric(score))) %>%
+  filter(!is.na(score))
+
+.obs_pos <- pos_df %>%
+  mutate(CAAS_score = suppressWarnings(as.numeric(CAAS_score))) %>%
+  filter(!is.na(CAAS_score), side %in% c("top", "bottom")) %>%
   transmute(Gene, Position, side, score = CAAS_score)
 
 # Cycles with no detection leave no row, so the number of cycles is taken from the p.emp floor (1/(N + 1))
 # when the table reaches it, and otherwise from the cycles present.
 .null_cycles <- unique(.null_pos$cycle)
-.n_cyc <- max(length(.null_cycles),
-              if ("p.emp" %in% names(pos_df) && any(!is.na(pos_df$p.emp))) round(1 / min(pos_df$p.emp, na.rm = TRUE)) - 1 else 0)
-.n_pad <- .n_cyc - length(.null_cycles)
+.p_emp_num   <- suppressWarnings(as.numeric(pos_df$p.emp))
+.p_emp_fin   <- .p_emp_num[is.finite(.p_emp_num) & .p_emp_num > 0]
+.n_cyc_p     <- if (length(.p_emp_fin) > 0) round(1 / min(.p_emp_fin)) - 1 else 0
+.n_cyc       <- max(length(.null_cycles), .n_cyc_p, 1L)
+.n_pad       <- max(0L, .n_cyc - length(.null_cycles))
 
 # global: one entry per position, its best side, as in the undirected gene score.
-.best_side <- function(d, by) d %>% group_by(across(all_of(by))) %>% summarise(score = max(score), .groups = "drop")
+.best_side <- function(d, by) {
+  if (nrow(d) == 0) return(d)
+  d %>% group_by(across(all_of(by))) %>%
+    summarise(score = if (any(is.finite(score))) max(score[is.finite(score)]) else NA_real_, .groups = "drop")
+}
 .sets <- list(
   global = list(obs = .best_side(.obs_pos, c("Gene", "Position")),
                 null = .best_side(.null_pos, c("Gene", "Position", "cycle"))),
@@ -526,6 +561,7 @@ The formal per-pathway `p.perm` (ASR axis) is in the companion **FCS** report.
 
 # Per-cycle count of a quantity, with the cycles that detect nothing as 0.
 .per_cycle <- function(d, f) {
+  if (length(.null_cycles) == 0) return(rep(0, .n_pad))
   v <- vapply(split(d, factor(d$cycle, levels = .null_cycles)), f, numeric(1))
   c(v, rep(0, .n_pad))
 }
@@ -539,15 +575,25 @@ cat("_No position-level permulation null available for this run",
 ### Detected positions vs null
 
 ```{r pos-null-excedance, eval=has_pos_null, fig.height=4.8, fig.width=10}
-.grid <- seq(0, ceiling(100 * max(.null_pos$score, .obs_pos$score)) / 100, by = 0.01)
-.cnt  <- function(x) rev(cumsum(rev(tabulate(findInterval(x, .grid), length(.grid)))))  # N(score >= grid)
+.valid_scores <- c(.null_pos$score[is.finite(.null_pos$score)], .obs_pos$score[is.finite(.obs_pos$score)])
+.max_s <- if (length(.valid_scores) > 0) max(.valid_scores) else 1.0
+.grid  <- seq(0, max(0.01, ceiling(100 * .max_s) / 100), by = 0.01)
+.cnt   <- function(x) {
+  x_fin <- x[is.finite(x)]
+  rev(cumsum(rev(tabulate(findInterval(x_fin, .grid), length(.grid)))))  # N(score >= grid)
+}
 .exc <- dplyr::bind_rows(lapply(names(.sets), function(d) {
   st <- .sets[[d]]
-  m  <- vapply(split(st$null$score, factor(st$null$cycle, levels = .null_cycles)), .cnt, numeric(length(.grid)))
+  m  <- if (length(.null_cycles) > 0) {
+    vapply(split(st$null$score, factor(st$null$cycle, levels = .null_cycles)), .cnt, numeric(length(.grid)))
+  } else {
+    matrix(0, nrow = length(.grid), ncol = 0)
+  }
   m  <- cbind(m, matrix(0, length(.grid), .n_pad))
   tibble::tibble(direction = d, s = .grid, obs = .cnt(st$obs$score),
-                 med = apply(m, 1, median),
-                 lo = apply(m, 1, quantile, .025), hi = apply(m, 1, quantile, .975))
+                 med = if (ncol(m) > 0) apply(m, 1, median) else rep(0, length(.grid)),
+                 lo  = if (ncol(m) > 0) apply(m, 1, quantile, .025) else rep(0, length(.grid)),
+                 hi  = if (ncol(m) > 0) apply(m, 1, quantile, .975) else rep(0, length(.grid)))
 })) %>% mutate(direction = factor(direction, levels = c("global", "top", "bottom")))
 
 .fl <- 0.5   # log axis floor for counts of 0
@@ -855,25 +901,33 @@ pairs are not constrained and show whether that matching is enough for the null 
 # its BH adjustment (p.adj_bh). p.emp_fact is its factorized form, with p.adj_bh_fact.
 # scoring_compute.R writes them into position_scores.tsv
 # whenever --caas_pos_cycle_caas is set.
-has_p_emp <- "p.emp" %in% names(pos_df) && any(!is.na(pos_df$p.emp))
+.valid_p <- suppressWarnings(as.numeric(pos_df$p.emp))
+.valid_p <- .valid_p[is.finite(.valid_p) & .valid_p > 0]
+has_p_emp <- length(.valid_p) > 0
 # p.emp is add-one smoothed, so its minimum is 1/(N + 1). A value at that floor is reported as "< 1/N" (with 1000
 # permulations "<0.001"), the convention of Saputra et al. 2021; the TSV keeps the number. N is read from the floor.
-.p_floor <- if (has_p_emp) min(pos_df$p.emp, na.rm = TRUE) else NA_real_
-.n_perm  <- if (is.finite(.p_floor) && .p_floor > 0) round(1 / .p_floor) - 1 else NA_real_
+.p_floor <- if (has_p_emp) min(.valid_p) else NA_real_
+.n_perm  <- if (!is.na(.p_floor) && is.finite(.p_floor) && .p_floor > 0) round(1 / .p_floor) - 1 else NA_real_
 .fmt_p <- function(p) vapply(p, function(x) {
-  if (is.na(x)) return(NA_character_)
-  if (is.finite(.n_perm) && x <= .p_floor * (1 + 1e-9)) return(sprintf("<%s", format(1 / .n_perm, digits = 3)))
+  if (is.na(x) || !is.finite(x)) return(NA_character_)
+  if (is.finite(.n_perm) && !is.na(.p_floor) && is.finite(.p_floor) && x <= .p_floor * (1 + 1e-9)) {
+    return(sprintf("<%s", format(1 / .n_perm, digits = 3)))
+  }
   format(signif(x, 3), scientific = FALSE, trim = TRUE)
 }, character(1))
 ```
 
 ```{r p-emp-header, eval=has_p_emp, results='asis'}
 cat("### p.emp\n\n")
-n_val <- sum(!is.na(pos_df$p.emp))
+n_val <- sum(!is.na(pos_df$p.emp) & is.finite(pos_df$p.emp))
 n_tot <- nrow(pos_df)
-n_floor <- sum(pos_df$p.emp <= .p_floor * (1 + 1e-9), na.rm = TRUE)
+n_floor <- if (!is.na(.p_floor) && is.finite(.p_floor)) {
+  sum(!is.na(pos_df$p.emp) & is.finite(pos_df$p.emp) & pos_df$p.emp <= .p_floor * (1 + 1e-9))
+} else {
+  0L
+}
 has_fact <- all(c("p.emp_fact", "p.adj_bh_fact") %in% names(pos_df))
-min_fact <- if (has_fact) suppressWarnings(min(pos_df$p.emp_fact, na.rm = TRUE)) else NA_real_
+min_fact <- if (has_fact) suppressWarnings(min(pos_df$p.emp_fact[is.finite(pos_df$p.emp_fact)], na.rm = TRUE)) else NA_real_
 
 cat(sprintf(paste0(
   "The position p-values are informative: no threshold or significance call is applied to them.\n\n",

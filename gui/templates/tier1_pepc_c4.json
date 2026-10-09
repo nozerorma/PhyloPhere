@@ -90,13 +90,15 @@
       "chunk_size": "500",
       "resample_use_n": true,
       "multi_hypothesis": true,
-      "max_fop": "100"
+      "max_fop": "100",
+      "perm_match_pss": true,
+      "perm_match_pss_tol": "0.25"
     },
     "disambiguation": {
       "enabled": true,
       "extra_flags": "",
       "ct_disambig_asr_model": "lg",
-      "ct_disambig_asr_cache_dir": "",
+      "ct_disambig_asr_cache_dir": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/output/pepc/asr",
       "ct_disambig_hypotheses_pairs": "",
       "ct_disambig_posterior_threshold": "0.1",
       "ct_disambig_max_tasks_per_child": "50",
