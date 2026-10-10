@@ -633,12 +633,18 @@ positions are detected and not from what a detection looks like.
 
 #### Score of the detected positions (score > 0)
 
-```{r pos-null-score-density, eval=has_pos_null, fig.height=3.8, fig.width=10}
-ggplot(.comp %>% filter(score > 0), aes(score, colour = source, fill = source)) +
-  geom_density(alpha = .25, adjust = 1.2) + facet_wrap(~direction, scales = "free_y") +
-  scale_colour_manual(values = .src_pal) + scale_fill_manual(values = .src_pal) +
-  labs(x = "CAAS Score", y = "density", colour = NULL, fill = NULL) +
-  .theme_p + theme(legend.position = "top")
+```{r pos-null-score-density, eval=has_pos_null, fig.height=3.8, fig.width=10, results='asis'}
+.comp_pos <- .comp %>% filter(score > 0)
+if (nrow(.comp_pos) > 0) {
+  p_dens <- ggplot(.comp_pos, aes(score, colour = source, fill = source)) +
+    geom_density(alpha = .25, adjust = 1.2) + facet_wrap(~direction, scales = "free_y") +
+    scale_colour_manual(values = .src_pal) + scale_fill_manual(values = .src_pal) +
+    labs(x = "CAAS Score", y = "density", colour = NULL, fill = NULL) +
+    .theme_p + theme(legend.position = "top")
+  print(p_dens)
+} else {
+  cat("_No positions with score > 0 available._\n\n")
+}
 ```
 
 #### Detections with score 0
@@ -1015,19 +1021,29 @@ thr_1  <- quantile(pos_df$CAAS_score, 1 - top1_pct, na.rm = TRUE)
 p_combined <- ggplot(pos_df, aes(x = CAAS_score)) +
   geom_histogram(aes(y = after_stat(density)), bins = 50,
                  fill = .tableau10[1], alpha = 0.7) +
-  geom_density(linewidth = 0.8, colour = .tableau10[2]) +
-  geom_vline(xintercept = thr_10, linetype = "dashed",
-             colour = .tableau10[3], linewidth = 0.7) +
-  geom_vline(xintercept = thr_5,  linetype = "longdash",
-             colour = .tableau10[5], linewidth = 0.7) +
-  geom_vline(xintercept = thr_1,  linetype = "dotted",
-             colour = .tableau10[4], linewidth = 0.7) +
-  annotate("text", x = thr_10, y = Inf, label = sprintf("Top %g%%", top_pct * 100),
-           vjust = 2,    hjust = -0.1, colour = .tableau10[3], size = 3.5) +
-  annotate("text", x = thr_5,  y = Inf, label = sprintf("Top %g%%", top5_pct * 100),
-           vjust = 2.75, hjust = -0.1, colour = .tableau10[5], size = 3.5) +
-  annotate("text", x = thr_1,  y = Inf, label = sprintf("Top %g%%", top1_pct * 100),
-           vjust = 3.5,  hjust = -0.1, colour = .tableau10[4], size = 3.5) +
+  geom_density(linewidth = 0.8, colour = .tableau10[2])
+if (is.finite(thr_10)) {
+  p_combined <- p_combined +
+    geom_vline(xintercept = thr_10, linetype = "dashed",
+               colour = .tableau10[3], linewidth = 0.7) +
+    annotate("text", x = thr_10, y = Inf, label = sprintf("Top %g%%", top_pct * 100),
+             vjust = 2,    hjust = -0.1, colour = .tableau10[3], size = 3.5)
+}
+if (is.finite(thr_5)) {
+  p_combined <- p_combined +
+    geom_vline(xintercept = thr_5,  linetype = "longdash",
+               colour = .tableau10[5], linewidth = 0.7) +
+    annotate("text", x = thr_5,  y = Inf, label = sprintf("Top %g%%", top5_pct * 100),
+             vjust = 2.75, hjust = -0.1, colour = .tableau10[5], size = 3.5)
+}
+if (is.finite(thr_1)) {
+  p_combined <- p_combined +
+    geom_vline(xintercept = thr_1,  linetype = "dotted",
+               colour = .tableau10[4], linewidth = 0.7) +
+    annotate("text", x = thr_1,  y = Inf, label = sprintf("Top %g%%", top1_pct * 100),
+             vjust = 3.5,  hjust = -0.1, colour = .tableau10[4], size = 3.5)
+}
+p_combined <- p_combined +
   labs(title = "CAAS Score Distribution - Combined",
        subtitle = sprintf("n = %s positions | Trait: %s",
                           format(nrow(pos_df), big.mark = ","), params$traitname),
@@ -1045,31 +1061,37 @@ shape of the positions that carry signal. The `global` panel keeps one entry per
 the undirected gene score does; `top` and `bottom` use only the positions of that side. The share of zeros of
 each panel is in its label.
 
-```{r caas-score-nonzero, fig.height=7, fig.width=10}
-.dir_scores <- dplyr::bind_rows(
-  pos_df %>% filter(!is.na(CAAS_score)) %>% group_by(Gene, Position) %>%
-    summarise(score = max(CAAS_score), .groups = "drop") %>% mutate(direction = "global"),
-  pos_df %>% filter(!is.na(CAAS_score), side == "top")    %>% transmute(Gene, Position, score = CAAS_score, direction = "top"),
-  pos_df %>% filter(!is.na(CAAS_score), side == "bottom") %>% transmute(Gene, Position, score = CAAS_score, direction = "bottom")
-) %>% mutate(direction = factor(direction, levels = c("global", "top", "bottom")))
+```{r caas-score-nonzero, fig.height=7, fig.width=10, results='asis'}
+.valid_caas <- pos_df %>% filter(!is.na(CAAS_score) & is.finite(CAAS_score))
+if (nrow(.valid_caas) == 0) {
+  cat("_No non-missing CAAS scores available to plot distribution._\n\n")
+} else {
+  .dir_scores <- dplyr::bind_rows(
+    .valid_caas %>% group_by(Gene, Position) %>%
+      summarise(score = max(CAAS_score), .groups = "drop") %>% mutate(direction = "global"),
+    .valid_caas %>% filter(side == "top")    %>% transmute(Gene, Position, score = CAAS_score, direction = "top"),
+    .valid_caas %>% filter(side == "bottom") %>% transmute(Gene, Position, score = CAAS_score, direction = "bottom")
+  ) %>% mutate(direction = factor(direction, levels = c("global", "top", "bottom")))
 
-dir_pal <- c(global = "#4E79A7", top = "#E15759", bottom = "#59A14F")
-.nz_lab <- .dir_scores %>% group_by(direction) %>%
-  summarise(lab = sprintf("n = %s | zeros: %.1f%%", format(dplyr::n(), big.mark = ","), 100 * mean(score == 0)), .groups = "drop")
-.nz_dat <- dplyr::bind_rows(
-  .dir_scores %>% mutate(variant = "All positions"),
-  .dir_scores %>% filter(score > 0) %>% mutate(variant = "Score > 0")
-) %>% mutate(variant = factor(variant, levels = c("All positions", "Score > 0")))
+  dir_pal <- c(global = "#4E79A7", top = "#E15759", bottom = "#59A14F")
+  .nz_lab <- .dir_scores %>% group_by(direction) %>%
+    summarise(lab = sprintf("n = %s | zeros: %.1f%%", format(dplyr::n(), big.mark = ","), 100 * mean(score == 0)), .groups = "drop")
+  .nz_dat <- dplyr::bind_rows(
+    .dir_scores %>% mutate(variant = "All positions"),
+    .dir_scores %>% filter(score > 0) %>% mutate(variant = "Score > 0")
+  ) %>% mutate(variant = factor(variant, levels = c("All positions", "Score > 0")))
 
-ggplot(.nz_dat, aes(x = score, fill = direction)) +
-  geom_histogram(bins = 40, boundary = 0, colour = "grey30", alpha = 0.85, show.legend = FALSE) +
-  geom_text(data = .nz_lab %>% mutate(variant = factor("All positions", levels = levels(.nz_dat$variant))),
-            aes(x = Inf, y = Inf, label = lab), inherit.aes = FALSE, hjust = 1.05, vjust = 1.5, size = 3.3) +
-  facet_grid(variant ~ direction, scales = "free_y") +
-  scale_fill_manual(values = dir_pal) +
-  labs(title = "CAAS Score distribution, with and without zeros", x = "CAAS Score", y = "positions") +
-  theme_minimal(base_size = 12) +
-  theme(plot.title = element_text(face = "bold"))
+  p_nz <- ggplot(.nz_dat, aes(x = score, fill = direction)) +
+    geom_histogram(bins = 40, boundary = 0, colour = "grey30", alpha = 0.85, show.legend = FALSE) +
+    geom_text(data = .nz_lab %>% mutate(variant = factor("All positions", levels = levels(.nz_dat$variant))),
+              aes(x = Inf, y = Inf, label = lab), inherit.aes = FALSE, hjust = 1.05, vjust = 1.5, size = 3.3) +
+    facet_grid(variant ~ direction, scales = "free_y") +
+    scale_fill_manual(values = dir_pal) +
+    labs(title = "CAAS Score distribution, with and without zeros", x = "CAAS Score", y = "positions") +
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(face = "bold"))
+  print(p_nz)
+}
 ```
 
 ### CAAS Score Manhattan (Position Level)
@@ -1117,35 +1139,43 @@ pos_chr_label_positions <- pos_chr_offsets %>%
   )
 ```
 
-```{r pos-caas-manhattan-plot, eval=has_genomic, fig.height=5, fig.width=14}
-pos_genomic <- pos_genomic %>%
-  mutate(caas_log = -log10(1 - pmin(CAAS_score, 0.9999)))   # CAAS_score lies in [0, 1]
-pos_thr_log <- -log10(1 - pmin(thr_10, 0.9999))
+```{r pos-caas-manhattan-plot, eval=has_genomic, fig.height=5, fig.width=14, results='asis'}
+if (nrow(pos_genomic) == 0) {
+  cat("_No scored positions mapped to genomic coordinates._\n\n")
+} else {
+  pos_genomic <- pos_genomic %>%
+    mutate(caas_log = -log10(1 - pmin(CAAS_score, 0.9999)))   # CAAS_score lies in [0, 1]
+  pos_thr_log <- if (is.finite(thr_10)) -log10(1 - pmin(thr_10, 0.9999)) else NA_real_
 
-ggplot(pos_genomic, aes(x = manhattan_x, y = caas_log, colour = chr_even)) +
-  geom_point(alpha = 0.45, size = 0.6, show.legend = FALSE) +
-  geom_hline(yintercept = pos_thr_log, linetype = "dashed",
-             colour = "grey40", linewidth = 0.6) +
-  scale_colour_manual(
-    values = c("FALSE" = .tableau10[1], "TRUE" = .tableau10[2]),
-    guide = "none"
-  ) +
-  scale_x_continuous(
-    breaks = pos_chr_label_positions$mid_x,
-    labels = pos_chr_label_positions$chr_label,
-    expand = expansion(mult = 0.01)
-  ) +
-  labs(
-    title    = "Position-Level CAAS Score - Manhattan View",
-    subtitle = sprintf("%d positions with genomic coordinates | dashed = top %g%% threshold",
-                       nrow(pos_genomic), params$top_pct * 100),
-    x = "Chromosome", y = "-log10(1 - CAAS Score / 2)"
-  ) +
-  theme(
-    plot.title         = element_text(face = "bold"),
-    axis.text.x        = element_text(size = 7),
-    panel.grid.major.x = element_blank()
-  )
+  p_man <- ggplot(pos_genomic, aes(x = manhattan_x, y = caas_log, colour = chr_even)) +
+    geom_point(alpha = 0.45, size = 0.6, show.legend = FALSE)
+  if (is.finite(pos_thr_log)) {
+    p_man <- p_man + geom_hline(yintercept = pos_thr_log, linetype = "dashed",
+                                colour = "grey40", linewidth = 0.6)
+  }
+  p_man <- p_man +
+    scale_colour_manual(
+      values = c("FALSE" = .tableau10[1], "TRUE" = .tableau10[2]),
+      guide = "none"
+    ) +
+    scale_x_continuous(
+      breaks = pos_chr_label_positions$mid_x,
+      labels = pos_chr_label_positions$chr_label,
+      expand = expansion(mult = 0.01)
+    ) +
+    labs(
+      title    = "Position-Level CAAS Score - Manhattan View",
+      subtitle = sprintf("%d positions with genomic coordinates | dashed = top %g%% threshold",
+                         nrow(pos_genomic), params$top_pct * 100),
+      x = "Chromosome", y = "-log10(1 - CAAS Score / 2)"
+    ) +
+    theme(
+      plot.title         = element_text(face = "bold"),
+      axis.text.x        = element_text(size = 7),
+      panel.grid.major.x = element_blank()
+    )
+  print(p_man)
+}
 ```
 
 ---
@@ -1161,22 +1191,32 @@ Scores section, faceted by direction.
 
 ```{r dir-caas-dist, fig.height=9}
 make_dir_dist <- function(df, dir_label, thr10, thr5, thr1, col) {
-  ggplot(df, aes(x = CAAS_score)) +
+  p <- ggplot(df, aes(x = CAAS_score)) +
     geom_histogram(aes(y = after_stat(density)), bins = 50,
                    fill = col, alpha = 0.7) +
-    geom_density(linewidth = 0.8, colour = col) +
-    geom_vline(xintercept = thr10, linetype = "dashed",  colour = "grey30", linewidth = 0.7) +
-    geom_vline(xintercept = thr5,  linetype = "longdash", colour = "grey30", linewidth = 0.7) +
-    geom_vline(xintercept = thr1,  linetype = "dotted",  colour = "grey30", linewidth = 0.7) +
-    annotate("text", x = thr10, y = Inf,
-             label = sprintf("Top %g%%\n(%.4f)", top_pct * 100,  thr10),
-             vjust = 2,    hjust = -0.05, colour = "grey20", size = 3) +
-    annotate("text", x = thr5,  y = Inf,
-             label = sprintf("Top %g%%\n(%.4f)", top5_pct * 100, thr5),
-             vjust = 3.8,  hjust = -0.05, colour = "grey20", size = 3) +
-    annotate("text", x = thr1,  y = Inf,
-             label = sprintf("Top %g%%\n(%.4f)", top1_pct * 100, thr1),
-             vjust = 5.6,  hjust = -0.05, colour = "grey20", size = 3) +
+    geom_density(linewidth = 0.8, colour = col)
+  if (is.finite(thr10)) {
+    p <- p +
+      geom_vline(xintercept = thr10, linetype = "dashed",  colour = "grey30", linewidth = 0.7) +
+      annotate("text", x = thr10, y = Inf,
+               label = sprintf("Top %g%%\n(%.4f)", top_pct * 100,  thr10),
+               vjust = 2,    hjust = -0.05, colour = "grey20", size = 3)
+  }
+  if (is.finite(thr5)) {
+    p <- p +
+      geom_vline(xintercept = thr5,  linetype = "longdash", colour = "grey30", linewidth = 0.7) +
+      annotate("text", x = thr5,  y = Inf,
+               label = sprintf("Top %g%%\n(%.4f)", top5_pct * 100, thr5),
+               vjust = 3.8,  hjust = -0.05, colour = "grey20", size = 3)
+  }
+  if (is.finite(thr1)) {
+    p <- p +
+      geom_vline(xintercept = thr1,  linetype = "dotted",  colour = "grey30", linewidth = 0.7) +
+      annotate("text", x = thr1,  y = Inf,
+               label = sprintf("Top %g%%\n(%.4f)", top1_pct * 100, thr1),
+               vjust = 5.6,  hjust = -0.05, colour = "grey20", size = 3)
+  }
+  p +
     labs(title = sprintf("CAAS Score Distribution - %s positions", dir_label),
          subtitle = sprintf("n = %s | thresholds computed within direction",
                             format(nrow(df), big.mark = ",")),
@@ -1669,12 +1709,19 @@ long_dir_scores <- bind_rows(
     transmute(Gene, score = gene_caas_bot, direction = "BOTTOM")
 )
 
-ggplot(long_dir_scores, aes(x = score, fill = direction, colour = direction)) +
-  geom_density(alpha = 0.45, linewidth = 0.7) +
-  geom_vline(xintercept = g_top_thr_10, linetype = "dashed",
-             colour = .tableau10[1], linewidth = 0.6) +
-  geom_vline(xintercept = g_bot_thr_10, linetype = "dashed",
-             colour = .tableau10[2], linewidth = 0.6) +
+p_g_dir <- ggplot(long_dir_scores, aes(x = score, fill = direction, colour = direction)) +
+  geom_density(alpha = 0.45, linewidth = 0.7)
+if (is.finite(g_top_thr_10)) {
+  p_g_dir <- p_g_dir +
+    geom_vline(xintercept = g_top_thr_10, linetype = "dashed",
+               colour = .tableau10[1], linewidth = 0.6)
+}
+if (is.finite(g_bot_thr_10)) {
+  p_g_dir <- p_g_dir +
+    geom_vline(xintercept = g_bot_thr_10, linetype = "dashed",
+               colour = .tableau10[2], linewidth = 0.6)
+}
+p_g_dir <- p_g_dir +
   scale_fill_manual(values   = c("TOP" = .tableau10[1], "BOTTOM" = .tableau10[2])) +
   scale_colour_manual(values = c("TOP" = .tableau10[1], "BOTTOM" = .tableau10[2])) +
   labs(title = "Directional Gene CAAS Score Distribution",
@@ -1682,6 +1729,7 @@ ggplot(long_dir_scores, aes(x = score, fill = direction, colour = direction)) +
                           params$gene_top_pct * 100),
        x = "Gene CAAS Score", y = "Density") +
   theme(plot.title = element_text(face = "bold"))
+print(p_g_dir)
 ```
 
 ### RERConverge
