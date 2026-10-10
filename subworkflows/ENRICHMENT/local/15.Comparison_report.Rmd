@@ -274,6 +274,18 @@ fcs_stats_cmp_df  <- if (has_fcs_stats_cmp) readr::read_tsv(params$fcs_stats_fil
 
 has_position_scores_cmp <- .file_ok(params$position_scores_file)
 position_scores_cmp_df  <- if (has_position_scores_cmp) readr::read_tsv(params$position_scores_file, show_col_types = FALSE) else NULL
+if (!is.null(position_scores_cmp_df) && "Position" %in% names(position_scores_cmp_df)) {
+  position_scores_cmp_df$Position <- suppressWarnings(as.integer(position_scores_cmp_df$Position))
+}
+if (!is.null(position_scores_cmp_df) && "Gene" %in% names(position_scores_cmp_df)) {
+  position_scores_cmp_df$Gene <- as.character(position_scores_cmp_df$Gene)
+}
+if (!is.null(position_scores_cmp_df) && "gene" %in% names(position_scores_cmp_df)) {
+  position_scores_cmp_df$gene <- as.character(position_scores_cmp_df$gene)
+}
+if (!is.null(position_scores_cmp_df) && "side" %in% names(position_scores_cmp_df)) {
+  position_scores_cmp_df$side <- as.character(position_scores_cmp_df$side)
+}
 
 has_vep_primateai_cmp <- .file_ok(params$vep_primateai_file)
 vep_primateai_cmp_df  <- if (has_vep_primateai_cmp) readr::read_tsv(params$vep_primateai_file, show_col_types = FALSE) else NULL

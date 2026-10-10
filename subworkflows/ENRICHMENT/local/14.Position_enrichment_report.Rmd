@@ -962,7 +962,12 @@ if (requireNamespace("paletteer", quietly = TRUE)) {
 has_position_scores <- .file_ok(params$position_scores_file)
 has_gene_scores      <- .file_ok(params$gene_scores_file)
 pos_df  <- if (has_position_scores) readr::read_tsv(params$position_scores_file, show_col_types = FALSE) else NULL
+if (!is.null(pos_df) && "Position" %in% names(pos_df)) pos_df$Position <- suppressWarnings(as.integer(pos_df$Position))
+if (!is.null(pos_df) && "Gene"     %in% names(pos_df)) pos_df$Gene     <- as.character(pos_df$Gene)
+if (!is.null(pos_df) && "side"     %in% names(pos_df)) pos_df$side     <- as.character(pos_df$side)
+
 gene_df <- if (has_gene_scores)     readr::read_tsv(params$gene_scores_file,     show_col_types = FALSE) else NULL
+if (!is.null(gene_df) && "Gene"     %in% names(gene_df)) gene_df$Gene     <- as.character(gene_df$Gene)
 
 has_vep_primateai <- .file_ok(params$vep_primateai_file)
 has_vep_cosmic    <- .file_ok(params$vep_cosmic_file)
@@ -971,12 +976,15 @@ has_genomic       <- .file_ok(params$genomic_info_file)
 biochem_df <- if (.file_ok(params$position_biochem_file)) {
   readr::read_tsv(params$position_biochem_file, show_col_types = FALSE) %>% dplyr::filter(side %in% c("top", "bottom"))
 } else NULL
+if (!is.null(biochem_df) && "Position" %in% names(biochem_df)) biochem_df$Position <- suppressWarnings(as.integer(biochem_df$Position))
+if (!is.null(biochem_df) && "Gene"     %in% names(biochem_df)) biochem_df$Gene     <- as.character(biochem_df$Gene)
+if (!is.null(biochem_df) && "side"     %in% names(biochem_df)) biochem_df$side     <- as.character(biochem_df$side)
 has_biochem <- !is.null(biochem_df) && nrow(biochem_df) > 0
 # has_fade_sites_top/bottom and fade_sites_top_df/bottom_df are loaded in the `load` chunk.
 # Position scores are required by every sub-tab below (PAI3D, COSMIC and FADE joins,
 # regional accumulation), so they gate the whole section together with at least one
 # external layer.
-has_pos_char <- has_position_scores &&
+has_pos_char <- has_position_scores && !is.null(pos_df) && nrow(pos_df) > 0 &&
   (has_vep_primateai || has_vep_cosmic || has_genomic || has_fade_sites_top || has_fade_sites_bottom || has_biochem)
 
 if (has_vep_primateai) {

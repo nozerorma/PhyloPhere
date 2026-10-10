@@ -140,7 +140,7 @@ pos_df  <- read_tsv(params$position_scores_file, show_col_types = FALSE)
 gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
-# Force numeric types for columns that may be guessed as character due to leading NAs
+# Force numeric types for columns that may be guessed as character due to leading NAs or empty tables
 .num_cols_pos <- c(
   "CAAS_score", "asr_score", "asr_path_score", "p.emp", "p.adj_bh",
   "p.emp_fact", "p.adj_bh_fact", "q_emp", "fubar_prob", "pos_var_mean",
@@ -151,6 +151,13 @@ for (.cn in intersect(.num_cols_pos, names(pos_df))) {
   pos_df[[.cn]] <- suppressWarnings(as.numeric(pos_df[[.cn]]))
 }
 
+.int_cols_pos <- c("Position", "n_schemes", "n_hypotheses", "n_top_species", "n_bottom_species")
+for (.cn in intersect(.int_cols_pos, names(pos_df))) {
+  pos_df[[.cn]] <- suppressWarnings(as.integer(pos_df[[.cn]]))
+}
+if ("Gene" %in% names(pos_df)) pos_df$Gene <- as.character(pos_df$Gene)
+if ("side" %in% names(pos_df)) pos_df$side <- as.character(pos_df$side)
+
 .num_cols_gene <- c(
   "gene_caas_score", "gene_caas_score_top", "gene_caas_score_bottom",
   "accum_p", "accum_cct_p", "accum_fdr", "accum_score",
@@ -160,6 +167,12 @@ for (.cn in intersect(.num_cols_pos, names(pos_df))) {
 for (.cn in intersect(.num_cols_gene, names(gene_df))) {
   gene_df[[.cn]] <- suppressWarnings(as.numeric(gene_df[[.cn]]))
 }
+
+.int_cols_gene <- c("n_positions", "n_positions_top", "n_positions_bottom")
+for (.cn in intersect(.int_cols_gene, names(gene_df))) {
+  gene_df[[.cn]] <- suppressWarnings(as.integer(gene_df[[.cn]]))
+}
+if ("Gene" %in% names(gene_df)) gene_df$Gene <- as.character(gene_df$Gene)
 
 # position_scores.tsv carries no per-scheme factor: a position-level mean of asr_score would hide
 # scheme disagreement, and CAAS_score is already the US asr_path_score of the position.
@@ -1287,7 +1300,7 @@ SCORING uses everywhere else (`top100` = every scored position, tightening to
   q     = c(0.00, 0.50, 0.75, 0.90, 0.95, 0.99)
 )
 
-has_convtype <- .file_ok(params$filtered_discovery_file)
+has_convtype <- .file_ok(params$filtered_discovery_file) && nrow(pos_df) > 0
 if (has_convtype) {
   # filtered_discovery.tsv carries one row per (Gene, Position, caap_group,
   # side) -- up to 5 scheme rows per side. pos_df (CAAS_score) carries one row
@@ -1302,14 +1315,21 @@ if (has_convtype) {
   .scheme_priority <- c(US = 5, GS4 = 4, GS3 = 3, GS2 = 2, GS1 = 1)
   .disc_raw <- readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE) %>%
     dplyr::select(Gene, Position, dplyr::any_of("side"), caap_group, convergence_type)
+  if ("Position" %in% names(.disc_raw)) .disc_raw$Position <- suppressWarnings(as.integer(.disc_raw$Position))
+  if ("Gene"     %in% names(.disc_raw)) .disc_raw$Gene     <- as.character(.disc_raw$Gene)
+  if ("side"     %in% names(.disc_raw)) .disc_raw$side     <- as.character(.disc_raw$side)
   .join_keys <- intersect(c("Gene", "Position", "side"), names(.disc_raw))
   .disc_df <- .disc_raw %>%
     dplyr::mutate(.priority = .scheme_priority[caap_group]) %>%
     dplyr::arrange(dplyr::desc(.priority)) %>%
     dplyr::distinct(dplyr::pick(dplyr::all_of(.join_keys)), .keep_all = TRUE) %>%
     dplyr::select(-.priority, -caap_group)
-  .conv_df <- pos_df %>%
-    dplyr::select(Gene, Position, CAAS_score, dplyr::any_of("side")) %>%
+  .conv_pos <- pos_df %>%
+    dplyr::select(Gene, Position, CAAS_score, dplyr::any_of("side"))
+  if ("Position" %in% names(.conv_pos)) .conv_pos$Position <- suppressWarnings(as.integer(.conv_pos$Position))
+  if ("Gene"     %in% names(.conv_pos)) .conv_pos$Gene     <- as.character(.conv_pos$Gene)
+  if ("side"     %in% names(.conv_pos)) .conv_pos$side     <- as.character(.conv_pos$side)
+  .conv_df <- .conv_pos %>%
     dplyr::inner_join(.disc_df, by = .join_keys)
   has_convtype <- nrow(.conv_df) > 0 && "convergence_type" %in% names(.conv_df)
 }
