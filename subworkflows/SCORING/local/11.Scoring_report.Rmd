@@ -757,8 +757,15 @@ cat("_No `permulation_harvest.tsv` is available for this run: the harvest was ma
 ```
 
 ```{r null-harvest-setup, eval=.file_ok(params$perm_harvest_file)}
-.hv <- readr::read_tsv(params$perm_harvest_file, show_col_types = FALSE,
-                       col_types = readr::cols(section = "c", key = "c", x = "d", value = "d"))
+.hv <- readr::read_tsv(params$perm_harvest_file, show_col_types = FALSE)
+if (!"x" %in% names(.hv)) .hv$x <- NA_real_
+if (!"value" %in% names(.hv)) .hv$value <- NA_real_
+.hv <- .hv %>% mutate(
+  section = as.character(section),
+  key     = as.character(key),
+  x       = suppressWarnings(as.numeric(x)),
+  value   = suppressWarnings(as.numeric(value))
+)
 .hv_get <- function(sec, key) { v <- .hv$value[.hv$section == sec & .hv$key == key]; if (length(v)) v[[1]] else NA_real_ }
 .hv_draws <- .hv_get("run", "draws"); .hv_t1 <- .hv_get("run", "tier1"); .hv_t2 <- .hv_get("run", "tier2")
 .hv_pool <- .hv_get("run", "pool"); .hv_match <- isTRUE(.hv_get("settings", "match_pss") == 1)
@@ -1905,16 +1912,20 @@ fade_cor_bot <- gene_fade_df %>%
   mutate(x_norm=rank_norm(gene_caas_bot), y_norm=rank_norm(fade_bot_max_bf))
 
 .fade_scatter <- function(df, col, title, xlab, ylab) {
-  ggplot(df, aes(x=x_norm, y=y_norm)) +
+  p <- ggplot(df, aes(x=x_norm, y=y_norm)) +
     geom_point(alpha=0.5, size=1.2, colour=col) +
-    geom_smooth(method="lm", se=TRUE, colour="grey30", linewidth=0.7) +
-    ggrepel::geom_text_repel(
-      data = df %>% filter(y_norm > quantile(y_norm, 0.95, na.rm=TRUE)),
+    geom_smooth(method="lm", se=TRUE, colour="grey30", linewidth=0.7)
+  lbl_data <- df %>%
+    filter(is.finite(x_norm), is.finite(y_norm), y_norm > quantile(y_norm, 0.95, na.rm=TRUE))
+  if (nrow(lbl_data) > 0) {
+    p <- p + ggrepel::geom_text_repel(
+      data = lbl_data,
       aes(label=Gene), size=2.5, max.overlaps=10, show.legend=FALSE
-    ) +
-    labs(title=title,
-         subtitle=sprintf("r = %.3f", safe_cor(df$x_norm, df$y_norm)),
-         x=xlab, y=ylab) +
+    )
+  }
+  p + labs(title=title,
+       subtitle=sprintf("r = %.3f", safe_cor(df$x_norm, df$y_norm)),
+       x=xlab, y=ylab) +
     theme(plot.title = element_text(face="bold", size=11))
 }
 gridExtra::grid.arrange(
@@ -2137,6 +2148,20 @@ chr_label_positions <- chr_offsets %>%
 # Returns a dataframe with one row per window, summarising mean and max score.
 make_window_accum <- function(df, score_col,
                                win_size = params$window_size_bp) {
+  if (nrow(df) == 0) {
+    return(tibble(
+      chr_order  = integer(),
+      chr_label  = character(),
+      win_id     = double(),
+      win_start  = double(),
+      win_end    = double(),
+      win_mid    = double(),
+      n_genes    = integer(),
+      mean_score = double(),
+      max_score  = double(),
+      genes      = character()
+    ))
+  }
   df %>%
     mutate(
       win_id    = floor(gene_mid / win_size),
@@ -2147,8 +2172,16 @@ make_window_accum <- function(df, score_col,
     group_by(chr_order, chr_label, win_id, win_start, win_end, win_mid) %>%
     summarise(
       n_genes    = dplyr::n(),
-      mean_score = mean(.data[[score_col]], na.rm = TRUE),
-      max_score  = max(.data[[score_col]],  na.rm = TRUE),
+      mean_score = {
+        vals <- .data[[score_col]]
+        vals <- vals[!is.na(vals) & is.finite(vals)]
+        if (length(vals) > 0) mean(vals) else 0.0
+      },
+      max_score  = {
+        vals <- .data[[score_col]]
+        vals <- vals[!is.na(vals) & is.finite(vals)]
+        if (length(vals) > 0) max(vals) else 0.0
+      },
       genes      = paste(unique(Gene), collapse = ", "),
       .groups    = "drop"
     )
@@ -2157,6 +2190,9 @@ make_window_accum <- function(df, score_col,
 # Stitch window midpoints onto the cumulative chromosome x-axis (same offsets
 # as gene_genomic so windows align with the per-gene manhattans above).
 stitch_windows <- function(win_df) {
+  if (nrow(win_df) == 0) {
+    return(win_df %>% mutate(win_x = numeric(), chr_even = logical()))
+  }
   win_df %>%
     left_join(chr_offsets %>% select(chr_order, offset), by = "chr_order") %>%
     mutate(win_x = win_mid + offset,
@@ -2170,23 +2206,38 @@ stitch_windows <- function(win_df) {
 gene_genomic <- gene_genomic %>%
   mutate(
     chr_even      = chr_order %% 2 == 0,
-    caas_log      = -log10(1 - pmin(gene_caas_score, 0.9999)),
+    caas_log      = if_else(!is.na(gene_caas_score) & is.finite(gene_caas_score),
+                            -log10(1 - pmin(gene_caas_score, 0.9999)), 0.0),
     caas_top_log  = -log10(1 - pmin(replace_na(gene_caas_top, 0), 0.9999)),
     caas_bot_log  = -log10(1 - pmin(replace_na(gene_caas_bot, 0), 0.9999))
   )
-caas_log_thr <- -log10(1 - pmin(g_thr_10, 0.9999))
+caas_log_thr <- if (is.finite(g_thr_10)) -log10(1 - pmin(g_thr_10, 0.9999)) else NA_real_
 
-ggplot(gene_genomic,
+p_gene_man <- ggplot(gene_genomic,
        aes(x = manhattan_x, y = caas_log,
            colour = chr_even, size = n_positions)) +
-  geom_point(alpha = 0.65, show.legend = FALSE) +
-  geom_hline(yintercept = caas_log_thr, linetype = "dashed",
-             colour = "grey40", linewidth = 0.6) +
-  ggrepel::geom_text_repel(
-    data = gene_genomic %>% slice_max(caas_log, n = 20, with_ties = FALSE),
-    aes(label = Gene), size = 2.2, max.overlaps = 15,
-    show.legend = FALSE, colour = "black"
-  ) +
+  geom_point(alpha = 0.65, show.legend = FALSE)
+
+if (is.finite(caas_log_thr)) {
+  p_gene_man <- p_gene_man +
+    geom_hline(yintercept = caas_log_thr, linetype = "dashed",
+               colour = "grey40", linewidth = 0.6)
+}
+
+top_gene_labels <- gene_genomic %>%
+  filter(!is.na(caas_log) & is.finite(caas_log) & caas_log > 0 & is.finite(manhattan_x)) %>%
+  slice_max(caas_log, n = 20, with_ties = FALSE)
+
+if (nrow(top_gene_labels) > 0) {
+  p_gene_man <- p_gene_man +
+    ggrepel::geom_text_repel(
+      data = top_gene_labels,
+      aes(label = Gene), size = 2.2, max.overlaps = 15,
+      show.legend = FALSE, colour = "black"
+    )
+}
+
+p_gene_man <- p_gene_man +
   scale_colour_manual(values = c("FALSE"=.tableau10[1], "TRUE"=.tableau10[2]), guide="none") +
   scale_size_continuous(name = "N positions", range = c(0.5, 5)) +
   scale_x_continuous(
@@ -2204,13 +2255,15 @@ ggplot(gene_genomic,
         axis.text.x=element_text(size=14), axis.text.y=element_text(size=14),
         axis.title=element_text(size=14), legend.text=element_text(size=12),
         panel.grid.major.x=element_blank())
+
+print(p_gene_man)
 ```
 
 ### CAAS Window Accumulation (Positions)
 
 `r if (!has_genomic) "> **Note:** Genomic coordinates not available - position window accumulation skipped."`
 
-```{r pos-window-accum, eval=has_genomic, fig.height=5, fig.width=14}
+```{r pos-window-accum, eval=has_genomic, fig.height=5, fig.width=14, results='asis'}
 # Tile position-level CAAS scores into genomic windows.
 # pos_genomic is built in the pos-caas-manhattan-setup chunk above.
 # We use the same pos_chr_offsets to align x-coordinates with the gene-level plots.
@@ -2222,57 +2275,72 @@ win_size_label <- if (params$window_size_bp >= 1e6) {
 
 pos_wins <- pos_genomic %>%
   rename(Gene = Gene) %>%
-  make_window_accum("CAAS_score", win_size = params$window_size_bp) %>%
-  left_join(pos_chr_offsets %>% select(chr_order, offset), by = "chr_order") %>%
-  mutate(n_positions = n_genes,
-         win_x       = win_mid + offset,
-         chr_even    = chr_order %% 2 == 0,
-         mean_log    = -log10(1 - pmin(mean_score, 0.9999)),   # position score in [0, 1]
-         max_log     = -log10(1 - pmin(max_score,  0.9999)))
+  make_window_accum("CAAS_score", win_size = params$window_size_bp)
 
-# Label the top windows as genomic regions, not gene names.
-# Ranked by n_positions (window density) rather than mean_log, to surface the
-# regions with the most positions rather than the highest mean score.
-top_pos_wins <- pos_wins %>%
-  slice_max(n_positions, n = 5, with_ties = FALSE) %>%
-  mutate(region_label = sprintf("chr%s:%0.1f-%0.1f Mb", chr_label, win_start / 1e6, win_end / 1e6))
+if (nrow(pos_wins) == 0) {
+  cat("_No scored positions mapped to genomic windows._\n\n")
+} else {
+  pos_wins <- pos_wins %>%
+    left_join(pos_chr_offsets %>% select(chr_order, offset), by = "chr_order") %>%
+    mutate(n_positions = n_genes,
+           win_x       = win_mid + offset,
+           chr_even    = chr_order %% 2 == 0,
+           mean_log    = -log10(1 - pmin(replace_na(mean_score, 0), 0.9999)),   # position score in [0, 1]
+           max_log     = -log10(1 - pmin(replace_na(max_score, 0),  0.9999)))
 
-ggplot(pos_wins, aes(x = win_x, y = mean_log, fill = chr_even)) +
-  geom_col(width = params$window_size_bp * 0.9, alpha = 0.75) +
-  geom_point(aes(y = max_log, colour = chr_even), size = 1.2, alpha = 0.85, show.legend = FALSE) +
-  ggrepel::geom_text_repel(
-    data = top_pos_wins,
-    aes(y = max_log, label = sprintf("%s\n(%d positions)", region_label, n_positions)),
-    size = 2.2, max.overlaps = 10, colour = "black",
-    show.legend = FALSE
-  ) +
-  scale_fill_manual(
-    values = c("FALSE" = .tableau10[1], "TRUE" = .tableau10[2]),
-    guide = "none"
-  ) +
-  scale_colour_manual(
-    values = c("FALSE" = .tableau10[3], "TRUE" = .tableau10[4]),
-    guide = "none"
-  ) +
-  scale_x_continuous(
-    breaks = pos_chr_label_positions$mid_x,
-    labels = pos_chr_label_positions$chr_label,
-    expand = expansion(mult = 0.01)
-  ) +
-  labs(
-    title    = sprintf("Position-Level CAAS Score - %s Window Accumulation", win_size_label),
-    subtitle = sprintf("Bars = mean | Points = max | %d windows across %d chromosomes",
-                       nrow(pos_wins), length(unique(pos_wins$chr_order))),
-    x = "Chromosome", y = "-log10(1 - mean CAAS score)"
-  ) +
-  theme(
-    plot.title         = element_text(face = "bold"),
-    axis.text.x        = element_text(size = 14),
-    axis.text.y        = element_text(size = 14),
-    axis.title         = element_text(size = 14),
-    legend.text        = element_text(size = 12),
-    panel.grid.major.x = element_blank()
-  )
+  # Label the top windows as genomic regions, not gene names.
+  # Ranked by n_positions (window density) rather than mean_log, to surface the
+  # regions with the most positions rather than the highest mean score.
+  top_pos_wins <- pos_wins %>%
+    filter(!is.na(max_log) & is.finite(max_log) & max_log > 0 & is.finite(win_x)) %>%
+    slice_max(n_positions, n = 5, with_ties = FALSE) %>%
+    mutate(region_label = sprintf("chr%s:%0.1f-%0.1f Mb", chr_label, win_start / 1e6, win_end / 1e6))
+
+  p_pos_accum <- ggplot(pos_wins, aes(x = win_x, y = mean_log, fill = chr_even)) +
+    geom_col(width = params$window_size_bp * 0.9, alpha = 0.75) +
+    geom_point(aes(y = max_log, colour = chr_even), size = 1.2, alpha = 0.85, show.legend = FALSE)
+
+  if (nrow(top_pos_wins) > 0) {
+    p_pos_accum <- p_pos_accum +
+      ggrepel::geom_text_repel(
+        data = top_pos_wins,
+        aes(y = max_log, label = sprintf("%s\n(%d positions)", region_label, n_positions)),
+        size = 2.2, max.overlaps = 10, colour = "black",
+        show.legend = FALSE
+      )
+  }
+
+  p_pos_accum <- p_pos_accum +
+    scale_fill_manual(
+      values = c("FALSE" = .tableau10[1], "TRUE" = .tableau10[2]),
+      guide = "none"
+    ) +
+    scale_colour_manual(
+      values = c("FALSE" = .tableau10[3], "TRUE" = .tableau10[4]),
+      guide = "none"
+    ) +
+    scale_x_continuous(
+      breaks = pos_chr_label_positions$mid_x,
+      labels = pos_chr_label_positions$chr_label,
+      expand = expansion(mult = 0.01)
+    ) +
+    labs(
+      title    = sprintf("Position-Level CAAS Score - %s Window Accumulation", win_size_label),
+      subtitle = sprintf("Bars = mean | Points = max | %d windows across %d chromosomes",
+                         nrow(pos_wins), length(unique(pos_wins$chr_order))),
+      x = "Chromosome", y = "-log10(1 - mean CAAS score)"
+    ) +
+    theme(
+      plot.title         = element_text(face = "bold"),
+      axis.text.x        = element_text(size = 14),
+      axis.text.y        = element_text(size = 14),
+      axis.title         = element_text(size = 14),
+      legend.text        = element_text(size = 12),
+      panel.grid.major.x = element_blank()
+    )
+
+  print(p_pos_accum)
+}
 ```
 
 ```{r pos-window-accum-table, eval=has_genomic && exists("pos_wins") && nrow(pos_wins) > 0}
@@ -2303,54 +2371,69 @@ DT::datatable(
 
 `r if (!has_genomic) "> **Note:** Genomic coordinates not available - gene-level CAAS window accumulation skipped."`
 
-```{r gene-caas-window-accum, eval=has_genomic, fig.height=5, fig.width=14}
+```{r gene-caas-window-accum, eval=has_genomic, fig.height=5, fig.width=14, results='asis'}
 gene_caas_wins <- gene_genomic %>%
-  make_window_accum("gene_caas_score", win_size = params$window_size_bp) %>%
-  stitch_windows() %>%
-  mutate(mean_log = -log10(1 - pmin(mean_score, 0.9999)),
-         max_log  = -log10(1 - pmin(max_score,  0.9999)))
+  make_window_accum("gene_caas_score", win_size = params$window_size_bp)
 
-# Ranked by n_genes (window density) rather than mean_log, to surface the
-# regions with the most genes rather than the highest mean score.
-top_caas_wins <- gene_caas_wins %>%
-  slice_max(n_genes, n = 5, with_ties = FALSE) %>%
-  mutate(region_label = sprintf("chr%s:%0.1f-%0.1f Mb", chr_label, win_start / 1e6, win_end / 1e6))
+if (nrow(gene_caas_wins) == 0) {
+  cat("_No genes mapped to genomic windows._\n\n")
+} else {
+  gene_caas_wins <- gene_caas_wins %>%
+    stitch_windows() %>%
+    mutate(mean_log = -log10(1 - pmin(replace_na(mean_score, 0), 0.9999)),
+           max_log  = -log10(1 - pmin(replace_na(max_score, 0),  0.9999)))
 
-ggplot(gene_caas_wins, aes(x = win_x, y = mean_log, fill = chr_even)) +
-  geom_col(width = params$window_size_bp * 0.9, alpha = 0.75) +
-  geom_point(aes(y = max_log, colour = chr_even), size = 1.5, alpha = 0.85, show.legend = FALSE) +
-  ggrepel::geom_text_repel(
-    data = top_caas_wins,
-    aes(y = max_log, label = sprintf("%s\n(%d genes)", region_label, n_genes)),
-    size = 2.2, max.overlaps = 10, colour = "black",
-    show.legend = FALSE
-  ) +
-  scale_fill_manual(
-    values = c("FALSE" = .tableau10[1], "TRUE" = .tableau10[2]),
-    guide = "none"
-  ) +
-  scale_colour_manual(
-    values = c("FALSE" = .tableau10[3], "TRUE" = .tableau10[4]),
-    guide = "none"
-  ) +
-  scale_x_continuous(
-    breaks = chr_label_positions$mid_x,
-    labels = chr_label_positions$chr_label,
-    expand = expansion(mult = 0.01)
-  ) +
-  labs(
-    title    = sprintf("Gene CAAS Score - %s Window Accumulation", win_size_label),
-    subtitle = sprintf("Bars = mean | Points = max | %d windows", nrow(gene_caas_wins)),
-    x = "Chromosome", y = "-log10(1 - mean gene_caas_score)"
-  ) +
-  theme(
-    plot.title         = element_text(face = "bold"),
-    axis.text.x        = element_text(size = 14),
-    axis.text.y        = element_text(size = 14),
-    axis.title         = element_text(size = 14),
-    legend.text        = element_text(size = 12),
-    panel.grid.major.x = element_blank()
-  )
+  # Ranked by n_genes (window density) rather than mean_log, to surface the
+  # regions with the most genes rather than the highest mean score.
+  top_caas_wins <- gene_caas_wins %>%
+    filter(!is.na(max_log) & is.finite(max_log) & max_log > 0 & is.finite(win_x)) %>%
+    slice_max(n_genes, n = 5, with_ties = FALSE) %>%
+    mutate(region_label = sprintf("chr%s:%0.1f-%0.1f Mb", chr_label, win_start / 1e6, win_end / 1e6))
+
+  p_gene_accum <- ggplot(gene_caas_wins, aes(x = win_x, y = mean_log, fill = chr_even)) +
+    geom_col(width = params$window_size_bp * 0.9, alpha = 0.75) +
+    geom_point(aes(y = max_log, colour = chr_even), size = 1.5, alpha = 0.85, show.legend = FALSE)
+
+  if (nrow(top_caas_wins) > 0) {
+    p_gene_accum <- p_gene_accum +
+      ggrepel::geom_text_repel(
+        data = top_caas_wins,
+        aes(y = max_log, label = sprintf("%s\n(%d genes)", region_label, n_genes)),
+        size = 2.2, max.overlaps = 10, colour = "black",
+        show.legend = FALSE
+      )
+  }
+
+  p_gene_accum <- p_gene_accum +
+    scale_fill_manual(
+      values = c("FALSE" = .tableau10[1], "TRUE" = .tableau10[2]),
+      guide = "none"
+    ) +
+    scale_colour_manual(
+      values = c("FALSE" = .tableau10[3], "TRUE" = .tableau10[4]),
+      guide = "none"
+    ) +
+    scale_x_continuous(
+      breaks = chr_label_positions$mid_x,
+      labels = chr_label_positions$chr_label,
+      expand = expansion(mult = 0.01)
+    ) +
+    labs(
+      title    = sprintf("Gene CAAS Score - %s Window Accumulation", win_size_label),
+      subtitle = sprintf("Bars = mean | Points = max | %d windows", nrow(gene_caas_wins)),
+      x = "Chromosome", y = "-log10(1 - mean gene_caas_score)"
+    ) +
+    theme(
+      plot.title         = element_text(face = "bold"),
+      axis.text.x        = element_text(size = 14),
+      axis.text.y        = element_text(size = 14),
+      axis.title         = element_text(size = 14),
+      legend.text        = element_text(size = 12),
+      panel.grid.major.x = element_blank()
+    )
+
+  print(p_gene_accum)
+}
 ```
 
 ```{r gene-caas-window-accum-table, eval=has_genomic && exists("gene_caas_wins") && nrow(gene_caas_wins) > 0}
