@@ -94,6 +94,21 @@ def run_one_list(domino_core, captured, list_path, network_file, slices_file, sl
     (cluster, n_genes, genes, p_value, p_adj). p_adj is p_value times n_putative, capped at 1.
     """
     captured.clear()
+
+    # If the active genes file is empty or contains no non-empty lines, DOMINO cannot run
+    # and would crash with EmptyDataError in pd.read_csv. Treat as 0 final modules.
+    if not os.path.exists(list_path) or os.path.getsize(list_path) == 0:
+        print(f"[run_domino_modules] {os.path.basename(list_path)}: empty gene list "
+              f"-- treating as zero final modules.", file=sys.stderr)
+        return [], []
+
+    with open(list_path) as f:
+        has_content = any(line.strip() for line in f)
+    if not has_content:
+        print(f"[run_domino_modules] {os.path.basename(list_path)}: no genes in file "
+              f"-- treating as zero final modules.", file=sys.stderr)
+        return [], []
+
     try:
         final_modules = domino_core.main(
             active_genes_file=list_path,
@@ -102,6 +117,10 @@ def run_one_list(domino_core, captured, list_path, network_file, slices_file, sl
             slice_threshold=slice_threshold,
             module_threshold=module_threshold,
         )
+    except pd.errors.EmptyDataError:
+        print(f"[run_domino_modules] {os.path.basename(list_path)}: empty data encountered "
+              f"by DOMINO parser -- treating as zero final modules.", file=sys.stderr)
+        final_modules = []
     except ValueError as e:
         # Some DOMINO builds raise a ValueError mentioning union_all when zero modules
         # survive modularity slicing. That is a legitimate outcome for a small or sparse

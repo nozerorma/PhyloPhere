@@ -169,7 +169,7 @@ voronoi_domains <- function(Dm, members) {
   dom
 }
 
-#' Unified greedy Dunn-gated pair assembly.
+#' Unified greedy Dunn-gated pair assembly with maximum phylogenetic tree dispersion.
 #'
 #' @param ranked candidate pairs already ordered best-first by rank_candidates().
 #'   Needs species1, species2, distance, abs_diff (+ pair_n optional).
@@ -178,9 +178,8 @@ voronoi_domains <- function(Dm, members) {
 #' @param enforce_dunn TRUE  -> only accept a pair that keeps every cluster's
 #'                              modified Dunn >= 1; stop when none qualifies
 #'                              (observed selector: variable pair count).
-#'                     FALSE -> always take the highest-Dunn available candidate
-#'                              up to `target`, even below 1; caller grades the
-#'                              result (permulation null: fixed N, tiered).
+#'                     FALSE -> take the best candidate up to `target`, even below 1;
+#'                              caller grades the result (permulation null: fixed N, tiered).
 #' @return list(selected = data.frame of chosen rows + Dunn_index + cluster,
 #'              members  = list of c(species1, species2)).
 greedy_dunn_select <- function(ranked, D, target = Inf, enforce_dunn = TRUE) {
@@ -205,22 +204,47 @@ greedy_dunn_select <- function(ranked, D, target = Inf, enforce_dunn = TRUE) {
     }, numeric(1))
     cand$Dunn_index <- round(dunn, 4)
 
+    # Minimum patristic distance from this pair to any already-selected pair
+    inter_dists <- vapply(seq_len(nrow(cand)), function(i) {
+      s1 <- cand$species1[i]; s2 <- cand$species2[i]
+      min(vapply(members, function(m) {
+        min(D[s1, m[1]], D[s1, m[2]], D[s2, m[1]], D[s2, m[2]])
+      }, numeric(1)))
+    }, numeric(1))
+    cand$inter_dist <- round(inter_dists, 4)
+
     if (enforce_dunn) {
       cand <- cand[cand$Dunn_index >= 1, , drop = FALSE]
       if (nrow(cand) == 0) break
+
+      # Order by: 1) maximum inter-cluster distance (broadest tree dispersion / coverage),
+      # 2) highest Dunn index, 3) stable incoming rank order (PSS / rank_candidates)
+      cand <- cand[order(-cand$inter_dist, -cand$Dunn_index, seq_len(nrow(cand))), , drop = FALSE]
+
+      # Find first candidate whose addition keeps overall Dunn >= 1 across all clusters
+      picked <- FALSE
+      for (i in seq_len(nrow(cand))) {
+        best_cand <- cand[i, , drop = FALSE]
+        new_members <- c(members, list(c(best_cand$species1, best_cand$species2)))
+        if (overall_dunn_lean(D, new_members) >= 1) {
+          best_cand$cluster <- length(members) + 1L
+          selected <- rbind(selected, best_cand[, setdiff(names(best_cand), "inter_dist"), drop = FALSE])
+          members  <- new_members
+          used     <- c(used, best_cand$species1, best_cand$species2)
+          picked   <- TRUE
+          break
+        }
+      }
+      if (!picked) break
+    } else {
+      # Without enforce_dunn (tiered null fallback): order by inter-cluster distance then Dunn
+      cand <- cand[order(-cand$inter_dist, -cand$Dunn_index, seq_len(nrow(cand))), , drop = FALSE]
+      best <- cand[1, , drop = FALSE]
+      best$cluster <- length(members) + 1L
+      selected <- rbind(selected, best[, setdiff(names(best), "inter_dist"), drop = FALSE])
+      members  <- c(members, list(c(best$species1, best$species2)))
+      used     <- c(used, best$species1, best$species2)
     }
-
-    # Highest Dunn; ties resolved by the incoming rank order (stable sort).
-    cand <- cand[order(-cand$Dunn_index, seq_len(nrow(cand))), , drop = FALSE]
-    best <- cand[1, , drop = FALSE]
-
-    new_members <- c(members, list(c(best$species1, best$species2)))
-    if (enforce_dunn && overall_dunn_lean(D, new_members) < 1) break
-
-    best$cluster <- length(members) + 1L
-    selected <- rbind(selected, best)
-    members  <- new_members
-    used     <- c(used, best$species1, best$species2)
   }
 
   list(selected = selected, members = members)
