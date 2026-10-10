@@ -1009,12 +1009,14 @@ violin_highlighted.f <- function(df, ordered_taxa) {
     ggplot2::scale_color_manual(
       name = "Secondary (FOP):",
       values = c("Top/High (FOP secondary)" = "red", "Bottom/Low (FOP secondary)" = "forestgreen"),
-      drop = FALSE
+      drop = FALSE,
+      guide = ggplot2::guide_legend(nrow = 1, byrow = TRUE, order = 2)
     ) +
     ggplot2::scale_fill_manual(
       name = "Canonical (H1):",
       values = c("Top/High (H1)" = "red", "Bottom/Low (H1)" = "forestgreen"),
-      drop = FALSE
+      drop = FALSE,
+      guide = ggplot2::guide_legend(nrow = 1, byrow = TRUE, order = 1)
     ) +
     ggplot2::geom_vline(ggplot2::aes(xintercept = median_value), linewidth = 1, color = "grey30", alpha = 0.5) +
     ggplot2::labs(x = capitalized_trait) +
@@ -1023,10 +1025,11 @@ violin_highlighted.f <- function(df, ordered_taxa) {
       axis.text.y = ggplot2::element_text(size = violin_dims$axis_text_y, hjust = 0.5, face = "bold"),
       axis.title.x = ggplot2::element_text(size = violin_dims$axis_title, face = "bold", margin = ggplot2::margin(t = 12)),
       axis.title.y = ggplot2::element_blank(),
-      legend.text = ggplot2::element_text(size = 14),
-      legend.title = ggplot2::element_text(size = 14, face = "bold"),
+      legend.text = ggplot2::element_text(size = 12),
+      legend.title = ggplot2::element_text(size = 12, face = "bold"),
       legend.position = "bottom",
-      legend.box = "horizontal"
+      legend.box = "vertical",
+      legend.spacing.y = grid::unit(0.15, "cm")
     )
   p
 }
