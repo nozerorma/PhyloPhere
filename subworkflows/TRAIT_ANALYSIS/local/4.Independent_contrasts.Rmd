@@ -773,7 +773,22 @@ This reproduces the trait-distribution plots from `2.Phenotype_exploration.Rmd`,
 
 # stats_df keeps its original column names, which fop_pair_sel.f and the trait-file
 # generation use. The plots work on a copy with the value and taxa columns, joined to the
-# contrast assignment (traits_res) so the selected species can be highlighted.
+# canonical contrast assignment (traits_res) and all FOP hypotheses (fop_master_df)
+# so both canonical H1 and secondary FOP species can be distinguished.
+fop_species_summary <- if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 0) {
+  fop_master_df %>%
+    dplyr::group_by(species) %>%
+    dplyr::summarise(
+      n_hyp = dplyr::n_distinct(hypothesis_id),
+      fop_grp = dplyr::first(contrast_group),
+      .groups = "drop"
+    )
+} else {
+  data.frame(species = character(), n_hyp = integer(), fop_grp = integer(), stringsAsFactors = FALSE)
+}
+
+canon_species_h1 <- unique(c(selected_pairs$species1, selected_pairs$species2))
+
 stats_df_hl <- stats_df %>%
   dplyr::mutate(
     value = .data[[trait]],
@@ -783,11 +798,19 @@ stats_df_hl <- stats_df %>%
     traits_res %>% dplyr::select(species, contrast_group),
     by = "species"
   ) %>%
+  dplyr::left_join(
+    fop_species_summary,
+    by = "species"
+  ) %>%
   dplyr::mutate(
+    is_canonical = species %in% canon_species_h1,
+    is_secondary = !is_canonical & !is.na(n_hyp) & n_hyp > 0,
     contrast_label = dplyr::case_when(
-      contrast_group == 1 ~ "Top/High",
-      contrast_group == 0 ~ "Bottom/Low",
-      TRUE ~ "Not selected"
+      is_canonical & contrast_group == 1 ~ "Top/High (H1)",
+      is_canonical & contrast_group == 0 ~ "Bottom/Low (H1)",
+      is_secondary & fop_grp == 1        ~ "Top/High (FOP secondary)",
+      is_secondary & fop_grp == 0        ~ "Bottom/Low (FOP secondary)",
+      TRUE                               ~ "Not selected"
     ),
     is_selected = contrast_label != "Not selected"
   )
@@ -811,35 +834,85 @@ ordered_taxa_hl <- ordered_species_hl %>%
   na.omit() %>%
   unique()
 
-contrast_fill_values <- c("Top/High" = "red", "Bottom/Low" = "forestgreen")
+contrast_fill_values <- c(
+  "Top/High (H1)"              = "red",
+  "Bottom/Low (H1)"           = "forestgreen",
+  "Top/High (FOP secondary)"   = "red",
+  "Bottom/Low (FOP secondary)" = "forestgreen"
+)
+
+contrast_shape_values <- c(
+  "Top/High (H1)"              = 21,  # filled circle with black border
+  "Bottom/Low (H1)"           = 21,  # filled circle with black border
+  "Top/High (FOP secondary)"   = 1,   # open/unfilled circle
+  "Bottom/Low (FOP secondary)" = 1    # open/unfilled circle
+)
+
+# Resolve family/taxa palette matching Reports 1 & 2
+taxa_palette_values <- resolve_taxa_palette(ordered_taxa_hl, palette_name = color_palette)
+dark_palette_values <- get_palette_values(paste0("dark_", color_palette))
+if (is.null(dark_palette_values)) dark_palette_values <- taxa_palette_values
 
 # ── Contrast plot, highlighted ────────────────────────────────────────────────
 
-# Trait values by taxon (faint points); the selected species are outlined and filled by
-# contrast group, and the global median is a dashed line.
+# Trait values by taxon: background points colored by family; canonical H1 species
+# are filled points (red/green) with black border; secondary FOP species are drawn as
+# unfilled open circles (red/green).
 contrast_plot_highlighted.f <- function(df, ordered_taxa) {
   plot_profile <- species_plot_profile(
     n_species = dplyr::n_distinct(df$species),
     n_taxa = dplyr::n_distinct(df$taxa)
   )
   contrast_dims <- plot_profile$contrast
+  # Make distribution points larger and more legible
+  base_pt_size <- max(3.5, contrast_dims$point_size * 1.5)
+  h1_pt_size   <- base_pt_size * 1.6
+  fop_pt_size  <- base_pt_size * 1.5
   global_median <- df$g_median[1]
 
-  ggplot2::ggplot(df, ggplot2::aes(x = value, y = taxa)) +
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = value, y = taxa)) +
     ggplot2::scale_y_discrete(limits = rev(ordered_taxa)) +
-    ggplot2::geom_point(ggplot2::aes(color = taxa), shape = 16, size = contrast_dims$point_size, alpha = 0.30) +
-    ggplot2::scale_color_discrete(guide = "none") +
     ggplot2::geom_point(
-      data = subset(df, is_selected),
-      ggplot2::aes(fill = contrast_label),
-      shape = 21, color = "black", stroke = 1.1, size = contrast_dims$point_size * 1.8
+      ggplot2::aes(color = taxa), shape = 16, size = base_pt_size, alpha = 0.35
+    )
+
+  if (!is.null(taxa_palette_values) && length(taxa_palette_values) > 0) {
+    p <- p + ggplot2::scale_color_manual(values = taxa_palette_values, guide = "none")
+  } else {
+    p <- p + ggplot2::scale_color_discrete(guide = "none")
+  }
+
+  p <- p +
+    ggnewscale::new_scale_color() +
+    # Secondary FOP species: open circles (unfilled, colored border)
+    ggplot2::geom_point(
+      data = subset(df, is_secondary),
+      ggplot2::aes(color = contrast_label),
+      shape = 1, stroke = 1.3, size = fop_pt_size
     ) +
-    ggplot2::scale_fill_manual(name = "Contrast group:", values = contrast_fill_values) +
+    # Canonical H1 species: filled circles (shape 21, solid fill + black stroke)
+    ggplot2::geom_point(
+      data = subset(df, is_canonical),
+      ggplot2::aes(fill = contrast_label),
+      shape = 21, color = "black", stroke = 1.2, size = h1_pt_size
+    ) +
+    ggplot2::scale_color_manual(
+      name = "Secondary (FOP):",
+      values = c("Top/High (FOP secondary)" = "red", "Bottom/Low (FOP secondary)" = "forestgreen"),
+      drop = FALSE
+    ) +
+    ggplot2::scale_fill_manual(
+      name = "Canonical (H1):",
+      values = c("Top/High (H1)" = "red", "Bottom/Low (H1)" = "forestgreen"),
+      drop = FALSE
+    ) +
     ggplot2::geom_vline(xintercept = global_median, linetype = "longdash", linewidth = 1.2, color = "grey30") +
-    ggplot2::labs(x = capitalized_trait,
-                  y = paste(capitalized_taxon, "-", capitalized_clade),
-                  title = paste("Trait distribution with selected contrast pairs highlighted:", capitalized_trait),
-                  caption = "Global median: longdash grey line. Outlined points: species selected as Top/High or Bottom/Low contrast pairs.") +
+    ggplot2::labs(
+      x = capitalized_trait,
+      y = paste(capitalized_taxon, "-", capitalized_clade),
+      title = paste("Trait distribution with selected contrast pairs highlighted:", capitalized_trait),
+      caption = "Global median: dashed line. Filled points: Canonical H1 pairs. Open circles: FOP secondary alternatives."
+    ) +
     ggplot2::theme_minimal() +
     ggplot2::theme(
       plot.title = ggplot2::element_text(size = contrast_dims$title_size, hjust = 0, margin = ggplot2::margin(t = 20, b = 6), face = "bold"),
@@ -847,9 +920,12 @@ contrast_plot_highlighted.f <- function(df, ordered_taxa) {
       axis.title.x = ggplot2::element_text(size = contrast_dims$axis_title, margin = ggplot2::margin(t = 12)),
       axis.title.y = ggplot2::element_text(size = contrast_dims$axis_title, angle = 90, margin = ggplot2::margin(l = 20, r = 20)),
       plot.caption = ggplot2::element_text(size = contrast_dims$caption_size, hjust = 0, margin = ggplot2::margin(t = 20)),
-      legend.text = ggplot2::element_text(size = 15),
-      legend.position = "bottom"
+      legend.text = ggplot2::element_text(size = 14),
+      legend.title = ggplot2::element_text(size = 14, face = "bold"),
+      legend.position = "bottom",
+      legend.box = "horizontal"
     )
+  p
 }
 
 contrast_hl_graph <- contrast_plot_highlighted.f(stats_df_hl, ordered_taxa_hl)
@@ -870,32 +946,76 @@ contrast_hl_graph
 
 # ── Violin plot, highlighted ──────────────────────────────────────────────────
 
-# Same as the contrast plot, over the violins of each taxon.
+# Violins and background jitter points respect the family palette of Reports 1 and 2.
+# Canonical H1 species are filled circles (red/green) with black outline;
+# Secondary FOP species are open circles (unfilled red/green).
 violin_highlighted.f <- function(df, ordered_taxa) {
   plot_profile <- species_plot_profile(
     n_species = dplyr::n_distinct(df$species),
     n_taxa = dplyr::n_distinct(df$taxa)
   )
   violin_dims <- plot_profile$violin
+  base_pt_size <- max(2.2, violin_dims$point_size * 1.3)
+  h1_pt_size   <- base_pt_size * 1.6
+  fop_pt_size  <- base_pt_size * 1.5
   median_value <- median(df$value, na.rm = TRUE)
 
-  ggplot2::ggplot(df, ggplot2::aes(x = value, y = taxa)) +
-    ggplot2::scale_y_discrete(limits = rev(ordered_taxa)) +
-    ggplot2::geom_violin(ggplot2::aes(fill = taxa), color = "black", width = 0.5, trim = TRUE, scale = "width", alpha = 0.15) +
-    ggplot2::scale_fill_discrete(guide = "none") +
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = value, y = taxa)) +
+    ggplot2::scale_y_discrete(limits = rev(ordered_taxa))
+
+  # Violin fill with family palette
+  if (!is.null(dark_palette_values) && length(dark_palette_values) > 0) {
+    p <- p +
+      ggplot2::geom_violin(
+        ggplot2::aes(fill = taxa), color = "black", width = 0.5, trim = TRUE, scale = "width", alpha = 0.20
+      ) +
+      ggplot2::scale_fill_manual(values = dark_palette_values, guide = "none") +
+      ggnewscale::new_scale_fill() +
+      ggplot2::geom_point(
+        ggplot2::aes(color = taxa), shape = 16, size = base_pt_size, alpha = 0.35,
+        position = ggplot2::position_jitter(height = violin_dims$jitter_height)
+      ) +
+      ggplot2::scale_color_manual(values = taxa_palette_values, guide = "none")
+  } else {
+    p <- p +
+      ggplot2::geom_violin(
+        ggplot2::aes(fill = taxa), color = "black", width = 0.5, trim = TRUE, scale = "width", alpha = 0.20
+      ) +
+      ggplot2::scale_fill_discrete(guide = "none") +
+      ggnewscale::new_scale_fill() +
+      ggplot2::geom_point(
+        ggplot2::aes(color = taxa), shape = 16, size = base_pt_size, alpha = 0.35,
+        position = ggplot2::position_jitter(height = violin_dims$jitter_height)
+      ) +
+      ggplot2::scale_color_discrete(guide = "none")
+  }
+
+  p <- p +
+    ggnewscale::new_scale_color() +
+    # Secondary FOP species: open circles (shape 1, unfilled, jittered)
     ggplot2::geom_point(
-      ggplot2::aes(color = taxa), shape = 16, size = violin_dims$point_size, alpha = 0.30,
+      data = subset(df, is_secondary),
+      ggplot2::aes(color = contrast_label),
+      shape = 1, stroke = 1.2, size = fop_pt_size,
       position = ggplot2::position_jitter(height = violin_dims$jitter_height)
     ) +
-    ggplot2::scale_color_discrete(guide = "none") +
-    ggnewscale::new_scale_fill() +
+    # Canonical H1 species: filled circles (shape 21, jittered)
     ggplot2::geom_point(
-      data = subset(df, is_selected),
+      data = subset(df, is_canonical),
       ggplot2::aes(fill = contrast_label),
-      shape = 21, color = "black", stroke = 1.1, size = violin_dims$point_size * 1.8,
+      shape = 21, color = "black", stroke = 1.1, size = h1_pt_size,
       position = ggplot2::position_jitter(height = violin_dims$jitter_height)
     ) +
-    ggplot2::scale_fill_manual(name = "Contrast group:", values = contrast_fill_values) +
+    ggplot2::scale_color_manual(
+      name = "Secondary (FOP):",
+      values = c("Top/High (FOP secondary)" = "red", "Bottom/Low (FOP secondary)" = "forestgreen"),
+      drop = FALSE
+    ) +
+    ggplot2::scale_fill_manual(
+      name = "Canonical (H1):",
+      values = c("Top/High (H1)" = "red", "Bottom/Low (H1)" = "forestgreen"),
+      drop = FALSE
+    ) +
     ggplot2::geom_vline(ggplot2::aes(xintercept = median_value), linewidth = 1, color = "grey30", alpha = 0.5) +
     ggplot2::labs(x = capitalized_trait) +
     ggplot2::theme_minimal() +
@@ -903,9 +1023,12 @@ violin_highlighted.f <- function(df, ordered_taxa) {
       axis.text.y = ggplot2::element_text(size = violin_dims$axis_text_y, hjust = 0.5, face = "bold"),
       axis.title.x = ggplot2::element_text(size = violin_dims$axis_title, face = "bold", margin = ggplot2::margin(t = 12)),
       axis.title.y = ggplot2::element_blank(),
-      legend.text = ggplot2::element_text(size = 15),
-      legend.position = "bottom"
+      legend.text = ggplot2::element_text(size = 14),
+      legend.title = ggplot2::element_text(size = 14, face = "bold"),
+      legend.position = "bottom",
+      legend.box = "horizontal"
     )
+  p
 }
 
 violin_hl_graph <- violin_highlighted.f(stats_df_hl, ordered_taxa_hl)
@@ -922,11 +1045,7 @@ violin_hl_graph
 
 ```
 
-## 5. Permulation Trait Files for Permutation Analysis
-
-
-This section extracts species  for use in permulation testing.
-```{r permulation_traitfiles, message=FALSE, warning=FALSE}
+```{r permulation_traitfiles, include=FALSE, message=FALSE, warning=FALSE}
 
 # ── Permulation trait file ────────────────────────────────────────────────────
 
@@ -943,8 +1062,6 @@ permulation_traitfile <- trait_df %>%
   dplyr::select(all_of(perm_cols)) %>%
   dplyr::filter(!is.na(.data[[trait]]))
 
-cat("Removed", nrow(trait_df) - nrow(permulation_traitfile), "species with NA trait values from permulation traitfile\n")
-
 # Written with a header, so permulations.R can detect the count columns.
 perm_path <- file.path(permulation_traitfile_dir)
 createDir(perm_path)
@@ -956,11 +1073,6 @@ write.table(
   col.names = TRUE,
   sep = "\t"
 )
-
-cat("Permulation traitfile:", nrow(permulation_traitfile), "species\n")
-
-head(permulation_traitfile)
-
 ```
 
 ---

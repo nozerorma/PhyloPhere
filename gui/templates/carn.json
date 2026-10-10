@@ -63,7 +63,7 @@
       "caas_permulation_enrichment": true,
       "caas_perms_postproc": true,
       "pss_top_pct": "0.05",
-      "max_contrasts": "0",
+      "max_contrasts": "5",
       "min_contrasts": "3",
       "publish_intermediates": false,
       "ct_core_batch_size": "100",

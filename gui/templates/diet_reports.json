@@ -2,7 +2,7 @@
   "schema_version": 1,
   "flavor": "primates",
   "general": {
-    "project_name": "carn",
+    "project_name": "diet_reports",
     "seed": "1998",
     "reporting": true,
     "repo_dir": "/homes/users/mramon/scratch/0.Phylophere",
@@ -11,14 +11,14 @@
     "remote_root_dir": "/homes/users/mramon/scratch/"
   },
   "runtime": {
-    "resume": true,
+    "resume": false,
     "toy_mode": false,
     "toy_n": "1000",
     "toy_perms": "1000",
     "runtime_type": "slurm",
-    "script_base_name": "carn",
-    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_carn",
-    "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/carn",
+    "script_base_name": "diet_reports_01-5",
+    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_diet_reports_01-5",
+    "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/diet_reports_01-5",
     "use_tower": true,
     "sbatch_job_name": "phylophere",
     "sbatch_partition": "high-cpu",
@@ -26,7 +26,7 @@
     "sbatch_mail_user": "miguel.ramon@upf.edu",
     "sbatch_array_concurrency": "1",
     "alignment_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT/bmge",
-    "ali_format": "fasta",
+    "ali_format": "clustal",
     "tree_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/5.Phylogeny/science.abn7829_data_s4.nex.tree",
     "trait_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/maria_caas/Datos_fenotipos/diet_traitfile_comma.csv",
     "prune_dir": "",
@@ -48,6 +48,33 @@
         "prune": "",
         "prune_secondary": "",
         "trait_type": ""
+      },
+      {
+        "trait": "ins_idx",
+        "secondary": "",
+        "n_trait": "",
+        "c_trait": "",
+        "prune": "",
+        "prune_secondary": "",
+        "trait_type": ""
+      },
+      {
+        "trait": "fol_idx",
+        "secondary": "",
+        "n_trait": "",
+        "c_trait": "",
+        "prune": "",
+        "prune_secondary": "",
+        "trait_type": ""
+      },
+      {
+        "trait": "omn_idx",
+        "secondary": "",
+        "n_trait": "",
+        "c_trait": "",
+        "prune": "",
+        "prune_secondary": "",
+        "trait_type": ""
       }
     ]
   },
@@ -55,19 +82,19 @@
     "caas": {
       "enabled": true,
       "extra_flags": "",
-      "ct_tool_discovery": true,
-      "ct_tool_resample": true,
+      "ct_tool_discovery": false,
+      "ct_tool_resample": false,
       "caas_config_path": "",
       "patterns": "1,2,3",
       "caas_full_perms": "1000",
       "caas_permulation_enrichment": true,
       "caas_perms_postproc": true,
-      "pss_top_pct": "0.01",
-      "max_contrasts": "0",
+      "pss_top_pct": "0.05",
+      "max_contrasts": "5",
       "min_contrasts": "3",
       "publish_intermediates": false,
       "ct_core_batch_size": "100",
-      "min_divergent_fraction": "0.5",
+      "min_divergent_fraction": "1.0",
       "max_bg_gaps_fraction": "0.0",
       "max_fg_gaps_fraction": "0.0",
       "max_gaps_fraction": "0.0",
@@ -86,7 +113,7 @@
       "perm_match_pss_tol": "0.25"
     },
     "disambiguation": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "ct_disambig_asr_model": "lg",
       "ct_disambig_asr_cache_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/7.ASR_primates",
@@ -108,7 +135,7 @@
       "iqr_multiplier": "3.0"
     },
     "accumulation": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "accumulation_n_randomizations": "1000000",
       "accumulation_randomization_type": "cons_decile",
@@ -116,7 +143,7 @@
       "accumulation_fdr": "0.05"
     },
     "rer": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "rer_tool_build_trait": true,
       "rer_tool_build_tree": true,
@@ -164,7 +191,7 @@
       "fade_universe_file": ""
     },
     "vep": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "vep_primateai_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PAI3D/PrimateAI-3D.hg38.txt.gz",
       "cosmic_db": "",
@@ -174,7 +201,7 @@
       "vep_assembly": "GRCh38"
     },
     "scoring": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "scoring_gene_top_pct": "0.10",
       "scoring_position_top_pct": "0.10",
@@ -182,11 +209,11 @@
       "auto_generate_ensembl": false,
       "ensembl_dataset": "",
       "scoring_window_size_bp": "100000",
-      "caas_evidence_top_n": "20",
+      "caas_evidence_top_n": "0",
       "scoring_hypotheses_pairs": ""
     },
     "enrichment": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "posenrich_enabled": true,
       "fcs_enabled": true,
