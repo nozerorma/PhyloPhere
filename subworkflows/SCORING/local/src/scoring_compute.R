@@ -340,6 +340,12 @@ cat(sprintf("  %d detected position sides, %d of them by US; %d of the US-detect
             nrow(position_biochem), sum(position_biochem$US), sum(position_biochem$US & position_biochem$is_biochem),
             sum(!position_biochem$US)))
 
+# Keep only positions with true convergence (CAAS_score > 0 and side top/bottom).
+# Rows with CAAS_score <= 0 or NA (shadow single-domain rows, divergent non-identical
+# residues under US, or side "none") are filtered from position_scores.tsv but preserved in position_biochem.tsv.
+pos_scores <- pos_scores %>%
+  filter(!is.na(CAAS_score) & CAAS_score > 0 & side %in% c("top", "bottom"))
+
 # CAAS_score is the US score of that side; asr_path_score repeats it.
 pos_scores <- pos_scores %>% mutate(asr_path_score = CAAS_score)
 
@@ -426,7 +432,7 @@ if (has_caas_pos_cycle_caas) {
   cyc_caas <- cyc_caas %>%
     mutate(Position = as.integer(Position),
            caas_score = suppressWarnings(as.numeric(caas_score))) %>%
-    filter(!is.na(caas_score))
+    filter(!is.na(caas_score) & caas_score > 0)
 
   # per-cycle pooled null statistic = max over detected sides of the scheme-mean
   cyc_pooled <- cyc_caas %>%

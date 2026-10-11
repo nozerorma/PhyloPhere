@@ -19,9 +19,9 @@ SIDES = ("top", "bottom")
 
 
 def pooled_sides(pooled: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """One summary per participating side of a pool_domains result ([] when no domain changed anywhere).
+    """One summary per participating side of a pool_domains result ([] when no side converged with score > 0).
 
-    Keys: side, asr_path_score (float), derived_agreement (agree_num / agree_den, None without a changed
+    Keys: side, asr_path_score (float > 0), derived_agreement (agree_num / agree_den, None without a changed
     domain), agreement_ambiguous (a changed domain had a tied derived residue), participating_hyps (comma-joined or
     None), domain_scores / domain_anc / domain_der / domain_der_support / domain_anc_support (dict or None), and
     convergence_type when the pool carries it.
@@ -31,10 +31,13 @@ def pooled_sides(pooled: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
         d = (pooled or {}).get(side) or {}
         if int(d.get("n_participating", 0) or 0) <= 0:
             continue
+        score = float(d.get("asr_path_score", 0.0) or 0.0)
+        if score <= 0.0:
+            continue
         den = int(d.get("agree_den", 0) or 0)
         summary = {
             "side": side,
-            "asr_path_score": float(d.get("asr_path_score", 0.0) or 0.0),
+            "asr_path_score": score,
             "derived_agreement": (int(d.get("agree_num", 0) or 0) / den) if den else None,
             "agreement_ambiguous": bool(d.get("agreement_tie", False)),
             "participating_hyps": (",".join(d.get("participating_hyps") or []) or None),

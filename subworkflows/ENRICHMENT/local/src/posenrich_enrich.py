@@ -97,8 +97,8 @@ def parse_args():
                         "pass a NO_FILE* sentinel for no null (those values are NA unless "
                         "--allow-label-shuffle).")
     p.add_argument("--output-dir", required=True)
-    p.add_argument("--min-size", type=int, default=5,
-                   help="min positions per set in background (GMT sources only)")
+    p.add_argument("--min-size", type=int, default=2,
+                   help="min positions per set in background (GMT sources only; default: 2)")
     p.add_argument("--max-size", type=int, default=0,
                    help="max positions per set in background (0 = no cap; GMT sources only)")
     p.add_argument("--fdr-lachenbruch", type=float, default=0.15,
@@ -251,17 +251,18 @@ def collapse_null_sides(sub):
 def load_caas_cycle_null(path):
     """Load perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_score, n_schemes).
 
-    Returns (long_df, all_cycle_levels). long_df has columns pos_id, side, cycle and score,
+    Returns (long_df, all_cycle_levels, null_positions). long_df has columns pos_id, side, cycle and score,
     where score is the caas_score of the position on that side in that null cycle (the
-    units of CAAS_score in position_scores.tsv; 0 when unscored). all_cycle_levels is every
+    units of CAAS_score in position_scores.tsv; > 0). all_cycle_levels is every
     distinct cycle of the file regardless of side, so a cycle without hits on one side is
-    still a null draw that contributes 0 to the term sums of that side.
+    still a null draw that contributes 0 to the term sums of that side. null_positions is the set
+    of distinct position IDs with score > 0 in any cycle (the U_CAAS null space).
 
-    Returns (None, None) when the path is absent, a NO_FILE* sentinel, missing or empty:
+    Returns (None, None, None) when the path is absent, a NO_FILE* sentinel, missing or empty:
     callers treat it as "no CAAS null available".
     """
     if not path or os.path.basename(path).startswith("NO_FILE") or not os.path.exists(path):
-        return None, None
+        return None, None, None
     header = pd.read_csv(path, sep="\t", nrows=0).columns
     if "caas_score" not in header:
         raise ValueError(f"{path} has no caas_score column: it predates the shared position score. "
@@ -269,32 +270,43 @@ def load_caas_cycle_null(path):
     df = pd.read_csv(path, sep="\t", usecols=["Gene", "Position", "side", "cycle", "caas_score"],
                      float_precision="round_trip")
     if df.empty:
-        return None, None
-    df["pos_id"] = df["Gene"].astype(str) + ":" + df["Position"].astype(str)
-    df["score"] = df["caas_score"].fillna(0.0)
+        return None, None, None
     all_cycle_levels = np.sort(df["cycle"].unique())
-    return df[["pos_id", "side", "cycle", "score"]], all_cycle_levels
+    df["caas_score"] = pd.to_numeric(df["caas_score"], errors="coerce")
+    df = df[df["caas_score"] > 0].copy()
+    if df.empty:
+        return None, None, None
+    df["pos_id"] = df["Gene"].astype(str) + ":" + df["Position"].astype(str)
+    df["score"] = df["caas_score"]
+    null_positions = set(df["pos_id"].unique())
+    return df[["pos_id", "side", "cycle", "score"]], all_cycle_levels, null_positions
 
 
 def load_prepped_caas_null(path):
     """Load caas_null_prepped.pkl (posenrich_prep_caas_null.py).
 
     It holds the null of load_caas_cycle_null() already split by direction and reduced to
-    one score per (pos_id, cycle). Returns (by_direction, all_cycle_levels), where
+    one score per (pos_id, cycle). Returns (by_direction, all_cycle_levels, null_positions), where
     by_direction is {"global"/"top"/"bottom": DataFrame[pos_id, cycle, score]}, equal to
-    null_direction_subset(long_df, direction) for each direction.
+    null_direction_subset(long_df, direction) for each direction. null_positions is the set
+    of distinct position IDs with score > 0 in any cycle (the U_CAAS null space).
 
-    Returns (None, None) when the path is absent, a NO_FILE* sentinel, missing, or the
+    Returns (None, None, None) when the path is absent, a NO_FILE* sentinel, missing, or the
     artifact is empty (same contract as load_caas_cycle_null).
     """
     if not path or os.path.basename(path).startswith("NO_FILE") or not os.path.exists(path):
-        return None, None
+        return None, None, None
     with open(path, "rb") as fh:
         prepped = pickle.load(fh)
     if prepped.get("cycle_levels") is None:
-        return None, None
+        return None, None, None
     by_direction = {d: prepped[d] for d in ("global", "top", "bottom")}
-    return by_direction, prepped["cycle_levels"]
+    null_positions = prepped.get("null_positions")
+    if null_positions is None and by_direction.get("global") is not None:
+        null_positions = set(by_direction["global"]["pos_id"].unique())
+    else:
+        null_positions = set(null_positions) if null_positions is not None else set()
+    return by_direction, prepped["cycle_levels"], null_positions
 
 
 def null_direction_subset(long_df, direction):
@@ -508,19 +520,55 @@ def main():
     universe_genes = load_universe_genes(args.universe)
     print(f"[posenrich] universe (cleaned_background) genes: {len(universe_genes)}", flush=True)
 
-    background = build_background(args.background, universe_genes)
+    # 1. Load CAAS permulation null (if supplied) to extract cycle roster and U_CAAS possibility space
+    caas_null_by_direction = None
+    null_positions = None
+    if args.caas_null_prepped:
+        caas_null_by_direction, caas_null_cycles, null_positions = load_prepped_caas_null(args.caas_null_prepped)
+        caas_null_long = None
+        if caas_null_by_direction is not None:
+            print(f"[posenrich] CAAS permulation null: {len(caas_null_cycles)} cycles "
+                  f"loaded (prepped) from {args.caas_null_prepped} -> used as the primary null "
+                  f"({len(null_positions)} null positions with score > 0)", flush=True)
+        else:
+            print("[posenrich] no CAAS permulation null supplied", flush=True)
+    else:
+        caas_null_long, caas_null_cycles, null_positions = load_caas_cycle_null(args.caas_cycle_null)
+        if caas_null_long is not None:
+            print(f"[posenrich] CAAS permulation null: {len(caas_null_cycles)} cycles "
+                  f"loaded from {args.caas_cycle_null} -> used as the primary null "
+                  f"({len(null_positions)} null positions with score > 0)", flush=True)
+        else:
+            print("[posenrich] no CAAS permulation null supplied", flush=True)
+    if caas_null_by_direction is None and caas_null_long is None:
+        print("[posenrich] without a null, lach_p.perm is NA and nothing is significant", flush=True)
+
+    # 2. Observed scores and background
     obs = pd.read_csv(args.obs_scores, sep="\t")
     for col in ("Gene", "Position", "CAAS_score", "side"):
         if col not in obs.columns:
             sys.exit(f"[posenrich] obs-scores missing column: {col}")
     obs = obs[obs["Gene"].isin(universe_genes)].copy()
     obs["CAAS_score"] = pd.to_numeric(obs["CAAS_score"], errors="coerce").fillna(0.0)
+    # Strictly positive observed CAAS scores
+    obs = obs[obs["CAAS_score"] > 0].copy()
     obs["pos_id"] = obs["Gene"].astype(str) + ":" + obs["Position"].astype(str)
+    obs_pos = set(obs["pos_id"])
 
-    background = sorted(set(background) | set(obs["pos_id"]))
+    raw_background = set(build_background(args.background, universe_genes))
+    if null_positions is not None and len(null_positions) > 0:
+        # Possibility space U_CAAS: positions tested in background.output that reached
+        # caas_score > 0 in at least one null cycle, union observed positive positions.
+        background = sorted((raw_background & null_positions) | obs_pos)
+        print(f"[posenrich] background restricted to U_CAAS: {len(background)} positions "
+              f"({len(raw_background)} raw tested, {len(null_positions)} null-positive)", flush=True)
+    else:
+        background = sorted(raw_background | obs_pos)
+        print(f"[posenrich] full tested background (no null): {len(background)} positions", flush=True)
+
     bg_set = set(background)
     N = len(background)
-    print(f"[posenrich] background positions: {N} | scored: {(obs['CAAS_score']>0).sum()}", flush=True)
+    print(f"[posenrich] effective background positions: {N} | scored: {len(obs_pos)}", flush=True)
 
     coverage_restricted_bg = {}
     for db_name, coverage_path in (("cosmic_orthogroups", args.cosmic_coverage),
@@ -553,25 +601,6 @@ def main():
     # it is written out here under the leading-edge schema's supporting_hypotheses.
     has_hyp = "n_hypotheses" in obs.columns
     supp_col = next((c for c in ("participating_hypotheses", "supporting_hypotheses") if c in obs.columns), None)
-
-    caas_null_by_direction = None
-    if args.caas_null_prepped:
-        caas_null_by_direction, caas_null_cycles = load_prepped_caas_null(args.caas_null_prepped)
-        caas_null_long = None
-        if caas_null_by_direction is not None:
-            print(f"[posenrich] CAAS permulation null: {len(caas_null_cycles)} cycles "
-                  f"loaded (prepped) from {args.caas_null_prepped} -> used as the primary null", flush=True)
-        else:
-            print("[posenrich] no CAAS permulation null supplied", flush=True)
-    else:
-        caas_null_long, caas_null_cycles = load_caas_cycle_null(args.caas_cycle_null)
-        if caas_null_long is not None:
-            print(f"[posenrich] CAAS permulation null: {len(caas_null_cycles)} cycles "
-                  f"loaded from {args.caas_cycle_null} -> used as the primary null", flush=True)
-        else:
-            print("[posenrich] no CAAS permulation null supplied", flush=True)
-    if caas_null_by_direction is None and caas_null_long is None:
-        print("[posenrich] without a null, lach_p.perm is NA and nothing is significant", flush=True)
 
     directions = ["global", "top", "bottom"]
     rows = []

@@ -161,9 +161,27 @@ def _emit_pooled_side_rows(
 
     sides = pooled_sides(pooled)
     if not sides:
+        # Preserve the diagnostic convergence_type ("divergent", "single", or "no_change")
+        # and derived_agreement from whichever side had changed domains, so downstream
+        # characterization reports (Reports 8, 9, 11, 16) can distinguish why score == 0.
+        diag_side = max(
+            ((pooled or {}).get(s) or {} for s in ("top", "bottom")),
+            key=lambda d: (int(d.get("agree_den", 0) or 0), int(d.get("agree_num", 0) or 0)),
+            default={},
+        )
+        diag_den = int(diag_side.get("agree_den", 0) or 0)
+        diag_num = int(diag_side.get("agree_num", 0) or 0)
+        diag_ctype = str(diag_side.get("convergence_type") or "no_change")
+        if diag_ctype == "convergent":
+            # Had >=2 domains with the same derived residue, yet asr_path_score == 0
+            # (ancestral retention P_LCA == 1.0 or disjoint hypotheses).
+            diag_ctype = "symplesiomorphic"
+        diag_agree = (diag_num / diag_den) if diag_den > 0 else None
+        diag_ambig = bool(diag_side.get("agreement_tie", False))
         return [dataclasses.replace(
             base, side="none", hypothesis=hyp_out, participating_hypotheses=None,
-            asr_path_score=0.0, convergence_type="no_change",
+            asr_path_score=0.0, convergence_type=diag_ctype,
+            derived_agreement=diag_agree, agreement_ambiguous=diag_ambig,
             domain_scores=None, domain_anc_aa=None,
             domain_der_top_aa=None, domain_der_bot_aa=None,
             domain_der_support_top_aa=None, domain_der_support_bot_aa=None,

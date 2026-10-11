@@ -1073,18 +1073,19 @@ p_combined <- p_combined +
 print(p_combined)
 ```
 
-### CAAS Score, nonzero
+### CAAS Score, Distribution by Direction
 
-The score distribution of the positions, by direction, with and without the positions of score exactly 0. A
-zero is a detected position with no ASR support, a point mass that dominates the count scale and hides the
-shape of the positions that carry signal. The `global` panel keeps one entry per position, its best side, as
-the undirected gene score does; `top` and `bottom` use only the positions of that side. The share of zeros of
-each panel is in its label.
+The score distribution of convergent positions (`CAAS_score > 0`) by direction.
+Zero-scoring positions (shadow single-domain rows, divergent non-identical residues under US,
+or ancestral retentions) are filtered upstream from `position_scores.tsv` to avoid distorting
+the ECDF reference pools and multiple-testing adjustments, while remaining fully characterized in
+`position_biochem.tsv` and `filtered_discovery.tsv` (see the *Zero-Score Diagnostics* tab below).
+The `global` panel keeps one entry per position, its best side; `top` and `bottom` use the positions of that side.
 
-```{r caas-score-nonzero, fig.height=7, fig.width=10, results='asis'}
-.valid_caas <- pos_df %>% filter(!is.na(CAAS_score) & is.finite(CAAS_score))
+```{r caas-score-nonzero, fig.height=5, fig.width=10, results='asis'}
+.valid_caas <- pos_df %>% filter(!is.na(CAAS_score) & is.finite(CAAS_score) & CAAS_score > 0)
 if (nrow(.valid_caas) == 0) {
-  cat("_No non-missing CAAS scores available to plot distribution._\n\n")
+  cat("_No non-missing positive CAAS scores available to plot distribution._\n\n")
 } else {
   .dir_scores <- dplyr::bind_rows(
     .valid_caas %>% group_by(Gene, Position) %>%
@@ -1095,24 +1096,114 @@ if (nrow(.valid_caas) == 0) {
 
   dir_pal <- c(global = "#4E79A7", top = "#E15759", bottom = "#59A14F")
   .nz_lab <- .dir_scores %>% group_by(direction) %>%
-    summarise(lab = sprintf("n = %s | zeros: %.1f%%", format(dplyr::n(), big.mark = ","), 100 * mean(score == 0)), .groups = "drop")
-  .nz_dat <- dplyr::bind_rows(
-    .dir_scores %>% mutate(variant = "All positions"),
-    .dir_scores %>% filter(score > 0) %>% mutate(variant = "Score > 0")
-  ) %>% mutate(variant = factor(variant, levels = c("All positions", "Score > 0")))
+    summarise(lab = sprintf("n = %s | med: %.3f", format(dplyr::n(), big.mark = ","), median(score)), .groups = "drop")
 
-  p_nz <- ggplot(.nz_dat, aes(x = score, fill = direction)) +
+  p_nz <- ggplot(.dir_scores, aes(x = score, fill = direction)) +
     geom_histogram(bins = 40, boundary = 0, colour = "grey30", alpha = 0.85, show.legend = FALSE) +
-    geom_text(data = .nz_lab %>% mutate(variant = factor("All positions", levels = levels(.nz_dat$variant))),
+    geom_text(data = .nz_lab,
               aes(x = Inf, y = Inf, label = lab), inherit.aes = FALSE, hjust = 1.05, vjust = 1.5, size = 3.3) +
-    facet_grid(variant ~ direction, scales = "free_y") +
+    facet_wrap(~ direction, scales = "free_y") +
     scale_fill_manual(values = dir_pal) +
-    labs(title = "CAAS Score distribution, with and without zeros", x = "CAAS Score", y = "positions") +
+    labs(title = "CAAS Score Distribution (Convergent Positions, Score > 0)", x = "CAAS Score", y = "positions") +
     theme_minimal(base_size = 12) +
     theme(plot.title = element_text(face = "bold"))
   print(p_nz)
 }
 ```
+
+### Zero-Score Diagnostics & Structural Filtering
+
+Positions detected during discovery with `asr_path_score == 0` under the Unweighted Scheme (US)
+are filtered from downstream scoring (`position_scores.tsv`) while remaining characterized in
+`filtered_discovery.tsv` and `position_biochem.tsv`. This diagnostic tabulates and visualizes the
+reasons why these position sides were filtered out:
+- **Single-domain shadow**: A single domain changed on this side ($n_{\text{changed}} = 1$) while the opposite side converged in $\ge 2$ independent lineages. A single domain cannot converge with itself.
+- **Divergent under US (biochemically convergent in GS1–GS4)**: Derived lineages mutated to different amino acids under US (e.g., `R -> C, H, Q`), but share common physicochemical properties under `GS1`–`GS4`.
+- **Divergent pure**: Lineages mutated to different residues with no biochemical convergence across any scheme.
+- **Symplesiomorphic / Reversion**: Retained ancestral state ($P_{\text{LCA}} = 1.0$) or cross-hypothesis non-co-occurrence.
+
+```{r pos-zero-diag, fig.height=5, fig.width=10, results='asis'}
+has_disc <- .file_ok(params$filtered_discovery_file)
+if (!has_disc) {
+  cat("_`filtered_discovery_file` not available to diagnose filtered zero-score positions._\n\n")
+} else {
+  .disc_all <- readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE)
+  if (!all(c("Gene", "Position", "caap_group") %in% names(.disc_all))) {
+    cat("_`filtered_discovery_file` missing required columns._\n\n")
+  } else {
+    .disc_all$Position <- suppressWarnings(as.integer(.disc_all$Position))
+    .disc_all$Gene     <- as.character(.disc_all$Gene)
+
+    # Identify which positions have any biochemical convergence (GS1-GS4 with asr_path_score > 0)
+    .biochem_pos <- .disc_all %>%
+      filter(caap_group %in% c("GS1", "GS2", "GS3", "GS4")) %>%
+      mutate(score_num = suppressWarnings(as.numeric(asr_path_score))) %>%
+      filter(!is.na(score_num) & score_num > 0) %>%
+      distinct(Gene, Position) %>%
+      mutate(has_biochem = TRUE)
+
+    # Analyze US rows
+    .us_rows <- .disc_all %>%
+      filter(caap_group == "US") %>%
+      mutate(
+        score_num = suppressWarnings(as.numeric(asr_path_score)),
+        side_clean = if ("side" %in% names(.)) as.character(side) else "none",
+        ctype = if ("convergence_type" %in% names(.)) as.character(convergence_type) else "unknown"
+      ) %>%
+      left_join(.biochem_pos, by = c("Gene", "Position")) %>%
+      mutate(has_biochem = coalesce(has_biochem, FALSE))
+
+    # Classify each US position row
+    .us_rows <- .us_rows %>%
+      mutate(
+        status = case_when(
+          !is.na(score_num) & score_num > 0 & side_clean %in% c("top", "bottom") ~ "Retained: Convergent (CAAS_score > 0)",
+          ctype == "single" ~ "Filtered: Single-domain shadow (n=1)",
+          ctype == "divergent" & has_biochem ~ "Filtered: Divergent US (biochemically convergent in GS1-GS4)",
+          ctype == "divergent" & !has_biochem ~ "Filtered: Divergent pure (no scheme converges)",
+          ctype %in% c("symplesiomorphic", "no_change") ~ "Filtered: Symplesiomorphic / Ancestral retention",
+          TRUE ~ "Filtered: Non-convergent (score = 0)"
+        )
+      )
+
+    .status_counts <- .us_rows %>%
+      count(status, name = "n_rows") %>%
+      mutate(pct = round(100 * n_rows / sum(n_rows), 2)) %>%
+      arrange(desc(n_rows))
+
+    .stat_pal <- c(
+      "Retained: Convergent (CAAS_score > 0)" = "#4E79A7",
+      "Filtered: Single-domain shadow (n=1)" = "#F28E2B",
+      "Filtered: Divergent US (biochemically convergent in GS1-GS4)" = "#59A14F",
+      "Filtered: Divergent pure (no scheme converges)" = "#E15759",
+      "Filtered: Symplesiomorphic / Ancestral retention" = "#B07AA1",
+      "Filtered: Non-convergent (score = 0)" = "#BAB0AC"
+    )
+
+    p_zero <- ggplot(.status_counts, aes(x = reorder(status, n_rows), y = n_rows, fill = status)) +
+      geom_col(show.legend = FALSE) +
+      geom_text(aes(label = sprintf("%s (%.1f%%)", format(n_rows, big.mark = ","), pct)),
+                hjust = -0.1, size = 3.5) +
+      coord_flip() +
+      scale_fill_manual(values = .stat_pal) +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.25))) +
+      labs(title = "Position Filtering & Zero-Score Diagnostics (US scheme)",
+           subtitle = sprintf("Total US position sides detected: %s | Retained: %s",
+                              format(nrow(.us_rows), big.mark = ","),
+                              format(sum(.us_rows$status == "Retained: Convergent (CAAS_score > 0)"), big.mark = ",")),
+           x = NULL, y = "Detected position sides") +
+      theme_minimal(base_size = 12) +
+      theme(plot.title = element_text(face = "bold"))
+
+    print(p_zero)
+    cat("\n\n")
+    print(knitr::kable(.status_counts, col.names = c("Classification", "Count", "% of Detected"),
+                       caption = "Breakdown of US position sides: convergent vs filtered non-convergent."))
+    cat("\n\n")
+  }
+}
+```
+
 
 ### CAAS Score Manhattan (Position Level)
 

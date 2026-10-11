@@ -52,7 +52,7 @@ def parse_args():
 def write_empty(path):
     """Write the artifact that means "no CAAS null": every entry None (p-values stay NA downstream)."""
     with open(path, "wb") as fh:
-        pickle.dump({"cycle_levels": None, "global": None, "top": None, "bottom": None}, fh)
+        pickle.dump({"cycle_levels": None, "null_positions": None, "global": None, "top": None, "bottom": None}, fh)
 
 
 def main():
@@ -84,18 +84,28 @@ def main():
         print(f"[posenrich_prep] empty CAAS null file -> wrote empty {args.output}", flush=True)
         return
 
-    # pos_id is cast to category at once, so the string column of every row collapses to
-    # integer codes over the (much smaller) set of distinct positions.
-    pos_id = (df["Gene"].astype(str) + ":" + df["Position"].astype(str)).astype("category")
-    df["pos_id"] = pos_id
-    df["score"] = df["caas_score"].fillna(0.0)
     # The categories of cycle are exactly its distinct values, so this reads the category
     # list instead of scanning every row.
     cycle_levels = np.sort(np.asarray(df["cycle"].cat.categories, dtype=object))
 
-    long_df = df[["pos_id", "side", "cycle", "score"]]
+    # Keep only null hits with caas_score > 0 (U_CAAS possibility space)
+    df["caas_score"] = pd.to_numeric(df["caas_score"], errors="coerce")
+    df = df[df["caas_score"] > 0].copy()
+    if df.empty:
+        write_empty(args.output)
+        print(f"[posenrich_prep] no null hit with caas_score > 0 -> wrote empty {args.output}", flush=True)
+        return
 
-    out = {"cycle_levels": cycle_levels}
+    # pos_id is cast to category at once, so the string column of every row collapses to
+    # integer codes over the (much smaller) set of distinct positions.
+    pos_id = (df["Gene"].astype(str) + ":" + df["Position"].astype(str)).astype("category")
+    df["pos_id"] = pos_id
+    df["score"] = df["caas_score"]
+
+    long_df = df[["pos_id", "side", "cycle", "score"]]
+    null_positions = np.sort(np.asarray(df["pos_id"].unique(), dtype=object))
+
+    out = {"cycle_levels": cycle_levels, "null_positions": null_positions}
     for direction in ("global", "top", "bottom"):
         if direction == "global":
             sub = long_df
@@ -112,7 +122,7 @@ def main():
 
     with open(args.output, "wb") as fh:
         pickle.dump(out, fh, protocol=pickle.HIGHEST_PROTOCOL)
-    print(f"[posenrich_prep] wrote {args.output} ({len(cycle_levels)} cycles)", flush=True)
+    print(f"[posenrich_prep] wrote {args.output} ({len(cycle_levels)} cycles, {len(null_positions)} null positions)", flush=True)
 
 
 if __name__ == "__main__":

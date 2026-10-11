@@ -53,17 +53,17 @@ def _is_value(x) -> bool:
 
 
 def position_score(scheme_scores: Mapping[str, float]) -> Optional[float]:
-    """Score of a position side: its US score; None when US did not score it.
+    """Score of a position side: its US score; None when US did not score it or scored <= 0.0.
 
     ``scheme_scores`` maps scheme name to ``caas_row``; the GS entries are ignored.
     """
     us = scheme_scores.get("US")
-    return float(us) if _is_value(us) else None
+    return float(us) if (_is_value(us) and float(us) > 0.0) else None
 
 
 def collapse_sides(side_scores: Mapping[str, float]) -> Dict[str, float]:
     """Per-direction entries of one position: ``all`` = best side, plus ``top`` / ``bottom`` when present."""
-    vals = {s: v for s, v in side_scores.items() if _is_value(v)}
+    vals = {s: v for s, v in side_scores.items() if _is_value(v) and v > 0.0}
     if not vals:
         return {}
     out = {"all": max(vals.values())}
@@ -88,7 +88,7 @@ def size_adj_max(values: Sequence[float], pool_sorted: Sequence[float]) -> Optio
     ``pool_sorted`` must be ascending. Pool values within ``TIE_TOL`` above the maximum are
     ties and count as below-or-equal.
     """
-    xs = [v for v in values if _is_value(v)]
+    xs = [v for v in values if _is_value(v) and v > 0.0]
     if not xs or len(pool_sorted) == 0:
         return None
     return (bisect.bisect_right(pool_sorted, max(xs) + TIE_TOL) / len(pool_sorted)) ** len(xs)

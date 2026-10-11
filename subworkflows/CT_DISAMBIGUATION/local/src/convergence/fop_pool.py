@@ -20,8 +20,10 @@ Per side ``s`` over the universe of K fixed Voronoi domains
 
     M       = number of hypothesis records
     s̄_d    = ( Σ_h  domain_scores_h.get(d, 0.0) ) / M
-    w̄_d    = ( Σ_h  pss(h, d, default 1.0) )      / M
-    core_s  = clamp01( Σ_d w̄_d·s̄_d / Σ_d w̄_d )      (0 if Σ w̄_d == 0)
+    w_d,h   = (1 - δ) + 2δ·(log(1+pss) - min) / (max - min) with δ = 1 / (2K)
+    w̄_d    = ( Σ_h  w_d,h )                       / M
+    score_d = ( Σ_d w̄_d·s̄_d / Σ_d w̄_d )            (0 if Σ w̄_d == 0)
+    core_s  = clamp01( score_d * (M / (M + 2.0)) ) (shrinkage when pss provided)
 
 ``M = 1`` degenerates exactly to the plain PSS-weighted mean over the K domains
 (arithmetic mean when no PSS file). ``agree_num`` / ``agree_den`` and
@@ -146,9 +148,49 @@ def pool_domains(
                 return pss_by_hyp_domain[(h, k)]
         return None
 
+    # ── Component A: K-bounded PSS domain weights (delta = 1 / (2*K)) ──────────
+    # Within each hypothesis h, compress raw PSS with log(1 + PSS) and linearly
+    # rescale to [1 - delta, 1 + delta]. Guarantees that m+1 domains strictly
+    # outweigh m domains for any K >= 2.
+    K = len(rep)
+    delta = (1.0 / (2.0 * K)) if K >= 1 else 0.0
+    w_by_hyp_domain: Dict[Tuple[str, Any], float] = {}
+    if pss_by_hyp_domain and M >= 1:
+        for r in hyps:
+            h = r["hyp"]
+            log_vals: Dict[Any, float] = {}
+            for sd, d in rep.items():
+                raw_w = _pss(h, d)
+                p = 1.0 if raw_w is None else float(raw_w)
+                log_vals[d] = math.log(1.0 + max(0.0, p))
+            min_l = min(log_vals.values()) if log_vals else 0.0
+            max_l = max(log_vals.values()) if log_vals else 0.0
+            span = max_l - min_l
+            for d, lv in log_vals.items():
+                if span < 1e-12:
+                    w_by_hyp_domain[(h, d)] = 1.0
+                else:
+                    w_by_hyp_domain[(h, d)] = (1.0 - delta) + 2.0 * delta * ((lv - min_l) / span)
+    else:
+        for r in hyps:
+            h = r["hyp"]
+            for sd, d in rep.items():
+                w_by_hyp_domain[(h, d)] = 1.0
+
+    w_bar: Dict[Any, float] = {}
+    for sd, d in rep.items():
+        wsum = math.fsum(w_by_hyp_domain.get((r["hyp"], d), 1.0) for r in hyps)
+        w_bar[d] = (wsum / M) if M else 0.0
+    denom = math.fsum(w_bar.values())
+
+    # ── Component B: FOP hypothesis shrinkage f_FOP(M) = M / (M + 2) ───────────
+    # Penalizes positions detected in only 1 or 2 isolated FOP hypotheses while
+    # preserving robust positions detected across many hypotheses.
+    k_0 = 2.0
+    f_fop = (M / (M + k_0)) if (pss_by_hyp_domain is not None and M >= 1) else 1.0
+
     def _agg(side: str) -> Dict[str, Any]:
         s_bar: Dict[Any, float] = {}
-        w_bar: Dict[Any, float] = {}
         # Sums are correctly rounded (math.fsum): the pooled score does not depend on the
         # order the hypotheses or the domains arrive in.
         for sd, d in rep.items():
@@ -157,16 +199,11 @@ def pool_domains(
                 for r in hyps
             )
             s_bar[d] = (num / M) if M else 0.0
-            wsum = math.fsum(
-                1.0 if (w := _pss(r["hyp"], d)) is None else float(w) for r in hyps
-            )
-            w_bar[d] = (wsum / M) if M else 0.0
 
-        denom = math.fsum(w_bar.values())
-        core = (
+        score_dom = (
             math.fsum(w_bar[d] * s_bar[d] for d in w_bar) / denom if denom > 0 else 0.0
         )
-        core = max(0.0, min(1.0, core))
+        core = max(0.0, min(1.0, score_dom * f_fop))
 
         # Agreement across the pooled hypotheses, over the domains changed in >= 1 of them.
         der_enc: Dict[str, List[str]] = {}
