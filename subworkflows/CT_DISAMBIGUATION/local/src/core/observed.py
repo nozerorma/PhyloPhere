@@ -102,6 +102,11 @@ def analyze_observed(
         posterior_threshold=posterior_threshold,
         hyp_pairs_pss=hyp_pairs_pss,
         keep_unpooled=keep_unpooled,
+        hoisted_seq_by_id=ctx.get("seq_by_id"),
+        hoisted_seq_by_species=ctx.get("seq_by_species"),
+        hoisted_node_index=ctx.get("node_index"),
+        hoisted_name_index=ctx.get("name_index"),
+        hoisted_taxid_index=ctx.get("taxid_index"),
     )
 
 

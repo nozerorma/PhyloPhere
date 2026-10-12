@@ -250,6 +250,8 @@ def _position_axes(
     node_index: Optional[Dict[int, Any]],
     pair_details_list: Optional[List[Dict[str, Any]]],
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
+    axes_cache: Optional[Dict[Tuple[Optional[int], str, tuple], Dict[str, Any]]] = None,
+    domain_sig: Optional[tuple] = None,
 ) -> Dict[str, Any]:
     """Reduced domain-score kernel shared by the full scorer and the perm replay.
 
@@ -266,6 +268,24 @@ def _position_axes(
     ``position_one_based``; the observed path passes ``None``.
     """
     paml_site = caas_pos.position_one_based
+    scheme = getattr(caas_pos, "caap_group", "US") or "US"
+
+    if axes_cache is not None:
+        if domain_sig is None:
+            domain_sig = tuple(
+                (
+                    p.get("pair_id"),
+                    p.get("node_id"),
+                    p.get("focal_state"),
+                    p.get("top_tip_mode"),
+                    p.get("bottom_tip_mode"),
+                )
+                for p in (pair_details_list or ())
+            )
+        cache_key = (paml_site, scheme, domain_sig)
+        cached = axes_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
     if per_site_dist_cache is not None:
         per_node_dist = per_site_dist_cache.get(paml_site)
@@ -278,12 +298,15 @@ def _position_axes(
     if node_index is None:  # per-gene invariant; the caller passes it when it has one
         node_index = build_node_index(getattr(tree_data, "root", None))
 
-    return compute_domain_scores(
+    res = compute_domain_scores(
         pair_details=pair_details_list,
         per_node_dist=per_node_dist,
         node_index=node_index,
-        scheme=getattr(caas_pos, "caap_group", "US") or "US",
+        scheme=scheme,
     )
+    if axes_cache is not None:
+        axes_cache[cache_key] = res
+    return res
 
 
 def analyze_caas_position_disambiguation(
@@ -297,6 +320,8 @@ def analyze_caas_position_disambiguation(
     build_node_posteriors: bool = False,
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     hypothesis: Optional[str] = None,
+    axes_cache: Optional[Dict[Tuple[Optional[int], str, tuple], Dict[str, Any]]] = None,
+    domain_sig: Optional[tuple] = None,
 ) -> "List[ConvergenceResult]":
     """
     Perform complete convergence/disambiguation analysis for a CAAS position.
@@ -318,7 +343,7 @@ def analyze_caas_position_disambiguation(
         one row per participating side, a no-change position one ``side="none"``
         row).
     """
-    logger.info(
+    logger.debug(
         f"Analyzing convergence for {gene} position {caas_pos.position_one_based}"
     )
     node_posteriors: Dict[str, Any] = {}  # always defined
@@ -536,6 +561,8 @@ def analyze_caas_position_disambiguation(
         domain_split = _position_axes(
             caas_pos, tree_data, posterior_data, node_index, pair_details_list,
             per_site_dist_cache=per_site_dist_cache,
+            axes_cache=axes_cache,
+            domain_sig=domain_sig,
         )
     except Exception as e:  # a path-scoring failure must not stop the disambiguation
         domain_split = None
@@ -609,6 +636,17 @@ def analyze_gene_disambiguation(
     build_node_posteriors: bool = False,
     hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]] = None,
     keep_unpooled: bool = False,
+    hoisted_seq_by_id: Optional[Dict] = None,
+    hoisted_seq_by_species: Optional[Dict] = None,
+    hoisted_node_index: Optional[Dict[int, Any]] = None,
+    hoisted_name_index: Optional[Dict[str, Any]] = None,
+    hoisted_taxid_index: Optional[Dict[str, Any]] = None,
+    mrca_cache: Optional[Dict[tuple, Any]] = None,
+    pair_mrca_cache: Optional[Dict[Tuple[str, str], Tuple[Optional[int], str, str]]] = None,
+    tip_cache: Optional[Dict[Tuple[int, str], Tuple[List[Dict[str, Any]], Optional[str]]]] = None,
+    modal_state_cache: Optional[Dict[Tuple[Optional[int], Optional[int]], Tuple[Optional[str], Optional[float]]]] = None,
+    contrast_obs_cache: Optional[Dict[Tuple[int, Optional[int], tuple], Tuple[List[Dict[str, Any]], tuple]]] = None,
+    axes_cache: Optional[Dict[Tuple[Optional[int], str, tuple], Dict[str, Any]]] = None,
 ) -> Tuple[List[ConvergenceResult], Dict[str, Any]]:
     """
     Perform complete convergence/disambiguation analysis for a gene's CAAS entries.
@@ -639,15 +677,32 @@ def analyze_gene_disambiguation(
         Tuple of (results list, diagnostics dict). In axes_only mode the list holds
         :class:`PositionAxes` records instead of :class:`ConvergenceResult`.
     """
-    logger.info(
-        f"Starting convergence disambiguation for {gene} ({len(caas_entries)} entries)"
-    )
+    if axes_only:
+        logger.debug(
+            f"Starting convergence disambiguation for {gene} ({len(caas_entries)} entries)"
+        )
+    else:
+        logger.info(
+            f"Starting convergence disambiguation for {gene} ({len(caas_entries)} entries)"
+        )
     logger.debug(
         f"Using posterior threshold {posterior_threshold:.3f} for node state extraction"
     )
 
     if per_site_dist_cache is None:
         per_site_dist_cache = {}
+    if mrca_cache is None:
+        mrca_cache = {}
+    if pair_mrca_cache is None:
+        pair_mrca_cache = {}
+    if tip_cache is None:
+        tip_cache = {}
+    if modal_state_cache is None:
+        modal_state_cache = {}
+    if contrast_obs_cache is None:
+        contrast_obs_cache = {}
+    if axes_cache is None:
+        axes_cache = {}
 
     results: List[ConvergenceResult] = []
     diagnostics: Dict[str, Any] = {
@@ -698,10 +753,11 @@ def analyze_gene_disambiguation(
         lone contrast, with no hypothesis label.
         """
         raw = str(getattr(entry, "trait", "") or "").strip()
-        m = re.search(r"H(\d+)", raw)
-        if m:
-            k = int(m.group(1))
-            return (k if k in contrast_pairs_by_key else None), f"H{k}"
+        if raw:
+            m = re.search(r"H(\d+)", raw)
+            if m:
+                k = int(m.group(1))
+                return (k if k in contrast_pairs_by_key else None), f"H{k}"
         if _single_contrast_key is not None and not _multi_contrast:
             return _single_contrast_key, None
         if _single_contrast_key is not None:
@@ -711,23 +767,21 @@ def analyze_gene_disambiguation(
     # ── Per-gene invariants, computed once ─────────────────────────────────────
     # The alignment lookup, the tree node index and the MRCA of each species set
     # depend only on the alignment and the tree, which are fixed for the gene.
-    # They are built here, outside the per-position loop, which changes no result.
-    hoisted_seq_by_id = hoisted_seq_by_species = None
-    if any_pairs and taxid_mapping:
+    # They are built here (or reused from the caller's hoisted context), outside
+    # the per-position loop, which changes no result.
+    if any_pairs and taxid_mapping and (hoisted_seq_by_id is None or hoisted_seq_by_species is None):
         hoisted_seq_by_id, hoisted_seq_by_species = build_alignment_lookup(
             alignment_data.alignment, alignment_data.taxid_to_species
         )
-    hoisted_node_index = build_node_index(getattr(tree_data, "root", None))
-    # get_mrca's tip lookups (find_node_by_name, find_node_by_taxid) are each a
-    # recursive search of the whole tree, and the null replay calls this once per
-    # cycle over a tree that never changes (see
-    # docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md). Building the name and taxid
-    # index is one pass over the tree per call of this function, which replaces
-    # many whole-tree searches.
-    _name_index, _taxid_index = (
-        build_name_taxid_index(tree_data.root) if getattr(tree_data, "root", None) else ({}, {})
-    )
-    _mrca_cache: Dict[tuple, Any] = {}
+    if hoisted_node_index is None:
+        hoisted_node_index = build_node_index(getattr(tree_data, "root", None))
+    if hoisted_name_index is None or hoisted_taxid_index is None:
+        _name_index, _taxid_index = (
+            build_name_taxid_index(tree_data.root) if getattr(tree_data, "root", None) else ({}, {})
+        )
+    else:
+        _name_index, _taxid_index = hoisted_name_index, hoisted_taxid_index
+    _mrca_cache = mrca_cache
 
     def _get_mrca_cached(taxa: List[str]):
         if not tree_data or not taxa:
@@ -776,92 +830,131 @@ def analyze_gene_disambiguation(
 
             # Tip-level analysis over all the pairs of the row's contrast
             tip_diagnostics: Dict[str, Any] = {}
+            domain_sig: Optional[tuple] = None
             try:
                 if contrast_pairs and taxid_mapping:
                     seq_by_id, seq_by_species = hoisted_seq_by_id, hoisted_seq_by_species
+                    site = caas_pos.position_one_based
+                    contrast_key = tuple(contrast_pairs)
+                    obs_key = (pos, site, contrast_key)
+                    cached_obs = contrast_obs_cache.get(obs_key)
 
-                    pair_details = []
-                    all_taxa: List[str] = []
+                    if cached_obs is not None:
+                        pair_details, domain_sig = cached_obs
+                    else:
+                        pair_details = []
+                        sig_items = []
 
-                    def _modal_state(
-                        node_id: Optional[int],
-                    ) -> Tuple[Optional[str], Optional[float]]:
-                        if node_id is None or posterior_data is None:
-                            return None, None
-                        site = caas_pos.position_one_based
-                        node_dict = posterior_data.get(node_id, {})
-                        site_post = node_dict.get(site, {}) if site is not None else {}
-                        if not site_post:
-                            return None, None
-                        aa, prob = max(site_post.items(), key=lambda x: x[1])
-                        return aa, prob
+                        for pair_idx, (high_species, low_species) in enumerate(
+                            contrast_pairs, 1
+                        ):
+                            pm_key = (high_species, low_species)
+                            pm = pair_mrca_cache.get(pm_key)
+                            if pm is None:
+                                top_taxid = str(taxid_mapping.get(high_species, high_species))
+                                bottom_taxid = str(taxid_mapping.get(low_species, low_species))
+                                mrca_node = _get_mrca_cached([top_taxid, bottom_taxid])
+                                mrca_node_id = mrca_node.node_id if mrca_node else None
+                                pm = (mrca_node_id, top_taxid, bottom_taxid)
+                                pair_mrca_cache[pm_key] = pm
+                            else:
+                                mrca_node_id, top_taxid, bottom_taxid = pm
 
-                    for pair_idx, (high_species, low_species) in enumerate(
-                        contrast_pairs, 1
-                    ):
-                        top_taxid = str(taxid_mapping.get(high_species, high_species))
-                        bottom_taxid = str(taxid_mapping.get(low_species, low_species))
+                            ms_key = (site, mrca_node_id)
+                            if ms_key in modal_state_cache:
+                                mrca_state, mrca_prob = modal_state_cache[ms_key]
+                            else:
+                                if mrca_node_id is None or posterior_data is None:
+                                    mrca_state, mrca_prob = None, None
+                                else:
+                                    node_dict = posterior_data.get(mrca_node_id, {})
+                                    site_post = node_dict.get(site, {}) if site is not None else {}
+                                    if not site_post:
+                                        mrca_state, mrca_prob = None, None
+                                    else:
+                                        mrca_state, mrca_prob = max(
+                                            site_post.items(), key=lambda x: x[1]
+                                        )
+                                modal_state_cache[ms_key] = (mrca_state, mrca_prob)
 
-                        all_taxa.extend([top_taxid, bottom_taxid])
+                            top_key = (pos, high_species)
+                            top_cached = tip_cache.get(top_key)
+                            if top_cached is None:
+                                top_tip_records = collect_tip_residues(
+                                    [top_taxid],
+                                    [high_species],
+                                    pos,
+                                    seq_by_id,
+                                    seq_by_species,
+                                    alignment_data.taxid_to_species,
+                                )
+                                top_tip = extract_tip_residue(top_tip_records)
+                                top_cached = (top_tip_records, top_tip)
+                                tip_cache[top_key] = top_cached
+                            else:
+                                top_tip_records, top_tip = top_cached
 
-                        mrca_node = _get_mrca_cached([top_taxid, bottom_taxid])
-                        mrca_state, mrca_prob = _modal_state(
-                            mrca_node.node_id if mrca_node else None
-                        )
+                            bot_key = (pos, low_species)
+                            bot_cached = tip_cache.get(bot_key)
+                            if bot_cached is None:
+                                bottom_tip_records = collect_tip_residues(
+                                    [bottom_taxid],
+                                    [low_species],
+                                    pos,
+                                    seq_by_id,
+                                    seq_by_species,
+                                    alignment_data.taxid_to_species,
+                                )
+                                bottom_tip = extract_tip_residue(bottom_tip_records)
+                                bot_cached = (bottom_tip_records, bottom_tip)
+                                tip_cache[bot_key] = bot_cached
+                            else:
+                                bottom_tip_records, bottom_tip = bot_cached
 
-                        top_tip_records = collect_tip_residues(
-                            [top_taxid],
-                            [high_species],
-                            caas_pos.position,
-                            seq_by_id,
-                            seq_by_species,
-                            alignment_data.taxid_to_species,
-                        )
-                        bottom_tip_records = collect_tip_residues(
-                            [bottom_taxid],
-                            [low_species],
-                            caas_pos.position,
-                            seq_by_id,
-                            seq_by_species,
-                            alignment_data.taxid_to_species,
-                        )
+                            pair_details.append(
+                                {
+                                    "pair_id": pair_idx,
+                                    "node_id": mrca_node_id,
+                                    "focal_state": mrca_state,
+                                    "focal_prob": mrca_prob,
+                                    "mrca_modal_aa": mrca_state,
+                                    "top_taxa": [top_taxid],
+                                    "bottom_taxa": [bottom_taxid],
+                                    "top_species": [high_species],
+                                    "bottom_species": [low_species],
+                                    "top_tip_mode": top_tip,
+                                    "bottom_tip_mode": bottom_tip,
+                                    "top_tip_residue": top_tip,
+                                    "bottom_tip_residue": bottom_tip,
+                                    "top_tip_residues": top_tip_records,
+                                    "bottom_tip_residues": bottom_tip_records,
+                                }
+                            )
+                            sig_items.append(
+                                (pair_idx, mrca_node_id, mrca_state, top_tip, bottom_tip)
+                            )
 
-                        top_tip = extract_tip_residue(top_tip_records)
-                        bottom_tip = extract_tip_residue(bottom_tip_records)
-
-                        pair_details.append(
-                            {
-                                "pair_id": pair_idx,
-                                "node_id": mrca_node.node_id if mrca_node else None,
-                                "focal_state": mrca_state,
-                                "focal_prob": mrca_prob,
-                                "mrca_modal_aa": mrca_state,
-                                "top_taxa": [top_taxid],
-                                "bottom_taxa": [bottom_taxid],
-                                "top_species": [high_species],
-                                "bottom_species": [low_species],
-                                "top_tip_mode": top_tip,
-                                "bottom_tip_mode": bottom_tip,
-                                "top_tip_residue": top_tip,
-                                "bottom_tip_residue": bottom_tip,
-                                "top_tip_residues": top_tip_records,
-                                "bottom_tip_residues": bottom_tip_records,
-                            }
-                        )
-
-                    mrca_node = _get_mrca_cached(all_taxa)
-                    node_mapping = {
-                        "root": (
-                            tree_data.root.node_id
-                            if tree_data and tree_data.root
-                            else None
-                        ),
-                        "mrca_contrast": mrca_node.node_id if mrca_node else None,
-                        "focal_nodes": [p.get("node_id") for p in pair_details],
-                    }
+                        domain_sig = tuple(sig_items)
+                        contrast_obs_cache[obs_key] = (pair_details, domain_sig)
 
                     tip_diagnostics["pair_details"] = pair_details
-                    tip_diagnostics["node_mapping"] = node_mapping
+                    if not axes_only:
+                        all_taxa = [
+                            t
+                            for p in pair_details
+                            for t in (p["top_taxa"][0], p["bottom_taxa"][0])
+                        ]
+                        mrca_node = _get_mrca_cached(all_taxa)
+                        node_mapping = {
+                            "root": (
+                                tree_data.root.node_id
+                                if tree_data and tree_data.root
+                                else None
+                            ),
+                            "mrca_contrast": mrca_node.node_id if mrca_node else None,
+                            "focal_nodes": [p.get("node_id") for p in pair_details],
+                        }
+                        tip_diagnostics["node_mapping"] = node_mapping
             except Exception as e:
                 logger.warning(f"Tip-level analysis failed for position {pos}: {e}")
 
@@ -895,6 +988,8 @@ def analyze_gene_disambiguation(
                         hoisted_node_index,
                         tip_diagnostics.get("pair_details"),
                         per_site_dist_cache=per_site_dist_cache,
+                        axes_cache=axes_cache,
+                        domain_sig=domain_sig,
                     )
                 except Exception as e:  # a path-scoring failure must not stop the replay
                     logger.warning(
@@ -928,12 +1023,14 @@ def analyze_gene_disambiguation(
                 build_node_posteriors=build_node_posteriors,
                 per_site_dist_cache=per_site_dist_cache,
                 hypothesis=_hyp_label,
+                axes_cache=axes_cache,
+                domain_sig=domain_sig,
             )
 
             # One base row per (position, scheme, hypothesis); the per-side
             # split and pooling happen after the loop.
             results.extend(row_list)
-            logger.info(
+            logger.debug(
                 f"✓ Analyzed position {pos}: {row_list[0].ancestral}→{row_list[0].derived}"
             )
 
@@ -971,9 +1068,14 @@ def analyze_gene_disambiguation(
         except Exception as e:  # a pooling failure must not stop the disambiguation
             logger.warning(f"[{gene}] domain pooling failed: {e}")
 
-    logger.info(
-        f"✓ Completed convergence disambiguation: {len(results)}/{len(caas_entries)} metadata rows"
-    )
+    if axes_only:
+        logger.debug(
+            f"✓ Completed convergence disambiguation: {len(results)}/{len(caas_entries)} metadata rows"
+        )
+    else:
+        logger.info(
+            f"✓ Completed convergence disambiguation: {len(results)}/{len(caas_entries)} metadata rows"
+        )
     diagnostics["skip_reasons"] = dict(diagnostics["skip_reasons"])
     return results, diagnostics
 

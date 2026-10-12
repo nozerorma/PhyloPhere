@@ -166,11 +166,14 @@ def _genes_from_export(perm_discovery_path: Path) -> Tuple[list, dict]:
         # alignmentID is the base name of the alignment file (for example "GENE.Homo_sapiens"
         # from "GENE.Homo_sapiens.fa"). The gene is the first dot-delimited segment, because
         # the bare symbol is what ensembl_genes, find_gene_alignment (which splits on the
-        # first dot) and the meta_caas Gene column use.
+        # first dot) and the meta_caas Gene column use. Normalize byte size by ~55 bytes/row
+        # so the workload proxy matches the row-count scale of file mode.
         for p in perm_discovery_path.iterdir():
             if p.is_file() and not p.name.startswith("."):
-                name = p.name.split(".", 1)[0]
-                sizes[name] = sizes.get(name, 0) + p.stat().st_size
+                st_size = p.stat().st_size
+                if st_size > 0:
+                    name = p.name.split(".", 1)[0]
+                    sizes[name] = sizes.get(name, 0) + max(1, st_size // 55)
     genes = [g for g, _ in sorted(sizes.items(), key=lambda kv: (-kv[1], kv[0]))]
     return genes, sizes
 

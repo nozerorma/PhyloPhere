@@ -28,8 +28,11 @@ from src.asr.asr_single import (
     load_precomputed_asr,
     run_asr_pipeline,
 )
+from src.asr.tree_parser import build_name_taxid_index
+from src.convergence.convergence import build_alignment_lookup
 from src.convergence.disambiguate_single import PositionAxes, analyze_gene_disambiguation
 from src.convergence.fop_pool import base_cycle, pool_domains
+from src.convergence.path_scores import build_node_index
 from src.core.labelings import hyp_id, trait_pairs_from
 from src.core.pooling import pooled_sides
 from src.phylo.tree_utils import build_tree_node_mapping, extract_tip_labels
@@ -159,10 +162,23 @@ def load_gene_context(
         except Exception as e:
             logger.warning(f"[perms] {gene}: could not rebuild tree_data from PAML tree: {e}")
 
+    seq_by_id, seq_by_species = build_alignment_lookup(
+        alignment_data.alignment, alignment_data.taxid_to_species
+    )
+    node_index = build_node_index(getattr(tree_data, "root", None))
+    name_index, taxid_index = (
+        build_name_taxid_index(tree_data.root) if getattr(tree_data, "root", None) else ({}, {})
+    )
+
     return {
         "alignment_data": alignment_data,
         "tree_data": tree_data,
         "node_posteriors": node_posteriors,
+        "seq_by_id": seq_by_id,
+        "seq_by_species": seq_by_species,
+        "node_index": node_index,
+        "name_index": name_index,
+        "taxid_index": taxid_index,
     }
 
 
@@ -182,17 +198,28 @@ def score_labelings(
     tree_data = ctx["tree_data"]
     node_posteriors = ctx["node_posteriors"]
     full_posteriors = getattr(node_posteriors, "posteriors_node", None)
+    hoisted_seq_by_id = ctx.get("seq_by_id")
+    hoisted_seq_by_species = ctx.get("seq_by_species")
+    hoisted_node_index = ctx.get("node_index")
+    hoisted_name_index = ctx.get("name_index")
+    hoisted_taxid_index = ctx.get("taxid_index")
 
     axes_only = os.environ.get("CAAS_PERMS_AXES_ONLY", "1") not in ("0", "false", "False")
     per_site_dist_cache: Dict[int, Any] = {} if axes_only else None
+    mrca_cache: Dict[tuple, Any] = {}
+    pair_mrca_cache: Dict[Tuple[str, str], Tuple[Optional[int], str, str]] = {}
+    tip_cache: Dict[Tuple[int, str], Tuple[List[Dict[str, Any]], Optional[str]]] = {}
+    modal_state_cache: Dict[Tuple[Optional[int], Optional[int]], Tuple[Optional[str], Optional[float]]] = {}
+    contrast_obs_cache: Dict[Tuple[int, Optional[int], tuple], Tuple[List[Dict[str, Any]], tuple]] = {}
+    axes_cache: Dict[Tuple[Optional[int], str, tuple], Dict[str, Any]] = {}
 
     results = []
     for cyc in tags:
+        caas_entries = entries_by_tag.get(cyc)
+        if not caas_entries:
+            continue
         labeling = labelings.get(cyc)
         if not labeling:
-            continue
-        caas_entries = entries_by_tag.get(cyc, [])
-        if not caas_entries:
             continue
         fg, bg = labeling
         trait_pairs = trait_pairs_from(fg, bg)
@@ -208,6 +235,17 @@ def score_labelings(
                 posterior_threshold=posterior_threshold,
                 axes_only=axes_only,
                 per_site_dist_cache=per_site_dist_cache,
+                hoisted_seq_by_id=hoisted_seq_by_id,
+                hoisted_seq_by_species=hoisted_seq_by_species,
+                hoisted_node_index=hoisted_node_index,
+                hoisted_name_index=hoisted_name_index,
+                hoisted_taxid_index=hoisted_taxid_index,
+                mrca_cache=mrca_cache,
+                pair_mrca_cache=pair_mrca_cache,
+                tip_cache=tip_cache,
+                modal_state_cache=modal_state_cache,
+                contrast_obs_cache=contrast_obs_cache,
+                axes_cache=axes_cache,
             )
             if biochem_results:
                 results.append((cyc, biochem_results))

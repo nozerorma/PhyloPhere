@@ -220,6 +220,9 @@ def _parse_discovery_entries(
         i for i in (cyc_idx, pos_idx, gene_idx if gene_filter is not None else None)
         if i is not None
     )
+    cycle_tag_set = (
+        cycle_tags if isinstance(cycle_tags, (set, frozenset)) else set(cycle_tags)
+    )
 
     for line in handle:
         parts = line.rstrip("\n").split("\t")
@@ -228,7 +231,7 @@ def _parse_discovery_entries(
         if gene_filter is not None and parts[gene_idx].strip() != gene_filter:
             continue
         cyc = parts[cyc_idx].strip()
-        if not cyc or cyc not in cycle_tags:
+        if not cyc or cyc not in cycle_tag_set:
             continue
         try:
             pos0 = int(parts[pos_idx].strip())
@@ -1052,27 +1055,24 @@ def process_all_genes_perms(
         n_cycles_total = len(cycle_tags)
 
     if chunk_threshold is None:
-        chunk_threshold = int(os.environ.get("CAAS_PERMS_CHUNK_THRESHOLD", "5000"))
+        chunk_threshold = int(os.environ.get("CAAS_PERMS_CHUNK_THRESHOLD", "0"))
     if chunk_target_size is None:
         chunk_target_size = int(os.environ.get("CAAS_PERMS_CHUNK_TARGET_SIZE", "1000"))
 
-    # Chunking: a gene whose size proxy (gene_sizes, the row-count tally that
-    # disambiguation_perms_main.py's _genes_from_export computes for the LPT ordering)
-    # exceeds chunk_threshold has its replay split into base-cycle-respecting sub-chunks,
-    # each dispatched as its own worker task. This bounds the wall time behind a single
-    # oversized gene and the memory of a worker, which would otherwise hold the whole
-    # multi-thousand-cycle result set of the gene. Below the threshold (or without
-    # gene_sizes) a gene gets one chunk with all of cycle_tags. All genes replay the same
-    # cycle_tags, so the split points are identical and computed once.
+    # Chunking: when chunk_threshold > 0 is explicitly configured, a gene whose size proxy
+    # exceeds chunk_threshold has its replay split into base-cycle-respecting sub-chunks.
+    # By default (chunk_threshold == 0), each gene runs as a single LPT-scheduled worker task
+    # so its ASR context, discovery file parse, and per-gene MRCA/tip/domain caches are built
+    # once and reused across all cycles.
     big_chunks = None
-    if gene_sizes and any(gene_sizes.get(g, 0) > chunk_threshold for g in genes):
+    if chunk_threshold > 0 and gene_sizes and any(gene_sizes.get(g, 0) > chunk_threshold for g in genes):
         big_chunks = _chunk_gene_cycles(cycle_tags, chunk_target_size)
 
     tasks: List[Tuple[str, List[str], float]] = []  # (gene, chunk_cycle_tags, est_workload)
     chunks_per_gene: Dict[str, int] = {}
     for gene in genes:
         size = (gene_sizes or {}).get(gene, 0)
-        use_chunks = big_chunks if (big_chunks and size > chunk_threshold) else [cycle_tags]
+        use_chunks = big_chunks if (big_chunks and chunk_threshold > 0 and size > chunk_threshold) else [cycle_tags]
         chunks_per_gene[gene] = len(use_chunks)
         for chunk in use_chunks:
             tasks.append((gene, chunk, size / len(use_chunks)))
