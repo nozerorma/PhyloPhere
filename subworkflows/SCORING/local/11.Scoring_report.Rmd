@@ -921,6 +921,133 @@ When the permulations are harvested with `perm_match_pss`, the PSS of the canoni
 the run, so the PSS histogram is centered on the red line by construction; the distance and the trait difference of the
 pairs are not constrained and show whether that matching is enough for the null to resemble the run.
 
+### Null Draw Diversity & Redundancy
+
+Evaluation of whether the harvested null pool represents diverse, independent evolutionary configurations
+or collapses to recurring sets of contrast pairs. In trees with finite tip taxa or restricted trait variations,
+some contrast configurations can be drawn more than once. This panel audits:
+- **Uniqueness & Redundancy**: How many of the $N$ accepted cycles represent unique contrast drawings vs duplicate re-draws.
+- **Multiplicity Distribution**: How many cycles occur as singletons ($1\times$) vs multiples ($2\times, 3\times, \dots$).
+- **Normalized Shannon Entropy**: $H_{\text{norm}} \in [0, 1]$, where $1.0$ indicates perfect uniformity across all draws, while values $< 0.8$ would indicate clustering in few phenotypic configurations.
+- **Pairwise Contrast Overlap (Jaccard similarity)**: Average fraction of contrast pairs shared between distinct null cycles.
+
+```{r pos-null-diversity, eval=.file_ok(params$perm_manifest_file), fig.height=5, fig.width=10, results='asis'}
+.man_div <- readr::read_tsv(params$perm_manifest_file, show_col_types = FALSE)
+
+# Derive draw signature: prefer explicit draw_signature or species, fallback to trait values
+if ("draw_signature" %in% names(.man_div) && any(nzchar(.man_div$draw_signature))) {
+  .sigs <- .man_div$draw_signature
+} else if (all(c("fg_species", "bg_species") %in% names(.man_div))) {
+  .sigs <- paste(.man_div$fg_species, .man_div$bg_species, sep = " vs ")
+} else if (all(c("fg_values", "bg_values") %in% names(.man_div))) {
+  .sigs <- paste(.man_div$fg_values, .man_div$bg_values, sep = " vs ")
+} else {
+  .sigs <- .man_div$cycle
+}
+
+.n_tot <- nrow(.man_div)
+.tab_sigs <- table(.sigs)
+.n_uniq <- length(.tab_sigs)
+.n_dup <- .n_tot - .n_uniq
+.dup_rate <- if (.n_tot > 0) .n_dup / .n_tot else 0.0
+.max_mult <- if (length(.tab_sigs)) max(.tab_sigs) else 0L
+
+# Normalized Shannon entropy
+.p_sig <- as.numeric(.tab_sigs) / max(.n_tot, 1L)
+.ent_norm <- if (.n_tot > 1 && .n_uniq > 1) {
+  -sum(.p_sig * log(.p_sig)) / log(.n_tot)
+} else if (.n_tot > 0 && .n_uniq == 1) {
+  0.0
+} else {
+  1.0
+}
+
+# Multiplicity counts
+.mult_counts <- tibble::as_tibble(.tab_sigs, .name_repair = "minimal") %>%
+  rlang::set_names(c("signature", "multiplicity")) %>%
+  mutate(multiplicity = as.integer(multiplicity))
+
+.mult_summary <- .mult_counts %>%
+  count(multiplicity, name = "n_unique_draws") %>%
+  mutate(
+    total_cycles_accounted = multiplicity * n_unique_draws,
+    pct_of_pool = round(100 * total_cycles_accounted / .n_tot, 2)
+  ) %>%
+  arrange(multiplicity)
+
+# KPI summary table
+.div_kpis <- tibble::tibble(
+  Metric = c("Total null cycles in pool (N)",
+             "Unique contrast configurations",
+             "Duplicate cycles",
+             "Uniqueness rate",
+             "Redundancy rate",
+             "Max multiplicity (most frequent draw)",
+             "Normalized Shannon entropy"),
+  Value = c(format(.n_tot, big.mark = ","),
+            format(.n_uniq, big.mark = ","),
+            format(.n_dup, big.mark = ","),
+            sprintf("%.2f%%", 100 * (1 - .dup_rate)),
+            sprintf("%.2f%%", 100 * .dup_rate),
+            sprintf("%d cycles (%.2f%% of pool)", .max_mult, 100 * .max_mult / max(.n_tot, 1L)),
+            sprintf("%.4f (1.0 = maximal diversity)", .ent_norm))
+)
+print(knitr::kable(.div_kpis, caption = "Null Draw Diversity & Redundancy Summary"))
+cat("\n\n")
+
+# Multiplicity bar plot
+p_mult <- ggplot(.mult_summary, aes(x = factor(multiplicity), y = total_cycles_accounted, fill = factor(multiplicity))) +
+  geom_col(show.legend = FALSE, width = 0.6) +
+  geom_text(aes(label = sprintf("%d cycles\n(%.1f%%)", total_cycles_accounted, pct_of_pool)),
+            vjust = -0.3, size = 3.3) +
+  scale_fill_viridis_d(option = "cividis", end = 0.85) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.2))) +
+  labs(title = "Distribution of Draw Multiplicities in Null Pool",
+       subtitle = sprintf("%s total cycles | %s unique configurations (%.1f%%)",
+                          format(.n_tot, big.mark = ","), format(.n_uniq, big.mark = ","), 100 * (1 - .dup_rate)),
+       x = "Multiplicity (times configuration was drawn)",
+       y = "Cycles in pool") +
+  theme_minimal(base_size = 11) +
+  theme(plot.title = element_text(face = "bold"))
+
+# Pairwise Jaccard overlap on a sample of draws (if pairs are separated by ;)
+if ("draw_signature" %in% names(.man_div) && any(grepl(";", .man_div$draw_signature))) {
+  .draw_pairs <- strsplit(.man_div$draw_signature, ";")
+  .sample_idx <- if (.n_tot > 200) sample(.n_tot, 200) else seq_len(.n_tot)
+  .sub_pairs <- .draw_pairs[.sample_idx]
+  .m_n <- length(.sub_pairs)
+  .jacc_vals <- numeric(0)
+  for (i in seq_len(.m_n - 1)) {
+    for (j in (i + 1):.m_n) {
+      u <- union(.sub_pairs[[i]], .sub_pairs[[j]])
+      int <- intersect(.sub_pairs[[i]], .sub_pairs[[j]])
+      if (length(u) > 0) .jacc_vals <- c(.jacc_vals, length(int) / length(u))
+    }
+  }
+  if (length(.jacc_vals) > 0) {
+    .jacc_df <- tibble::tibble(jaccard = .jacc_vals)
+    p_jacc <- ggplot(.jacc_df, aes(x = jaccard)) +
+      geom_histogram(bins = 30, fill = "#4E79A7", colour = "grey30", alpha = 0.85) +
+      geom_vline(xintercept = median(.jacc_vals), colour = "#E15759", linetype = "dashed", linewidth = 0.8) +
+      labs(title = "Pairwise Contrast Jaccard Overlap (Sample of Null Draws)",
+           subtitle = sprintf("Median pair sharing: %.2f%% (dashed red)", 100 * median(.jacc_vals)),
+           x = "Jaccard similarity between two draws", y = "Draw pairs") +
+      theme_minimal(base_size = 11) +
+      theme(plot.title = element_text(face = "bold"))
+    gridExtra::grid.arrange(p_mult, p_jacc, ncol = 2)
+  } else {
+    print(p_mult)
+  }
+} else {
+  print(p_mult)
+}
+cat("\n\n")
+```
+
+```{r pos-null-diversity-na, eval=!.file_ok(params$perm_manifest_file), results='asis'}
+cat("_No `permulation_manifest.tsv` available to evaluate null draw diversity._\n\n")
+```
+
 ```{r pos-perm-p-setup}
 # p.emp is the position-level permulation p: the "detects AND exceeds score"
 # permulation p, pooled to (Gene, Position) over the max-over-sides axis, with

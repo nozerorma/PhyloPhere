@@ -693,6 +693,41 @@ if (!is.null(pss_profile)) {
 for (i in seq_along(dm_rows)) for (k in names(dm_rows[[i]])) .add("design", k, x = i, value = dm_rows[[i]][[k]])
 for (i in seq_along(cap_rows)) if (!is.null(cap_rows[[i]])) for (k in names(cap_rows[[i]])) .add("capacity", k, x = i, value = cap_rows[[i]][[k]])
 for (k in names(obs_cap)) .add("observed", k, value = obs_cap[[k]])
+
+# ── Diversity and redundancy audit over the harvested pool ───────────────────
+.draw_sigs <- vapply(pool, function(e) {
+  if (length(e$fg) && length(e$bg)) {
+    paste(sort(paste(e$fg, e$bg, sep = ":")), collapse = ";")
+  } else {
+    ""
+  }
+}, character(1))
+.sig_counts <- table(.draw_sigs)
+.n_pool_total <- length(pool)
+.n_pool_unique <- length(.sig_counts)
+.n_pool_dup <- .n_pool_total - .n_pool_unique
+.max_mult <- if (length(.sig_counts)) max(.sig_counts) else 0L
+.dup_rate <- if (.n_pool_total > 0) .n_pool_dup / .n_pool_total else 0.0
+.probs <- as.numeric(.sig_counts) / max(.n_pool_total, 1L)
+.entropy_norm <- if (.n_pool_total > 1 && .n_pool_unique > 1) {
+  -sum(.probs * log(.probs)) / log(.n_pool_total)
+} else if (.n_pool_total > 0 && .n_pool_unique == 1) {
+  0.0
+} else {
+  1.0
+}
+
+.add("diversity", "total_cycles", value = .n_pool_total)
+.add("diversity", "unique_draws", value = .n_pool_unique)
+.add("diversity", "duplicate_draws", value = .n_pool_dup)
+.add("diversity", "duplicate_rate", value = round(.dup_rate, 4))
+.add("diversity", "max_multiplicity", value = .max_mult)
+.add("diversity", "entropy_norm", value = round(.entropy_norm, 4))
+
+log_msg("INFO", sprintf(
+  "Pool draw diversity: %d unique of %d total (%.1f%% unique, %d duplicate(s); max multiplicity %d, norm entropy %.4f)",
+  .n_pool_unique, .n_pool_total, 100 * (1 - .dup_rate), .n_pool_dup, .max_mult, .entropy_norm))
+
 write.table(data.table::rbindlist(.hv), file.path(outdir, "permulation_harvest.tsv"), sep = "\t", quote = FALSE, row.names = FALSE)
 
 # Streamed writers: only the current chunk is held in memory, never the whole pool. Each
@@ -704,6 +739,7 @@ chunk_manifest <- list()
 
 man_con <- file(file.path(outdir, "permulation_manifest.tsv"), "w")
 writeLines(paste(c("cycle", "tier", "n_pairs", "dunn_min", "n_below", "mode",
+                   "fg_species", "bg_species", "draw_signature",
                    "fg_values", "bg_values", "mean_distance", "mean_abs_diff", "mean_pss", "pss_mismatch"),
                  collapse = "\t"), man_con)
 
@@ -731,6 +767,9 @@ for (b in seq_along(pool)) {
     cycle = paste0("b_", b), tier = e$tier,
     n_pairs = e$n_pairs, dunn_min = e$dunn_min,
     n_below = e$n_below, mode = e$mode,
+    fg_species = paste(e$fg, collapse = ","),
+    bg_species = paste(e$bg, collapse = ","),
+    draw_signature = .draw_sigs[b],
     fg_values = fmt(e$fg_values),
     bg_values = fmt(e$bg_values),
     mean_distance = e$mean_pd, mean_abs_diff = e$mean_df, mean_pss = e$mean_pss,
