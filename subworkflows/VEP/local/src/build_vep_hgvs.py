@@ -10,6 +10,8 @@ that rejoins VEP's output to the rows.
 The ancestral and derived residues are the ones the ASR inferred for each position (the columns
 ancestral_aa and derived_aa of position_scores.tsv); a position without them uses the caas pattern read
 in the direction of its side (vep_common.anc_der_from_row). No reference proteome is needed.
+The targets are built per (gene, position, side): the derived residue differs between the top and the bottom side
+of a position, so each side gets its own identifiers and keeps its own VEP rows downstream.
 Translating an alignment column to a protein position needs the vep_map_dir MAP files,
 which this pipeline cannot derive. human_protein_id must be an Ensembl protein ID (ENSP...)
 for VEP's cache lookup; a gene with another ID system is skipped without a message.
@@ -19,7 +21,8 @@ Inputs:     caas_file          position_scores.tsv, with Gene, Position, side, c
             vep_map_dir        directory of the per-gene MAP files (alignment column → hg38 position)
             gene_ensembl_file  TSV with gene and human_protein_id (ENSP...)
 Outputs:    output_hgvs.txt    one identifier per line, e.g. ENSP00000234875.4:p.Trp24Cys
-            output_id_map.tsv  hgvs_id, Gene, Position, caap_group
+            output_id_map.tsv  hgvs_id, Gene, Position, side, caap_group (an identifier shared by several
+                       targets appears once per target)
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -60,7 +63,7 @@ def load_gene_protein_ids(gene_ensembl_file: str) -> dict:
 
 
 def load_caas_targets(caas_file: str) -> dict:
-    """(gene, position) → list of {anc_aas, der_aas, caap_group}, for the US scheme rows only."""
+    """(gene, position, side) → list of {anc_aas, der_aas, caap_group}, for the US scheme rows only."""
     targets = {}
     with open(caas_file, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
@@ -89,12 +92,13 @@ def load_caas_targets(caas_file: str) -> dict:
                 position = int(row[pos_col])
             except ValueError:
                 continue
-            side = row.get(side_col, "") if side_col else ""
+            side = (row.get(side_col, "") if side_col else "") or ""
+            side = side.strip().lower()
             caas = row.get(caas_col, "") if caas_col else ""
             anc_aas, der_aas = anc_der_from_row(row.get(anc_col, "") if anc_col else "", row.get(der_col, "") if der_col else "", caas, side)
             if not anc_aas or not der_aas:
                 continue
-            targets.setdefault((gene, position), []).append({
+            targets.setdefault((gene, position, side), []).append({
                 "anc_aas": anc_aas, "der_aas": der_aas, "caap_group": caap_group,
             })
     return targets
@@ -114,12 +118,14 @@ def main():
     targets = load_caas_targets(caas_file)
 
     loaded_maps = {}
+    seen_ids = set()   # identifiers already in the VEP input: each is annotated once
+    seen_rows = set()  # (hgvs_id, gene, position, side, caap_group) already in the id map
     n_written = 0
     with open(output_hgvs, "w") as hgvs_out, open(output_id_map, "w", newline="") as map_out:
         map_writer = csv.writer(map_out, delimiter="\t", lineterminator="\n")
-        map_writer.writerow(["hgvs_id", "Gene", "Position", "caap_group"])
+        map_writer.writerow(["hgvs_id", "Gene", "Position", "side", "caap_group"])
 
-        for (gene, position), entries in targets.items():
+        for (gene, position, side), entries in targets.items():
             protein_id = protein_ids.get(gene)
             if not protein_id:
                 continue
@@ -144,9 +150,14 @@ def main():
                         if not der3:
                             continue
                         hgvs_id = f"{protein_id}:p.{anc3}{hg38_aa_pos}{der3}"
-                        hgvs_out.write(hgvs_id + "\n")
-                        map_writer.writerow([hgvs_id, gene, position, entry["caap_group"]])
-                        n_written += 1
+                        if hgvs_id not in seen_ids:
+                            seen_ids.add(hgvs_id)
+                            hgvs_out.write(hgvs_id + "\n")
+                            n_written += 1
+                        row_key = (hgvs_id, gene, position, side, entry["caap_group"])
+                        if row_key not in seen_rows:
+                            seen_rows.add(row_key)
+                            map_writer.writerow(list(row_key))
 
     print(f"Wrote {n_written} HGVS identifiers to {output_hgvs}", file=sys.stderr)
 

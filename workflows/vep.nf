@@ -58,10 +58,11 @@ workflow VEP {
             // ── Ensembl VEP consequence annotation (independent of the DBs above) ──
             if (params.vep_ensembl) {
                 assert params.gene_ensembl_file : "VEP: --vep_ensembl requires --gene_ensembl_file (for human_protein_id -> HGVS lookup)."
-                // Not user-required: an empty --vep_cache_dir resolves to a
-                // persistent, species/assembly-scoped default that
+                // Used only in offline mode. Not user-required: an empty --vep_cache_dir
+                // resolves to a persistent, species/assembly-scoped default that
                 // ENSEMBL_VEP_ANNOTATE populates itself on first use via
                 // vep_install (see subworkflows/VEP/ensembl_vep.nf).
+                assert (params.vep_mode ?: 'auto') in ['auto', 'database', 'offline'] : "VEP: --vep_mode must be auto, database or offline (got '${params.vep_mode}')."
                 def species = params.vep_species ?: 'homo_sapiens'
                 def assembly = params.vep_assembly ?: 'GRCh38'
                 def resolved_cache_dir = params.vep_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/vep/${species}_${assembly}"

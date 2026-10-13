@@ -300,9 +300,74 @@ if (has_vep_ensembl_cmp) {
   .dup_g <- which(names(vep_ensembl_cmp_df) == "Gene")
   if (length(.dup_g) > 1L) names(vep_ensembl_cmp_df)[.dup_g[-1]] <- "Ensembl_Gene"
   if ("Position" %in% names(vep_ensembl_cmp_df)) vep_ensembl_cmp_df$Position <- suppressWarnings(as.integer(vep_ensembl_cmp_df$Position))
+  if ("side"     %in% names(vep_ensembl_cmp_df)) vep_ensembl_cmp_df$side     <- as.character(vep_ensembl_cmp_df$side)
 } else {
   vep_ensembl_cmp_df <- NULL
 }
+
+# <vep_collapse>
+# Reduces the per-transcript rows of the Ensembl VEP table to ONE consequence per group (by default Gene, Position,
+# side). The transcript is chosen by rule: the MANE Select row, else the canonical row (the MANE_SELECT / CANONICAL
+# columns, or the same keys in Extra, when vep ran with --mane / --canonical), else, when the group has no flagged row,
+# the most severe consequence over all its rows. Ties within a rule go to the most severe consequence (VEP severity
+# order of the Ensembl consequence table) and then to the lowest Feature ID. Returned columns: the `by` columns,
+# Feature, Consequence (all terms of the chosen row), top_consequence (its most severe term), IMPACT (when present),
+# transcript_rule and missense_only (TRUE when the chosen row carries no term other than missense_variant).
+.vep_so_order <- c(
+  "transcript_ablation", "splice_acceptor_variant", "splice_donor_variant", "stop_gained", "frameshift_variant",
+  "stop_lost", "start_lost", "transcript_amplification", "feature_elongation", "feature_truncation",
+  "inframe_insertion", "inframe_deletion", "missense_variant", "protein_altering_variant",
+  "splice_donor_5th_base_variant", "splice_region_variant", "splice_donor_region_variant",
+  "splice_polypyrimidine_tract_variant", "incomplete_terminal_codon_variant", "start_retained_variant",
+  "stop_retained_variant", "synonymous_variant", "coding_sequence_variant", "mature_miRNA_variant",
+  "5_prime_UTR_variant", "3_prime_UTR_variant", "non_coding_transcript_exon_variant", "intron_variant",
+  "NMD_transcript_variant", "non_coding_transcript_variant", "coding_transcript_variant", "upstream_gene_variant",
+  "downstream_gene_variant", "TFBS_ablation", "TFBS_amplification", "TF_binding_site_variant",
+  "regulatory_region_ablation", "regulatory_region_amplification", "regulatory_region_variant",
+  "intergenic_variant", "sequence_variant"
+)
+.vep_term_rank <- function(x) {
+  r <- match(x, .vep_so_order)
+  r[is.na(r)] <- length(.vep_so_order) + 1L   # a term outside the table ranks last
+  r
+}
+collapse_vep_consequence <- function(df, by = c("Gene", "Position", "side")) {
+  df <- as.data.frame(df, stringsAsFactors = FALSE)
+  extra <- if ("Extra" %in% names(df)) as.character(df$Extra) else rep("", nrow(df))
+  extra[is.na(extra)] <- ""
+  terms <- lapply(strsplit(as.character(df$Consequence), ",", fixed = TRUE),
+                  function(t) { t <- trimws(t); t[!is.na(t) & nzchar(t) & t != "-"] })
+  keep <- lengths(terms) > 0L
+  df <- df[keep, , drop = FALSE]; extra <- extra[keep]; terms <- terms[keep]
+  out_cols <- c(by, "Feature", "Consequence", "top_consequence", if ("IMPACT" %in% names(df)) "IMPACT",
+                "transcript_rule", "missense_only")
+  if (nrow(df) == 0L) {
+    out <- df[0, intersect(c(by, "Feature", "IMPACT"), names(df)), drop = FALSE]
+    out$Consequence <- character(0); out$top_consequence <- character(0)
+    out$transcript_rule <- character(0); out$missense_only <- logical(0)
+    return(out[, intersect(out_cols, names(out)), drop = FALSE])
+  }
+  if (!"Feature" %in% names(df)) df$Feature <- NA_character_
+  # MANE Select and canonical flags: columns of their own in the tab output of current vep releases, key=value
+  # pairs of the Extra column in older ones.
+  .col <- function(nm) if (nm %in% names(df)) as.character(df[[nm]]) else rep("", nrow(df))
+  .set <- function(x) !is.na(x) & nzchar(x) & x != "-"
+  is_mane <- .set(.col("MANE_SELECT")) | .col("MANE") %in% "MANE_Select" | grepl("MANE_SELECT=|MANE=MANE_Select", extra)
+  is_canonical <- .col("CANONICAL") %in% "YES" | grepl("CANONICAL=YES", extra)
+  tier <- ifelse(is_mane, 1L, ifelse(is_canonical, 2L, 3L))
+  severity <- vapply(terms, function(t) min(.vep_term_rank(t)), numeric(1))
+  grp <- do.call(paste, c(unname(as.list(df[by])), sep = "\r"))
+  ord <- order(grp, tier, severity, as.character(df$Feature))
+  first <- ord[!duplicated(grp[ord])]   # best tier, then most severe, per group
+  out <- df[first, intersect(c(by, "Feature", "IMPACT"), names(df)), drop = FALSE]
+  out$Consequence      <- vapply(terms[first], paste, character(1), collapse = ",")
+  out$top_consequence  <- vapply(terms[first], function(t) t[which.min(.vep_term_rank(t))], character(1))
+  out$transcript_rule  <- c("MANE Select", "canonical", "most severe")[tier[first]]
+  out$missense_only    <- vapply(terms[first], function(t) all(t == "missense_variant"), logical(1))
+  rownames(out) <- NULL
+  out[, out_cols, drop = FALSE]
+}
+# </vep_collapse>
 
 has_fade_sites_top_cmp    <- .file_ok(params$fade_sites_top_file)
 has_fade_sites_bottom_cmp <- .file_ok(params$fade_sites_bottom_file)
@@ -1523,18 +1588,16 @@ build_interesting_positions <- function(direction) {
   has_vep_ensembl_pos <- FALSE
   if (has_vep_ensembl_cmp && !is.null(vep_ensembl_cmp_df) && nrow(vep_ensembl_cmp_df) > 0 && "Consequence" %in% names(vep_ensembl_cmp_df)) {
     .vep_ens <- if ("caap_group" %in% names(vep_ensembl_cmp_df)) dplyr::filter(vep_ensembl_cmp_df, caap_group == "US") else vep_ensembl_cmp_df
-    .vep_ens_pos <- .vep_ens %>%
-      dplyr::filter(!is.na(Consequence) & nzchar(as.character(Consequence)) & Consequence != "-") %>%
-      dplyr::group_by(Gene, Position) %>%
-      dplyr::summarise(
-        .conseq = {
-          terms <- unlist(strsplit(as.character(Consequence), ",", fixed = TRUE))
-          terms <- unique(trimws(terms[nzchar(terms) & terms != "-"]))
-          paste(terms, collapse = "; ")
-        },
-        .groups = "drop"
-      )
-    .me <- .vep_ens_pos[match(paste(base$gene, base$Position), paste(.vep_ens_pos$Gene, .vep_ens_pos$Position)), ]
+    # One consequence per position and side (MANE Select, else canonical, else the most severe over all transcripts).
+    # A table without a side column is matched by Gene and Position only.
+    .vep_has_side <- "side" %in% names(.vep_ens) && "side" %in% names(base)
+    if (!.vep_has_side) message("Ensembl VEP table has no side column: positions matched by Gene and Position only.")
+    .vep_by <- if (.vep_has_side) c("Gene", "Position", "side") else c("Gene", "Position")
+    .vep_ens_pos <- collapse_vep_consequence(.vep_ens, by = .vep_by)
+    .vep_ens_pos$.conseq <- gsub(",", "; ", .vep_ens_pos$Consequence, fixed = TRUE)
+    .key_ens  <- do.call(paste, c(unname(as.list(.vep_ens_pos[.vep_by])), sep = "\r"))
+    .key_base <- if (.vep_has_side) paste(base$gene, base$Position, base$side, sep = "\r") else paste(base$gene, base$Position, sep = "\r")
+    .me <- .vep_ens_pos[match(.key_base, .key_ens), ]
     base$VEP_consequence <- dplyr::coalesce(dplyr::na_if(.me$.conseq, ""), "missing")
     has_vep_ensembl_pos <- any(base$VEP_consequence != "missing")
   }

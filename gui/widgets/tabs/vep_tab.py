@@ -72,7 +72,7 @@ SPEC = ModuleTabSpec(
             name="vep_cache_dir",
             label="Ensembl VEP cache directory",
             kind="path_dir",
-            help="Local offline VEP cache. Left blank, defaults to a persistent "
+            help="Offline mode only. Local offline VEP cache. Left blank, defaults to a persistent "
                  "~/.cache/phylophere/vep/<species>_<assembly> location and is "
                  "populated automatically on first use (vep_install -a cf -s "
                  "<species> -y <assembly> -c <dir> --NO_HTSLIB), then reused across "
@@ -84,6 +84,17 @@ SPEC = ModuleTabSpec(
         # actual reference data gives wrong annotations without an error.
         FieldSpec(name="vep_species", label="Ensembl VEP species", importance="default"),
         FieldSpec(name="vep_assembly", label="Ensembl VEP assembly", importance="default"),
+        FieldSpec(
+            name="vep_mode",
+            label="Ensembl VEP source",
+            kind="choice",
+            choices=("auto", "database", "offline"),
+            help="auto: query the public Ensembl database when it is reachable (no download, slow for many "
+                 "variants) and use the offline cache otherwise. database / offline force one of them.",
+            importance="default",
+        ),
+        FieldSpec(name="vep_db_host", label="Ensembl VEP database host", importance="optional"),
+        FieldSpec(name="vep_db_port", label="Ensembl VEP database port", importance="optional"),
     ),
 )
 

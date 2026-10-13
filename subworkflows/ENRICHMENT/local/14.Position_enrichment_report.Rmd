@@ -972,7 +972,8 @@ if (!is.null(gene_df) && "Gene"     %in% names(gene_df)) gene_df$Gene     <- as.
 
 has_vep_primateai <- .file_ok(params$vep_primateai_file)
 has_vep_cosmic    <- .file_ok(params$vep_cosmic_file)
-has_vep_ensembl   <- .file_ok(params$vep_ensembl_file)
+# A header-only table (no VEP row) is no table: the Ensembl section would carry a title and nothing else.
+has_vep_ensembl   <- .file_ok(params$vep_ensembl_file) && length(readLines(params$vep_ensembl_file, n = 2L)) > 1L
 has_genomic       <- .file_ok(params$genomic_info_file)
 # Observed scheme profile of the detected position sides (top and bottom).
 biochem_df <- if (.file_ok(params$position_biochem_file)) {
@@ -1163,7 +1164,7 @@ along phenotype-associated branches) and so is not restricted to the US scheme.
 
 - **`pai_char_score`**: The pathogenicity score of mutating the ancestral human reference amino acid to the derived US alternative amino acid(s) in PrimateAI-3D.
 - **COSMIC Overlap**: The presence and recurrence of somatic mutations mapped to the specific codon under the US transition.
-- **Ensembl VEP Consequence**: Sequence Ontology (SO) consequence terms and VEP impact tiers across all overlapping Ensembl transcripts at the codon mutated under the US transition.
+- **Ensembl VEP Consequence**: Sequence Ontology (SO) consequence term and VEP impact tier of one transcript per position (MANE Select, else canonical, else the most severe), for the amino acid substitution of the US transition, computed per side because the derived residue differs between top and bottom.
 - **FADE Overlap**: Whether the position falls within the direction-specific FADE_top_sig/FADE_bottom_sig significant site set (BF ≥ `fade_bf_threshold`), and its maximum Bayes Factor.
 - **Biochemistry**: Which of the grouping schemes GS1-GS4 detect the position besides US, how that profile compares with what the permulations produce, and how much of the US set each scheme recovers.
 
@@ -1586,6 +1587,70 @@ if (has_vep_ensembl) cat("## VEP: Ensembl Consequence\n\n")
 ```
 
 ```{r vep-ensembl-setup, eval=has_vep_ensembl}
+# <vep_collapse>
+# Reduces the per-transcript rows of the Ensembl VEP table to ONE consequence per group (by default Gene, Position,
+# side). The transcript is chosen by rule: the MANE Select row, else the canonical row (the MANE_SELECT / CANONICAL
+# columns, or the same keys in Extra, when vep ran with --mane / --canonical), else, when the group has no flagged row,
+# the most severe consequence over all its rows. Ties within a rule go to the most severe consequence (VEP severity
+# order of the Ensembl consequence table) and then to the lowest Feature ID. Returned columns: the `by` columns,
+# Feature, Consequence (all terms of the chosen row), top_consequence (its most severe term), IMPACT (when present),
+# transcript_rule and missense_only (TRUE when the chosen row carries no term other than missense_variant).
+.vep_so_order <- c(
+  "transcript_ablation", "splice_acceptor_variant", "splice_donor_variant", "stop_gained", "frameshift_variant",
+  "stop_lost", "start_lost", "transcript_amplification", "feature_elongation", "feature_truncation",
+  "inframe_insertion", "inframe_deletion", "missense_variant", "protein_altering_variant",
+  "splice_donor_5th_base_variant", "splice_region_variant", "splice_donor_region_variant",
+  "splice_polypyrimidine_tract_variant", "incomplete_terminal_codon_variant", "start_retained_variant",
+  "stop_retained_variant", "synonymous_variant", "coding_sequence_variant", "mature_miRNA_variant",
+  "5_prime_UTR_variant", "3_prime_UTR_variant", "non_coding_transcript_exon_variant", "intron_variant",
+  "NMD_transcript_variant", "non_coding_transcript_variant", "coding_transcript_variant", "upstream_gene_variant",
+  "downstream_gene_variant", "TFBS_ablation", "TFBS_amplification", "TF_binding_site_variant",
+  "regulatory_region_ablation", "regulatory_region_amplification", "regulatory_region_variant",
+  "intergenic_variant", "sequence_variant"
+)
+.vep_term_rank <- function(x) {
+  r <- match(x, .vep_so_order)
+  r[is.na(r)] <- length(.vep_so_order) + 1L   # a term outside the table ranks last
+  r
+}
+collapse_vep_consequence <- function(df, by = c("Gene", "Position", "side")) {
+  df <- as.data.frame(df, stringsAsFactors = FALSE)
+  extra <- if ("Extra" %in% names(df)) as.character(df$Extra) else rep("", nrow(df))
+  extra[is.na(extra)] <- ""
+  terms <- lapply(strsplit(as.character(df$Consequence), ",", fixed = TRUE),
+                  function(t) { t <- trimws(t); t[!is.na(t) & nzchar(t) & t != "-"] })
+  keep <- lengths(terms) > 0L
+  df <- df[keep, , drop = FALSE]; extra <- extra[keep]; terms <- terms[keep]
+  out_cols <- c(by, "Feature", "Consequence", "top_consequence", if ("IMPACT" %in% names(df)) "IMPACT",
+                "transcript_rule", "missense_only")
+  if (nrow(df) == 0L) {
+    out <- df[0, intersect(c(by, "Feature", "IMPACT"), names(df)), drop = FALSE]
+    out$Consequence <- character(0); out$top_consequence <- character(0)
+    out$transcript_rule <- character(0); out$missense_only <- logical(0)
+    return(out[, intersect(out_cols, names(out)), drop = FALSE])
+  }
+  if (!"Feature" %in% names(df)) df$Feature <- NA_character_
+  # MANE Select and canonical flags: columns of their own in the tab output of current vep releases, key=value
+  # pairs of the Extra column in older ones.
+  .col <- function(nm) if (nm %in% names(df)) as.character(df[[nm]]) else rep("", nrow(df))
+  .set <- function(x) !is.na(x) & nzchar(x) & x != "-"
+  is_mane <- .set(.col("MANE_SELECT")) | .col("MANE") %in% "MANE_Select" | grepl("MANE_SELECT=|MANE=MANE_Select", extra)
+  is_canonical <- .col("CANONICAL") %in% "YES" | grepl("CANONICAL=YES", extra)
+  tier <- ifelse(is_mane, 1L, ifelse(is_canonical, 2L, 3L))
+  severity <- vapply(terms, function(t) min(.vep_term_rank(t)), numeric(1))
+  grp <- do.call(paste, c(unname(as.list(df[by])), sep = "\r"))
+  ord <- order(grp, tier, severity, as.character(df$Feature))
+  first <- ord[!duplicated(grp[ord])]   # best tier, then most severe, per group
+  out <- df[first, intersect(c(by, "Feature", "IMPACT"), names(df)), drop = FALSE]
+  out$Consequence      <- vapply(terms[first], paste, character(1), collapse = ",")
+  out$top_consequence  <- vapply(terms[first], function(t) t[which.min(.vep_term_rank(t))], character(1))
+  out$transcript_rule  <- c("MANE Select", "canonical", "most severe")[tier[first]]
+  out$missense_only    <- vapply(terms[first], function(t) all(t == "missense_variant"), logical(1))
+  rownames(out) <- NULL
+  out[, out_cols, drop = FALSE]
+}
+# </vep_collapse>
+
 # Restrict to the genes present in both the background and the VEP table.
 shared_genes_ensembl <- intersect(bg_genes, unique(vep_ensembl_df$Gene))
 pos_ensembl_shared <- pos_score_meta %>% filter(Gene %in% shared_genes_ensembl)
@@ -1597,70 +1662,89 @@ if ("caap_group" %in% names(vep_ensembl_df)) {
   vep_ensembl_df <- vep_ensembl_df %>% filter(Gene %in% shared_genes_ensembl)
 }
 
-for (.col in c("Uploaded_variation", "Feature", "Consequence", "Amino_acids", "Codons", "Existing_variation", "IMPACT")) {
+for (.col in c("Uploaded_variation", "Feature", "Consequence", "Amino_acids", "Codons", "Existing_variation", "IMPACT", "Extra")) {
   if (!.col %in% names(vep_ensembl_df)) vep_ensembl_df[[.col]] <- NA_character_
 }
 
-ensembl_joined <- vep_ensembl_df %>%
-  inner_join(pos_ensembl_shared, by = c("Gene", "Position"))
+# The derived residue differs between the two sides of a position, so a table with a side column is joined by
+# Gene, Position and side. A table without it (built before the side was recorded) is joined by Gene and Position,
+# and both sides of a position then carry the same annotation.
+vep_has_side <- "side" %in% names(vep_ensembl_df)
+.vep_join_by <- if (vep_has_side) c("Gene", "Position", "side") else c("Gene", "Position")
+if (vep_has_side) vep_ensembl_df$side <- as.character(vep_ensembl_df$side)
+if (!vep_has_side) message("Ensembl VEP table has no side column: joined by Gene and Position, both sides share the annotation.")
 
-has_vep_ensembl <- nrow(ensembl_joined) > 0
+ensembl_joined <- vep_ensembl_df %>%
+  inner_join(pos_ensembl_shared, by = .vep_join_by)
+
+# One consequence per (Gene, Position, side): MANE Select, else canonical, else the most severe over all transcripts.
+ensembl_collapsed <- collapse_vep_consequence(ensembl_joined, by = c("Gene", "Position", "side")) %>%
+  inner_join(pos_ensembl_shared %>% select(Gene, Position, side, CAAS_score), by = c("Gene", "Position", "side"))
+
+has_vep_ensembl <- nrow(ensembl_collapsed) > 0
 ```
 
-`r if (exists("ensembl_joined") && nrow(ensembl_joined) == 0) "> **Note:** Ensembl VEP consequences were annotated, but no scored positions could be matched to the Ensembl VEP annotations for this direction."`
+```{r vep-ensembl-coverage, results='asis', eval=has_vep_ensembl}
+# Positions of the shared genes that received a consequence, against those that did not: only the former enter the
+# plots and the enrichment test below.
+.n_pos <- function(x) c(top = sum(x$side == "top"), bottom = sum(x$side == "bottom"))
+.n_all <- .n_pos(pos_ensembl_shared)
+.n_ann <- .n_pos(ensembl_collapsed)
+.rules <- table(factor(ensembl_collapsed$transcript_rule, levels = c("MANE Select", "canonical", "most severe")))
+cat(sprintf(
+  "\nEnsembl VEP annotated %d of %d scored positions in the genes shared with the background (top: %d of %d; bottom: %d of %d). The remaining %d have no annotation (no Ensembl protein ID, no MAP entry or no VEP result) and are left out of the plots and of the enrichment test, not counted as plain missense. One transcript represents each position: the MANE Select transcript (%d positions), else the canonical one (%d), else the most severe consequence over all transcripts (%d).\n\n",
+  sum(.n_ann), sum(.n_all), .n_ann[["top"]], .n_all[["top"]], .n_ann[["bottom"]], .n_all[["bottom"]],
+  sum(.n_all) - sum(.n_ann), .rules[["MANE Select"]], .rules[["canonical"]], .rules[["most severe"]]))
+```
+
+`r if (exists("ensembl_joined") && nrow(ensembl_collapsed) == 0) "> **Note:** Ensembl VEP consequences were annotated, but no scored positions could be matched to the Ensembl VEP annotations for this direction."`
 
 ```{r vep-ensembl-table, eval=has_vep_ensembl}
 .impact_levels <- c("HIGH", "MODERATE", "LOW", "MODIFIER")
 
-ensembl_table <- ensembl_joined %>%
-  group_by(Gene, Position, CAAS_score, side) %>%
+# Transcript context of the annotated positions (every transcript VEP returned) next to the consequence of the
+# representative transcript.
+ensembl_context <- ensembl_joined %>%
+  group_by(Gene, Position, side) %>%
   summarise(
     `HGVS` = paste(unique(na.omit(Uploaded_variation[Uploaded_variation != "-"])), collapse = "; "),
     `AA Change` = paste(unique(na.omit(Amino_acids[Amino_acids != "-"])), collapse = "; "),
     `Codons` = paste(unique(na.omit(Codons[Codons != "-"])), collapse = "; "),
     `N Transcripts` = dplyr::n_distinct(Feature[!is.na(Feature) & Feature != "-"]),
-    `Max Impact` = {
-      imp <- intersect(.impact_levels, unique(na.omit(IMPACT)))
-      if (length(imp) > 0) imp[1] else NA_character_
-    },
-    `Consequences` = {
-      terms <- unlist(strsplit(as.character(na.omit(Consequence)), ",", fixed = TRUE))
-      terms <- unique(trimws(terms[nzchar(terms) & terms != "-"]))
-      paste(terms, collapse = "; ")
-    },
     `Existing Variation` = {
       ev <- unique(na.omit(Existing_variation[Existing_variation != "-" & nzchar(Existing_variation)]))
       if (length(ev) > 0) paste(ev, collapse = "; ") else "-"
     },
     .groups = "drop"
-  ) %>%
-  arrange(desc(CAAS_score)) %>%
-  rename(
-    `CAAS Score` = CAAS_score,
-    `Change Side` = side
   )
+
+ensembl_table <- ensembl_collapsed %>%
+  left_join(ensembl_context, by = c("Gene", "Position", "side")) %>%
+  transmute(
+    Gene, Position, `CAAS Score` = CAAS_score, `Change Side` = side,
+    `HGVS`, `AA Change`, `Codons`,
+    `Transcript` = Feature, `Transcript Rule` = transcript_rule,
+    `Consequence` = gsub(",", "; ", Consequence, fixed = TRUE),
+    `Impact` = IMPACT,
+    `N Transcripts`, `Existing Variation`
+  ) %>%
+  arrange(desc(`CAAS Score`))
 
 DT::datatable(
   ensembl_table,
-  caption = "CAAS positions annotated by Ensembl VEP across overlapping transcripts, ordered by CAAS score",
+  caption = "Annotated CAAS positions with the Ensembl VEP consequence of one transcript each (MANE Select, else canonical, else the most severe), ordered by CAAS score",
   options = list(pageLength = 10, scrollX = TRUE),
   rownames = FALSE
 )
 ```
 
 ```{r vep-ensembl-consequence-bar, eval=has_vep_ensembl, fig.height=6}
-# Distinct CAAS positions carrying each Sequence Ontology (SO) consequence term across overlapping transcripts, split by direction.
-ensembl_conseq_counts <- bind_rows(
-  ensembl_joined %>% filter(side == "top")    %>% mutate(vep_direction = "TOP"),
-  ensembl_joined %>% filter(side == "bottom") %>% mutate(vep_direction = "BOTTOM")
-) %>%
-  filter(!is.na(Consequence) & Consequence != "" & Consequence != "-") %>%
-  mutate(so_term = strsplit(as.character(Consequence), ",", fixed = TRUE)) %>%
-  tidyr::unnest(so_term) %>%
-  mutate(so_term = trimws(so_term)) %>%
-  filter(nzchar(so_term)) %>%
-  distinct(vep_direction, Gene, Position, so_term) %>%
-  count(vep_direction, so_term)
+# Annotated CAAS positions per most severe Sequence Ontology (SO) term of their representative transcript, split by
+# direction. Each position counts once.
+ensembl_conseq_counts <- ensembl_collapsed %>%
+  filter(side %in% c("top", "bottom")) %>%
+  mutate(vep_direction = toupper(side)) %>%
+  count(vep_direction, so_term = top_consequence)
 
 ggplot(ensembl_conseq_counts, aes(x = reorder(so_term, n, sum), y = n, fill = vep_direction)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.7) +
@@ -1670,21 +1754,18 @@ ggplot(ensembl_conseq_counts, aes(x = reorder(so_term, n, sum), y = n, fill = ve
   scale_y_continuous(expand = expansion(mult = c(0, 0.14))) +
   labs(
     title    = "Ensembl VEP Consequence Distribution Across CAAS Positions",
-    subtitle = "Distinct CAAS positions carrying each SO consequence term across overlapping transcripts",
+    subtitle = "Annotated CAAS positions per most severe SO term of the representative transcript",
     x = NULL, y = "N positions", fill = "Direction"
   ) +
   theme(plot.title = element_text(face = "bold"))
 ```
 
 ```{r vep-ensembl-impact-bar, eval=has_vep_ensembl, fig.height=5}
-# Distinct CAAS positions per VEP IMPACT tier and direction across overlapping transcripts.
-ensembl_impact_counts <- bind_rows(
-  ensembl_joined %>% filter(side == "top")    %>% mutate(vep_direction = "TOP"),
-  ensembl_joined %>% filter(side == "bottom") %>% mutate(vep_direction = "BOTTOM")
-) %>%
-  filter(!is.na(IMPACT) & IMPACT != "" & IMPACT != "-") %>%
-  distinct(vep_direction, Gene, Position, IMPACT) %>%
-  mutate(IMPACT = factor(IMPACT, levels = c("HIGH", "MODERATE", "LOW", "MODIFIER"))) %>%
+# Annotated CAAS positions per VEP IMPACT tier of the representative transcript and direction.
+ensembl_impact_counts <- ensembl_collapsed %>%
+  filter(side %in% c("top", "bottom"), !is.na(IMPACT), IMPACT != "", IMPACT != "-") %>%
+  mutate(vep_direction = toupper(side),
+         IMPACT = factor(IMPACT, levels = .impact_levels)) %>%
   count(vep_direction, IMPACT, .drop = FALSE)
 
 ggplot(ensembl_impact_counts, aes(x = IMPACT, y = n, fill = vep_direction)) +
@@ -1694,40 +1775,22 @@ ggplot(ensembl_impact_counts, aes(x = IMPACT, y = n, fill = vep_direction)) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
   labs(
     title    = "Ensembl VEP Impact Tier Distribution",
-    subtitle = "Distinct CAAS positions per VEP impact tier across overlapping transcripts",
+    subtitle = "Annotated CAAS positions per VEP impact tier of the representative transcript",
     x = "VEP Impact Tier", y = "N positions", fill = "Direction"
   ) +
   theme(plot.title = element_text(face = "bold"))
 ```
 
 ```{r vep-ensembl-fisher, eval=has_vep_ensembl}
-# Because every CAAS US transition is a coding amino-acid substitution in the canonical protein,
-# almost all positions carry `missense_variant` on the primary coding transcript. Beyond plain
-# missense, a substitution can also fall in a splice region (`splice_region_variant`), induce
-# high-impact changes (`stop_gained`, `start_lost`, `stop_lost`), or affect alternative/NMD/UTR
-# transcripts (`NMD_transcript_variant`, `5_prime_UTR_variant`, `3_prime_UTR_variant`, etc.).
-# We test whether positions carrying such pleiotropic / splice / high-impact consequences
-# (any consequence term other than plain `missense_variant` or `IMPACT == "HIGH"`) are enriched
-# within the top CAAS score percentiles.
-ensembl_pleiotropic_pos <- ensembl_joined %>%
-  mutate(
-    so_term = strsplit(as.character(Consequence), ",", fixed = TRUE)
-  ) %>%
-  tidyr::unnest(so_term) %>%
-  mutate(so_term = trimws(so_term)) %>%
-  group_by(Gene, Position) %>%
-  summarise(
-    has_non_missense = any(
-      (!is.na(so_term) & nzchar(so_term) & so_term != "-" & so_term != "missense_variant") |
-      (!is.na(IMPACT) & IMPACT == "HIGH"),
-      na.rm = TRUE
-    ),
-    .groups = "drop"
-  )
-
+# The input to VEP is a protein-level substitution, so most positions carry `missense_variant` on their
+# representative transcript; the rest carry a consequence beyond plain missense that a coding change can produce
+# (e.g. `start_lost`, `splice_region_variant`, `stop_retained_variant`, or a UTR/intron class when the
+# representative transcript is not the one the residue was mapped on). We test whether positions whose consequence
+# set is not exactly `missense_variant` are enriched within the top CAAS score percentiles. The universe holds only
+# the positions that received an annotation (ensembl_collapsed); unannotated positions are not plain missense.
 pos_ensembl <- pos_ensembl_shared %>%
-  left_join(ensembl_pleiotropic_pos, by = c("Gene", "Position")) %>%
-  mutate(has_non_missense = replace_na(has_non_missense, FALSE))
+  inner_join(ensembl_collapsed %>% select(Gene, Position, side, missense_only), by = c("Gene", "Position", "side")) %>%
+  mutate(has_non_missense = !missense_only)
 
 pos_ensembl_top    <- pos_ensembl %>% filter(side == "top")
 pos_ensembl_bottom <- pos_ensembl %>% filter(side == "bottom")
@@ -1735,7 +1798,7 @@ pos_ensembl_bottom <- pos_ensembl %>% filter(side == "bottom")
 run_ensembl_fisher_dir <- function(df, label) {
   n_all <- nrow(df)
   pct_rows <- list(
-    list(col = NULL, lbl = "100% (all positions)",    flag = rep(TRUE, n_all)),
+    list(col = NULL, lbl = "100% (all annotated positions)", flag = rep(TRUE, n_all)),
     list(col = NULL, lbl = "25% (top 25% CAAS)",      flag = test_glob_25(df)),
     list(col = "in_top_10pct", lbl = sprintf("Top %g%%", top_pct  * 100), flag = NULL),
     list(col = "in_top_5pct",  lbl = sprintf("Top %g%%", top5_pct * 100), flag = NULL),
@@ -1757,8 +1820,8 @@ run_ensembl_fisher_dir <- function(df, label) {
       Direction                      = label,
       Threshold                      = thr$lbl,
       `N positions`                  = n_top,
-      `N splice / high / regulatory` = n_top_e,
-      `% splice / high / regulatory` = sprintf("%.1f%%", 100 * n_top_e / max(n_top, 1)),
+      `N beyond missense`            = n_top_e,
+      `% beyond missense`            = sprintf("%.1f%%", 100 * n_top_e / max(n_top, 1)),
       `Odds ratio`                   = sprintf("%.2f", ft$estimate),
       `P value`                      = formatC(ft$p.value, format = "e", digits = 2)
     )
@@ -1772,7 +1835,7 @@ ensembl_fisher <- bind_rows(
 
 knitr::kable(
   ensembl_fisher,
-  caption = "Fisher exact test for enrichment of positions with splice, high-impact, or regulatory/isoform consequences (beyond plain missense_variant) within CAAS score thresholds",
+  caption = "Fisher exact test for enrichment of annotated positions whose Ensembl VEP consequence is beyond plain missense_variant (one representative transcript per position) within CAAS score thresholds",
   align = c("l", "l", rep("r", ncol(ensembl_fisher) - 2))
 )
 ```
