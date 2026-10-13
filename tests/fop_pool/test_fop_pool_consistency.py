@@ -1,94 +1,83 @@
 #!/usr/bin/env python3
-# test_fop_pool_consistency.py: the pooled score of the observed labeling and of a null cycle goes through one rule.
+# test_fop_pool_consistency.py: the pooled score is strength (mean over the domains of the noisy-OR of the pair independences) times breadth (n_sp / S).
 # PhyloPhere | tests/fop_pool/
-"""Checks pool_domains: the support shrinkage M / (M + 2) is a property of the design (the number H of hypotheses of
-the PSS map), not of whether a map happens to be present or empty."""
+"""Checks pool_domains: the worked example, species counted once, the mean (not the maximum) over the species
+combinations of two domains, a missing S, and the observed / null parity of the reducer."""
 
 import math
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "subworkflows" / "CT_DISAMBIGUATION" / "local"))
-from src.convergence.fop_pool import pool_domains, effective_number  # noqa: E402
+from src.convergence.fop_pool import pool_domains  # noqa: E402
 from src.core.driver import _expand_pooled  # noqa: E402
 
 
-def record(hyp, scores):
-    """One hypothesis record: domain scores on the top side, three domains in the design."""
-    side = {"domain_scores": scores, "domain_der": {d: "A" for d in scores}, "domain_der_enc": {d: "A" for d in scores},
-            "domain_anc": {d: "V" for d in scores}}
-    return {"hyp": hyp, "sides": {"top": side, "bottom": {}, "domain_meta": {1: {}, 2: {}, 3: {}}}}
+def rec(hyp, species, pairs, scores=None, domains=(1, 2, 3)):
+    """One hypothesis record on the top side. `species` {domain: species carrying the derived residue},
+    `pairs` [(a, b, c)] the independence of two converging domains; `scores` defaults to the noisy-OR of `pairs`."""
+    if scores is None:
+        scores = {d: 1 - math.prod(1 - c for a, b, c in pairs if d in (a, b)) for d in species
+                  if any(d in (a, b) for a, b, c in pairs)}
+    side = {"domain_scores": scores, "domain_der": {d: "A" for d in species}, "domain_der_enc": {d: "A" for d in species},
+            "domain_anc": {d: "V" for d in species}, "domain_der_species": dict(species),
+            "pair_lca": [[a, b, 99, c] for a, b, c in pairs]}
+    return {"hyp": hyp, "sides": {"top": side, "bottom": {}, "domain_meta": {d: {} for d in domains}}}
 
 
-def pss(hyps):
-    return {(h, d): 2.0 for h in hyps for d in (1, 2, 3)}
-
-
-def top_score(pooled):
+def top(pooled):
     return pooled["top"]["asr_path_score"]
 
 
 def main():
-    one = [record("H1", {1: 1.0, 2: 1.0})]
-    base = top_score(pool_domains(one, None))                       # no PSS: weights 1, no shrinkage
-    assert math.isclose(base, 2 / 3), base
+    # Worked example: K = 3, S = 20; A and B converge with c = 0.9, the residue sits in 2 species of A and 1 of B,
+    # C does not change. s = (0.9, 0.9, 0): strength 0.6, breadth 3 / 20, score 0.09. The two species of A are two
+    # combinations of the same pair of domains (same c), so their mean is 0.9.
+    pair = [(1, 2, 0.9)]
+    h1 = rec("H1", {1: "sA1", 2: "sB1"}, pair)
+    h2 = rec("H2", {1: "sA2", 2: "sB1"}, pair)
+    pooled = pool_domains([h1, h2], None, 20)
+    assert math.isclose(top(pooled), 0.09), top(pooled)
+    assert pooled["top"]["n_sp"] == 3 and pooled["n_hypotheses"] == 2
 
-    # Single-hypothesis design with a PSS map: not shrunk, equal weights (constant PSS) -> same as no map.
-    single = top_score(pool_domains(one, pss(["H1"])))
-    assert math.isclose(single, base), (single, base)
+    # Without S the breadth is 1 (also S = 0): the score is the strength.
+    assert math.isclose(top(pool_domains([h1, h2], None, None)), 0.6)
+    assert math.isclose(top(pool_domains([h1, h2], None, 0)), 0.6)
 
-    # Two-hypothesis design: one detecting hypothesis (M = 1) is shrunk by 1 / 3.
-    multi = top_score(pool_domains(one, pss(["H1", "H2"])))
-    assert math.isclose(multi, base / 3), (multi, base)
+    # Species are counted once whatever the number of hypotheses that use them; hypotheses repeating the same
+    # combination add nothing to the pair either.
+    same = pool_domains([rec(f"H{i}", {1: "sA", 2: "sB"}, pair) for i in (1, 2, 3)], None, 20)
+    assert same["top"]["n_sp"] == 2 and math.isclose(top(same), 0.6 * 2 / 20)
 
-    # M = 2 of the same design: both detect, factor 2 / 4.
-    two = [record("H1", {1: 1.0, 2: 1.0}), record("H2", {1: 1.0, 2: 1.0})]
-    both = top_score(pool_domains(two, pss(["H1", "H2"])))
-    assert math.isclose(both, base / 2), (both, base)
+    # A species of a domain with score 0 does not count.
+    zero = pool_domains([rec("H1", {1: "sA", 2: "sB"}, pair, scores={1: 0.9, 2: 0.0})], None, 20)
+    assert zero["top"]["n_sp"] == 1
 
-    # An empty map and None are the same input.
-    assert top_score(pool_domains(one, {})) == top_score(pool_domains(one, None))
+    # Without pair_lca the score is 0 and the pooled record still carries M.
+    none = pool_domains([rec("H1", {1: "sA", 2: "sB"}, [], scores={})], None, 20)
+    assert top(none) == 0.0 and none["n_hypotheses"] == 1
+    rows = _expand_pooled(7, "US", None, none)
+    assert rows[0].side == "none" and rows[0].n_hypotheses == 1
 
-    # Observed and null parity: the same records and the same map give the same pooled result, whatever the
-    # hypothesis labels of the cycle are called, because only the map decides the design size.
-    obs = pool_domains(one, pss(["H1", "H2", "H3"]))
-    nul = pool_domains([record("H1", {1: 1.0, 2: 1.0})], pss(["H1", "H2", "H3"]))
-    assert obs == nul
-    # The pooled record of a null position carries M, the number of hypotheses that detected it (also for a
-    # position no side of which converges), so the null and the observed support can be compared.
-    two_pooled = pool_domains(two, pss(["H1", "H2", "H3"]))
-    rows = _expand_pooled(7, "US", None, two_pooled)
-    assert rows and all(r.n_hypotheses == 2 for r in rows), rows
-    none = _expand_pooled(7, "US", None, pool_domains([record("H1", {})], pss(["H1", "H2", "H3"])))
-    assert none[0].side == "none" and none[0].n_hypotheses == 1
-    # Effective number of independent hypotheses: identical supports count once, disjoint ones in full.
-    a, b, c = frozenset({("1", 10), ("2", 20)}), frozenset({("1", 11), ("2", 21)}), frozenset({("1", 10), ("2", 21)})
-    assert effective_number([]) == 0.0 and effective_number([a]) == 1.0
-    assert effective_number([a, a, a, a]) == 1.0
-    assert effective_number([a, b]) == 2.0
-    assert 1.0 < effective_number([a, a, b]) < 3.0
-    assert 1.0 < effective_number([a, b, c]) < 3.0          # c shares one pair with each of a and b
-    # pool_domains reports it per side: hypotheses with the same supporting pairs are one effective hypothesis.
-    def rec_pair(hyp, node):
-        side = {"domain_scores": {1: 1.0, 2: 1.0}, "domain_der": {1: "A", 2: "A"}, "domain_der_enc": {1: "A", 2: "A"},
-                "domain_anc": {1: "V", 2: "V"}}
-        return {"hyp": hyp, "sides": {"top": side, "bottom": {}, "domain_meta": {1: {"mrca_id": node}, 2: {"mrca_id": node + 1}, 3: {}}}}
-    same = pool_domains([rec_pair("H1", 5), rec_pair("H2", 5), rec_pair("H3", 5)], pss(["H1", "H2", "H3"]))
-    diff = pool_domains([rec_pair("H1", 5), rec_pair("H2", 7), rec_pair("H3", 9)], pss(["H1", "H2", "H3"]))
-    assert same["top"]["n_eff"] == 1.0 and diff["top"]["n_eff"] == 3.0, (same["top"]["n_eff"], diff["top"]["n_eff"])
-    assert same["n_hypotheses"] == diff["n_hypotheses"] == 3
-    # Distinct species that carry the derived residue in a converging domain: the hypotheses that confirm the
-    # position with the same species add nothing, and a species in a domain without a positive score is not counted.
-    def rec_sp(hyp, sp1, sp2, sc2=1.0):
-        side = {"domain_scores": {1: 1.0, 2: sc2}, "domain_der": {1: "A", 2: "A"}, "domain_der_enc": {1: "A", 2: "A"},
-                "domain_anc": {1: "V", 2: "V"}, "domain_der_species": {1: sp1, 2: sp2}}
-        return {"hyp": hyp, "sides": {"top": side, "bottom": {}, "domain_meta": {1: {"mrca_id": 5}, 2: {"mrca_id": 6}, 3: {}}}}
-    h3 = ["H1", "H2", "H3"]
-    one = pool_domains([rec_sp("H1", "sA", "sB"), rec_sp("H2", "sA", "sB"), rec_sp("H3", "sA", "sB")], pss(h3))
-    four = pool_domains([rec_sp("H1", "sA", "sB"), rec_sp("H2", "sC", "sB"), rec_sp("H3", "sA", "sD")], pss(h3))
-    assert one["top"]["n_sp"] == 2 and four["top"]["n_sp"] == 4, (one["top"]["n_sp"], four["top"]["n_sp"])
-    zero = pool_domains([rec_sp("H1", "sA", "sB", sc2=0.0)], pss(h3))
-    assert zero["top"]["n_sp"] == 1                       # sB sits in a domain whose score is 0: only sA counts
+    # Two combinations of the same two domains take the MEAN of their independences, not the maximum.
+    lo, hi = rec("H1", {1: "sA1", 2: "sB1"}, [(1, 2, 0.5)]), rec("H2", {1: "sA2", 2: "sB1"}, [(1, 2, 0.9)])
+    mixed = pool_domains([lo, hi], None, None)
+    assert math.isclose(top(mixed), (0.7 + 0.7 + 0.0) / 3), top(mixed)
+
+    # A domain with two partners takes the noisy-OR of their independences.
+    three = pool_domains([rec("H1", {1: "a", 2: "b", 3: "c"}, [(1, 2, 0.5), (1, 3, 0.5), (2, 3, 0.0)])], None, None)
+    assert math.isclose(top(three), ((1 - 0.25) + 0.5 + 0.5) / 3), top(three)
+
+    # The score is clamped to [0, 1]: more species than S (a design that lacks one) caps the breadth at 1.
+    assert top(pool_domains([h1, h2], None, 2)) <= 1.0
+
+    # Observed and null parity: the same records, design keys and S give the same pooled result whatever the
+    # hypothesis labels are called, and the design keys complete K with the domains no record holds.
+    keys = {(h, d): 1.0 for h in ("H1", "H2") for d in (1, 2, 3, 4)}
+    a = pool_domains([rec("H1", {1: "sA", 2: "sB"}, pair)], keys, 20)
+    b = pool_domains([rec("H7", {1: "sA", 2: "sB"}, pair)], keys, 20)
+    assert top(a) == top(b) and math.isclose(top(a), 0.45 * 2 / 20), top(a)    # K = 4: strength 1.8 / 4
+
     print("test_fop_pool_consistency: OK")
 
 

@@ -37,6 +37,7 @@ from src.utils.concurrency import plan_concurrency, init_worker
 from src.utils.amino import normalize_amino_list
 from src.core.driver import load_gene_context, pool_labelings, score_labelings
 from src.core.scores import DIRECTIONS, SCORE_RULE, collapse_sides, direction_values, gene_scores, position_score
+from src.core.labelings import read_design_species, read_pss
 from src.data.models import CAASPosition
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,6 @@ def convert_convergence_result_to_dict(
         "participating_hypotheses": getattr(result, "participating_hypotheses", None) or "",
         # Number of hypotheses (M) harvested for this (position, scheme) pool.
         "n_hypotheses": getattr(result, "n_hypotheses", None),
-        "n_hypotheses_eff": getattr(result, "n_hypotheses_eff", None),
         "n_species": getattr(result, "n_species", None),
         # Cross-hypothesis support tallies for tag, caas and amino_encoded, which above keep the
         # value of the first row.
@@ -177,9 +177,8 @@ def _read_resample_labelings(resample_dir: str) -> Dict[str, Tuple[List[str], Li
 
 
 def _read_fop_pairs(path: str) -> Dict[str, Dict[Tuple[str, int], float]]:
-    """fop_pairs.tsv -> {base_cycle: {(H<n>, domain): pss_score}} (core.labelings.read_pss)."""
-    from src.core.labelings import read_pss
-
+    """fop_pairs.tsv -> {base_cycle: {(H<n>, domain): pss_score}} (core.labelings.read_pss); the keys are the
+    design's domains, the PSS values are not used by the score."""
     return read_pss(path)
 
 
@@ -360,6 +359,7 @@ def _perms_worker_replay(
     perm_discovery_file: str,
     ensembl_genes: Optional[Set[str]] = None,
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None,
+    design_species: Optional[Dict[str, int]] = None,
 ) -> Tuple[str, Optional[List[Tuple[str, List[Any]]]]]:
     """Replay step of a chunked gene replay (_perms_worker_finalize is the reduction step).
 
@@ -412,7 +412,7 @@ def _perms_worker_replay(
             ctx, gene, cycle_tags, cycle_labelings, cycle_to_entries, posterior_threshold)
         if not all_cycle_results:
             return (gene, [])
-        return (gene, pool_labelings(all_cycle_results, fop_pairs))
+        return (gene, pool_labelings(all_cycle_results, fop_pairs, design_species, cycle_labelings))
     except Exception as e:
         logger.error(f"[perms] replay worker failed for {gene}: {e}", exc_info=True)
         return (gene, None)
@@ -548,7 +548,6 @@ def _perms_worker_finalize(
                 "clust": 1 if int(pos) in clust_by.get((cyc, group), ()) else 0,
                 "side": side,
                 "n_hyp": getattr(r, "n_hypotheses", None),
-                "n_hyp_eff": getattr(r, "n_hypotheses_eff", None),
                 "n_sp": getattr(r, "n_species", None),
             }
             detail_rows.append(row)
@@ -1014,9 +1013,11 @@ def process_all_genes_perms(
     # _perms_worker_replay then domain-pools them back to one record per base cycle. The
     # per-(hypothesis, domain) PSS weights are parsed once here.
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None
+    design_species: Dict[str, int] = {}
     if fop_pairs_file and Path(fop_pairs_file).exists():
         fop_pairs = _read_fop_pairs(fop_pairs_file)
-        logger.info(f"[perms] FOP mirror ON: PSS weights for {len(fop_pairs)} base cycles")
+        design_species = read_design_species(fop_pairs_file)
+        logger.info(f"[perms] FOP mirror ON: design domains and species count for {len(fop_pairs)} base cycles")
 
     cycle_tags, cycle_labelings = build_cycle_inputs(
         perm_discovery_file, resample_dir, cycles
@@ -1043,7 +1044,7 @@ def process_all_genes_perms(
 
     # The detail rows carry `side` (a "both" position is two rows, one per side).
     detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score",
-                     "n_detected", "clust", "side", "n_hyp", "n_hyp_eff", "n_sp"]
+                     "n_detected", "clust", "side", "n_hyp", "n_sp"]
 
     # CT_POSTPROC filtering of the null candidate pool (cluster trains and dubious/extreme
     # genes). Off by default; the Nextflow layer turns it on (params.caas_perms_postproc)
@@ -1117,7 +1118,7 @@ def process_all_genes_perms(
     args_generator = (
         (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
          asr_cache_dir, posterior_threshold,
-         chunk, cycle_labelings, perm_discovery_file, None, fop_pairs)
+         chunk, cycle_labelings, perm_discovery_file, None, fop_pairs, design_species)
         for gene, chunk, _est in tasks
     )
 

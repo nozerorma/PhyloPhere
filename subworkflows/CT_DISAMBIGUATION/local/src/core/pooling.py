@@ -41,7 +41,6 @@ def pooled_sides(pooled: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "derived_agreement": (int(d.get("agree_num", 0) or 0) / den) if den else None,
             "agreement_ambiguous": bool(d.get("agreement_tie", False)),
             "participating_hyps": (",".join(d.get("participating_hyps") or []) or None),
-            "n_eff": d.get("n_eff"),
             "n_sp": d.get("n_sp"),
         }
         for key in ("domain_scores", "domain_anc", "domain_der", "domain_der_support", "domain_anc_support"):

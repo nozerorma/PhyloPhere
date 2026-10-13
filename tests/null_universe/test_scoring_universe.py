@@ -55,7 +55,7 @@ def build_fixture(d):
     with gzip.open(d / "null.tsv.gz", "wt") as fh:
         fh.write("Gene\tPosition\tside\tcycle\tcaas_score\tn_schemes\tscheme_set\tscore_aggregation\n")
         for g, p, s, c, sc in null:
-            fh.write(f"{g}\t{p}\t{s}\t{c}\t{sc}\t1\tUS\tus_pos\n")
+            fh.write(f"{g}\t{p}\t{s}\t{c}\t{sc}\t1\tUS\tus_pos_species\n")
     (d / "roster.txt").write_text("".join(f"{c}\n" for c in cycles))
     with open(d / "background.output", "w") as fh:
         for g in genes:

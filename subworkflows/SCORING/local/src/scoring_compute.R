@@ -78,9 +78,9 @@ caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle
 cycle_roster_file    <- parse_arg("--cycle_roster")      # cycle_roster.txt: every replayed cycle (N of the null); NO_FILE otherwise
 tested_positions_file <- parse_arg("--tested_positions") # caastools background.output (gene<TAB>tested positions); NO_FILE otherwise
 universe_file        <- parse_arg("--universe")          # cleaned_background_main.txt (gene universe); NO_FILE otherwise
-# Rule of the position score: the US score, defined only when positive (core.scores.SCORE_RULE). The observed scores (observed_core_scores.py)
+# Rule of the position score: the US score with its species breadth, defined only when positive (core.scores.SCORE_RULE). The observed scores (observed_core_scores.py)
 # and the null (perm_pos_cycle_caas.tsv.gz, column score_aggregation) must use the same rule.
-score_aggregation <- "us_pos"
+score_aggregation <- "us_pos_species"
 # Rows reach this script already pooled over hypotheses by CT_DISAMBIGUATION (one row per Gene,
 # Position, scheme and side, hypothesis NA), so scoring never pools hypotheses itself.
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))

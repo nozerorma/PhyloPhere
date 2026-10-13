@@ -34,7 +34,7 @@ def write_null(path, rows):
     with gzip.open(path, "wt") as fh:
         fh.write("Gene\tPosition\tside\tcycle\tcaas_score\tn_schemes\tscheme_set\tscore_aggregation\n")
         for g, p, s, c, sc in rows:
-            fh.write(f"{g}\t{p}\t{s}\t{c}\t{'' if sc is None else sc}\t1\tUS\tus_pos\n")
+            fh.write(f"{g}\t{p}\t{s}\t{c}\t{'' if sc is None else sc}\t1\tUS\tus_pos_species\n")
 
 
 def check(cond, msg):

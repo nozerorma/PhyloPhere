@@ -8,31 +8,29 @@ Multi-hypothesis (FOP) pooling of domain scores into one position score per phen
 ``pool_domains`` collapses ``M >= 1`` per-hypothesis ``compute_domain_scores``
 records for one ``(Gene, Position, scheme)`` into one score per phenotype side.
 It is **treeless**: every tree lookup already happened in
-``path_scores.compute_domain_scores``; here we only average scalars.
+``path_scores.compute_domain_scores``; here we only combine scalars.
 
 Imported by: src/convergence/disambiguate_single.py, src/core/driver.py, disambiguation_perms_main.py and
 reaggregate_perm_scores.py (`base_cycle`)
-Inputs: lists of {"hyp", "sides"} records and an optional {(hyp, domain): pss} map (in memory)
+Inputs: lists of {"hyp", "sides"} records, the (hypothesis, domain) keys of the design and its species count S
 Outputs: the pooled per-side aggregates described in `pool_domains`
 
-Per side ``s`` over the universe of K fixed Voronoi domains
-(``⋃_h keys(sides["domain_meta"]) ∪ keys(pss)``):
+Per side, over the K fixed Voronoi domains of the design and the pooled hypotheses taken together (a hypothesis
+is only a way of drawing the pairs, it carries no weight of its own):
 
-    M       = number of hypothesis records
-    s̄_d    = ( Σ_h  domain_scores_h.get(d, 0.0) ) / M
-    w_d,h   = (1 - δ) + 2δ·(log(1+pss) - min) / (max - min) with δ = 1 / (2K)
-    w̄_d    = ( Σ_h  w_d,h )                       / M
-    score_d = ( Σ_d w̄_d·s̄_d / Σ_d w̄_d )            (0 if Σ w̄_d == 0)
-    core_s  = clamp01( score_d * (M / (M + 2.0)) ) (shrinkage when the PSS map holds more than one hypothesis)
+    c(a, b)  = 1 - P(the derived residue was already at the LCA of a and b), the contribution of a pair of
+               domains that carry the same derived residue; the distinct species combinations of the same two
+               domains give one value each and the pair of domains takes their mean
+    s(d)     = 1 - prod over the partners b of d of (1 - c(d, b))          (0 without a partner)
+    strength = sum_d s(d) / K
+    breadth  = n_sp / S, n_sp the distinct species that carry the derived residue in a domain with a positive
+               score in at least one hypothesis, S the distinct species of the design of the cycle
+    score    = clamp01(strength * breadth)                                 (breadth = 1 when S is not given)
 
-Without a PSS map, w_d,h = 1 and the shrinkage factor is 1, so ``M = 1`` is the arithmetic mean over the
-K domains. With a PSS map the weights are the bounded ones above; the score is also shrunk by M / (M + 2)
-when the map holds more than one hypothesis, and not shrunk when it holds a single one. ``agree_num`` / ``agree_den`` and
-``convergence_type`` are computed here, across all the pooled hypotheses, from the
-modal encoded derived residue per domain (a domain that splits V/I/L between
-hypotheses scores low under US and high under a scheme that co-encodes them; the
-encoding is already applied in each ``domain_der_enc`` upstream, so ``pool_domains``
-never sees the scheme).
+A species counts once however many hypotheses use it. ``agree_num`` / ``agree_den`` and ``convergence_type`` come
+from the modal encoded derived residue per domain across the pooled hypotheses (a domain that splits V/I/L
+between hypotheses scores low under US and high under a scheme that co-encodes them; the encoding is already
+applied in each ``domain_der_enc`` upstream, so ``pool_domains`` never sees the scheme).
 
 See ``docs/scoring_v3_core.md`` for the scoring contract.
 """
@@ -42,7 +40,7 @@ from __future__ import annotations
 import collections
 
 import math
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from src.convergence.path_scores import _convergence_type
 from src.convergence.support_fmt import fmt_support
@@ -87,67 +85,44 @@ def base_cycle(tag: str) -> str:
     return tag.split("~", 1)[0]
 
 
-# ── Domain id matching (int vs str keys) ──────────────────────────────────────
-# ``compute_domain_scores`` keys everything by the int ``pair_id``; a fixture
-# round-tripped through JSON arrives str-keyed; the PSS map may be either. Match
-# tolerantly, but keep the representative id (int when available) in the output.
-def _cands(d):
-    out = [d]
-    if not isinstance(d, str):
-        out.append(str(d))
-    try:
-        out.append(int(d))
-    except (TypeError, ValueError):
-        pass
-    return out
+def _pair_contributions(hyps: List[Dict], side: str) -> Dict[Tuple[str, str], List[float]]:
+    """{(domain_a, domain_b): [c, ...]} over the distinct (domain, species) combinations of the pooled hypotheses.
 
-
-def _dget(mapping: Optional[Dict], d, default=None):
-    if not mapping:
-        return default
-    for k in _cands(d):
-        if k in mapping:
-            return mapping[k]
-    return default
-
-
-def effective_number(supports) -> float:
-    """Effective number of independent hypotheses among the supports of the hypotheses that detect a position on one side.
-
-    A support is the set of (domain, MRCA node of the pair) that carry the change in one hypothesis, so two
-    hypotheses that confirm the position with the same pairs are one piece of evidence, not two. The number is
-    M^2 / sum_ij Z_ij (the Hill number of order 2 with a similarity matrix, Z_ij the Jaccard similarity of the
-    supports): M when no two supports share a pair, 1 when all are identical, 0 without a support.
-    """
-    sups = [s for s in supports if s]
-    m = len(sups)
-    if m == 0:
-        return 0.0
-    groups = list(collections.Counter(sups).items())   # identical supports collapse into one group
-    total = 0.0
-    for a, ca in groups:
-        for b, cb in groups:
-            total += ca * cb * (len(a & b) / len(a | b))
-    return (m * m) / total
+    A combination that several hypotheses share counts once; a pair of domains without the species of both
+    ends (no row of `domain_der_species`) cannot be told apart from a repeat and is left out."""
+    comb: Dict[Tuple, float] = {}
+    for r in hyps:
+        srow = (r.get("sides") or {}).get(side) or {}
+        spd = {str(d): sp for d, sp in (srow.get("domain_der_species") or {}).items()}
+        for a, b, _lca, c in srow.get("pair_lca") or []:
+            a, b = str(a), str(b)
+            if a in spd and b in spd:
+                ends = tuple(sorted(((a, spd[a]), (b, spd[b]))))
+                comb[ends] = float(c)
+    by_pair: Dict[Tuple[str, str], List[float]] = collections.defaultdict(list)
+    for ((a, _sa), (b, _sb)), c in comb.items():
+        by_pair[(a, b)].append(c)
+    return by_pair
 
 
 def pool_domains(
     hyp_records: List[Dict],
-    pss_by_hyp_domain: Optional[Dict[Tuple[str, Any], float]] = None,
+    design_domains: Optional[Iterable[Tuple[str, Any]]] = None,
+    n_design_species: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Treeless mean-of-means pooler over the fixed Voronoi domains.
+    """Treeless pooler over the fixed Voronoi domains.
 
     Args:
         hyp_records: ``list[{"hyp": str, "sides": <compute_domain_scores return>}]``,
             ``M >= 1``.
-        pss_by_hyp_domain: ``{(hyp, domain): pss}`` of the design (every hypothesis it holds, not only the ones
-            that detect the position); ``None`` / empty / missing key -> weight 1.0. The number of distinct
-            hypotheses of this map is the design size H: the support shrinkage applies only when H > 1.
+        design_domains: the ``(hypothesis, domain)`` keys of the design (every hypothesis it holds, not only the
+            ones that detect the position); its domains complete the K of the design when a record lacks them.
+        n_design_species: S, the distinct species of the design of the cycle; ``None`` or <= 0 -> breadth 1.
 
     Returns:
         ``{"top": <agg>, "bottom": <agg>, "n_hypotheses": M}`` where ``<agg>`` is
-        ``{asr_path_score, domain_scores, domain_weights, domain_der,
-        domain_anc, agree_num, agree_den, n_participating, convergence_type}``.
+        ``{asr_path_score, domain_scores, domain_der, domain_anc, agree_num, agree_den, n_participating,
+        convergence_type, n_sp}``. ``domain_scores`` is s(d) of every domain of the design;
         ``domain_der`` / ``domain_anc`` carry only domains changed in >= 1
         hypothesis (modal residue); ``agree_den == n_participating``; ``agreement_tie`` flags a changed
         domain whose derived residue was tied; ``participating_hyps`` lists the
@@ -156,84 +131,26 @@ def pool_domains(
     hyps = [r for r in hyp_records if r.get("hyp")]
     M = len(hyps)
 
-    # Domain universe: the domain_meta ids (all K domains) plus any ids only the PSS map has.
+    # Domain universe: the domain_meta ids (all K domains) plus any ids only the design keys have.
     rep: Dict[str, Any] = {}
     for r in hyps:
         for d in ((r.get("sides") or {}).get("domain_meta") or {}):
             rep.setdefault(str(d), d)
-    if pss_by_hyp_domain:
-        for (_h, d) in pss_by_hyp_domain:
-            rep.setdefault(str(d), d)
-
-    def _pss(h, d) -> Optional[float]:
-        if not pss_by_hyp_domain:
-            return None
-        for k in _cands(d):
-            if (h, k) in pss_by_hyp_domain:
-                return pss_by_hyp_domain[(h, k)]
-        return None
-
-    # ── Component A: K-bounded PSS domain weights (delta = 1 / (2*K)) ──────────
-    # Within each hypothesis h, compress raw PSS with log(1 + PSS) and linearly
-    # rescale to [1 - delta, 1 + delta]. Guarantees that m+1 domains strictly
-    # outweigh m domains for any K >= 2.
+    for (_h, d) in (design_domains or ()):
+        rep.setdefault(str(d), d)
     K = len(rep)
-    delta = (1.0 / (2.0 * K)) if K >= 1 else 0.0
-    w_by_hyp_domain: Dict[Tuple[str, Any], float] = {}
-    has_pss = bool(pss_by_hyp_domain)
-    if has_pss and M >= 1:
-        for r in hyps:
-            h = r["hyp"]
-            log_vals: Dict[Any, float] = {}
-            for sd, d in rep.items():
-                raw_w = _pss(h, d)
-                p = 1.0 if raw_w is None else float(raw_w)
-                log_vals[d] = math.log(1.0 + max(0.0, p))
-            min_l = min(log_vals.values()) if log_vals else 0.0
-            max_l = max(log_vals.values()) if log_vals else 0.0
-            span = max_l - min_l
-            for d, lv in log_vals.items():
-                if span < 1e-12:
-                    w_by_hyp_domain[(h, d)] = 1.0
-                else:
-                    w_by_hyp_domain[(h, d)] = (1.0 - delta) + 2.0 * delta * ((lv - min_l) / span)
-    else:
-        for r in hyps:
-            h = r["hyp"]
-            for sd, d in rep.items():
-                w_by_hyp_domain[(h, d)] = 1.0
-
-    w_bar: Dict[Any, float] = {}
-    for sd, d in rep.items():
-        wsum = math.fsum(w_by_hyp_domain.get((r["hyp"], d), 1.0) for r in hyps)
-        w_bar[d] = (wsum / M) if M else 0.0
-    denom = math.fsum(w_bar.values())
-
-    # ── Component B: FOP hypothesis shrinkage f_FOP(M) = M / (M + 2) ───────────
-    # Penalizes positions detected in only 1 or 2 isolated FOP hypotheses while
-    # preserving robust positions detected across many hypotheses. It is a property of the design,
-    # read from the number of hypotheses H of the PSS map (the same map the observed labeling and every
-    # null cycle carry), so a single-hypothesis design is never shrunk and the observed score and the
-    # null scores sit on one scale.
-    k_0 = 2.0
-    n_hyp_design = len({h for (h, _d) in pss_by_hyp_domain}) if has_pss else 0
-    f_fop = (M / (M + k_0)) if (n_hyp_design > 1 and M >= 1) else 1.0
+    S = int(n_design_species) if n_design_species else 0
 
     def _agg(side: str) -> Dict[str, Any]:
-        s_bar: Dict[Any, float] = {}
-        # Sums are correctly rounded (math.fsum): the pooled score does not depend on the
-        # order the hypotheses or the domains arrive in.
-        for sd, d in rep.items():
-            num = math.fsum(
-                float(_dget(((r.get("sides") or {}).get(side) or {}).get("domain_scores"), d, 0.0) or 0.0)
-                for r in hyps
-            )
-            s_bar[d] = (num / M) if M else 0.0
-
-        score_dom = (
-            math.fsum(w_bar[d] * s_bar[d] for d in w_bar) / denom if denom > 0 else 0.0
-        )
-        core = max(0.0, min(1.0, score_dom * f_fop))
+        # Noisy-OR of the contributions of each domain's partners; the pair of two domains counts the mean of its
+        # distinct species combinations.
+        partners: Dict[str, List[float]] = collections.defaultdict(list)
+        for (a, b), cs in _pair_contributions(hyps, side).items():
+            c = math.fsum(cs) / len(cs)
+            partners[a].append(c)
+            partners[b].append(c)
+        s_dom = {sd: (1.0 - math.prod(1.0 - c for c in partners[sd])) if partners.get(sd) else 0.0 for sd in rep}
+        strength = (math.fsum(s_dom.values()) / K) if K else 0.0
 
         # Agreement across the pooled hypotheses, over the domains changed in >= 1 of them.
         der_enc: Dict[str, List[str]] = {}
@@ -250,14 +167,6 @@ def pool_domains(
             for dd, e in (srow.get("domain_anc") or {}).items():
                 anc_raw.setdefault(str(dd), []).append(e)
 
-        supports = []
-        for r in hyps:
-            rs = r.get("sides") or {}
-            changed_h = (rs.get(side) or {}).get("domain_der_enc") or {}
-            if changed_h:
-                meta_h = rs.get("domain_meta") or {}
-                supports.append(frozenset((str(dd), (meta_h.get(dd) or {}).get("mrca_id")) for dd in changed_h))
-
         # Species that carry the derived residue in a domain that converges (a positive domain score) in at least
         # one hypothesis: the independent observations behind the position, whatever the hypotheses that used them.
         species = set()
@@ -267,6 +176,8 @@ def pool_domains(
             for dd, sp in (srow.get("domain_der_species") or {}).items():
                 if float(ds.get(dd, 0.0) or 0.0) > 0.0:
                     species.add(sp)
+        breadth = min(1.0, len(species) / S) if S else 1.0
+        core = max(0.0, min(1.0, strength * breadth))
 
         changed = list(der_enc.keys())
         agree_den = len(changed)
@@ -280,8 +191,7 @@ def pool_domains(
 
         return {
             "asr_path_score": core,
-            "domain_scores": dict(s_bar),
-            "domain_weights": dict(w_bar),
+            "domain_scores": {rep[sd]: v for sd, v in s_dom.items()},
             "domain_der": {rep.get(sd, sd): _modal_str(der_raw.get(sd, [])) for sd in changed},
             "domain_anc": {rep.get(sd, sd): _modal_str(anc_raw.get(sd, [])) for sd in changed},
             "domain_der_support": {rep.get(sd, sd): _support_str(der_raw.get(sd, [])) for sd in changed},
@@ -290,7 +200,6 @@ def pool_domains(
             "agree_den": agree_den,
             "agreement_tie": agreement_tie,
             "n_participating": agree_den,
-            "n_eff": effective_number(supports),
             "n_sp": len(species),
             "convergence_type": _convergence_type(agree_num, agree_den),
             "participating_hyps": sorted({h for hs in hyp_ids_by_domain.values() for h in hs}),

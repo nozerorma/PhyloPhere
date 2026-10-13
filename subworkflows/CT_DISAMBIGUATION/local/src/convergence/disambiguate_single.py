@@ -40,6 +40,7 @@ from src.data.models import CAASPosition, ConvergenceResult
 from src.biochem.grouping import get_grouping_scheme
 from src.convergence.path_scores import build_node_index, compute_domain_scores
 from src.convergence.fop_pool import pool_domains
+from src.core.labelings import design_species_count
 from src.core.pooling import pooled_sides
 from src.convergence.support_fmt import fmt_support
 
@@ -54,7 +55,7 @@ PositionAxes = namedtuple(
     "PositionAxes",
     ["position", "caap_group", "asr_path_score",
      "side", "hypothesis", "domain_scores", "derived_agreement",
-     "sides", "n_hypotheses", "n_hypotheses_eff", "n_species"],
+     "sides", "n_hypotheses", "n_species"],
 )
 # `side` and the fields after it are optional. `sides` is the raw
 # ``compute_domain_scores`` return ``{"top", "bottom", "domain_meta"}`` that the
@@ -110,7 +111,8 @@ def _pooled_pair_lca(hyp_rows: List[Dict[str, Any]], side: str) -> Optional[List
 def _emit_pooled_side_rows(
     base: ConvergenceResult,
     hyp_rows: List[Dict[str, Any]],
-    hyp_pairs_pss: Optional[Dict[Tuple[str, Any], float]] = None,
+    design_domains: Optional[Dict[Tuple[str, Any], float]] = None,
+    n_design_species: Optional[int] = None,
     all_rows: Optional[List[ConvergenceResult]] = None,
 ) -> List[ConvergenceResult]:
     """Pool ``M >= 1`` per-hypothesis ``compute_domain_scores`` records for one
@@ -118,7 +120,7 @@ def _emit_pooled_side_rows(
 
     ``hyp_rows`` = ``[{"hyp": str, "sides": <compute_domain_scores return>}]``.
     Always calls :func:`fop_pool.pool_domains` (``M == 1`` degenerates to the
-    plain PSS-weighted mean over the domains). A position with no changed
+    mean over the domains of the single hypothesis). A position with no changed
     domain on either side in any pooled hypothesis collapses to one
     ``side="none"`` row. When the pool holds more than one distinct hypothesis
     the emitted rows drop the ``hypothesis`` label; a lone hypothesis keeps it.
@@ -128,7 +130,7 @@ def _emit_pooled_side_rows(
     result itself, not inside ``sides``, so they cannot be recovered from
     ``hyp_rows`` alone.
     """
-    pooled = pool_domains(hyp_rows, hyp_pairs_pss)
+    pooled = pool_domains(hyp_rows, design_domains, n_design_species)
     meta = None
     for hr in hyp_rows:
         meta = (hr.get("sides") or {}).get("domain_meta") or meta
@@ -222,7 +224,6 @@ def _emit_pooled_side_rows(
             tag_support=tag_support, caas_support=caas_support,
             amino_encoded_support=amino_encoded_support,
             n_hypotheses=n_hypotheses,
-            n_hypotheses_eff=sd.get("n_eff"),
             n_species=sd.get("n_sp"),
         ))
     return out
@@ -1054,9 +1055,10 @@ def analyze_gene_disambiguation(
     if not axes_only and results:
         # Group the per-hypothesis base rows by (position, scheme) and pool them
         # onto <=2 per-side rows with the treeless mean-of-means pooler (M == 1
-        # degenerates to the plain PSS-weighted mean over the domains). PSS weights
-        # {(hyp, domain): pss} come from hyp_pairs_pss (None: equal weight).
+        # degenerates to the mean over the domains). The design's (hyp, domain) keys come from
+        # hyp_pairs_pss and its species count S from trait_pairs.
         try:
+            n_design_species = design_species_count(trait_pairs)
             by_group: Dict[Tuple[Any, str], List[ConvergenceResult]] = {}
             for r in results:
                 by_group.setdefault(
@@ -1070,7 +1072,7 @@ def analyze_gene_disambiguation(
                     for i, r in enumerate(_rows)
                 ]
                 pooled_rows.extend(
-                    _emit_pooled_side_rows(_rows[0], hyp_rows, hyp_pairs_pss, all_rows=_rows)
+                    _emit_pooled_side_rows(_rows[0], hyp_rows, hyp_pairs_pss, n_design_species, all_rows=_rows)
                 )
             results = pooled_rows
         except Exception as e:  # a pooling failure must not stop the disambiguation
