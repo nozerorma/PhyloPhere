@@ -35,6 +35,7 @@ sys.path.insert(0, str(project_root / "src"))
 
 from src.utils.concurrency import plan_concurrency, init_worker
 from src.utils.amino import normalize_amino_list
+from src.convergence.origins import build_origin_counter
 from src.core.driver import load_gene_context, pool_labelings, score_labelings
 from src.core.scores import DIRECTIONS, SCORE_RULE, collapse_sides, direction_values, gene_scores, position_score
 from src.data.models import CAASPosition
@@ -105,6 +106,7 @@ def convert_convergence_result_to_dict(
         "n_hypotheses": getattr(result, "n_hypotheses", None),
         "n_hypotheses_eff": getattr(result, "n_hypotheses_eff", None),
         "n_species": getattr(result, "n_species", None),
+        "n_origins": getattr(result, "n_origins", None),
         # Cross-hypothesis support tallies for tag, caas and amino_encoded, which above keep the
         # value of the first row.
         "tag_support": getattr(result, "tag_support", "") or "",
@@ -412,7 +414,13 @@ def _perms_worker_replay(
             ctx, gene, cycle_tags, cycle_labelings, cycle_to_entries, posterior_threshold)
         if not all_cycle_results:
             return (gene, [])
-        return (gene, pool_labelings(all_cycle_results, fop_pairs))
+        origins = None
+        tree_root = getattr(ctx["tree_data"], "root", None)
+        if tree_root is not None:
+            origins = build_origin_counter(
+                tree_root, ctx["taxid_index"], ctx["seq_by_id"], ctx["seq_by_species"],
+                ctx["alignment_data"].species_to_taxid)
+        return (gene, pool_labelings(all_cycle_results, fop_pairs, origins=origins))
     except Exception as e:
         logger.error(f"[perms] replay worker failed for {gene}: {e}", exc_info=True)
         return (gene, None)
@@ -550,6 +558,7 @@ def _perms_worker_finalize(
                 "n_hyp": getattr(r, "n_hypotheses", None),
                 "n_hyp_eff": getattr(r, "n_hypotheses_eff", None),
                 "n_sp": getattr(r, "n_species", None),
+                "n_orig": getattr(r, "n_origins", None),
             }
             detail_rows.append(row)
 
@@ -1043,7 +1052,7 @@ def process_all_genes_perms(
 
     # The detail rows carry `side` (a "both" position is two rows, one per side).
     detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score",
-                     "n_detected", "clust", "side", "n_hyp", "n_hyp_eff", "n_sp"]
+                     "n_detected", "clust", "side", "n_hyp", "n_hyp_eff", "n_sp", "n_orig"]
 
     # CT_POSTPROC filtering of the null candidate pool (cluster trains and dubious/extreme
     # genes). Off by default; the Nextflow layer turns it on (params.caas_perms_postproc)

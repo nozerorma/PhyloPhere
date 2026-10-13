@@ -40,6 +40,7 @@ from src.data.models import CAASPosition, ConvergenceResult
 from src.biochem.grouping import get_grouping_scheme
 from src.convergence.path_scores import build_node_index, compute_domain_scores
 from src.convergence.fop_pool import pool_domains
+from src.convergence.origins import build_origin_counter
 from src.core.pooling import pooled_sides
 from src.convergence.support_fmt import fmt_support
 
@@ -54,13 +55,13 @@ PositionAxes = namedtuple(
     "PositionAxes",
     ["position", "caap_group", "asr_path_score",
      "side", "hypothesis", "domain_scores", "derived_agreement",
-     "sides", "n_hypotheses", "n_hypotheses_eff", "n_species"],
+     "sides", "n_hypotheses", "n_hypotheses_eff", "n_species", "n_origins"],
 )
 # `side` and the fields after it are optional. `sides` is the raw
 # ``compute_domain_scores`` return ``{"top", "bottom", "domain_meta"}`` that the
 # treeless pooler (``fop_pool.pool_domains``) consumes; it is populated in the
 # axes-only replay. `n_hypotheses` is the number M of FOP hypotheses that detected the position in the cycle.
-PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None, None, None)
+PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None, None, None, None)
 
 
 def _derive_convergent_call(all_rows: List["ConvergenceResult"], attr: str) -> str:
@@ -112,6 +113,7 @@ def _emit_pooled_side_rows(
     hyp_rows: List[Dict[str, Any]],
     hyp_pairs_pss: Optional[Dict[Tuple[str, Any], float]] = None,
     all_rows: Optional[List[ConvergenceResult]] = None,
+    origins=None,
 ) -> List[ConvergenceResult]:
     """Pool ``M >= 1`` per-hypothesis ``compute_domain_scores`` records for one
     ``(Gene, Position, scheme)`` and emit <= 2 per-side ConvergenceResult rows.
@@ -128,7 +130,10 @@ def _emit_pooled_side_rows(
     result itself, not inside ``sides``, so they cannot be recovered from
     ``hyp_rows`` alone.
     """
-    pooled = pool_domains(hyp_rows, hyp_pairs_pss)
+    origin_fn = None
+    if origins is not None and getattr(base, "caap_group", "US") == "US" and getattr(base, "position", None) is not None:
+        origin_fn = lambda residue, species, _col=base.position: origins(_col, residue, species)  # noqa: E731
+    pooled = pool_domains(hyp_rows, hyp_pairs_pss, origin_fn=origin_fn)
     meta = None
     for hr in hyp_rows:
         meta = (hr.get("sides") or {}).get("domain_meta") or meta
@@ -224,6 +229,7 @@ def _emit_pooled_side_rows(
             n_hypotheses=n_hypotheses,
             n_hypotheses_eff=sd.get("n_eff"),
             n_species=sd.get("n_sp"),
+            n_origins=sd.get("n_orig"),
         ))
     return out
 
@@ -791,6 +797,13 @@ def analyze_gene_disambiguation(
         _name_index, _taxid_index = hoisted_name_index, hoisted_taxid_index
     _mrca_cache = mrca_cache
 
+    # Independent origins of the derived residue on the species tree (US scheme): built once per gene call.
+    _origins = None
+    if (any_pairs and taxid_mapping and getattr(tree_data, "root", None) is not None
+            and hoisted_seq_by_id is not None and hoisted_seq_by_species is not None):
+        _origins = build_origin_counter(
+            tree_data.root, _taxid_index, hoisted_seq_by_id, hoisted_seq_by_species, taxid_mapping)
+
     def _get_mrca_cached(taxa: List[str]):
         if not tree_data or not taxa:
             return None
@@ -1070,7 +1083,7 @@ def analyze_gene_disambiguation(
                     for i, r in enumerate(_rows)
                 ]
                 pooled_rows.extend(
-                    _emit_pooled_side_rows(_rows[0], hyp_rows, hyp_pairs_pss, all_rows=_rows)
+                    _emit_pooled_side_rows(_rows[0], hyp_rows, hyp_pairs_pss, all_rows=_rows, origins=_origins)
                 )
             results = pooled_rows
         except Exception as e:  # a pooling failure must not stop the disambiguation

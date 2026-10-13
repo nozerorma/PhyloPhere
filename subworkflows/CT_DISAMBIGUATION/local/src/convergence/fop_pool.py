@@ -40,6 +40,7 @@ See ``docs/scoring_v3_core.md`` for the scoring contract.
 from __future__ import annotations
 
 import collections
+import os
 
 import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -111,6 +112,9 @@ def _dget(mapping: Optional[Dict], d, default=None):
     return default
 
 
+_VARIANT = os.environ.get("PHYLOPHERE_POOL_VARIANT", "base")   # experiment switch (not committed)
+
+
 def effective_number(supports) -> float:
     """Effective number of independent hypotheses among the supports of the hypotheses that detect a position on one side.
 
@@ -134,12 +138,15 @@ def effective_number(supports) -> float:
 def pool_domains(
     hyp_records: List[Dict],
     pss_by_hyp_domain: Optional[Dict[Tuple[str, Any], float]] = None,
+    origin_fn=None,
 ) -> Dict[str, Any]:
     """Treeless mean-of-means pooler over the fixed Voronoi domains.
 
     Args:
         hyp_records: ``list[{"hyp": str, "sides": <compute_domain_scores return>}]``,
             ``M >= 1``.
+        origin_fn: optional ``origin_fn(residue, species) -> int``, the number of independent origins of a residue among
+            carrier species on the species tree (the pooler itself stays treeless); it gives ``n_orig`` of a side.
         pss_by_hyp_domain: ``{(hyp, domain): pss}`` of the design (every hypothesis it holds, not only the ones
             that detect the position); ``None`` / empty / missing key -> weight 1.0. The number of distinct
             hypotheses of this map is the design size H: the support shrinkage applies only when H > 1.
@@ -203,6 +210,9 @@ def pool_domains(
             for sd, d in rep.items():
                 w_by_hyp_domain[(h, d)] = 1.0
 
+    if "nopss" in _VARIANT:
+        for key in list(w_by_hyp_domain):
+            w_by_hyp_domain[key] = 1.0
     w_bar: Dict[Any, float] = {}
     for sd, d in rep.items():
         wsum = math.fsum(w_by_hyp_domain.get((r["hyp"], d), 1.0) for r in hyps)
@@ -219,20 +229,87 @@ def pool_domains(
     n_hyp_design = len({h for (h, _d) in pss_by_hyp_domain}) if has_pss else 0
     f_fop = (M / (M + k_0)) if (n_hyp_design > 1 and M >= 1) else 1.0
 
+    def _redundancy_weights(side: str):
+        """Weight of each hypothesis, 1 / sum_h' Z_hh' (Z the Jaccard similarity of the supports, an empty support
+        being identical to another empty one only), normalized to 1: hypotheses with the same support share one unit."""
+        sups = []
+        for r in hyps:
+            rs = r.get("sides") or {}
+            ch = (rs.get(side) or {}).get("domain_der_enc") or {}
+            meta_h = rs.get("domain_meta") or {}
+            sups.append(frozenset((str(dd), (meta_h.get(dd) or {}).get("mrca_id")) for dd in ch))
+        groups = collections.Counter(sups)
+        def z(a, b):
+            if not a and not b:
+                return 1.0
+            if not a or not b:
+                return 0.0
+            return len(a & b) / len(a | b)
+        wgt = {g: 1.0 / sum(cb * z(g, b) for b, cb in groups.items()) for g in groups}
+        v = [wgt[g] for g in sups]
+        tot = math.fsum(v)
+        return [x / tot for x in v]
+
     def _agg(side: str) -> Dict[str, Any]:
         s_bar: Dict[Any, float] = {}
+        vw = _redundancy_weights(side) if ("redund" in _VARIANT and M) else None
+        w_bar_use, denom_use = w_bar, denom
+        if vw:
+            w_bar_use = {d: math.fsum(v * w_by_hyp_domain.get((r["hyp"], d), 1.0) for v, r in zip(vw, hyps)) for sd, d in rep.items()}
+            denom_use = math.fsum(w_bar_use.values())
         # Sums are correctly rounded (math.fsum): the pooled score does not depend on the
         # order the hypotheses or the domains arrive in.
         for sd, d in rep.items():
-            num = math.fsum(
-                float(_dget(((r.get("sides") or {}).get(side) or {}).get("domain_scores"), d, 0.0) or 0.0)
-                for r in hyps
-            )
-            s_bar[d] = (num / M) if M else 0.0
+            vals = [float(_dget(((r.get("sides") or {}).get(side) or {}).get("domain_scores"), d, 0.0) or 0.0) for r in hyps]
+            if vw:
+                s_bar[d] = math.fsum(v * x for v, x in zip(vw, vals))
+            else:
+                s_bar[d] = (math.fsum(vals) / M) if M else 0.0
 
         score_dom = (
-            math.fsum(w_bar[d] * s_bar[d] for d in w_bar) / denom if denom > 0 else 0.0
+            math.fsum(w_bar_use[d] * s_bar[d] for d in w_bar_use) / denom_use if denom_use > 0 else 0.0
         )
+        if _VARIANT.startswith("hier") and M:
+            # two levels: weighted mean over the domains inside each hypothesis (weights and scores of the same
+            # pairs), then a mean over the hypotheses with redundancy-discounted weights
+            vh = _redundancy_weights(side)
+            per_h = []
+            for r in hyps:
+                dsc = ((r.get("sides") or {}).get(side) or {}).get("domain_scores")
+                num = math.fsum(w_by_hyp_domain.get((r["hyp"], d), 1.0) * float(_dget(dsc, d, 0.0) or 0.0) for sd, d in rep.items())
+                den = math.fsum(w_by_hyp_domain.get((r["hyp"], d), 1.0) for sd, d in rep.items())
+                per_h.append(num / den if den > 0 else 0.0)
+            score_dom = math.fsum(v * x for v, x in zip(vh, per_h))
+        if _VARIANT.startswith("union") and M:
+            # no hypotheses: the distinct pairs of species of two domains that carry the same derived residue (each
+            # counted once whatever the number of hypotheses that use it) give the independence of the two domains;
+            # a domain scores the noisy-OR of its partners and the position the plain mean over the domains
+            comb = {}
+            pss_max = max(pss_by_hyp_domain.values()) if has_pss else None
+            for r in hyps:
+                srow = (r.get("sides") or {}).get(side) or {}
+                spd = srow.get("domain_der_species") or {}
+                for a, b, _lca, ct in (srow.get("pair_lca") or []):
+                    sa, sb = spd.get(a), spd.get(b)
+                    if sa is not None and sb is not None:
+                        if "pssin" in _VARIANT and pss_max:
+                            # the PSS of the two pairs scales the contribution of the pair of domains, before the noisy-OR
+                            wa, wb = [math.log1p(_pss(r["hyp"], d) or pss_max) / math.log1p(pss_max) for d in (a, b)]
+                            ct = ct * math.sqrt(wa * wb)
+                        comb[(a, b, sa, sb)] = ct
+            by_pair = collections.defaultdict(list)
+            for (a, b, _sa, _sb), ct in comb.items():
+                by_pair[(a, b)].append(ct)
+            cdom = collections.defaultdict(list)
+            for (a, b), cts in by_pair.items():
+                c = max(cts) if _VARIANT.endswith("max") else math.fsum(cts) / len(cts)
+                cdom[a].append(c)
+                cdom[b].append(c)
+            s_dom = [(1.0 - math.prod(1.0 - c for c in cdom[d])) if cdom.get(d) else 0.0 for d in rep.values()]
+            score_dom = math.fsum(s_dom) / len(s_dom) if s_dom else 0.0
+            if _VARIANT.endswith("_pss") and denom > 0:
+                # the mean of the domains weighted by the bounded PSS of each domain
+                score_dom = math.fsum(w_bar[d] * x for d, x in zip(rep.values(), s_dom)) / denom
         core = max(0.0, min(1.0, score_dom * f_fop))
 
         # Agreement across the pooled hypotheses, over the domains changed in >= 1 of them.
@@ -268,6 +345,18 @@ def pool_domains(
                 if float(ds.get(dd, 0.0) or 0.0) > 0.0:
                     species.add(sp)
 
+        n_orig = None
+        if origin_fn is not None:
+            carriers_by_residue = collections.defaultdict(set)
+            for r in hyps:
+                srow = (r.get("sides") or {}).get(side) or {}
+                ds = srow.get("domain_scores") or {}
+                enc = srow.get("domain_der_enc") or {}
+                for dd, sp in (srow.get("domain_der_species") or {}).items():
+                    if float(ds.get(dd, 0.0) or 0.0) > 0.0 and enc.get(dd):
+                        carriers_by_residue[enc[dd]].add(sp)
+            n_orig = max((origin_fn(res, sps) for res, sps in carriers_by_residue.items()), default=0)
+
         changed = list(der_enc.keys())
         agree_den = len(changed)
         modal_enc = {sd: _modal_str(v) for sd, v in der_enc.items()}
@@ -292,6 +381,7 @@ def pool_domains(
             "n_participating": agree_den,
             "n_eff": effective_number(supports),
             "n_sp": len(species),
+            "n_orig": n_orig,
             "convergence_type": _convergence_type(agree_num, agree_den),
             "participating_hyps": sorted({h for hs in hyp_ids_by_domain.values() for h in hs}),
         }

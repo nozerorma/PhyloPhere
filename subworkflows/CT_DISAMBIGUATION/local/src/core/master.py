@@ -58,6 +58,8 @@ def master_fields(max_pairs: int) -> List[str]:
         "n_hypotheses_eff",
         # Distinct species that carry the derived residue in a converging domain of this side.
         "n_species",
+        # Independent origins of the derived residue among them (carriers that share an ancestor count once).
+        "n_origins",
         # Direction key of the row (top / bottom / none).
         "side",
         # CAAS convergence score on the Voronoi domain

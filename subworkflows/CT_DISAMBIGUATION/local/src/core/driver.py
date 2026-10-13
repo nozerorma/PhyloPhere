@@ -268,6 +268,7 @@ def _expand_pooled(pos, grp, hyp_label, pooled):
             n_hypotheses=pooled.get("n_hypotheses"),
             n_hypotheses_eff=sd.get("n_eff"),
             n_species=sd.get("n_sp"),
+            n_origins=sd.get("n_orig"),
         )
         for sd in pooled_sides(pooled)
     ]
@@ -283,6 +284,7 @@ def _expand_pooled(pos, grp, hyp_label, pooled):
 def pool_labelings(
     results: List[Tuple[str, List[Any]]],
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]],
+    origins=None,
 ) -> List[Tuple[str, List[Any]]]:
     """Collapse scored labelings into one per-side, domain-pooled record set per cycle.
 
@@ -315,7 +317,10 @@ def pool_labelings(
             # pool_domains wants only {(hyp, domain) -> pss} of this cycle (missing -> equal weight); the number of
             # hypotheses of that map is the design size H of the cycle, as for the observed labeling.
             pss_map = fop_pairs.get(base)
-            pooled = pool_domains(hyp_recs, pss_map)
+            origin_fn = None
+            if origins is not None and grp == "US":
+                origin_fn = lambda residue, species, _col=pos: origins(_col, residue, species)  # noqa: E731
+            pooled = pool_domains(hyp_recs, pss_map, origin_fn=origin_fn)
             pooled_by_cycle.setdefault(base, []).extend(_expand_pooled(pos, grp, None, pooled))
         return list(pooled_by_cycle.items())
 

@@ -43,6 +43,7 @@ def pooled_sides(pooled: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "participating_hyps": (",".join(d.get("participating_hyps") or []) or None),
             "n_eff": d.get("n_eff"),
             "n_sp": d.get("n_sp"),
+            "n_orig": d.get("n_orig"),
         }
         for key in ("domain_scores", "domain_anc", "domain_der", "domain_der_support", "domain_anc_support"):
             summary[key] = dict(d.get(key) or {}) or None
