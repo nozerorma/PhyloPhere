@@ -148,7 +148,17 @@ json_files <- list.files(
   full.names = TRUE
 )
 
+# The site tables are the input of SCORING and ENRICHMENT. They are written here, as a header-only file, when
+# the report stops before any result is read, and by the write-sites-tsv chunk otherwise.
+write_site_tables <- function(sites_core, direction) {
+  write.table(sites_core, paste0("fade_site_bf_", direction, ".tsv"), sep = "\t", row.names = FALSE, quote = FALSE)
+  write.csv(sites_core, paste0("fade_sites_", direction, ".csv"), row.names = FALSE)
+}
+empty_sites_core <- data.frame(gene = character(), position = integer(),
+                               max_bf = numeric(), target_aa = character())
+
 if (length(json_files) == 0) {
+  write_site_tables(empty_sites_core, params$direction)
   message("No *.FADE.json files found in '", json_search_dir,
           "'. No FADE results for the ", params$direction, " direction ",
           "(genes may all have failed or no genes were significant).")
@@ -323,6 +333,7 @@ all_results <- if (.Platform$OS.type == "unix" && n_report_cores > 1L) {
 all_results <- Filter(Negate(is.null), all_results)
 
 if (length(all_results) == 0) {
+  write_site_tables(empty_sites_core, params$direction)
   message("✗ All FADE JSON files failed to parse (empty or corrupt). ",
           "No valid results for the ", params$direction, " direction.")
   knitr::knit_exit()
@@ -440,16 +451,12 @@ if (nrow(sig_sites) == 0) {
 ```{r write-sites-tsv}
 # Significant-site table, tab-delimited and comma-delimited, with the columns of
 # fade_sites_<direction>.csv. The header is written even with no significant site.
-out_sites_tsv <- paste0("fade_site_bf_", params$direction, ".tsv")
-out_sites_csv <- paste0("fade_sites_", params$direction, ".csv")
 sites_core <- if (nrow(sig_sites) == 0) {
-  data.frame(gene = character(), position = integer(),
-             max_bf = numeric(), target_aa = character())
+  empty_sites_core
 } else {
   sig_sites %>% select(gene, position, max_bf, target_aa)
 }
-write.table(sites_core, out_sites_tsv, sep = "\t", row.names = FALSE, quote = FALSE)
-write.csv(sites_core, out_sites_csv, row.names = FALSE)
+write_site_tables(sites_core, params$direction)
 invisible(NULL)
 ```
 

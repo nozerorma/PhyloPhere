@@ -43,26 +43,27 @@ lfunction fade.LoadBaselineCache (path) {
     return {};
 }
 
+// Inside an lfunction the terms.* names are not visible: they are resolved with utility.getGlobalValue.
 lfunction fade.WriteBaselineCache (path, data) {
     if (path != "/dev/null" && path != "NONE") {
         light_cache = {};
-        if (utility.Has (data, terms.fade.cache.settings, "AssociativeList")) {
-            light_cache [terms.fade.cache.settings] = data [terms.fade.cache.settings];
+        if (utility.Has (data, utility.getGlobalValue ("terms.fade.cache.settings"), "AssociativeList")) {
+            light_cache [utility.getGlobalValue ("terms.fade.cache.settings")] = data [utility.getGlobalValue ("terms.fade.cache.settings")];
         }
-        if (utility.Has (data, terms.fade.cache.root, "AssociativeList")) {
-            light_cache [terms.fade.cache.root] = data [terms.fade.cache.root];
+        if (utility.Has (data, utility.getGlobalValue ("terms.fade.cache.root"), "AssociativeList")) {
+            light_cache [utility.getGlobalValue ("terms.fade.cache.root")] = data [utility.getGlobalValue ("terms.fade.cache.root")];
         }
-        if (utility.Has (data, terms.fade.cache.model, "String")) {
-            light_cache [terms.fade.cache.model] = data [terms.fade.cache.model];
+        if (utility.Has (data, utility.getGlobalValue ("terms.fade.cache.model"), "String")) {
+            light_cache [utility.getGlobalValue ("terms.fade.cache.model")] = data [utility.getGlobalValue ("terms.fade.cache.model")];
         }
-        if (utility.Has (data, terms.fade.cache.model_generator, "String")) {
-            light_cache [terms.fade.cache.model_generator] = data [terms.fade.cache.model_generator];
+        if (utility.Has (data, utility.getGlobalValue ("terms.fade.cache.model_generator"), "String")) {
+            light_cache [utility.getGlobalValue ("terms.fade.cache.model_generator")] = data [utility.getGlobalValue ("terms.fade.cache.model_generator")];
         }
-        if (utility.Has (data, terms.fade.cache.baseline, "AssociativeList")) {
-            light_cache [terms.fade.cache.baseline] = data [terms.fade.cache.baseline];
+        if (utility.Has (data, utility.getGlobalValue ("terms.fade.cache.baseline"), "AssociativeList")) {
+            light_cache [utility.getGlobalValue ("terms.fade.cache.baseline")] = data [utility.getGlobalValue ("terms.fade.cache.baseline")];
         }
-        if (utility.Has (data, terms.fade.cache.grid, "Matrix")) {
-            light_cache [terms.fade.cache.grid] = data [terms.fade.cache.grid];
+        if (utility.Has (data, utility.getGlobalValue ("terms.fade.cache.grid"), "Matrix")) {
+            light_cache [utility.getGlobalValue ("terms.fade.cache.grid")] = data [utility.getGlobalValue ("terms.fade.cache.grid")];
         }
         fprintf (path, CLEAR_FILE, light_cache);
     }

@@ -111,7 +111,8 @@ def make_fade_batches(fade_input_ch, dir_label, batch_size) {
                 def trees = item[3]
                 def indices = (0..<dirs.size()).toSorted { i, j ->
                     def order = ['top': 0, 'bottom': 1]
-                    (order[dirs[i]] ?: 2) <=> (order[dirs[j]] ?: 2)
+                    // getOrDefault: the Elvis operator would read the 0 of 'top' as false
+                    order.getOrDefault(dirs[i], 2) <=> order.getOrDefault(dirs[j], 2)
                 }
                 indices.each { idx ->
                     rows << [gid, dirs[idx], fas[idx], trees[idx]]

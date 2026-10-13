@@ -8,12 +8,14 @@
 # A failed gene is logged and skipped, so the batch task itself succeeds; an empty
 # JSON is removed so that it is not emitted as an output.
 #
-# Manifest (tab-separated, one gene per line, written by the process):
-#   gene_id <TAB> fasta_filename <TAB> annotated_tree_filename
+# Manifest (tab-separated, one run per line, written by the process):
+#   gene_id <TAB> direction <TAB> fasta_filename <TAB> annotated_tree_filename
+# A 3-column line (gene_id, fasta, tree) takes its direction from --direction.
 # The files are staged by Nextflow as fastas/<fasta_filename> and trees/<annotated_tree_filename>.
+# The runs of one gene share the baseline model fit (--share-baseline true) through a per-gene cache file.
 #
 # Args (named flags):
-#   --batch-id, --manifest, --direction (top | bottom), --runner-mode (container | local)
+#   --batch-id, --manifest, --direction (top | bottom | both), --runner-mode (container | local)
 #       required; container mode runs hyphy through /usr/local/bin/_entrypoint.sh
 #   --workers            concurrent genes (positive integer, default 1)
 #   --cpu-per-worker     CPUs of each HyPhy call (default 1)
@@ -132,7 +134,9 @@ launch_gene_group() {
 
         local cache_arg="NONE"
         if [[ "${#specs[@]}" -gt 1 && "$share_baseline" == "true" ]]; then
-            cache_arg="${gid}.baseline.cache"
+            # Absolute path: HyPhy resolves a relative cache path against the directory of the batch file,
+            # not the working directory, so a relative name would be written beside FADE_phylophere.bf.
+            cache_arg="${PWD}/${gid}.baseline.cache"
             rm -f "$cache_arg"
         fi
         trap 'rm -f "${gid}.baseline.cache" "${gid}".*.hyphy.log' EXIT
@@ -168,6 +172,10 @@ launch_gene_group() {
             if ! "${cmd[@]}" > "$tmp_log" 2>&1; then
                 echo "[FADE_BATCHED] FADE failed for ${gid} (${run_dir}), skipping"
                 tail -n 25 "$tmp_log" >&2 || true
+            fi
+            # Marker kept in the task log (the HyPhy log is discarded): the shared baseline fit was reused.
+            if grep -q "Loaded baseline model fit from cache" "$tmp_log" 2>/dev/null; then
+                echo "[FADE_BATCHED] ${gid} (${run_dir}): baseline model fit loaded from the shared cache"
             fi
             rm -f "$tmp_log" "${fasta_path}.FADE.cache"
 

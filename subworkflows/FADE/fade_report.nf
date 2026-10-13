@@ -10,7 +10,9 @@
  *  Consumes:  direction, the collected *.FADE.json files, optional foreground species
  *             list (NO_FG_LIST sentinel when absent)
  *  Produces:  6.FADE_report_<direction>.html, fade_summary_<direction>.tsv (one row per
- *             gene), fade_site_bf_<direction>.tsv
+ *             gene), fade_site_bf_<direction>.tsv, and fade_sites_<direction>.csv (the
+ *             per-significant-site table gene,position,max_bf,target_aa read by SCORING
+ *             and ENRICHMENT; optional output)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -44,7 +46,7 @@ process FADE_REPORT {
     path fg_list_file  // optional: foreground species list (NO_FG_LIST sentinel when absent)
 
     output:
-    path "6.FADE_report_${direction}.html", emit: report
+    path "6.FADE_report_${direction}.html", emit: report,      optional: true
     path "fade_summary_${direction}.tsv",   emit: summary_tsv, optional: true
     path "fade_site_bf_${direction}.tsv",   emit: site_tsv,    optional: true
     path "fade_sites_${direction}.csv",     emit: sites_csv,   optional: true
@@ -83,7 +85,7 @@ process FADE_REPORT {
                 ),
                 output_file = '6.FADE_report_${direction}.html'
             )
-        "
+        " || echo "[FADE_REPORT] WARNING: rendering stopped early; the site tables written before that point are kept."
 
         if [ -f '6.FADE_report_${direction}.html' ]; then
             echo "[FADE_REPORT] Report generated: 6.FADE_report_${direction}.html"
@@ -117,7 +119,7 @@ process FADE_REPORT {
                 ),
                 output_file = '6.FADE_report_${direction}.html'
             )
-        "
+        " || echo "[FADE_REPORT] WARNING: rendering stopped early; the site tables written before that point are kept."
 
         if [ -f '6.FADE_report_${direction}.html' ]; then
             echo "[FADE_REPORT] Report generated: 6.FADE_report_${direction}.html"
