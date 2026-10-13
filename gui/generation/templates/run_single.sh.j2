@@ -93,12 +93,17 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     CAAS_POS_CYCLE_CAAS_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_cycle_caas.tsv.gz"
     CAAS_POS_SAMPLE_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
     CAAS_POS_QUANTILES_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
-    CAAS_GENE_CYCLE_SCORES_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/gene_cycle_scores.tsv"
+    CAAS_CYCLE_ROSTER_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/cycle_roster.txt"
     CAAS_PERM_MANIFEST_FILE="${EXPLORATORY_OUTDIR}/caastools/permulation_manifest.tsv"
     CAAS_PERM_HARVEST_FILE="${EXPLORATORY_OUTDIR}/caastools/permulation_harvest.tsv"
-    for _f in "$CAAS_PERMS_FILE" "$CAAS_POS_CYCLE_CAAS_FILE" "$CAAS_POS_SAMPLE_FILE" "$CAAS_POS_QUANTILES_FILE" "$CAAS_GENE_CYCLE_SCORES_FILE"; do
+    for _f in "$CAAS_PERMS_FILE" "$CAAS_POS_CYCLE_CAAS_FILE" "$CAAS_POS_SAMPLE_FILE" "$CAAS_POS_QUANTILES_FILE"; do
         [ -f "$_f" ] || echo "[WARN] expected permulation output missing, p.perm will be empty: $_f" >&2
     done
+    # The roster gives N of the null (cycles with no detection included); a null of an older run has none
+    [ -f "$CAAS_CYCLE_ROSTER_FILE" ] || {
+        echo "[WARN] cycle_roster.txt missing: N will be the number of cycles present in the null (understated when a cycle detected nothing)" >&2
+        CAAS_CYCLE_ROSTER_FILE=""
+    }
     # When set, SCORING rebuilds the null from this directory (CAAS_CORE_MERGE: minutes,
     # no ASR replay) instead of importing caas_perms.rds as it is. A cached null is
     # valid only while it holds the same gene-level statistic as the observed score;
@@ -195,7 +200,11 @@ if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     CAAS_POS_CYCLE_CAAS_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_cycle_caas.tsv.gz"
     CAAS_POS_SAMPLE_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
     CAAS_POS_QUANTILES_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
-    CAAS_GENE_CYCLE_SCORES_FILE="${PRECOMP_OUTDIR}/caas_permulation/gene_cycle_scores.tsv"
+    CAAS_CYCLE_ROSTER_FILE="${PRECOMP_OUTDIR}/caas_permulation/cycle_roster.txt"
+    [ -f "$CAAS_CYCLE_ROSTER_FILE" ] || {
+        echo "[WARN] cycle_roster.txt missing: N will be the number of cycles present in the null (understated when a cycle detected nothing)" >&2
+        CAAS_CYCLE_ROSTER_FILE=""
+    }
     CAAS_PERM_MANIFEST_FILE="${PRECOMP_OUTDIR}/caastools/permulation_manifest.tsv"
     CAAS_PERM_HARVEST_FILE="${PRECOMP_OUTDIR}/caastools/permulation_harvest.tsv"
     # Triggers CAAS_CORE_MERGE in SCORING (see the reuse_exploratory branch).
@@ -579,7 +588,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "caas_perm_manifest_file": "${CAAS_PERM_MANIFEST_FILE:-}",
   "caas_perm_harvest_file": "${CAAS_PERM_HARVEST_FILE:-}",
   "caas_pos_detail_file": "${CAAS_POS_DETAIL_FILE:-}",
-  "caas_gene_cycle_scores_file": "${CAAS_GENE_CYCLE_SCORES_FILE:-}",
+  "caas_cycle_roster_file": "${CAAS_CYCLE_ROSTER_FILE:-}",
 
   "vep": $_RUN_VEP,
   "caas_map_dir": "${MAP_DIR:-}",
@@ -589,6 +598,9 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "vep_cache_dir": "${VEP_CACHE_DIR:-}",
   "vep_species": "${VEP_SPECIES:-homo_sapiens}",
   "vep_assembly": "${VEP_ASSEMBLY:-GRCh38}",
+  "vep_mode": "${VEP_MODE:-auto}",
+  "vep_db_host": "${VEP_DB_HOST:-ensembldb.ensembl.org}",
+  "vep_db_port": ${VEP_DB_PORT:-3306},
 
   "enrichment": $_RUN_ENRICHMENT,
   "fcs_enabled": ${FCS_ENABLED:-true},
@@ -628,7 +640,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "egg_members_file": "${EGG_MEMBERS_FILE:-}",
   "egg_annotations_file": "${EGG_ANNOTATIONS_FILE:-}",
   "fubar_sites_file": "${FUBAR_SITES_FILE:-}",
-  "posenrich_min_size": "${POSENRICH_MIN_SIZE:-5}",
+  "posenrich_min_size": "${POSENRICH_MIN_SIZE:-2}",
   "posenrich_max_size": "${POSENRICH_MAX_SIZE:-0}",
   "posenrich_batch_size": "${POSENRICH_BATCH_SIZE:-4}",
   "posenrich_background_file": "${POSENRICH_BACKGROUND_FILE:-}"

@@ -22,7 +22,7 @@ Path templates, relative to base_path/<TRAIT>, matched to the publishDir of each
   CT/CAAS       : caastools/{discovery,resample}.tab, caastools/background_genes.output,
                   caastools/background.output, meta_caas/meta_caas/global_meta_caas.tsv
                   (signification/meta_caas/ is also searched, for outdirs that use that name),
-                  caas_permulation/{caas_perms.rds,gene_cycle_scores.tsv,
+                  caas_permulation/{caas_perms.rds,gene_cycle_scores.tsv,cycle_roster.txt,
                   perm_pos_cycle_caas.tsv.gz,perm_pos_sample.tsv,perm_pos_quantiles.tsv},
                   caas_permulation/perm_pos_detail/ (one gz shard per gene; it makes
                   SCORING rebuild the null with CAAS_CORE_MERGE instead of trusting the cached
@@ -39,7 +39,7 @@ Path templates, relative to base_path/<TRAIT>, matched to the publishDir of each
   FADE          : selection/fade/{top,bottom}/json (dir),
                   selection/fade/{top,bottom}/fade_summary_{top,bottom}.tsv,
                   selection/fade/{top,bottom}/fade_site_bf_{top,bottom}.tsv
-  VEP           : vep/primateai_mapped.tsv, vep/cosmic_scores.tsv
+  VEP           : vep/primateai_mapped.tsv, vep/cosmic_scores.tsv, vep/ensembl_vep_mapped.tsv
 
 Some of these files are published conditionally (the post-processing pair only when
 gene_filter_mode != 'none'; the optional emits for RER perms, FADE summary and site
@@ -92,7 +92,7 @@ class PrecomputedConfig:
     # per-phenotype scoring_fade_summary_top/bottom and scoring_fade_site_top/bottom
 
     # --- VEP ---
-    use_vep: bool = False  # turns off VEP; wires scoring_vep_primateai/scoring_vep_cosmic
+    use_vep: bool = False  # turns off VEP; wires scoring_vep_primateai/scoring_vep_cosmic/scoring_vep_ensembl
 
 
 def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str, str]]:
@@ -134,7 +134,7 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         entries.append(("caas_pos_cycle_caas_file", os.path.join(perm_dir, "perm_pos_cycle_caas.tsv.gz"), "file"))
         entries.append(("caas_pos_sample_file", os.path.join(perm_dir, "perm_pos_sample.tsv"), "file"))
         entries.append(("caas_pos_quantiles_file", os.path.join(perm_dir, "perm_pos_quantiles.tsv"), "file"))
-        entries.append(("caas_gene_cycle_scores_file", os.path.join(perm_dir, "gene_cycle_scores.tsv"), "file"))
+        entries.append(("caas_cycle_roster_file", os.path.join(perm_dir, "cycle_roster.txt"), "file"))
         entries.append(("caas_perm_manifest_file", os.path.join(outdir, "caastools", "permulation_manifest.tsv"), "file"))
         entries.append(("caas_perm_harvest_file", os.path.join(outdir, "caastools", "permulation_harvest.tsv"), "file"))
         # caas_pos_detail_file makes SCORING rebuild the null (CAAS_CORE_MERGE)

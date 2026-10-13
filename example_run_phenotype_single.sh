@@ -121,6 +121,7 @@ if [ "${RUN_VEP:-true}" = true ]; then
         --vep_primateai_db "${VEP_PRIMATEAI_DB}"
         --caas_map_dir "${MAP_DIR}"
         --scoring_vep_cosmic "${SCORING_VEP_COSMIC:-}"
+        --scoring_vep_ensembl "${SCORING_VEP_ENSEMBL:-}"
     )
 fi
 

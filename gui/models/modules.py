@@ -236,12 +236,16 @@ class VepConfig(ModuleConfigBase):
     # VEP reads it from there.
     # COSMIC mutation database that VEP maps positions onto (conf/vep.config). It is not
     # the scoring_vep_cosmic scores table that SCORING can take as a precomputed input
-    # (see PrecomputedConfig), which workflows/vep.nf does not read.
+    # (see PrecomputedConfig), which workflows/vep.nf does not read. The same holds for
+    # scoring_vep_ensembl, the precomputed Ensembl VEP consequence table.
     cosmic_db: str = ""  # --cosmic_db
     vep_ensembl: bool = False  # --vep_ensembl
     vep_cache_dir: str = ""  # --vep_cache_dir
     vep_species: str = "homo_sapiens"  # --vep_species
     vep_assembly: str = "GRCh38"  # --vep_assembly
+    vep_mode: str = "auto"  # --vep_mode
+    vep_db_host: str = "ensembldb.ensembl.org"  # --vep_db_host
+    vep_db_port: str = "3306"  # --vep_db_port
 
 
 
@@ -261,7 +265,7 @@ class ScoringConfig(ModuleConfigBase):
     caas_evidence_top_n: str = "0"  # --caas_evidence_top_n (evidence table of the N best positions after SCORING; 0 = off)
     scoring_hypotheses_pairs: str = ""  # --scoring_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for SCORING)
 
-    # Precomputed inputs (scoring_postproc_input, scoring_accum_dir, scoring_vep_primateai,
+    # Precomputed inputs (scoring_postproc_input, scoring_accum_dir, scoring_vep_primateai, scoring_vep_cosmic, scoring_vep_ensembl,
     # scoring_background_input, caas_perms_file, scoring_fade_site_top/bottom) are derived
     # from PrecomputedConfig.
 
@@ -331,7 +335,7 @@ class EnrichmentConfig(ModuleConfigBase):
     fubar_sites_file: str = ""  # --fubar_sites_file
 
     # POSENRICH thresholds (position-wise Lachenbruch test, same gates as the gene FCS above)
-    posenrich_min_size: str = "5"  # --posenrich_min_size
+    posenrich_min_size: str = "2"  # --posenrich_min_size
     posenrich_max_size: str = "0"  # --posenrich_max_size
     posenrich_batch_size: str = "4"  # --posenrich_batch_size (GMTs per POSENRICH_RUN_BATCHED task; 1 = no batching)
 

@@ -217,7 +217,7 @@ Usage:
 --accumulation_caas_input             <"filtered_discovery.tsv">   null  (standalone entry)
 --accumulation_background_input        <"background_file">           null
 --accumulation_entropy_dir               <"entropy_dir">                null
---accumulation_randomization_type          <"naive|cons_decile|permulation">          "cons_decile"
+--accumulation_randomization_type          <"naive|cons_decile|permulation">          "cons_decile"   (naive and cons_decile draw from the universe U, the tested positions scored by the permulation null plus the observed ones, when the null table is available)
 --accumulation_n_randomizations              <INTEGER>                      1000000
 --accumulation_fdr                               <FLOAT 0-1>                    0.1
 '''
@@ -243,7 +243,10 @@ Usage:
 --vep_primateai_db                 <"primateai_db">          null
 --cosmic_db                          <"cosmic_db">              null
 --vep_ensembl                         <BOOLEAN>                 false (runs the official Ensembl VEP CLI, independent of the two DBs above)
---vep_cache_dir                        <"vep_cache_dir">          null  (optional; blank auto-populates ~/.cache/phylophere/vep/<species>_<assembly> via vep_install on first use)
+--vep_mode                             <"mode">                   "auto"  (auto = database when vep_db_host is reachable, else offline cache; database; offline)
+--vep_db_host                           <"host">                   "ensembldb.ensembl.org"
+--vep_db_port                            <PORT>                    3306
+--vep_cache_dir                        <"vep_cache_dir">          null  (offline mode; blank auto-populates ~/.cache/phylophere/vep/<species>_<assembly> via vep_install on first use)
 --vep_species                            <"species">                "homo_sapiens"
 --vep_assembly                             <"assembly">               "GRCh38"
 '''
@@ -337,6 +340,8 @@ Standalone mode (provide inputs directly):
 --scoring_vep_ensembl                                <"ensembl_vep_mapped.tsv">          ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
 --caas_perms_file                                        <"caas_perms.rds">                  ""    (genome-wide CAAS permulation null)
 --caas_pos_detail_file                                   <"perm_pos_detail/">          ""    (rebuild the null from a prior run's per-cycle detail shard dir, or a legacy perm_pos_detail.tsv.gz; preferred over --caas_perms_file for reruns, minutes, no ASR replay)
+--caas_pos_cycle_caas_file                               <"perm_pos_cycle_caas.tsv.gz">  ""    (filtered position-level null of a prior run: SCORING p.emp, POSENRICH and the accumulation permulation null)
+--caas_cycle_roster_file                                 <"cycle_roster.txt">          ""    (every replayed cycle of a prior run, the empty ones included: N of the null everywhere; without it N is the number of cycles present in the null, with a log line)
 
 Position-level components: biochem, ASR, convergence, parallel, [FADE]
 Gene-level scores: gene_caas, [gene_rer], [gene_fade], gene_composite

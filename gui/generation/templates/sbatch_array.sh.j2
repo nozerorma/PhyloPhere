@@ -233,6 +233,9 @@ export VEP_ENSEMBL="{{ 'true' if modules.vep.vep_ensembl else 'false' }}"
 export VEP_CACHE_DIR="{{ modules.vep.vep_cache_dir }}"
 export VEP_SPECIES="{{ modules.vep.vep_species }}"
 export VEP_ASSEMBLY="{{ modules.vep.vep_assembly }}"
+export VEP_MODE="{{ modules.vep.vep_mode }}"
+export VEP_DB_HOST="{{ modules.vep.vep_db_host }}"
+export VEP_DB_PORT="{{ modules.vep.vep_db_port }}"
 export PRECOMP_USE_VEP="{{ 'true' if precomputed.use_vep else 'false' }}"
 
 # ── Scoring ───────────────────────────────────────────────────────────────────
