@@ -438,9 +438,10 @@ if (nrow(sig_sites) == 0) {
 ```
 
 ```{r write-sites-tsv}
-# Significant-site table, tab-delimited, with the columns of FADE_JSON_TO_CSV's
+# Significant-site table, tab-delimited and comma-delimited, with the columns of
 # fade_sites_<direction>.csv. The header is written even with no significant site.
 out_sites_tsv <- paste0("fade_site_bf_", params$direction, ".tsv")
+out_sites_csv <- paste0("fade_sites_", params$direction, ".csv")
 sites_core <- if (nrow(sig_sites) == 0) {
   data.frame(gene = character(), position = integer(),
              max_bf = numeric(), target_aa = character())
@@ -448,6 +449,7 @@ sites_core <- if (nrow(sig_sites) == 0) {
   sig_sites %>% select(gene, position, max_bf, target_aa)
 }
 write.table(sites_core, out_sites_tsv, sep = "\t", row.names = FALSE, quote = FALSE)
+write.csv(sites_core, out_sites_csv, row.names = FALSE)
 invisible(NULL)
 ```
 

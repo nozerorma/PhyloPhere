@@ -39,7 +39,6 @@ include { FADE_RUN; FADE_BATCHED  } from '../subworkflows/FADE/fade_run.nf'
 include { FADE_REPORT as FADE_REPORT_TOP    } from '../subworkflows/FADE/fade_report.nf'
 include { FADE_REPORT as FADE_REPORT_BOTTOM } from '../subworkflows/FADE/fade_report.nf'
 include { FADE_GENE_LISTS as FADE_GENE_LISTS_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_BOTTOM } from '../subworkflows/FADE/fade_gene_lists.nf'
-include { FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_TOP; FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_BOTTOM } from '../subworkflows/FADE/fade_json_to_csv.nf'
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -90,23 +89,42 @@ def make_annotate_batches(branch_ch, dir, batch_size) {
 }
 
 /**
- * Batch the (gene_id, direction, filtered_fasta, annotated_tree) rows of one
- * direction into FADE_BATCHED inputs of `batch_size` genes each.
+ * Group (gene_id, direction, filtered_fasta, annotated_tree) rows by gene_id so
+ * both directions ('top' and 'bottom') of a gene are placed consecutively in the
+ * same batch, allowing run_hyphy_fade_batch.sh to reuse the baseline model fit
+ * across directions of the same gene.
  */
-def make_fade_batches(branch_ch, dir, batch_size) {
+def make_fade_batches(fade_input_ch, dir_label, batch_size) {
     def batchCounter = 0
-    return branch_ch
+    return fade_input_ch
+        .groupTuple(by: 0)
         .toSortedList({ a, b -> a[0] <=> b[0] })
         .flatMap()
         .collate(batch_size)
-        .map { batch ->
-            def batchID = String.format('fade_batch_%s_%05d', dir, ++batchCounter)
+        .map { geneBatch ->
+            def batchID = String.format('fade_batch_%s_%05d', dir_label, ++batchCounter)
+            def rows = []
+            geneBatch.each { item ->
+                def gid   = item[0]
+                def dirs  = item[1]
+                def fas   = item[2]
+                def trees = item[3]
+                def indices = (0..<dirs.size()).toSorted { i, j ->
+                    def order = ['top': 0, 'bottom': 1]
+                    (order[dirs[i]] ?: 2) <=> (order[dirs[j]] ?: 2)
+                }
+                indices.each { idx ->
+                    rows << [gid, dirs[idx], fas[idx], trees[idx]]
+                }
+            }
             def manifestText = createBatchManifestText(
-                batch.collect { row -> "${row[0]}\t${row[2].name}\t${row[3].name}" }
+                rows.collect { row -> "${row[0]}\t${row[1]}\t${row[2].name}\t${row[3].name}" }
             )
-            tuple(batchID, dir, batch.size(), manifestText,
-                  batch.collect { row -> row[2] },   // filtered fastas
-                  batch.collect { row -> row[3] })   // annotated trees
+            def uniqFastas = rows.collect { row -> row[2] }.unique { it.name }
+            def uniqTrees  = rows.collect { row -> row[3] }.unique { it.name }
+            tuple(batchID, dir_label, geneBatch.size(), manifestText,
+                  uniqFastas,   // filtered fastas (deduplicated when shared between top & bottom)
+                  uniqTrees)    // annotated trees
         }
 }
 
@@ -214,17 +232,27 @@ workflow FADE {
                     tuple(m[0][1], m[0][2], f)
                 }
 
-            filtered_fasta_ch = batched_out.filtered_fastas
-                .flatten()
-                .map { f ->
-                    def m = (f.name =~ /^(.+)_(top|bottom)\.fa$/)
-                    tuple(m[0][1], m[0][2], f)
-                }
+            if (params.fade_background_scope == 'opposite') {
+                filtered_fasta_ch = batched_out.filtered_fastas
+                    .flatten()
+                    .map { f ->
+                        def m = (f.name =~ /^(.+)_(top|bottom)\.fa$/)
+                        tuple(m[0][1], m[0][2], f)
+                    }
+            } else {
+                // In 'all' mode, SELECTION_PREP already pruned the FASTA to tree species;
+                // reuse it directly without writing 32,266 duplicate FASTA copies.
+                filtered_fasta_ch = annotate_input_ch.map { row -> tuple(row[0], row[1], row[2]) }
+            }
         } else {
             // ── Single-gene annotation mode ──────────────────────────────────
             def annotate_result = ANNOTATE_TREE_FG(annotate_input_ch)
             annotated_ch = annotate_result.annotated_tree
-            filtered_fasta_ch = annotate_result.filtered_fasta
+            if (params.fade_background_scope == 'opposite') {
+                filtered_fasta_ch = annotate_result.filtered_fasta
+            } else {
+                filtered_fasta_ch = annotate_input_ch.map { row -> tuple(row[0], row[1], row[2]) }
+            }
         }
 
         // ── Join filtered FASTA + annotated tree, then run FADE ─────────────
@@ -235,21 +263,15 @@ workflow FADE {
 
         def fadeBatchSize = (params.fade_batch_size ?: 1) as int
         if (fadeBatchSize > 1) {
-            // ── Batched mode ──────────────────────────────────────────────
-            def fade_branched = fade_input_ch.branch {
-                top:    it[1] == 'top'
-                bottom: it[1] == 'bottom'
-            }
-
-            def batches_ch = make_fade_batches(fade_branched.top,    'top',    fadeBatchSize)
-                .mix(make_fade_batches(fade_branched.bottom, 'bottom', fadeBatchSize))
+            // ── Batched mode (groups top + bottom of each gene into the same batch) ──
+            def batches_ch = make_fade_batches(fade_input_ch, params.fade_direction, fadeBatchSize)
 
             def batched_out = FADE_BATCHED(batches_ch, lg_dat_ch).fade_json
             fade_results_ch = batched_out
-                .transpose()
-                .map { dir, f ->
-                    def gene_id = f.name.replace(".${dir}.FADE.json", "")
-                    tuple(gene_id, dir, f)
+                .flatten()
+                .map { f ->
+                    def m = (f.name =~ /^(.+)\.(top|bottom)\.FADE\.json$/)
+                    tuple(m[0][1], m[0][2], f)
                 }
         } else {
             // ── Single-gene mode (default) ────────────────────────────────
@@ -288,8 +310,7 @@ workflow FADE {
             report_top_ch    = rep_top.report
             summary_top_ch   = rep_top.summary_tsv
             site_tsv_top_ch  = rep_top.site_tsv
-
-            sites_csv_top_ch = FADE_JSON_TO_CSV_TOP(Channel.value('top'), top_jsons).sites_csv
+            sites_csv_top_ch = rep_top.sites_csv
 
             def top_lists_out = FADE_GENE_LISTS_TOP(Channel.value('top'), summary_top_ch)
             def top_lists    = split_gene_lists(top_lists_out.gene_lists)
@@ -311,8 +332,7 @@ workflow FADE {
             report_bottom_ch    = rep_bottom.report
             summary_bottom_ch   = rep_bottom.summary_tsv
             site_tsv_bottom_ch  = rep_bottom.site_tsv
-
-            sites_csv_bottom_ch = FADE_JSON_TO_CSV_BOTTOM(Channel.value('bottom'), bottom_jsons).sites_csv
+            sites_csv_bottom_ch = rep_bottom.sites_csv
 
             def bottom_lists_out = FADE_GENE_LISTS_BOTTOM(Channel.value('bottom'), summary_bottom_ch)
             def bottom_lists    = split_gene_lists(bottom_lists_out.gene_lists)

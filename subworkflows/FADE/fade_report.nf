@@ -34,6 +34,9 @@ process FADE_REPORT {
     publishDir path: "${params.outdir}/selection/fade/${direction}",
                mode: 'copy', overwrite: true,
                pattern: 'fade_site_bf_*.tsv'
+    publishDir path: "${params.outdir}/selection/fade/${direction}",
+               mode: 'copy', overwrite: true,
+               pattern: 'fade_sites_*.csv'
 
     input:
     val  direction
@@ -41,9 +44,10 @@ process FADE_REPORT {
     path fg_list_file  // optional: foreground species list (NO_FG_LIST sentinel when absent)
 
     output:
-    path "6.FADE_report_${direction}.html",   emit: report
+    path "6.FADE_report_${direction}.html", emit: report
     path "fade_summary_${direction}.tsv",   emit: summary_tsv, optional: true
     path "fade_site_bf_${direction}.tsv",   emit: site_tsv,    optional: true
+    path "fade_sites_${direction}.csv",     emit: sites_csv,   optional: true
 
     script:
     def local_dir   = "${baseDir}/subworkflows/FADE/local"

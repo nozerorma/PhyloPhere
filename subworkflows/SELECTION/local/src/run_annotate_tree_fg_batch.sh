@@ -87,13 +87,15 @@ while IFS=$'\t' read -r gene_id direction fasta_name tree_name species_file_name
     tree_path="trees/${tree_name}"
     species_file_path="species_files/${species_file_name}"
 
-    bg_arg=()
-    if [[ -n "${bg_species_file_name:-}" && "${bg_species_file_name}" != "NO_FILE" ]]; then
-        bg_arg=(--bg-species-file "bg_species_files/${bg_species_file_name}")
-    fi
-
     out_tree="${gene_id}_${direction}_fg.nwk"
     out_fasta="${gene_id}_${direction}.fa"
+
+    bg_arg=()
+    fasta_out_arg=()
+    if [[ -n "${bg_species_file_name:-}" && "${bg_species_file_name}" != "NO_FILE" ]]; then
+        bg_arg=(--bg-species-file "bg_species_files/${bg_species_file_name}")
+        fasta_out_arg=(--fasta_out "${out_fasta}")
+    fi
 
     (
         ${PY_BIN} "${ANNOTATE_TREE}" \
@@ -101,7 +103,7 @@ while IFS=$'\t' read -r gene_id direction fasta_name tree_name species_file_name
             "${bg_arg[@]}" \
             --tree         "${tree_path}" \
             --fasta        "${fasta_path}" \
-            --fasta_out    "${out_fasta}" \
+            "${fasta_out_arg[@]}" \
             --internal-nodes "${internal_nodes}" \
             --output       "${out_tree}" \
             || echo "[ANNOTATE_TREE_FG_BATCHED] annotate_tree_fg failed for ${gene_id} (${direction}), skipping"

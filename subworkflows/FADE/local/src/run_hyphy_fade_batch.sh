@@ -25,9 +25,13 @@
 # =============================================================================
 set -uo pipefail  # no -e: a failed gene must not abort the batch
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fade_bf="${script_dir}/FADE_phylophere.bf"
+
 batch_id=""
 manifest=""
-direction=""
+direction="both"
+share_baseline="true"
 workers="1"
 cpu_per_worker="1"
 runner_mode=""
@@ -46,6 +50,8 @@ while [[ $# -gt 0 ]]; do
         --batch-id)           batch_id="$2";          shift 2 ;;
         --manifest)           manifest="$2";           shift 2 ;;
         --direction)          direction="$2";          shift 2 ;;
+        --share-baseline)     share_baseline="$2";     shift 2 ;;
+        --fade-bf)            fade_bf="$2";            shift 2 ;;
         --workers)            workers="$2";            shift 2 ;;
         --cpu-per-worker)     cpu_per_worker="$2";     shift 2 ;;
         --runner-mode)        runner_mode="$2";        shift 2 ;;
@@ -62,7 +68,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$batch_id" || -z "$manifest" || -z "$direction" || -z "$runner_mode" ]]; then
+if [[ -z "$batch_id" || -z "$manifest" || -z "$runner_mode" ]]; then
     echo "Missing required arguments for FADE batch runner" >&2
     exit 1
 fi
@@ -75,9 +81,9 @@ fi
 # ── Base HyPhy command ───────────────────────────────────────────────────────
 declare -a base_cmd
 if [[ "$runner_mode" == "container" ]]; then
-    base_cmd=("/usr/local/bin/_entrypoint.sh" "hyphy" "fade")
+    base_cmd=("/usr/local/bin/_entrypoint.sh" "hyphy" "$fade_bf")
 else
-    base_cmd=("hyphy" "fade")
+    base_cmd=("hyphy" "$fade_bf")
 fi
 
 # MCMC options are passed only for the MCMC method
@@ -91,9 +97,9 @@ if [[ "$method" != "Variational-Bayes" ]]; then
     )
 fi
 
-gene_count="$(grep -cve '^[[:space:]]*$' "$manifest" || true)"
-echo "Running batched FADE task $batch_id (direction: $direction)"
-echo "Genes in batch: $gene_count"
+row_count="$(grep -cve '^[[:space:]]*$' "$manifest" || true)"
+echo "Running batched FADE task $batch_id (direction: $direction, share_baseline: $share_baseline)"
+echo "Runs in batch: $row_count"
 echo "Concurrent workers: $workers (${cpu_per_worker} CPU(s) per HyPhy call)"
 
 # ── Job-control helpers ──────────────────────────────────────────────────────
@@ -111,57 +117,99 @@ wait_for_all() {
     done
 }
 
-# ── Process each gene ────────────────────────────────────────────────────────
-idx=0
-while IFS=$'\t' read -r gene_id fasta_name tree_name; do
-    [[ -z "${gene_id:-}" ]] && continue
-    idx=$((idx + 1))
+launch_gene_group() {
+    local gid="$1"
+    shift
+    local -a specs=("$@")
+    [[ "${#specs[@]}" -eq 0 ]] && return 0
+
     wait_for_slot
-    echo "[FADE_BATCHED] Launching ${gene_id} (${direction}) ($idx/$gene_count)"
-
-    output_json="${gene_id}.${direction}.FADE.json"
-    fasta_path="fastas/${fasta_name}"
-    tree_path="trees/${tree_name}"
-
     (
-        # model_file_arg is empty or "--model-file lg.dat"; it is added as separate
-        # tokens only when non-empty, to avoid quoting problems.
-        declare -a cmd=(
-            "${base_cmd[@]}"
-            "--alignment"               "$fasta_path"
-            "--tree"                    "$tree_path"
-            "--branches"                "Foreground"
-            "--model"                   "$model"
-            "--method"                  "$method"
-            "--grid"                    "$grid"
-            "--concentration_parameter" "$concentration"
-            "--cpu"                     "$cpu_per_worker"
-            "--output"                  "$output_json"
-        )
-        if [[ -n "$model_file_arg" ]]; then
-            # split "--model-file lg.dat" into two tokens
-            read -r -a _mfa <<< "$model_file_arg"
-            cmd+=("${_mfa[@]}")
-        fi
-        cmd+=("${mcmc_args[@]}")
-
-        # Cap BLAS and OpenMP threads at the per-worker CPUs: --cpu only sets the
-        # HyPhy scheduler, while OpenBLAS, OpenMP and MKL read the CPU count of the
-        # node unless these variables are set.
         export OMP_NUM_THREADS="${cpu_per_worker}"
         export MKL_NUM_THREADS="${cpu_per_worker}"
         export OPENBLAS_NUM_THREADS="${cpu_per_worker}"
         export BLAS_NUM_THREADS="${cpu_per_worker}"
 
-        "${cmd[@]}" \
-            || echo "[FADE_BATCHED] FADE failed for ${gene_id} (${direction}), skipping"
+        local cache_arg="NONE"
+        if [[ "${#specs[@]}" -gt 1 && "$share_baseline" == "true" ]]; then
+            cache_arg="${gid}.baseline.cache"
+            rm -f "$cache_arg"
+        fi
+        trap 'rm -f "${gid}.baseline.cache" "${gid}".*.hyphy.log' EXIT
 
-        # Remove 0-byte JSON so optional:true does not emit it to the report
-        [ -s "$output_json" ] || rm -f "$output_json"
-        echo "[FADE_BATCHED] Completed ${gene_id} (${direction})"
+        for spec in "${specs[@]}"; do
+            IFS='|' read -r run_dir fasta_name tree_name <<< "$spec"
+            local output_json="${gid}.${run_dir}.FADE.json"
+            local fasta_path="fastas/${fasta_name}"
+            local tree_path="trees/${tree_name}"
+            local tmp_log="${gid}.${run_dir}.hyphy.log"
+
+            echo "[FADE_BATCHED] Launching ${gid} (${run_dir})"
+
+            declare -a cmd=(
+                "${base_cmd[@]}"
+                "--alignment"               "$fasta_path"
+                "--tree"                    "$tree_path"
+                "--branches"                "Foreground"
+                "--model"                   "$model"
+                "--method"                  "$method"
+                "--grid"                    "$grid"
+                "--concentration_parameter" "$concentration"
+                "--cpu"                     "$cpu_per_worker"
+                "--cache"                   "$cache_arg"
+                "--output"                  "$output_json"
+            )
+            if [[ -n "$model_file_arg" ]]; then
+                read -r -a _mfa <<< "$model_file_arg"
+                cmd+=("${_mfa[@]}")
+            fi
+            cmd+=("${mcmc_args[@]}")
+
+            if ! "${cmd[@]}" > "$tmp_log" 2>&1; then
+                echo "[FADE_BATCHED] FADE failed for ${gid} (${run_dir}), skipping"
+                tail -n 25 "$tmp_log" >&2 || true
+            fi
+            rm -f "$tmp_log" "${fasta_path}.FADE.cache"
+
+            # Remove 0-byte JSON so optional:true does not emit it to the report
+            [ -s "$output_json" ] || rm -f "$output_json"
+            echo "[FADE_BATCHED] Completed ${gid} (${run_dir})"
+        done
+
+        rm -f "${gid}.baseline.cache"
     ) &
+}
 
+# ── Group consecutive manifest rows by gene_id and launch ────────────────────
+current_gene=""
+declare -a current_specs=()
+
+while IFS=$'\t' read -r col1 col2 col3 col4; do
+    [[ -z "${col1:-}" ]] && continue
+    if [[ -n "${col4:-}" ]]; then
+        gene_id="$col1"
+        run_dir="$col2"
+        fasta_name="$col3"
+        tree_name="$col4"
+    else
+        gene_id="$col1"
+        run_dir="$direction"
+        fasta_name="$col2"
+        tree_name="$col3"
+    fi
+
+    if [[ -n "$current_gene" && "$gene_id" != "$current_gene" ]]; then
+        launch_gene_group "$current_gene" "${current_specs[@]}"
+        current_specs=()
+    fi
+    current_gene="$gene_id"
+    current_specs+=("${run_dir}|${fasta_name}|${tree_name}")
 done < "$manifest"
 
+if [[ -n "$current_gene" && "${#current_specs[@]}" -gt 0 ]]; then
+    launch_gene_group "$current_gene" "${current_specs[@]}"
+fi
+
 wait_for_all
+rm -f ./*.baseline.cache fastas/*.FADE.cache
 echo "[FADE_BATCHED] Batch $batch_id finished."

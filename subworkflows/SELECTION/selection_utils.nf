@@ -138,7 +138,9 @@ process ANNOTATE_TREE_FG {
     // bg_species_file is the NO_FILE sentinel whenever fade_background_scope
     // == 'all' (the default) -- omit the flag entirely in that case, which
     // reproduces annotate_tree_fg.py's pre-existing pruning behavior unchanged.
-    def bgArg = (bg_species_file?.name && bg_species_file.name != 'NO_FILE') ? "--bg-species-file \"${bg_species_file}\"" : ""
+    def hasBg = (bg_species_file?.name && bg_species_file.name != 'NO_FILE')
+    def bgArg = hasBg ? "--bg-species-file \"${bg_species_file}\"" : ""
+    def fastaOutArg = hasBg ? "--fasta_out \"${gene_id}_${direction}.fa\"" : ""
     if (params.use_singularity || params.use_apptainer) {
         """
         /usr/local/bin/_entrypoint.sh python ${local_dir}/annotate_tree_fg.py \
@@ -146,7 +148,7 @@ process ANNOTATE_TREE_FG {
             ${bgArg} \
             --tree      "${tree}" \
             --fasta     "${fasta}" \
-            --fasta_out "${gene_id}_${direction}.fa" \
+            ${fastaOutArg} \
             --internal-nodes "${params.fade_internal_nodes ?: 'all_descendants'}" \
             --output    "${gene_id}_${direction}_fg.nwk"
         """
@@ -157,7 +159,7 @@ process ANNOTATE_TREE_FG {
             ${bgArg} \
             --tree      "${tree}" \
             --fasta     "${fasta}" \
-            --fasta_out "${gene_id}_${direction}.fa" \
+            ${fastaOutArg} \
             --internal-nodes "${params.fade_internal_nodes ?: 'all_descendants'}" \
             --output    "${gene_id}_${direction}_fg.nwk"
         """

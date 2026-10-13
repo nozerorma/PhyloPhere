@@ -55,22 +55,29 @@ def annotate_newick(newick_str: str, fg_species: set, label: str) -> tuple:
     return annotated, total_subs
 
 
-def label_internal_nodes(tree, fg_species: set) -> int:
-    """Name every non-root internal node whose descendant tips are all foreground.
+def label_internal_nodes(
+    tree, fg_species: set, internal_mode: str = "all_descendants"
+) -> set:
+    """Assign deterministic postorder labels IntNode<k> to all non-root internal nodes.
 
-    Each such node gets a placeholder label FGNode<k>; the caller appends the
-    HyPhy branch tag after serialisation. HyPhy applies an internal node's tag
-    to the branch leading to that node, so the stem branch of each foreground
-    clade is included. Returns the number of nodes labelled.
+    Returns the set of internal node labels whose descendant tips are all foreground
+    (empty when internal_mode == 'none'); the caller appends the HyPhy branch tag
+    after serialisation. Naming every non-root internal node deterministically
+    ensures that top and bottom trees over the same taxa share identical branch
+    identifiers, allowing HyPhy FADE to reuse the baseline model fit across directions.
     """
-    n = 0
+    idx = 0
+    fg_labels = set()
     for nd in tree.postorder_internal_node_iter():
         if nd.parent_node is None:
             continue
-        if all(leaf.taxon.label in fg_species for leaf in nd.leaf_iter()):
-            n += 1
-            nd.label = f"FGNode{n}"
-    return n
+        idx += 1
+        nd.label = f"IntNode{idx}"
+        if internal_mode == "all_descendants" and all(
+            leaf.taxon.label in fg_species for leaf in nd.leaf_iter()
+        ):
+            fg_labels.add(nd.label)
+    return fg_labels
 
 
 def parse_fasta_taxa(path: str) -> set:
@@ -228,14 +235,18 @@ def main():
         )
         return
 
-    n_internal = 0
-    if args.internal_nodes == "all_descendants":
-        n_internal = label_internal_nodes(tree, fg_in_tree)
-        if n_internal:
-            newick_str = tree.as_string(schema="newick", suppress_rooting=True).strip()
-            newick_str = re.sub(
-                r"'?(FGNode\d+)'?(?=[:,);\s])", r"\1{" + args.label + "}", newick_str
-            )
+    fg_internal_labels = label_internal_nodes(tree, fg_in_tree, args.internal_nodes)
+    n_internal = len(fg_internal_labels)
+    newick_str = tree.as_string(schema="newick", suppress_rooting=True).strip()
+    if fg_internal_labels:
+        fg_alt = "|".join(
+            re.escape(lbl) for lbl in sorted(fg_internal_labels, key=len, reverse=True)
+        )
+        newick_str = re.sub(
+            r"'?(" + fg_alt + r")'?(?=[:,);\s])",
+            r"\1{" + args.label + "}",
+            newick_str,
+        )
 
     annotated, n_subs = annotate_newick(newick_str, fg_in_tree, args.label)
     if n_subs == 0:

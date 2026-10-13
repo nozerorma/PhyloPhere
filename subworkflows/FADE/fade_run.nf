@@ -25,9 +25,12 @@ process FADE_BATCHED {
     tag "$batchID (${batchSize} genes, ${direction})"
     label 'process_long_compute'
 
-    publishDir path: "${params.outdir}/selection/fade/${direction}/json",
+    publishDir path: "${params.outdir}/selection/fade/top/json",
                mode: 'copy', overwrite: true,
-               pattern: '*.FADE.json'
+               pattern: '*.top.FADE.json'
+    publishDir path: "${params.outdir}/selection/fade/bottom/json",
+               mode: 'copy', overwrite: true,
+               pattern: '*.bottom.FADE.json'
 
     // A failed gene does not fail the task: the batch script logs it and continues.
 
@@ -37,18 +40,19 @@ process FADE_BATCHED {
     path lg_dat
 
     output:
-    tuple val(direction), path("*.FADE.json"), emit: fade_json, optional: true
+    path "*.FADE.json", emit: fade_json, optional: true
 
     script:
-    def model        = params.fade_model        ?: 'GTR'
-    def method       = params.fade_method       ?: 'Variational-Bayes'
-    def grid         = params.fade_grid         ?: 20
-    def conc         = params.fade_concentration ?: 0.5
-    def runnerMode   = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
-    def nWorkers     = (task.cpus ?: 8) as int
+    def model         = params.fade_model        ?: 'GTR'
+    def method        = params.fade_method       ?: 'Variational-Bayes'
+    def grid          = params.fade_grid         ?: 20
+    def conc          = params.fade_concentration ?: 0.5
+    def shareBaseline = ((params.fade_background_scope ?: 'all') == 'all') ? 'true' : 'false'
+    def runnerMode    = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
+    def nWorkers      = (task.cpus ?: 8) as int
     // Each HyPhy call gets floor(task.cpus / workers) CPUs, at least 1, so that it does
     // not read the CPU count of the whole node and oversubscribe it.
-    def cpuPerWorker = Math.max(1, (task.cpus as int).intdiv(nWorkers))
+    def cpuPerWorker  = Math.max(1, (task.cpus as int).intdiv(nWorkers))
 
     def mcmc_args = (method == 'Variational-Bayes') ? "" :
         """--mcmc-chains ${params.fade_chains ?: 5} \\
@@ -71,6 +75,7 @@ bash ${baseDir}/subworkflows/FADE/local/src/run_hyphy_fade_batch.sh \\
     --method         "${method}" \\
     --grid           ${grid} \\
     --concentration  ${conc} \\
+    --share-baseline ${shareBaseline} \\
     ${mcmc_args}
 """
 }
@@ -100,6 +105,7 @@ process FADE_RUN {
     def method  = params.fade_method  ?: 'Variational-Bayes'
     def grid    = params.fade_grid    ?: 20
     def conc    = params.fade_concentration ?: 0.5
+    def fade_bf = "${baseDir}/subworkflows/FADE/local/src/FADE_phylophere.bf"
 
     // MCMC options apply only when the method is not Variational-Bayes
     def mcmc_args = (method == 'Variational-Bayes') ? "" :
@@ -114,7 +120,7 @@ process FADE_RUN {
         export MKL_NUM_THREADS=${task.cpus}
         export OPENBLAS_NUM_THREADS=${task.cpus}
         export BLAS_NUM_THREADS=${task.cpus}
-        /usr/local/bin/_entrypoint.sh hyphy fade \\
+        /usr/local/bin/_entrypoint.sh hyphy "${fade_bf}" \\
             --alignment "${fasta}" \\
             --tree      "${annotated_tree}" \\
             --branches  Foreground \\
@@ -122,10 +128,12 @@ process FADE_RUN {
             --method    "${method}" \\
             --grid      ${grid} \\
             --concentration_parameter ${conc} \\
+            --cache     NONE \\
             --cpu       ${task.cpus} \\
             ${mcmc_args} \\
-            --output    "${gene_id}.${direction}.FADE.json" \\
-        || echo "FADE failed for ${gene_id} (${direction}), skipping"
+            --output    "${gene_id}.${direction}.FADE.json" > "${gene_id}.${direction}.hyphy.log" 2>&1 \\
+        || { tail -n 30 "${gene_id}.${direction}.hyphy.log" >&2 || true; echo "FADE failed for ${gene_id} (${direction}), skipping"; }
+        rm -f "${gene_id}.${direction}.hyphy.log" *.cache
         # Remove 0-byte JSON so optional:true does not emit it to the report
         [ -s "${gene_id}.${direction}.FADE.json" ] || rm -f "${gene_id}.${direction}.FADE.json"
         """
@@ -135,7 +143,7 @@ process FADE_RUN {
         export MKL_NUM_THREADS=${task.cpus}
         export OPENBLAS_NUM_THREADS=${task.cpus}
         export BLAS_NUM_THREADS=${task.cpus}
-        hyphy fade \\
+        hyphy "${fade_bf}" \\
             --alignment "${fasta}" \\
             --tree      "${annotated_tree}" \\
             --branches  Foreground \\
@@ -143,10 +151,12 @@ process FADE_RUN {
             --method    "${method}" \\
             --grid      ${grid} \\
             --concentration_parameter ${conc} \\
+            --cache     NONE \\
             --cpu       ${task.cpus} \\
             ${mcmc_args} \\
-            --output    "${gene_id}.${direction}.FADE.json" \\
-        || echo "FADE failed for ${gene_id} (${direction}), skipping"
+            --output    "${gene_id}.${direction}.FADE.json" > "${gene_id}.${direction}.hyphy.log" 2>&1 \\
+        || { tail -n 30 "${gene_id}.${direction}.hyphy.log" >&2 || true; echo "FADE failed for ${gene_id} (${direction}), skipping"; }
+        rm -f "${gene_id}.${direction}.hyphy.log" *.cache
         # Remove 0-byte JSON so optional:true does not emit it to the report
         [ -s "${gene_id}.${direction}.FADE.json" ] || rm -f "${gene_id}.${direction}.FADE.json"
         """
