@@ -84,6 +84,8 @@ class ConvergenceResult:
     # Number of hypotheses (M, from fop_pool.pool_domains) pooled for this
     # (position, scheme); identical on both emitted side rows.
     n_hypotheses: Optional[int] = None
+    # Effective number of independent hypotheses among the ones that detected the position on this side.
+    n_hypotheses_eff: Optional[float] = None
     # Cross-hypothesis support tallies for the fields above that otherwise take
     # the value of the first hypothesis row in file order (see
     # `_emit_pooled_side_rows`). They sit beside those fields and do not replace them.

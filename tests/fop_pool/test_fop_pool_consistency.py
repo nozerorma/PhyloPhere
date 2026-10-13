@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "subworkflows" / "CT_DISAMBIGUATION" / "local"))
-from src.convergence.fop_pool import pool_domains  # noqa: E402
+from src.convergence.fop_pool import pool_domains, effective_number  # noqa: E402
 from src.core.driver import _expand_pooled  # noqa: E402
 
 
@@ -61,6 +61,22 @@ def main():
     assert rows and all(r.n_hypotheses == 2 for r in rows), rows
     none = _expand_pooled(7, "US", None, pool_domains([record("H1", {})], pss(["H1", "H2", "H3"])))
     assert none[0].side == "none" and none[0].n_hypotheses == 1
+    # Effective number of independent hypotheses: identical supports count once, disjoint ones in full.
+    a, b, c = frozenset({("1", 10), ("2", 20)}), frozenset({("1", 11), ("2", 21)}), frozenset({("1", 10), ("2", 21)})
+    assert effective_number([]) == 0.0 and effective_number([a]) == 1.0
+    assert effective_number([a, a, a, a]) == 1.0
+    assert effective_number([a, b]) == 2.0
+    assert 1.0 < effective_number([a, a, b]) < 3.0
+    assert 1.0 < effective_number([a, b, c]) < 3.0          # c shares one pair with each of a and b
+    # pool_domains reports it per side: hypotheses with the same supporting pairs are one effective hypothesis.
+    def rec_pair(hyp, node):
+        side = {"domain_scores": {1: 1.0, 2: 1.0}, "domain_der": {1: "A", 2: "A"}, "domain_der_enc": {1: "A", 2: "A"},
+                "domain_anc": {1: "V", 2: "V"}}
+        return {"hyp": hyp, "sides": {"top": side, "bottom": {}, "domain_meta": {1: {"mrca_id": node}, 2: {"mrca_id": node + 1}, 3: {}}}}
+    same = pool_domains([rec_pair("H1", 5), rec_pair("H2", 5), rec_pair("H3", 5)], pss(["H1", "H2", "H3"]))
+    diff = pool_domains([rec_pair("H1", 5), rec_pair("H2", 7), rec_pair("H3", 9)], pss(["H1", "H2", "H3"]))
+    assert same["top"]["n_eff"] == 1.0 and diff["top"]["n_eff"] == 3.0, (same["top"]["n_eff"], diff["top"]["n_eff"])
+    assert same["n_hypotheses"] == diff["n_hypotheses"] == 3
     print("test_fop_pool_consistency: OK")
 
 

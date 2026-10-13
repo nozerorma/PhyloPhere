@@ -54,6 +54,8 @@ def master_fields(max_pairs: int) -> List[str]:
         "participating_hypotheses",
         # Number of hypotheses (M) pooled for this (position, scheme), not per side.
         "n_hypotheses",
+        # Effective number of independent hypotheses among them (identical supporting pairs count once).
+        "n_hypotheses_eff",
         # Direction key of the row (top / bottom / none).
         "side",
         # CAAS convergence score on the Voronoi domain

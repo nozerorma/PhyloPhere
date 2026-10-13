@@ -39,6 +39,8 @@ See ``docs/scoring_v3_core.md`` for the scoring contract.
 
 from __future__ import annotations
 
+import collections
+
 import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -107,6 +109,26 @@ def _dget(mapping: Optional[Dict], d, default=None):
         if k in mapping:
             return mapping[k]
     return default
+
+
+def effective_number(supports) -> float:
+    """Effective number of independent hypotheses among the supports of the hypotheses that detect a position on one side.
+
+    A support is the set of (domain, MRCA node of the pair) that carry the change in one hypothesis, so two
+    hypotheses that confirm the position with the same pairs are one piece of evidence, not two. The number is
+    M^2 / sum_ij Z_ij (the Hill number of order 2 with a similarity matrix, Z_ij the Jaccard similarity of the
+    supports): M when no two supports share a pair, 1 when all are identical, 0 without a support.
+    """
+    sups = [s for s in supports if s]
+    m = len(sups)
+    if m == 0:
+        return 0.0
+    groups = list(collections.Counter(sups).items())   # identical supports collapse into one group
+    total = 0.0
+    for a, ca in groups:
+        for b, cb in groups:
+            total += ca * cb * (len(a & b) / len(a | b))
+    return (m * m) / total
 
 
 def pool_domains(
@@ -228,6 +250,14 @@ def pool_domains(
             for dd, e in (srow.get("domain_anc") or {}).items():
                 anc_raw.setdefault(str(dd), []).append(e)
 
+        supports = []
+        for r in hyps:
+            rs = r.get("sides") or {}
+            changed_h = (rs.get(side) or {}).get("domain_der_enc") or {}
+            if changed_h:
+                meta_h = rs.get("domain_meta") or {}
+                supports.append(frozenset((str(dd), (meta_h.get(dd) or {}).get("mrca_id")) for dd in changed_h))
+
         changed = list(der_enc.keys())
         agree_den = len(changed)
         modal_enc = {sd: _modal_str(v) for sd, v in der_enc.items()}
@@ -250,6 +280,7 @@ def pool_domains(
             "agree_den": agree_den,
             "agreement_tie": agreement_tie,
             "n_participating": agree_den,
+            "n_eff": effective_number(supports),
             "convergence_type": _convergence_type(agree_num, agree_den),
             "participating_hyps": sorted({h for hs in hyp_ids_by_domain.values() for h in hs}),
         }

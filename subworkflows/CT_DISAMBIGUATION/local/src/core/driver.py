@@ -266,6 +266,7 @@ def _expand_pooled(pos, grp, hyp_label, pooled):
             derived_agreement=sd["derived_agreement"],
             domain_scores=sd["domain_scores"],
             n_hypotheses=pooled.get("n_hypotheses"),
+            n_hypotheses_eff=sd.get("n_eff"),
         )
         for sd in pooled_sides(pooled)
     ]
