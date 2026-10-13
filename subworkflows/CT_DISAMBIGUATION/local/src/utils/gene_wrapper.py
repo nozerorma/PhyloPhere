@@ -37,7 +37,7 @@ from src.utils.concurrency import plan_concurrency, init_worker
 from src.utils.amino import normalize_amino_list
 from src.core.driver import load_gene_context, pool_labelings, score_labelings
 from src.core.scores import DIRECTIONS, SCORE_RULE, collapse_sides, direction_values, gene_scores, position_score
-from src.core.labelings import read_design_species, read_pss
+from src.core.labelings import read_pss
 from src.data.models import CAASPosition
 
 logger = logging.getLogger(__name__)
@@ -176,9 +176,8 @@ def _read_resample_labelings(resample_dir: str) -> Dict[str, Tuple[List[str], Li
     return {t: (list(l.fg), list(l.bg)) for t, l in read_labelings(resample_dir).items()}
 
 
-def _read_fop_pairs(path: str) -> Dict[str, Dict[Tuple[str, int], float]]:
-    """fop_pairs.tsv -> {base_cycle: {(H<n>, domain): pss_score}} (core.labelings.read_pss); the keys are the
-    design's domains, the PSS values are not used by the score."""
+def _read_fop_pairs(path: str) -> Dict[str, Dict[Tuple[str, int], Tuple[str, str, float]]]:
+    """fop_pairs.tsv -> {base_cycle: {(H<n>, domain): (top species, bottom species, pss_score)}} (core.labelings.read_pss)."""
     return read_pss(path)
 
 
@@ -358,8 +357,7 @@ def _perms_worker_replay(
     cycle_labelings: Dict[str, Tuple[List[str], List[str]]],
     perm_discovery_file: str,
     ensembl_genes: Optional[Set[str]] = None,
-    fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None,
-    design_species: Optional[Dict[str, Dict[str, int]]] = None,
+    fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], Tuple[str, str, float]]]] = None,
 ) -> Tuple[str, Optional[List[Tuple[str, List[Any]]]]]:
     """Replay step of a chunked gene replay (_perms_worker_finalize is the reduction step).
 
@@ -412,7 +410,7 @@ def _perms_worker_replay(
             ctx, gene, cycle_tags, cycle_labelings, cycle_to_entries, posterior_threshold)
         if not all_cycle_results:
             return (gene, [])
-        return (gene, pool_labelings(all_cycle_results, fop_pairs, design_species, cycle_labelings))
+        return (gene, pool_labelings(all_cycle_results, fop_pairs, cycle_labelings))
     except Exception as e:
         logger.error(f"[perms] replay worker failed for {gene}: {e}", exc_info=True)
         return (gene, None)
@@ -1012,12 +1010,10 @@ def process_all_genes_perms(
     # hypothesis labelings. build_cycle_inputs resolves one labeling per hypothesis tag;
     # _perms_worker_replay then domain-pools them back to one record per base cycle. The
     # per-(hypothesis, domain) PSS weights are parsed once here.
-    fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None
-    design_species: Dict[str, Dict[str, int]] = {}
+    fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], Tuple[str, str, float]]]] = None
     if fop_pairs_file and Path(fop_pairs_file).exists():
         fop_pairs = _read_fop_pairs(fop_pairs_file)
-        design_species = read_design_species(fop_pairs_file)
-        logger.info(f"[perms] FOP mirror ON: design domains and species count for {len(fop_pairs)} base cycles")
+        logger.info(f"[perms] FOP mirror ON: design pairs of {len(fop_pairs)} base cycles")
 
     cycle_tags, cycle_labelings = build_cycle_inputs(
         perm_discovery_file, resample_dir, cycles
@@ -1118,7 +1114,7 @@ def process_all_genes_perms(
     args_generator = (
         (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
          asr_cache_dir, posterior_threshold,
-         chunk, cycle_labelings, perm_discovery_file, None, fop_pairs, design_species)
+         chunk, cycle_labelings, perm_discovery_file, None, fop_pairs)
         for gene, chunk, _est in tasks
     )
 

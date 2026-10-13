@@ -40,7 +40,7 @@ from src.data.models import CAASPosition, ConvergenceResult
 from src.biochem.grouping import get_grouping_scheme
 from src.convergence.path_scores import build_node_index, compute_domain_scores
 from src.convergence.fop_pool import pool_domains
-from src.core.labelings import design_species_count
+from src.core.labelings import design_pairs_from
 from src.core.pooling import pooled_sides
 from src.convergence.support_fmt import fmt_support
 
@@ -111,16 +111,15 @@ def _pooled_pair_lca(hyp_rows: List[Dict[str, Any]], side: str) -> Optional[List
 def _emit_pooled_side_rows(
     base: ConvergenceResult,
     hyp_rows: List[Dict[str, Any]],
-    design_domains: Optional[Dict[Tuple[str, Any], float]] = None,
-    n_design_species: Optional[Dict[str, int]] = None,
+    design_pairs: Dict[Tuple[str, Any], Tuple[str, str, Optional[float]]],
     all_rows: Optional[List[ConvergenceResult]] = None,
 ) -> List[ConvergenceResult]:
     """Pool ``M >= 1`` per-hypothesis ``compute_domain_scores`` records for one
     ``(Gene, Position, scheme)`` and emit <= 2 per-side ConvergenceResult rows.
 
     ``hyp_rows`` = ``[{"hyp": str, "sides": <compute_domain_scores return>}]``.
-    Always calls :func:`fop_pool.pool_domains` (``M == 1`` degenerates to the
-    mean over the domains of the single hypothesis). A position with no changed
+    Always calls :func:`fop_pool.pool_domains` with the pairs of the design
+    (``{(hypothesis, domain): (top species, bottom species, pss)}``). A position with no changed
     domain on either side in any pooled hypothesis collapses to one
     ``side="none"`` row. When the pool holds more than one distinct hypothesis
     the emitted rows drop the ``hypothesis`` label; a lone hypothesis keeps it.
@@ -130,7 +129,7 @@ def _emit_pooled_side_rows(
     result itself, not inside ``sides``, so they cannot be recovered from
     ``hyp_rows`` alone.
     """
-    pooled = pool_domains(hyp_rows, design_domains, n_design_species)
+    pooled = pool_domains(hyp_rows, design_pairs)
     meta = None
     for hr in hyp_rows:
         meta = (hr.get("sides") or {}).get("domain_meta") or meta
@@ -643,7 +642,7 @@ def analyze_gene_disambiguation(
     axes_only: bool = False,
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     build_node_posteriors: bool = False,
-    hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]] = None,
+    hyp_pairs_pss: Optional[Dict[Tuple[str, int], Tuple[str, str, float]]] = None,
     keep_unpooled: bool = False,
     hoisted_seq_by_id: Optional[Dict] = None,
     hoisted_seq_by_species: Optional[Dict] = None,
@@ -1053,12 +1052,11 @@ def analyze_gene_disambiguation(
         diagnostics["unpooled"] = list(results)
 
     if not axes_only and results:
-        # Group the per-hypothesis base rows by (position, scheme) and pool them
-        # onto <=2 per-side rows with the treeless mean-of-means pooler (M == 1
-        # degenerates to the mean over the domains). The design's (hyp, domain) keys come from
-        # hyp_pairs_pss and its species count S from trait_pairs.
+        # Group the per-hypothesis base rows by (position, scheme) and pool them onto <=2 per-side rows with the
+        # treeless pooler. The design pairs are the ones of hyp_pairs_pss (species and PSS of every
+        # (hypothesis, domain)), or those of trait_pairs without PSS when there is no table.
         try:
-            n_design_species = design_species_count(trait_pairs)
+            design_pairs = hyp_pairs_pss or design_pairs_from(trait_pairs)
             by_group: Dict[Tuple[Any, str], List[ConvergenceResult]] = {}
             for r in results:
                 by_group.setdefault(
@@ -1072,7 +1070,7 @@ def analyze_gene_disambiguation(
                     for i, r in enumerate(_rows)
                 ]
                 pooled_rows.extend(
-                    _emit_pooled_side_rows(_rows[0], hyp_rows, hyp_pairs_pss, n_design_species, all_rows=_rows)
+                    _emit_pooled_side_rows(_rows[0], hyp_rows, design_pairs, all_rows=_rows)
                 )
             results = pooled_rows
         except Exception as e:  # a pooling failure must not stop the disambiguation

@@ -1,4 +1,4 @@
-# labelings.py — Readers of foreground/background labelings, trait files and PSS weights.
+# labelings.py — Readers of foreground/background labelings, trait files and the design pairs with their PSS.
 # PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/core/
 
 """
@@ -18,11 +18,11 @@ Three file formats describe them; they are read here and nowhere else:
   * resample_*.tab / fop_labelings.tab   `tag <TAB> fg_csv <TAB> bg_csv`, no header
     (fg[k] and bg[k] are pair k+1, as in a trait file);
   * traitfile*.tab                       `species <TAB> 1|0 <TAB> pair` (1 = foreground);
-  * fop_pairs.tsv (null) and contrast_hypotheses_pairs.tsv (observed): the PSS weight of every
-    (hypothesis, domain), `cycle` being absent from the observed file (its cycle is b_0).
+  * fop_pairs.tsv (null) and contrast_hypotheses_pairs.tsv (observed): the species and the PSS of the pair
+    of every (hypothesis, domain), `cycle` being absent from the observed file (its cycle is b_0).
 
 Hypothesis ids are normalized to their `H<n>` token everywhere, so the observed and null sides
-key the PSS weights identically.
+key the design pairs identically.
 """
 from __future__ import annotations
 
@@ -60,11 +60,10 @@ def trait_pairs_from(fg, bg) -> Dict[int, List[Tuple[str, str]]]:
     return {1: list(zip(fg, bg))}
 
 
-def design_species_count(trait_pairs: Dict[int, List[Tuple[str, str]]]) -> Dict[str, int]:
-    """S per side `{"top", "bottom"}`: the distinct species of the first (top) and of the second (bottom) member of
-    the pairs of a design (every contrast of it)."""
-    pairs = [pair for ps in trait_pairs.values() for pair in ps]
-    return {"top": len({p[0] for p in pairs}), "bottom": len({p[1] for p in pairs})}
+def design_pairs_from(trait_pairs: Dict[int, List[Tuple[str, str]]]) -> Dict[Tuple[str, int], Tuple[str, str, Optional[float]]]:
+    """The design of `trait_pairs` as `{(H<contrast>, domain): (top species, bottom species, None)}`: the pairs of a design that has
+    no fop_pairs / contrast_hypotheses_pairs table, so without PSS (every pair weighs the same). Domains are numbered from 1."""
+    return {(f"H{c}", i): (top, bottom, None) for c, pairs in trait_pairs.items() for i, (top, bottom) in enumerate(pairs, 1)}
 
 
 @dataclass(frozen=True)
@@ -279,22 +278,23 @@ def read_trait_pairs(
         return {}
 
 
-PssMap = Dict[str, Dict[Tuple[str, int], float]]
+PssMap = Dict[str, Dict[Tuple[str, int], Tuple[str, str, float]]]
 
 
 def read_pss(path, default_cycle: str = OBSERVED_CYCLE) -> PssMap:
-    """PSS weights `{cycle: {(H<n>, domain): pss}}` from fop_pairs.tsv or contrast_hypotheses_pairs.tsv.
+    """Design pairs `{cycle: {(H<n>, domain): (top species, bottom species, pss)}}` from fop_pairs.tsv or
+    contrast_hypotheses_pairs.tsv.
 
     Rows lacking a cycle column (the observed file) belong to `default_cycle`. Missing files, `NO_*`
-    sentinels and files without the needed columns give an empty map (the pooler then weights every
-    node equally).
+    sentinels and files without the needed columns give an empty map (the design is then built from the
+    trait pairs, every pair weighing the same).
     """
     if not path or str(path).startswith("NO_") or not Path(path).is_file():
         return {}
     out: PssMap = {}
     with open(path, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
-        if not reader.fieldnames or not {"hypothesis_id", "pair", "pss_score"} <= set(reader.fieldnames):
+        if not reader.fieldnames or not {"hypothesis_id", "pair", "species1", "species2", "pss_score"} <= set(reader.fieldnames):
             return {}
         for row in reader:
             raw = (row.get("hypothesis_id") or "").strip()
@@ -306,30 +306,8 @@ def read_pss(path, default_cycle: str = OBSERVED_CYCLE) -> PssMap:
             except (TypeError, ValueError):
                 continue
             cycle = (row.get("cycle") or "").strip() or default_cycle
-            out.setdefault(cycle, {})[(hyp_id(raw), domain)] = pss
+            out.setdefault(cycle, {})[(hyp_id(raw), domain)] = (row["species1"], row["species2"], pss)
     return out
-
-
-def read_design_species(path, default_cycle: str = OBSERVED_CYCLE) -> Dict[str, Dict[str, int]]:
-    """S per side `{cycle: {"top": distinct species1, "bottom": distinct species2}}` of fop_pairs.tsv or
-    contrast_hypotheses_pairs.tsv (rows lacking a cycle column belong to `default_cycle`). Missing files,
-    `NO_*` sentinels and files without the columns give an empty map (the pooler then takes breadth 1)."""
-    if not path or str(path).startswith("NO_") or not Path(path).is_file():
-        return {}
-    seen: Dict[str, Dict[str, set]] = {}
-    with open(path, newline="") as fh:
-        reader = csv.DictReader(fh, delimiter="\t")
-        if not reader.fieldnames or not {"hypothesis_id", "species1", "species2"} <= set(reader.fieldnames):
-            return {}
-        for row in reader:
-            if not _HYP.search((row.get("hypothesis_id") or "").strip()):
-                continue
-            cycle = (row.get("cycle") or "").strip() or default_cycle
-            both = seen.setdefault(cycle, {"top": set(), "bottom": set()})
-            for side, col in (("top", "species1"), ("bottom", "species2")):
-                if row[col]:
-                    both[side].add(row[col])
-    return {c: {side: len(v) for side, v in both.items()} for c, both in seen.items()}
 
 
 def design_max_pairs(trait_file: Path) -> int:
@@ -372,5 +350,5 @@ def design_max_pairs(trait_file: Path) -> int:
 
 
 def observed_pss(path) -> Optional[Dict[Tuple[str, int], float]]:
-    """PSS weights of the observed cycle, or None when there are none."""
+    """Design pairs of the observed cycle (see `read_pss`), or None when there are none."""
     return read_pss(path).get(OBSERVED_CYCLE) or None

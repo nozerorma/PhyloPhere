@@ -74,7 +74,7 @@ def analyze_observed(
     gene: str,
     entries: List[CAASPosition],
     trait_pairs: Dict[int, List[Tuple[str, str]]],
-    hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]],
+    hyp_pairs_pss: Optional[Dict[Tuple[str, int], Tuple[str, str, float]]],
     posterior_threshold: float,
     keep_unpooled: bool = False,
 ) -> Tuple[List[Any], Dict[str, Any]]:
@@ -115,7 +115,7 @@ def score_observed(
     gene: str,
     entries: List[CAASPosition],
     trait_pairs: Dict[int, List[Tuple[str, str]]],
-    hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]],
+    hyp_pairs_pss: Optional[Dict[Tuple[str, int], Tuple[str, str, float]]],
     posterior_threshold: float,
 ) -> List[Any]:
     """The pooled results of :func:`analyze_observed` alone."""

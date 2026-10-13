@@ -33,7 +33,7 @@ from src.convergence.convergence import build_alignment_lookup
 from src.convergence.disambiguate_single import PositionAxes, analyze_gene_disambiguation
 from src.convergence.fop_pool import base_cycle, pool_domains
 from src.convergence.path_scores import build_node_index
-from src.core.labelings import design_species_count, hyp_id, trait_pairs_from
+from src.core.labelings import design_pairs_from, hyp_id, trait_pairs_from
 from src.core.pooling import pooled_sides
 from src.phylo.tree_utils import build_tree_node_mapping, extract_tip_labels
 from src.utils.concurrency import codeml_slot
@@ -279,18 +279,9 @@ def _expand_pooled(pos, grp, hyp_label, pooled):
     return out
 
 
-def _warn_missing_species(cycles) -> None:
-    """Log the cycles pooled without the species count S per side of their design (breadth 1: their scores are not
-    on the scale of the cycles that have it)."""
-    if cycles:
-        logger.warning(f"[perms] {len(cycles)} cycles pooled without the species count of their design "
-                       f"(breadth 1), e.g. {sorted(cycles)[:3]}")
-
-
 def pool_labelings(
     results: List[Tuple[str, List[Any]]],
-    fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]],
-    design_species: Optional[Dict[str, Dict[str, int]]] = None,
+    fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], Tuple[str, str, float]]]],
     labelings: Optional[Dict[str, Tuple[List[str], List[str]]]] = None,
 ) -> List[Tuple[str, List[Any]]]:
     """Collapse scored labelings into one per-side, domain-pooled record set per cycle.
@@ -301,12 +292,10 @@ def pool_labelings(
     the mean over the fixed Voronoi domains), the same statistic the observed path emits through
     disambiguate_single._emit_pooled_side_rows.
 
-    With `fop_pairs` the "<base>~H<m>" hypotheses of a base cycle are pooled together; without it each
-    labeling is its own single-hypothesis cycle. The species count S per side (top / bottom group) of the design of a cycle is
-    `design_species[base cycle]` (read from fop_pairs.tsv), per side, or, without `fop_pairs`, the species of the
-    pairs of the cycle's own labeling in `labelings`; a cycle without S is pooled with breadth 1.
+    With `fop_pairs` the "<base>~H<m>" hypotheses of a base cycle are pooled together, and the design of the cycle is
+    `fop_pairs[base cycle]`; without it each labeling is its own single-hypothesis cycle, and its design the pairs of
+    its own labeling in `labelings`.
     """
-    missing = set()
     if fop_pairs is not None:
         # (base_cyc, pos, scheme) -> [ {hyp, sides} ]; one pool_domains call each.
         by_pos: Dict[Tuple[str, int, str], List[Dict[str, Any]]] = {}
@@ -324,25 +313,21 @@ def pool_labelings(
 
         pooled_by_cycle: Dict[str, List[Any]] = {}
         for (base, pos, grp), hyp_recs in by_pos.items():
-            # pool_domains wants only {(hyp, domain) -> pss} of this cycle (missing -> equal weight); the number of
-            # hypotheses of that map is the design size H of the cycle, as for the observed labeling.
-            n_sp_design = (design_species or {}).get(base)
-            if n_sp_design is None:
-                missing.add(base)
-            pooled = pool_domains(hyp_recs, fop_pairs.get(base), n_sp_design)
+            # The design of the cycle holds every hypothesis, also the ones that did not detect the position.
+            design = fop_pairs.get(base)
+            if not design:
+                raise ValueError(f"cycle {base} has no rows in fop_pairs")
+            pooled = pool_domains(hyp_recs, design)
             pooled_by_cycle.setdefault(base, []).extend(_expand_pooled(pos, grp, None, pooled))
-        _warn_missing_species(missing)
         return list(pooled_by_cycle.items())
 
-    # Without fop_pairs: one hypothesis per record. pool_domains still runs (M == 1) so the observed and
+    # Without fop_pairs: one hypothesis per record. pool_domains still runs so the observed and
     # the null go through the exact same reducer.
     expanded = []
     for cyc, recs in results:
-        n_sp_design = None
-        if labelings and labelings.get(cyc):
-            n_sp_design = design_species_count(trait_pairs_from(*labelings[cyc]))
-        else:
-            missing.add(cyc)
+        if not (labelings and labelings.get(cyc)):
+            raise ValueError(f"cycle {cyc} has no labeling to take its design from")
+        design = design_pairs_from(trait_pairs_from(*labelings[cyc]))
         out_recs = []
         for r in recs:
             pos = getattr(r, "position", None)
@@ -350,8 +335,7 @@ def pool_labelings(
                 continue
             hyp = getattr(r, "hypothesis", None)
             pooled = pool_domains(
-                [{"hyp": hyp or "H1", "sides": getattr(r, "sides", None) or {}}], None, n_sp_design)
+                [{"hyp": hyp or "H1", "sides": getattr(r, "sides", None) or {}}], design)
             out_recs.extend(_expand_pooled(pos, getattr(r, "caap_group", "US"), hyp, pooled))
         expanded.append((cyc, out_recs))
-    _warn_missing_species(missing)
     return expanded

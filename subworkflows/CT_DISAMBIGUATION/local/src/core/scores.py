@@ -39,8 +39,8 @@ __all__ = ["DIRECTIONS", "TIE_TOL", "SCORE_RULE", "GS_SCHEMES", "position_score"
 DIRECTIONS = ("all", "top", "bottom")
 
 # Rule of the position score. It is stamped on the null (perm_pos_cycle_caas.tsv.gz, column score_aggregation) so that
-# scoring_compute.R refuses a null scored with another rule. "us_pos_species": the US score (strength of the converging domains times the species breadth n_sp / S_side), defined only when positive.
-SCORE_RULE = "us_pos_species"
+# scoring_compute.R refuses a null scored with another rule. "us_pos_species_pss": the US score (mean over the domains of the PSS-weighted mean, over the species of the domain, of their hypothesis scores), defined only when positive.
+SCORE_RULE = "us_pos_species_pss"
 # Biochemical schemes: they describe a position and never enter its score.
 GS_SCHEMES = ("GS1", "GS2", "GS3", "GS4")
 
