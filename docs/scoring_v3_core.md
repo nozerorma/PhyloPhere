@@ -83,7 +83,7 @@ target falta. Cuando `agree = 1` el `set` es un singleton `{enc(r)}` y `P_wc_any
 al caso de un solo target (masa exacta de `enc(r)` si está registrada; si no, el remanente
 `1 − Σ registrado`).
 
-**Sin factor de aislamiento. Sin PSS.** El PSS actúa en la selección de pares y en el nulo (`match_pss`), no en el score.
+**Sin factor de aislamiento. Sin PSS aquí.** El PSS entra solo en el pooling (§3), repartiendo el peso de un dominio entre sus especies.
 
 `agree` es duro 0/1 sobre residuos codificados. El gradiente bioquímico lo da la media de
 los 5 esquemas en `scoring_compute.R` §2g, no una regla suave aquí (racional idéntico al de
@@ -156,59 +156,63 @@ anc_enc, 0.0)`, no una cota worst-case. Ver `subworkflows/CT_DISAMBIGUATION/loca
 
 ---
 
-## 3. `pool_domains`: score de posición sin hipótesis, con factor de especies
+## 3. `pool_domains`: score de posición por especie dentro de cada dominio
 
-`pool_domains(hyp_records, design_domains=None, n_design_species=None) -> {"top": agg, "bottom": agg,
-"n_hypotheses": M}`, **sin árbol** (combina escalares ya calculados por hipótesis).
+`pool_domains(hyp_records, design_pairs) -> {"top": agg, "bottom": agg, "n_hypotheses": M}`, **sin árbol**
+(combina escalares ya calculados por hipótesis).
 
-- `hyp_records` = `list[{"hyp": str, "sides": <retorno de compute_domain_scores>}]`, `M ≥ 1`.
-- `design_domains` = claves `(hyp, d)` del diseño (el mapa de `fop_pairs.tsv` o de
-  `contrast_hypotheses_pairs.tsv`); solo completan el universo de dominios. Sus valores no se usan.
-- `n_design_species` = `{"top": S_top, "bottom": S_bottom}`: especies distintas del grupo de cada lado en el
-  diseño del ciclo (`species1` para top, `species2` para bottom; unión de las hipótesis). Un lado sin `S`
-  (ausente o 0) → amplitud 1.
+- `hyp_records` = `list[{"hyp": str, "sides": <retorno de compute_domain_scores>}]`, `M ≥ 1`: las hipótesis que detectan
+  la posición.
+- `design_pairs` = `{(hyp, d): (especie top, especie bottom, pss)}` del diseño del ciclo, con **todas** sus hipótesis, también
+  las que no detectan la posición. Sale de `fop_pairs.tsv` (nulo), de `contrast_hypotheses_pairs.tsv` (observado) o, sin
+  tabla, de los pares de `trait_pairs` (entonces `pss = None`). Un diseño de una sola hipótesis toma todos los registros
+  como suyos, sea cual sea su etiqueta. Sin diseño la función falla: no adivina las especies.
 
-Una hipótesis es solo una manera de trazar los pares y no pesa: el score depende de los pares de dominios y de las especies.
+Una hipótesis solo sortea qué par representa cada dominio. La unidad de un dominio son las especies que lo representan,
+no las hipótesis.
 
 ### 3.1. Universo de dominios
 
 ```
-universo = ⋃_h keys(hyp_records[h].sides["domain_meta"])   ∪   {d : (h, d) en design_domains}
+universo = ⋃_h keys(hyp_records[h].sides["domain_meta"])   ∪   {d : (h, d) en design_pairs}
 K        = |universo|
 ```
 
-`domain_meta` lleva siempre los K dominios fijos, así que el universo es K exista o no el mapa del diseño.
+`domain_meta` lleva siempre los K dominios fijos, así que el universo es K exista o no el diseño.
 
 ### 3.2. Por lado `s`
 
 ```
-c(a, b)   = 1 - P(derivado ya en el LCA de a y b)         # contrib de compute_domain_scores (pair_lca)
-combinac. = (a, especie_a, b, especie_b) distintas sobre las hipótesis (cada una cuenta una vez)
-c(a, b)   = media de las c de las combinaciones de ese par de dominios        # media, no máximo
-s(d)      = 1 - Π_b (1 - c(d, b))                          # noisy-OR sobre sus parejas; 0 sin pareja
-fuerza    = Σ_d s(d) / K
-n_sp      = especies distintas que llevan el derivado en un dominio con score > 0 en alguna hipótesis
-amplitud  = min(1, n_sp / S_lado)                          # 1 si S_lado no está
-core_s    = clamp01( fuerza · amplitud )
+s_x    = media, sobre las hipótesis del diseño en que la especie x representa el dominio d, del score_d^h de esa
+         hipótesis (0 donde la hipótesis no detecta la posición o el dominio no cambió)
+w_x    = media del PSS de los pares en que x representa d                  (1 sin PSS)
+S_d    = Σ_x w_x · s_x / Σ_x w_x       sobre las especies distintas del lado (species1 top, species2 bottom) que representan d
+core_s = clamp01( Σ_d S_d / K )
 ```
 
-Una combinación que varias hipótesis comparten cuenta una vez; un par de dominios sin la especie de
-algún extremo (`domain_der_species`) no puede distinguirse de una repetición y se omite.
+`score_d^h` es el noisy-OR de `c = 1 - P(derivado ya en el LCA)` sobre los compañeros del mismo residuo (§1.3).
 
-`n_sp` y `S_lado` son del mismo lado (la especie del par que está en el grupo de ese lado); no se divide por
-la suma de los dos grupos.
+- Cada especie cuenta una vez, aparezca en las hipótesis que aparezca: el muestreo del harvest no pesa.
+- Cada dominio pesa lo mismo. El PSS solo reparte el peso de un dominio entre sus especies, así que un factor constante del
+  PSS no cambia el score. Si ningún par del dominio tiene PSS positivo, sus especies pesan igual.
+- Con una sola hipótesis, `core_s` es la media aritmética de los `score_d` de los K dominios.
+- `n_sp`: especies distintas que llevan el derivado en un dominio con score positivo en alguna hipótesis. Es descriptivo y
+  no entra en el score.
 
-Ejemplo (K = 3, lado top con S_top = 10): A y B convergen con `c = 0.9`, el residuo está en 2 especies de A y 1
-de B, C no cambia → `s = (0.9, 0.9, 0)`, fuerza 0.6, amplitud 3/10, `core_s = 0.18`.
+Ejemplo (K = 3, tres hipótesis, lado top). El residuo está en `A1` y `A2` (dominio 1) y en `B1` (dominio 2); `B2` y `C1` no
+lo llevan. Detectan la posición H1 (representantes `A1, B1, C1`) y H3 (`A2, B1, C1`), con `c = 0.9` entre los dominios 1 y 2,
+así que sus scores son `0.9, 0.9, 0`; H2 (`A1, B2, C1`) no la detecta. Por especie: `A1 = (0.9 + 0)/2 = 0.45`, `A2 = 0.9`,
+`B1 = 0.9`, `B2 = 0`, `C1 = 0`. Con PSS 3.0 para `A1` y 1.5 para `A2`, `S_1 = (3·0.45 + 1.5·0.9)/4.5 = 0.6`;
+`S_2 = (0.9 + 0)/2 = 0.45` y `S_3 = 0`: `core_s = (0.6 + 0.45 + 0)/3 = 0.35`. Sin PSS, `S_1 = 0.675` y `core_s = 0.375`.
 
-El score sigue en [0, 1]; llega a 1 solo si todas las especies del grupo de ese lado llevan el cambio y todos los
-dominios convergen con `c = 1`.
+El score depende, además de la fuerza de convergencia de cada hipótesis, de cuántas de las hipótesis del diseño detectan la
+posición: una hipótesis que no la detecta aporta 0 a las especies que representa.
 
 ### 3.3. `agg`
 
 ```
 agg = { "asr_path_score": core_s,
-        "domain_scores":  {d: s(d)}   ∀ d en universo,      # descriptivo
+        "domain_scores":  {d: S_d}   ∀ d en universo,
         "domain_der":     {d: _modal_str(der crudo de d sobre h)}   # solo d cambiados en ≥1 h
         "domain_anc":     {d: _modal_str(anc crudo de d sobre h)}   # solo d cambiados en ≥1 h
         "agree_num": int, "agree_den": int, "n_participating": int,
@@ -218,9 +222,8 @@ agg = { "asr_path_score": core_s,
 - `agree_den == n_participating` = nº de dominios cambiados en ≥1 hipótesis.
 - `agree_num` = mayor grupo de `_modal_str(domain_der_enc de d sobre h)` entre esos dominios.
 - `convergence_type = _convergence_type(agree_num, agree_den)`.
-- El pooling **no recibe `scheme`**: la codificación ya está horneada en cada `contrib` /
-  `domain_der_enc` aguas arriba. Un dominio que "se parte" V/I/L entre hipótesis bajo US puntúa bajo;
-  bajo GS3 puntúa alto.
+- El pooling **no recibe `scheme`**: la codificación ya está horneada en cada `score_d^h` / `domain_der_enc` aguas arriba.
+  Un dominio que "se parte" V/I/L entre hipótesis bajo US puntúa bajo; bajo GS3 puntúa alto.
 
 ### 3.4. Colapso `side = "none"`
 
@@ -229,15 +232,10 @@ Si **ningún** dominio cambió en ningún lado en ninguna hipótesis, `_emit_poo
 dos filas top/bottom a 0. `pool_domains` en sí devuelve ambos `agg` con `core_s = 0`; el
 colapso vive en el caller.
 
-### 3.5. De dónde sale `S_lado`
+### 3.5. Sello de la regla
 
-- Observado: especies distintas del primer y del segundo miembro de los pares de `trait_pairs` (todos los
-  contrastes del diseño).
-- Nulo con FOP: especies distintas de `species1` y `species2` de las filas de `fop_pairs.tsv` del ciclo base
-  (`read_design_species`).
-- Nulo sin FOP: especies de los pares del propio labeling del ciclo, por grupo.
-- Si un ciclo no tiene `S`, se agrupa con amplitud 1 y el log lo avisa; el sello `score_aggregation`
-  (`us_pos_species`) hace que `scoring_compute.R` rechace un nulo calculado con otra regla.
+El nulo (`perm_pos_cycle_caas.tsv.gz`, columna `score_aggregation`) y el observado llevan `us_pos_species_pss`
+(`core.scores.SCORE_RULE`); `scoring_compute.R` rechaza un nulo calculado con otra regla.
 
 ---
 
@@ -407,20 +405,20 @@ El efecto del slot vacío se ve en `pool_domains` (§3.1: el dominio sigue conta
 
 ## Apéndice B — ejemplos de `pool_domains`
 
-Cada `hyp_record` = `{"hyp": "H<n>", "sides": <retorno de compute_domain_scores>}`. Los casos con aritmética
-exacta están en `unification/fop_pool/test_fop_pool_consistency.py` y `unification/fop_pool/test_design_species.py` del directorio de validación `PhyloPhere_validation`.
+Cada `hyp_record` = `{"hyp": "H<n>", "sides": <retorno de compute_domain_scores>}`. Los casos con aritmética exacta están en
+`PhyloPhere_validation/unification/fop_pool/test_fop_pool_consistency.py` y `test_design_pairs.py`.
 
 | Caso | Entrada | Resultado |
 |---|---|---|
-| Ejemplo de la §3.2 | K = 3, S_top = 10, `c = 0.9`, especies `A1, A2` (dominio 1) y `B1` (dominio 2) | `core = 0.6 · 3/10 = 0.18` |
-| `S` por lado | `S_top = 10`, `S_bottom = 20`, dos especies por lado | amplitud 2/10 arriba y 2/20 abajo |
-| Sin `S` | el mismo | `core = 0.6` |
-| Especies repetidas | tres hipótesis con las mismas dos especies | `n_sp = 2`, el par cuenta una vez |
-| Dominio con score 0 | `{1: 0.9, 2: 0.0}` | solo la especie del dominio 1 cuenta |
-| Media entre combinaciones | `c = 0.5` y `c = 0.9` para el mismo par de dominios | `c = 0.7` |
-| Noisy-OR | un dominio con parejas `c = 0.5` y `c = 0.5` | `s = 0.75` |
-| Sin `pair_lca` | ningún par converge | `core = 0` |
-| Dominios del diseño | `design_domains` añade un dominio sin registro (K = 4) | la fuerza se divide por 4 |
+| Ejemplo de la §3.2 | K = 3, `A1`, `A2`, `B1` como arriba, con PSS | `core = (0.6 + 0.45 + 0)/3 = 0.35` |
+| Sin PSS | el mismo diseño con `pss = None` | `core = (0.675 + 0.45 + 0)/3 = 0.375` |
+| Factor constante del PSS | PSS multiplicado por 7 | el mismo score |
+| Especies repetidas | `A1` en 99 hipótesis (lleva el residuo), `A2` en 1 | dominio 1 = 0.45, `A1` y `A2` pesan igual |
+| Techo | los tres dominios convergen, una especie por dominio en todas las hipótesis | `core` = el score del dominio (0.95) |
+| Dominio con score 0 | `{1: 0.9, 2: 0.0}` | solo la especie del dominio 1 cuenta en `n_sp` |
+| Diseño de una hipótesis | registros con cualquier etiqueta | pertenecen a esa hipótesis |
+| Dominios del diseño | el diseño añade un dominio sin registro (K = 4) | la suma se divide por 4 |
+| Sin diseño | `design_pairs = {}` | error |
 
 
 ## Apéndice C — deltas Tier-1 (PEPC) esperados
