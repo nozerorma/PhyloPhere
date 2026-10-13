@@ -408,7 +408,7 @@ El efecto del slot vacío se ve en `pool_domains` (§3.1: el dominio sigue conta
 ## Apéndice B — ejemplos de `pool_domains`
 
 Cada `hyp_record` = `{"hyp": "H<n>", "sides": <retorno de compute_domain_scores>}`. Los casos con aritmética
-exacta están en `tests/fop_pool/test_fop_pool_consistency.py` y `tests/fop_pool/test_design_species.py`.
+exacta están en `unification/fop_pool/test_fop_pool_consistency.py` y `unification/fop_pool/test_design_species.py` del directorio de validación `PhyloPhere_validation`.
 
 | Caso | Entrada | Resultado |
 |---|---|---|
