@@ -323,6 +323,7 @@ def compute_domain_scores(
     raw_der: Dict[str, Dict[Any, str]] = {"top": {}, "bottom": {}}
     raw_anc: Dict[str, Dict[Any, str]] = {"top": {}, "bottom": {}}
     der_enc: Dict[str, Dict[Any, str]] = {"top": {}, "bottom": {}}
+    der_species: Dict[str, Dict[Any, str]] = {"top": {}, "bottom": {}}
 
     for pair in pairs:
         d = pair.get("pair_id")
@@ -364,6 +365,9 @@ def compute_domain_scores(
             raw_der[side][d] = str(raw_tip).strip().upper()
             raw_anc[side][d] = str(focal_raw).strip().upper()
             der_enc[side][d] = tip_enc
+            sp = pair.get("top_species" if side == "top" else "bottom_species")
+            if sp:
+                der_species[side][d] = str(sp[0])   # the species of the pair that carries the derived residue
 
     out: Dict[str, Any] = {}
     for side in ("top", "bottom"):
@@ -373,6 +377,7 @@ def compute_domain_scores(
             "domain_der": raw_der[side],
             "domain_der_enc": der_enc[side],
             "domain_anc": raw_anc[side],
+            "domain_der_species": der_species[side],
             "agree_num": sc["agree_num"],
             "agree_den": sc["agree_den"],
             "n_changed": sc["n_changed"],

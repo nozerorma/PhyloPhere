@@ -56,6 +56,8 @@ def master_fields(max_pairs: int) -> List[str]:
         "n_hypotheses",
         # Effective number of independent hypotheses among them (identical supporting pairs count once).
         "n_hypotheses_eff",
+        # Distinct species that carry the derived residue in a converging domain of this side.
+        "n_species",
         # Direction key of the row (top / bottom / none).
         "side",
         # CAAS convergence score on the Voronoi domain

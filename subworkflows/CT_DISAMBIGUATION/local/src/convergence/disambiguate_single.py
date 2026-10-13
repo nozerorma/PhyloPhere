@@ -54,13 +54,13 @@ PositionAxes = namedtuple(
     "PositionAxes",
     ["position", "caap_group", "asr_path_score",
      "side", "hypothesis", "domain_scores", "derived_agreement",
-     "sides", "n_hypotheses", "n_hypotheses_eff"],
+     "sides", "n_hypotheses", "n_hypotheses_eff", "n_species"],
 )
 # `side` and the fields after it are optional. `sides` is the raw
 # ``compute_domain_scores`` return ``{"top", "bottom", "domain_meta"}`` that the
 # treeless pooler (``fop_pool.pool_domains``) consumes; it is populated in the
 # axes-only replay. `n_hypotheses` is the number M of FOP hypotheses that detected the position in the cycle.
-PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None, None)
+PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None, None, None)
 
 
 def _derive_convergent_call(all_rows: List["ConvergenceResult"], attr: str) -> str:
@@ -223,6 +223,7 @@ def _emit_pooled_side_rows(
             amino_encoded_support=amino_encoded_support,
             n_hypotheses=n_hypotheses,
             n_hypotheses_eff=sd.get("n_eff"),
+            n_species=sd.get("n_sp"),
         ))
     return out
 

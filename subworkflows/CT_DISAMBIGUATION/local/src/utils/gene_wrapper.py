@@ -104,6 +104,7 @@ def convert_convergence_result_to_dict(
         # Number of hypotheses (M) harvested for this (position, scheme) pool.
         "n_hypotheses": getattr(result, "n_hypotheses", None),
         "n_hypotheses_eff": getattr(result, "n_hypotheses_eff", None),
+        "n_species": getattr(result, "n_species", None),
         # Cross-hypothesis support tallies for tag, caas and amino_encoded, which above keep the
         # value of the first row.
         "tag_support": getattr(result, "tag_support", "") or "",
@@ -548,6 +549,7 @@ def _perms_worker_finalize(
                 "side": side,
                 "n_hyp": getattr(r, "n_hypotheses", None),
                 "n_hyp_eff": getattr(r, "n_hypotheses_eff", None),
+                "n_sp": getattr(r, "n_species", None),
             }
             detail_rows.append(row)
 
@@ -1041,7 +1043,7 @@ def process_all_genes_perms(
 
     # The detail rows carry `side` (a "both" position is two rows, one per side).
     detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score",
-                     "n_detected", "clust", "side", "n_hyp", "n_hyp_eff"]
+                     "n_detected", "clust", "side", "n_hyp", "n_hyp_eff", "n_sp"]
 
     # CT_POSTPROC filtering of the null candidate pool (cluster trains and dubious/extreme
     # genes). Off by default; the Nextflow layer turns it on (params.caas_perms_postproc)

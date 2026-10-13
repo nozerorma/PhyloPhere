@@ -258,6 +258,16 @@ def pool_domains(
                 meta_h = rs.get("domain_meta") or {}
                 supports.append(frozenset((str(dd), (meta_h.get(dd) or {}).get("mrca_id")) for dd in changed_h))
 
+        # Species that carry the derived residue in a domain that converges (a positive domain score) in at least
+        # one hypothesis: the independent observations behind the position, whatever the hypotheses that used them.
+        species = set()
+        for r in hyps:
+            srow = (r.get("sides") or {}).get(side) or {}
+            ds = srow.get("domain_scores") or {}
+            for dd, sp in (srow.get("domain_der_species") or {}).items():
+                if float(ds.get(dd, 0.0) or 0.0) > 0.0:
+                    species.add(sp)
+
         changed = list(der_enc.keys())
         agree_den = len(changed)
         modal_enc = {sd: _modal_str(v) for sd, v in der_enc.items()}
@@ -281,6 +291,7 @@ def pool_domains(
             "agreement_tie": agreement_tie,
             "n_participating": agree_den,
             "n_eff": effective_number(supports),
+            "n_sp": len(species),
             "convergence_type": _convergence_type(agree_num, agree_den),
             "participating_hyps": sorted({h for hs in hyp_ids_by_domain.values() for h in hs}),
         }

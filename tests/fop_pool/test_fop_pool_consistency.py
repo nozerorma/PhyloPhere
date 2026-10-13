@@ -77,6 +77,18 @@ def main():
     diff = pool_domains([rec_pair("H1", 5), rec_pair("H2", 7), rec_pair("H3", 9)], pss(["H1", "H2", "H3"]))
     assert same["top"]["n_eff"] == 1.0 and diff["top"]["n_eff"] == 3.0, (same["top"]["n_eff"], diff["top"]["n_eff"])
     assert same["n_hypotheses"] == diff["n_hypotheses"] == 3
+    # Distinct species that carry the derived residue in a converging domain: the hypotheses that confirm the
+    # position with the same species add nothing, and a species in a domain without a positive score is not counted.
+    def rec_sp(hyp, sp1, sp2, sc2=1.0):
+        side = {"domain_scores": {1: 1.0, 2: sc2}, "domain_der": {1: "A", 2: "A"}, "domain_der_enc": {1: "A", 2: "A"},
+                "domain_anc": {1: "V", 2: "V"}, "domain_der_species": {1: sp1, 2: sp2}}
+        return {"hyp": hyp, "sides": {"top": side, "bottom": {}, "domain_meta": {1: {"mrca_id": 5}, 2: {"mrca_id": 6}, 3: {}}}}
+    h3 = ["H1", "H2", "H3"]
+    one = pool_domains([rec_sp("H1", "sA", "sB"), rec_sp("H2", "sA", "sB"), rec_sp("H3", "sA", "sB")], pss(h3))
+    four = pool_domains([rec_sp("H1", "sA", "sB"), rec_sp("H2", "sC", "sB"), rec_sp("H3", "sA", "sD")], pss(h3))
+    assert one["top"]["n_sp"] == 2 and four["top"]["n_sp"] == 4, (one["top"]["n_sp"], four["top"]["n_sp"])
+    zero = pool_domains([rec_sp("H1", "sA", "sB", sc2=0.0)], pss(h3))
+    assert zero["top"]["n_sp"] == 1                       # sB sits in a domain whose score is 0: only sA counts
     print("test_fop_pool_consistency: OK")
 
 

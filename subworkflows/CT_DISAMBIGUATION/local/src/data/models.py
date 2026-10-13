@@ -86,6 +86,8 @@ class ConvergenceResult:
     n_hypotheses: Optional[int] = None
     # Effective number of independent hypotheses among the ones that detected the position on this side.
     n_hypotheses_eff: Optional[float] = None
+    # Number of distinct species that carry the derived residue in a converging domain of this side.
+    n_species: Optional[int] = None
     # Cross-hypothesis support tallies for the fields above that otherwise take
     # the value of the first hypothesis row in file order (see
     # `_emit_pooled_side_rows`). They sit beside those fields and do not replace them.
