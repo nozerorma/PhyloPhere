@@ -431,7 +431,7 @@ Voronoi domain, built from the per-node ASR posteriors (full definitions in
 
 | Quantity | What it rewards |
 |--------|-----------------|
-| `asr_path_score` | PSS-weighted mean over the K fixed Voronoi domains of each domain's noisy-OR agreement with its same-residue partners, discounted by the derived state's probability at the shared LCA |
+| `asr_path_score` | mean over the K fixed Voronoi domains of each domain's noisy-OR independence with its same-residue partners (one minus the probability that the derived residue was already at their shared LCA), times the share `n_sp / S` of the design's species that carry the derived residue in a converging domain |
 | `derived_agreement` | retained descriptor (not a score factor): changed pairs landing on the same derived residue per side |
 
 (Core v3 removed the pairwise isolation factor `s_c^s * s_d^s` and the earlier

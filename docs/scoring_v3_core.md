@@ -30,12 +30,12 @@ dominios distintos.
 
 core v3 mueve todo el score al **dominio de Voronoi** como unidad. La cosecha FOP ya extrae
 exactamente **un par candidato por dominio** (K dominios fijados por la selección Dunn
-canónica de H1), los pesos PSS ya son por `(hipótesis, dominio)`, y la capa por-par era
+canónica de H1), y la capa por-par era
 precisión aparente contra la que el pooler llevaba peleando. Colapsar a dominios:
 
 - **disuelve T4c entero** — el índice de dominio *es* la clave, siempre K de ellos;
 - **borra** el walk del segmento privado, `L_s`, `walk_cache`, `iso_override`, y deja el
-  pooler FOP **sin árbol** (promedia escalares ya calculados por hipótesis);
+  pooler FOP **sin árbol** (combina escalares ya calculados por hipótesis);
 - **unifica** observado (M=1) y null-FOP (M≥1) en un solo code path;
 - el factor de aislamiento `s_c^s · s_d^s` **desaparece** de `contrib` (era el principal
   motivo por el que los pares `n=2` no se movían en T3; ahora `contrib` es solo
@@ -83,7 +83,7 @@ target falta. Cuando `agree = 1` el `set` es un singleton `{enc(r)}` y `P_wc_any
 al caso de un solo target (masa exacta de `enc(r)` si está registrada; si no, el remanente
 `1 − Σ registrado`).
 
-**Sin factor de aislamiento. Sin PSS aquí.** El PSS entra solo en el pooling (§3).
+**Sin factor de aislamiento. Sin PSS.** El PSS actúa en la selección de pares y en el nulo (`match_pss`), no en el score.
 
 `agree` es duro 0/1 sobre residuos codificados. El gradiente bioquímico lo da la media de
 los 5 esquemas en `scoring_compute.R` §2g, no una regla suave aquí (racional idéntico al de
@@ -156,65 +156,67 @@ anc_enc, 0.0)`, no una cota worst-case. Ver `subworkflows/CT_DISAMBIGUATION/loca
 
 ---
 
-## 3. `pool_domains` — pooling = media de medias; el PSS entra solo aquí (V3-2)
+## 3. `pool_domains`: score de posición sin hipótesis, con factor de especies
 
-`pool_domains(hyp_records, pss_by_hyp_domain=None) -> {"top": agg, "bottom": agg,
-"n_hypotheses": M}`, **sin árbol** (promedia escalares).
+`pool_domains(hyp_records, design_domains=None, n_design_species=None) -> {"top": agg, "bottom": agg,
+"n_hypotheses": M}`, **sin árbol** (combina escalares ya calculados por hipótesis).
 
 - `hyp_records` = `list[{"hyp": str, "sides": <retorno de compute_domain_scores>}]`, `M ≥ 1`.
-- `pss_by_hyp_domain` = `{(hyp, d): pss}`; `None` o clave ausente → peso `1.0`.
+- `design_domains` = claves `(hyp, d)` del diseño (el mapa de `fop_pairs.tsv` o de
+  `contrast_hypotheses_pairs.tsv`); solo completan el universo de dominios. Sus valores no se usan.
+- `n_design_species` = `S`, las especies distintas de los pares del diseño del ciclo (unión de las hipótesis).
+  `None` o 0 → amplitud 1.
 
-### 3.1. Universo de dominios (decisión V3-0, refina el sketch de V3-2)
+Una hipótesis es solo una manera de trazar los pares y no pesa: el score depende de los pares de dominios y de las especies.
+
+### 3.1. Universo de dominios
 
 ```
-universo = ⋃_h keys(hyp_records[h].sides["domain_meta"])   ∪   keys(pss_by_hyp_domain)
+universo = ⋃_h keys(hyp_records[h].sides["domain_meta"])   ∪   {d : (h, d) en design_domains}
+K        = |universo|
 ```
 
-`domain_meta` lleva siempre los K dominios fijos (todo `pair_detail`), así que el universo
-**siempre es K**, exista o no fichero PSS. (El sketch de V3-2 decía "union of
-`domain_scores` keys ∪ `pss` keys"; eso deja fuera un dominio que no cambió en ninguna
-hipótesis y no tiene PSS — se añade `domain_meta` para cerrar ese hueco y honrar la regla
-"denominador = todos los K".)
+`domain_meta` lleva siempre los K dominios fijos, así que el universo es K exista o no el mapa del diseño.
 
 ### 3.2. Por lado `s`
 
 ```
-M          = len(hyp_records con clave "hyp")
-para cada d en universo:
-    s̄_d   = ( Σ_h  sides_h["s"]["domain_scores"].get(d, 0.0) ) / M
-    w̄_d   = ( Σ_h  pss(h, d, default 1.0) ) / M
-core_s     = clamp01( Σ_d  w̄_d · s̄_d  /  Σ_d  w̄_d )          # 0 si Σ_d w̄_d == 0
+c(a, b)   = 1 - P(derivado ya en el LCA de a y b)         # contrib de compute_domain_scores (pair_lca)
+combinac. = (a, especie_a, b, especie_b) distintas sobre las hipótesis (cada una cuenta una vez)
+c(a, b)   = media de las c de las combinaciones de ese par de dominios        # media, no máximo
+s(d)      = 1 - Π_b (1 - c(d, b))                          # noisy-OR sobre sus parejas; 0 sin pareja
+fuerza    = Σ_d s(d) / K
+n_sp      = especies distintas que llevan el derivado en un dominio con score > 0 en alguna hipótesis
+amplitud  = min(1, n_sp / S)                               # 1 si S no está
+core_s    = clamp01( fuerza · amplitud )
 ```
 
-Una hipótesis donde `d` no cambió (o `d` sin reconstrucción) aporta `0.0` al numerador de
-`s̄_d` y su peso `pss(h,d)` (o `1.0`) al de `w̄_d`.
+Una combinación que varias hipótesis comparten cuenta una vez; un par de dominios sin la especie de
+algún extremo (`domain_der_species`) no puede distinguirse de una repetición y se omite.
 
-**`M = 1` degenera exactamente** a `core_s = Σ_d PSS_d · score_d / Σ_d PSS_d` sobre los K
-dominios fijos. Sin PSS → `w̄_d = 1.0` → media aritmética sobre K.
+Ejemplo (K = 3, S = 20): A y B convergen con `c = 0.9`, el residuo está en 2 especies de A y 1 de B, C no
+cambia → `s = (0.9, 0.9, 0)`, fuerza 0.6, amplitud 3/20, `core_s = 0.09`.
+
+El score sigue en [0, 1]; llega a 1 solo si todas las especies del diseño llevan el cambio y todos los
+dominios convergen con `c = 1`.
 
 ### 3.3. `agg`
 
 ```
-agg = { "asr_path_score": core_s, "core": core_s,        # alias, idénticos
-        "domain_scores":  {d: s̄_d}   ∀ d en universo,
-        "domain_weights": {d: w̄_d}   ∀ d en universo,
+agg = { "asr_path_score": core_s,
+        "domain_scores":  {d: s(d)}   ∀ d en universo,      # descriptivo
         "domain_der":     {d: _modal_str(der crudo de d sobre h)}   # solo d cambiados en ≥1 h
         "domain_anc":     {d: _modal_str(anc crudo de d sobre h)}   # solo d cambiados en ≥1 h
         "agree_num": int, "agree_den": int, "n_participating": int,
-        "convergence_type": str }
+        "n_sp": int, "convergence_type": str, "participating_hyps": [...] }
 ```
 
 - `agree_den == n_participating` = nº de dominios cambiados en ≥1 hipótesis.
 - `agree_num` = mayor grupo de `_modal_str(domain_der_enc de d sobre h)` entre esos dominios.
-- `convergence_type = _convergence_type(agree_num, agree_den)` (harvest-wide).
-- El pooling **no recibe `scheme`**: la codificación ya está horneada en cada
-  `domain_scores` / `domain_der_enc` aguas arriba. Un dominio que "se parte" V/I/L entre
-  hipótesis bajo US puntúa bajo; bajo GS3 puntúa alto; `pool_domains` solo promedia.
-
-`fop_pool.py` conserva `_modal_str`, `base_cycle`, `_cands`, `_dget`; borra `pool_hypotheses`,
-`pool_hypotheses_pairwise`, `_domain_side_dists`, `_da_frac_from_dists`,
-`_rebuild_derived_agreement`, `p_at_least_2`, `_encode_aa`, y (V3-5, ya sin caller)
-`_num` / `_wmean`.
+- `convergence_type = _convergence_type(agree_num, agree_den)`.
+- El pooling **no recibe `scheme`**: la codificación ya está horneada en cada `contrib` /
+  `domain_der_enc` aguas arriba. Un dominio que "se parte" V/I/L entre hipótesis bajo US puntúa bajo;
+  bajo GS3 puntúa alto.
 
 ### 3.4. Colapso `side = "none"`
 
@@ -222,6 +224,14 @@ Si **ningún** dominio cambió en ningún lado en ninguna hipótesis, `_emit_poo
 (en `disambiguate_single.py`) emite una única fila `side = "none"` con `core = 0` en vez de
 dos filas top/bottom a 0. `pool_domains` en sí devuelve ambos `agg` con `core_s = 0`; el
 colapso vive en el caller.
+
+### 3.5. De dónde sale `S`
+
+- Observado: especies distintas de los pares de `trait_pairs` (todos los contrastes del diseño).
+- Nulo con FOP: especies distintas de las filas de `fop_pairs.tsv` del ciclo base (`read_design_species`).
+- Nulo sin FOP: especies de los pares del propio labeling del ciclo.
+- Si un ciclo no tiene `S`, se agrupa con amplitud 1 y el log lo avisa; el sello `score_aggregation`
+  (`us_pos_species`) hace que `scoring_compute.R` rechace un nulo calculado con otra regla.
 
 ---
 
@@ -385,156 +395,26 @@ resto `A`. US. `K = 3`.
   `domain_anc = {1: "A", 2: "A"}`. `agree_den = 2`, `agree_num = 2` → `"convergent"`.
 - **bottom**: `{}`, `"no_change"`.
 
-El efecto del slot vacío se ve en `pool_domains` (§ Apéndice B.5), no aquí.
+El efecto del slot vacío se ve en `pool_domains` (§3.1: el dominio sigue contando en K), no aquí.
 
 ---
 
-## Apéndice B — goldens `pool_domains`, aritmética completa
+## Apéndice B — ejemplos de `pool_domains`
 
-Cada `hyp_record` = `{"hyp": "H<n>", "sides": <retorno de compute_domain_scores>}`.
-`pss` como lista `[[hyp, domain, weight], ...]` → `{(hyp, domain): weight}`; ausente →
-peso `1.0`. Resultado: `{"top": agg, "bottom": agg, "n_hypotheses": M}`.
+Cada `hyp_record` = `{"hyp": "H<n>", "sides": <retorno de compute_domain_scores>}`. Los casos con aritmética
+exacta están en `tests/fop_pool/test_fop_pool_consistency.py` y `tests/fop_pool/test_design_species.py`.
 
-### B.0. `m1_passthrough` — `M = 1`, sin PSS, degenera a media
+| Caso | Entrada | Resultado |
+|---|---|---|
+| Ejemplo de la §3.2 | K = 3, S = 20, `c = 0.9`, especies `A1, A2` (dominio 1) y `B1` (dominio 2) | `core = 0.6 · 3/20 = 0.09` |
+| Sin `S` | el mismo | `core = 0.6` |
+| Especies repetidas | tres hipótesis con las mismas dos especies | `n_sp = 2`, el par cuenta una vez |
+| Dominio con score 0 | `{1: 0.9, 2: 0.0}` | solo la especie del dominio 1 cuenta |
+| Media entre combinaciones | `c = 0.5` y `c = 0.9` para el mismo par de dominios | `c = 0.7` |
+| Noisy-OR | un dominio con parejas `c = 0.5` y `c = 0.5` | `s = 0.75` |
+| Sin `pair_lca` | ningún par converge | `core = 0` |
+| Dominios del diseño | `design_domains` añade un dominio sin registro (K = 4) | la fuerza se divide por 4 |
 
-`hyp_records = [{"hyp": "H1", "sides": <A.2>}]`. Universo (`domain_meta` de A.2) = `{1, 2}`.
-
-- **top**: `s̄_1 = 0.95/1 = 0.95`, `s̄_2 = 0.95`. `w̄_1 = w̄_2 = 1.0/1 = 1.0`.
-  `core_top = (1.0·0.95 + 1.0·0.95) / (1.0 + 1.0) = 1.90/2 = 0.95`.
-  `domain_scores = {1: 0.95, 2: 0.95}`, `domain_weights = {1: 1.0, 2: 1.0}`,
-  `domain_der = {1: "V", 2: "V"}`, `domain_anc = {1: "A", 2: "A"}`.
-  `agree_den = n_participating = 2`, `agree_num = 2` → `"convergent"`.
-  `asr_path_score = core = 0.95`.
-- **bottom**: `s̄_1 = s̄_2 = 0.0`, `w̄ = 1.0`. `core_bottom = 0 / 2 = 0.0`.
-  `domain_scores = {1: 0.0, 2: 0.0}`, `domain_weights = {1: 1.0, 2: 1.0}`,
-  `domain_der = {}`, `domain_anc = {}`. `agree_den = n_participating = 0` → `"no_change"`.
-- `n_hypotheses = 1`.
-
-### B.1. `m1_pss_shifts_to_d1` — `M = 1`, PSS reordena el diseño
-
-`hyp_records = [{"hyp": "H1", "sides": <A.6>}]` (VVL: `score` top `{1: 0.95, 2: 0.95,
-3: 0.0}`). `pss = [["H1",1,0.9], ["H1",2,0.9], ["H1",3,0.1]]`. Universo = `{1, 2, 3}`.
-
-- **top**: `s̄ = {1: 0.95, 2: 0.95, 3: 0.0}`. `w̄ = {1: 0.9, 2: 0.9, 3: 0.1}`.
-  `Σ w̄·s̄ = 0.9·0.95 + 0.9·0.95 + 0.1·0 = 0.855 + 0.855 = 1.71`.
-  `Σ w̄ = 1.9`. `core_top = 1.71 / 1.9 = 0.90`.
-  (Equipeso daría `(0.95 + 0.95 + 0) / 3 = 0.6333`; el PSS empuja hacia los dominios V.)
-  `domain_scores = {1: 0.95, 2: 0.95, 3: 0.0}`, `domain_weights = {1: 0.9, 2: 0.9,
-  3: 0.1}`, `domain_der = {1: "V", 2: "V", 3: "L"}`, `domain_anc` todo `"A"`.
-  `agree_den = 3`, `agree_num = 2` → `"convergent"`. `n_participating = 3`.
-- **bottom**: `s̄ = 0` ∀ d. `Σ w̄·s̄ = 0`, `Σ w̄ = 1.9` → `core_bottom = 0.0`.
-  `domain_der = {}`, `agree_den = 0` → `"no_change"`.
-- `n_hypotheses = 1`.
-
-### B.2. `m2_domain_changed_only_in_H1` — `s̄_d = score / M`
-
-`hyp_records = [{"hyp": "H1", "sides": <A.2>}, {"hyp": "H2", "sides": <A.8>}]`.
-Sin PSS. Universo = `{1, 2}`. `M = 2`.
-
-- **top**: `Σ_h score_1 = 0.95 (H1) + 0.0 (H2) = 0.95` → `s̄_1 = 0.95/2 = 0.475`.
-  `s̄_2 = 0.475`. `w̄_1 = w̄_2 = (1.0 + 1.0)/2 = 1.0`.
-  `core_top = (1.0·0.475 + 1.0·0.475) / 2 = 0.475`.
-  `domain_scores = {1: 0.475, 2: 0.475}`, `domain_weights = {1: 1.0, 2: 1.0}`.
-  `domain_der`: `d1` sobre `h` = `["V"]` (H2 no lo cambió) → `_modal_str = "V"`; `d2 = "V"`.
-  `agree_den = 2` (cambiados en ≥1 h), `agree_num = 2` → `"convergent"`.
-  `n_participating = 2`.
-- **bottom**: todo 0 → `core_bottom = 0.0`, `"no_change"`.
-- `n_hypotheses = 2`.
-
-### B.3. `m2_asymmetric_pss_same_domain` — `w̄_d` = media de PSS por hipótesis
-
-`hyp_records = [{"hyp": "H1", "sides": <A.6>}, {"hyp": "H2", "sides": <A.6>}]`.
-`pss = [["H1",1,0.1], ["H2",1,0.9], ["H1",2,0.9], ["H2",2,0.9], ["H1",3,0.5],
-["H2",3,0.5]]`. Universo = `{1, 2, 3}`. `M = 2`.
-
-- **top**: `s̄_1 = (0.95 + 0.95)/2 = 0.95`, `s̄_2 = 0.95`, `s̄_3 = (0 + 0)/2 = 0`.
-  `w̄_1 = (0.1 + 0.9)/2 = 0.5`, `w̄_2 = (0.9 + 0.9)/2 = 0.9`, `w̄_3 = (0.5 + 0.5)/2 = 0.5`.
-  `Σ w̄·s̄ = 0.5·0.95 + 0.9·0.95 + 0.5·0 = 0.475 + 0.855 = 1.33`. `Σ w̄ = 1.9`.
-  `core_top = 1.33 / 1.9 = 0.70`.
-  `domain_scores = {1: 0.95, 2: 0.95, 3: 0.0}`, `domain_weights = {1: 0.5, 2: 0.9,
-  3: 0.5}`, `domain_der = {1: "V", 2: "V", 3: "L"}`. `agree_den = 3`, `agree_num = 2`
-  → `"convergent"`. `n_participating = 3`.
-- **bottom**: `core_bottom = 0.0`, `"no_change"`.
-- `n_hypotheses = 2`.
-
-### B.4. `side_none_collapse` — nada cambió; ambos `agg` a 0
-
-`hyp_records = [{"hyp": "H1", "sides": <A.8>}]`. Sin PSS. Universo = `{1, 2}`. `M = 1`.
-
-- **top** y **bottom**: `s̄_1 = s̄_2 = 0.0`, `w̄_1 = w̄_2 = 1.0`.
-  `Σ w̄·s̄ = 0`, `Σ w̄ = 2.0` → `core_s = 0 / 2 = 0.0`.
-  `domain_scores = {1: 0.0, 2: 0.0}`, `domain_weights = {1: 1.0, 2: 1.0}`,
-  `domain_der = {}`, `domain_anc = {}`. `agree_den = agree_num = n_participating = 0`
-  → `"no_change"`.
-- `n_hypotheses = 1`. El caller (`_emit_pooled_side_rows`) colapsa esto a una fila
-  `side = "none"`.
-
-### B.5. `no_reconstruction_in_denominator` — el slot vacío tira `core` abajo
-
-`hyp_records = [{"hyp": "H1", "sides": <A.9>}]`. Sin PSS.
-Universo = `domain_meta` de A.9 = `{1, 2, 3}`. `M = 1`.
-
-- **top**: `s̄_1 = 0.95`, `s̄_2 = 0.95`, `s̄_3 = get(3, 0.0) / 1 = 0.0` (d3 nunca en
-  `domain_scores`). `w̄_1 = w̄_2 = w̄_3 = 1.0` (PSS por defecto para el slot vacío también).
-  `Σ w̄·s̄ = 0.95 + 0.95 + 0 = 1.90`. `Σ w̄ = 3.0`. `core_top = 1.90 / 3 = 0.633333…`.
-  (Si d3 se excluyera del denominador: `1.90 / 2 = 0.95`. La regla "denominador = todos los
-  K" penaliza el dato faltante.)
-  `domain_scores = {1: 0.95, 2: 0.95, 3: 0.0}`, `domain_weights = {1: 1.0, 2: 1.0,
-  3: 1.0}`, `domain_der = {1: "V", 2: "V"}` (d3 nunca cambió), `domain_anc = {1: "A",
-  2: "A"}`. `agree_den = 2`, `agree_num = 2` → `"convergent"`. `n_participating = 2`.
-- **bottom**: `core_bottom = 0.0`, `"no_change"`.
-- `n_hypotheses = 1`.
-
-### B.6. `m3_split_scheme_resolved_US` vs `_GS3` — el pooling es agnóstico de esquema
-
-3 hipótesis, dominios `d1` (node 3) y `d2` (node 5). El tip fg de `d1` varía por hipótesis
-(H1 → V, H2 → I, H3 → L); `d2 → V` en las tres. `focal A`, `post[3] = post[5] = V_here`
-(y `{I}` / `{L}` según haga falta para el tip; el tip no lee del posterior, se pasa en
-`pair_details`).
-
-**`compute_domain_scores` por hipótesis, esquema US:**
-
-| h | `d1` der | `d2` der | `domain_scores` top | nota |
-|---|---|---|---|---|
-| H1 | V | V | `{1: 0.95, 2: 0.95}` | `partners` mutuos, `contrib(1,2)@0 = 0.95` |
-| H2 | I | V | `{1: 0.0, 2: 0.0}` | `enc(I) ≠ enc(V)` → sin `partners`; `agree_den 2, agree_num 1` → `divergent` |
-| H3 | L | V | `{1: 0.0, 2: 0.0}` | idem |
-
-**`pool_domains` US** (`M = 3`, sin PSS, universo `{1, 2}`):
-
-- `s̄_1 = (0.95 + 0 + 0)/3 = 0.316667`. `s̄_2 = (0.95 + 0 + 0)/3 = 0.316667`.
-  `w̄_1 = w̄_2 = 1.0`. `core_top = (0.316667 + 0.316667)/2 = 0.316667`.
-- `domain_der`: `d1` sobre h = `["V", "I", "L"]` → `_modal_str` (empate, first-seen) = `"V"`;
-  `d2 = "V"`. `domain_der_enc` modal: `d1 → "V"`, `d2 → "V"`.
-  `agree_den = 2`, `agree_num = 2` (`{V: 2}`) → `"convergent"` (etiqueta = conteo físico;
-  el score es bajo — son cosas distintas). `n_participating = 2`.
-- `domain_scores = {1: 0.316667, 2: 0.316667}`, `domain_weights = {1: 1.0, 2: 1.0}`.
-- **bottom**: `core_bottom = 0.0`. `n_hypotheses = 3`.
-
-**`compute_domain_scores` por hipótesis, esquema GS3** (`V, I, L → 'l'`, `A → 'n'`;
-`dist@0` enc GS3 `{n: .95, l: .05}`):
-
-| h | `d1` der_enc | `d2` der_enc | `domain_scores` top |
-|---|---|---|---|
-| H1 | l | l | `{1: 0.95, 2: 0.95}` |
-| H2 | l | l | `{1: 0.95, 2: 0.95}` |
-| H3 | l | l | `{1: 0.95, 2: 0.95}` |
-
-**`pool_domains` GS3** (`M = 3`, universo `{1, 2}`):
-
-- `s̄_1 = (0.95·3)/3 = 0.95`. `s̄_2 = 0.95`. `w̄ = 1.0`.
-  `core_top = (0.95 + 0.95)/2 = 0.95`.
-- `domain_der` (crudo): `d1` → `_modal_str(["V","I","L"]) = "V"`, `d2 = "V"`.
-  `domain_der_enc` modal: `d1 → "l"`, `d2 → "l"`. `agree_den = 2`, `agree_num = 2` (`{l: 2}`)
-  → `"convergent"`. `n_participating = 2`.
-- `domain_scores = {1: 0.95, 2: 0.95}`, `domain_weights = {1: 1.0, 2: 1.0}`.
-- **bottom**: `core_bottom = 0.0`. `n_hypotheses = 3`.
-
-Mismo harvest, mismo `pool_domains` (sin `scheme`), resultado `0.317` vs `0.95` según el
-esquema bajo el que se corrió `compute_domain_scores`. La resolución bioquímica vive aguas
-arriba; el pooling solo promedia.
-
----
 
 ## Apéndice C — deltas Tier-1 (PEPC) esperados
 
@@ -545,8 +425,7 @@ arriba; el pooling solo promedia.
 - Semántica del denominador — v2 era `|P_s| + n_conserved`; v3 es `Σ_{d=1..K} w̄_d` sobre
   los K dominios fijos. Posiciones cuyos dominios cambiaron **solo en el otro lado**
   puntúan más bajo en el lado `s`.
-- Posiciones FOP multi-hipótesis re-escoran — media de medias reemplaza el
-  `noisy_or` / `p_at_least_2` de pooling por dominio; el PSS pesa dominios, no hipótesis.
+- Posiciones FOP multi-hipótesis re-escoran con la fórmula de la §3.2.
 - Etiquetas `convergence_type` cambian para algunas posiciones (recomputadas harvest-wide).
 - `gene_caas_score`, rankings de `position_scores.tsv` / `gene_scores.tsv` se reordenan.
 - `position_scores.tsv` pierde `convergence_schemes`, `n_conserved_pairs`;

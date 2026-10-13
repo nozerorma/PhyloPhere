@@ -141,8 +141,8 @@ Con `max_fop = 100` se conservan las 4.
 **Salidas:**
 
 - `contrast_hypotheses_pairs.tsv`: `hypothesis_id`, `pair` (= id de **dominio de Voronoi**),
-  `species1`, `species2`, `pss_score`. Es el fichero de pesos PSS que consume el
-  domain-pooling del scoring (H.2).
+  `species1`, `species2`, `pss_score`. Es el fichero del diseño observado: su PSS lo usan
+  el selector y el nulo, y sus especies dan `S` del scoring (H.2).
 - `traitfile_H1.tab … traitfile_H4.tab`: cada una un fichero de contraste de 3 columnas
   (`species`, `1|0`, `pair`). **Todo paso CT posterior corre una vez por hipótesis**; la
   columna `trait` del `discovery.tab` lleva `traitfile_H<n>.tab`.
@@ -286,10 +286,10 @@ los recorridos MRCA→raíz invariantes al labeling.
 > la unidad *par* por el **dominio de Voronoi**: `compute_domain_scores` da
 > `score_d^{h,s} = noisy_or` de `contrib_h(d,d') = agree · (1 − P_wc_any(set @ LCA))` sobre
 > compañeros del mismo residuo (**sin factor de aislamiento, sin PSS aquí**);
-> `pool_domains` colapsa la cosecha FOP como **media de medias**
-> `core_s = Σ_d w̄_d·s̄_d / Σ_d w̄_d` sobre los K dominios fijos, con
-> `s̄_d = Σ_h score_d^{h,s} / M`, `w̄_d = Σ_h PSS_d^h / M` (**el PSS entra solo aquí**);
-> `M = 1` degenera a `Σ_d PSS_d·score_d / Σ_d PSS_d`. Los bloques columna F.4 pasan de
+> `pool_domains` combina la cosecha FOP sin pesar hipótesis:
+> cada pareja de dominios con el mismo residuo da `c` (la media entre sus combinaciones de especies),
+> `s_d = noisy_or` de las `c` de sus parejas y `core_s = (Σ_d s_d / K) · n_sp / S`, con `n_sp` las especies
+> distintas que llevan el derivado en un dominio con score positivo y `S` las especies del diseño del ciclo. Los bloques columna F.4 pasan de
 > `mrca_<i>_*` a `domain_<d>_{node,state,posterior,score,anc_aa,top_aa,bot_aa}`; se van
 > `conserved_<j>_*` e `independence`. El gate VEP `convergence_schemes` se retira.
 
@@ -421,9 +421,8 @@ Cinco esquemas de scoring (`US, GS4, GS3, GS2, GS1`). `scheme_priority` (US=5…
 > **TODO core v3 (`scoring_v2`, prosa final en V3-4/V3-6).** Los Pasos 1–4 de abajo
 > (dedup por `mrca_<i>_node`, dos trabajos de peso PSS, `p_at_least_2` direccional,
 > `rebuild_derived_agreement`) se sustituyen por `fop_pool.py::pool_domains` **sin árbol**:
-> `core_s = Σ_d w̄_d·s̄_d / Σ_d w̄_d` sobre los K dominios de Voronoi fijos, con
-> `s̄_d` = media sobre las M hipótesis de `score_d^{h,s}` (una hipótesis sin cambio en `d`
-> aporta 0) y `w̄_d` = media sobre M del PSS `(hipótesis, dominio)`. El dedup por nodo (T4c)
+> `core_s = (Σ_d s_d / K) · n_sp / S` sobre los K dominios de Voronoi fijos (fórmula completa en
+> [`scoring_v3_core.md`](scoring_v3_core.md) §3.2). El dedup por nodo (T4c)
 > **se disuelve**: el índice de dominio es la clave. `fop_pool.R` se borra en V3-5;
 > `apply_fop_pooling` desaparece de §2b. Detalle: [`scoring_v3_core.md`](scoring_v3_core.md) §3.
 
@@ -634,9 +633,9 @@ Paso posterior a SCORING que explica de dónde sale el score de las posiciones m
   (`top_species`, `bottom_species`, `top_tip_aa`, `bottom_tip_aa`); el score del dominio en cada lado
   (`top_domain_score`, `bottom_domain_score`) y el LCA de los dominios que comparten residuo (`top_pair_lca`,
   `bottom_pair_lca`). `top_positions.tsv` lista gen, posición, `CAAS_score` y `p.emp` en orden de ranking.
-- **Relación con el master.** `domain_<d>_score` del master es la media, sobre las hipótesis de la posición, del score
-  del dominio en ese lado (0 donde el dominio no cambió). La tabla reproduce esa media con sus propias filas y no
-  añade ningún cálculo. Los pesos PSS actúan solo al agrupar las hipótesis, de modo que no intervienen aquí.
+- **Relación con el master.** `domain_<d>_score` del master es `s_d`, el noisy-OR de las `c` de las parejas del dominio en ese lado sobre
+  todas las hipótesis de la posición (0 sin pareja). La tabla lista, por hipótesis, el score de cada dominio y el LCA de sus parejas; el `s_d` del
+  master combina las parejas de todas las hipótesis (§3.2 del contrato) y por eso puede diferir del score por hipótesis de la tabla.
 - **Requisitos y fallos.** Necesita `--scoring`, el `discovery.tab` del observado (el de la corrida, o el dado con
   `--discovery_from`) y la caché de ASR. Si un gen elegido carece de alineamiento, ASR o filas de descubrimiento, o si
   una posición elegida no tiene filas en `discovery.tab`, el script escribe lo que pudo explicar y termina con error.
