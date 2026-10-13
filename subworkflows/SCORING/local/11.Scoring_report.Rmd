@@ -32,6 +32,7 @@ params:
   perm_manifest_file: NULL
   hypotheses_pairs_file: NULL
   perm_harvest_file: NULL
+  null_universe_file: NULL
   caas_pos_sample_file: NULL
   caas_pos_quantiles_file: NULL
   filtered_discovery_file: NULL
@@ -735,6 +736,50 @@ knitr::kable(dplyr::bind_rows(lapply(names(.vol_n), function(m) {
 The plot shows how far a cycle departs from the median cycle, in folds, and the red line is where the run falls.
 The table gives the same spread in numbers and the share of null cycles that detect at least as much as the run.
 
+### Null universe
+
+```{r null-universe-na, eval=!.file_ok(params$null_universe_file), results='asis'}
+cat("_No null-universe summary for this run (`null_universe_summary.tsv` absent: no position-level null given to SCORING)._\n\n")
+```
+
+```{r null-universe-text, eval=.file_ok(params$null_universe_file), results='asis'}
+.nu <- readr::read_tsv(params$null_universe_file, show_col_types = FALSE)
+.nu_val  <- function(m) { v <- .nu$value[.nu$metric == m]; if (length(v)) v[[1]] else NA_real_ }
+.nu_note <- function(m) { v <- .nu$note[.nu$metric == m]; if (length(v) && !is.na(v[[1]])) v[[1]] else "" }
+.nu_n <- function(x) if (is.finite(x)) format(round(x), big.mark = ",", trim = TRUE) else "NA"
+
+cat(paste0(
+  "The position p-values compare each observed position with a null that can only produce the positions the ",
+  "permulation labelings reach. The universe U of the position family (`p.adj_bh`, `p.adj_bh_fact`, and the pool of ",
+  "the classes of `p.emp_fact`) is the null-positive positions inside the tested set plus every observed positive ",
+  "position, the same set the position enrichment uses as background.\n\n",
+  "- **N**: ", .nu_n(.nu_val("N_cycles")), " cycles (", .nu_note("N_cycles"), "; ",
+  .nu_n(.nu_val("N_cycles_present_in_null")), " leave a row in the null file)\n",
+  "- **Null-positive positions**: ", .nu_n(.nu_val("null_positive_positions_all")), " in total, ",
+  .nu_n(.nu_val("null_positive_positions_in_universe")), " in U (", .nu_note("null_positive_positions_in_universe"), ")\n",
+  "- **Observed positive positions**: ", .nu_n(.nu_val("observed_positive_positions")), "\n",
+  "- **Observed positions the null never scored**: ", .nu_n(.nu_val("observed_unseen_positions")),
+  sprintf(" (%.1f%%)\n", 100 * .nu_val("fraction_unseen")),
+  "- **|U|**: ", .nu_n(.nu_val("universe_size")), " positions\n\n",
+  "An unseen position is a position no null cycle scored. It keeps p = 1/(N + 1) and stays in the BH families and ",
+  "in the enrichment background: the unseen fraction diagnoses whether N cycles are enough for the null to reach ",
+  "the positions that can be scored, and demotes nothing.\n\n"))
+```
+
+```{r null-universe-curve, eval=.file_ok(params$null_universe_file), fig.height=4, fig.width=8}
+.nu_curve <- .nu %>% filter(metric == "null_positive_positions_cumulative", is.finite(cycles))
+if (nrow(.nu_curve) > 0) {
+  ggplot(.nu_curve, aes(x = cycles, y = value)) +
+    geom_line(colour = "grey40") +
+    geom_point(size = 2.2, colour = "#E15759") +
+    scale_y_continuous(labels = scales::comma) +
+    labs(title = "Saturation of the null",
+         subtitle = "distinct null-positive positions of U seen in the first k cycles",
+         x = "cycles", y = "positions") +
+    theme_minimal(base_size = 12)
+}
+```
+
 ### Null harvest
 
 How many permulated labelings the harvest drew, how many it kept, why it discarded the others, and how much of the
@@ -942,15 +987,10 @@ if ("draw_signature" %in% names(.man_div) && any(nzchar(.man_div$draw_signature)
 .dup_rate <- if (.n_tot > 0) .n_dup / .n_tot else 0.0
 .max_mult <- if (length(.tab_sigs)) max(.tab_sigs) else 0L
 
-# Normalized Shannon entropy
+# Effective number of distinct draws (inverse Simpson index): the size of an equally redundant pool of
+# equally frequent draws; N when every draw is unique, 1 when one draw fills the pool.
 .p_sig <- as.numeric(.tab_sigs) / max(.n_tot, 1L)
-.ent_norm <- if (.n_tot > 1 && .n_uniq > 1) {
-  -sum(.p_sig * log(.p_sig)) / log(.n_tot)
-} else if (.n_tot > 0 && .n_uniq == 1) {
-  0.0
-} else {
-  1.0
-}
+.eff_draws <- if (.n_tot > 0) 1 / sum(.p_sig^2) else 0
 
 # Multiplicity counts
 .mult_counts <- tibble::as_tibble(.tab_sigs, .name_repair = "minimal") %>%
@@ -973,14 +1013,15 @@ if ("draw_signature" %in% names(.man_div) && any(nzchar(.man_div$draw_signature)
              "Uniqueness rate",
              "Redundancy rate",
              "Max multiplicity (most frequent draw)",
-             "Normalized Shannon entropy"),
+             "Effective number of distinct draws"),
   Value = c(format(.n_tot, big.mark = ","),
             format(.n_uniq, big.mark = ","),
             format(.n_dup, big.mark = ","),
             sprintf("%.2f%%", 100 * (1 - .dup_rate)),
             sprintf("%.2f%%", 100 * .dup_rate),
             sprintf("%d cycles (%.2f%% of pool)", .max_mult, 100 * .max_mult / max(.n_tot, 1L)),
-            sprintf("%.4f (1.0 = maximal diversity)", .ent_norm))
+            sprintf("%s (%.1f%% of N; bounds the resolution of an empirical p)",
+                    format(round(.eff_draws, 1), big.mark = ","), 100 * .eff_draws / max(.n_tot, 1L)))
 )
 print(knitr::kable(.div_kpis, caption = "Null Draw Diversity & Redundancy Summary"))
 cat("\n\n")
@@ -1078,8 +1119,9 @@ cat(sprintf(paste0(
   "that detect the position (on either phenotype side) and give it a `CAAS_score` at least as high as the ",
   "observed one, counting the observed run as one more cycle, (k + 1)/(N + 1). Its minimum is 1/(N + 1), ",
   "reported as `< 1/N`. A position with an observed score of 0 has p.emp = 1. `p.adj_bh` is its Benjamini-Hochberg ",
-  "adjustment over one test per position, across every position the null detects (positions the null detects ",
-  "and the observed data do not enter at p = 1).\n\n",
+  "adjustment over one test per position of the universe U of the null-universe tab (the null-positive positions ",
+  "inside the tested set plus every observed positive position; positions the null detects and the observed data ",
+  "do not enter at p = 1).\n\n",
   "`p.emp_fact` is the same quantity factorized: the proportion of cycles that detect the position times the ",
   "proportion of the detections of positions of a similar propensity to be detected (the cycles that detect ",
   "them) that reach its score. It is not limited by the 1/(N + 1) floor, so it orders positions that `p.emp` ",

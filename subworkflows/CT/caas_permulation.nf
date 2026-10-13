@@ -187,6 +187,8 @@ process CAAS_CORE_BATCHED {
     """
     # One worker pool per step runs the genes in parallel; BLAS and OpenMP stay at one thread each.
     export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+    # Memory of one replay worker: the ASR replay splits a gene whose replay would not fit in it into cycle chunks.
+    export CAAS_PERMS_WORKER_MEM_MB=\$(( ${task.memory.toMega()} / ${task.cpus} ))
     mkdir -p perm_disc b0_observed
     PERM_DISC=perm_disc_in
     if ${replay}; then
@@ -385,7 +387,7 @@ process CAAS_CORE_MERGE {
     tag "caas_core_merge"
     label 'process_medium'
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true,
-               pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv,perm_pos_cycle_caas.tsv.gz,removed_units.tsv,b0}'
+               pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv,perm_pos_cycle_caas.tsv.gz,cycle_roster.txt,removed_units.tsv,b0}'
 
     input:
     path batchDetail, stageAs: 'batch_*'   // batch shard directories, or one legacy perm_pos_detail.tsv.gz
@@ -399,6 +401,7 @@ process CAAS_CORE_MERGE {
     path "caas_perms.rds",            emit: perms
     path "gene_cycle_scores.tsv",     emit: gene_cycle_scores
     path "removed_units.tsv",         emit: removed_units, optional: true   // null gene removal (only when a gene annotation was given)
+    path "cycle_roster.txt",          emit: cycle_roster,  optional: true   // every replayed cycle, the ones with no detection included: N of every consumer of the null (absent when the labelings file is NO_LABELINGS)
     path "perm_pos_cycle_caas.tsv.gz", emit: pos_cycle_caas, optional: true
     path "perm_pos_sample.tsv",       emit: pos_sample,    optional: true
     path "perm_pos_quantiles.tsv",    emit: pos_quantiles, optional: true

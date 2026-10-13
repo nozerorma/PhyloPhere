@@ -18,7 +18,10 @@ over sides, and each (pos_id, cycle) pair has a single score.
 Called by:  POSENRICH_PREP_NULL Nextflow process (posenrich.nf → posenrich_prep_caas_null.py)
 Inputs:     --caas-cycle-null  perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_score, n_schemes);
                                absent or a NO_FILE* sentinel gives an empty artifact
-Outputs:    caas_null_prepped.pkl  dict with cycle_levels (sorted array of every cycle in the file)
+            --cycle-roster     cycle_roster.txt of the same CAAS_CORE_MERGE run (optional): N of the null, the
+                               cycles with no detection included
+Outputs:    caas_null_prepped.pkl  dict with cycle_levels (sorted array of the replay roster, or of the cycles
+                                   present in the file when no roster fits)
                                    and global/top/bottom (DataFrames pos_id, cycle, score; pos_id categorical);
                                    all four entries are None for an empty artifact
 """
@@ -42,11 +45,38 @@ def parse_args():
                    help="perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, "
                         "caas_score, n_schemes). Omit or pass a NO_FILE* sentinel to "
                         "write an empty artifact (p.perm stays NA downstream).")
+    p.add_argument("--cycle-roster", default=None,
+                   help="cycle_roster.txt (one replayed cycle per line): N of the null. Without it, or when it "
+                        "does not list every cycle of the null file, N is the number of cycles present in the file.")
     p.add_argument("--output", default="caas_null_prepped.pkl")
     return p.parse_args()
 
 
 # ── Reduction ─────────────────────────────────────────────────────────────────
+
+
+def resolve_cycle_levels(roster_path, cycles_present):
+    """Sorted array of the cycles that make N of the null: the roster when it lists every cycle present, else the cycles present.
+
+    The roster counts the cycles that detected nothing, which the null file cannot show; falling back to the
+    cycles present can only raise the permulation p-values. The choice is printed either way. The same rule as
+    scoring_compute.R and randomize.py (accumulation).
+    """
+    present = {str(c) for c in cycles_present}
+    if roster_path and os.path.exists(roster_path) and not os.path.basename(roster_path).startswith("NO_"):
+        with open(roster_path) as fh:
+            roster = {line.strip() for line in fh if line.strip()}
+        stray = present - roster
+        if not stray:
+            print(f"[posenrich_prep] N = {len(roster)} cycles (replay roster; {len(present)} present in the null file)",
+                  flush=True)
+            return np.sort(np.asarray(sorted(roster), dtype=object))
+        print(f"[posenrich_prep] WARNING: the roster does not list {len(stray)} cycle(s) of the null file "
+              f"(e.g. {sorted(stray)[:3]}): ignored, N = cycles present ({len(present)})", flush=True)
+    else:
+        print(f"[posenrich_prep] no cycle roster: N = cycles present in the null file ({len(present)}), "
+              f"which understates N by the cycles with no detection", flush=True)
+    return np.sort(np.asarray(sorted(present), dtype=object))
 
 
 def write_empty(path):
@@ -86,7 +116,7 @@ def main():
 
     # The categories of cycle are exactly its distinct values, so this reads the category
     # list instead of scanning every row.
-    cycle_levels = np.sort(np.asarray(df["cycle"].cat.categories, dtype=object))
+    cycle_levels = resolve_cycle_levels(args.cycle_roster, df["cycle"].cat.categories)
 
     # Keep only null hits with caas_score > 0 (U_CAAS possibility space)
     df["caas_score"] = pd.to_numeric(df["caas_score"], errors="coerce")

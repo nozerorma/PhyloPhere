@@ -27,10 +27,11 @@ workflow CT_ACCUMULATION {
         trait_file_channel    // traitfile from CT (pruned when contrast_selection is on; or Channel.empty())
         tested_positions_channel // caastools background.output — TESTED positions; the
                                  // randomization null's eligible pool (or Channel.empty())
-        pos_detail_channel       // sharded perm_pos_detail/ dir from CAAS_CORE_MERGE; the
-                                 // permulation randomization type's null (or Channel.empty())
-        gene_cycle_scores_channel // gene_cycle_scores.tsv from the SAME CAAS_CORE_MERGE run;
-                                 // authoritative cycle count for the permulation null (or Channel.empty())
+        null_cycle_caas_channel  // perm_pos_cycle_caas.tsv.gz from CAAS_CORE_MERGE, the filtered null SCORING also
+                                 // uses; the permulation type's null and the universe U of the draw pool of the
+                                 // naive and cons_decile types (or Channel.empty())
+        cycle_roster_channel     // cycle_roster.txt from the SAME CAAS_CORE_MERGE run; N of the
+                                 // permulation null (or Channel.empty())
         taxid_map_channel        // tax_id map (curated by NAME_CURATION) for the clade variability, or the NO_FILE sentinel
 
     main:
@@ -191,15 +192,15 @@ workflow CT_ACCUMULATION {
             .collect()
             .map { it[0] }
         def bg_universe_val = background_val.ifEmpty { file('NO_BG_UNIVERSE') }
-        // Only consumed when accumulation_randomization_type == 'permulation'; the
-        // NO_ sentinel keeps every other randomization type unaffected (ctacc_run.nf
-        // turns a NO_-prefixed path into an empty CLI flag).
-        def pos_detail_val = (pos_detail_channel ?: Channel.empty())
-            .ifEmpty { file(params.caas_pos_detail_file ?: 'NO_PERM_POS_DETAIL') }
+        // Passed to every randomization type: the null of 'permulation', the universe U of the
+        // draw pool of 'naive' and 'cons_decile'. Without the table (NO_ sentinel, which ctacc_run.nf
+        // turns into an empty CLI flag) the occupancy nulls draw from the tested pool.
+        def null_cycle_caas_val = (null_cycle_caas_channel ?: Channel.empty())
+            .ifEmpty { file(params.caas_pos_cycle_caas_file ?: 'NO_NULL_CYCLE_CAAS') }
             .collect()
             .map { it[0] }
-        def gene_cycle_scores_val = (gene_cycle_scores_channel ?: Channel.empty())
-            .ifEmpty { file(params.caas_gene_cycle_scores_file ?: 'NO_GENE_CYCLE_SCORES') }
+        def cycle_roster_val = (cycle_roster_channel ?: Channel.empty())
+            .ifEmpty { file(params.caas_cycle_roster_file ?: 'NO_CYCLE_ROSTER') }
             .collect()
             .map { it[0] }
 
@@ -208,16 +209,16 @@ workflow CT_ACCUMULATION {
             .combine(meta_caas_val)
             .combine(tested_pos_val)
             .combine(bg_universe_val)
-            .combine(pos_detail_val)
-            .combine(gene_cycle_scores_val)
-            .multiMap { dir, global_csv, caas_csv, tested_pos, bg_universe, pos_detail, gene_cycle_scores ->
+            .combine(null_cycle_caas_val)
+            .combine(cycle_roster_val)
+            .multiMap { dir, global_csv, caas_csv, tested_pos, bg_universe, null_cycle_caas, cycle_roster ->
                 direction:         dir
                 global:            global_csv
                 caas:              caas_csv
                 tested:            tested_pos
                 universe:          bg_universe
-                pos_detail:        pos_detail
-                gene_cycle_scores: gene_cycle_scores
+                null_cycle_caas:   null_cycle_caas
+                cycle_roster:      cycle_roster
             }
 
         randomize_out = CT_ACCUMULATION_RANDOMIZE(
@@ -226,8 +227,8 @@ workflow CT_ACCUMULATION {
             rand_in.caas,
             rand_in.tested,
             rand_in.universe,
-            rand_in.pos_detail,
-            rand_in.gene_cycle_scores
+            rand_in.null_cycle_caas,
+            rand_in.cycle_roster
         )
 
         // ── Accumulation report (rendered after all directions complete) ──────

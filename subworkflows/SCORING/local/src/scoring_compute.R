@@ -22,13 +22,19 @@
 #   --fade_site_top, --fade_site_bot  per-site FADE tables (comma-delimited)
 #   --rer                 rerconverge_summary_<trait>.tsv
 #   --accum_dir           directory with accumulation_<direction>_<scheme>_aggregated_results.csv
-#   --caas_perms          caas_perms.rds (scoring_caas_perms.R); its cycle roster gives N for the position p
+#   --caas_perms          caas_perms.rds (scoring_caas_perms.R); its cycle roster gives N for the position p when no roster file is given
 #   --caas_pos_cycle_caas perm_pos_cycle_caas.tsv.gz, the position-level null for p.emp
+#   --cycle_roster        cycle_roster.txt of the CAAS_CORE_MERGE run: N of the null, the cycles with no detection included
+#   --tested_positions    caastools background.output (gene, tested positions): the positions the null is restricted to
+#   --universe            cleaned_background_main.txt: genes the restricted null is limited to
 #   --hypotheses_pairs, --top_pct, --gene_top_pct   parsed but not used by the computation
 #
 # Outputs (working directory):
 #   position_scores.tsv            one row per Gene, Position and side that US detects; GS_schemes and is_biochem
-#                                  carry its biochemical profile
+#                                  carry its biochemical profile; nd (cycles of the null that score the position) and
+#                                  null_unseen (nd == 0) next to the position p-values
+#   null_universe_summary.tsv      N, size of the position universe, observed positions the null never scored and the
+#                                  saturation curve of the null (written when a null is given)
 #   position_biochem.tsv           one row per Gene, Position and side that any scheme detects: US, GS1-GS4 flags,
 #                                  GS_schemes, is_biochem, anc_aa (ancestral residue) and CAAS_score (NA when US
 #                                  does not detect it)
@@ -69,6 +75,9 @@ caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permul
 core_positions_file  <- parse_arg("--core_positions")  # observed_core_scores.py: CAAS_score per (Gene, Position, side)
 core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: size-adjusted gene CAAS scores
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
+cycle_roster_file    <- parse_arg("--cycle_roster")      # cycle_roster.txt: every replayed cycle (N of the null); NO_FILE otherwise
+tested_positions_file <- parse_arg("--tested_positions") # caastools background.output (gene<TAB>tested positions); NO_FILE otherwise
+universe_file        <- parse_arg("--universe")          # cleaned_background_main.txt (gene universe); NO_FILE otherwise
 # Rule of the position score: the US score, defined only when positive (core.scores.SCORE_RULE). The observed scores (observed_core_scores.py)
 # and the null (perm_pos_cycle_caas.tsv.gz, column score_aggregation) must use the same rule.
 score_aggregation <- "us_pos"
@@ -141,6 +150,107 @@ FACT_PROP_CLASSES <- 20L                       # propensity classes: percentiles
   p
 }
 # ── end of the factorized p helpers ───────────────────────────────────────────
+
+# ── Null universe helpers ─────────────────────────────────────────────────────
+# One N and one positional universe for every consumer of the CAAS permulation null (SCORING, POSENRICH, FCS,
+# accumulation permulation). The helpers are pure functions of their arguments.
+
+# N of the null: the cycles that make its denominator. The first source that lists every cycle present in the null file
+# is used: cycle_roster.txt (every replayed cycle), then the column set of caas_perms.rds (built from the same roster).
+# Without one, N is the number of cycles present, which cannot count the cycles that detected nothing and so can only
+# raise the p-values. Returns list(cycles, source).
+.resolve_n_cycles <- function(present, roster = NULL, perms_roster = NULL) {
+  present <- unique(as.character(present))
+  for (src in list(list("cycle_roster.txt", roster), list("caas_perms.rds", perms_roster))) {
+    r <- unique(as.character(src[[2]]))
+    if (!length(r)) next
+    stray <- setdiff(present, r)
+    if (!length(stray)) return(list(cycles = r, source = src[[1]]))
+    cat(sprintf("  WARNING: %s does not list %d cycle(s) of the null file (e.g. %s): ignored\n",
+                src[[1]], length(stray), paste(head(sort(stray), 3), collapse = ", ")), file = stderr())
+  }
+  cat(sprintf(paste0("  WARNING: no cycle roster fits the null file: N = %d cycles present in it, which understates N by ",
+                     "the cycles with no detection\n"), length(present)), file = stderr())
+  list(cycles = present, source = "cycles present in the null file")
+}
+
+# Cycles in replay order: numeric suffix first ("b_2" before "b_10"), label otherwise. The order only fixes the
+# checkpoints of the saturation curve; the cycles are exchangeable.
+.cycle_order <- function(cycles) {
+  cycles <- as.character(cycles)
+  cycles[order(suppressWarnings(as.numeric(sub("^.*_", "", cycles))), cycles)]
+}
+
+# Gene list of a one-gene-per-line file (header "Gene" ignored).
+.read_gene_list <- function(f) {
+  g <- trimws(readLines(f, warn = FALSE))
+  setdiff(g[nzchar(g)], "Gene")
+}
+
+# Whether each (gene, position) pair is a position CAAStools tested. tested_file is background.output: one line per gene,
+# `gene<TAB>comma-separated positions`. Only the genes asked for are parsed, so the 5.9M tested positions of a proteome
+# are never expanded. Returns list(in_tested, gene_covered): gene_covered says whether the gene has a line at all.
+.tested_membership <- function(tested_file, gene, position) {
+  lines <- readLines(tested_file, warn = FALSE)
+  tab <- regexpr("\t", lines, fixed = TRUE)
+  ok <- tab > 0
+  tested_gene <- substr(lines[ok], 1, tab[ok] - 1L)
+  tested_pos  <- substring(lines[ok], tab[ok] + 1L)
+  rm(lines)
+  gene <- as.character(gene)
+  in_tested <- logical(length(gene))
+  covered <- gene %in% tested_gene
+  rows_by_gene <- split(seq_along(gene), gene)
+  for (g in names(rows_by_gene)) {
+    i <- match(g, tested_gene)
+    if (is.na(i)) next
+    pos <- suppressWarnings(as.integer(strsplit(tested_pos[i], ",", fixed = TRUE)[[1]]))
+    r <- rows_by_gene[[g]]
+    in_tested[r] <- position[r] %in% pos
+  }
+  list(in_tested = in_tested, gene_covered = covered)
+}
+
+# The rows of the null (Gene, Position, cycle) that belong to the positional universe
+#   U = (null-positive positions in tested_ok) union (observed positive positions)
+# where tested_ok flags the null-positive positions inside the tested set (and the gene universe). An observed position
+# stays in U whether or not the null ever scored it: a position the null never produced is the strongest evidence by
+# design, and is neither demoted nor excluded. keep_obs is a data frame (Gene, Position) of the observed positive positions.
+.restrict_null_to_universe <- function(cyc_pooled, tested_ok, null_pos, keep_obs) {
+  key <- function(d) paste(d$Gene, d$Position, sep = ":")
+  keep <- tested_ok | key(null_pos) %in% key(keep_obs)
+  cyc_pooled %>% semi_join(null_pos[keep, c("Gene", "Position")], by = c("Gene", "Position"))
+}
+
+# Rows of null_universe_summary.tsv (metric, cycles, value, note): N, |U|, observed positive positions, the ones the null
+# never scored, and the saturation curve of the null (distinct null-positive positions of U after k cycles, at ~10
+# checkpoints). cyc_pooled is already restricted to U. An unseen fraction is a diagnostic of the adequacy of the null
+# (does N reach the positions that can be scored?), not a reason to demote a position.
+.null_universe_summary <- function(cyc_pooled, cycles, n_obs, n_unseen, n_null_raw, n_cycles_present,
+                                   n_source, universe_note) {
+  cycles <- .cycle_order(cycles)
+  N <- length(cycles)
+  first <- cyc_pooled %>%
+    mutate(.r = match(as.character(cycle), cycles)) %>%
+    group_by(Gene, Position) %>%
+    summarise(.first = min(.r), .groups = "drop")
+  n_null_u <- nrow(first)
+  ks <- sort(unique(pmax(1L, as.integer(round(seq(N / 10, N, length.out = 10))))))
+  curve <- vapply(ks, function(k) sum(first$.first <= k), numeric(1))
+  rbind(
+    data.frame(metric = c("N_cycles", "N_cycles_present_in_null", "null_positive_positions_all",
+                          "null_positive_positions_in_universe", "observed_positive_positions",
+                          "observed_unseen_positions", "fraction_unseen", "universe_size"),
+               cycles = NA_integer_,
+               value = c(N, n_cycles_present, n_null_raw, n_null_u, n_obs, n_unseen,
+                         if (n_obs > 0) n_unseen / n_obs else NA_real_, n_null_u + n_unseen),
+               note = c(n_source, "", "", universe_note, "", "positions whose null detections are 0 (p = 1/(N+1), kept)",
+                        "", "null-positive positions of U plus the observed positions the null never scored"),
+               stringsAsFactors = FALSE),
+    data.frame(metric = "null_positive_positions_cumulative", cycles = ks, value = curve,
+               note = "distinct null-positive positions of U seen in the first k cycles", stringsAsFactors = FALSE))
+}
+# ── end of the null universe helpers ──────────────────────────────────────────
 
 # Correlation over the complete pairs; NA when fewer than 3 remain.
 safe_cor <- function(x, y, method = "pearson") {
@@ -402,6 +512,8 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
 pos_scores$p.emp <- NA_real_
 pos_scores$p.emp_fact <- NA_real_
 pos_scores$p.adj_bh_fact <- NA_real_
+pos_scores$nd <- NA_integer_          # cycles of the null that score the position (informational)
+pos_scores$null_unseen <- NA          # nd == 0: the null never produced the position (informational, no demotion)
 has_caas_pos_cycle_caas <- file_exists(caas_pos_cycle_caas_file)
 # A null table with a header and no row (N = 0, or no permuted cycle re-detected any position) has no cycle to count:
 # (k + 1) / (N + 1) would read 1 for every position, a value rather than the absence of one. p.emp and p.adj_bh
@@ -410,8 +522,6 @@ if (has_caas_pos_cycle_caas && length(read_lines(caas_pos_cycle_caas_file, n_max
   cat("  perm_pos_cycle_caas.tsv.gz has no row: no null cycle, so p.emp and p.adj_bh stay NA\n")
   has_caas_pos_cycle_caas <- FALSE
 }
-# caas_perms.rds is loaded here when present: its columns are the cycle roster that gives N below.
-caas_perms <- NULL
 if (has_caas_pos_cycle_caas) {
   cat("Loading per-cycle CAAS null (p.emp):", caas_pos_cycle_caas_file, "\n")
   # caas_score is read as text and converted with as.numeric: readr's own double parser
@@ -429,6 +539,7 @@ if (has_caas_pos_cycle_caas) {
                         "p.emp and p.adj_bh would compare different statistics. Rebuild the null (CAAS_CORE_MERGE)."),
                  paste(.null_agg, collapse = "/"), score_aggregation))
   }
+  .cycles_in_file <- unique(as.character(cyc_caas$cycle))   # every cycle with a row, scored or not
   cyc_caas <- cyc_caas %>%
     mutate(Position = as.integer(Position),
            caas_score = suppressWarnings(as.numeric(caas_score))) %>%
@@ -446,31 +557,58 @@ if (has_caas_pos_cycle_caas) {
     group_by(Gene, Position) %>%
     summarise(.obs = max(CAAS_score), .groups = "drop")
 
-  # N = cycles replayed, not cycles present in the file: a cycle that re-detects
-  # no position emits no rows. The replay roster is the column set of
-  # caas_perms.rds (one column per cycle, zero-detection cycles included). It is
-  # used only if it contains every cycle present in the file; otherwise N falls
-  # back to the cycles present, which can only make p.emp larger.
+  # N = cycles replayed, not cycles present in the file: a cycle that re-detects no position emits no rows (see
+  # .resolve_n_cycles for the sources, in order: cycle_roster.txt, caas_perms.rds, the cycles present).
   N_present <- dplyr::n_distinct(cyc_pooled$cycle)
-  N_emp     <- N_present
+  .roster_file <- if (file_exists(cycle_roster_file)) {
+    .r <- trimws(readLines(cycle_roster_file, warn = FALSE)); .r[nzchar(.r)]
+  } else NULL
+  .perms_roster <- NULL
   if (file_exists(caas_perms_file)) {
-    caas_perms <- tryCatch(readRDS(caas_perms_file), error = function(e) NULL)
-    .roster <- colnames(caas_perms[["caas_corStat_byrank"]][["global"]])
-    if (!is.null(.roster) && all(unique(cyc_pooled$cycle) %in% .roster)) {
-      N_emp <- length(.roster)
+    .cp <- tryCatch(readRDS(caas_perms_file), error = function(e) NULL)
+    .perms_roster <- colnames(.cp[["caas_corStat_byrank"]][["global"]])
+    rm(.cp)
+  }
+  .n_res <- .resolve_n_cycles(.cycles_in_file, .roster_file, .perms_roster)
+  N_emp  <- length(.n_res$cycles)
+  cat(sprintf("  N = %d cycles (source: %s)\n", N_emp, .n_res$source))
+
+  # Positional universe U = (null-positive positions inside the tested set) union (observed positive positions): the
+  # family of p.adj_bh and p.adj_bh_fact, and the pool of the classes of p.emp_fact. The tested set is background.output
+  # (the positions CAAStools tested), limited to the genes of the cleaned background, the same set POSENRICH uses. An
+  # observed position is never removed from U, seen by the null or not. Without a usable tested set (no file, or a
+  # coordinate mismatch) U is every null-positive position plus the observed ones.
+  .null_pos_raw <- cyc_pooled %>% distinct(Gene, Position)
+  n_null_raw <- nrow(.null_pos_raw)
+  .universe_note <- "no tested positions given: every null-positive position"
+  if (file_exists(tested_positions_file)) {
+    .mem <- .tested_membership(tested_positions_file, .null_pos_raw$Gene, .null_pos_raw$Position)
+    .n_cov <- sum(.mem$gene_covered)
+    .rate_t <- if (.n_cov > 0) sum(.mem$in_tested[.mem$gene_covered]) / .n_cov else 0
+    if (.rate_t >= 0.5) {
+      .in_univ <- if (file_exists(universe_file)) .null_pos_raw$Gene %in% .read_gene_list(universe_file) else TRUE
+      cyc_pooled <- .restrict_null_to_universe(cyc_pooled, .mem$in_tested & .in_univ, .null_pos_raw, obs_max)
+      .universe_note <- sprintf("null-positive positions inside the tested set%s",
+                                if (file_exists(universe_file)) " and the cleaned background genes" else "")
+      cat(sprintf("  universe: tested set%s; %d of %d null-positive positions kept (%.1f%% of them lie in the tested set)\n",
+                  if (file_exists(universe_file)) " and cleaned background genes" else "",
+                  dplyr::n_distinct(cyc_pooled$Gene, cyc_pooled$Position), n_null_raw, 100 * .rate_t))
     } else {
-      cat("  WARNING: caas_perms.rds cycle roster missing or inconsistent with ",
-          "perm_pos_cycle_caas.tsv.gz; N = cycles present in the null file\n",
-          file = stderr())
+      .universe_note <- sprintf("tested positions ignored (only %.1f%% of the null-positive positions lie in them): every null-positive position", 100 * .rate_t)
+      cat(sprintf(paste0("  WARNING: only %.1f%% of the null-positive positions lie in %s: coordinates likely differ; ",
+                         "universe = every null-positive position plus the observed ones\n"),
+                  100 * .rate_t, basename(tested_positions_file)), file = stderr())
     }
+  } else {
+    cat("  universe: no tested positions given; every null-positive position plus the observed ones\n")
   }
 
   # An observed position that no null cycle re-detects has k_emp = 0 (its
   # null statistic is -Inf in every cycle), hence the left join from obs_max.
-  # An observed score of 0 (detected, but no pair of domains shares a derived residue) is no evidence of
-  # convergence: p.emp = 1. Counted as "detects and exceeds" it would only measure how often the null
-  # detects the column. For a positive observed score the rule changes nothing, since a null that does not
-  # detect the position (score -Inf, or 0 as in the gene-level null) never reaches it.
+  # Observed scores are positive here (position_scores.tsv keeps only CAAS_score > 0), so the guard on
+  # .obs <= TIE_TOL below only protects against a score read as 0 within the tolerance: such a value is no
+  # evidence of convergence, p.emp = 1. A null that does not detect the position (score -Inf) never
+  # reaches a positive observed score.
   .k_emp <- obs_max %>%
     left_join(cyc_pooled, by = c("Gene", "Position")) %>%
     group_by(Gene, Position) %>%
@@ -522,9 +660,21 @@ if (has_caas_pos_cycle_caas) {
     mutate(nd = dplyr::coalesce(nd, 0L))
   .fact_pos$p.emp_fact <- .fact_p(.fact_pos$.obs, .fact_pos$nd, .fact_assign_obs(.fit_pos, .fact_pos$nd), .fit_pos, N_emp)
   .fact_pos$p.emp_fact[is.na(.fact_pos$p.emp)] <- NA_real_
+  # Diagnostics, informational only: nd is the number of cycles of the null that score the position, null_unseen flags
+  # nd == 0. Where the coordinate guard left p.emp NA they are NA too.
+  .fact_pos$nd[is.na(.fact_pos$p.emp)] <- NA_integer_
+  .fact_pos$null_unseen <- .fact_pos$nd == 0L
   pos_scores <- pos_scores %>%
-    select(-p.emp_fact) %>%
-    left_join(.fact_pos %>% select(Gene, Position, p.emp_fact), by = c("Gene", "Position"))
+    select(-p.emp_fact, -nd, -null_unseen) %>%
+    left_join(.fact_pos %>% select(Gene, Position, p.emp_fact, nd, null_unseen), by = c("Gene", "Position"))
+  .n_obs_u <- sum(!is.na(.fact_pos$nd))
+  .n_unseen <- sum(.fact_pos$null_unseen, na.rm = TRUE)
+  cat(sprintf("  null adequacy: %d of %d observed positive positions never scored by the null (%.1f%%); kept at p = 1/(N+1)\n",
+              .n_unseen, .n_obs_u, if (.n_obs_u > 0) 100 * .n_unseen / .n_obs_u else 0))
+  write_tsv(.null_universe_summary(cyc_pooled, .n_res$cycles, .n_obs_u, .n_unseen, n_null_raw, length(.cycles_in_file),
+                                   .n_res$source, .universe_note),
+            "null_universe_summary.tsv")
+  cat("  null_universe_summary.tsv written\n")
 } else if (!file.exists(caas_pos_cycle_caas_file)) {
   cat("  no --caas_pos_cycle_caas provided, skipping p.emp\n")
 }
@@ -532,13 +682,14 @@ if (has_caas_pos_cycle_caas) {
 # ── 2h. Position-level multiple testing: p.adj_bh ─────────────────────────────
 # p.adj_bh: BH over the permutation family, one test per (Gene, Position) (the
 # side rows of a position share one pooled p.emp and enter BH once). The
-# family is every position the null detects in >= 1 cycle plus every observed
-# position with a p.emp. p.emp's statistic is "max-side CAAS_score if detected,
-# -Inf otherwise", so a null-detectable position the observed data did not
-# detect is a tested position with p = 1; restricting BH to observed-detected
-# positions would select on the statistic itself. Positions detected neither
-# by the null nor by the observed data are left out, so m counts only columns
-# the finite null sample happened to reach.
+# family is the positional universe U of section 2f-ter: the positions the null
+# scores in >= 1 cycle inside the tested set, plus every observed position with a
+# p.emp (the ones the null never scored included, at p = 1/(N+1)). p.emp's statistic
+# is "max-side CAAS_score if detected, -Inf otherwise", so a null-detectable
+# position the observed data did not detect is a tested position with p = 1;
+# restricting BH to observed-detected positions would select on the statistic
+# itself. Positions detected neither by the null nor by the observed data are left
+# out, so m counts only columns the finite null sample happened to reach.
 pos_scores$p.adj_bh  <- NA_real_
 if (has_caas_pos_cycle_caas) {
   .fam_e <- cyc_pooled %>%
@@ -1011,7 +1162,9 @@ pos_out <- pos_scores %>%
          any_of(c("caas", "amino_encoded")), any_of(c("ancestral_aa", "derived_aa")),
          # p.emp: the pooled "detects AND exceeds" position p; p.adj_bh: its BH adjustment (§2h); p.emp_fact and
          # p.adj_bh_fact: the factorized p of the position and its BH adjustment.
-         any_of(c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact"))) %>%
+         any_of(c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact")),
+         # nd: cycles of the null that score the position; null_unseen: nd == 0. Null-adequacy diagnostics, no demotion.
+         any_of(c("nd", "null_unseen"))) %>%
   arrange(desc(CAAS_score))
 
 write_tsv(pos_out, "position_scores.tsv")

@@ -98,13 +98,14 @@ def main():
                              "positions in post-processing-removed genes.")
     parser.add_argument("--caas-csv",                   help="Meta-CAAS file (global_meta_caas.tsv or CAAS CSV)")
     parser.add_argument("--randomization-type",         choices=["naive", "cons_decile", "permulation"])
-    parser.add_argument("--perm-pos-detail",            dest="perm_pos_detail", default=None,
-                        help="perm_pos_detail/ shard dir from a prior CAAS_CORE_MERGE run. "
-                             "Required iff --randomization-type permulation.")
-    parser.add_argument("--gene-cycle-scores",          dest="gene_cycle_scores", default=None,
-                        help="gene_cycle_scores.tsv from the same CAAS_CORE_MERGE run. "
-                             "Optional but recommended with --randomization-type permulation "
-                             "for an exact cycle count.")
+    parser.add_argument("--null-cycle-caas",            dest="null_cycle_caas", default=None,
+                        help="perm_pos_cycle_caas.tsv.gz from a CAAS_CORE_MERGE run (the filtered null "
+                             "that SCORING also uses). Required for --randomization-type permulation; for naive and "
+                             "cons_decile it restricts the draw pool to the universe U (null-positive tested "
+                             "positions plus observed positions).")
+    parser.add_argument("--cycle-roster",               dest="cycle_roster", default=None,
+                        help="cycle_roster.txt from the same run: N of the permulation null. Optional "
+                             "but recommended: without it N is the number of cycles present in the null.")
     parser.add_argument("--n-randomizations",           type=int, default=10000)
     parser.add_argument("--workers",                    type=int, default=None)
     parser.add_argument("--compress",                   action="store_true")
@@ -139,8 +140,8 @@ def main():
                    if getattr(args, p) is None]
         if missing:
             parser.error(f"Randomization requires: {', '.join(missing)}")
-        if args.randomization_type == "permulation" and not args.perm_pos_detail:
-            parser.error("--perm-pos-detail is required when --randomization-type is permulation")
+        if args.randomization_type == "permulation" and not args.null_cycle_caas:
+            parser.error("--null-cycle-caas is required when --randomization-type is permulation")
 
     try:
         if args.tool in ["aggregate", "both"]:
@@ -166,8 +167,8 @@ def main():
                 bg_caas=args.bg_caas,
                 output_prefix=args.output_prefix,
                 randomization_type=args.randomization_type,
-                perm_pos_detail=args.perm_pos_detail,
-                gene_cycle_scores=args.gene_cycle_scores,
+                null_cycle_caas=args.null_cycle_caas,
+                cycle_roster=args.cycle_roster,
                 n_randomizations=args.n_randomizations,
                 workers=args.workers,
                 compress=args.compress,

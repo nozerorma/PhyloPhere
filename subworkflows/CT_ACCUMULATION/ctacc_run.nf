@@ -11,8 +11,9 @@
  *
  *  Consumes:  alignment directory, genomic-info TSV, traitfile, filtered_discovery.tsv
  *             and cleaned background list (CT_POSTPROC); for the randomization also
- *             the tested positions (background.output) and, for the permulation type,
- *             perm_pos_detail/ and gene_cycle_scores.tsv of one CAAS_CORE_MERGE run
+ *             the tested positions (background.output) and perm_pos_cycle_caas.tsv.gz and
+ *             cycle_roster.txt of one CAAS_CORE_MERGE run (the null of the permulation type,
+ *             the universe U of the draw pool of naive and cons_decile)
  *  Produces:  entropy_dir/ (<gene>.entropy.tsv), accumulation_global.csv,
  *             accumulation_<direction>_<scheme>_aggregated_results.csv
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -127,9 +128,10 @@ process CT_ACCUMULATION_RANDOMIZE {
     path caas_csv
     path background_positions   // caastools background.output (tested positions)
     path bg_caas_universe       // cleaned_background_main.txt (surviving genes)
-    path perm_pos_detail        // perm_pos_detail/ shard directory from CAAS_CORE_MERGE (NO_ sentinel when absent)
-    path gene_cycle_scores      // gene_cycle_scores.tsv of the same run (NO_ sentinel when absent):
-                                 // the exact cycle count of the permulation null (see randomize.py)
+    path null_cycle_caas        // perm_pos_cycle_caas.tsv.gz from CAAS_CORE_MERGE, the filtered null SCORING also uses (NO_ sentinel when absent):
+                                 // the null of 'permulation', the universe U of the draw pool of 'naive' and 'cons_decile'
+    path cycle_roster           // cycle_roster.txt of the same run (NO_ sentinel when absent): N of the permulation null,
+                                 // counting the cycles that detected nothing (see randomize.py)
 
     output:
     val  direction,                           emit: direction
@@ -138,15 +140,17 @@ process CT_ACCUMULATION_RANDOMIZE {
     script:
     def local_dir    = "${baseDir}/subworkflows/CT_ACCUMULATION/local"
     def out_pfx        = "accumulation_${direction}"
-    // The eligible null pool is the tested positions of the surviving genes. Both inputs
-    // are optional at the channel level (a NO_ sentinel file when absent); randomize.py
-    // falls back to the ungapped-column pool, with a warning, when the tested positions are missing.
+    // The eligible null pool is the tested positions of the surviving genes, restricted to the positions
+    // the null scores plus the observed ones (universe U) when the null table is given. Every input
+    // is optional at the channel level (a NO_ sentinel file when absent); randomize.py
+    // falls back to the ungapped-column pool, with a warning, when the tested positions are missing,
+    // and to the tested pool, logged, when the null table is missing.
     def bgpos_flag = (background_positions.name =~ /^NO_/) ? '' : "--background-positions '${background_positions}'"
     def bgcaas_flag = (bg_caas_universe.name =~ /^NO_/) ? '' : "--bg-caas '${bg_caas_universe}'"
-    // Used only when accumulation_randomization_type is permulation; randomize.py ignores
-    // both files for naive and cons_decile.
-    def permdetail_flag = (perm_pos_detail.name =~ /^NO_/) ? '' : "--perm-pos-detail '${perm_pos_detail}'"
-    def genecyclescores_flag = (gene_cycle_scores.name =~ /^NO_/) ? '' : "--gene-cycle-scores '${gene_cycle_scores}'"
+    // The null table feeds every randomization type (the null of permulation, the universe U of naive and
+    // cons_decile); the roster only matters to permulation, which takes N from it.
+    def nullcycle_flag = (null_cycle_caas.name =~ /^NO_/) ? '' : "--null-cycle-caas '${null_cycle_caas}'"
+    def roster_flag = (cycle_roster.name =~ /^NO_/) ? '' : "--cycle-roster '${cycle_roster}'"
     // 'all' maps to --change-side both, which keeps every row with a side other than 'none'
     def change_side_arg = (direction == 'all') ? 'both' : direction
     def rand_type    = params.accumulation_randomization_type ?: 'naive'
@@ -177,7 +181,7 @@ process CT_ACCUMULATION_RANDOMIZE {
             --n-randomizations ${n_rands} \\
             --change-side '${change_side_arg}' \\
             ${bgpos_flag} ${bgcaas_flag} \\
-            ${permdetail_flag} ${genecyclescores_flag} \\
+            ${nullcycle_flag} ${roster_flag} \\
             ${workers_flag} ${seed_flag} \\
             --log-level '${log_level}'
         """
@@ -197,7 +201,7 @@ process CT_ACCUMULATION_RANDOMIZE {
             --n-randomizations ${n_rands} \\
             --change-side '${change_side_arg}' \\
             ${bgpos_flag} ${bgcaas_flag} \\
-            ${permdetail_flag} ${genecyclescores_flag} \\
+            ${nullcycle_flag} ${roster_flag} \\
             ${workers_flag} ${seed_flag} \\
             --log-level '${log_level}'
         """

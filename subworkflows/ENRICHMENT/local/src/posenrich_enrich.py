@@ -18,14 +18,17 @@ would discard the magnitude.
 
 Null. The null is the real permulation cycles of the CAAS null (perm_pos_cycle_caas.tsv.gz). The observed scores and every
 cycle go through the same function, so lach_p.perm = (1 + number of cycles with chi-square >= observed) / (n_cycles + 1)
-compares like with like. Without a CAAS null lach_p.perm is NA, nothing is significant, and the analytic columns are still
+compares like with like. n_cycles is the replay roster (--cycle-roster) when it lists every cycle of the file, so a cycle
+with no detection counts; otherwise the cycles present in the file, with a log line. Without a CAAS null lach_p.perm is NA, nothing is significant, and the analytic columns are still
 written.
 
 lach_p.adj is the BH adjustment of lach_pval within each (ranking, database). A term is significant (sig) when
 lach_p.adj < --fdr-lachenbruch and lach_p.perm < --pperm-thr, the gates of the Lachenbruch vote of the FCS.
 
 Background. The positions tested by caastools (--background) restricted to the genes of
---universe, plus any scored position. For the cosmic_orthogroups and pai3d_orthogroups
+--universe. With a CAAS permulation null, it is further restricted to the positions that scored
+> 0 in at least one null cycle (U_CAAS), plus the observed positions with a score > 0; observed
+and null scores are kept only when > 0. Without a null, every tested position plus the scored ones. For the cosmic_orthogroups and pai3d_orthogroups
 databases it is further restricted to the genes the source database can annotate
 (--cosmic-coverage, --pai3d-coverage from build_position_gmt.py).
 
@@ -35,6 +38,7 @@ Inputs:     --obs-scores        position_scores.tsv (Gene, Position, CAAS_score,
             --characterization  characterization_layers.tsv, optional (name, description, members)
             --universe, --background   gene universe and caastools background.output (gene, tested positions)
             --caas-null-prepped | --caas-cycle-null   the CAAS null (prepped pickle takes precedence)
+            --cycle-roster      cycle_roster.txt of the same run: N of the null, cycles with no detection included
 Outputs:    posenrich_characterization.tsv  ranking, database, pathway, description, layer_size,
                 n_pos_with_score, lach_chi_binary, lach_chi_nonzero, lach_chi_total, lach_frac_magnitude,
                 lach_pval, lach_p.adj, lach_p.perm, background_n,
@@ -54,6 +58,9 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 from scipy import stats as st
+
+# ── Package-internal (the script directory is on sys.path when run as a script) ─
+from posenrich_prep_caas_null import resolve_cycle_levels  # noqa: E402
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -96,6 +103,10 @@ def parse_args():
                         "task. Takes precedence over --caas-cycle-null when both are given. Omit or "
                         "pass a NO_FILE* sentinel for no null (those values are NA unless "
                         "--allow-label-shuffle).")
+    p.add_argument("--cycle-roster", default=None,
+                   help="cycle_roster.txt of the CAAS_CORE_MERGE run (one replayed cycle per line): N of the null. "
+                        "Used with --caas-cycle-null; a --caas-null-prepped pickle already carries its cycle levels. "
+                        "Without it N is the number of cycles present in the null file.")
     p.add_argument("--output-dir", required=True)
     p.add_argument("--min-size", type=int, default=2,
                    help="min positions per set in background (GMT sources only; default: 2)")
@@ -248,7 +259,7 @@ def collapse_null_sides(sub):
                .max().reset_index())
 
 
-def load_caas_cycle_null(path):
+def load_caas_cycle_null(path, roster_path=None):
     """Load perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_score, n_schemes).
 
     Returns (long_df, all_cycle_levels, null_positions). long_df has columns pos_id, side, cycle and score,
@@ -271,7 +282,8 @@ def load_caas_cycle_null(path):
                      float_precision="round_trip")
     if df.empty:
         return None, None, None
-    all_cycle_levels = np.sort(df["cycle"].unique())
+    df["cycle"] = df["cycle"].astype(str)   # cycle is a label, as in the roster
+    all_cycle_levels = resolve_cycle_levels(roster_path, df["cycle"].unique())
     df["caas_score"] = pd.to_numeric(df["caas_score"], errors="coerce")
     df = df[df["caas_score"] > 0].copy()
     if df.empty:
@@ -533,7 +545,7 @@ def main():
         else:
             print("[posenrich] no CAAS permulation null supplied", flush=True)
     else:
-        caas_null_long, caas_null_cycles, null_positions = load_caas_cycle_null(args.caas_cycle_null)
+        caas_null_long, caas_null_cycles, null_positions = load_caas_cycle_null(args.caas_cycle_null, args.cycle_roster)
         if caas_null_long is not None:
             print(f"[posenrich] CAAS permulation null: {len(caas_null_cycles)} cycles "
                   f"loaded from {args.caas_cycle_null} -> used as the primary null "
@@ -560,8 +572,11 @@ def main():
         # Possibility space U_CAAS: positions tested in background.output that reached
         # caas_score > 0 in at least one null cycle, union observed positive positions.
         background = sorted((raw_background & null_positions) | obs_pos)
+        # An observed position the null never scored stays in the background: it is the strongest evidence by design
+        n_unseen = len(obs_pos - null_positions)
         print(f"[posenrich] background restricted to U_CAAS: {len(background)} positions "
-              f"({len(raw_background)} raw tested, {len(null_positions)} null-positive)", flush=True)
+              f"({len(raw_background)} raw tested, {len(null_positions)} null-positive, "
+              f"{n_unseen} of {len(obs_pos)} observed positive positions never scored by the null, kept)", flush=True)
     else:
         background = sorted(raw_background | obs_pos)
         print(f"[posenrich] full tested background (no null): {len(background)} positions", flush=True)

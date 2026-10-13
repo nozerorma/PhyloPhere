@@ -294,6 +294,8 @@ def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(outdir, "**/filtered_discovery.tsv")),
         _slot("background_file", "Background gene list", False,
               _first_match(outdir, "**/cleaned_background*.txt", "**/*background*.txt")),
+        _slot("null_universe", "Null universe summary TSV", False,
+              _first_match(scoring, "null_universe_summary.tsv")),
     ]
 
 
@@ -323,6 +325,7 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"caas_pos_quantiles_file = {_r_arg(s['caas_pos_quantiles'])}",
             f"filtered_discovery_file = {_r_arg(s['filtered_discovery'])}",
             f"background_file      = {_r_arg(s['background_file'])}",
+            f"null_universe_file   = {_r_arg(s['null_universe'])}",
             "window_size_bp       = 1000000",
             "direction            = 'combined'",
             "seed                 = '1998'",

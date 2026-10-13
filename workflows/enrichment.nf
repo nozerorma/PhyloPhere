@@ -103,6 +103,15 @@ process PUBLISH_UNIVERSES {
 }
 
 // Channel of a `.collect()`-wrapped single-element List<Path> -> channel of the bare Path.
+// Precomputed fallback of a VEP table: the file of the param when it exists, else the sentinel.
+// A param that is set but points to no file is reported, since the sentinel hides it from the process.
+def precomputedOrSentinel(String param_name, String param_value, String sentinel) {
+    if (!param_value) return file(sentinel)
+    if (file(param_value).exists()) return file(param_value)
+    log.warn "${param_name} is set to '${param_value}', which does not exist: the table is treated as absent"
+    return file(sentinel)
+}
+
 def unwrap1(ch) {
     return ch.map { it instanceof List ? it[0] : it }
 }
@@ -120,6 +129,7 @@ workflow ENRICHMENT {
         caas_perms_ch
         caas_pos_sample_ch
         caas_pos_cycle_caas_ch  // perm_pos_cycle_caas.tsv.gz (Gene,Position,side,cycle,caas_score,n_schemes,scheme_set) -> POSENRICH's p.perm and biochemistry section
+        caas_cycle_roster_ch    // cycle_roster.txt of the same CAAS_CORE_MERGE run -> N of the null for POSENRICH (null/empty when absent)
         position_scores
         position_biochem     // position_biochem.tsv: scheme profile of every detected position (biochemistry section of report 14)
         position_lists       // SCORING's published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv dir
@@ -450,12 +460,12 @@ workflow ENRICHMENT {
             def pos_vep_primateai_ch = (vep_primateai_ch ?: Channel.empty())
                 .ifEmpty { (params.scoring_vep_primateai && file(params.scoring_vep_primateai).exists()) ? file(params.scoring_vep_primateai) : file('NO_FILE_VEP_PAI') }
             def pos_vep_cosmic_ch   = (vep_cosmic_ch ?: Channel.empty())
-                .ifEmpty { (params.scoring_vep_cosmic && file(params.scoring_vep_cosmic).exists()) ? file(params.scoring_vep_cosmic) : file('NO_FILE_VEP_COSMIC') }
+                .ifEmpty { precomputedOrSentinel('scoring_vep_cosmic', params.scoring_vep_cosmic, 'NO_FILE_VEP_COSMIC') }
             def pos_vep_ensembl_ch  = (vep_ensembl_ch ?: Channel.empty())
-                .ifEmpty { (params.scoring_vep_ensembl && file(params.scoring_vep_ensembl).exists()) ? file(params.scoring_vep_ensembl) : file('NO_FILE_VEP_ENSEMBL') }
+                .ifEmpty { precomputedOrSentinel('scoring_vep_ensembl', params.scoring_vep_ensembl, 'NO_FILE_VEP_ENSEMBL') }
 
             // FADE_top_sig / FADE_bottom_sig position group (the classic BF>=100
-            // sites, always produced by FADE_JSON_TO_CSV when --fade runs).
+            // sites, written by FADE_REPORT as fade_sites_<direction>.csv when --fade runs).
             def pos_fade_sites_top_ch    = (fade_sites_top_ch ?: Channel.empty()).ifEmpty { file('NO_FILE_FADE_TOP') }
             def pos_fade_sites_bottom_ch = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FILE_FADE_BOTTOM') }
 
@@ -464,6 +474,10 @@ workflow ENRICHMENT {
             // invocation (--caas_permulation_enrichment off, or CT skipped).
             def pos_caas_cycle_null_ch = (caas_pos_cycle_caas_ch ?: Channel.empty())
                 .ifEmpty { file('NO_FILE_CAAS_CYCLE_NULL') }
+            // Roster of the replayed cycles: live from CAAS_CORE_MERGE, else --caas_cycle_roster_file.
+            // Without it POSENRICH takes N from the cycles present in the null and says so.
+            def pos_cycle_roster_ch = (caas_cycle_roster_ch ?: Channel.empty())
+                .ifEmpty { file(params.caas_cycle_roster_file ?: 'NO_FILE_CYCLE_ROSTER') }
 
             posenrich_out = POSENRICH(
                 pos_gene_ensembl_ch,
@@ -490,6 +504,7 @@ workflow ENRICHMENT {
                 pos_fade_sites_top_ch,
                 pos_fade_sites_bottom_ch,
                 pos_caas_cycle_null_ch,
+                pos_cycle_roster_ch,
                 pos_biochem_ch
             )
             final_reports = final_reports.mix(posenrich_out.report)
@@ -524,9 +539,9 @@ workflow ENRICHMENT {
         def cmp_vep_pai_ch     = (vep_primateai_ch ?: Channel.empty())
             .ifEmpty { (params.scoring_vep_primateai && file(params.scoring_vep_primateai).exists()) ? file(params.scoring_vep_primateai) : file('NO_VEP_PAI') }
         def cmp_vep_cosmic_ch  = (vep_cosmic_ch ?: Channel.empty())
-            .ifEmpty { (params.scoring_vep_cosmic && file(params.scoring_vep_cosmic).exists()) ? file(params.scoring_vep_cosmic) : file('NO_VEP_COSMIC') }
+            .ifEmpty { precomputedOrSentinel('scoring_vep_cosmic', params.scoring_vep_cosmic, 'NO_VEP_COSMIC') }
         def cmp_vep_ensembl_ch = (vep_ensembl_ch ?: Channel.empty())
-            .ifEmpty { (params.scoring_vep_ensembl && file(params.scoring_vep_ensembl).exists()) ? file(params.scoring_vep_ensembl) : file('NO_VEP_ENSEMBL') }
+            .ifEmpty { precomputedOrSentinel('scoring_vep_ensembl', params.scoring_vep_ensembl, 'NO_VEP_ENSEMBL') }
         def cmp_fade_top_ch   = (fade_sites_top_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_TOP') }
         def cmp_fade_bot_ch   = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_BOTTOM') }
         // SCORING's published percentile slices -- gene_lists_ch already

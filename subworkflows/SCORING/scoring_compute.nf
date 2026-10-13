@@ -17,12 +17,16 @@
  *  Consumes:  postproc_file (filtered_discovery.tsv, mandatory); optional FADE gene
  *             summaries and per-site tables, RERConverge summary, accumulation results,
  *             hypothesis pairs, CAAS permulation null (caas_perms.rds and
- *             perm_pos_cycle_caas.tsv.gz). Each optional input is a staged
+ *             perm_pos_cycle_caas.tsv.gz) with its cycle roster (N), and the tested
+ *             positions (background.output) and cleaned background that fix the
+ *             positional universe of the null. Each optional input is a staged
  *             NO_* sentinel file when absent.
  *  Produces:  position_scores.tsv, position_biochem.tsv (scheme profile of every detected
  *             position, GS-only ones included), gene_scores.tsv, gene_correlations.tsv,
  *             fcs_stats.tsv (plus fcs_stats_{rer,fade,accum}.tsv when that evidence
- *             exists), gene_lists/ and position_lists/ (12 slice TSVs each: top,
+ *             exists), null_universe_summary.tsv (N, size of the positional universe,
+ *             observed positions the null never scored, saturation curve of the
+ *             null; written when a null is given), gene_lists/ and position_lists/ (12 slice TSVs each: top,
  *             bottom, global × 25, 10, 5, 1%; position slices keyed Gene, Position,
  *             CAAS_score), gene_threshold_enrichment.tsv, pos_threshold_enrichment.tsv
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -56,6 +60,9 @@ process SCORING_COMPUTE {
     path hypotheses_pairs   // optional: contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS sentinel otherwise
     path caas_perms         // optional: caas_perms.rds; its cycle roster gives N for the position p; NO_FILE sentinel otherwise
     path caas_pos_cycle_caas // optional: perm_pos_cycle_caas.tsv.gz, the position-level null for p.emp; NO_FILE sentinel otherwise
+    path cycle_roster       // optional: cycle_roster.txt, N of the null (cycles with no detection included); NO_* sentinel otherwise
+    path tested_positions   // optional: caastools background.output; the null is limited to these positions; NO_* sentinel otherwise
+    path universe           // optional: cleaned_background_main.txt; the null is limited to these genes; NO_* sentinel otherwise
 
     output:
     path "position_scores.tsv",                              emit: position_scores
@@ -68,6 +75,7 @@ process SCORING_COMPUTE {
     path "gene_correlations.tsv",                            emit: gene_correlations
     path "gene_lists",                                 optional: true, emit: gene_lists
     path "position_lists",                             optional: true, emit: position_lists
+    path "null_universe_summary.tsv",                 optional: true, emit: null_universe_summary
     path "gene_threshold_enrichment.tsv",             optional: true, emit: gene_threshold_enrichment
     path "pos_threshold_enrichment.tsv",              optional: true, emit: pos_threshold_enrichment
 
@@ -84,6 +92,9 @@ process SCORING_COMPUTE {
     def hp_arg            = hypotheses_pairs.name =~ /^NO_/ ? 'NO_HYP_PAIRS' : "${hypotheses_pairs}"
     def cp_arg            = caas_perms.name =~ /^NO_/ ? 'NO_FILE' : "${caas_perms}"
     def cpcc_arg          = caas_pos_cycle_caas.name =~ /^NO_/ ? 'NO_FILE' : "${caas_pos_cycle_caas}"
+    def roster_arg        = cycle_roster.name =~ /^NO_/ ? 'NO_FILE' : "${cycle_roster}"
+    def tested_arg        = tested_positions.name =~ /^NO_/ ? 'NO_FILE' : "${tested_positions}"
+    def universe_arg      = universe.name =~ /^NO_/ ? 'NO_FILE' : "${universe}"
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -108,6 +119,9 @@ process SCORING_COMPUTE {
             --hypotheses_pairs '${hp_arg}' \
             --caas_perms      '${cp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
+            --cycle_roster    '${roster_arg}' \
+            --tested_positions '${tested_arg}' \
+            --universe        '${universe_arg}' \
             --top_pct              ${top_pct} \
             --top25_pct            0.25 \
             --top5_pct             0.05 \
@@ -140,6 +154,9 @@ process SCORING_COMPUTE {
             --hypotheses_pairs '${hp_arg}' \
             --caas_perms      '${cp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
+            --cycle_roster    '${roster_arg}' \
+            --tested_positions '${tested_arg}' \
+            --universe        '${universe_arg}' \
             --top_pct              ${top_pct} \
             --top25_pct            0.25 \
             --top5_pct             0.05 \

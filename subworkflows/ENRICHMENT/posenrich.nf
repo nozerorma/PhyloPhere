@@ -109,6 +109,7 @@ process POSENRICH_RUN {
     val max_size
     path position_lists_dir
     path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz, the null (NO_FILE* sentinel for none)
+    path cycle_roster       // optional: cycle_roster.txt, N of the null (NO_* sentinel for none)
 
     output:
     path "posenrich_characterization.tsv", emit: results
@@ -128,6 +129,7 @@ process POSENRICH_RUN {
     def cosmic_cov_arg = !(cosmic_coverage.name =~ /^NO_FILE/) ? "--cosmic-coverage ${cosmic_coverage}" : ""
     def pai3d_cov_arg  = !(pai3d_coverage.name =~ /^NO_FILE/) ? "--pai3d-coverage ${pai3d_coverage}" : ""
     def caas_null_arg  = !(caas_cycle_null.name =~ /^NO_FILE/) ? "--caas-cycle-null ${caas_cycle_null}" : ""
+    def roster_arg     = !(cycle_roster.name =~ /^NO_/) ? "--cycle-roster ${cycle_roster}" : ""
     // SCORING's published position_lists/ (slice_{top,bottom,global}{25,10,5,1}.tsv,
     // from scoring_compute.R) is the only foreground source, so it is passed without
     // a NO_FILE guard. --background (caastools background.output, the tested
@@ -148,6 +150,7 @@ process POSENRICH_RUN {
         --min-size ${min_size} \
         --max-size ${max_size} \
         ${caas_null_arg} \
+        ${roster_arg} \
         --fdr-lachenbruch ${params.fcs_fdr_lachenbruch ?: params.fcs_fdr} \
         --pperm-thr ${params.fcs_pperm_thr} \
         --output-dir .
@@ -165,6 +168,7 @@ process POSENRICH_PREP_NULL {
 
     input:
     path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz, the null (NO_FILE* sentinel for none)
+    path cycle_roster       // optional: cycle_roster.txt, N of the null (NO_* sentinel for none)
 
     output:
     path "caas_null_prepped.pkl", emit: prepped
@@ -174,9 +178,11 @@ process POSENRICH_PREP_NULL {
     // differ), so the null is parsed once here instead of once per batch
     // (posenrich_prep_caas_null.py).
     def caas_null_arg = !(caas_cycle_null.name =~ /^NO_FILE/) ? "--caas-cycle-null ${caas_cycle_null}" : "--caas-cycle-null NO_FILE"
+    def roster_arg    = !(cycle_roster.name =~ /^NO_/) ? "--cycle-roster ${cycle_roster}" : ""
     """
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_prep_caas_null.py \
         ${caas_null_arg} \
+        ${roster_arg} \
         --output caas_null_prepped.pkl
     """
 }
@@ -409,6 +415,7 @@ workflow POSENRICH {
     fade_sites_top_file     // optional: fade_sites_top.csv (FADE_top_sig position group)
     fade_sites_bottom_file  // optional: fade_sites_bottom.csv (FADE_bottom_sig position group)
     caas_cycle_null_file    // optional: perm_pos_cycle_caas.tsv.gz, the null
+    cycle_roster_file       // optional: cycle_roster.txt, N of the null
     position_biochem_file   // optional: position_biochem.tsv (Biochemistry section of the report)
 
     main:
@@ -463,7 +470,7 @@ workflow POSENRICH {
         def position_lists_file_bc = position_lists_file.collect().map { it[0] }
 
         // The null is parsed once for the whole run (POSENRICH_PREP_NULL).
-        POSENRICH_PREP_NULL(caas_cycle_null_file)
+        POSENRICH_PREP_NULL(caas_cycle_null_file, cycle_roster_file)
         def caas_null_prepped_bc = POSENRICH_PREP_NULL.out.prepped.collect().map { it[0] }
 
         POSENRICH_RUN_BATCHED(
@@ -501,7 +508,8 @@ workflow POSENRICH {
             min_size,
             max_size,
             position_lists_file,
-            caas_cycle_null_file
+            caas_cycle_null_file,
+            cycle_roster_file
         )
 
         posenrich_results_ch = POSENRICH_RUN.out.results

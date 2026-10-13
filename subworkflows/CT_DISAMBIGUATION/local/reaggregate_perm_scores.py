@@ -115,8 +115,8 @@ def main() -> int:
                     help="keep cluster-train positions in the scored pool (params.remove_caas_clusters false)")
     ap.add_argument("--cycles-from", type=Path, default=None,
                     help="labelings file the cycles were replayed from (resample_perms.tab). N of the null is the number "
-                         "of its cycles, not the number of cycles that left a row: writes cycle_roster.txt for "
-                         "scoring_caas_perms.R, warns about the cycles without a row, and refuses rows of a cycle it "
+                         "of its cycles, not the number of cycles that left a row: writes cycle_roster.txt, the N of "
+                         "scoring_caas_perms.R, SCORING, POSENRICH and the accumulation permulation null, warns about the cycles without a row, and refuses rows of a cycle it "
                          "does not list")
     ap.add_argument("--empty-null", action="store_true",
                     help="the null has no permuted labeling (N = 0): write the null tables empty. Refused when --detail "

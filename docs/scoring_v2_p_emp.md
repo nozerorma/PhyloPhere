@@ -99,9 +99,14 @@ El fichero llega a SCORING como `--caas_pos_cycle_caas` (desde
    La comparación `>=` cuenta como empate lo que difiere menos de
    `TIE_TOL = 1e-12` (la misma constante que `core.scores`): las medias iguales en
    aritmética exacta pueden diferir en 1 ulp según cómo se sumaron o se leyeron.
-4. `N` es el roster de ciclos de `caas_perms.rds` (incluye los ciclos que no
-   detectan nada), siempre que contenga todos los ciclos presentes en el
-   fichero; si no, `N` = ciclos presentes, lo que sólo puede aumentar `p.emp`.
+4. `N` es el roster de ciclos replayados, que incluye los ciclos que no detectan
+   nada. Fuentes por orden: `cycle_roster.txt` (lo publica `CAAS_CORE_MERGE`),
+   las columnas de `caas_perms.rds` (se construye con el mismo roster) y, si
+   ninguna contiene todos los ciclos presentes en el fichero, los ciclos
+   presentes, lo que sólo puede aumentar `p.emp` y queda dicho en el log. Es
+   la misma `N` que usan POSENRICH, FCS y el nulo `permulation` de la
+   acumulación (`accumulation_randomization_type = "permulation"`, que cuenta
+   los aciertos de este mismo fichero filtrado con la regla del lado observado).
 
 **Guard de coordenadas.** Si hay al menos 10 posiciones observadas y menos de
 la mitad aparecen en el nulo, se asume un desajuste de coordenadas entre
@@ -145,16 +150,30 @@ p.emp_fact = (nd + 1) / (N + 1)  ×  (1 + #{detecciones de la clase con score >=
 
 ### 3.1 `p.adj_bh`
 
-BH con un test por `(Gene, Position)` sobre la familia
+BH con un test por `(Gene, Position)` sobre el universo posicional `U`
 
 ```
-familia = posiciones detectadas por >= 1 ciclo nulo  ∪  posiciones observadas con p.emp
+U = (posiciones con score > 0 en >= 1 ciclo nulo  ∩  posiciones testadas)  ∪  posiciones observadas con p.emp
 ```
+
+Las posiciones testadas son las de `background.output` (CAAStools), limitadas a los genes de
+`cleaned_background_main.txt`: el mismo conjunto que usa POSENRICH como fondo. Sin ese fichero, o si
+menos de la mitad de las posiciones positivas del nulo caen en él (desajuste de coordenadas), `U` es toda
+posición positiva del nulo más las observadas, y el log lo dice. `U` es también la reserva de las clases
+de `p.emp_fact`.
 
 Las posiciones que el nulo detecta y el observado no entran con `p = 1`: el
 estadístico es `-Inf` para ellas, y restringir BH a lo observado filtraría
 sobre el propio estadístico. Las posiciones que no detectan ni el nulo ni el
 observado quedan fuera.
+
+**Posiciones no vistas.** Una posición observada que ningún ciclo del nulo puntúa (`nd = 0`) es,
+por diseño, la evidencia más fuerte: conserva `p = 1/(N + 1)`, sigue en la familia de BH y en el fondo
+de POSENRICH, y no se degrada ni se excluye. Se exportan `nd` y `null_unseen` (`nd == 0`) en
+`position_scores.tsv`, y `null_universe_summary.tsv` resume `N`, `|U|`, las posiciones observadas
+positivas, las no vistas y la curva de saturación del nulo (posiciones positivas distintas acumuladas en
+unos 10 puntos del número de ciclos). La fracción de no vistas diagnostica si `N` basta para que el
+nulo alcance las posiciones puntuables; no es una corrección.
 
 **Limitación.** m cuenta sólo las columnas que la muestra finita del nulo
 alcanzó. Una columna que el nulo nunca detecta pero el observado sí entra con
@@ -197,7 +216,9 @@ muestran los cuatro. Ninguno filtra `position_scores.tsv`.
   (`accum_cct_p` repite el valor). Con `accumulation_randomization_type =
   "cons_decile"` (por defecto) su nulo es de ocupación por deciles de
   conservación y no controla la relación árbol-fenotipo; con `"permulation"`
-  lee `perm_pos_detail/`.
+  cuenta los aciertos por gen y ciclo de `perm_pos_cycle_caas.tsv.gz` (el nulo filtrado de §2.1, con los
+  clusters y las unidades eliminadas ya fuera, como en `filtered_discovery.tsv`), con la misma regla de lado
+  que el observado (solo US, lado `top`/`bottom`, una posición en ambos lados cuenta dos veces) y `N` del roster.
 
 ---
 

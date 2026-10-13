@@ -291,8 +291,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         def scoring_caas_pos_cycle_caas_ch = null   // perm_pos_cycle_caas.tsv.gz — p.emp numerator/denominator
         def scoring_caas_pos_sample_ch = null
         def scoring_caas_pos_quantiles_ch = null
-        def scoring_caas_pos_detail_ch = null        // sharded perm_pos_detail dir — CT_ACCUMULATION permulation null (Tier 3E)
-        def scoring_caas_gene_cycle_scores_ch = null // gene_cycle_scores.tsv — CT_ACCUMULATION permulation null (Tier 3E)
+        def scoring_caas_cycle_roster_ch = null      // cycle_roster.txt — N of the null for SCORING, POSENRICH and the CT_ACCUMULATION permulation null
         def core = null               // the permulation core: shard directories and b_0 slices of the batches
         def core_observed = null      // the observed contract files, written from the b_0 slices
         def core_replays = false      // true when the core replays the alignments (it then has a b_0 slice)
@@ -550,8 +549,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             scoring_caas_pos_cycle_caas_ch = caas_perm_out.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))  // per (gene,position,side,cycle) caas_score -> p.emp
             scoring_caas_pos_sample_ch = caas_perm_out.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))  // cycle-stratified sample for distribution plots
             scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))  // per (cycle,scheme) distribution shape
-            scoring_caas_pos_detail_ch = caas_perm_out.pos_detail                   // sharded perm_pos_detail dir
-            scoring_caas_gene_cycle_scores_ch = caas_perm_out.gene_cycle_scores     // genes x cycles raw scores
+            scoring_caas_cycle_roster_ch = caas_perm_out.cycle_roster.ifEmpty(file('NO_CAAS_CYCLE_ROSTER'))  // every replayed cycle, the empty ones included
             ran_any = true
         }
 
@@ -588,20 +586,16 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     ? Channel.fromPath(params.posenrich_background_file)
                     : Channel.empty())
 
-            // sharded perm_pos_detail dir + its companion gene_cycle_scores.tsv —
-            // only consumed when accumulation_randomization_type == 'permulation'
-            // (Tier 3E); NO_FILE sentinel otherwise, with the standalone
-            // --caas_pos_detail_file / --caas_gene_cycle_scores_file params as a
-            // fallback for reruns without a live permulation core. The gene_cycle_scores
-            // file is what gives the permulation null its exact cycle count instead of
-            // inferring it from perm_pos_detail alone (see randomize.py).
-            def acc_pos_detail_ch = (scoring_caas_pos_detail_ch ?: Channel.empty())
-                .ifEmpty { file(params.caas_pos_detail_file ?: 'NO_FILE') }
-            def acc_gene_cycle_scores_ch = (scoring_caas_gene_cycle_scores_ch ?: Channel.empty())
-                .ifEmpty { file(params.caas_gene_cycle_scores_file ?: 'NO_FILE') }
+            // The permulation type reads the same filtered null SCORING uses
+            // (perm_pos_cycle_caas.tsv.gz) and takes N from the cycle roster; both fall back to
+            // --caas_pos_cycle_caas_file / --caas_cycle_roster_file for reruns without a live
+            // permulation core (resolved inside CT_ACCUMULATION). Without a roster N is the
+            // number of cycles present in the null, with a warning (see randomize.py).
+            def acc_null_cycle_caas_ch = scoring_caas_pos_cycle_caas_ch
+            def acc_cycle_roster_ch    = scoring_caas_cycle_roster_ch
 
             accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch, acc_trait_file_ch,
-                                            acc_tested_pos_ch, acc_pos_detail_ch, acc_gene_cycle_scores_ch,
+                                            acc_tested_pos_ch, acc_null_cycle_caas_ch, acc_cycle_roster_ch,
                                             taxid_map_ch)
             ran_any = true
 
@@ -767,11 +761,10 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             def scoring_fade_top_ch      = params.fade ? FADE.out.summary_top    : fade_precomp_top_out?.summary_tsv
             def scoring_fade_bot_ch      = params.fade ? FADE.out.summary_bottom : fade_precomp_bot_out?.summary_tsv
             // Position-level FADE evidence for scoring: the per-significant-site
-            // table (gene,position,max_bf,target_aa) from FADE_JSON_TO_CSV /
-            // parse_fade_json_sites.R — NOT the report's old site_tsv emit,
-            // which 6.FADE_report.Rmd no longer produces. scoring_compute.R's
-            // .load_fade_sites() is written for exactly this comma-delimited
-            // schema, and ENRICHMENT already consumes the same channel.
+            // table (gene,position,max_bf,target_aa) that FADE_REPORT writes as
+            // fade_sites_<direction>.csv (sites_csv emit). scoring_compute.R's
+            // .load_fade_sites() reads this comma-delimited schema, and
+            // ENRICHMENT consumes the same channel.
             def scoring_fade_site_top_ch = params.fade ? FADE.out.sites_csv_top    : fade_precomp_sites_top_ch
             def scoring_fade_site_bot_ch = params.fade ? FADE.out.sites_csv_bottom : fade_precomp_sites_bot_ch
             def scoring_rer_ch           = (params.rer_tool || params.rer_continuous_file) ? RER_MAIN.out.summary_tsv : null
@@ -827,7 +820,9 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 scoring_caas_pos_quantiles_ch, // per (cycle,scheme) null distribution shape
                 scoring_hyp_pairs_ch,          // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
                 scoring_perm_manifest_ch,      // permulation_manifest.tsv — design of the null cycles (report panel)
-                scoring_perm_harvest_ch        // permulation_harvest.tsv — what the null harvest tried and discarded (report tab)
+                scoring_perm_harvest_ch,       // permulation_harvest.tsv — what the null harvest tried and discarded (report tab)
+                core_observed ? core_observed.background : null,  // background.output: limits the null to the tested positions (scoring.nf falls back to --posenrich_background_file)
+                scoring_caas_cycle_roster_ch   // cycle_roster.txt — N of the null, cycles with no detection included (scoring.nf falls back to --caas_cycle_roster_file)
             )
             ran_any = true
 
@@ -951,6 +946,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     caas_perms_for_enrich,
                     scoring_caas_pos_sample_ch,
                     scoring_caas_pos_cycle_caas_ch,
+                    scoring_caas_cycle_roster_ch,
                     position_scores_ch,
                     position_biochem_ch,
                     position_lists_ch,

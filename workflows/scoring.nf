@@ -37,6 +37,8 @@ workflow SCORING {
         hypotheses_pairs_ch      // Channel<path> or null — contrast_hypotheses_pairs.tsv (FOP domain-pool weights)
         perm_manifest_ch         // Channel<path> or null — permulation_manifest.tsv (design of the canonical pairs of each null cycle)
         perm_harvest_ch          // Channel<path> or null — permulation_harvest.tsv (draws, rejections, acceptance by PSS tolerance, capacity)
+        tested_positions_ch      // Channel<path> or null — caastools background.output (tested positions): limits the null to the positional universe
+        cycle_roster_ch          // Channel<path> or null — cycle_roster.txt of the CAAS_CORE_MERGE run: N of the null, cycles with no detection included
 
     main:
         assert params.traitname : "SCORING requires --traitname"
@@ -186,7 +188,11 @@ workflow SCORING {
             def _detail = file(params.caas_pos_detail_file)
             assert _detail.exists() : "SCORING: --caas_pos_detail_file not found: ${params.caas_pos_detail_file}"
             log.info "SCORING: rebuilding CAAS permulation null from ${_detail.name} (no ASR replay)"
-            _rebuild = CAAS_CORE_MERGE(Channel.value(_detail), resolved_background, Channel.value(params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE')), Channel.value(file('NO_LABELINGS')))
+            // A cycle roster of the original run (one tag per line) stands in for the labelings file, so the rebuilt
+            // null counts the cycles that detected nothing; without it N is read from the detail rows.
+            def _roster_in = (params.caas_cycle_roster_file && file(params.caas_cycle_roster_file).exists())
+                ? file(params.caas_cycle_roster_file) : file('NO_LABELINGS')
+            _rebuild = CAAS_CORE_MERGE(Channel.value(_detail), resolved_background, Channel.value(params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE')), Channel.value(_roster_in))
             caas_perms_resolved = _rebuild.perms.collect().map { it[0] }
         } else {
             caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
@@ -214,6 +220,20 @@ workflow SCORING {
                 .map { it[0] }
         }
 
+        // Positional universe and N of the null (see scoring_compute.R, section 2f-ter). The tested positions are
+        // the live background.output, else --posenrich_background_file (the same file POSENRICH and CT_ACCUMULATION
+        // read); the cleaned background (resolved_background) limits the null to the genes of the run. The roster is the
+        // live one of CAAS_CORE_MERGE, else --caas_cycle_roster_file. Each falls back to a NO_* sentinel: SCORING then
+        // takes the family of every null-positive position, and N from caas_perms.rds or the cycles present, and logs it.
+        def resolved_tested_pos = (tested_positions_ch ?: Channel.empty())
+            .ifEmpty { file(params.posenrich_background_file ?: 'NO_TESTED_POSITIONS') }
+            .collect()
+            .map { it[0] }
+        def resolved_cycle_roster = (cycle_roster_ch ?: Channel.empty())
+            .ifEmpty { file(params.caas_cycle_roster_file ?: 'NO_CYCLE_ROSTER') }
+            .collect()
+            .map { it[0] }
+
         // ── Run scoring — single pass on full postproc pool ────────────────
         def compute_out = SCORING_COMPUTE(
             resolved_postproc,
@@ -225,7 +245,10 @@ workflow SCORING {
             accum_all_ch,
             resolved_hyp_pairs,
             caas_perms_resolved,
-            caas_pos_cycle_caas_resolved
+            caas_pos_cycle_caas_resolved,
+            resolved_cycle_roster,
+            resolved_tested_pos,
+            resolved_background
         )
 
         // ── Render report ──────────────────────────────────────────────────
@@ -240,6 +263,13 @@ workflow SCORING {
             .map { it[0] }
         def caas_pos_quantiles_resolved = (caas_pos_quantiles_ch ?: Channel.empty())
             .ifEmpty { file(params.caas_pos_quantiles_file ?: 'NO_CAAS_POS_QUANTILES') }
+            .collect()
+            .map { it[0] }
+
+        // N, universe size, unseen observed positions and saturation curve of the null (null_universe_summary.tsv);
+        // the sentinel when no null was given, and the report then omits its section.
+        def null_universe_resolved = compute_out.null_universe_summary
+            .ifEmpty { file('NO_NULL_UNIVERSE') }
             .collect()
             .map { it[0] }
 
@@ -260,7 +290,8 @@ workflow SCORING {
             resolved_background,
             resolved_perm_manifest,
             resolved_hyp_pairs,
-            resolved_perm_harvest
+            resolved_perm_harvest,
+            null_universe_resolved
         )
 
         def final_reports = report_out.report

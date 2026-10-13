@@ -11,7 +11,8 @@
  *             per-site FADE tables (top and bottom), gene coordinates, the CAAS
  *             position-level permulation null (perm_pos_cycle_caas.tsv.gz), the design of the
  *             null cycles (permulation_manifest.tsv), the audit of the null harvest
- *             (permulation_harvest.tsv) and the design of the observed pairs
+ *             (permulation_harvest.tsv), the null-adequacy summary of the scoring
+ *             (null_universe_summary.tsv) and the design of the observed pairs
  *             (contrast_hypotheses_pairs.tsv), filtered_discovery.tsv. The
  *             optional inputs are NO_* sentinel files when absent and reach the report
  *             as NULL; caas_pos_sample, caas_pos_quantiles and background_file are
@@ -51,6 +52,7 @@ process SCORING_REPORT {
     path perm_manifest       // optional: permulation_manifest.tsv, design of the canonical pairs of each null cycle (NO_PERM_MANIFEST sentinel when absent)
     path hyp_pairs           // optional: contrast_hypotheses_pairs.tsv, design of the observed canonical pairs (NO_HYP_PAIRS sentinel when absent)
     path perm_harvest        // optional: permulation_harvest.tsv, what the null harvest tried and discarded (NO_PERM_HARVEST sentinel when absent)
+    path null_universe       // optional: null_universe_summary.tsv, N, universe size, unseen observed positions and saturation curve of the null (NO_NULL_UNIVERSE sentinel when absent)
 
     output:
     path "11.Scoring_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -74,6 +76,7 @@ process SCORING_REPORT {
     def perm_manifest_arg = (perm_manifest.name =~ /^NO_PERM_MANIFEST|^NO_FILE/) ? 'NULL' : "'${perm_manifest}'"
     def hyp_pairs_arg = (hyp_pairs.name =~ /^NO_HYP_PAIRS|^NO_FILE/) ? 'NULL' : "'${hyp_pairs}'"
     def perm_harvest_arg = (perm_harvest.name =~ /^NO_PERM_HARVEST|^NO_FILE/) ? 'NULL' : "'${perm_harvest}'"
+    def null_universe_arg = (null_universe.name =~ /^NO_NULL_UNIVERSE|^NO_FILE/) ? 'NULL' : "'${null_universe}'"
     def win_size = params.scoring_window_size_bp ?: 1000000
 
     if (params.use_singularity || params.use_apptainer) {
@@ -102,6 +105,7 @@ process SCORING_REPORT {
                     perm_manifest_file   = ${perm_manifest_arg},
                     hypotheses_pairs_file = ${hyp_pairs_arg},
                     perm_harvest_file    = ${perm_harvest_arg},
+                    null_universe_file   = ${null_universe_arg},
                     window_size_bp       = ${win_size},
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'
@@ -136,6 +140,7 @@ process SCORING_REPORT {
                     perm_manifest_file   = ${perm_manifest_arg},
                     hypotheses_pairs_file = ${hyp_pairs_arg},
                     perm_harvest_file    = ${perm_harvest_arg},
+                    null_universe_file   = ${null_universe_arg},
                     window_size_bp       = ${win_size},
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'
