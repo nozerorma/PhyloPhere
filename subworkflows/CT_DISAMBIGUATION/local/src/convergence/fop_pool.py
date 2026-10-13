@@ -23,10 +23,11 @@ Per side ``s`` over the universe of K fixed Voronoi domains
     w_d,h   = (1 - δ) + 2δ·(log(1+pss) - min) / (max - min) with δ = 1 / (2K)
     w̄_d    = ( Σ_h  w_d,h )                       / M
     score_d = ( Σ_d w̄_d·s̄_d / Σ_d w̄_d )            (0 if Σ w̄_d == 0)
-    core_s  = clamp01( score_d * (M / (M + 2.0)) ) (shrinkage when pss provided)
+    core_s  = clamp01( score_d * (M / (M + 2.0)) ) (shrinkage when the PSS map holds more than one hypothesis)
 
-``M = 1`` degenerates exactly to the plain PSS-weighted mean over the K domains
-(arithmetic mean when no PSS file). ``agree_num`` / ``agree_den`` and
+Without a PSS map, w_d,h = 1 and the shrinkage factor is 1, so ``M = 1`` is the arithmetic mean over the
+K domains. With a PSS map the weights are the bounded ones above; the score is also shrunk by M / (M + 2)
+when the map holds more than one hypothesis, and not shrunk when it holds a single one. ``agree_num`` / ``agree_den`` and
 ``convergence_type`` are computed here, across all the pooled hypotheses, from the
 modal encoded derived residue per domain (a domain that splits V/I/L between
 hypotheses scores low under US and high under a scheme that co-encodes them; the
@@ -117,7 +118,9 @@ def pool_domains(
     Args:
         hyp_records: ``list[{"hyp": str, "sides": <compute_domain_scores return>}]``,
             ``M >= 1``.
-        pss_by_hyp_domain: ``{(hyp, domain): pss}``; ``None`` / missing key -> 1.0.
+        pss_by_hyp_domain: ``{(hyp, domain): pss}`` of the design (every hypothesis it holds, not only the ones
+            that detect the position); ``None`` / empty / missing key -> weight 1.0. The number of distinct
+            hypotheses of this map is the design size H: the support shrinkage applies only when H > 1.
 
     Returns:
         ``{"top": <agg>, "bottom": <agg>, "n_hypotheses": M}`` where ``<agg>`` is
@@ -155,7 +158,8 @@ def pool_domains(
     K = len(rep)
     delta = (1.0 / (2.0 * K)) if K >= 1 else 0.0
     w_by_hyp_domain: Dict[Tuple[str, Any], float] = {}
-    if pss_by_hyp_domain and M >= 1:
+    has_pss = bool(pss_by_hyp_domain)
+    if has_pss and M >= 1:
         for r in hyps:
             h = r["hyp"]
             log_vals: Dict[Any, float] = {}
@@ -185,9 +189,13 @@ def pool_domains(
 
     # ── Component B: FOP hypothesis shrinkage f_FOP(M) = M / (M + 2) ───────────
     # Penalizes positions detected in only 1 or 2 isolated FOP hypotheses while
-    # preserving robust positions detected across many hypotheses.
+    # preserving robust positions detected across many hypotheses. It is a property of the design,
+    # read from the number of hypotheses H of the PSS map (the same map the observed labeling and every
+    # null cycle carry), so a single-hypothesis design is never shrunk and the observed score and the
+    # null scores sit on one scale.
     k_0 = 2.0
-    f_fop = (M / (M + k_0)) if (pss_by_hyp_domain is not None and M >= 1) else 1.0
+    n_hyp_design = len({h for (h, _d) in pss_by_hyp_domain}) if has_pss else 0
+    f_fop = (M / (M + k_0)) if (n_hyp_design > 1 and M >= 1) else 1.0
 
     def _agg(side: str) -> Dict[str, Any]:
         s_bar: Dict[Any, float] = {}

@@ -709,24 +709,23 @@ for (k in names(obs_cap)) .add("observed", k, value = obs_cap[[k]])
 .max_mult <- if (length(.sig_counts)) max(.sig_counts) else 0L
 .dup_rate <- if (.n_pool_total > 0) .n_pool_dup / .n_pool_total else 0.0
 .probs <- as.numeric(.sig_counts) / max(.n_pool_total, 1L)
-.entropy_norm <- if (.n_pool_total > 1 && .n_pool_unique > 1) {
-  -sum(.probs * log(.probs)) / log(.n_pool_total)
-} else if (.n_pool_total > 0 && .n_pool_unique == 1) {
-  0.0
-} else {
-  1.0
-}
+# Effective number of distinct draws (inverse Simpson index, 1 / sum(p_i^2)): the size of a pool of equally
+# frequent draws that is as redundant as this one. It equals the pool size when every draw is unique and 1 when
+# a single draw fills the pool; its fraction of the pool size bounds the resolution of an empirical p.
+.eff_draws <- if (.n_pool_total > 0) 1 / sum(.probs^2) else 0
+.eff_frac  <- if (.n_pool_total > 0) .eff_draws / .n_pool_total else NA_real_
 
 .add("diversity", "total_cycles", value = .n_pool_total)
 .add("diversity", "unique_draws", value = .n_pool_unique)
 .add("diversity", "duplicate_draws", value = .n_pool_dup)
 .add("diversity", "duplicate_rate", value = round(.dup_rate, 4))
 .add("diversity", "max_multiplicity", value = .max_mult)
-.add("diversity", "entropy_norm", value = round(.entropy_norm, 4))
+.add("diversity", "effective_draws", value = round(.eff_draws, 2))
+.add("diversity", "effective_fraction", value = round(.eff_frac, 4))
 
 log_msg("INFO", sprintf(
-  "Pool draw diversity: %d unique of %d total (%.1f%% unique, %d duplicate(s); max multiplicity %d, norm entropy %.4f)",
-  .n_pool_unique, .n_pool_total, 100 * (1 - .dup_rate), .n_pool_dup, .max_mult, .entropy_norm))
+  "Pool draw diversity: %d unique of %d total (%.1f%% unique, %d duplicate(s); max multiplicity %d, effective draws %.1f = %.1f%% of the pool)",
+  .n_pool_unique, .n_pool_total, 100 * (1 - .dup_rate), .n_pool_dup, .max_mult, .eff_draws, 100 * .eff_frac))
 
 write.table(data.table::rbindlist(.hv), file.path(outdir, "permulation_harvest.tsv"), sep = "\t", quote = FALSE, row.names = FALSE)
 

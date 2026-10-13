@@ -21,6 +21,7 @@ Imported by: disambiguation_perms_main.py (process_all_genes_perms), reaggregate
 import functools
 import gzip
 import logging
+import math
 import multiprocessing as mp
 import os
 import random
@@ -303,6 +304,25 @@ def _scan_perm_discovery_dir(disc_path: Path) -> Dict[str, Path]:
     return by_prefix
 
 
+# Memory model of one replay chunk (see process_all_genes_perms): MB per million rows of perm-discovery export and the
+# fixed part of a worker. Four genes of 0.8 to 6.4 million rows replayed with one worker each peaked at 2.4, 3.6, 10.9 and
+# 16.3 GB (linear fit: 2450 MB per million rows, 200 MB fixed, within 5 %); the constants round that fit up.
+# MEM_HEADROOM is the share of the worker budget a chunk may use.
+_REPLAY_MB_PER_MROW = 2500.0
+_REPLAY_BASE_MB = 400.0
+_REPLAY_MEM_HEADROOM = 0.8
+
+
+def replay_chunk_count(rows: int, worker_mem_mb: float, mb_per_mrow: float = _REPLAY_MB_PER_MROW,
+                       base_mb: float = _REPLAY_BASE_MB) -> int:
+    """Smallest number of chunks that brings the replay of a gene of `rows` export rows under the usable memory of
+    one worker (1 without a budget or without rows)."""
+    if worker_mem_mb <= 0 or rows <= 0:
+        return 1
+    usable_mb = max(_REPLAY_MEM_HEADROOM * worker_mem_mb - base_mb, 0.2 * worker_mem_mb)
+    return max(1, math.ceil(rows / 1e6 * mb_per_mrow / usable_mb))
+
+
 def _chunk_gene_cycles(cycle_tags: List[str], target_chunk_size: int) -> List[List[str]]:
     """Split cycle_tags into sub-chunks of about target_chunk_size tags.
 
@@ -525,6 +545,7 @@ def _perms_worker_finalize(
                 "n_detected": n_detected_count.get((pos, group), 1),
                 "clust": 1 if int(pos) in clust_by.get((cyc, group), ()) else 0,
                 "side": side,
+                "n_hyp": getattr(r, "n_hypotheses", None),
             }
             detail_rows.append(row)
 
@@ -921,8 +942,7 @@ def process_all_genes_perms(
     extreme_percentile: float = 0.99,
     postproc_filter: bool = False,
     gene_sizes: Optional[Dict[str, int]] = None,
-    chunk_threshold: Optional[int] = None,
-    chunk_target_size: Optional[int] = None,
+    worker_mem_mb: Optional[float] = None,
     seed: int = 1998,
     remove_clusters: bool = True,
     train_map_dir: Optional[str] = None,
@@ -1019,7 +1039,7 @@ def process_all_genes_perms(
 
     # The detail rows carry `side` (a "both" position is two rows, one per side).
     detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score",
-                     "n_detected", "clust", "side"]
+                     "n_detected", "clust", "side", "n_hyp"]
 
     # CT_POSTPROC filtering of the null candidate pool (cluster trains and dubious/extreme
     # genes). Off by default; the Nextflow layer turns it on (params.caas_perms_postproc)
@@ -1054,28 +1074,35 @@ def process_all_genes_perms(
     else:
         n_cycles_total = len(cycle_tags)
 
-    if chunk_threshold is None:
-        chunk_threshold = int(os.environ.get("CAAS_PERMS_CHUNK_THRESHOLD", "0"))
-    if chunk_target_size is None:
-        chunk_target_size = int(os.environ.get("CAAS_PERMS_CHUNK_TARGET_SIZE", "1000"))
+    # Chunking by memory budget. A replay chunk holds the discovery rows of its cycles and their per-position
+    # records, so its memory grows linearly with the rows of the export it replays (MB_PER_MROW) on top of a
+    # fixed ASR context (BASE_MB). A gene whose whole replay would exceed the usable memory of one worker is
+    # split into the smallest number of base-cycle-respecting chunks that fits; every other gene runs as one
+    # LPT-scheduled task, so its ASR context, discovery parse and per-gene MRCA/tip/domain caches are built
+    # once and reused across all cycles. The worker budget comes from the task (task.memory / task.cpus), so a
+    # larger genome, a larger request or a retry with more memory changes the split without any threshold to
+    # retune; without a budget (0) nothing is chunked.
+    if worker_mem_mb is None:
+        worker_mem_mb = float(os.environ.get("CAAS_PERMS_WORKER_MEM_MB", "0") or 0)
+    mb_per_mrow = float(os.environ.get("CAAS_PERMS_MB_PER_MROW", _REPLAY_MB_PER_MROW))
+    base_mb = float(os.environ.get("CAAS_PERMS_BASE_MB", _REPLAY_BASE_MB))
 
-    # Chunking: when chunk_threshold > 0 is explicitly configured, a gene whose size proxy
-    # exceeds chunk_threshold has its replay split into base-cycle-respecting sub-chunks.
-    # By default (chunk_threshold == 0), each gene runs as a single LPT-scheduled worker task
-    # so its ASR context, discovery file parse, and per-gene MRCA/tip/domain caches are built
-    # once and reused across all cycles.
-    big_chunks = None
-    if chunk_threshold > 0 and gene_sizes and any(gene_sizes.get(g, 0) > chunk_threshold for g in genes):
-        big_chunks = _chunk_gene_cycles(cycle_tags, chunk_target_size)
-
+    chunk_sets: Dict[int, List[List[str]]] = {}   # n chunks -> cycle split; identical for every gene
     tasks: List[Tuple[str, List[str], float]] = []  # (gene, chunk_cycle_tags, est_workload)
     chunks_per_gene: Dict[str, int] = {}
     for gene in genes:
         size = (gene_sizes or {}).get(gene, 0)
-        use_chunks = big_chunks if (big_chunks and chunk_threshold > 0 and size > chunk_threshold) else [cycle_tags]
+        k = replay_chunk_count(size, worker_mem_mb, mb_per_mrow, base_mb)
+        if k not in chunk_sets:
+            chunk_sets[k] = [cycle_tags] if k == 1 else _chunk_gene_cycles(cycle_tags, math.ceil(len(cycle_tags) / k))
+        use_chunks = chunk_sets[k]
         chunks_per_gene[gene] = len(use_chunks)
         for chunk in use_chunks:
             tasks.append((gene, chunk, size / len(use_chunks)))
+    n_split = sum(1 for n in chunks_per_gene.values() if n > 1)
+    if worker_mem_mb > 0:
+        logger.info(f"[perms] worker budget {worker_mem_mb:.0f} MB: "
+                    f"{n_split} of {len(genes)} genes replayed in chunks")
 
     # LPT (longest processing time first): the chunk with the largest estimated workload is
     # dispatched first. `genes` arrives ordered by size (largest first) from

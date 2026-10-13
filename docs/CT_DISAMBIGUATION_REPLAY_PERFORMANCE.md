@@ -578,16 +578,14 @@ set, or one base-cycle-respecting sub-chunk of it via the new `_chunk_gene_cycle
 splits one base cycle's hypothesis variants) and `_perms_worker_finalize` (phase B: the true whole-gene
 reduction — `n_detected`/`pos_perm_p`, the CT_POSTPROC cluster filter, detail-row emission — run once
 per gene after every one of its chunks has arrived; verbatim to the old worker's tail, so output is
-unchanged regardless of chunk count). `process_all_genes_perms` now splits a gene's replay into
-`_chunk_gene_cycles(cycle_tags, chunk_target_size)` sub-chunks (env `CAAS_PERMS_CHUNK_TARGET_SIZE`,
-default 1000 — a reasoned starting point, not a measured one: `_load_gene_asr_context`'s fixed cost is
-now paid once PER CHUNK rather than once per gene, and at 1000 cycles/chunk (~3.5s of real replay work
-at the ~3.5ms/cycle rate measured in the Tier-1 closure above) that fixed cost needs to stay under
-~1s for overhead to stay under ~25%; `_perms_worker_replay` now logs `ctx load {s}s (chunk of {n}
-cycle-tags)` per chunk specifically so the next real run gives an actual number to check this against,
-rather than leaving it as a permanent guess) whenever its LPT size proxy (`gene_sizes`, threaded
-through from `_genes_from_export`) exceeds `chunk_threshold` (env `CAAS_PERMS_CHUNK_THRESHOLD`, default
-5000, also unmeasured); the flattened per-chunk
+unchanged regardless of chunk count). `process_all_genes_perms` splits the replay of a gene into base-cycle-respecting chunks (`_chunk_gene_cycles`)
+only when its whole replay would not fit in the memory of one worker: the worker budget is `task.memory / task.cpus`
+(env `CAAS_PERMS_WORKER_MEM_MB`, set by CAAS_CORE_BATCHED; 0 or unset turns chunking off) and the memory of a chunk is
+modeled as a fixed part (`CAAS_PERMS_BASE_MB`) plus a part proportional to the rows of the export it replays
+(`CAAS_PERMS_MB_PER_MROW`, both measured on the cancer perm-discovery exports with one worker per gene). The number of
+chunks is the smallest that fits the usable share (80 %) of the budget, so a genome with larger alignments, a larger
+request or a retry with more memory changes the split without a threshold to retune. `_perms_worker_replay` logs
+`ctx load {s}s (chunk of {n} cycle-tags)` per chunk, the fixed cost paid once per chunk; the flattened per-chunk
 task list is LPT-sorted the same way genes were. Parent-side bookkeeping (`pending_pooled`/`received`
 dicts, keyed by gene) accumulates a gene's chunk results as they arrive via `imap_unordered` and calls
 `_perms_worker_finalize` once complete, bounding how many genes are ever partially resident at once to

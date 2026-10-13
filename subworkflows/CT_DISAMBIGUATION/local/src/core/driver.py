@@ -265,6 +265,7 @@ def _expand_pooled(pos, grp, hyp_label, pooled):
             side=sd["side"], hypothesis=hyp_label,
             derived_agreement=sd["derived_agreement"],
             domain_scores=sd["domain_scores"],
+            n_hypotheses=pooled.get("n_hypotheses"),
         )
         for sd in pooled_sides(pooled)
     ]
@@ -272,6 +273,7 @@ def _expand_pooled(pos, grp, hyp_label, pooled):
         out.append(PositionAxes(
             position=pos, caap_group=grp, asr_path_score=0.0,
             side="none", hypothesis=hyp_label,
+            n_hypotheses=(pooled or {}).get("n_hypotheses"),
         ))
     return out
 
@@ -308,8 +310,9 @@ def pool_labelings(
 
         pooled_by_cycle: Dict[str, List[Any]] = {}
         for (base, pos, grp), hyp_recs in by_pos.items():
-            # pool_domains wants only {(hyp, domain) -> pss} of this cycle (missing -> equal weight).
-            pss_map = fop_pairs.get(base, {}) or None
+            # pool_domains wants only {(hyp, domain) -> pss} of this cycle (missing -> equal weight); the number of
+            # hypotheses of that map is the design size H of the cycle, as for the observed labeling.
+            pss_map = fop_pairs.get(base)
             pooled = pool_domains(hyp_recs, pss_map)
             pooled_by_cycle.setdefault(base, []).extend(_expand_pooled(pos, grp, None, pooled))
         return list(pooled_by_cycle.items())
