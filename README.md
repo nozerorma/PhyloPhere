@@ -255,10 +255,12 @@ characterization is a separate evidence line handled by ENRICHMENT
 
 ### Position-level score (`CAAS_score`)
 
-For each alignment position and side, `CAAS_score = (US + mean(GS)) / 2`: half the `caas_row` of the US scheme (0 when US
-did not detect the position) plus half the mean of the `caas_row` of the GS1-GS4 schemes that detected it (0 when none
-did). `caas_row` is `asr_score`/`asr_path_score`, the ancestral-state-reconstruction path score of the row. The
-score lies in [0, 1].
+For each alignment position and side, `CAAS_score` is the `caas_row` of the US scheme, and a side that US does not detect
+or scores 0 has no score and is not in `position_scores.tsv`. `caas_row` is `asr_score`/`asr_path_score`, the
+ancestral-state-reconstruction path score of the row. The score lies in (0, 1]. The GS1-GS4 schemes do not enter the score:
+`GS_schemes` and `is_biochem` of `position_scores.tsv` give the biochemical profile of each position, `position_biochem.tsv`
+that of every detected position (those only GS schemes detect included), and the Biochemistry section of the
+position-level enrichment report analyses it against the permulation null.
 
 US is the strict test on residues, and a GS scheme tests the same substitution after recoding the residues into
 biochemical classes, so the GS term is the bonus for a divergence in chemistry. A position detected only by GS
@@ -292,8 +294,8 @@ is then rebuilt (`CAAS_CORE_MERGE`, no ASR replay).
 side, `ancestral_aa` and `derived_aa` (comma-separated, most frequent first). The `caas` column is the pattern
 `<top residues>/<bottom residues>` and has no direction.
 
-**`gene_scores.tsv`**: `gene_caas_score` (+ `_top`/`_bottom`), `accum_cct_p`
-(Cauchy-combined accumulation signal) with BH FDR `accum_fdr` and
+**`gene_scores.tsv`**: `gene_caas_score` (+ `_top`/`_bottom`), `accum_p`
+(empirical accumulation p of the US scheme; `accum_cct_p` repeats it) with BH FDR `accum_fdr` and
 `accum_significant`, `rer_min_pval`, `rer_acceleration`,
 `fade_max_bf_top`/`_bottom`, `fade_significant_top`/`_bottom`.
 

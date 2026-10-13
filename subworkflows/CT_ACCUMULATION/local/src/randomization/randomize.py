@@ -5,8 +5,7 @@
 """
 Randomization: tests whether a gene accumulates more CAAS than a null predicts.
 
-Writes one <prefix>_<group>_aggregated_results.csv per grouping scheme (us, gs1, gs2, gs3,
-gs4), plus conservation-decile parquet tables for 'cons_decile'.
+Writes <prefix>_us_aggregated_results.csv, plus conservation-decile parquet tables for 'cons_decile'.
 
 Test design
 -----------
@@ -46,8 +45,8 @@ too-high expectation (conservative) and well covered genes a too-low one
 
 Evaluation is Unweighted Scheme (US) only
 ------------------------------------------
-Accumulation is evaluated strictly under the Unweighted Scheme (US); biochemical Grantham Score
-(GS) schemes describe positions and are excluded from accumulation. Each gene's empirical p-value
+Accumulation is evaluated strictly under the Unweighted Scheme (US); the biochemical grouping
+schemes (GS1-GS4) describe positions and are excluded from accumulation. Each gene's empirical p-value
 is derived from the US null distribution and adjusted directly by Benjamini-Hochberg (BH FDR)
 downstream in accum_gene_lists.nf and scoring_compute.R.
 

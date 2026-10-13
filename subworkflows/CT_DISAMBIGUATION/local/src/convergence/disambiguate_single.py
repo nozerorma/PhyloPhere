@@ -161,7 +161,7 @@ def _emit_pooled_side_rows(
 
     sides = pooled_sides(pooled)
     if not sides:
-        # Preserve the diagnostic convergence_type ("divergent", "single", or "no_change")
+        # Preserve the diagnostic convergence_type ("divergent", "single", "no_change", "symplesiomorphic" or "cross_hypothesis")
         # and derived_agreement from whichever side had changed domains, so downstream
         # characterization reports (Reports 8, 9, 11, 16) can distinguish why score == 0.
         diag_side = max(
@@ -173,9 +173,15 @@ def _emit_pooled_side_rows(
         diag_num = int(diag_side.get("agree_num", 0) or 0)
         diag_ctype = str(diag_side.get("convergence_type") or "no_change")
         if diag_ctype == "convergent":
-            # Had >=2 domains with the same derived residue, yet asr_path_score == 0
-            # (ancestral retention P_LCA == 1.0 or disjoint hypotheses).
-            diag_ctype = "symplesiomorphic"
+            # The pooled residues agree across >= 2 domains, yet the score is 0. Two causes, told apart
+            # by the per-hypothesis records: some hypothesis is convergent by itself, so the derived
+            # state was already held at the LCA of its domains (symplesiomorphic); or no hypothesis is,
+            # the agreement exists only across hypotheses (cross_hypothesis).
+            diag_ctype = "cross_hypothesis"
+            for hr in hyp_rows:
+                for s in ("top", "bottom"):
+                    if ((hr.get("sides") or {}).get(s) or {}).get("convergence_type") == "convergent":
+                        diag_ctype = "symplesiomorphic"
         diag_agree = (diag_num / diag_den) if diag_den > 0 else None
         diag_ambig = bool(diag_side.get("agreement_tie", False))
         return [dataclasses.replace(

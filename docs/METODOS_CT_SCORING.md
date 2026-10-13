@@ -182,7 +182,7 @@ Con `overlap` = min(residuos fg también en bg, residuos bg también en fg), y
 `US` (residuo literal) y `GS1..GS4` (agrupaciones bioquímicas progresivamente más gruesas).
 **Cuántos esquemas disparan es una propiedad determinista de qué aminoácidos intervienen**
 (distancia bioquímica discretizada), no una medida de fuerza de evidencia. Por eso el
-scoring (H.4) puntúa la posición como `(US + media(GS)) / 2`: la mitad del score de US (0 si no detecta) más la mitad de la **media** de los scores de los GS1-GS4 que detectan (0 si ninguno). US es el test estricto sobre residuos y cada GS repite el test tras recodificar los residuos en clases bioquímicas; el término GS es el bonus por divergencia química. Una posición detectada solo por GS conserva su término GS (el de US es 0) en lugar de desaparecer, y la que detectan ambos suma los dos, cada uno con peso 0.5. Cuántos GS detectan no se premia: las cuatro particiones son ejes distintos, no versiones fina y gruesa de una. El score va de 0 a 1.
+scoring (H.4) puntúa la posición solo con el score de US, el test estricto sobre residuos; una posición que US no detecta, o detecta con score 0, no tiene score. Los GS recodifican los residuos en clases bioquímicas y describen la posición, no la puntúan: `GS_schemes` e `is_biochem` (en `position_scores.tsv`) dan su perfil, `position_biochem.tsv` el de toda posición detectada (las solo-GS incluidas) y la nula registra el `scheme_set` de cada detección. Cuántos GS detectan no se premia: las cuatro particiones son ejes distintos, no versiones fina y gruesa de una. El score va de 0 (excluido) a 1.
 
 *Ejemplo — columna 210, patrón fg/bg por hipótesis:*
 
@@ -601,8 +601,8 @@ falsos positivos a α = 0.01 en el 1 % de mayor propensión, y 0 % por gen con l
 `gene_caas` se une por **`full_join`** (no `left_join`: cada módulo tiene su propio universo
 de genes, más ancho que el CAAS) con:
 
-- **Accumulation**: por dirección (`all`/`top`/`bottom`), Cauchy Combination Test
-  (CCT/ACAT) sobre las p empíricas de los 5 esquemas → `accum_cct_p`, BH → `accum_fdr`,
+- **Accumulation**: por dirección (`all`/`top`/`bottom`), p empírica del esquema US
+  → `accum_p` (`accum_cct_p` la repite), BH → `accum_fdr`,
   `accum_significant` (< 0.05) sobre genes con ≥ 1 CAAS.
 - **RER**: `rer_min_pval` (usa `p.perm` si existe), `rer_significant` (≤ 0.05, **sin corregir** por tests múltiples; es la llamada que usan las listas de genes RER y los flags AMI), `rer_perm_padj` (BH de `p.perm` sobre todos los genes) y `rer_significant_fdr` (`rer_perm_padj` ≤ 0.05; Saputra et al. 2021 corrigen el p de permulación antes de llamar genes), `rer_rho`,
   `rer_acceleration`.
@@ -704,7 +704,7 @@ mismos umbrales que el FCS. Sin nulo, `lach_p.perm` es NA y `sig` es falso.
 | `CAAS_score` posición (H.4) | ≈ 1.35 (0.57 de US + ≈ 0.78 de media de los GS), `change_side = "top"` |
 | `gene_caas_score` (H.5) | 0.94^12 ≈ 0.48 |
 | `gene_caas_pperm` (H.6) | ≈ 0.013 |
-| Ejes independientes (H.7) | FADE BF 300, RER p.perm 0.02 (acc), accum CCT p 0.04 — columnas separadas |
+| Ejes independientes (H.7) | FADE BF 300, RER p.perm 0.02 (acc), accum p 0.04 — columnas separadas |
 | FCS (I.2) | `GO:phototransduction` "Supported" (Wilcoxon + Lachenbruch) |
 
 ---

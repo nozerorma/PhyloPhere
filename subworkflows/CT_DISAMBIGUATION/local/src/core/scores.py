@@ -9,8 +9,9 @@ Inputs: per-scheme (or per-side) score mappings and the reference pools of posit
 Outputs: position scores, per-direction values and gene scores (in memory)
 
 * The score of a row (``caas_row``) is its ``asr_path_score`` (identity). A position's score, per side,
-  is the score of its US row (exact residue identity), in [0, 1]. A position that US does not detect has
-  no score, whatever the GS schemes say: the GS1-GS4 schemes recode the residues into biochemical classes
+  is the score of its US row (exact residue identity), in (0, 1]. A position that US does not detect, or
+  detects with a score of 0, has no score, whatever the GS schemes say; a side without a score does not
+  enter the direction values nor the ``size_adj_max`` count of the gene. The GS schemes: the GS1-GS4 schemes recode the residues into biochemical classes
   and describe the chemistry of a position (which schemes detect it), they do not enter the score or
   any quantity built on it. Their per-position profile is written by scoring_compute.R and the null
   records the scheme set of each detection (``scheme_set`` of perm_pos_cycle_caas.tsv.gz).
@@ -38,8 +39,8 @@ __all__ = ["DIRECTIONS", "TIE_TOL", "SCORE_RULE", "GS_SCHEMES", "position_score"
 DIRECTIONS = ("all", "top", "bottom")
 
 # Rule of the position score. It is stamped on the null (perm_pos_cycle_caas.tsv.gz, column score_aggregation) so that
-# scoring_compute.R refuses a null scored with another rule.
-SCORE_RULE = "us"
+# scoring_compute.R refuses a null scored with another rule. "us_pos": the US score, defined only when positive.
+SCORE_RULE = "us_pos"
 # Biochemical schemes: they describe a position and never enter its score.
 GS_SCHEMES = ("GS1", "GS2", "GS3", "GS4")
 

@@ -1406,7 +1406,7 @@ Prioritized amino-acid position candidates evaluated strictly at **position-nati
   - *CAAS percentiles* (`25%`, `10%`, `5%`, `1%`): collapsed to deepest nested tier (0–4).
   - *FADE site overlap* (`FADE_overlap`): exact codon site identified by FADE (0–1).
 - **Descriptivas** (amber): Characterization-only annotations excluded from scoring:
-  - *Biochemical profile*: `GS_schemes` (detection across Grantham Score groups GS1–GS4) and `is_biochem` (hit in ≥1 GS scheme).
+  - *Biochemical profile*: `GS_schemes` (detection across the biochemical grouping schemes GS1–GS4) and `is_biochem` (hit in ≥1 GS scheme).
   - *PosEnrich*: position-level functional enrichment terms (`PE_sig`, `PE term(s)`). Does not weight.
   - *Empirical statistics*: permutation p-values (`p.emp`, `p.adj_bh`).
   - *External annotations*: `COSMIC` somatic hits, `PAI3D_pathogenic` PrimateAI-3D pathogenicity calls.
@@ -1476,6 +1476,8 @@ build_interesting_positions <- function(direction) {
   }
 
   # Biochemical profile flags (GS_schemes and is_biochem)
+  # The profile exists when position_scores.tsv carries it or its scheme_set; otherwise the columns are not shown.
+  has_biochem_pos <- any(c("GS_schemes", "scheme_set") %in% names(base))
   if (!"GS_schemes" %in% names(base)) {
     if ("scheme_set" %in% names(base)) {
       base$GS_schemes <- gsub("\\+?US\\+?", "", base$scheme_set)
@@ -1625,7 +1627,7 @@ build_interesting_positions <- function(direction) {
   pond_cols <- c("25%", "10%", "5%", "1%")
   if (has_fade_pos) pond_cols <- c(pond_cols, "FADE_overlap")
 
-  desc_cols <- c("GS_schemes", "is_biochem")
+  desc_cols <- if (has_biochem_pos) c("GS_schemes", "is_biochem") else c()
   if (has_pe_pos)          desc_cols <- c(desc_cols, "PE_sig", "PE term(s)")
   if (has_pemp)            desc_cols <- c(desc_cols, "p.emp")
   if (has_padj)            desc_cols <- c(desc_cols, "p.adj_bh")

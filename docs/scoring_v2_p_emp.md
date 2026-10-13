@@ -27,8 +27,7 @@ T = max_lado CAAS_score   si la posición se detecta en algún lado
 T = -Inf                  si no se detecta
 ```
 
-donde `CAAS_score` de un lado es la agregación §2g sobre los esquemas, `(US + media(GS)) / 2`: la mitad del score de US (0 si no detecta)
-más la mitad de la media de los scores de GS1-GS4 que detectan (0 si ninguno; el nulo y el observado usan la misma regla); va de 0 a 1. El score de la posición es el máximo sobre los lados
+donde `CAAS_score` de un lado es el score del esquema US (el nulo y el observado usan la misma regla); un lado que US no detecta, o detecta con score 0, no tiene score; va de 0 (excluido) a 1. El score de la posición es el máximo sobre los lados
 detectados (el eje "all", `.pos_undirected` de §4a).
 
 Un ciclo nulo `i` cuenta a favor de la hipótesis nula si **(a)** re-detecta la
@@ -194,8 +193,8 @@ muestran los cuatro. Ninguno filtra `position_scores.tsv`.
   vez por `core.scores` y reproducido por `_size_adj_max_null` en el nulo), que es el ranking que entra al
   enriquecimiento (FCS) con su nulo por permulación en la misma escala (`caas_perms.rds`,
   `scoring_caas_perms.R`).
-- **`accum_cct_p` (§4b).** Conteo de posiciones detectadas por gen y esquema,
-  combinado con Cauchy (CCT/ACAT). Con `accumulation_randomization_type =
+- **`accum_p` (§4b).** Conteo de posiciones detectadas por gen con el esquema US
+  (`accum_cct_p` repite el valor). Con `accumulation_randomization_type =
   "cons_decile"` (por defecto) su nulo es de ocupación por deciles de
   conservación y no controla la relación árbol-fenotipo; con `"permulation"`
   lee `perm_pos_detail/`.

@@ -69,9 +69,9 @@ caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permul
 core_positions_file  <- parse_arg("--core_positions")  # observed_core_scores.py: CAAS_score per (Gene, Position, side)
 core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: size-adjusted gene CAAS scores
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
-# Rule of the position score: the US score, in [0, 1] (core.scores.SCORE_RULE). The observed scores (observed_core_scores.py)
+# Rule of the position score: the US score, defined only when positive (core.scores.SCORE_RULE). The observed scores (observed_core_scores.py)
 # and the null (perm_pos_cycle_caas.tsv.gz, column score_aggregation) must use the same rule.
-score_aggregation <- "us"
+score_aggregation <- "us_pos"
 # Rows reach this script already pooled over hypotheses by CT_DISAMBIGUATION (one row per Gene,
 # Position, scheme and side, hypothesis NA), so scoring never pools hypotheses itself.
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
@@ -730,7 +730,7 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
 # position with side != "none"; "top" / "bottom" restrict to that side, so the flag is
 # direction-aware like FADE and RER. Accumulation is evaluated under the Unweighted Scheme (US) only.
 #
-# Returns a tibble with Gene + accum_p<suffix> (and accum_cct_p<suffix> for alias compatibility),
+# Returns a tibble with Gene + accum_p<suffix> (accum_cct_p<suffix> repeats it: the US empirical p, not a combined test, kept under its former name for the readers of that column),
 # accum_fdr<suffix> / accum_significant<suffix> and accum_pval_us<suffix> (suffix = "" for "all",
 # "_top" / "_bottom" otherwise); the suffixes let the three directions full_join onto gene_scores without colliding.
 compute_accum_significance <- function(accum_dir, direction, suffix) {

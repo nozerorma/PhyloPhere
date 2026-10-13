@@ -229,16 +229,6 @@ if (has_genomic) {
   genomic_raw <- NULL
 }
 
-accum_scheme_info <- tibble(
-  scheme = c("us", "gs4", "gs3", "gs2", "gs1"),
-  label = c("US", "GS4", "GS3", "GS2", "GS1"),
-  weight = c(0.5, 0.2, 0.1, 0.1, 0.1),
-  pval_col = paste0("accum_pval_", c("us", "gs4", "gs3", "gs2", "gs1")),
-  score_col = paste0("accum_score_", c("us", "gs4", "gs3", "gs2", "gs1")),
-  weighted_col = paste0("accum_weighted_", c("us", "gs4", "gs3", "gs2", "gs1"))
-) %>%
-  filter(pval_col %in% names(gene_df))
-
 # Thresholds
 top_pct   <- params$top_pct
 top25_pct <- 0.25
@@ -1206,7 +1196,7 @@ The score distribution of convergent positions (`CAAS_score > 0`) by direction.
 Zero-scoring positions (shadow single-domain rows, divergent non-identical residues under US,
 or ancestral retentions) are filtered upstream from `position_scores.tsv` to avoid distorting
 the ECDF reference pools and multiple-testing adjustments, while remaining fully characterized in
-`position_biochem.tsv` and `filtered_discovery.tsv` (see the *Zero-Score Diagnostics* tab below).
+`filtered_discovery.tsv` and, as detections, in `position_biochem.tsv` (see the *Zero-Score Diagnostics* tab below).
 The `global` panel keeps one entry per position, its best side; `top` and `bottom` use the positions of that side.
 
 ```{r caas-score-nonzero, fig.height=5, fig.width=10, results='asis'}
@@ -1242,7 +1232,7 @@ if (nrow(.valid_caas) == 0) {
 
 Positions detected during discovery with `asr_path_score == 0` under the Unweighted Scheme (US)
 are filtered from downstream scoring (`position_scores.tsv`) while remaining characterized in
-`filtered_discovery.tsv` and `position_biochem.tsv`. This diagnostic tabulates and visualizes the
+`filtered_discovery.tsv`. This diagnostic tabulates and visualizes the
 reasons why these position sides were filtered out:
 - **Single-domain shadow**: A single domain changed on this side ($n_{\text{changed}} = 1$) while the opposite side converged in $\ge 2$ independent lineages. A single domain cannot converge with itself.
 - **Divergent under US (biochemically convergent in GS1–GS4)**: Derived lineages mutated to different amino acids under US (e.g., `R -> C, H, Q`), but share common physicochemical properties under `GS1`–`GS4`.
