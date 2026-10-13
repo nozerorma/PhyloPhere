@@ -37,6 +37,7 @@ params:
   gene_scores_file:     NULL   # gene_scores.tsv (background gene fallback)
   vep_primateai_file:   NULL   # PrimateAI-3D score TSV
   vep_cosmic_file:      NULL   # COSMIC Mutant Census score TSV
+  vep_ensembl_file:     NULL   # Ensembl VEP consequence TSV
   genomic_info_file:    NULL   # gene, chr, start, end, length (no header assumed)
   # FADE_top_sig/FADE_bottom_sig position group (gene,position,max_bf,target_aa;
   # BF >= fade_bf_threshold only). Direction-specific, unlike PAI3D/COSMIC.
@@ -971,6 +972,7 @@ if (!is.null(gene_df) && "Gene"     %in% names(gene_df)) gene_df$Gene     <- as.
 
 has_vep_primateai <- .file_ok(params$vep_primateai_file)
 has_vep_cosmic    <- .file_ok(params$vep_cosmic_file)
+has_vep_ensembl   <- .file_ok(params$vep_ensembl_file)
 has_genomic       <- .file_ok(params$genomic_info_file)
 # Observed scheme profile of the detected position sides (top and bottom).
 biochem_df <- if (.file_ok(params$position_biochem_file)) {
@@ -981,11 +983,11 @@ if (!is.null(biochem_df) && "Gene"     %in% names(biochem_df)) biochem_df$Gene  
 if (!is.null(biochem_df) && "side"     %in% names(biochem_df)) biochem_df$side     <- as.character(biochem_df$side)
 has_biochem <- !is.null(biochem_df) && nrow(biochem_df) > 0
 # has_fade_sites_top/bottom and fade_sites_top_df/bottom_df are loaded in the `load` chunk.
-# Position scores are required by every sub-tab below (PAI3D, COSMIC and FADE joins,
+# Position scores are required by every sub-tab below (PAI3D, COSMIC, Ensembl VEP and FADE joins,
 # regional accumulation), so they gate the whole section together with at least one
 # external layer.
 has_pos_char <- has_position_scores && !is.null(pos_df) && nrow(pos_df) > 0 &&
-  (has_vep_primateai || has_vep_cosmic || has_genomic || has_fade_sites_top || has_fade_sites_bottom || has_biochem)
+  (has_vep_primateai || has_vep_cosmic || has_vep_ensembl || has_genomic || has_fade_sites_top || has_fade_sites_bottom || has_biochem)
 
 if (has_vep_primateai) {
   vep_pai_df <- readr::read_tsv(params$vep_primateai_file, show_col_types = FALSE)
@@ -999,6 +1001,35 @@ if (has_vep_cosmic) {
   if ("Position" %in% names(vep_cosmic_df)) vep_cosmic_df$Position <- suppressWarnings(as.integer(vep_cosmic_df$Position))
 } else {
   vep_cosmic_df <- NULL
+}
+
+if (has_vep_ensembl) {
+  vep_ensembl_df <- readr::read_tsv(params$vep_ensembl_file, name_repair = "minimal", show_col_types = FALSE)
+  dup_gene_idx <- which(names(vep_ensembl_df) == "Gene")
+  if (length(dup_gene_idx) > 1L) {
+    names(vep_ensembl_df)[dup_gene_idx[-1]] <- "Ensembl_Gene"
+  }
+  if ("Position" %in% names(vep_ensembl_df)) vep_ensembl_df$Position <- suppressWarnings(as.integer(vep_ensembl_df$Position))
+  if ("Gene"     %in% names(vep_ensembl_df)) vep_ensembl_df$Gene     <- as.character(vep_ensembl_df$Gene)
+  if (!"IMPACT" %in% names(vep_ensembl_df)) {
+    if ("Extra" %in% names(vep_ensembl_df)) {
+      vep_ensembl_df$IMPACT <- ifelse(
+        grepl("IMPACT=", vep_ensembl_df$Extra),
+        sub(".*IMPACT=([^;]+).*", "\\1", vep_ensembl_df$Extra),
+        NA_character_
+      )
+    } else if ("Consequence" %in% names(vep_ensembl_df)) {
+      vep_ensembl_df$IMPACT <- dplyr::case_when(
+        grepl("stop_gained|stop_lost|start_lost|frameshift|splice_acceptor|splice_donor|transcript_ablation", vep_ensembl_df$Consequence) ~ "HIGH",
+        grepl("missense_variant|inframe_insertion|inframe_deletion|protein_altering_variant", vep_ensembl_df$Consequence) ~ "MODERATE",
+        grepl("splice_region_variant|synonymous_variant|stop_retained_variant|start_retained_variant", vep_ensembl_df$Consequence) ~ "LOW",
+        !is.na(vep_ensembl_df$Consequence) & nzchar(vep_ensembl_df$Consequence) ~ "MODIFIER",
+        TRUE ~ NA_character_
+      )
+    }
+  }
+} else {
+  vep_ensembl_df <- NULL
 }
 
 if (has_genomic) {
@@ -1118,19 +1149,21 @@ if (has_pos_char) cat(r"(# Position Characterisation {.tabset #position-characte
 
 This section examines how ranked positions behave in relation to signals that
 do **not** contribute to the `CAAS_score`. PrimateAI-3D, COSMIC Mutant Census,
-FADE branch-site selection evidence and the biochemical grouping schemes
-(GS1-GS4) are treated as independent characterisation layers.
+Ensembl VEP consequence annotations, FADE branch-site selection evidence and the
+biochemical grouping schemes (GS1-GS4) are treated as independent
+characterisation layers.
 
-PrimateAI-3D and COSMIC both describe specific amino acid transitions, so the
-biochemical groupings are out of scope for those two (they group transitions
-into classes instead of modeling the specific substitution). We restrict those
-two layers strictly to the **Unweighted Scheme (US)**, with all scores and
-mutation overlaps derived solely from US transitions. FADE evidence is not
-transition-specific (it is a per-site test of dN/dS shift along
-phenotype-associated branches) and so is not restricted to the US scheme.
+PrimateAI-3D, COSMIC and Ensembl VEP all describe specific amino acid
+transitions, so the biochemical groupings are out of scope for those three (they
+group transitions into classes instead of modeling the specific substitution).
+We restrict those layers strictly to the **Unweighted Scheme (US)**, with all
+scores, consequences and mutation overlaps derived solely from US transitions.
+FADE evidence is not transition-specific (it is a per-site test of dN/dS shift
+along phenotype-associated branches) and so is not restricted to the US scheme.
 
 - **`pai_char_score`**: The pathogenicity score of mutating the ancestral human reference amino acid to the derived US alternative amino acid(s) in PrimateAI-3D.
 - **COSMIC Overlap**: The presence and recurrence of somatic mutations mapped to the specific codon under the US transition.
+- **Ensembl VEP Consequence**: Sequence Ontology (SO) consequence terms and VEP impact tiers across all overlapping Ensembl transcripts at the codon mutated under the US transition.
 - **FADE Overlap**: Whether the position falls within the direction-specific FADE_top_sig/FADE_bottom_sig significant site set (BF ≥ `fade_bf_threshold`), and its maximum Bayes Factor.
 - **Biochemistry**: Which of the grouping schemes GS1-GS4 detect the position besides US, how that profile compares with what the permulations produce, and how much of the US set each scheme recovers.
 
@@ -1544,6 +1577,203 @@ knitr::kable(
   cosmic_fisher,
   caption = "Fisher exact test for COSMIC somatic mutations overlap enrichment within CAAS score thresholds",
   align = c("l", "l", rep("r", ncol(cosmic_fisher) - 2))
+)
+```
+
+
+```{r vep-ensembl-subsec, results='asis'}
+if (has_vep_ensembl) cat("## VEP: Ensembl Consequence\n\n")
+```
+
+```{r vep-ensembl-setup, eval=has_vep_ensembl}
+# Restrict to the genes present in both the background and the VEP table.
+shared_genes_ensembl <- intersect(bg_genes, unique(vep_ensembl_df$Gene))
+pos_ensembl_shared <- pos_score_meta %>% filter(Gene %in% shared_genes_ensembl)
+
+# US scheme only, when the table has caap_group.
+if ("caap_group" %in% names(vep_ensembl_df)) {
+  vep_ensembl_df <- vep_ensembl_df %>% filter(caap_group == "US", Gene %in% shared_genes_ensembl)
+} else {
+  vep_ensembl_df <- vep_ensembl_df %>% filter(Gene %in% shared_genes_ensembl)
+}
+
+for (.col in c("Uploaded_variation", "Feature", "Consequence", "Amino_acids", "Codons", "Existing_variation", "IMPACT")) {
+  if (!.col %in% names(vep_ensembl_df)) vep_ensembl_df[[.col]] <- NA_character_
+}
+
+ensembl_joined <- vep_ensembl_df %>%
+  inner_join(pos_ensembl_shared, by = c("Gene", "Position"))
+
+has_vep_ensembl <- nrow(ensembl_joined) > 0
+```
+
+`r if (exists("ensembl_joined") && nrow(ensembl_joined) == 0) "> **Note:** Ensembl VEP consequences were annotated, but no scored positions could be matched to the Ensembl VEP annotations for this direction."`
+
+```{r vep-ensembl-table, eval=has_vep_ensembl}
+.impact_levels <- c("HIGH", "MODERATE", "LOW", "MODIFIER")
+
+ensembl_table <- ensembl_joined %>%
+  group_by(Gene, Position, CAAS_score, side) %>%
+  summarise(
+    `HGVS` = paste(unique(na.omit(Uploaded_variation[Uploaded_variation != "-"])), collapse = "; "),
+    `AA Change` = paste(unique(na.omit(Amino_acids[Amino_acids != "-"])), collapse = "; "),
+    `Codons` = paste(unique(na.omit(Codons[Codons != "-"])), collapse = "; "),
+    `N Transcripts` = dplyr::n_distinct(Feature[!is.na(Feature) & Feature != "-"]),
+    `Max Impact` = {
+      imp <- intersect(.impact_levels, unique(na.omit(IMPACT)))
+      if (length(imp) > 0) imp[1] else NA_character_
+    },
+    `Consequences` = {
+      terms <- unlist(strsplit(as.character(na.omit(Consequence)), ",", fixed = TRUE))
+      terms <- unique(trimws(terms[nzchar(terms) & terms != "-"]))
+      paste(terms, collapse = "; ")
+    },
+    `Existing Variation` = {
+      ev <- unique(na.omit(Existing_variation[Existing_variation != "-" & nzchar(Existing_variation)]))
+      if (length(ev) > 0) paste(ev, collapse = "; ") else "-"
+    },
+    .groups = "drop"
+  ) %>%
+  arrange(desc(CAAS_score)) %>%
+  rename(
+    `CAAS Score` = CAAS_score,
+    `Change Side` = side
+  )
+
+DT::datatable(
+  ensembl_table,
+  caption = "CAAS positions annotated by Ensembl VEP across overlapping transcripts, ordered by CAAS score",
+  options = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+)
+```
+
+```{r vep-ensembl-consequence-bar, eval=has_vep_ensembl, fig.height=6}
+# Distinct CAAS positions carrying each Sequence Ontology (SO) consequence term across overlapping transcripts, split by direction.
+ensembl_conseq_counts <- bind_rows(
+  ensembl_joined %>% filter(side == "top")    %>% mutate(vep_direction = "TOP"),
+  ensembl_joined %>% filter(side == "bottom") %>% mutate(vep_direction = "BOTTOM")
+) %>%
+  filter(!is.na(Consequence) & Consequence != "" & Consequence != "-") %>%
+  mutate(so_term = strsplit(as.character(Consequence), ",", fixed = TRUE)) %>%
+  tidyr::unnest(so_term) %>%
+  mutate(so_term = trimws(so_term)) %>%
+  filter(nzchar(so_term)) %>%
+  distinct(vep_direction, Gene, Position, so_term) %>%
+  count(vep_direction, so_term)
+
+ggplot(ensembl_conseq_counts, aes(x = reorder(so_term, n, sum), y = n, fill = vep_direction)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(aes(label = n), position = position_dodge(width = 0.8), hjust = -0.15, size = 3.3) +
+  coord_flip() +
+  scale_fill_manual(values = c("TOP" = .tableau10[1], "BOTTOM" = .tableau10[3])) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.14))) +
+  labs(
+    title    = "Ensembl VEP Consequence Distribution Across CAAS Positions",
+    subtitle = "Distinct CAAS positions carrying each SO consequence term across overlapping transcripts",
+    x = NULL, y = "N positions", fill = "Direction"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r vep-ensembl-impact-bar, eval=has_vep_ensembl, fig.height=5}
+# Distinct CAAS positions per VEP IMPACT tier and direction across overlapping transcripts.
+ensembl_impact_counts <- bind_rows(
+  ensembl_joined %>% filter(side == "top")    %>% mutate(vep_direction = "TOP"),
+  ensembl_joined %>% filter(side == "bottom") %>% mutate(vep_direction = "BOTTOM")
+) %>%
+  filter(!is.na(IMPACT) & IMPACT != "" & IMPACT != "-") %>%
+  distinct(vep_direction, Gene, Position, IMPACT) %>%
+  mutate(IMPACT = factor(IMPACT, levels = c("HIGH", "MODERATE", "LOW", "MODIFIER"))) %>%
+  count(vep_direction, IMPACT, .drop = FALSE)
+
+ggplot(ensembl_impact_counts, aes(x = IMPACT, y = n, fill = vep_direction)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(aes(label = n), position = position_dodge(width = 0.8), vjust = -0.3, size = 3.5) +
+  scale_fill_manual(values = c("TOP" = .tableau10[1], "BOTTOM" = .tableau10[3])) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(
+    title    = "Ensembl VEP Impact Tier Distribution",
+    subtitle = "Distinct CAAS positions per VEP impact tier across overlapping transcripts",
+    x = "VEP Impact Tier", y = "N positions", fill = "Direction"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r vep-ensembl-fisher, eval=has_vep_ensembl}
+# Because every CAAS US transition is a coding amino-acid substitution in the canonical protein,
+# almost all positions carry `missense_variant` on the primary coding transcript. Beyond plain
+# missense, a substitution can also fall in a splice region (`splice_region_variant`), induce
+# high-impact changes (`stop_gained`, `start_lost`, `stop_lost`), or affect alternative/NMD/UTR
+# transcripts (`NMD_transcript_variant`, `5_prime_UTR_variant`, `3_prime_UTR_variant`, etc.).
+# We test whether positions carrying such pleiotropic / splice / high-impact consequences
+# (any consequence term other than plain `missense_variant` or `IMPACT == "HIGH"`) are enriched
+# within the top CAAS score percentiles.
+ensembl_pleiotropic_pos <- ensembl_joined %>%
+  mutate(
+    so_term = strsplit(as.character(Consequence), ",", fixed = TRUE)
+  ) %>%
+  tidyr::unnest(so_term) %>%
+  mutate(so_term = trimws(so_term)) %>%
+  group_by(Gene, Position) %>%
+  summarise(
+    has_non_missense = any(
+      (!is.na(so_term) & nzchar(so_term) & so_term != "-" & so_term != "missense_variant") |
+      (!is.na(IMPACT) & IMPACT == "HIGH"),
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  )
+
+pos_ensembl <- pos_ensembl_shared %>%
+  left_join(ensembl_pleiotropic_pos, by = c("Gene", "Position")) %>%
+  mutate(has_non_missense = replace_na(has_non_missense, FALSE))
+
+pos_ensembl_top    <- pos_ensembl %>% filter(side == "top")
+pos_ensembl_bottom <- pos_ensembl %>% filter(side == "bottom")
+
+run_ensembl_fisher_dir <- function(df, label) {
+  n_all <- nrow(df)
+  pct_rows <- list(
+    list(col = NULL, lbl = "100% (all positions)",    flag = rep(TRUE, n_all)),
+    list(col = NULL, lbl = "25% (top 25% CAAS)",      flag = test_glob_25(df)),
+    list(col = "in_top_10pct", lbl = sprintf("Top %g%%", top_pct  * 100), flag = NULL),
+    list(col = "in_top_5pct",  lbl = sprintf("Top %g%%", top5_pct * 100), flag = NULL),
+    list(col = "in_top_1pct",  lbl = sprintf("Top %g%%", top1_pct * 100), flag = NULL)
+  )
+
+  purrr::map_dfr(pct_rows, function(thr) {
+    in_top   <- if (!is.null(thr$flag)) thr$flag else df[[thr$col]]
+    in_top   <- replace_na(in_top, FALSE)
+    n_top    <- sum(in_top)
+    n_top_e  <- sum(in_top & df$has_non_missense, na.rm = TRUE)
+    n_rest   <- sum(!in_top)
+    n_rest_e <- sum(!in_top & df$has_non_missense, na.rm = TRUE)
+    mat <- matrix(c(n_top_e, n_rest_e, n_top - n_top_e, n_rest - n_rest_e), nrow = 2)
+    ft  <- tryCatch(fisher.test(mat),
+                    error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
+
+    tibble(
+      Direction                      = label,
+      Threshold                      = thr$lbl,
+      `N positions`                  = n_top,
+      `N splice / high / regulatory` = n_top_e,
+      `% splice / high / regulatory` = sprintf("%.1f%%", 100 * n_top_e / max(n_top, 1)),
+      `Odds ratio`                   = sprintf("%.2f", ft$estimate),
+      `P value`                      = formatC(ft$p.value, format = "e", digits = 2)
+    )
+  })
+}
+
+ensembl_fisher <- bind_rows(
+  run_ensembl_fisher_dir(pos_ensembl_top,    "TOP"),
+  run_ensembl_fisher_dir(pos_ensembl_bottom, "BOTTOM")
+)
+
+knitr::kable(
+  ensembl_fisher,
+  caption = "Fisher exact test for enrichment of positions with splice, high-impact, or regulatory/isoform consequences (beyond plain missense_variant) within CAAS score thresholds",
+  align = c("l", "l", rep("r", ncol(ensembl_fisher) - 2))
 )
 ```
 

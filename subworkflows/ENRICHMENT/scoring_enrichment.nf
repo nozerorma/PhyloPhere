@@ -238,6 +238,7 @@ process SCORING_COMPARE_REPORT {
     path position_scores,     stageAs: 'position_scores.tsv'
     path vep_primateai,       stageAs: 'vep_primateai.tsv'
     path vep_cosmic,          stageAs: 'vep_cosmic.tsv'
+    path vep_ensembl,         stageAs: 'vep_ensembl.tsv'
     path fade_sites_top,      stageAs: 'fade_sites_top.csv'
     path fade_sites_bottom,   stageAs: 'fade_sites_bottom.csv'
     // Per-position Pfam domain/clan, UCR core/flank region and variability, and FUBAR
@@ -271,6 +272,7 @@ process SCORING_COMPARE_REPORT {
     def position_scores_arg = (position_scores.name =~ /^NO_/)   ? 'NULL' : "'${position_scores}'"
     def vep_primateai_arg  = (vep_primateai.name =~ /^NO_/)      ? 'NULL' : "'${vep_primateai}'"
     def vep_cosmic_arg     = (vep_cosmic.name =~ /^NO_/)         ? 'NULL' : "'${vep_cosmic}'"
+    def vep_ensembl_arg    = (vep_ensembl.name =~ /^NO_/)        ? 'NULL' : "'${vep_ensembl}'"
     def fade_sites_top_arg    = (fade_sites_top.name =~ /^NO_/)    ? 'NULL' : "'${fade_sites_top}'"
     def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_/) ? 'NULL' : "'${fade_sites_bottom}'"
     def position_char_arg     = (position_char.name =~ /^NO_/)     ? 'NULL' : "'${position_char}'"
@@ -298,6 +300,7 @@ process SCORING_COMPARE_REPORT {
                     position_scores_file     = ${position_scores_arg},
                     vep_primateai_file       = ${vep_primateai_arg},
                     vep_cosmic_file          = ${vep_cosmic_arg},
+                    vep_ensembl_file         = ${vep_ensembl_arg},
                     fade_sites_top_file      = ${fade_sites_top_arg},
                     fade_sites_bottom_file   = ${fade_sites_bottom_arg},
                     position_characterization_file = ${position_char_arg},

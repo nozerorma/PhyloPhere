@@ -298,6 +298,7 @@ process POSENRICH_REPORT {
     path gene_scores
     path vep_primateai
     path vep_cosmic
+    path vep_ensembl
     path genomic_info
     path fade_sites_top
     path fade_sites_bottom
@@ -329,6 +330,7 @@ process POSENRICH_REPORT {
     def gene_scores_arg = (gene_scores.name =~ /^NO_FILE/) ? 'NULL' : "'${gene_scores}'"
     def vep_pai_arg = (vep_primateai.name =~ /^NO_FILE/) ? 'NULL' : "'${vep_primateai}'"
     def vep_cosmic_arg = (vep_cosmic.name =~ /^NO_FILE/) ? 'NULL' : "'${vep_cosmic}'"
+    def vep_ensembl_arg = (vep_ensembl.name =~ /^NO_FILE/) ? 'NULL' : "'${vep_ensembl}'"
     def genomic_info_arg = (genomic_info.name =~ /^NO_FILE/) ? 'NULL' : "'${genomic_info}'"
     def fade_sites_top_arg = (fade_sites_top.name =~ /^NO_FILE/) ? 'NULL' : "'${fade_sites_top}'"
     def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_FILE/) ? 'NULL' : "'${fade_sites_bottom}'"
@@ -350,6 +352,7 @@ process POSENRICH_REPORT {
                 gene_scores_file     = ${gene_scores_arg},
                 vep_primateai_file   = ${vep_pai_arg},
                 vep_cosmic_file      = ${vep_cosmic_arg},
+                vep_ensembl_file     = ${vep_ensembl_arg},
                 genomic_info_file    = ${genomic_info_arg},
                 fade_sites_top_file    = ${fade_sites_top_arg},
                 fade_sites_bottom_file = ${fade_sites_bottom_arg},
@@ -401,6 +404,7 @@ workflow POSENRICH {
     gene_scores_file        // optional: gene_scores.tsv (Position Characterisation)
     vep_primateai_file      // optional: PrimateAI-3D score TSV (Position Characterisation)
     vep_cosmic_file         // optional: COSMIC Mutant Census score TSV (Position Characterisation)
+    vep_ensembl_file        // optional: Ensembl VEP consequence TSV (Position Characterisation)
     genomic_info_file       // optional: gene genomic coords TSV (Position Characterisation)
     fade_sites_top_file     // optional: fade_sites_top.csv (FADE_top_sig position group)
     fade_sites_bottom_file  // optional: fade_sites_bottom.csv (FADE_bottom_sig position group)
@@ -511,6 +515,7 @@ workflow POSENRICH {
         gene_scores_file,
         vep_primateai_file,
         vep_cosmic_file,
+        vep_ensembl_file,
         genomic_info_file,
         fade_sites_top_file,
         fade_sites_bottom_file,

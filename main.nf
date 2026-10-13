@@ -53,12 +53,6 @@ include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
 include {FADE_REPORT as FADE_REPORT_PRECOMP_TOP; FADE_REPORT as FADE_REPORT_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_report.nf'
 include {FADE_GENE_LISTS as FADE_GENE_LISTS_PRECOMP_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_gene_lists.nf'
-// Position-level FADE-site CSV (gene,position,max_bf,target_aa) — same process
-// FADE() itself calls, re-run standalone against the precomputed *.FADE.json
-// dir so posenrich's Position Characterisation FADE-overlap check and
-// ENRICHMENT's fade_sites_top/bottom_ch aren't silently null on a
-// --fade_json_dir_top/_bottom-only (no live --fade) invocation.
-include {FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_PRECOMP_TOP; FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_json_to_csv.nf'
 include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}                       from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
@@ -713,14 +707,14 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 def precomp_top_jsons = Channel.fromPath("${params.fade_json_dir_top}/*.FADE.json").collect().ifEmpty([])
                 def fg_top_precomp    = resolve_fg_species(params.fade_json_dir_top, 'top_species.txt')
                 fade_precomp_top_out      = FADE_REPORT_PRECOMP_TOP(Channel.value('top'), precomp_top_jsons, fg_top_precomp)
-                fade_precomp_sites_top_ch = FADE_JSON_TO_CSV_PRECOMP_TOP(Channel.value('top'), precomp_top_jsons).sites_csv
+                fade_precomp_sites_top_ch = fade_precomp_top_out.sites_csv
             }
 
             if (params.fade_json_dir_bottom) {
                 def precomp_bottom_jsons = Channel.fromPath("${params.fade_json_dir_bottom}/*.FADE.json").collect().ifEmpty([])
                 def fg_bottom_precomp    = resolve_fg_species(params.fade_json_dir_bottom, 'bottom_species.txt')
                 fade_precomp_bot_out      = FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), precomp_bottom_jsons, fg_bottom_precomp)
-                fade_precomp_sites_bot_ch = FADE_JSON_TO_CSV_PRECOMP_BOTTOM(Channel.value('bottom'), precomp_bottom_jsons).sites_csv
+                fade_precomp_sites_bot_ch = fade_precomp_bot_out.sites_csv
             }
             ran_any = true
         }
@@ -894,8 +888,9 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 def position_scores_ch = params.scoring ? SCORING.out.position_scores : Channel.empty()
                 def position_biochem_ch = params.scoring ? SCORING.out.position_biochem : Channel.empty()
                 def position_lists_ch = params.scoring ? SCORING.out.position_lists : Channel.empty()
-                def scoring_vep_pai_ch    = params.vep ? VEP.out.primateai_tsv : null
-                def scoring_vep_cosmic_ch = params.vep ? VEP.out.cosmic_tsv    : null
+                def scoring_vep_pai_ch     = params.vep ? VEP.out.primateai_tsv   : null
+                def scoring_vep_cosmic_ch  = params.vep ? VEP.out.cosmic_tsv      : null
+                def scoring_vep_ensembl_ch = params.vep ? VEP.out.ensembl_vep_tsv : null
                 // POSENRICH background = caastools background.output (tested positions);
                 // the engine restricts it to the cleaned_background genes.
                 def posenrich_background_ch = core_observed ? core_observed.background : file('NO_FILE')
@@ -962,6 +957,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     posenrich_background_ch,
                     scoring_vep_pai_ch,
                     scoring_vep_cosmic_ch,
+                    scoring_vep_ensembl_ch,
                     params.fade ? FADE.out.sites_csv_top    : fade_precomp_sites_top_ch,
                     params.fade ? FADE.out.sites_csv_bottom : fade_precomp_sites_bot_ch,
                     rer_gene_lists_bg_ch,

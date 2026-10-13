@@ -251,9 +251,10 @@ if [ "${PRECOMP_USE_FADE:-false}" = true ]; then
 fi
 
 if [ "${PRECOMP_USE_VEP:-false}" = true ]; then
-    # Each exists only if the source run had the matching database (PrimateAI-3D, COSMIC) configured.
+    # Each exists only if the source run had the matching database (PrimateAI-3D, COSMIC, Ensembl VEP) configured.
     SCORING_VEP_PRIMATEAI="${PRECOMP_OUTDIR}/vep/primateai_mapped.tsv"
     SCORING_VEP_COSMIC="${PRECOMP_OUTDIR}/vep/cosmic_scores.tsv"
+    SCORING_VEP_ENSEMBL="${PRECOMP_OUTDIR}/vep/ensembl_vep_mapped.tsv"
 fi
 
 {% if resources.process_overrides %}
@@ -570,6 +571,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring_fade_site_top": "${SCORING_FADE_SITE_TOP:-}",
   "scoring_fade_site_bottom": "${SCORING_FADE_SITE_BOTTOM:-}",
   "scoring_vep_cosmic": "${SCORING_VEP_COSMIC:-}",
+  "scoring_vep_ensembl": "${SCORING_VEP_ENSEMBL:-}",
   "caas_perms_file": "${CAAS_PERMS_FILE:-}",
   "caas_pos_cycle_caas_file": "${CAAS_POS_CYCLE_CAAS_FILE:-}",
   "caas_pos_sample_file": "${CAAS_POS_SAMPLE_FILE:-}",

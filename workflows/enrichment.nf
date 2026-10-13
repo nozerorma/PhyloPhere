@@ -126,6 +126,7 @@ workflow ENRICHMENT {
         background_output_ch
         vep_primateai_ch     // optional: PrimateAI-3D score TSV (null when --vep not run)
         vep_cosmic_ch        // optional: COSMIC Mutant Census score TSV (null when --vep not run)
+        vep_ensembl_ch       // optional: Ensembl VEP consequence TSV (null when --vep not run)
         fade_sites_top_ch    // optional: fade_sites_top.csv (null when --fade not run)
         fade_sites_bottom_ch // optional: fade_sites_bottom.csv (null when --fade not run)
         rer_gene_lists_bg_ch        // RER's own background.txt (empty when RER didn't run)
@@ -447,9 +448,11 @@ workflow ENRICHMENT {
             // reaches Position Characterisation instead of silently going NULL.
             def pos_gene_scores_ch = (gene_scores ?: Channel.empty()).ifEmpty { file('NO_FILE_GENE_SCORES') }
             def pos_vep_primateai_ch = (vep_primateai_ch ?: Channel.empty())
-                .ifEmpty { params.scoring_vep_primateai ? file(params.scoring_vep_primateai) : file('NO_FILE_VEP_PAI') }
+                .ifEmpty { (params.scoring_vep_primateai && file(params.scoring_vep_primateai).exists()) ? file(params.scoring_vep_primateai) : file('NO_FILE_VEP_PAI') }
             def pos_vep_cosmic_ch   = (vep_cosmic_ch ?: Channel.empty())
-                .ifEmpty { params.scoring_vep_cosmic ? file(params.scoring_vep_cosmic) : file('NO_FILE_VEP_COSMIC') }
+                .ifEmpty { (params.scoring_vep_cosmic && file(params.scoring_vep_cosmic).exists()) ? file(params.scoring_vep_cosmic) : file('NO_FILE_VEP_COSMIC') }
+            def pos_vep_ensembl_ch  = (vep_ensembl_ch ?: Channel.empty())
+                .ifEmpty { (params.scoring_vep_ensembl && file(params.scoring_vep_ensembl).exists()) ? file(params.scoring_vep_ensembl) : file('NO_FILE_VEP_ENSEMBL') }
 
             // FADE_top_sig / FADE_bottom_sig position group (the classic BF>=100
             // sites, always produced by FADE_JSON_TO_CSV when --fade runs).
@@ -482,6 +485,7 @@ workflow ENRICHMENT {
                 pos_gene_scores_ch,
                 pos_vep_primateai_ch,
                 pos_vep_cosmic_ch,
+                pos_vep_ensembl_ch,
                 pos_gene_ensembl_ch,
                 pos_fade_sites_top_ch,
                 pos_fade_sites_bottom_ch,
@@ -517,10 +521,12 @@ workflow ENRICHMENT {
         def cmp_fcs_stats_ch  = annot_ch ?: file('NO_FCS_STATS')
         def cmp_pos_scores_ch = position_scores ? position_scores : file('NO_POS_SCORES')
         // Same precomputed-VEP fallback as pos_vep_primateai_ch/pos_vep_cosmic_ch above.
-        def cmp_vep_pai_ch    = (vep_primateai_ch ?: Channel.empty())
-            .ifEmpty { params.scoring_vep_primateai ? file(params.scoring_vep_primateai) : file('NO_VEP_PAI') }
-        def cmp_vep_cosmic_ch = (vep_cosmic_ch ?: Channel.empty())
-            .ifEmpty { params.scoring_vep_cosmic ? file(params.scoring_vep_cosmic) : file('NO_VEP_COSMIC') }
+        def cmp_vep_pai_ch     = (vep_primateai_ch ?: Channel.empty())
+            .ifEmpty { (params.scoring_vep_primateai && file(params.scoring_vep_primateai).exists()) ? file(params.scoring_vep_primateai) : file('NO_VEP_PAI') }
+        def cmp_vep_cosmic_ch  = (vep_cosmic_ch ?: Channel.empty())
+            .ifEmpty { (params.scoring_vep_cosmic && file(params.scoring_vep_cosmic).exists()) ? file(params.scoring_vep_cosmic) : file('NO_VEP_COSMIC') }
+        def cmp_vep_ensembl_ch = (vep_ensembl_ch ?: Channel.empty())
+            .ifEmpty { (params.scoring_vep_ensembl && file(params.scoring_vep_ensembl).exists()) ? file(params.scoring_vep_ensembl) : file('NO_VEP_ENSEMBL') }
         def cmp_fade_top_ch   = (fade_sites_top_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_TOP') }
         def cmp_fade_bot_ch   = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_BOTTOM') }
         // SCORING's published percentile slices -- gene_lists_ch already
@@ -535,6 +541,7 @@ workflow ENRICHMENT {
                                               posenrich_le_summary_ch,
                                               cmp_fcs_stats_ch, cmp_pos_scores_ch,
                                               cmp_vep_pai_ch, cmp_vep_cosmic_ch,
+                                              cmp_vep_ensembl_ch,
                                               cmp_fade_top_ch, cmp_fade_bot_ch,
                                               posenrich_position_char_ch,
                                               gene_lists_ch, cmp_position_lists_ch)

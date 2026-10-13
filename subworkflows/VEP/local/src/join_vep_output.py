@@ -50,6 +50,7 @@ def main():
                 continue
             if line.startswith("#"):
                 header = line[1:].rstrip("\n").split("\t")
+                header = ["Ensembl_Gene" if col == "Gene" else col for col in header]
                 out.write("Gene\tPosition\tcaap_group\t" + "\t".join(header) + "\n")
                 continue
             if header is None:

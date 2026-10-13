@@ -46,6 +46,7 @@ params:
   position_scores_file:  NULL
   vep_primateai_file:    NULL
   vep_cosmic_file:       NULL
+  vep_ensembl_file:      NULL
   fade_sites_top_file:    NULL
   fade_sites_bottom_file: NULL
   # posenrich's own per-position characterization layers (PFAM domain/clan,
@@ -292,6 +293,16 @@ vep_primateai_cmp_df  <- if (has_vep_primateai_cmp) readr::read_tsv(params$vep_p
 
 has_vep_cosmic_cmp <- .file_ok(params$vep_cosmic_file)
 vep_cosmic_cmp_df  <- if (has_vep_cosmic_cmp) readr::read_tsv(params$vep_cosmic_file, show_col_types = FALSE) else NULL
+
+has_vep_ensembl_cmp <- .file_ok(params$vep_ensembl_file)
+if (has_vep_ensembl_cmp) {
+  vep_ensembl_cmp_df <- readr::read_tsv(params$vep_ensembl_file, name_repair = "minimal", show_col_types = FALSE)
+  .dup_g <- which(names(vep_ensembl_cmp_df) == "Gene")
+  if (length(.dup_g) > 1L) names(vep_ensembl_cmp_df)[.dup_g[-1]] <- "Ensembl_Gene"
+  if ("Position" %in% names(vep_ensembl_cmp_df)) vep_ensembl_cmp_df$Position <- suppressWarnings(as.integer(vep_ensembl_cmp_df$Position))
+} else {
+  vep_ensembl_cmp_df <- NULL
+}
 
 has_fade_sites_top_cmp    <- .file_ok(params$fade_sites_top_file)
 has_fade_sites_bottom_cmp <- .file_ok(params$fade_sites_bottom_file)
@@ -1506,6 +1517,27 @@ build_interesting_positions <- function(direction) {
   }
   if (!has_cosmic_pos) base$COSMIC <- rep("missing", nrow(base))
 
+  # External characterization: Ensembl VEP consequence
+  has_vep_ensembl_pos <- FALSE
+  if (has_vep_ensembl_cmp && !is.null(vep_ensembl_cmp_df) && nrow(vep_ensembl_cmp_df) > 0 && "Consequence" %in% names(vep_ensembl_cmp_df)) {
+    .vep_ens <- if ("caap_group" %in% names(vep_ensembl_cmp_df)) dplyr::filter(vep_ensembl_cmp_df, caap_group == "US") else vep_ensembl_cmp_df
+    .vep_ens_pos <- .vep_ens %>%
+      dplyr::filter(!is.na(Consequence) & nzchar(as.character(Consequence)) & Consequence != "-") %>%
+      dplyr::group_by(Gene, Position) %>%
+      dplyr::summarise(
+        .conseq = {
+          terms <- unlist(strsplit(as.character(Consequence), ",", fixed = TRUE))
+          terms <- unique(trimws(terms[nzchar(terms) & terms != "-"]))
+          paste(terms, collapse = "; ")
+        },
+        .groups = "drop"
+      )
+    .me <- .vep_ens_pos[match(paste(base$gene, base$Position), paste(.vep_ens_pos$Gene, .vep_ens_pos$Position)), ]
+    base$VEP_consequence <- dplyr::coalesce(dplyr::na_if(.me$.conseq, ""), "missing")
+    has_vep_ensembl_pos <- any(base$VEP_consequence != "missing")
+  }
+  if (!has_vep_ensembl_pos) base$VEP_consequence <- rep("missing", nrow(base))
+
   # Position characterization GMTs: Pfam, UCR, variability, FUBAR
   has_pfam_pos  <- FALSE
   has_ucr_pos   <- FALSE
@@ -1594,11 +1626,12 @@ build_interesting_positions <- function(direction) {
   if (has_fade_pos) pond_cols <- c(pond_cols, "FADE_overlap")
 
   desc_cols <- c("GS_schemes", "is_biochem")
-  if (has_pe_pos)    desc_cols <- c(desc_cols, "PE_sig", "PE term(s)")
-  if (has_pemp)      desc_cols <- c(desc_cols, "p.emp")
-  if (has_padj)      desc_cols <- c(desc_cols, "p.adj_bh")
-  if (has_cosmic_pos) desc_cols <- c(desc_cols, "COSMIC")
-  if (has_pai3d_pos)  desc_cols <- c(desc_cols, "PAI3D_pathogenic")
+  if (has_pe_pos)          desc_cols <- c(desc_cols, "PE_sig", "PE term(s)")
+  if (has_pemp)            desc_cols <- c(desc_cols, "p.emp")
+  if (has_padj)            desc_cols <- c(desc_cols, "p.adj_bh")
+  if (has_cosmic_pos)      desc_cols <- c(desc_cols, "COSMIC")
+  if (has_pai3d_pos)       desc_cols <- c(desc_cols, "PAI3D_pathogenic")
+  if (has_vep_ensembl_pos) desc_cols <- c(desc_cols, "VEP_consequence")
   if (has_pfam_pos) {
     if (any(!is.na(base$pfam_domain) & nzchar(as.character(base$pfam_domain)))) desc_cols <- c(desc_cols, "Pfam domain")
     if (any(!is.na(base$pfam_clan) & nzchar(as.character(base$pfam_clan)))) desc_cols <- c(desc_cols, "Pfam clan")

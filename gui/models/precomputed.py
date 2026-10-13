@@ -183,5 +183,6 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         vep_dir = os.path.join(outdir, "vep")
         entries.append(("scoring_vep_primateai", os.path.join(vep_dir, "primateai_mapped.tsv"), "file"))
         entries.append(("scoring_vep_cosmic", os.path.join(vep_dir, "cosmic_scores.tsv"), "file"))
+        entries.append(("scoring_vep_ensembl", os.path.join(vep_dir, "ensembl_vep_mapped.tsv"), "file"))
 
     return entries

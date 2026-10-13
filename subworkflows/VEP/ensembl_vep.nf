@@ -67,7 +67,7 @@ process ENSEMBL_VEP_ANNOTATE {
             echo "ERROR '\$tool' is not on the PATH of this task: the ensembl-vep package is missing from the environment." >&2
             echo "      Install it with: micromamba install -n phylophere -c conda-forge -c bioconda ensembl-vep" >&2
             echo "      Skipping Ensembl VEP annotation; the output table has only its header." >&2
-            printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
+            printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tEnsembl_Gene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
             exit 0
         fi
     done
@@ -77,7 +77,7 @@ process ENSEMBL_VEP_ANNOTATE {
         echo "INFO VEP cache empty at ${vep_cache_dir} -- populating once via vep_install (${species}/${assembly})." >&2
         if ! vep_install -a cf -s ${species} -y ${assembly} -c "${vep_cache_dir}" --NO_HTSLIB --NO_UPDATE --NO_TEST --QUIET; then
             echo "WARN vep_install failed for ${species}/${assembly} in ${vep_cache_dir} -- skipping Ensembl VEP annotation." >&2
-            printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
+            printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tEnsembl_Gene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
             exit 0
         fi
     fi
@@ -86,7 +86,7 @@ process ENSEMBL_VEP_ANNOTATE {
 
     if [[ ! -s hgvs_ids.txt ]]; then
         echo "WARN No HGVS identifiers resolved (missing MAP files or protein IDs) — skipping Ensembl VEP call." >&2
-        printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
+        printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tEnsembl_Gene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
         exit 0
     fi
 
@@ -108,6 +108,6 @@ process ENSEMBL_VEP_ANNOTATE {
 
     stub:
     """
-    printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
+    printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tEnsembl_Gene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
     """
 }
