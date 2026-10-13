@@ -279,11 +279,11 @@ def read_trait_pairs(
         return {}
 
 
-PssMap = Dict[str, Dict[Tuple[str, int], float]]
+PssMap = Dict[str, Dict[Tuple[str, int], Tuple[str, str, float]]]
 
 
 def read_pss(path, default_cycle: str = OBSERVED_CYCLE) -> PssMap:
-    """PSS weights `{cycle: {(H<n>, domain): pss}}` from fop_pairs.tsv or contrast_hypotheses_pairs.tsv.
+    """Design pairs `{cycle: {(H<n>, domain): (species1, species2, pss)}}` from fop_pairs.tsv or contrast_hypotheses_pairs.tsv.
 
     Rows lacking a cycle column (the observed file) belong to `default_cycle`. Missing files, `NO_*`
     sentinels and files without the needed columns give an empty map (the pooler then weights every
@@ -294,7 +294,7 @@ def read_pss(path, default_cycle: str = OBSERVED_CYCLE) -> PssMap:
     out: PssMap = {}
     with open(path, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
-        if not reader.fieldnames or not {"hypothesis_id", "pair", "pss_score"} <= set(reader.fieldnames):
+        if not reader.fieldnames or not {"hypothesis_id", "pair", "pss_score", "species1", "species2"} <= set(reader.fieldnames):
             return {}
         for row in reader:
             raw = (row.get("hypothesis_id") or "").strip()
@@ -306,7 +306,7 @@ def read_pss(path, default_cycle: str = OBSERVED_CYCLE) -> PssMap:
             except (TypeError, ValueError):
                 continue
             cycle = (row.get("cycle") or "").strip() or default_cycle
-            out.setdefault(cycle, {})[(hyp_id(raw), domain)] = pss
+            out.setdefault(cycle, {})[(hyp_id(raw), domain)] = (row["species1"], row["species2"], pss)
     return out
 
 

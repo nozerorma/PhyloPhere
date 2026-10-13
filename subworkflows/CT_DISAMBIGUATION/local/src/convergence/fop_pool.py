@@ -39,6 +39,7 @@ See ``docs/scoring_v3_core.md`` for the scoring contract.
 from __future__ import annotations
 
 import collections
+import os
 
 import math
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -84,6 +85,38 @@ def _support_str(vals: Sequence[Optional[str]]) -> str:
 def base_cycle(tag: str) -> str:
     """'b_5~H3' -> 'b_5'; a plain 'b_5' passes through."""
     return tag.split("~", 1)[0]
+
+
+# Species-level domain score of an experimental variant, chosen with SX_VARIANT ("equal" or "pss"; any other value keeps the
+# score of the module docstring). Per domain and side, the species of the design's pairs that represent the domain (species1
+# for top, species2 for bottom) take the mean score of the hypotheses in which they represent it (0 where the position was not
+# detected); the domain is the plain ("equal") or PSS-weighted ("pss") mean over those species.
+VARIANT = os.environ.get("SX_VARIANT", "")
+
+
+def _species_domain_scores(hyps: List[Dict], side: str, rep: Dict[str, Any], design: Optional[Dict]) -> Dict[str, float]:
+    col = 0 if side == "top" else 1
+    rec = {r["hyp"]: r for r in hyps}
+    per: Dict[str, Dict[str, Tuple[List[float], List[float]]]] = collections.defaultdict(lambda: collections.defaultdict(lambda: ([], [])))
+    for (h, d), v in (design or {}).items():
+        r = rec.get(h)
+        ds = (((r or {}).get("sides") or {}).get(side) or {}).get("domain_scores") or {}
+        score = float(ds.get(d, ds.get(str(d), 0.0)) or 0.0) if r else 0.0
+        per[str(d)][v[col]][0].append(score)
+        per[str(d)][v[col]][1].append(float(v[2]))
+    out: Dict[str, float] = {}
+    for sd in rep:
+        xs = per.get(sd) or {}
+        if not xs:
+            out[sd] = 0.0
+            continue
+        sx = {x: math.fsum(a) / len(a) for x, (a, _b) in xs.items()}
+        if VARIANT == "pss":
+            wx = {x: math.fsum(b) / len(b) for x, (_a, b) in xs.items()}
+            out[sd] = math.fsum(wx[x] * sx[x] for x in xs) / math.fsum(wx.values())
+        else:
+            out[sd] = math.fsum(sx.values()) / len(sx)
+    return out
 
 
 def _pair_contributions(hyps: List[Dict], side: str) -> Dict[Tuple[str, str], List[float]]:
@@ -143,15 +176,19 @@ def pool_domains(
     K = len(rep)
 
     def _agg(side: str) -> Dict[str, Any]:
-        # Noisy-OR of the contributions of each domain's partners; the pair of two domains counts the mean of its
-        # distinct species combinations.
-        partners: Dict[str, List[float]] = collections.defaultdict(list)
-        for (a, b), cs in _pair_contributions(hyps, side).items():
-            c = math.fsum(cs) / len(cs)
-            partners[a].append(c)
-            partners[b].append(c)
-        s_dom = {sd: (1.0 - math.prod(1.0 - c for c in partners[sd])) if partners.get(sd) else 0.0 for sd in rep}
-        strength = (math.fsum(s_dom.values()) / K) if K else 0.0
+        if VARIANT in ("equal", "pss"):
+            s_dom = _species_domain_scores(hyps, side, rep, design_domains)
+            strength = (math.fsum(s_dom.values()) / K) if K else 0.0
+        else:
+            # Noisy-OR of the contributions of each domain's partners; the pair of two domains counts the mean of its
+            # distinct species combinations.
+            partners: Dict[str, List[float]] = collections.defaultdict(list)
+            for (a, b), cs in _pair_contributions(hyps, side).items():
+                c = math.fsum(cs) / len(cs)
+                partners[a].append(c)
+                partners[b].append(c)
+            s_dom = {sd: (1.0 - math.prod(1.0 - c for c in partners[sd])) if partners.get(sd) else 0.0 for sd in rep}
+            strength = (math.fsum(s_dom.values()) / K) if K else 0.0
 
         # Agreement across the pooled hypotheses, over the domains changed in >= 1 of them.
         der_enc: Dict[str, List[str]] = {}
@@ -178,7 +215,7 @@ def pool_domains(
                 if float(ds.get(dd, 0.0) or 0.0) > 0.0:
                     species.add(sp)
         S = int((n_design_species or {}).get(side) or 0)
-        breadth = min(1.0, len(species) / S) if S > 0 else 1.0
+        breadth = 1.0 if VARIANT in ("equal", "pss") else (min(1.0, len(species) / S) if S > 0 else 1.0)
         core = max(0.0, min(1.0, strength * breadth))
 
         changed = list(der_enc.keys())
