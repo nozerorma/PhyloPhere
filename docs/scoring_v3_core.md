@@ -164,8 +164,9 @@ anc_enc, 0.0)`, no una cota worst-case. Ver `subworkflows/CT_DISAMBIGUATION/loca
 - `hyp_records` = `list[{"hyp": str, "sides": <retorno de compute_domain_scores>}]`, `M ≥ 1`.
 - `design_domains` = claves `(hyp, d)` del diseño (el mapa de `fop_pairs.tsv` o de
   `contrast_hypotheses_pairs.tsv`); solo completan el universo de dominios. Sus valores no se usan.
-- `n_design_species` = `S`, las especies distintas de los pares del diseño del ciclo (unión de las hipótesis).
-  `None` o 0 → amplitud 1.
+- `n_design_species` = `{"top": S_top, "bottom": S_bottom}`: especies distintas del grupo de cada lado en el
+  diseño del ciclo (`species1` para top, `species2` para bottom; unión de las hipótesis). Un lado sin `S`
+  (ausente o 0) → amplitud 1.
 
 Una hipótesis es solo una manera de trazar los pares y no pesa: el score depende de los pares de dominios y de las especies.
 
@@ -187,17 +188,20 @@ c(a, b)   = media de las c de las combinaciones de ese par de dominios        # 
 s(d)      = 1 - Π_b (1 - c(d, b))                          # noisy-OR sobre sus parejas; 0 sin pareja
 fuerza    = Σ_d s(d) / K
 n_sp      = especies distintas que llevan el derivado en un dominio con score > 0 en alguna hipótesis
-amplitud  = min(1, n_sp / S)                               # 1 si S no está
+amplitud  = min(1, n_sp / S_lado)                          # 1 si S_lado no está
 core_s    = clamp01( fuerza · amplitud )
 ```
 
 Una combinación que varias hipótesis comparten cuenta una vez; un par de dominios sin la especie de
 algún extremo (`domain_der_species`) no puede distinguirse de una repetición y se omite.
 
-Ejemplo (K = 3, S = 20): A y B convergen con `c = 0.9`, el residuo está en 2 especies de A y 1 de B, C no
-cambia → `s = (0.9, 0.9, 0)`, fuerza 0.6, amplitud 3/20, `core_s = 0.09`.
+`n_sp` y `S_lado` son del mismo lado (la especie del par que está en el grupo de ese lado); no se divide por
+la suma de los dos grupos.
 
-El score sigue en [0, 1]; llega a 1 solo si todas las especies del diseño llevan el cambio y todos los
+Ejemplo (K = 3, lado top con S_top = 10): A y B convergen con `c = 0.9`, el residuo está en 2 especies de A y 1
+de B, C no cambia → `s = (0.9, 0.9, 0)`, fuerza 0.6, amplitud 3/10, `core_s = 0.18`.
+
+El score sigue en [0, 1]; llega a 1 solo si todas las especies del grupo de ese lado llevan el cambio y todos los
 dominios convergen con `c = 1`.
 
 ### 3.3. `agg`
@@ -225,11 +229,13 @@ Si **ningún** dominio cambió en ningún lado en ninguna hipótesis, `_emit_poo
 dos filas top/bottom a 0. `pool_domains` en sí devuelve ambos `agg` con `core_s = 0`; el
 colapso vive en el caller.
 
-### 3.5. De dónde sale `S`
+### 3.5. De dónde sale `S_lado`
 
-- Observado: especies distintas de los pares de `trait_pairs` (todos los contrastes del diseño).
-- Nulo con FOP: especies distintas de las filas de `fop_pairs.tsv` del ciclo base (`read_design_species`).
-- Nulo sin FOP: especies de los pares del propio labeling del ciclo.
+- Observado: especies distintas del primer y del segundo miembro de los pares de `trait_pairs` (todos los
+  contrastes del diseño).
+- Nulo con FOP: especies distintas de `species1` y `species2` de las filas de `fop_pairs.tsv` del ciclo base
+  (`read_design_species`).
+- Nulo sin FOP: especies de los pares del propio labeling del ciclo, por grupo.
 - Si un ciclo no tiene `S`, se agrupa con amplitud 1 y el log lo avisa; el sello `score_aggregation`
   (`us_pos_species`) hace que `scoring_compute.R` rechace un nulo calculado con otra regla.
 
@@ -406,7 +412,8 @@ exacta están en `tests/fop_pool/test_fop_pool_consistency.py` y `tests/fop_pool
 
 | Caso | Entrada | Resultado |
 |---|---|---|
-| Ejemplo de la §3.2 | K = 3, S = 20, `c = 0.9`, especies `A1, A2` (dominio 1) y `B1` (dominio 2) | `core = 0.6 · 3/20 = 0.09` |
+| Ejemplo de la §3.2 | K = 3, S_top = 10, `c = 0.9`, especies `A1, A2` (dominio 1) y `B1` (dominio 2) | `core = 0.6 · 3/10 = 0.18` |
+| `S` por lado | `S_top = 10`, `S_bottom = 20`, dos especies por lado | amplitud 2/10 arriba y 2/20 abajo |
 | Sin `S` | el mismo | `core = 0.6` |
 | Especies repetidas | tres hipótesis con las mismas dos especies | `n_sp = 2`, el par cuenta una vez |
 | Dominio con score 0 | `{1: 0.9, 2: 0.0}` | solo la especie del dominio 1 cuenta |

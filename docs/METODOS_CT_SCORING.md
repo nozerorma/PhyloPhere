@@ -289,7 +289,7 @@ los recorridos MRCA→raíz invariantes al labeling.
 > `pool_domains` combina la cosecha FOP sin pesar hipótesis:
 > cada pareja de dominios con el mismo residuo da `c` (la media entre sus combinaciones de especies),
 > `s_d = noisy_or` de las `c` de sus parejas y `core_s = (Σ_d s_d / K) · n_sp / S`, con `n_sp` las especies
-> distintas que llevan el derivado en un dominio con score positivo y `S` las especies del diseño del ciclo. Los bloques columna F.4 pasan de
+> distintas que llevan el derivado en un dominio con score positivo y `S` las especies del grupo de ese lado en el diseño del ciclo (por lado). Los bloques columna F.4 pasan de
 > `mrca_<i>_*` a `domain_<d>_{node,state,posterior,score,anc_aa,top_aa,bot_aa}`; se van
 > `conserved_<j>_*` e `independence`. El gate VEP `convergence_schemes` se retira.
 

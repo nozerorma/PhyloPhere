@@ -60,9 +60,11 @@ def trait_pairs_from(fg, bg) -> Dict[int, List[Tuple[str, str]]]:
     return {1: list(zip(fg, bg))}
 
 
-def design_species_count(trait_pairs: Dict[int, List[Tuple[str, str]]]) -> int:
-    """S: the distinct species of all the pairs of a design (every contrast of it)."""
-    return len({sp for pairs in trait_pairs.values() for pair in pairs for sp in pair})
+def design_species_count(trait_pairs: Dict[int, List[Tuple[str, str]]]) -> Dict[str, int]:
+    """S per side `{"top", "bottom"}`: the distinct species of the first (top) and of the second (bottom) member of
+    the pairs of a design (every contrast of it)."""
+    pairs = [pair for ps in trait_pairs.values() for pair in ps]
+    return {"top": len({p[0] for p in pairs}), "bottom": len({p[1] for p in pairs})}
 
 
 @dataclass(frozen=True)
@@ -308,13 +310,13 @@ def read_pss(path, default_cycle: str = OBSERVED_CYCLE) -> PssMap:
     return out
 
 
-def read_design_species(path, default_cycle: str = OBSERVED_CYCLE) -> Dict[str, int]:
-    """S `{cycle: distinct species}` over the species1/species2 columns of fop_pairs.tsv or
+def read_design_species(path, default_cycle: str = OBSERVED_CYCLE) -> Dict[str, Dict[str, int]]:
+    """S per side `{cycle: {"top": distinct species1, "bottom": distinct species2}}` of fop_pairs.tsv or
     contrast_hypotheses_pairs.tsv (rows lacking a cycle column belong to `default_cycle`). Missing files,
     `NO_*` sentinels and files without the columns give an empty map (the pooler then takes breadth 1)."""
     if not path or str(path).startswith("NO_") or not Path(path).is_file():
         return {}
-    seen: Dict[str, set] = {}
+    seen: Dict[str, Dict[str, set]] = {}
     with open(path, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
         if not reader.fieldnames or not {"hypothesis_id", "species1", "species2"} <= set(reader.fieldnames):
@@ -323,8 +325,11 @@ def read_design_species(path, default_cycle: str = OBSERVED_CYCLE) -> Dict[str, 
             if not _HYP.search((row.get("hypothesis_id") or "").strip()):
                 continue
             cycle = (row.get("cycle") or "").strip() or default_cycle
-            seen.setdefault(cycle, set()).update(sp for sp in (row["species1"], row["species2"]) if sp)
-    return {c: len(v) for c, v in seen.items()}
+            both = seen.setdefault(cycle, {"top": set(), "bottom": set()})
+            for side, col in (("top", "species1"), ("bottom", "species2")):
+                if row[col]:
+                    both[side].add(row[col])
+    return {c: {side: len(v) for side, v in both.items()} for c, both in seen.items()}
 
 
 def design_max_pairs(trait_file: Path) -> int:

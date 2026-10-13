@@ -112,7 +112,7 @@ def _emit_pooled_side_rows(
     base: ConvergenceResult,
     hyp_rows: List[Dict[str, Any]],
     design_domains: Optional[Dict[Tuple[str, Any], float]] = None,
-    n_design_species: Optional[int] = None,
+    n_design_species: Optional[Dict[str, int]] = None,
     all_rows: Optional[List[ConvergenceResult]] = None,
 ) -> List[ConvergenceResult]:
     """Pool ``M >= 1`` per-hypothesis ``compute_domain_scores`` records for one

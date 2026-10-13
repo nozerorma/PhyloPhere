@@ -280,7 +280,7 @@ def _expand_pooled(pos, grp, hyp_label, pooled):
 
 
 def _warn_missing_species(cycles) -> None:
-    """Log the cycles pooled without the species count S of their design (breadth 1: their scores are not
+    """Log the cycles pooled without the species count S per side of their design (breadth 1: their scores are not
     on the scale of the cycles that have it)."""
     if cycles:
         logger.warning(f"[perms] {len(cycles)} cycles pooled without the species count of their design "
@@ -290,7 +290,7 @@ def _warn_missing_species(cycles) -> None:
 def pool_labelings(
     results: List[Tuple[str, List[Any]]],
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]],
-    design_species: Optional[Dict[str, int]] = None,
+    design_species: Optional[Dict[str, Dict[str, int]]] = None,
     labelings: Optional[Dict[str, Tuple[List[str], List[str]]]] = None,
 ) -> List[Tuple[str, List[Any]]]:
     """Collapse scored labelings into one per-side, domain-pooled record set per cycle.
@@ -302,8 +302,8 @@ def pool_labelings(
     disambiguate_single._emit_pooled_side_rows.
 
     With `fop_pairs` the "<base>~H<m>" hypotheses of a base cycle are pooled together; without it each
-    labeling is its own single-hypothesis cycle. The species count S of the design of a cycle is
-    `design_species[base cycle]` (read from fop_pairs.tsv) or, without `fop_pairs`, the species of the
+    labeling is its own single-hypothesis cycle. The species count S per side (top / bottom group) of the design of a cycle is
+    `design_species[base cycle]` (read from fop_pairs.tsv), per side, or, without `fop_pairs`, the species of the
     pairs of the cycle's own labeling in `labelings`; a cycle without S is pooled with breadth 1.
     """
     missing = set()

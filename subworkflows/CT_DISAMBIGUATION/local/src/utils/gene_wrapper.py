@@ -359,7 +359,7 @@ def _perms_worker_replay(
     perm_discovery_file: str,
     ensembl_genes: Optional[Set[str]] = None,
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None,
-    design_species: Optional[Dict[str, int]] = None,
+    design_species: Optional[Dict[str, Dict[str, int]]] = None,
 ) -> Tuple[str, Optional[List[Tuple[str, List[Any]]]]]:
     """Replay step of a chunked gene replay (_perms_worker_finalize is the reduction step).
 
@@ -1013,7 +1013,7 @@ def process_all_genes_perms(
     # _perms_worker_replay then domain-pools them back to one record per base cycle. The
     # per-(hypothesis, domain) PSS weights are parsed once here.
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None
-    design_species: Dict[str, int] = {}
+    design_species: Dict[str, Dict[str, int]] = {}
     if fop_pairs_file and Path(fop_pairs_file).exists():
         fop_pairs = _read_fop_pairs(fop_pairs_file)
         design_species = read_design_species(fop_pairs_file)

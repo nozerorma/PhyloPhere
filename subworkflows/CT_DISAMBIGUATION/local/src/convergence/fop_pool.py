@@ -12,7 +12,7 @@ It is **treeless**: every tree lookup already happened in
 
 Imported by: src/convergence/disambiguate_single.py, src/core/driver.py, disambiguation_perms_main.py and
 reaggregate_perm_scores.py (`base_cycle`)
-Inputs: lists of {"hyp", "sides"} records, the (hypothesis, domain) keys of the design and its species count S
+Inputs: lists of {"hyp", "sides"} records, the (hypothesis, domain) keys of the design and its species count S per side
 Outputs: the pooled per-side aggregates described in `pool_domains`
 
 Per side, over the K fixed Voronoi domains of the design and the pooled hypotheses taken together (a hypothesis
@@ -23,9 +23,10 @@ is only a way of drawing the pairs, it carries no weight of its own):
                domains give one value each and the pair of domains takes their mean
     s(d)     = 1 - prod over the partners b of d of (1 - c(d, b))          (0 without a partner)
     strength = sum_d s(d) / K
-    breadth  = n_sp / S, n_sp the distinct species that carry the derived residue in a domain with a positive
-               score in at least one hypothesis, S the distinct species of the design of the cycle
-    score    = clamp01(strength * breadth)                                 (breadth = 1 when S is not given)
+    breadth  = n_sp / S_side, n_sp the distinct species that carry the derived residue in a domain with a positive
+               score in at least one hypothesis, S_side the distinct species of that side's group (species1 for
+               top, species2 for bottom) in the design of the cycle
+    score    = clamp01(strength * breadth)                                 (breadth = 1 when S_side is not given)
 
 A species counts once however many hypotheses use it. ``agree_num`` / ``agree_den`` and ``convergence_type`` come
 from the modal encoded derived residue per domain across the pooled hypotheses (a domain that splits V/I/L
@@ -108,7 +109,7 @@ def _pair_contributions(hyps: List[Dict], side: str) -> Dict[Tuple[str, str], Li
 def pool_domains(
     hyp_records: List[Dict],
     design_domains: Optional[Iterable[Tuple[str, Any]]] = None,
-    n_design_species: Optional[int] = None,
+    n_design_species: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     """Treeless pooler over the fixed Voronoi domains.
 
@@ -117,7 +118,8 @@ def pool_domains(
             ``M >= 1``.
         design_domains: the ``(hypothesis, domain)`` keys of the design (every hypothesis it holds, not only the
             ones that detect the position); its domains complete the K of the design when a record lacks them.
-        n_design_species: S, the distinct species of the design of the cycle; ``None`` or <= 0 -> breadth 1.
+        n_design_species: S per side ``{"top", "bottom"}``, the distinct species of that phenotype group in the
+            design of the cycle; a side without S (``None``, missing or <= 0) takes breadth 1.
 
     Returns:
         ``{"top": <agg>, "bottom": <agg>, "n_hypotheses": M}`` where ``<agg>`` is
@@ -139,7 +141,6 @@ def pool_domains(
     for (_h, d) in (design_domains or ()):
         rep.setdefault(str(d), d)
     K = len(rep)
-    S = int(n_design_species) if n_design_species else 0
 
     def _agg(side: str) -> Dict[str, Any]:
         # Noisy-OR of the contributions of each domain's partners; the pair of two domains counts the mean of its
@@ -176,7 +177,8 @@ def pool_domains(
             for dd, sp in (srow.get("domain_der_species") or {}).items():
                 if float(ds.get(dd, 0.0) or 0.0) > 0.0:
                     species.add(sp)
-        breadth = min(1.0, len(species) / S) if S else 1.0
+        S = int((n_design_species or {}).get(side) or 0)
+        breadth = min(1.0, len(species) / S) if S > 0 else 1.0
         core = max(0.0, min(1.0, strength * breadth))
 
         changed = list(der_enc.keys())

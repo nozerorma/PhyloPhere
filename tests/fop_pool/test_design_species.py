@@ -31,23 +31,24 @@ def main():
         path = Path(td) / "fop_pairs.tsv"
         path.write_text("cycle\thypothesis_id\tpair\tspecies1\tspecies2\tpss_score\n"
                         + "".join(f"{c}\t{h}\t{p}\t{s1}\t{s2}\t1.0\n" for c, h, p, s1, s2 in ROWS))
-        # Distinct species per cycle, the species shared by two hypotheses counted once.
-        assert read_design_species(path) == {"b_1": 3, "b_2": 2}
+        # Distinct species1 (top) and species2 (bottom) per cycle, a species shared by two hypotheses counted once.
+        assert read_design_species(path) == {"b_1": {"top": 1, "bottom": 2}, "b_2": {"top": 1, "bottom": 1}}
         assert read_design_species(path.parent / "missing.tsv") == {} and read_design_species("NO_FILE") == {}
         # contrast_hypotheses_pairs.tsv has no cycle column: its rows belong to the observed cycle.
         obs = Path(td) / "contrast_hypotheses_pairs.tsv"
         obs.write_text("hypothesis_id\tpair\tspecies1\tspecies2\tpss_score\nH1\t1\ta1\ta2\t1\nH2\t1\ta1\ta3\t1\n")
-        assert list(read_design_species(obs).values()) == [3]
+        assert list(read_design_species(obs).values()) == [{"top": 1, "bottom": 2}]
 
-    assert design_species_count({1: [("a1", "a2"), ("a3", "a1")], 2: [("a2", "a4")]}) == 4
+    assert design_species_count({1: [("a1", "a2"), ("a3", "a1")], 2: [("a2", "a4")]}) == {"top": 3, "bottom": 3}
 
     # A null cycle with and without fop_pairs, and the observed design, give the same S and so the same score.
     sp = {1: "a1", 2: "a2"}
-    with_fop = pool_labelings([("b_1~H1", [axes_record(sp)])], {"b_1": {("H1", 1): 1.0, ("H1", 2): 1.0}}, {"b_1": 20})
-    labelings = {"b_1": ([f"f{i}" for i in range(10)], [f"g{i}" for i in range(10)])}   # S = 20 species
-    assert design_species_count(trait_pairs_from(*labelings["b_1"])) == 20
+    with_fop = pool_labelings([("b_1~H1", [axes_record(sp)])], {"b_1": {("H1", 1): 1.0, ("H1", 2): 1.0}}, {"b_1": {"top": 20, "bottom": 7}})
+    labelings = {"b_1": ([f"f{i}" for i in range(10)], [f"g{i}" for i in range(10)])}   # S_top = S_bottom = 10
+    assert design_species_count(trait_pairs_from(*labelings["b_1"])) == {"top": 10, "bottom": 10}
     no_fop = pool_labelings([("b_1", [axes_record(sp)])], None, None, labelings)
-    expected = 0.9 * 2 / 20                      # K = 2 domains, both at 0.9: strength 0.9; breadth 2 / 20
+    expected = 0.9 * 2 / 10                      # K = 2 domains, both at 0.9: strength 0.9; breadth 2 / S_top
+    with_fop = pool_labelings([("b_1~H1", [axes_record(sp)])], {"b_1": {("H1", 1): 1.0, ("H1", 2): 1.0}}, {"b_1": {"top": 10, "bottom": 10}})
     for pooled in (with_fop, no_fop):
         score = pooled[0][1][0].asr_path_score
         assert math.isclose(score, expected), score
