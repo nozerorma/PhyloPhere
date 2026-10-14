@@ -20,7 +20,7 @@ import pandas as pd
 
 # ── Extant-species residue tally (alignment-based) ────────────────────────────
 # Counts, per (Gene, Position), the contrast species of the hypotheses that call the position
-# (the `participating_hypotheses` of its rows, unioned over schemes and sides) that carry each
+# (the `participating_hypotheses` of its rows, unioned over sides) that carry each
 # residue at the alignment column (an "X of N species" check on the call). The species come from
 # the contrast design (contrast_hypotheses_pairs.tsv: species1 = top / foreground, species2 =
 # bottom / background of each pair), so the tally needs neither FADE nor the species_sets of

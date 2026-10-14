@@ -4,13 +4,12 @@
 
 """
 Summary of the cluster-filter parameter sweep: the number of Discarded positions of every
-*.filtered.minlen<L>.maxcaas<C>.tsv file, in total and per caap_group.
+*.filtered.minlen<L>.maxcaas<C>.tsv file.
 
 Called by:  CT_FILTER_SUMMARY process (ctpp_clustfilter.nf)
 Inputs:     --input-dir  directory with the *.filtered.*.tsv files of filter_caas_clusters-param.py
-Outputs:    --summary-output  one row per parameter pair (Parameter, Minlen, Maxcaas, one column
-                              per caap_group when present, DiscardedCount)
-            --discarded-output  one row per file (File, DiscardedCount, Minlen, Maxcaas, caap_groups)
+Outputs:    --summary-output  one row per parameter pair (Parameter, Minlen, Maxcaas, DiscardedCount)
+            --discarded-output  one row per parameter pair (File, DiscardedCount, Minlen, Maxcaas)
 """
 
 import argparse
@@ -50,14 +49,9 @@ def main() -> int:
         print("No filtered files found", file=sys.stderr)
         return 1
 
-    df_sample = pd.read_csv(filter_files[0], sep="\t", nrows=5)
-    has_caap = "caap_group" in df_sample.columns
-
     print(f"Found {len(filter_files)} filtered files")
-    print(f"CAAP mode: {has_caap}")
 
     summary_data = []
-    discarded_data = []
 
     for file_path in filter_files:
         match = re.search(r"minlen(\d+)\.maxcaas(\d+)", file_path.stem)
@@ -66,62 +60,18 @@ def main() -> int:
 
         minlen = int(match.group(1))
         maxcaas = int(match.group(2))
-        param_label = f"{minlen}/{maxcaas}"
         df = pd.read_csv(file_path, sep="\t")
+        summary_data.append(
+            {
+                "Parameter": f"{minlen}/{maxcaas}",
+                "Minlen": minlen,
+                "Maxcaas": maxcaas,
+                "DiscardedCount": int((df["clustering_flag"] == "Discarded").sum()),
+            }
+        )
 
-        if has_caap and "caap_group" in df.columns:
-            discarded = df[df["clustering_flag"] == "Discarded"]
-            group_counts = discarded.groupby("caap_group").size().to_dict()
-            row = {"Parameter": param_label, "Minlen": minlen, "Maxcaas": maxcaas}
-            row.update({str(k): v for k, v in group_counts.items()})
-            row["DiscardedCount"] = int(sum(group_counts.values()))
-            summary_data.append(row)
-
-            group_labels = [str(k) for k in group_counts.keys()]
-            groups_str = ",".join(sorted(group_labels))
-            discarded_data.append(
-                {
-                    "File": file_path.stem,
-                    "DiscardedCount": row["DiscardedCount"],
-                    "Minlen": minlen,
-                    "Maxcaas": maxcaas,
-                    "caap_groups": groups_str if groups_str else "none",
-                }
-            )
-        else:
-            count = int((df["clustering_flag"] == "Discarded").sum())
-            summary_data.append(
-                {
-                    "Parameter": param_label,
-                    "Minlen": minlen,
-                    "Maxcaas": maxcaas,
-                    "DiscardedCount": count,
-                }
-            )
-            discarded_data.append(
-                {
-                    "File": file_path.stem,
-                    "DiscardedCount": count,
-                    "Minlen": minlen,
-                    "Maxcaas": maxcaas,
-                    "caap_groups": "N/A",
-                }
-            )
-
-    if has_caap:
-        summary_df = pd.DataFrame(summary_data).fillna(0)
-        summary_df = summary_df.sort_values(["Minlen", "Maxcaas"])
-        protected = ["Parameter", "Minlen", "Maxcaas", "DiscardedCount"]
-        group_cols = sorted(col for col in summary_df.columns if col not in protected)
-        summary_df = summary_df[protected + group_cols]
-        for col in ["DiscardedCount", *group_cols]:
-            summary_df[col] = summary_df[col].astype(int)
-    else:
-        summary_df = pd.DataFrame(summary_data).sort_values(["Minlen", "Maxcaas"])
-        summary_df["DiscardedCount"] = summary_df["DiscardedCount"].astype(int)
-
-    discarded_df = pd.DataFrame(discarded_data).sort_values(["Minlen", "Maxcaas"])
-    discarded_df["DiscardedCount"] = discarded_df["DiscardedCount"].astype(int)
+    summary_df = pd.DataFrame(summary_data).sort_values(["Minlen", "Maxcaas"])
+    discarded_df = summary_df[["Parameter", "DiscardedCount", "Minlen", "Maxcaas"]].rename(columns={"Parameter": "File"})
 
     summary_df.to_csv(args.summary_output, sep="\t", index=False)
     discarded_df.to_csv(args.discarded_output, sep="\t", index=False)

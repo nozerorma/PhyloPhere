@@ -10,16 +10,15 @@ permulation null (core.postproc):
 2. Dubious genes: IQR outliers (Q3 + k*IQR) in distinct positions that also carry a
    cluster-train position.
 
-Thresholds are calibrated within each caap_group over the pooled rows (one unit per
-caap_group and gene). Cluster positions are dropped only with --remove-clusters.
+Thresholds are calibrated over the pooled rows (one unit per gene). Cluster positions are dropped only with --remove-clusters.
 
 Called by:  CAAS_FILTER_GENES process (ctpp_clustfilter.nf)
-Inputs:     -i  pooled discovery TSV (Gene, Position, optionally caap_group)
+Inputs:     -i  pooled discovery TSV (Gene, Position)
             -l  gene annotation TSV with gene and length columns
             -c  cluster file of filter_caas_clusters-param.py (needed for the dubious and
                 both modes and for --remove-clusters)
 Outputs:    -o  filtered discovery TSV
-            -s  removed (caap_group, Gene, category) units
+            -s  removed (Gene, category) units
             -g  statistics of every unit that has a gene length (gene_stats.tsv)
 """
 
@@ -46,52 +45,49 @@ POOL_ID = "ALL"
 
 
 def read_discarded(cluster_file):
-    """Cluster file to the set of (Gene, Position, caap_group) flagged Discarded."""
+    """Cluster file to the set of (Gene, Position) flagged Discarded."""
     cluster_df = pd.read_csv(cluster_file, sep="\t", **_CAAS_READ_KW)
     required = ["Gene", "Position", "clustering_flag"]
     if not all(c in cluster_df.columns for c in required):
         print(f"Error: Cluster file missing required columns: {required}", file=sys.stderr)
         sys.exit(1)
-    if "caap_group" not in cluster_df.columns:
-        cluster_df["caap_group"] = "US"
     d = cluster_df[cluster_df["clustering_flag"] == "Discarded"]
-    return set(d[["Gene", "Position", "caap_group"]].itertuples(index=False, name=None))
+    return set(d[["Gene", "Position"]].itertuples(index=False, name=None))
 
 
 def build_units(discovery_df, discarded):
-    """One core.postproc unit per (caap_group, Gene) of the pooled table."""
-    clustered = {(grp, gene) for gene, _pos, grp in discarded}
-    counts = discovery_df.groupby(["caap_group", "Gene"])["Position"].nunique()
-    return [GeneUnit(OBSERVED, str(grp), str(gene), int(n), (str(grp), str(gene)) in clustered)
-            for (grp, gene), n in counts.items()]
+    """One core.postproc unit per Gene of the pooled table."""
+    clustered = {gene for gene, _pos in discarded}
+    counts = discovery_df.groupby("Gene")["Position"].nunique()
+    return [GeneUnit(OBSERVED, str(gene), int(n), str(gene) in clustered)
+            for gene, n in counts.items()]
 
 
 def gene_stats_table(stats, removal):
-    """gene_stats.tsv: one row per (caap_group, Gene) with a gene length; category is the removal verdict (Extreme, Dubious, Both or Normal)."""
+    """gene_stats.tsv: one row per Gene with a gene length; category is the removal verdict (Extreme, Dubious, Both or Normal)."""
     rows = []
     for s in stats:
         if s["density"] is None:
             continue
-        cat = removal.get((s["labeling"], s["caap_group"], s["Gene"]), "Normal")
+        cat = removal.get((s["labeling"], s["Gene"]), "Normal")
         rows.append({
-            "hyp_id": POOL_ID, "caap_group": s["caap_group"], "Gene": s["Gene"],
+            "hyp_id": POOL_ID, "Gene": s["Gene"],
             "length": s["length"], "n_CAAS": s["n_caas"], "n_CAAS_per_length": s["density"],
             "threshold_extreme": s["threshold_extreme"], "threshold_dubious": s["threshold_dubious"],
             "category": cat,
         })
-    cols = ["hyp_id", "caap_group", "Gene", "length", "n_CAAS", "n_CAAS_per_length",
+    cols = ["hyp_id", "Gene", "length", "n_CAAS", "n_CAAS_per_length",
             "threshold_extreme", "threshold_dubious", "category"]
     return pd.DataFrame(rows, columns=cols)
 
 
 def apply_gene_filter(discovery_df, removed_genes_df):
-    """Remove the flagged (Gene, caap_group) units from the discovery table."""
+    """Remove the flagged genes from the discovery table."""
     n_before = len(discovery_df)
-    remove_keys = set(removed_genes_df[["Gene", "caap_group"]].itertuples(index=False, name=None))
-    keys = pd.Series(list(zip(discovery_df["Gene"], discovery_df["caap_group"])), index=discovery_df.index)
-    filtered_df = discovery_df[~keys.isin(remove_keys)].copy()
+    remove_genes = set(removed_genes_df["Gene"])
+    filtered_df = discovery_df[~discovery_df["Gene"].isin(remove_genes)].copy()
     n_after = len(filtered_df)
-    print(f"Removed {n_before - n_after} CAAS positions from {len(remove_keys)} gene/group units", file=sys.stderr)
+    print(f"Removed {n_before - n_after} CAAS positions from {len(remove_genes)} genes", file=sys.stderr)
     pct = (100 * n_after / n_before) if n_before > 0 else 100.0
     print(f"Remaining: {n_after}/{n_before} positions ({pct:.1f}%)", file=sys.stderr)
     return filtered_df
@@ -103,8 +99,7 @@ def apply_cluster_filter(discovery_df, discarded):
         print("Cluster filtering: 0 positions flagged as Discarded", file=sys.stderr)
         return discovery_df
     n_before = len(discovery_df)
-    keys = pd.Series(list(zip(discovery_df["Gene"], discovery_df["Position"], discovery_df["caap_group"])),
-                     index=discovery_df.index)
+    keys = pd.Series(list(zip(discovery_df["Gene"], discovery_df["Position"])), index=discovery_df.index)
     filtered_df = discovery_df[~keys.isin(discarded)].copy()
     n_after = len(filtered_df)
     print(f"Cluster filtering: Removed {n_before - n_after} clustered positions "
@@ -133,7 +128,7 @@ Examples:
     )
 
     parser.add_argument('-i', '--disambiguation-input', required=True,
-                        help='Pooled CAAS discovery file (TSV with Gene, Position and, optionally, caap_group)')
+                        help='Pooled CAAS discovery file (TSV with Gene and Position)')
     parser.add_argument('-l', '--gene-ensembl-file', required=True,
                         help='Gene annotation file (TSV with gene and length columns)')
     parser.add_argument('-c', '--cluster-file', default=None,
@@ -175,8 +170,6 @@ Examples:
 
     print(f"Loading disambiguation data: {args.disambiguation_input}", file=sys.stderr)
     discovery_df = pd.read_csv(args.disambiguation_input, sep='\t', **_CAAS_READ_KW)
-    if 'caap_group' not in discovery_df.columns:
-        discovery_df['caap_group'] = 'US'
 
     gene_lengths = load_gene_lengths(args.gene_ensembl_file)
     if not gene_lengths:
@@ -189,8 +182,8 @@ Examples:
     units = build_units(discovery_df, discarded)
     removal = gene_removal(units, gene_lengths, args.filter_mode, args.iqr_multiplier, args.extreme_percentile)
     removed_genes_df = pd.DataFrame(
-        sorted((grp, gene, cat) for (_lab, grp, gene), cat in removal.items()),
-        columns=['caap_group', 'Gene', 'category'])
+        sorted((gene, cat) for (_lab, gene), cat in removal.items()),
+        columns=['Gene', 'category'])
 
     filtered_df = apply_gene_filter(discovery_df, removed_genes_df)
 
@@ -219,7 +212,7 @@ Examples:
         count = int((removed_genes_df['category'] == category).sum())
         if count > 0:
             print(f"  {category}: {count}", file=sys.stderr)
-    print(f"Total removed gene/scheme units: {len(removed_genes_df)}", file=sys.stderr)
+    print(f"Total removed genes: {len(removed_genes_df)}", file=sys.stderr)
     pct_str = f"{100*len(filtered_df)/len(discovery_df):.2f}%" if len(discovery_df) > 0 else "N/A"
     print(f"Positions retained: {len(filtered_df)}/{len(discovery_df)} ({pct_str})", file=sys.stderr)
 

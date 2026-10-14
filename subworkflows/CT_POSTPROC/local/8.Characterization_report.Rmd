@@ -263,7 +263,6 @@ normalize_disambig_schema <- function(df) {
   # Standardize the disambiguation output: lowercase key names, and defaults for the optional columns
   if ('Gene' %in% names(df) && !'gene' %in% names(df)) df <- df %>% rename(gene = Gene)
   if ('Position' %in% names(df) && !'position' %in% names(df)) df <- df %>% rename(position = Position)
-  if (!'caap_group' %in% names(df)) df$caap_group <- 'US'
   if (!'convergence_type' %in% names(df)) df$convergence_type <- 'unknown'
   if (!'side' %in% names(df)) df$side <- 'none'
 
@@ -271,7 +270,6 @@ normalize_disambig_schema <- function(df) {
     mutate(
       gene = as.character(gene),
       position = suppressWarnings(as.integer(position)),
-      caap_group = as.character(caap_group),
       convergence_type = as.character(convergence_type),
       side = tolower(as.character(side)),
       site_id = paste(gene, position, sep = '@')
@@ -367,7 +365,6 @@ discovery_df <- discovery_std %>%
     site_id
   )
 
-if (!"caap_group" %in% names(discovery_df)) discovery_df <- discovery_df %>% mutate(caap_group = "US")
 
 gene_ensembl <- read_tsv(gene_ensembl_file, show_col_types = FALSE)
 names(gene_ensembl) <- tolower(names(gene_ensembl))
@@ -390,7 +387,7 @@ cat(
   "  Filter summary:", filter_summary_file, "\n",
   "  Gene ensembl:", gene_ensembl_file, "\n",
   "  Gene stats:", ifelse(is.null(gene_stats_file) || is.na(gene_stats_file), "Not provided (will recompute)", gene_stats_file), "\n",
-  "\n  Loaded CT position records (multi-scheme/side):", nrow(discovery_df), "\n",
+  "\n  Loaded CT position records:", nrow(discovery_df), "\n",
   "  Unique CT positions (site_id = Gene@Position):", n_distinct(discovery_df$site_id), "\n",
   "  Unique genes with length annotation:", n_distinct(discovery_df$Gene), "\n"
 )
@@ -415,9 +412,6 @@ if (!is.null(gene_stats_file) && !is.na(gene_stats_file) && file.exists(gene_sta
   }
 
   # Columns the plots need, with defaults for the ones the file lacks
-  if (!"caap_group" %in% names(gene_summary_annotated)) {
-    gene_summary_annotated$caap_group <- "US"
-  }
   if (!"n_CAAS_per_length" %in% names(gene_summary_annotated)) {
     if ("n_CAAS" %in% names(gene_summary_annotated) && "length" %in% names(gene_summary_annotated)) {
       gene_summary_annotated$n_CAAS_per_length <- gene_summary_annotated$n_CAAS / gene_summary_annotated$length * 100
@@ -435,36 +429,22 @@ if (!is.null(gene_stats_file) && !is.na(gene_stats_file) && file.exists(gene_sta
   cat("Gene statistics file not found or not provided\n")
 }
 
-# Without a caap_group column all rows belong to the "US" scheme
-if (!"caap_group" %in% names(gene_summary_annotated)) {
-  gene_summary_annotated$caap_group <- "US"
-}
-
-cat("Groups found:", paste(sort(unique(gene_summary_annotated$caap_group)), collapse=", "), "\n")
-
 if (nrow(gene_summary_annotated) == 0) {
   cat("WARNING: gene_summary_annotated is empty — skipping outlier distribution plots.\n")
 } else {
 
-# Per-group threshold lines; filtering the NA thresholds keeps facet_wrap from receiving an empty frame
-vline_dubious_data  <- gene_summary_annotated %>%
-  filter(!is.na(threshold_dubious)) %>%
-  group_by(caap_group) %>%
-  summarise(threshold_dubious = mean(threshold_dubious), .groups = "drop")
-vline_extreme_data  <- gene_summary_annotated %>%
-  filter(!is.na(threshold_extreme)) %>%
-  group_by(caap_group) %>%
-  summarise(threshold_extreme = mean(threshold_extreme), .groups = "drop")
+# Threshold lines; NA thresholds (genes without a length) are left out
+thr_dubious <- mean(gene_summary_annotated$threshold_dubious, na.rm = TRUE)
+thr_extreme <- mean(gene_summary_annotated$threshold_extreme, na.rm = TRUE)
 
 # Histograms of the gene descriptors, with the thresholds of the extreme and dubious filters
 p_gross_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS, fill = category)) +
   geom_histogram(binwidth = 0.05, color = "black", alpha = 0.8) +
   scale_fill_manual(values = category_palette, breaks = c("Extreme", "Dubious", "Both", "Normal")) +
   scale_x_log10(breaks = c(1, 2, 5, 10, 20, 50, 100, 200)) +
-  facet_wrap(~caap_group, scales = "free_y") +
-  labs(title = "CAAP Count Distribution by Group",
+  labs(title = "CAAS Count Distribution",
        subtitle = "Dubious threshold (Q3 + 3×IQR) shown as dashed line",
-       x = "Number of CAAP Positions", y = "Gene Count") +
+       x = "Number of CAAS Positions", y = "Gene Count") +
   theme_minimal(base_size = 16) +
   theme(
     legend.position = "bottom",
@@ -474,9 +454,9 @@ p_gross_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS, fill = category))
     plot.subtitle = element_text(size = 14, hjust = 0, color = "grey40", margin = ggplot2::margin(b = 10)),
     strip.text = element_text(face = "bold", size = 15)
   )
-if (nrow(vline_dubious_data) > 0) {
+if (is.finite(thr_dubious)) {
   p_gross_dist <- p_gross_dist +
-    geom_vline(data = vline_dubious_data, aes(xintercept = threshold_dubious),
+    geom_vline(xintercept = thr_dubious,
                color = tableau_10[["blue"]], linetype = "dashed", linewidth = 1)
 }
 
@@ -488,10 +468,9 @@ p_density_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS_per_length, fill
   geom_histogram(binwidth = 0.05, color = "black", alpha = 0.8) +
   scale_fill_manual(values = category_palette, breaks = c("Extreme", "Dubious", "Both", "Normal")) +
   scale_x_log10(breaks = c(0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100)) +
-  facet_wrap(~ caap_group, scales = "free_y") +
-  labs(title = "CAAP Density Distribution by Group",
+  labs(title = "CAAS Density Distribution",
        subtitle = paste0("Top ", 100*(1-extreme_threshold), "% density threshold shown as dashed line"),
-       x = "CAAP Density (positions / gene length)", y = "Gene Count") +
+       x = "CAAS Density (positions / gene length)", y = "Gene Count") +
   theme_minimal(base_size = 16) +
   theme(
     legend.position = "bottom",
@@ -501,9 +480,9 @@ p_density_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS_per_length, fill
     plot.subtitle = element_text(size = 14, hjust = 0, color = "grey40", margin = ggplot2::margin(b = 10)),
     strip.text = element_text(face = "bold", size = 15)
   )
-if (nrow(vline_extreme_data) > 0) {
+if (is.finite(thr_extreme)) {
   p_density_dist <- p_density_dist +
-    geom_vline(data = vline_extreme_data, aes(xintercept = threshold_extreme),
+    geom_vline(xintercept = thr_extreme,
                color = tableau_10[["vermillion"]], linetype = "dashed", linewidth = 1)
 }
 
@@ -517,11 +496,10 @@ combined_zoomed_plot <- p_zoom_gross / p_zoom_density
 print(combined_outlier_plot)
 print(combined_zoomed_plot)
 
-facet_count_outliers <- n_distinct(gene_summary_annotated$caap_group)
 outlier_dims <- compute_barplot_dims(
   n_labels = 8,
-  n_facets = facet_count_outliers,
-  facet_cols = min(3, facet_count_outliers),
+  n_facets = 1,
+  facet_cols = 1,
   base_width = 12,
   base_height = 8,
   per_label = 0.35,
@@ -534,24 +512,23 @@ ggsave(file.path(outliers_dir, "outlier_distributions.png"), combined_outlier_pl
 ggsave(file.path(outliers_dir, "outlier_distributions_zoomed.png"), combined_zoomed_plot,
        width = outlier_dims$width, height = outlier_dims$height, dpi = 320)
 
-# Bar chart of the removed genes per category and caap_group (Extreme only, Dubious only,
+# Bar chart of the removed genes per category (Extreme only, Dubious only,
 # and Both for the genes that fail both criteria)
 removed_cat_summary <- gene_summary_annotated %>%
   filter(category != "Normal") %>%
-  distinct(caap_group, Gene, category) %>%
-  count(caap_group, category)
+  distinct(Gene, category) %>%
+  count(category)
 
 if (nrow(removed_cat_summary) > 0) {
   p_removed_cats <- ggplot(removed_cat_summary,
                            aes(x = category, y = n, fill = category)) +
     geom_col(color = "black", linewidth = 0.3, width = 0.7) +
-    facet_wrap(~ caap_group, scales = "free_y", ncol = min(3, n_distinct(removed_cat_summary$caap_group))) +
     scale_fill_manual(
       values = category_palette,
       breaks = c("Extreme", "Dubious", "Both")
     ) +
     labs(
-      title    = "Removed Genes by category and Group",
+      title    = "Removed Genes by category",
       subtitle = paste0(
         "Extreme: top ", 100 * (1 - extreme_threshold), "% density  |  ",
         "Dubious: Q3 + ", iqr_multiplier, "\u00d7IQR count  |  ",
@@ -576,72 +553,50 @@ if (nrow(removed_cat_summary) > 0) {
     file.path(outliers_dir, "removed_genes_by_category.png"),
     p_removed_cats,
     n_labels = n_distinct(removed_cat_summary$category),
-    n_facets = n_distinct(removed_cat_summary$caap_group),
-    facet_cols = min(3, n_distinct(removed_cat_summary$caap_group)),
+    n_facets = 1,
+    facet_cols = 1,
     base_width = 9,
     base_height = 5.5
   )
 }
 
-thresholds_summary <- gene_summary_annotated %>%
+n_hyp <- if ("hyp_id" %in% names(gene_summary_annotated)) n_distinct(gene_summary_annotated$hyp_id) else 1L
+thr <- gene_summary_annotated %>%
   filter(!is.na(threshold_extreme) | !is.na(threshold_dubious)) %>%
-  group_by(caap_group) %>%
   summarise(
-    n_hyp = if ("hyp_id" %in% names(gene_summary_annotated)) n_distinct(hyp_id) else 1L,
     threshold_extreme_mean = mean(threshold_extreme, na.rm = TRUE),
     threshold_extreme_min  = min(threshold_extreme, na.rm = TRUE),
     threshold_extreme_max  = max(threshold_extreme, na.rm = TRUE),
     threshold_dubious_mean = mean(threshold_dubious, na.rm = TRUE),
     threshold_dubious_min  = min(threshold_dubious, na.rm = TRUE),
-    threshold_dubious_max  = max(threshold_dubious, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  arrange(caap_group)
+    threshold_dubious_max  = max(threshold_dubious, na.rm = TRUE)
+  )
 
-thresh_lines <- vapply(seq_len(nrow(thresholds_summary)), function(i) {
-  row <- thresholds_summary[i, ]
-  if (row$n_hyp > 1) {
-    sprintf(
-      "  %s (%d hypotheses):\n    Extreme (top %.0f%% density): mean %.4f [%.4f - %.4f]\n    Dubious (Q3 + %.1f×IQR): mean %.1f [%.0f - %.0f] positions\n",
-      row$caap_group,
-      row$n_hyp,
-      100 * (1 - extreme_threshold),
-      row$threshold_extreme_mean,
-      row$threshold_extreme_min,
-      row$threshold_extreme_max,
-      iqr_multiplier,
-      row$threshold_dubious_mean,
-      row$threshold_dubious_min,
-      row$threshold_dubious_max
-    )
-  } else {
-    sprintf(
-      "  %s:\n    Extreme (top %.0f%% density): %.4f\n    Dubious (Q3 + %.1f×IQR): %.0f positions\n",
-      row$caap_group,
-      100 * (1 - extreme_threshold),
-      row$threshold_extreme_mean,
-      iqr_multiplier,
-      row$threshold_dubious_mean
-    )
-  }
-}, character(1))
+thresh_lines <- if (nrow(thr) == 0) "  no thresholds (no gene has a length)\n" else if (n_hyp > 1) {
+  sprintf(
+    "  %d hypotheses:\n    Extreme (top %.0f%% density): mean %.4f [%.4f - %.4f]\n    Dubious (Q3 + %.1f×IQR): mean %.1f [%.0f - %.0f] positions\n",
+    n_hyp, 100 * (1 - extreme_threshold),
+    thr$threshold_extreme_mean, thr$threshold_extreme_min, thr$threshold_extreme_max,
+    iqr_multiplier, thr$threshold_dubious_mean, thr$threshold_dubious_min, thr$threshold_dubious_max
+  )
+} else {
+  sprintf(
+    "  Extreme (top %.0f%% density): %.4f\n  Dubious (Q3 + %.1f×IQR): %.0f positions\n",
+    100 * (1 - extreme_threshold), thr$threshold_extreme_mean, iqr_multiplier, thr$threshold_dubious_mean
+  )
+}
 
 outlier_counts <- gene_summary_annotated %>%
-  distinct(caap_group, Gene, category) %>%
-  count(caap_group, category) %>%
-  pivot_wider(names_from = category, values_from = n, values_fill = 0)
+  distinct(Gene, category) %>%
+  count(category, name = "Genes")
 
 cat(
-  "\n=== Outlier Detection Summary ===\n",
-  "CAAP/US unified mode: Group-aware thresholds calculated\n\n",
-  "Thresholds by group:\n",
+  "\n=== Outlier Detection Summary ===\n\n",
+  "Thresholds:\n",
   paste(thresh_lines, collapse = "\n"), "\n"
 )
 
-outlier_table <- outlier_counts %>%
-  rename(`CAAP Group` = caap_group)
-
-cat(kable(outlier_table, caption = "Gene counts by group and outlier category") %>%
+cat(kable(outlier_counts, caption = "Gene counts by outlier category") %>%
       kable_styling(bootstrap_options = c("striped", "hover", "condensed")))
 
 write_tsv(gene_summary_annotated, file.path(outliers_dir, "gene_summary_annotated.tsv"))
@@ -653,8 +608,8 @@ write_tsv(gene_summary_annotated, file.path(outliers_dir, "gene_summary_annotate
 
 Spatial clustering detects and mitigates artificial clusters ("trains") of CAAS positions within genes.
 Clustering evaluation is performed as follows:
-- **Grouping**: Each gene is evaluated independently per CAAP group (or across all positions for a gene in US mode) across all hypotheses pooled in the disambiguated dataset.
-- **Algorithm**: For every sliding interval `[start, end]` of CAAS positions within a gene/scheme with span `span = end - start + 1 >= minlen`, the local density `density = count_positions / span` is calculated.
+- **Grouping**: Each gene is evaluated independently across all hypotheses pooled in the disambiguated dataset.
+- **Algorithm**: For every sliding interval `[start, end]` of CAAS positions within a gene with span `span = end - start + 1 >= minlen`, the local density `density = count_positions / span` is calculated.
 - **Discard criteria**: If `density >= maxcaas`, all positions within that window are flagged as `Discarded`.
 - **Decoupled removal**: When cluster removal is enabled (`--remove_caas_clusters`), flagged positions are filtered out from the downstream discovery dataset, regardless of whether gene-level outlier filtering (`--gene_filter_mode`) is set to `none`, `extreme`, `dubious`, or `both`.
 
@@ -674,83 +629,30 @@ if (!"Minlen" %in% names(filter_summary) || !"Maxcaas" %in% names(filter_summary
   }
 }
 
-if (!"DiscardedCount" %in% names(filter_summary)) {
-  protected_cols <- c("Parameter", "Minlen", "Maxcaas", "caap_groups", "Groups_List", "N_Groups")
-  candidate_cols <- setdiff(names(filter_summary), protected_cols)
-  numeric_candidate_cols <- candidate_cols[vapply(candidate_cols, function(col) is.numeric(filter_summary[[col]]), logical(1))]
-  if (length(numeric_candidate_cols) > 0) {
-    filter_summary <- filter_summary %>% mutate(DiscardedCount = rowSums(across(all_of(numeric_candidate_cols)), na.rm = TRUE))
-    load_msgs <- c(load_msgs, sprintf("  Built DiscardedCount from columns: %s\n", paste(numeric_candidate_cols, collapse = ", ")))
-  } else {
-    filter_summary$DiscardedCount <- 0L
-    load_msgs <- c(load_msgs, "  Warning: Could not infer DiscardedCount from summary columns; defaulting to 0\n")
-  }
-} else {
-  filter_summary$DiscardedCount <- suppressWarnings(as.numeric(filter_summary$DiscardedCount))
-  filter_summary$DiscardedCount[is.na(filter_summary$DiscardedCount)] <- 0
-}
-
-has_caap_groups_in_summary <- 'caap_groups' %in% names(filter_summary) && any(filter_summary$caap_groups != 'N/A' & filter_summary$caap_groups != '')
-if (has_caap_groups_in_summary) {
-  load_msgs <- c(load_msgs, "  CAAP mode detected in filter summary\n")
-  filter_summary <- filter_summary %>% mutate(Groups_List = strsplit(as.character(caap_groups), ","), N_Groups = lengths(Groups_List))
-}
+filter_summary$DiscardedCount <- suppressWarnings(as.numeric(filter_summary$DiscardedCount))
+filter_summary$DiscardedCount[is.na(filter_summary$DiscardedCount)] <- 0
 
 cat(paste(load_msgs, collapse = ""))
 
-if (has_caap_groups_in_summary) {
-  group_cols <- setdiff(names(filter_summary), c('Parameter', 'Minlen', 'Maxcaas'))
-  filter_table <- filter_summary %>% select(Parameter, all_of(sort(group_cols)))
-} else {
-  filter_table <- filter_summary %>% select(Parameter, DiscardedCount)
-  names(filter_table)[2] <- "Discarded"
-}
+filter_table <- filter_summary %>% select(Parameter, DiscardedCount)
+names(filter_table)[2] <- "Discarded"
 
 kable(filter_table, caption = "Cluster Filtering Parameter Sweep Results", align = c("l", rep("r", ncol(filter_table) - 1))) %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
 
 if (nrow(filter_summary) > 1) {
-  if (has_caap_groups_in_summary) {
-    group_cols <- setdiff(names(filter_summary), c('Parameter', 'Minlen', 'Maxcaas'))
-    plot_data <- filter_summary %>%
-      pivot_longer(cols = all_of(group_cols), names_to = "caap_group", values_to = "DiscardedCount") %>%
-      mutate(param_label = sprintf("%d/%d", Minlen, as.integer(Maxcaas)), param_label = factor(param_label, levels = unique(param_label)))
-
-    p_param_sweep <- ggplot(plot_data, aes(x = param_label, y = DiscardedCount, fill = caap_group)) +
-      geom_col(position = "dodge", color = "black", linewidth = 0.3) +
-      scale_fill_paletteer_d("ggthemes::Tableau_10") +
-      labs(title = "Discarded CAAS Positions by Parameter Combination",
-           subtitle = "Grouped by CAAP group - minlen/maxcaas combinations",
-           x = "Parameter Combination (minlen/maxcaas)", y = "Positions Discarded", fill = "CAAP Group") +
-      theme_minimal(base_size = 16) +
-      theme(legend.position = "right", axis.title.y = element_text(size = 15, margin = ggplot2::margin(l = 20, r = 20)), axis.title.x = element_text(size = 15, margin = ggplot2::margin(t = 12)), plot.title = element_text(face = "bold", size = 18, hjust = 0, margin = ggplot2::margin(b = 6)), plot.subtitle = element_text(size = 14, hjust = 0, color = "grey40", margin = ggplot2::margin(b = 10)), axis.text.x = element_text(angle = 55, hjust = 1))
-  } else {
-    p_param_sweep <- ggplot(filter_summary, aes(x = factor(Minlen), y = DiscardedCount, color = factor(Maxcaas), group = factor(Maxcaas))) +
-      geom_point(size = 4) +
-      geom_line(linewidth = 1.2) +
-      scale_color_paletteer_d("ggthemes::Tableau_10", labels = function(x) sprintf("%.0f%%", as.numeric(x))) +
-      labs(title = "Discarded CAAS Positions by Parameter Combination",
-           subtitle = "Effect of minimum cluster length and maximum density threshold",
-           x = "Minimum Cluster length (minlen)", y = "Positions Discarded", color = "Max Density") +
-      theme_minimal(base_size = 16) +
-      theme(legend.position = "right", axis.title.y = element_text(size = 15, margin = ggplot2::margin(l = 20, r = 20)), axis.title.x = element_text(size = 15, margin = ggplot2::margin(t = 12)), plot.title = element_text(face = "bold", size = 18, hjust = 0, margin = ggplot2::margin(b = 6)), plot.subtitle = element_text(size = 14, hjust = 0, color = "grey40", margin = ggplot2::margin(b = 10)))
-  }
+  p_param_sweep <- ggplot(filter_summary, aes(x = factor(Minlen), y = DiscardedCount, color = factor(Maxcaas), group = factor(Maxcaas))) +
+    geom_point(size = 4) +
+    geom_line(linewidth = 1.2) +
+    scale_color_paletteer_d("ggthemes::Tableau_10", labels = function(x) sprintf("%.0f%%", as.numeric(x))) +
+    labs(title = "Discarded CAAS Positions by Parameter Combination",
+         subtitle = "Effect of minimum cluster length and maximum density threshold",
+         x = "Minimum Cluster length (minlen)", y = "Positions Discarded", color = "Max Density") +
+    theme_minimal(base_size = 16) +
+    theme(legend.position = "right", axis.title.y = element_text(size = 15, margin = ggplot2::margin(l = 20, r = 20)), axis.title.x = element_text(size = 15, margin = ggplot2::margin(t = 12)), plot.title = element_text(face = "bold", size = 18, hjust = 0, margin = ggplot2::margin(b = 6)), plot.subtitle = element_text(size = 14, hjust = 0, color = "grey40", margin = ggplot2::margin(b = 10)))
 
   print(p_param_sweep)
-  if (has_caap_groups_in_summary) {
-    save_barplot(
-      file.path(cluster_dir, "parameter_sweep_overview.png"),
-      p_param_sweep,
-      n_labels = n_distinct(plot_data$param_label),
-      n_facets = 1,
-      facet_cols = 1,
-      base_width = 10,
-      base_height = 6,
-      per_label = 0.65
-    )
-  } else {
-    ggsave(file.path(cluster_dir, "parameter_sweep_overview.png"), p_param_sweep, width = 12, height = 6, dpi = 320)
-  }
+  ggsave(file.path(cluster_dir, "parameter_sweep_overview.png"), p_param_sweep, width = 12, height = 6, dpi = 320)
 }
 
 write_tsv(filter_summary, file.path(cluster_dir, "filter_summary.tsv"))
@@ -797,10 +699,6 @@ if (processing_mode == 'exploratory' && nrow(filter_summary) > 1) {
       next
     }
 
-    if (!"caap_group" %in% names(discarded)) {
-      discarded <- discarded %>% mutate(caap_group = "US")
-    }
-
     detect_runs <- function(positions) {
       positions <- sort(unique(positions))
       if (length(positions) == 0) return(integer(0))
@@ -809,7 +707,7 @@ if (processing_mode == 'exploratory' && nrow(filter_summary) > 1) {
     }
 
     spatial_analysis <- discarded %>%
-      group_by(caap_group, Gene) %>%
+      group_by(Gene) %>%
       summarise(positions = list(Position), .groups = "drop") %>%
       mutate(run_lengths = map(positions, detect_runs)) %>%
       unnest(run_lengths, keep_empty = TRUE) %>%
@@ -826,20 +724,17 @@ if (processing_mode == 'exploratory' && nrow(filter_summary) > 1) {
       )
 
     spatial_summary <- spatial_analysis %>%
-      count(caap_group, cluster_type) %>%
-      complete(caap_group, cluster_type, fill = list(n = 0)) %>%
-      group_by(caap_group) %>%
-      mutate(percentage = round(100 * n / sum(n), 1)) %>%
-      ungroup()
+      count(cluster_type) %>%
+      mutate(percentage = round(100 * n / sum(n), 1))
 
-    p_spatial <- ggplot(spatial_summary, aes(x = caap_group, y = percentage / 100, fill = cluster_type)) +
+    p_spatial <- ggplot(spatial_summary, aes(x = "Discarded", y = percentage / 100, fill = cluster_type)) +
       geom_col(position = "fill", color = "black", size = 0.2) +
       scale_fill_paletteer_d("ggthemes::Tableau_10") +
       scale_y_continuous(labels = scales::percent) +
       labs(
         title = sprintf("Spatial Clustering: %s", param_label),
         subtitle = sprintf("Discarded positions only | %s", resolved_file$message),
-        x = "Group",
+        x = NULL,
         y = "Percentage",
         fill = "Cluster Type"
       ) +
@@ -864,7 +759,7 @@ precluster_events <- tibble()
 if (!is.na(removed_precluster_file)) {
   precluster_df <- normalize_disambig_schema(read_delim(removed_precluster_file, delim = "\t", show_col_types = FALSE))
   precluster_events <- precluster_df %>% transmute(
-    site_id, gene, position, caap_group, convergence_type,
+    site_id, gene, position, convergence_type,
     side,
     removal_stage = "precluster_other"
   )
@@ -873,11 +768,11 @@ if (!is.na(removed_precluster_file)) {
 cluster_events <- tibble()
 if (length(cluster_files) > 0) {
   cluster_df <- map_dfr(cluster_files, ~ normalize_disambig_schema(read_tsv(.x, show_col_types = FALSE)))
-  cluster_hits <- cluster_df %>% filter(clustering_flag == "Discarded") %>% transmute(gene = as.character(gene), position = as.integer(position), caap_group = as.character(caap_group)) %>% distinct()
+  cluster_hits <- cluster_df %>% filter(clustering_flag == "Discarded") %>% transmute(gene = as.character(gene), position = as.integer(position)) %>% distinct()
   cluster_events <- discovery_std %>%
-    inner_join(cluster_hits, by = c("gene", "position", "caap_group")) %>%
+    inner_join(cluster_hits, by = c("gene", "position")) %>%
     transmute(
-      site_id, gene, position, caap_group, convergence_type,
+      site_id, gene, position, convergence_type,
       side,
       removal_stage = "cluster"
     ) %>%
@@ -888,11 +783,10 @@ gene_events <- tibble()
 if (!is.na(removed_genes_file)) {
   rg <- read_tsv(removed_genes_file, show_col_types = FALSE)
   names(rg) <- tolower(names(rg))
-  if (!"caap_group" %in% names(rg)) rg$caap_group <- "US"
-  rg_norm <- rg %>% transmute(gene = as.character(gene), caap_group = as.character(caap_group), category = as.character(category)) %>% distinct()
+  rg_norm <- rg %>% transmute(gene = as.character(gene), category = as.character(category)) %>% distinct()
 
   gene_events <- discovery_std %>%
-    inner_join(rg_norm, by = c("gene", "caap_group")) %>%
+    inner_join(rg_norm, by = "gene") %>%
     mutate(removal_stage = case_when(
       tolower(category) == "extreme" ~ "extreme_gene",
       tolower(category) == "dubious" ~ "dubious_with_clusters",
@@ -900,7 +794,7 @@ if (!is.na(removed_genes_file)) {
       TRUE ~ "gene_filter"
     )) %>%
     transmute(
-      site_id, gene, position, caap_group, convergence_type,
+      site_id, gene, position, convergence_type,
       side, removal_stage
     ) %>%
     distinct()
@@ -917,7 +811,7 @@ cat("\n### 3.1.1 Gene-Level Filter Overlap Diagnostics {.tabset}\n\n")
 # --- 1. Gene-level filter flags -------------------------------------------
 
 gene_filter_flags <- gene_summary_annotated %>%
-  group_by(caap_group, Gene) %>%
+  group_by(Gene) %>%
   summarise(
     length            = dplyr::first(length),
     n_CAAS            = mean(n_CAAS, na.rm = TRUE),
@@ -929,15 +823,15 @@ gene_filter_flags <- gene_summary_annotated %>%
 
 cluster_removed_genes <- if (nrow(cluster_events) > 0) {
   cluster_events %>%
-    transmute(Gene = gene, caap_group = caap_group) %>%
+    transmute(Gene = gene) %>%
     distinct() %>%
     mutate(Cluster_removed = TRUE)
 } else {
-  tibble(Gene = character(), caap_group = character(), Cluster_removed = logical())
+  tibble(Gene = character(), Cluster_removed = logical())
 }
 
 gene_filter_flags <- gene_filter_flags %>%
-  left_join(cluster_removed_genes, by = c("Gene", "caap_group")) %>%
+  left_join(cluster_removed_genes, by = "Gene") %>%
   mutate(
     Cluster_removed = coalesce(Cluster_removed, FALSE),
     filter_combo = case_when(
@@ -959,23 +853,15 @@ gene_filter_flags <- gene_filter_flags %>%
 
 # --- 2. Membership summary table --------------------------------------------
 
-# gene_filter_flags has one row per (caap_group, Gene); the totals below are
-# per unique gene, flagged if any of its CAAP groups is flagged.
+# gene_filter_flags has one row per gene.
 gene_level_flags <- gene_filter_flags %>%
-  group_by(Gene) %>%
-  summarise(
-    Extreme         = any(Extreme, na.rm = TRUE),
-    Dubious         = any(Dubious, na.rm = TRUE),
-    Cluster_removed = any(Cluster_removed, na.rm = TRUE),
-    .groups         = "drop"
-  ) %>%
   mutate(any_flag = Extreme | Dubious | Cluster_removed)
 
 total_analyzed_genes <- n_distinct(c(discovery_df$Gene, gene_level_flags$Gene))
 
 membership_counts <- gene_filter_flags %>%
-  count(caap_group, filter_combo, .drop = FALSE) %>%
-  arrange(caap_group, filter_combo)
+  count(filter_combo, .drop = FALSE) %>%
+  arrange(filter_combo)
 
 nonzero_membership <- membership_counts %>% filter(n > 0)
 
@@ -992,7 +878,7 @@ filter_totals_msg <- sprintf(
 
 cat(filter_totals_msg, "\n")
 
-cat(kable(nonzero_membership, caption = "Gene counts by CAAP group and active filter combination") %>%
+cat(kable(nonzero_membership, caption = "Gene counts by active filter combination") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed")))
 ```
 
@@ -1009,20 +895,15 @@ gene_filter_plot <- gene_filter_flags %>%
   filter(!is.na(filter_combo)) %>%
   mutate(filter_combo = factor(filter_combo, levels = combo_levels))
 
-# A run with very few genes can leave nothing to plot once the NA rows are dropped, or a
-# `caap_group` column that is entirely NA; facet_wrap() then stops with "Faceting variables
-# must have at least one value". The panel is skipped in that case.
-.have_facet <- "caap_group" %in% names(gene_filter_plot) &&
-  any(!is.na(gene_filter_plot$caap_group))
-if (nrow(gene_filter_plot) == 0 || !.have_facet) {
-  cat("_Not enough filtered genes with a `caap_group` label to plot descriptor",
+# A run with very few genes can leave nothing to plot once the NA rows are dropped.
+if (nrow(gene_filter_plot) == 0) {
+  cat("_Not enough filtered genes to plot descriptor",
       "distributions by filter membership (small fixture)._\n\n")
 } else {
 
 make_descriptor_plot <- function(df, var_name, y_label, log_scale = FALSE) {
   p <- ggplot(df, aes(x = filter_combo, y = .data[[var_name]], fill = filter_combo)) +
     geom_boxplot(outlier.size = 0.8, outlier.alpha = 0.5, alpha = 0.8, show.legend = FALSE) +
-    facet_wrap(~ caap_group, scales = "free_y") +
     scale_fill_paletteer_d("ggthemes::Tableau_10") +
     theme_minimal(base_size = 12) +
     labs(x = NULL, y = y_label) +
@@ -1056,13 +937,13 @@ print(desc_grid)
 ggsave(file.path(outliers_dir, "filter_overlap_descriptors.png"),
        desc_grid, width = 14, height = 5.5, dpi = 280)
 
-}  # end .have_facet guard
+}  # end nrow(gene_filter_plot) guard
 ```
 
 ```{r filter_overlap_summary_table, eval=(processing_mode != 'exploratory'), results='asis'}
 cat("\n#### Filter overlap summary table\n\n")
 overlap_summary <- gene_filter_flags %>%
-  group_by(caap_group, filter_combo) %>%
+  group_by(filter_combo) %>%
   summarise(
     n_genes                  = n(),
     mean_Length              = round(mean(length,            na.rm = TRUE), 1),
@@ -1073,14 +954,14 @@ overlap_summary <- gene_filter_flags %>%
     sd_density               = round(sd(n_CAAS_per_length,   na.rm = TRUE), 4),
     .groups = "drop"
   ) %>%
-  arrange(caap_group, filter_combo)
+  arrange(filter_combo)
 
 write_tsv(gene_filter_flags,  file.path(outliers_dir, "filter_overlap_gene_table.tsv"))
 write_tsv(overlap_summary,    file.path(outliers_dir, "filter_overlap_summary.tsv"))
 
 kable(
   overlap_summary,
-  caption = "Filter overlap summary: per-combo x per-group mean +/- SD across descriptors"
+  caption = "Filter overlap summary: per-combo mean +/- SD across descriptors"
 ) %>% kable_styling()
 ```
 
@@ -1127,21 +1008,20 @@ if (nrow(removal_events) > 0) {
 
 ```{r global_pattern_sig, eval=(processing_mode != 'exploratory'), results='asis'}
 cat("\n## 3.3 Global Side-Aware Convergence Characterization\n\n")
-pattern_parallel_by_group <- convergence_plot_df %>%
-  count(side, caap_group, pattern_parallel, sort = TRUE)
+pattern_parallel_counts <- convergence_plot_df %>%
+  count(side, pattern_parallel, sort = TRUE)
 
-write_tsv(pattern_parallel_by_group, file.path(disambig_dir, "pattern_parallel_by_caap_group.tsv"))
+write_tsv(pattern_parallel_counts, file.path(disambig_dir, "pattern_parallel.tsv"))
 
 pg <- ggplot(
-  pattern_parallel_by_group,
-  aes(y = forcats::fct_rev(pattern_parallel), x = n, fill = caap_group)
+  pattern_parallel_counts,
+  aes(y = forcats::fct_rev(pattern_parallel), x = n)
 ) +
-  geom_col(position = position_dodge(width = 0.75), width = 0.7) +
+  geom_col(width = 0.7, fill = tableau_10[["blue"]]) +
   facet_wrap(~side, scales = "free_y", ncol = 2) +
-  scale_fill_paletteer_d("ggthemes::Tableau_10") +
   scale_y_discrete(labels = format_pattern_parallel_axis) +
   theme_minimal(base_size = 14) +
-  labs(title = "Convergence labels across CAAP groups", x = "n", y = "convergence label") +
+  labs(title = "Convergence labels", x = "n", y = "convergence label") +
   theme(
     axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
     axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
@@ -1151,10 +1031,10 @@ pg <- ggplot(
   )
 print(pg)
 save_barplot(
-  file.path(disambig_dir, "pattern_parallel_by_caap_group.png"),
+  file.path(disambig_dir, "pattern_parallel.png"),
   pg,
-  n_labels = n_distinct(pattern_parallel_by_group$pattern_parallel),
-  n_facets = n_distinct(pattern_parallel_by_group$side),
+  n_labels = n_distinct(pattern_parallel_counts$pattern_parallel),
+  n_facets = n_distinct(pattern_parallel_counts$side),
   facet_cols = 2,
   base_width = 11,
   base_height = 7.5
@@ -1289,14 +1169,14 @@ cat(
   "Gene-level statistics:\n",
   sprintf("  Total unique genes analyzed: %d\n\n", n_distinct(discovery_df$Gene)),
   "Position-level statistics:\n",
-  sprintf("  Total CT position records (multi-scheme/side): %d\n", nrow(discovery_df)),
+  sprintf("  Total CT position records: %d\n", nrow(discovery_df)),
   sprintf("  Total unique CT positions (site_id = Gene@Position): %d\n", n_distinct(discovery_df$site_id)),
   cluster_info
 )
 
 summary_table <- tibble(
   Metric = c(
-    "Total CT Position Records (multi-scheme/side)",
+    "Total CT Position Records",
     "Total Unique CT Positions (Gene@Position)",
     "Unique Genes Analyzed",
     "Gene Filtering Mode",

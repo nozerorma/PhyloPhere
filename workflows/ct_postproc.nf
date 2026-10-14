@@ -137,7 +137,6 @@ workflow CT_POSTPROC {
                 .map { combo, disc_file -> tuple('exploratory', combo[0], combo[1], disc_file) }
 
             log.info "🔍 Exploratory mode: testing ${combos.size()} parameter combinations"
-            log.info "   (Cluster filtering will respect caap_group boundaries)"
 
         } else if (params.caas_postproc_mode == 'filter') {
             // Single filter run: the selected minlen and maxcaas.
@@ -149,7 +148,6 @@ workflow CT_POSTPROC {
                 }
             
             log.info "🔧 Filter mode: running with minlen=${params.filter_minlen}, maxcaas=${params.filter_maxcaas}"
-            log.info "   (Cluster filtering will respect caap_group boundaries)"
             
         } else {
             error "Invalid caas_postproc_mode: ${params.caas_postproc_mode}. Must be 'exploratory' or 'filter'"
@@ -181,7 +179,6 @@ workflow CT_POSTPROC {
         assert gene_ensembl_file.exists() : "Error: gene_ensembl_file not found: ${params.gene_ensembl_file}"
 
         log.info "🧬 Running gene-level filtering (mode: ${params.gene_filter_mode})..."
-        log.info "   (Gene-level statistics will be calculated per caap_group)"
 
         // The gene filter uses the cluster file of the selected pair (filter_minlen, filter_maxcaas),
         // in filter mode and in exploratory mode alike. The name follows CT_FILTER's output naming.
@@ -231,8 +228,8 @@ workflow CT_POSTPROC {
         log.info "Post-processing reports generated in: ${params.outdir}/postproc/reports"
     
     emit:
-        filter_summary = filter_summary_results.summary  // filter_summary.tsv (rows=params, cols=groups)
-        discarded_summary = filter_summary_results.discarded_summary  // discarded_summary.tsv (old format for compatibility)
+        filter_summary = filter_summary_results.summary  // filter_summary.tsv (one row per parameter pair)
+        discarded_summary = filter_summary_results.discarded_summary  // discarded_summary.tsv (the same counts, File column)
         filter_dir = filter_dir_ch
         filtered_discovery = filtered_discovery_ch
         cleaned_background = cleaned_background_main_ch

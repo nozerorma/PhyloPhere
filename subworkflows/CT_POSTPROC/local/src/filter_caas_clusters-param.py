@@ -7,16 +7,16 @@ Cluster filter: flags the positions of a gene that lie in a high-density run of 
 
 The positions of a tight cluster ("train") of substitutions are flagged "Discarded", so that
 clustered substitutions do not pass as independent CAAS.
-For each gene (and each caap_group when that column exists) every interval [start, end]
+For each gene every interval [start, end]
 of the sorted positions with span >= minlen and count / span >= maxcaas flags all the
 positions it holds (core.postproc.ctrain, shared with the permulation null). With --map-dir
 the span is measured in untrimmed alignment columns.
 
 Called by:  CT_FILTER process (ctpp_clustfilter.nf), once per (minlen, maxcaas) pair
-Inputs:     -i  TSV with at least Gene and Position (caap_group is used when present)
+Inputs:     -i  TSV with at least Gene and Position
             -l, -c  minimum interval span and maximum density (maxcaas)
             --map-dir  optional directory of per-gene MAP tables (untrimmed coordinates)
-Outputs:    <input stem>.filtered.minlen<L>.maxcaas<C*100>.tsv with Gene, Position, [caap_group],
+Outputs:    <input stem>.filtered.minlen<L>.maxcaas<C*100>.tsv with Gene, Position,
             clustering_flag ("Good" or "Discarded"); <input stem>.minlen<L>.maxcaas<C*100>.log
 
 Usage:
@@ -180,110 +180,52 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
     genes = df["Gene"].unique()
     total_genes = len(genes)
     
-    # With a caap_group column every group of a gene is processed on its own
-    has_caap_group = "caap_group" in df.columns
-    
-    if has_caap_group:
-        caap_groups = df["caap_group"].unique()
-        logger.info(
-            f"CAAP mode detected: Processing {total_genes} genes across "
-            f"{len(caap_groups)} CAAP groups ({', '.join(caap_groups)}) with "
-            f"maxcaas={maxcaas}, minlen={minlen}"
-        )
-    else:
-        logger.info(
-            f"Processing {total_genes} genes with "
-            f"maxcaas={maxcaas}, minlen={minlen}"
-        )
-    
-    position_col = df["Position"]
+    logger.info(
+        f"Processing {total_genes} genes with "
+        f"maxcaas={maxcaas}, minlen={minlen}"
+    )
+
     gene_col = df["Gene"]
-    caap_group_col = df["caap_group"] if has_caap_group else None
-    
-    # Each gene is independent
+
+    # Each gene is independent: all its positions form one unit
     for i, gene in enumerate(genes, 1):
         gene_df = df[gene_col == gene]
         columns = gene_columns(map_index, gene, map_suffix) if map_index is not None else None
         if map_index is not None and columns is None:
             genes_without_map.append(gene)
-        
-        if has_caap_group:
-            groups_in_gene = gene_df["caap_group"].unique()
-            logger.info(f"Gene [{i}/{total_genes}]: {gene} (Groups: {', '.join(groups_in_gene)})")
-            
-            for group in groups_in_gene:
-                group_df = gene_df[gene_df["caap_group"] == group]
-                positions = sorted(group_df["Position"].unique())
-                
-                if len(positions) < minlen:
-                    continue
-                
-                logger.debug(
-                    f"  Group {group}: {len(positions)} positions: "
-                    f"{positions[:5]}{'...' if len(positions) > 5 else ''}"
-                )
-                
-                group_discarded = ctrain(positions, maxcaas, minlen, columns)
-                
-                if group_discarded:
-                    logger.info(
-                        f"  Group {group}: {len(group_discarded)} positions flagged "
-                        f"(density threshold exceeded)"
-                    )
-                    for pos in group_discarded:
-                        discarded.append((gene, pos, group))
-        else:
-            # No caap_group column: all positions of the gene form one unit
-            logger.info(f"Gene [{i}/{total_genes}]: {gene}")
-            positions = sorted(gene_df["Position"].unique())
-            
-            if len(positions) < minlen:
-                continue
-            
-            logger.debug(
-                f"  {len(positions)} positions: "
-                f"{positions[:5]}{'...' if len(positions) > 5 else ''}"
+
+        logger.info(f"Gene [{i}/{total_genes}]: {gene}")
+        positions = sorted(gene_df["Position"].unique())
+
+        if len(positions) < minlen:
+            continue
+
+        logger.debug(
+            f"  {len(positions)} positions: "
+            f"{positions[:5]}{'...' if len(positions) > 5 else ''}"
+        )
+
+        gene_discarded = ctrain(positions, maxcaas, minlen, columns)
+
+        if gene_discarded:
+            logger.info(
+                f"  {len(gene_discarded)} positions flagged "
+                f"(density threshold exceeded)"
             )
-            
-            gene_discarded = ctrain(positions, maxcaas, minlen, columns)
-            
-            if gene_discarded:
-                logger.info(
-                    f"  {len(gene_discarded)} positions flagged "
-                    f"(density threshold exceeded)"
-                )
-                for pos in gene_discarded:
-                    discarded.append((gene, pos, None))
-    
+            for pos in gene_discarded:
+                discarded.append((gene, pos))
+
     if genes_without_map:
         logger.warning(
             f"{len(genes_without_map)} of {total_genes} genes have no MAP file and keep trimmed coordinates, "
             f"e.g. {sorted(genes_without_map)[:5]}"
         )
 
-    out = df.copy()
-    
-    # A row is Discarded when its (Gene, Position[, caap_group]) was flagged
-    if has_caap_group:
-        out["clustering_flag"] = out.apply(
-            lambda row: "Discarded" if (row["Gene"], row["Position"], row["caap_group"]) in discarded else "Good",
-            axis=1
-        )
-    else:
-        discarded_set = {(gene, pos) for gene, pos, _ in discarded}
-        out["clustering_flag"] = out.apply(
-            lambda row: "Discarded" if (row["Gene"], row["Position"]) in discarded_set else "Good",
-            axis=1
-        )
-    
-    # Only the keys and the flag are written (caap_group included when present)
-    output_cols = ["Gene", "Position", "clustering_flag"]
-    if "caap_group" in df.columns:
-        output_cols = ["Gene", "Position", "caap_group", "clustering_flag"]
-        out = out[output_cols]
-    else:
-        out = out[output_cols]
-    
+    # Only the keys and the flag are written; a row is Discarded when its (Gene, Position) was flagged
+    out = df[["Gene", "Position"]].copy()
+    is_discarded = pd.MultiIndex.from_frame(out).isin(set(discarded))
+    out["clustering_flag"] = ["Discarded" if d else "Good" for d in is_discarded]
+
     out_file = path.with_suffix(
         f".filtered.minlen{minlen}.maxcaas{int(maxcaas*100)}.tsv"
     )

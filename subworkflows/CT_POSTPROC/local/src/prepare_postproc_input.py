@@ -10,7 +10,7 @@ residue tally (residue_descriptors.py).
 Called by:  CAAS_PREPARE_POSTPROC_INPUT process (ctpp_clustfilter.nf)
 Inputs:     --input  disambiguation master CSV/TSV (the separator is detected from the header)
             --alignment, --alignment-format, --hyp-pairs  optional, for the tally
-Outputs:    --output  normalized TSV (Gene, Position, caap_group, ...)
+Outputs:    --output  normalized TSV (Gene, Position, ...)
             --removed-output  TSV of precluster removals (header only: no row is removed)
 """
 
@@ -25,7 +25,7 @@ from residue_descriptors import add_species_tally
 
 def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     # Only the structural keys are renamed (gene/msa_pos → Gene/Position, the names the
-    # downstream steps read). The other columns (caap_group, convergence_type, pvalue, caas,
+    # downstream steps read). The other columns (convergence_type, pvalue, caas,
     # amino_encoded) keep their lowercase names.
     rename_map = {}
     if "gene" in df.columns:
@@ -34,9 +34,6 @@ def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         rename_map["msa_pos"] = "Position"
     if rename_map:
         df = df.rename(columns=rename_map)
-
-    if "caap_group" not in df.columns:
-        df["caap_group"] = "US"
 
     return df
 
