@@ -222,7 +222,7 @@ class FadeConfig(ModuleConfigBase):
     # of both directions is used (workflows/enrichment.nf).
     fade_universe_file: str = ""  # --fade_universe_file
 
-    # Precomputed FADE inputs (fade_json_dir_top/bottom, scoring_fade_summary_top/bottom,
+    # Precomputed FADE inputs (fade_tables_dir_top/bottom, scoring_fade_summary_top/bottom,
     # scoring_fade_site_top/bottom) are derived from PrecomputedConfig (use_fade).
 
 

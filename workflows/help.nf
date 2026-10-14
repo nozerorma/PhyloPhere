@@ -276,7 +276,7 @@ Usage:
 --fade_burn_in, --fade_samples               (MCMC-only settings; ignored by Variational-Bayes)
 --fade_concentration                            <FLOAT>                  0.5
 --fade_universe_file                              <"gene_list">            null  (else falls back to cleaned background)
---fade_json_dir_top / --fade_json_dir_bottom        <"dir/of/*.FADE.json">   null  (render report from precomputed JSON)
+--fade_tables_dir_top / --fade_tables_dir_bottom    <"dir/selection/fade/<direction>">   null  (scoring and report from the merged FADE tables of a prior run)
 '''
 }
 

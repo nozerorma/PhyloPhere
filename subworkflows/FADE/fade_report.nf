@@ -1,18 +1,15 @@
 #!/usr/bin/env nextflow
-// fade_report.nf — HTML report and gene-level summary of the FADE results of one direction.
+// fade_report.nf — HTML report of the FADE results of one direction.
 // PhyloPhere | subworkflows/FADE/
 
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  FADE_REPORT: renders 6.FADE_report.Rmd over all FADE JSON results of one direction
- *  (top or bottom).
+ *  FADE_REPORT: renders 6.FADE_report.Rmd over the merged FADE tables of one direction
+ *  (top or bottom), as written by FADE_TABLES.
  *
- *  Consumes:  direction, the collected *.FADE.json files, optional foreground species
- *             list (NO_FG_LIST sentinel when absent)
- *  Produces:  6.FADE_report_<direction>.html, fade_summary_<direction>.tsv (one row per
- *             gene), fade_site_bf_<direction>.tsv, and fade_sites_<direction>.csv (the
- *             per-significant-site table gene,position,max_bf,target_aa read by SCORING
- *             and ENRICHMENT; optional output)
+ *  Consumes:  direction, fade_gene_counts_<direction>.tsv, fade_sites_<direction>.csv,
+ *             optional foreground species list (NO_FG_LIST sentinel when absent)
+ *  Produces:  6.FADE_report_<direction>.html (optional: a failed render does not stop the run)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -30,26 +27,15 @@ process FADE_REPORT {
     publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
-    publishDir path: "${params.outdir}/selection/fade/${direction}",
-               mode: 'copy', overwrite: true,
-               pattern: 'fade_summary_*.tsv'
-    publishDir path: "${params.outdir}/selection/fade/${direction}",
-               mode: 'copy', overwrite: true,
-               pattern: 'fade_site_bf_*.tsv'
-    publishDir path: "${params.outdir}/selection/fade/${direction}",
-               mode: 'copy', overwrite: true,
-               pattern: 'fade_sites_*.csv'
 
     input:
     val  direction
-    path json_files
+    path gene_counts_file
+    path sites_file
     path fg_list_file  // optional: foreground species list (NO_FG_LIST sentinel when absent)
 
     output:
-    path "6.FADE_report_${direction}.html", emit: report,      optional: true
-    path "fade_summary_${direction}.tsv",   emit: summary_tsv, optional: true
-    path "fade_site_bf_${direction}.tsv",   emit: site_tsv,    optional: true
-    path "fade_sites_${direction}.csv",     emit: sites_csv,   optional: true
+    path "6.FADE_report_${direction}.html", emit: report, optional: true
 
     script:
     def local_dir   = "${baseDir}/subworkflows/FADE/local"
@@ -63,19 +49,14 @@ process FADE_REPORT {
         """
         cp -R ${local_dir}/* .
 
-        n_json=\$(find . -maxdepth 1 -name "*.FADE.json" 2>/dev/null | wc -l)
-        echo "[FADE_REPORT] direction=${direction} | JSON files found: \${n_json}"
-        if [ "\${n_json}" -eq 0 ]; then
-            echo "[FADE_REPORT] WARNING: No *.FADE.json files found for direction '${direction}'. "\
-                 "The report will contain no results. "\
-                 "Possible causes: all FADE jobs failed, or no genes were selected for this direction."
-        fi
+        echo "[FADE_REPORT] direction=${direction} | genes in the table: \$(( \$(wc -l < '${gene_counts_file}') - 1 ))"
 
-        FADE_REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
+        /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
                 '6.FADE_report.Rmd',
                 params = list(
-                    json_dir        = '.',
+                    gene_counts_file = '${gene_counts_file}',
+                    sites_file       = '${sites_file}',
                     direction       = '${direction}',
                     traitname       = '${traitname}',
                     bf_threshold    = ${bf_thr},
@@ -85,7 +66,7 @@ process FADE_REPORT {
                 ),
                 output_file = '6.FADE_report_${direction}.html'
             )
-        " || echo "[FADE_REPORT] WARNING: rendering stopped early; the site tables written before that point are kept."
+        " || echo "[FADE_REPORT] WARNING: rendering stopped early."
 
         if [ -f '6.FADE_report_${direction}.html' ]; then
             echo "[FADE_REPORT] Report generated: 6.FADE_report_${direction}.html"
@@ -97,19 +78,14 @@ process FADE_REPORT {
         """
         cp -R ${local_dir}/* .
 
-        n_json=\$(find . -maxdepth 1 -name "*.FADE.json" 2>/dev/null | wc -l)
-        echo "[FADE_REPORT] direction=${direction} | JSON files found: \${n_json}"
-        if [ "\${n_json}" -eq 0 ]; then
-            echo "[FADE_REPORT] WARNING: No *.FADE.json files found for direction '${direction}'. "\
-                 "The report will contain no results. "\
-                 "Possible causes: all FADE jobs failed, or no genes were selected for this direction."
-        fi
+        echo "[FADE_REPORT] direction=${direction} | genes in the table: \$(( \$(wc -l < '${gene_counts_file}') - 1 ))"
 
-        FADE_REPORT_CORES=${task.cpus} Rscript -e "
+        Rscript -e "
             rmarkdown::render(
                 '6.FADE_report.Rmd',
                 params = list(
-                    json_dir        = '.',
+                    gene_counts_file = '${gene_counts_file}',
+                    sites_file       = '${sites_file}',
                     direction       = '${direction}',
                     traitname       = '${traitname}',
                     bf_threshold    = ${bf_thr},
@@ -119,7 +95,7 @@ process FADE_REPORT {
                 ),
                 output_file = '6.FADE_report_${direction}.html'
             )
-        " || echo "[FADE_REPORT] WARNING: rendering stopped early; the site tables written before that point are kept."
+        " || echo "[FADE_REPORT] WARNING: rendering stopped early."
 
         if [ -f '6.FADE_report_${direction}.html' ]; then
             echo "[FADE_REPORT] Report generated: 6.FADE_report_${direction}.html"

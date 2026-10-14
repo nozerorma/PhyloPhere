@@ -182,9 +182,14 @@ parameter is empty.
 ### FADE — directional selection
 Runs HyPhy FADE, a Bayesian branch-site model, to detect accelerated or
 decelerated amino-acid selection on phenotype-extreme branches. Alignment
-prep is shared once across both directions (`SELECTION_PREP`). A
-precomputed-JSON path (`--fade_json_dir_top`/`bottom`) renders the report
-without rerunning HyPhy.
+prep is shared once across both directions (`SELECTION_PREP`). Each FADE task
+reduces its HyPhy JSON to a gene row and the significant sites of the gene
+(Bayes factor >= `fade_bf_threshold`) and deletes the JSON; the rows of all tasks
+are merged into one table per direction (`fade_summary`, `fade_gene_counts`,
+`fade_site_bf`, `fade_sites`, under `selection/fade/<direction>`). A
+precomputed-tables path (`--fade_tables_dir_top`/`bottom`, the
+`selection/fade/<direction>` directory of a prior run) feeds the scoring and
+renders the report without rerunning HyPhy.
 
 Three controls govern which comparison(s) actually run:
 - `--fade_direction` (`top`|`bottom`|`both`, default `both`) — which
@@ -502,7 +507,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `fade_concentration` | `0.5` | Dirichlet concentration prior parameter. |
 | `fade_min_genes_for_heatmap` | `2` | Minimum genes with significant sites needed to render report heatmaps. |
 | `fade_universe_file` | `""` | FADE tested-gene background universe file for FCS enrichment. |
-| `fade_json_dir_top` / `fade_json_dir_bottom` | `""` | Precomputed `*.FADE.json` directories for rendering reports without running HyPhy. |
+| `fade_tables_dir_top` / `fade_tables_dir_bottom` | `""` | `selection/fade/<direction>` directories of a prior `--fade` run (merged FADE tables) for scoring and rendering reports without running HyPhy. |
 
 </details>
 

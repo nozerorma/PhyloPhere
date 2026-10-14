@@ -36,6 +36,7 @@
 
 include { ANNOTATE_TREE_FG; ANNOTATE_TREE_FG_BATCHED } from '../subworkflows/SELECTION/selection_utils.nf'
 include { FADE_RUN; FADE_BATCHED  } from '../subworkflows/FADE/fade_run.nf'
+include { FADE_TABLES as FADE_TABLES_TOP; FADE_TABLES as FADE_TABLES_BOTTOM } from '../subworkflows/FADE/fade_tables.nf'
 include { FADE_REPORT as FADE_REPORT_TOP    } from '../subworkflows/FADE/fade_report.nf'
 include { FADE_REPORT as FADE_REPORT_BOTTOM } from '../subworkflows/FADE/fade_report.nf'
 include { FADE_GENE_LISTS as FADE_GENE_LISTS_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_BOTTOM } from '../subworkflows/FADE/fade_gene_lists.nf'
@@ -263,27 +264,27 @@ workflow FADE {
         def fade_input_ch = filtered_fasta_ch.join(annotated_ch, by: [0, 1])
 
         def fadeBatchSize = (params.fade_batch_size ?: 1) as int
+        def fade_genes_ch = null
+        def fade_sites_ch = null
         if (fadeBatchSize > 1) {
             // ── Batched mode (groups top + bottom of each gene into the same batch) ──
             def batches_ch = make_fade_batches(fade_input_ch, params.fade_direction, fadeBatchSize)
 
-            def batched_out = FADE_BATCHED(batches_ch, lg_dat_ch).fade_json
-            fade_results_ch = batched_out
-                .flatten()
-                .map { f ->
-                    def m = (f.name =~ /^(.+)\.(top|bottom)\.FADE\.json$/)
-                    tuple(m[0][1], m[0][2], f)
-                }
+            def batched_out = FADE_BATCHED(batches_ch, lg_dat_ch)
+            fade_genes_ch = batched_out.genes
+            fade_sites_ch = batched_out.sites
         } else {
             // ── Single-gene mode (default) ────────────────────────────────
-            fade_results_ch = FADE_RUN(fade_input_ch, lg_dat_ch).fade_json
+            def run_out = FADE_RUN(fade_input_ch, lg_dat_ch)
+            fade_genes_ch = run_out.genes
+            fade_sites_ch = run_out.sites
         }
 
-        // ── Reports per direction ────────────────────────────────────────────
-        def branched = fade_results_ch.branch {
-            top:    it[1] == 'top'
-            bottom: it[1] == 'bottom'
-        }
+        // ── Tables and reports per direction ─────────────────────────────────
+        // Every task writes the gene and site tables of its runs (FADE_BATCHED: both directions of its genes); FADE_TABLES keeps the
+        // rows of one direction and publishes the merged tables, which SCORING, ENRICHMENT and the report read.
+        def all_genes_ch = fade_genes_ch.collect().ifEmpty([])
+        def all_sites_ch = fade_sites_ch.collect().ifEmpty([])
 
         // ── Gene list extraction per direction (always automatic) ─────────
         // FADE no longer runs its own FCS ranking (see fcs.nf/scoring_enrichment.nf —
@@ -305,13 +306,13 @@ workflow FADE {
         def fade_gene_lists_sig_top_out    = Channel.empty()
 
         if (run_top) {
-            def top_jsons    = branched.top.map { it[2] }.collect().ifEmpty([])
+            def tables_top   = FADE_TABLES_TOP(Channel.value('top'), all_genes_ch, all_sites_ch)
             def fg_top_ch    = top_species_ch.ifEmpty { file('NO_FG_LIST') }
-            def rep_top      = FADE_REPORT_TOP(Channel.value('top'), top_jsons, fg_top_ch)
+            def rep_top      = FADE_REPORT_TOP(Channel.value('top'), tables_top.gene_counts_tsv, tables_top.sites_csv, fg_top_ch)
             report_top_ch    = rep_top.report
-            summary_top_ch   = rep_top.summary_tsv
-            site_tsv_top_ch  = rep_top.site_tsv
-            sites_csv_top_ch = rep_top.sites_csv
+            summary_top_ch   = tables_top.summary_tsv
+            site_tsv_top_ch  = tables_top.site_tsv
+            sites_csv_top_ch = tables_top.sites_csv
 
             def top_lists_out = FADE_GENE_LISTS_TOP(Channel.value('top'), summary_top_ch)
             def top_lists    = split_gene_lists(top_lists_out.gene_lists)
@@ -327,13 +328,13 @@ workflow FADE {
         def fade_gene_lists_sig_bottom_out    = Channel.empty()
 
         if (run_bottom) {
-            def bottom_jsons    = branched.bottom.map { it[2] }.collect().ifEmpty([])
+            def tables_bottom   = FADE_TABLES_BOTTOM(Channel.value('bottom'), all_genes_ch, all_sites_ch)
             def fg_bottom_ch    = bottom_species_ch.ifEmpty { file('NO_FG_LIST') }
-            def rep_bottom      = FADE_REPORT_BOTTOM(Channel.value('bottom'), bottom_jsons, fg_bottom_ch)
+            def rep_bottom      = FADE_REPORT_BOTTOM(Channel.value('bottom'), tables_bottom.gene_counts_tsv, tables_bottom.sites_csv, fg_bottom_ch)
             report_bottom_ch    = rep_bottom.report
-            summary_bottom_ch   = rep_bottom.summary_tsv
-            site_tsv_bottom_ch  = rep_bottom.site_tsv
-            sites_csv_bottom_ch = rep_bottom.sites_csv
+            summary_bottom_ch   = tables_bottom.summary_tsv
+            site_tsv_bottom_ch  = tables_bottom.site_tsv
+            sites_csv_bottom_ch = tables_bottom.sites_csv
 
             def bottom_lists_out = FADE_GENE_LISTS_BOTTOM(Channel.value('bottom'), summary_bottom_ch)
             def bottom_lists    = split_gene_lists(bottom_lists_out.gene_lists)
@@ -348,7 +349,6 @@ workflow FADE {
         summary_bottom = summary_bottom_ch
         site_tsv_top    = site_tsv_top_ch
         site_tsv_bottom = site_tsv_bottom_ch
-        json_results   = fade_results_ch
         sites_csv_top    = sites_csv_top_ch
         sites_csv_bottom = sites_csv_bottom_ch
         // FADE's own per-direction gene universe (background.txt) + its

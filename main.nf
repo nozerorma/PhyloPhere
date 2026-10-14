@@ -69,11 +69,11 @@ def toBool(val) {
     return val as boolean
 }
 
-// Foreground species list published next to a precomputed FADE json dir
+// Foreground species list published next to a precomputed FADE tables dir
 // (<selection>/species_sets/<filename>); falls back to the NO_FG_LIST sentinel.
-def resolve_fg_species(json_dir, filename) {
-    if (!json_dir) return file('NO_FG_LIST')
-    def selection_dir = file(json_dir).parent?.parent?.parent
+def resolve_fg_species(tables_dir, filename) {
+    if (!tables_dir) return file('NO_FG_LIST')
+    def selection_dir = file(tables_dir).parent?.parent
     def candidate = selection_dir ? selection_dir.resolve("species_sets/${filename}") : null
     return (candidate && candidate.exists()) ? candidate : file('NO_FG_LIST')
 }
@@ -190,8 +190,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         def ran_any = false
         def reporting_results = null
         def contrast_out = null
-        // Populated by the precomputed-FADE-input block below (json_dir -> summary/site
-        // TSVs) so SCORING can reuse them without a separate --scoring_fade_* path.
+        // Populated by the precomputed-FADE-input block below (tables dir -> summary/site
+        // tables) so SCORING can reuse them without a separate --scoring_fade_* path.
         def fade_precomp_top_out = null
         def fade_precomp_bot_out = null
         def fade_precomp_sites_top_ch = null
@@ -674,41 +674,38 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             }
         }
 
-        // Precomputed-FADE-input path: render 6.FADE_report_{top,bottom}.html
-        // directly from prior *.FADE.json results when --fade itself doesn't
-        // run this invocation (mirrors rer_continuous_file's role for RER,
-        // just below). FADE_REPORT already emits summary_tsv/site_tsv as a
-        // side effect of rendering (optional, same process SCORING would use
-        // if --fade ran live) — captured here into fade_precomp_{top,bot}_out
-        // so the SCORING block further down can wire them in directly instead
-        // of requiring a separately-supplied --scoring_fade_summary_*/--scoring_fade_site_*
-        // TSV. Those manual params remain as a fallback inside scoring.nf for
-        // the case where the caller already has the TSV but not the raw JSONs.
-        if (!params.fade && (params.fade_json_dir_top || params.fade_json_dir_bottom)) {
-            // The GUI's Precomputed Run tab points fade_json_dir_{top,bottom} at
-            // <outdir>/selection/fade/<direction>/json (see run_single.sh.j2's
-            // PRECOMP_OUTDIR block). EXTRACT_EXTREME_SPECIES published that same
-            // prior run's foreground list as a sibling under the same selection/
-            // root: <outdir>/selection/species_sets/<direction>_species.txt.
-            // Without this, 6.FADE_report.Rmd always got the NO_FG_LIST sentinel
-            // here (unconditionally, unlike the live path a few lines above,
-            // which wires SELECTION_PREP's channel straight through) and printed
-            // "Foreground species list not provided to this report" even though
-            // the source run had one. Best-effort: falls back to the sentinel
-            // when the derived path doesn't resolve (e.g. --fade_json_dir_top
-            // pointed somewhere outside this layout).
-            if (params.fade_json_dir_top) {
-                def precomp_top_jsons = Channel.fromPath("${params.fade_json_dir_top}/*.FADE.json").collect().ifEmpty([])
-                def fg_top_precomp    = resolve_fg_species(params.fade_json_dir_top, 'top_species.txt')
-                fade_precomp_top_out      = FADE_REPORT_PRECOMP_TOP(Channel.value('top'), precomp_top_jsons, fg_top_precomp)
-                fade_precomp_sites_top_ch = fade_precomp_top_out.sites_csv
-            }
-
-            if (params.fade_json_dir_bottom) {
-                def precomp_bottom_jsons = Channel.fromPath("${params.fade_json_dir_bottom}/*.FADE.json").collect().ifEmpty([])
-                def fg_bottom_precomp    = resolve_fg_species(params.fade_json_dir_bottom, 'bottom_species.txt')
-                fade_precomp_bot_out      = FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), precomp_bottom_jsons, fg_bottom_precomp)
-                fade_precomp_sites_bot_ch = fade_precomp_bot_out.sites_csv
+        // Precomputed-FADE-input path: the tables of a prior --fade run (<outdir>/selection/fade/<direction>:
+        // fade_summary, fade_gene_counts, fade_site_bf, fade_sites) feed SCORING and ENRICHMENT, and re-render
+        // 6.FADE_report_{top,bottom}.html, when --fade itself doesn't run this invocation (mirrors
+        // rer_continuous_file's role for RER, just below). The tables are captured into
+        // fade_precomp_{top,bot}_out so the SCORING block further down wires them in directly instead of
+        // requiring a separately-supplied --scoring_fade_summary_*/--scoring_fade_site_* table. Those manual
+        // params remain as a fallback inside scoring.nf for the case where the caller has the tables in
+        // another place.
+        if (!params.fade && (params.fade_tables_dir_top || params.fade_tables_dir_bottom)) {
+            // EXTRACT_EXTREME_SPECIES published that same prior run's foreground list as a sibling under the
+            // same selection/ root: <outdir>/selection/species_sets/<direction>_species.txt. Best-effort: falls
+            // back to the NO_FG_LIST sentinel when the derived path doesn't resolve (e.g. the tables dir is
+            // outside this layout).
+            [['top', params.fade_tables_dir_top], ['bottom', params.fade_tables_dir_bottom]].each { dir, tdir ->
+                if (!tdir) return
+                def tables = ['fade_summary_': 'tsv', 'fade_gene_counts_': 'tsv', 'fade_sites_': 'csv'].collectEntries { k, ext ->
+                    def f = file("${tdir}/${k}${dir}.${ext}")
+                    if (!f.exists()) error "--fade_tables_dir_${dir}: ${f} does not exist (the directory of a prior --fade run: <outdir>/selection/fade/${dir})"
+                    [(k): f]
+                }
+                def sites_ch = Channel.value(tables['fade_sites_'])
+                def rep = (dir == 'top')
+                    ? FADE_REPORT_PRECOMP_TOP(Channel.value('top'), Channel.value(tables['fade_gene_counts_']), sites_ch, resolve_fg_species(tdir, 'top_species.txt'))
+                    : FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), Channel.value(tables['fade_gene_counts_']), sites_ch, resolve_fg_species(tdir, 'bottom_species.txt'))
+                def out = [summary_tsv: Channel.value(tables['fade_summary_']), sites_csv: sites_ch, report: rep.report]
+                if (dir == 'top') {
+                    fade_precomp_top_out      = out
+                    fade_precomp_sites_top_ch = sites_ch
+                } else {
+                    fade_precomp_bot_out      = out
+                    fade_precomp_sites_bot_ch = sites_ch
+                }
             }
             ran_any = true
         }
@@ -753,15 +750,15 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             def scoring_postproc_ch      = postproc_results
                 ? postproc_results.filtered_discovery.collect().map { it[0] }
                 : (params.scoring_postproc_input ? Channel.value(file(params.scoring_postproc_input)) : null)
-            // Precomputed FADE JSONs (--fade_json_dir_top/_bottom, no --fade this run)
+            // Precomputed FADE tables (--fade_tables_dir_top/_bottom, no --fade this run)
             // feed the exact same summary_tsv/site_tsv SCORING needs, via
             // fade_precomp_{top,bot}_out captured above — so a --scoring run against a
-            // prior --fade run's JSON output no longer needs separately pre-built
-            // --scoring_fade_summary_*/--scoring_fade_site_* TSVs.
+            // prior --fade run's output no longer needs separately pre-built
+            // --scoring_fade_summary_*/--scoring_fade_site_* tables.
             def scoring_fade_top_ch      = params.fade ? FADE.out.summary_top    : fade_precomp_top_out?.summary_tsv
             def scoring_fade_bot_ch      = params.fade ? FADE.out.summary_bottom : fade_precomp_bot_out?.summary_tsv
             // Position-level FADE evidence for scoring: the per-significant-site
-            // table (gene,position,max_bf,target_aa) that FADE_REPORT writes as
+            // table (gene,position,max_bf,target_aa) that FADE_TABLES writes as
             // fade_sites_<direction>.csv (sites_csv emit). scoring_compute.R's
             // .load_fade_sites() reads this comma-delimited schema, and
             // ENRICHMENT consumes the same channel.
@@ -897,7 +894,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 // respective tool actually ran this invocation --
                 // OR (FADE, mirroring rer_continuous_file's precomputed-input
                 // role for RER) when its summary TSV is available from a prior
-                // run via --fade_json_dir_top/_bottom without --fade itself
+                // run via --fade_tables_dir_top/_bottom without --fade itself
                 // this invocation: FADE_GENE_LISTS only needs that summary TSV,
                 // so it's re-derived here from fade_precomp_{top,bot}_out the
                 // same way scoring_fade_top_ch/scoring_fade_bot_ch already do

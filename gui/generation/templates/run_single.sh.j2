@@ -249,8 +249,8 @@ if [ "${PRECOMP_USE_RER:-false}" = true ]; then
 fi
 
 if [ "${PRECOMP_USE_FADE:-false}" = true ]; then
-    FADE_JSON_DIR_TOP="${PRECOMP_OUTDIR}/selection/fade/top/json"
-    FADE_JSON_DIR_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom/json"
+    FADE_TABLES_DIR_TOP="${PRECOMP_OUTDIR}/selection/fade/top"
+    FADE_TABLES_DIR_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom"
     # The summary and site TSVs are optional emits: they exist only if the report step of
     # FADE produced them in the source run.
     SCORING_FADE_SUMMARY_TOP="${PRECOMP_OUTDIR}/selection/fade/top/fade_summary_top.tsv"
@@ -560,8 +560,8 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "fade_min_genes_for_heatmap": "${FADE_MIN_GENES_FOR_HEATMAP:-2}",
   "lg_dat_path": "${LG_DAT_PATH:-$REPO_DIR/subworkflows/SELECTION/local/dat/${_FADE_MODEL_LOWER}.dat}",
   "fade_universe_file": "${FADE_UNIVERSE_FILE:-}",
-  "fade_json_dir_top": "${FADE_JSON_DIR_TOP:-}",
-  "fade_json_dir_bottom": "${FADE_JSON_DIR_BOTTOM:-}",
+  "fade_tables_dir_top": "${FADE_TABLES_DIR_TOP:-}",
+  "fade_tables_dir_bottom": "${FADE_TABLES_DIR_BOTTOM:-}",
 
   "scoring": $_RUN_SCORING,
   "scoring_window_size_bp": "${SCORING_WINDOW_SIZE_BP:-1000000}",

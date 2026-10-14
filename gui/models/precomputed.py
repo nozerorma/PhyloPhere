@@ -36,7 +36,7 @@ Path templates, relative to base_path/<TRAIT>, matched to the publishDir of each
   RER           : rerconverge/rer_results/<TRAIT>.continuous.{output,perms.rds},
                   rerconverge/rer_results/rerconverge_summary_<TRAIT>.tsv (resolved by glob
                   at generation time, because the filename carries a variable suffix)
-  FADE          : selection/fade/{top,bottom}/json (dir),
+  FADE          : selection/fade/{top,bottom} (dir),
                   selection/fade/{top,bottom}/fade_summary_{top,bottom}.tsv,
                   selection/fade/{top,bottom}/fade_site_bf_{top,bottom}.tsv
   VEP           : vep/primateai_mapped.tsv, vep/cosmic_scores.tsv, vep/ensembl_vep_mapped.tsv
@@ -88,7 +88,7 @@ class PrecomputedConfig:
     # the per-phenotype scoring_rer_input/scoring_rer_perms_input Scoring falls back to
 
     # --- FADE ---
-    use_fade: bool = False  # turns off FADE; wires fade_json_dir_top/bottom plus the
+    use_fade: bool = False  # turns off FADE; wires fade_tables_dir_top/bottom plus the
     # per-phenotype scoring_fade_summary_top/bottom and scoring_fade_site_top/bottom
 
     # --- VEP ---
@@ -175,7 +175,7 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
     if config.use_fade:
         for direction in ("top", "bottom"):
             fade_dir = os.path.join(outdir, "selection", "fade", direction)
-            entries.append((f"fade_json_dir_{direction}", os.path.join(fade_dir, "json"), "dir"))
+            entries.append((f"fade_tables_dir_{direction}", fade_dir, "dir"))
             entries.append((f"scoring_fade_summary_{direction}", os.path.join(fade_dir, f"fade_summary_{direction}.tsv"), "file"))
             entries.append((f"scoring_fade_site_{direction}", os.path.join(fade_dir, f"fade_site_bf_{direction}.tsv"), "file"))
 

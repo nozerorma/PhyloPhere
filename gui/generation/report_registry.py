@@ -386,15 +386,15 @@ def _rer_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
 
 def _make_fade_spec(direction: str) -> ReportSpec:
     def find_slots(outdir: Listing) -> list[InputSlot]:
-        # fade_run.nf publishes the *.FADE.json files in selection/fade/<direction>/json/,
-        # one level below fade_dir.
+        # fade_tables.nf publishes the merged tables in selection/fade/<direction>/.
         fade_dir = outdir / "selection" / "fade" / direction
-        json_dir = fade_dir / "json"
-        json_files = sorted(json_dir.glob("*.FADE.json"))
+        counts = _first_match(fade_dir, f"fade_gene_counts_{direction}.tsv")
+        sites = _first_match(fade_dir, f"fade_sites_{direction}.csv")
         return [
-            _slot("json_dir", f"FADE JSON directory ({direction})", True,
-                  json_dir if json_files else None,
-                  note=f"{len(json_files)} *.FADE.json file(s) found" if json_files else "no *.FADE.json files found"),
+            _slot("gene_counts_file", f"FADE gene table ({direction})", True, counts,
+                  note="" if counts else f"fade_gene_counts_{direction}.tsv not found"),
+            _slot("sites_file", f"FADE significant-site table ({direction})", True, sites,
+                  note="" if sites else f"fade_sites_{direction}.csv not found"),
             # selection_utils.nf publishes the <direction>_species.txt files in the
             # shared selection/species_sets/, not inside fade_dir.
             _slot("fg_list_file", "Foreground species list", False,
@@ -404,14 +404,12 @@ def _make_fade_spec(direction: str) -> ReportSpec:
     def build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
         s = {slot.key: slot.path for slot in report.slots}
         output_file = f"6.FADE_report_{direction}.html"
-        # Symlink instead of copy: the *.FADE.json files of a full run can total tens
-        # of GB and the scratch directory is removed right after the render reads
-        # them once, so copying would only double the disk use.
-        pre_lines = [f'ln -sf "{s["json_dir"]}"/*.FADE.json . 2>/dev/null || true']
+        pre_lines: list[str] = []
         render = _render_call(
             "6.FADE_report.Rmd",
             [
-                "json_dir        = '.'",
+                f"gene_counts_file = {_r_arg(s['gene_counts_file'])}",
+                f"sites_file       = {_r_arg(s['sites_file'])}",
                 f"direction       = '{direction}'",
                 f"traitname       = '{report.traitname}'",
                 "bf_threshold    = 100",

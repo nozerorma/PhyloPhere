@@ -7,7 +7,7 @@
  *  FADE_GENE_LISTS: for one direction (top or bottom), extracts from the gene-level
  *  FADE summary the gene lists used by the AMI and FCS stages.
  *
- *  Consumes:  direction, fade_summary_<direction>.tsv (from FADE_REPORT)
+ *  Consumes:  direction, fade_summary_<direction>.tsv (from FADE_TABLES)
  *  Produces:  background.txt (every gene tested by FADE in this direction),
  *             fade_<direction>_significant.txt (genes with max_bf >= fade_bf_threshold),
  *             fcs_stats.tsv (gene, score_fade = max_bf, flag_gate_sig = max_bf >= threshold)

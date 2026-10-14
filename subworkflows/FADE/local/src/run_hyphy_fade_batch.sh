@@ -23,12 +23,16 @@
 #       FADE options (--model-file-arg is split into separate tokens)
 #   --mcmc-chains, --mcmc-chain-length, --mcmc-burn-in, --mcmc-samples
 #       MCMC options, used only when --method is not Variational-Bayes
-# Output: <gene_id>.<direction>.FADE.json in the working directory.
+#   --bf-threshold      Bayes factor threshold of a significant site (default 100)
+# Each HyPhy JSON is reduced to a gene row and the significant sites of its gene by fade_json_to_tables.py and then deleted; a gene
+# without a usable result writes no row.
+# Output: <batch_id>.fade_genes.tsv and <batch_id>.fade_sites.tsv in the working directory (header only when no gene has a result).
 # =============================================================================
 set -uo pipefail  # no -e: a failed gene must not abort the batch
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fade_bf="${script_dir}/FADE_phylophere.bf"
+extract_py="${script_dir}/fade_json_to_tables.py"
 
 batch_id=""
 manifest=""
@@ -46,6 +50,7 @@ mcmc_chains="5"
 mcmc_chain_length="2000000"
 mcmc_burn_in="1000000"
 mcmc_samples="1000"
+bf_threshold="100"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -66,6 +71,7 @@ while [[ $# -gt 0 ]]; do
         --mcmc-chain-length)  mcmc_chain_length="$2";  shift 2 ;;
         --mcmc-burn-in)       mcmc_burn_in="$2";       shift 2 ;;
         --mcmc-samples)       mcmc_samples="$2";       shift 2 ;;
+        --bf-threshold)       bf_threshold="$2";       shift 2 ;;
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
@@ -82,10 +88,13 @@ fi
 
 # ── Base HyPhy command ───────────────────────────────────────────────────────
 declare -a base_cmd
+declare -a py_cmd
 if [[ "$runner_mode" == "container" ]]; then
     base_cmd=("/usr/local/bin/_entrypoint.sh" "hyphy" "$fade_bf")
+    py_cmd=("/usr/local/bin/_entrypoint.sh" "python")
 else
     base_cmd=("hyphy" "$fade_bf")
+    py_cmd=("python")
 fi
 
 # MCMC options are passed only for the MCMC method
@@ -103,6 +112,7 @@ row_count="$(grep -cve '^[[:space:]]*$' "$manifest" || true)"
 echo "Running batched FADE task $batch_id (direction: $direction, share_baseline: $share_baseline)"
 echo "Runs in batch: $row_count"
 echo "Concurrent workers: $workers (${cpu_per_worker} CPU(s) per HyPhy call)"
+mkdir -p runs   # one pair of tables per run, concatenated at the end of the batch
 
 # ── Job-control helpers ──────────────────────────────────────────────────────
 # A failed gene is not fatal; the loops swallow the exit status of finished jobs.
@@ -179,8 +189,14 @@ launch_gene_group() {
             fi
             rm -f "$tmp_log" "${fasta_path}.FADE.cache"
 
-            # Remove 0-byte JSON so optional:true does not emit it to the report
-            [ -s "$output_json" ] || rm -f "$output_json"
+            # The tables of the run replace the JSON, which is not kept: a failed or empty run writes no row.
+            if [[ -s "$output_json" ]]; then
+                "${py_cmd[@]}" "$extract_py" --json "$output_json" --gene "$gid" --direction "$run_dir" \
+                    --bf-threshold "$bf_threshold" \
+                    --genes-out "runs/${gid}.${run_dir}.genes.tsv" --sites-out "runs/${gid}.${run_dir}.sites.tsv" \
+                    || echo "[FADE_BATCHED] ${gid} (${run_dir}): no usable FADE result, skipping" >&2
+            fi
+            rm -f "$output_json"
             echo "[FADE_BATCHED] Completed ${gid} (${run_dir})"
         done
 
@@ -220,4 +236,14 @@ fi
 
 wait_for_all
 rm -f ./*.baseline.cache fastas/*.FADE.cache
+
+# One table of each kind per batch: the header once, then the rows of every run.
+for kind in genes sites; do
+    out="${batch_id}.fade_${kind}.tsv"
+    "${py_cmd[@]}" "$extract_py" --print-header "$kind" > "$out"
+    for f in runs/*."${kind}".tsv; do
+        [[ -e "$f" ]] && tail -n +2 "$f" >> "$out"
+    done
+done
+rm -rf runs
 echo "[FADE_BATCHED] Batch $batch_id finished."

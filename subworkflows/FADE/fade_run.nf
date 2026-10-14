@@ -9,12 +9,14 @@
  *  (from ANNOTATE_TREE_FG), testing the foreground branches for directional selection
  *  toward each amino acid. FADE_RUN handles one gene; FADE_BATCHED handles
  *  fade_batch_size genes per task through run_hyphy_fade_batch.sh. A gene whose FADE
- *  run fails is skipped and produces no JSON.
+ *  run fails is skipped and writes no row. The HyPhy JSON of a run is reduced inside the task to the tables of
+ *  fade_json_to_tables.py (a gene row and the significant sites) and deleted: the JSON is not an output.
  *
  *  Consumes:  gene id, direction ('top' or 'bottom'), protein alignment (taxa names
  *             equal to the tree labels), annotated tree, lg_dat (model .dat file
  *             staged in the task directory)
- *  Produces:  <gene>.<direction>.FADE.json (HyPhy standard output)
+ *  Produces:  FADE_BATCHED: <batch>.fade_genes.tsv and <batch>.fade_sites.tsv (header only when no gene has a result)
+ *             FADE_RUN: <gene>.<direction>.fade_genes.tsv and <gene>.<direction>.fade_sites.tsv (none when the run fails)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -25,13 +27,6 @@ process FADE_BATCHED {
     tag "$batchID (${batchSize} genes, ${direction})"
     label 'process_long_compute'
 
-    publishDir path: "${params.outdir}/selection/fade/top/json",
-               mode: 'copy', overwrite: true,
-               pattern: '*.top.FADE.json'
-    publishDir path: "${params.outdir}/selection/fade/bottom/json",
-               mode: 'copy', overwrite: true,
-               pattern: '*.bottom.FADE.json'
-
     // A failed gene does not fail the task: the batch script logs it and continues.
 
     input:
@@ -40,13 +35,15 @@ process FADE_BATCHED {
     path lg_dat
 
     output:
-    path "*.FADE.json", emit: fade_json, optional: true
+    path "${batchID}.fade_genes.tsv", emit: genes
+    path "${batchID}.fade_sites.tsv", emit: sites
 
     script:
     def model         = params.fade_model        ?: 'GTR'
     def method        = params.fade_method       ?: 'Variational-Bayes'
     def grid          = params.fade_grid         ?: 20
     def conc          = params.fade_concentration ?: 0.5
+    def bfThreshold   = params.fade_bf_threshold ?: 100
     def shareBaseline = ((params.fade_background_scope ?: 'all') == 'all') ? 'true' : 'false'
     def runnerMode    = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
     def nWorkers      = (task.cpus ?: 8) as int
@@ -75,6 +72,7 @@ bash ${baseDir}/subworkflows/FADE/local/src/run_hyphy_fade_batch.sh \\
     --method         "${method}" \\
     --grid           ${grid} \\
     --concentration  ${conc} \\
+    --bf-threshold   ${bfThreshold} \\
     --share-baseline ${shareBaseline} \\
     ${mcmc_args}
 """
@@ -87,10 +85,6 @@ process FADE_RUN {
     tag "${gene_id}|${direction}"
     label 'process_long_compute'
 
-    publishDir path: "${params.outdir}/selection/fade/${direction}/json",
-               mode: 'copy', overwrite: true,
-               pattern: '*.FADE.json'
-
     errorStrategy 'ignore'  // a gene that fails (e.g. too few foreground branches) is skipped
 
     input:
@@ -98,7 +92,8 @@ process FADE_RUN {
     path lg_dat
 
     output:
-    tuple val(gene_id), val(direction), path("${gene_id}.${direction}.FADE.json"), emit: fade_json, optional: true
+    path "${gene_id}.${direction}.fade_genes.tsv", emit: genes, optional: true
+    path "${gene_id}.${direction}.fade_sites.tsv", emit: sites, optional: true
 
     script:
     def model   = params.fade_model   ?: 'GTR'
@@ -106,6 +101,9 @@ process FADE_RUN {
     def grid    = params.fade_grid    ?: 20
     def conc    = params.fade_concentration ?: 0.5
     def fade_bf = "${baseDir}/subworkflows/FADE/local/src/FADE_phylophere.bf"
+    def extract = "${baseDir}/subworkflows/FADE/local/src/fade_json_to_tables.py"
+    def bf_thr  = params.fade_bf_threshold ?: 100
+    def pyBin   = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python' : 'python'
 
     // MCMC options apply only when the method is not Variational-Bayes
     def mcmc_args = (method == 'Variational-Bayes') ? "" :
@@ -134,8 +132,14 @@ process FADE_RUN {
             --output    "${gene_id}.${direction}.FADE.json" > "${gene_id}.${direction}.hyphy.log" 2>&1 \\
         || { tail -n 30 "${gene_id}.${direction}.hyphy.log" >&2 || true; echo "FADE failed for ${gene_id} (${direction}), skipping"; }
         rm -f "${gene_id}.${direction}.hyphy.log" *.cache
-        # Remove 0-byte JSON so optional:true does not emit it to the report
-        [ -s "${gene_id}.${direction}.FADE.json" ] || rm -f "${gene_id}.${direction}.FADE.json"
+        # The tables replace the JSON, which is not kept: a failed or empty run writes no row (optional outputs)
+        if [ -s "${gene_id}.${direction}.FADE.json" ]; then
+            ${pyBin} "${extract}" --json "${gene_id}.${direction}.FADE.json" --gene "${gene_id}" --direction "${direction}" \\
+                --bf-threshold ${bf_thr} \\
+                --genes-out "${gene_id}.${direction}.fade_genes.tsv" --sites-out "${gene_id}.${direction}.fade_sites.tsv" \\
+              || echo "FADE: no usable result for ${gene_id} (${direction}), skipping" >&2
+        fi
+        rm -f "${gene_id}.${direction}.FADE.json"
         """
     } else {
         """
@@ -157,8 +161,14 @@ process FADE_RUN {
             --output    "${gene_id}.${direction}.FADE.json" > "${gene_id}.${direction}.hyphy.log" 2>&1 \\
         || { tail -n 30 "${gene_id}.${direction}.hyphy.log" >&2 || true; echo "FADE failed for ${gene_id} (${direction}), skipping"; }
         rm -f "${gene_id}.${direction}.hyphy.log" *.cache
-        # Remove 0-byte JSON so optional:true does not emit it to the report
-        [ -s "${gene_id}.${direction}.FADE.json" ] || rm -f "${gene_id}.${direction}.FADE.json"
+        # The tables replace the JSON, which is not kept: a failed or empty run writes no row (optional outputs)
+        if [ -s "${gene_id}.${direction}.FADE.json" ]; then
+            ${pyBin} "${extract}" --json "${gene_id}.${direction}.FADE.json" --gene "${gene_id}" --direction "${direction}" \\
+                --bf-threshold ${bf_thr} \\
+                --genes-out "${gene_id}.${direction}.fade_genes.tsv" --sites-out "${gene_id}.${direction}.fade_sites.tsv" \\
+              || echo "FADE: no usable result for ${gene_id} (${direction}), skipping" >&2
+        fi
+        rm -f "${gene_id}.${direction}.FADE.json"
         """
     }
 }

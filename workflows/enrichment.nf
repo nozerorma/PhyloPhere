@@ -233,13 +233,13 @@ workflow ENRICHMENT {
         // sentinels flow through when a tool didn't run this invocation.
         // FADE "ran" for AMI purposes whenever its gene lists/background are
         // actually available -- either a live --fade this invocation, or a
-        // precomputed summary TSV supplied via --fade_json_dir_top/_bottom
+        // precomputed summary TSV supplied via --fade_tables_dir_top/_bottom
         // (main.nf derives fade_gene_lists_bg/sig_* from that TSV the same way
         // it derives scoring_fade_top_ch/scoring_fade_bot_ch), mirroring how
         // rer_ran already treats rer_continuous_file as equivalent to rer_tool.
-        def fade_ran = (params.fade || params.fade_json_dir_top || params.fade_json_dir_bottom) as boolean
-        def fade_has_top    = params.fade ? ((params.fade_direction ?: 'both') in ['top', 'both']) : (params.fade_json_dir_top as boolean)
-        def fade_has_bottom = params.fade ? ((params.fade_direction ?: 'both') in ['bottom', 'both']) : (params.fade_json_dir_bottom as boolean)
+        def fade_ran = (params.fade || params.fade_tables_dir_top || params.fade_tables_dir_bottom) as boolean
+        def fade_has_top    = params.fade ? ((params.fade_direction ?: 'both') in ['top', 'both']) : (params.fade_tables_dir_top as boolean)
+        def fade_has_bottom = params.fade ? ((params.fade_direction ?: 'both') in ['bottom', 'both']) : (params.fade_tables_dir_bottom as boolean)
         // rer_ran already hoisted above (needed earlier for rer_universe_ch).
 
         def fade_union_bg_ch
