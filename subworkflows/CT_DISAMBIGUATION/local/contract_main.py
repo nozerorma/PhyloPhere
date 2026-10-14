@@ -72,9 +72,9 @@ def main():
     master_path = out / "ct_disambiguation" / "caas_convergence_master.csv"
     master_path.parent.mkdir(parents=True, exist_ok=True)
     if args.discovery_file:
-        counts = contract.write_meta(Path(args.discovery_file), out / "meta_caas")
+        n_meta = contract.write_meta(Path(args.discovery_file), out / "meta_caas")
         n_master = contract.write_master(shards, master_path, fields)
-        logger.info(f"[contract] {len(shards)} master shards, {n_master} master rows; meta_caas: {counts}")
+        logger.info(f"[contract] {len(shards)} master shards, {n_master} master rows; meta_caas: {n_meta} rows")
         return
     disc = contract.batch_files(dirs, contract.DISCOVERY_SUFFIX)
     bg = contract.batch_files(dirs, contract.BACKGROUND_SUFFIX)
@@ -84,10 +84,10 @@ def main():
         return
     n_disc = contract.write_discovery(disc, out / "discovery.tab")
     n_bg = contract.write_background(bg, out / "background.output", out / "background_genes.output")
-    counts = contract.write_meta(out / "discovery.tab", out / "meta_caas")
+    n_meta = contract.write_meta(out / "discovery.tab", out / "meta_caas")
     n_master = contract.write_master(shards, master_path, fields)
     logger.info(f"[contract] {len(disc)} discovery files, {n_disc} discovery rows, {n_bg} background genes, "
-                f"{len(shards)} master shards, {n_master} master rows; meta_caas: {counts}")
+                f"{len(shards)} master shards, {n_master} master rows; meta_caas: {n_meta} rows")
 
 
 if __name__ == "__main__":

@@ -95,14 +95,13 @@ def convert_convergence_result_to_dict(
         "position": getattr(result, "position", None),
         "tag": getattr(result, "tag", None),
         "caas": getattr(result, "caas", None),
-        "caap_group": getattr(result, "caap_group", "US"),
         "amino_encoded": getattr(result, "amino_encoded", ""),
         "multi_hypothesis": multi_hypothesis,
         # Hypotheses that drove at least one changed domain on THIS SIDE: the hypothesis-provenance
         # column the scoring reads (scoring_compute.R aggregates it by name). It is never blanked
         # when several hypotheses collide on the position.
         "participating_hypotheses": getattr(result, "participating_hypotheses", None) or "",
-        # Number of hypotheses (M) harvested for this (position, scheme) pool.
+        # Number of hypotheses (M) harvested for this position.
         "n_hypotheses": getattr(result, "n_hypotheses", None),
         "n_species": getattr(result, "n_species", None),
         # Cross-hypothesis support tallies for tag, caas and amino_encoded, which above keep the
@@ -216,7 +215,6 @@ def _parse_discovery_entries(
     ae_idx = col_indices.get("amino_encoded")
     icm_idx = col_indices.get("is_conserved_meta")
     cp_idx = col_indices.get("conserved_pair")
-    grp_idx = col_indices.get("caap_group")
     guard = max(
         i for i in (cyc_idx, pos_idx, gene_idx if gene_filter is not None else None)
         if i is not None
@@ -255,7 +253,6 @@ def _parse_discovery_entries(
             caas=caas,
             trait1_aa=trait1,
             trait0_aa=trait0,
-            caap_group=parts[grp_idx] if grp_idx is not None and grp_idx < len(parts) else "US",
             amino_encoded=parts[ae_idx] if ae_idx is not None and ae_idx < len(parts) else "",
             is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,
             conserved_pair=cp,
@@ -283,9 +280,8 @@ def build_cycle_inputs(
     return target_cycles, cycle_labelings
 
 
-# A position's score is the caas_row of its US scheme (core.scores.position_score). The GS schemes only describe
-# the detection: the null records which schemes detected it (scheme_set). The observed side (scoring_compute.R)
-# uses the same score.
+# A position's score is the caas_row of its detection (core.scores.position_score). The observed side
+# (scoring_compute.R) uses the same score.
 
 
 @functools.lru_cache(maxsize=8)
@@ -481,22 +477,21 @@ def _perms_worker_finalize(
     if not all_cycle_results:
         return (gene, [])
 
-    # ── 1. Detection count per (position, scheme) ─────────────────────────────
-    # n_detected counts, per (Position, caap_group), how many permuted-labeling cycles
+    # ── 1. Detection count per position ───────────────────────────────────────
+    # n_detected counts, per Position, how many permuted-labeling cycles
     # re-detected that CAAS. It only fills the `n_detected` column of the detail rows; the
     # position-level permulation p is p.emp of scoring_compute.R, computed from
     # perm_pos_cycle_caas.tsv.gz.
     n_detected = {}
-    for cyc, biochem_results in all_cycle_results:
-        for r in biochem_results:
+    for cyc, scored in all_cycle_results:
+        for r in scored:
             pos = getattr(r, "position", None)
-            group = getattr(r, "caap_group", "US")
             if pos is not None:
-                n_detected.setdefault((pos, group), set()).add(cyc)
+                n_detected.setdefault(pos, set()).add(cyc)
 
     n_detected_count = {key: len(cycles_set) for key, cycles_set in n_detected.items()}
 
-    # ── 2. Emit raw per-(cycle, position, scheme) detail ──────────────────────
+    # ── 2. Emit raw per-(cycle, position) detail ──────────────────────────────
     # Gene scores are not computed here. size_adj_max calibrates a gene's score against the
     # genome-wide reference pool of its cycle (_build_cycle_score_pools), and a worker sees
     # one gene only, so the pool cannot be formed at this level. The parent scores in pass B
@@ -506,30 +501,28 @@ def _perms_worker_finalize(
     # `side`), so the detail rows carry `side` directly.
     #
     # ── CT_POSTPROC cluster trains ────────────────────────────────────────────
-    # core.postproc.train_flags flags the detected positions of this gene per (base cycle,
-    # caap_group). The flag is written per detail row as `clust` (0/1): sub-pass B0 reads it
+    # core.postproc.train_flags flags the detected positions of this gene per base cycle.
+    # The flag is written per detail row as `clust` (0/1): sub-pass B0 reads it
     # for the dubious-gene test, and B1/B2 skip clust == 1 rows (_is_clustered) when the
     # trains are removed. Nothing is flagged unless postproc_filter is on.
-    clust_by: Dict[Tuple[str, str], set] = {}
+    clust_by: Dict[str, set] = {}
     if postproc_filter:
         from src.core.postproc import train_flags
-        pos_by_cycgrp: Dict[Tuple[str, str], set] = {}
-        for cyc, biochem_results in all_cycle_results:
-            for r in biochem_results:
+        pos_by_cyc: Dict[str, set] = {}
+        for cyc, scored in all_cycle_results:
+            for r in scored:
                 p = getattr(r, "position", None)
                 if p is None:
                     continue
-                pos_by_cycgrp.setdefault(
-                    (cyc, getattr(r, "caap_group", "US")), set()).add(int(p))
-        clust_by = train_flags(pos_by_cycgrp, clust_maxcaas, clust_minlen, train_columns)
+                pos_by_cyc.setdefault(cyc, set()).add(int(p))
+        clust_by = train_flags(pos_by_cyc, clust_maxcaas, clust_minlen, train_columns)
 
     detail_rows = []
-    for cyc, biochem_results in all_cycle_results:
-        for r in biochem_results:
+    for cyc, scored in all_cycle_results:
+        for r in scored:
             pos = getattr(r, "position", None)
             if pos is None:
                 continue
-            group = getattr(r, "caap_group", "US")
             asr_val = getattr(r, "asr_path_score", 0.0)
             if asr_val is None:
                 asr_val = 0.0
@@ -540,10 +533,9 @@ def _perms_worker_finalize(
                 "Gene": gene,
                 "cycle": cyc,
                 "Position": pos,
-                "caap_group": group,
                 "asr_path_score": asr_val,
-                "n_detected": n_detected_count.get((pos, group), 1),
-                "clust": 1 if int(pos) in clust_by.get((cyc, group), ()) else 0,
+                "n_detected": n_detected_count.get(pos, 1),
+                "clust": 1 if int(pos) in clust_by.get(cyc, ()) else 0,
                 "side": side,
                 "n_hyp": getattr(r, "n_hypotheses", None),
                 "n_sp": getattr(r, "n_species", None),
@@ -607,13 +599,13 @@ def _cycle_gene_removal_from_detail(
     iqr_multiplier: float,
     extreme_percentile: float,
     info: Optional[Dict[str, Any]] = None,
-) -> Set[Tuple[str, str, str]]:
+) -> Set[Tuple[str, str]]:
     """Sub-pass B0: dubious/extreme gene removal per labeling (cycle).
 
-    One streaming read of the detail rows. Per (cycle, caap_group, Gene) it counts the
+    One streaming read of the detail rows. Per (cycle, Gene) it counts the
     distinct detected positions and whether any row lies in a train (`clust`), then
-    applies core.postproc.gene_removal, which calibrates within each (cycle, caap_group) pool.
-    Returns the (cycle, caap_group, Gene) units to drop from the null pool; empty when `mode`
+    applies core.postproc.gene_removal, which calibrates within each cycle pool.
+    Returns the (cycle, Gene) units to drop from the null pool; empty when `mode`
     is "none".
 
     The rows of a gene are contiguous (one shard per gene), so the position sets of a gene are
@@ -633,12 +625,12 @@ def _cycle_gene_removal_from_detail(
         nonlocal n_rows
         done: Set[str] = set()
         current: Optional[str] = None
-        seen_pos: Dict[Tuple[str, str], set] = {}
-        has_clust: Dict[Tuple[str, str], bool] = {}
+        seen_pos: Dict[str, set] = {}
+        has_clust: Dict[str, bool] = {}
 
         def _drain():
-            for (cyc, grp), pset in seen_pos.items():
-                yield GeneUnit(cyc, grp, current, len(pset), has_clust.get((cyc, grp), False))
+            for cyc, pset in seen_pos.items():
+                yield GeneUnit(cyc, current, len(pset), has_clust.get(cyc, False))
 
         for row in iter_detail_rows(detail_path):
             gene = row["Gene"]
@@ -650,13 +642,12 @@ def _cycle_gene_removal_from_detail(
                     raise ValueError(f"[perms] rows of gene {gene} are not contiguous in {detail_path}")
                 current = sys.intern(gene)
                 seen_pos, has_clust = {}, {}
-            cyc, grp = sys.intern(row["cycle"]), sys.intern(row["caap_group"])
+            cyc = sys.intern(row["cycle"])
             cycles.add(cyc)
             n_rows += 1
-            key = (cyc, grp)
-            seen_pos.setdefault(key, set()).add(int(row["Position"]))
+            seen_pos.setdefault(cyc, set()).add(int(row["Position"]))
             if int(row.get("clust", 0) or 0):
-                has_clust[key] = True
+                has_clust[cyc] = True
         if current is not None:
             yield from _drain()
 
@@ -668,20 +659,20 @@ def _cycle_gene_removal_from_detail(
     return removed
 
 
-def write_removed_units(path: Path, removed: Set[Tuple[str, str, str]]) -> None:
-    """Write the (cycle, caap_group, Gene) units dropped by gene removal (TSV), so the removal
+def write_removed_units(path: Path, removed: Set[Tuple[str, str]]) -> None:
+    """Write the (cycle, Gene) units dropped by gene removal (TSV), so the removal
     of each labeling can be audited."""
     import csv as _csv
 
     with open(path, "w", newline="") as f_rm:
         w = _csv.writer(f_rm, delimiter="\t")
-        w.writerow(["cycle", "caap_group", "Gene"])
+        w.writerow(["cycle", "Gene"])
         w.writerows(sorted(removed))
 
 
 def _build_cycle_score_pools(
     detail_path: Path,
-    removed: Optional[Set[Tuple[str, str, str]]] = None,
+    removed: Optional[Set[Tuple[str, str]]] = None,
     remove_clusters: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
     """Sub-pass B1: per-cycle, per-direction pool of position-level null scores.
@@ -715,14 +706,14 @@ def _build_cycle_score_pools(
             acc[cyc] = pc
         return pc
 
-    def _drain_side(agg: Dict[Any, Dict[str, float]]) -> None:
-        # agg is keyed (cyc, pos, side) -> {caap_group: caas_row}. core.scores turns each into
+    def _drain_side(agg: Dict[Any, float]) -> None:
+        # agg is keyed (cyc, pos, side) -> caas_row. core.scores turns each into
         # the score of the position per side, then into one entry per direction: the directional
         # pools take the score of that side, the "all" pool one entry per position (its best
         # side), so a "both" position is not counted twice.
         by_pos: Dict[Tuple[str, int], Dict[str, float]] = {}
-        for (cyc, pos, side), schemes in agg.items():
-            score = position_score(schemes)
+        for (cyc, pos, side), caas_row in agg.items():
+            score = position_score(caas_row)
             if score is not None:
                 by_pos.setdefault((cyc, pos), {})[side] = score
         for (cyc, pos), sides in by_pos.items():
@@ -731,7 +722,7 @@ def _build_cycle_score_pools(
                 pc[d].append(v)
 
     current_gene: Optional[str] = None
-    pos_agg: Dict[Any, Dict[str, float]] = {}
+    pos_agg: Dict[Any, float] = {}
     for row in iter_detail_rows(detail_path):
         gene = row["Gene"]
         if gene != current_gene:
@@ -739,12 +730,12 @@ def _build_cycle_score_pools(
                 _drain_side(pos_agg)
             current_gene = gene
             pos_agg = {}
-        if _rm and (row["cycle"], row["caap_group"], gene) in _rm:
+        if _rm and (row["cycle"], gene) in _rm:
             continue
         if remove_clusters and _is_clustered(row):
             continue
         key = (row["cycle"], int(row["Position"]), row.get("side") or "none")
-        pos_agg.setdefault(key, {})[row["caap_group"]] = _null_row_caas(row)
+        pos_agg[key] = _null_row_caas(row)
     if current_gene is not None:
         _drain_side(pos_agg)
 
@@ -756,8 +747,8 @@ def _finalize_perm_scores(
     detail_path: Path,
     output_dir: Path,
     cycle_tags: List[str],
-    sample_per_cycle_group: Optional[int] = None,
-    removed: Optional[Set[Tuple[str, str, str]]] = None,
+    sample_per_cycle: Optional[int] = None,
+    removed: Optional[Set[Tuple[str, str]]] = None,
     seed: int = 1998,
     remove_clusters: bool = True,
 ) -> None:
@@ -766,7 +757,7 @@ def _finalize_perm_scores(
     Follows the observed pipeline of scoring_compute.R:
 
         null_row_caas   = asr_path_score
-        position score  = null_row_caas of the US scheme (core.scores.position_score)
+        position score  = null_row_caas (core.scores.position_score)
         gene x cycle    = size_adj_max over the cycle's positions, per direction
                           (CAAS axis; the ASR axis is the 90th percentile of the position scores)
 
@@ -788,26 +779,25 @@ def _finalize_perm_scores(
     sample_path = output_dir / "perm_pos_sample.tsv"
     quant_path = output_dir / "perm_pos_quantiles.tsv"
     # Per-(Gene, Position, side, cycle) position score of the null cycle (core.scores), the
-    # definition shared by the readers: scoring_compute.R (p.emp, SAM), the position enrichment and the
-    # biochemistry section of its report. caas_score is empty when US did not detect the position (a
-    # detection by GS schemes only); scheme_set lists the schemes that detected it ("GS1+US").
+    # definition shared by the readers: scoring_compute.R (p.emp, SAM) and the
+    # position enrichment. caas_score is empty when the score of the detection is not positive.
     cycle_caas_path = output_dir / "perm_pos_cycle_caas.tsv.gz"
     # score_aggregation records the rule of caas_score (core.scores.SCORE_RULE), so that scoring_compute.R can
     # refuse an observed score built with another one.
-    cycle_caas_fields = ["Gene", "Position", "side", "cycle", "caas_score", "n_schemes", "scheme_set", "score_aggregation"]
+    cycle_caas_fields = ["Gene", "Position", "side", "cycle", "caas_score", "score_aggregation"]
 
-    # Reservoir size per (cycle, scheme). It bounds the sample and the quantile summaries
-    # at about K x n_cycles x n_schemes rows regardless of the run size; the full detail
+    # Reservoir size per cycle. It bounds the sample and the quantile summaries
+    # at about K x n_cycles rows regardless of the run size; the full detail
     # rows stay on disk.
-    if sample_per_cycle_group is None:
-        sample_per_cycle_group = int(os.environ.get("CAAS_PERMS_SAMPLE_PER_CYCLE_GROUP", "200"))
+    if sample_per_cycle is None:
+        sample_per_cycle = int(os.environ.get("CAAS_PERMS_SAMPLE_PER_CYCLE", "200"))
 
     scores_fields = ["Gene", "cycle", "global_asr", "top_asr", "bottom_asr",
                      "global_caas", "top_caas", "bottom_caas"]
 
     rng = random.Random(seed)
-    reservoirs: Dict[Tuple[str, str], List[Tuple[str, int, float, float, float]]] = {}
-    seen: Dict[Tuple[str, str], int] = {}
+    reservoirs: Dict[str, List[Tuple[str, int, float]]] = {}
+    seen: Dict[str, int] = {}
     _rm = removed or set()
 
     # ── Sub-pass B1: per-cycle reference pools for the size-adjusted max ──────
@@ -825,16 +815,15 @@ def _finalize_perm_scores(
     def _na(x) -> Any:
         return "NA" if x is None else x
 
-    def _flush(gene: str, pos_scheme: Dict[Any, Dict[str, float]], writer) -> None:
-        # pos_scheme is keyed (cyc, pos, side) -> {caap_group: caas_row}. The per-cycle
+    def _flush(gene: str, pos_side: Dict[Any, float], writer) -> None:
+        # pos_side is keyed (cyc, pos, side) -> caas_row. The per-cycle
         # position scores are written first (perm_pos_cycle_caas.tsv.gz).
         by_pos: Dict[Tuple[str, int], Dict[str, float]] = {}
         cc_rows = []
-        for (cyc, pos, side), schemes in pos_scheme.items():
-            score = position_score(schemes)
+        for (cyc, pos, side), caas_row in pos_side.items():
+            score = position_score(caas_row)
             cc_rows.append({"Gene": gene, "Position": pos, "side": side, "cycle": cyc,
-                            "caas_score": score, "n_schemes": len(schemes),
-                            "scheme_set": "+".join(sorted(schemes)), "score_aggregation": SCORE_RULE})
+                            "caas_score": score, "score_aggregation": SCORE_RULE})
             if score is not None:
                 by_pos.setdefault((cyc, pos), {})[side] = score
         if writer_cc is not None and cc_rows:
@@ -873,19 +862,18 @@ def _finalize_perm_scores(
         writer_cc.writeheader()
 
         current_gene: Optional[str] = None
-        pos_scheme: Dict[Tuple[str, int, str], Dict[str, float]] = {}
+        pos_side: Dict[Tuple[str, int, str], float] = {}
 
         for row in reader:
             gene = row["Gene"]
             if gene != current_gene:
                 if current_gene is not None:
-                    _flush(current_gene, pos_scheme, writer_scores)
+                    _flush(current_gene, pos_side, writer_scores)
                 current_gene = gene
-                pos_scheme = {}
+                pos_side = {}
 
             cyc = row["cycle"]
-            grp = row["caap_group"]
-            if _rm and (cyc, grp, gene) in _rm:
+            if _rm and (cyc, gene) in _rm:
                 continue
             if remove_clusters and _is_clustered(row):
                 continue
@@ -894,51 +882,49 @@ def _finalize_perm_scores(
 
             rc = asr  # caas_row is the asr_path_score itself
 
-            skey = (cyc, pos, row.get("side") or "none")
-            pos_scheme.setdefault(skey, {})[grp] = rc
+            pos_side[(cyc, pos, row.get("side") or "none")] = rc
 
-            # Reservoir sample stratified by (cycle, scheme): every cycle contributes up to
+            # Reservoir sample stratified by cycle: every cycle contributes up to
             # the same K rows however many detections it produced, so each cycle is equally
             # represented and per-cycle summaries can be formed. Sampling per gene instead
             # would weight genes by the number of cycles that hit them.
-            key = (cyc, grp)
-            seen[key] = seen.get(key, 0) + 1
-            res = reservoirs.setdefault(key, [])
+            seen[cyc] = seen.get(cyc, 0) + 1
+            res = reservoirs.setdefault(cyc, [])
             item = (gene, pos, asr)
-            if len(res) < sample_per_cycle_group:
+            if len(res) < sample_per_cycle:
                 res.append(item)
             else:
-                j = rng.randrange(seen[key])
-                if j < sample_per_cycle_group:
+                j = rng.randrange(seen[cyc])
+                if j < sample_per_cycle:
                     res[j] = item
             n_rows += 1
 
         if current_gene is not None:
-            _flush(current_gene, pos_scheme, writer_scores)
+            _flush(current_gene, pos_side, writer_scores)
 
     # ── Sample + quantile summaries ───────────────────────────────────────────
-    sample_fields = ["Gene", "Position", "caap_group", "cycle", "asr_path_score"]
+    sample_fields = ["Gene", "Position", "cycle", "asr_path_score"]
     with open(sample_path, "w", newline="") as f_sample:
         writer_sample = _csv.DictWriter(f_sample, fieldnames=sample_fields, delimiter="\t")
         writer_sample.writeheader()
-        for (cyc, grp), res in reservoirs.items():
+        for cyc, res in reservoirs.items():
             writer_sample.writerows({
-                "Gene": g, "Position": p, "caap_group": grp, "cycle": cyc,
+                "Gene": g, "Position": p, "cycle": cyc,
                 "asr_path_score": a,
             } for (g, p, a) in res)
 
     quant_levels = [5, 10, 25, 50, 75, 90, 95]
-    quant_fields = (["cycle", "caap_group", "metric", "n_sampled", "n_total", "mean"]
+    quant_fields = (["cycle", "metric", "n_sampled", "n_total", "mean"]
                     + [f"q{q}" for q in quant_levels])
     with open(quant_path, "w", newline="") as f_quant:
         writer_quant = _csv.DictWriter(f_quant, fieldnames=quant_fields, delimiter="\t")
         writer_quant.writeheader()
-        for (cyc, grp), res in reservoirs.items():
+        for cyc, res in reservoirs.items():
             if not res:
                 continue
             vals = np.asarray([r[2] for r in res], dtype=float)
-            rec = {"cycle": cyc, "caap_group": grp, "metric": "asr_path_score",
-                   "n_sampled": len(vals), "n_total": seen.get((cyc, grp), len(vals)),
+            rec = {"cycle": cyc, "metric": "asr_path_score",
+                   "n_sampled": len(vals), "n_total": seen.get(cyc, len(vals)),
                    "mean": float(vals.mean())}
             for q, v in zip(quant_levels, np.percentile(vals, quant_levels)):
                 rec[f"q{q}"] = float(v)
@@ -988,7 +974,7 @@ def process_all_genes_perms(
     position scores of its cycle, while a worker sees a single gene:
 
       Pass A (parallel, one gene per task, or per chunk of cycles for a large gene) replays
-        the labelings and streams the raw per-(gene, cycle, position, scheme) detail to
+        the labelings and streams the raw per-(gene, cycle, position) detail to
         perm_pos_detail/<Gene>.tsv.gz (one gz shard per gene, since the reduction of a
         gene yields its complete row list).
       Pass B (single process, streaming) re-reads the shards via iter_detail_rows(),
@@ -1007,7 +993,7 @@ def process_all_genes_perms(
                                               needs no ASR replay, and re-aggregation
                                               stays at one-gene peak RAM)
       - output_dir/perm_pos_detail.manifest.tsv   (Gene, n_rows per shard)
-      - output_dir/perm_pos_quantiles.tsv    (per (cycle, scheme) distribution shape)
+      - output_dir/perm_pos_quantiles.tsv    (per cycle distribution shape)
       - output_dir/perm_pos_sample.tsv       (cycle-stratified sample for violins)
 
     With detail_only the run stops after pass A: only perm_pos_detail/ and its manifest are written, for
@@ -1070,7 +1056,7 @@ def process_all_genes_perms(
     manifest_path = output_dir / "perm_pos_detail.manifest.tsv"
 
     # The detail rows carry `side` (a "both" position is two rows, one per side).
-    detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score",
+    detail_fields = ["Gene", "cycle", "Position", "asr_path_score",
                      "n_detected", "clust", "side", "n_hyp", "n_sp"]
 
     # CT_POSTPROC filtering of the null candidate pool (cluster trains and dubious/extreme
@@ -1212,7 +1198,7 @@ def process_all_genes_perms(
         w.writerows(sorted(manifest_rows))
 
     logger.info(
-        f"[perms] pass A done: {n_genes} genes, {n_detail_rows} (gene,cycle,position,scheme) "
+        f"[perms] pass A done: {n_genes} genes, {n_detail_rows} (gene,cycle,position) "
         f"rows across {len(cycles_seen)} cycles -> {detail_dir.name}/ ({n_genes} shards)"
     )
     if n_genes < len(genes):
@@ -1237,13 +1223,13 @@ def process_all_genes_perms(
     # ── Pass B: score each cycle against its own pool, aggregate ──────────────
 
     # ── Sub-pass B0: cycle-aware dubious/extreme gene removal ─────────────────
-    removed: Set[Tuple[str, str, str]] = set()
+    removed: Set[Tuple[str, str]] = set()
     if postproc_filter and (gene_filter_mode or "none").lower() != "none":
         removed = _cycle_gene_removal_from_detail(
             detail_dir, gene_lengths, gene_filter_mode,
             iqr_multiplier, extreme_percentile,
         )
-        logger.info("[perms] pass B0: %d (cycle, group, gene) units removed "
+        logger.info("[perms] pass B0: %d (cycle, gene) units removed "
                     "(mode=%s) — mirrors CAAS_FILTER_GENES on the null pool",
                     len(removed), gene_filter_mode)
         write_removed_units(output_dir / "removed_units.tsv", removed)

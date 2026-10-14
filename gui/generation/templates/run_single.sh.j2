@@ -182,12 +182,8 @@ fi
 
 if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     DISCOVERY_FROM="${PRECOMP_OUTDIR}/caastools/discovery.tab"
-    # meta_caas/ is where CT_META_CAAS publishes; signification/ is the same tree under
-    # the name that some existing outdirs use, tried as fallback.
-    META_CAAS_FROM="${PRECOMP_OUTDIR}/meta_caas/meta_caas/global_meta_caas.tsv"
-    [ -f "$META_CAAS_FROM" ] || META_CAAS_FROM="${PRECOMP_OUTDIR}/signification/meta_caas/global_meta_caas.tsv"
-    [ -f "$META_CAAS_FROM" ] || META_CAAS_FROM="${PRECOMP_OUTDIR}/meta_caas/meta_caas/meta_caas.tsv"
-    [ -f "$META_CAAS_FROM" ] || META_CAAS_FROM="${PRECOMP_OUTDIR}/signification/meta_caas/meta_caas.tsv"
+    # meta_caas/ is where CT_META_CAAS publishes.
+    META_CAAS_FROM="${PRECOMP_OUTDIR}/meta_caas/meta_caas/meta_caas.tsv"
     BACKGROUND_INPUT="${PRECOMP_OUTDIR}/caastools/background_genes.output"
     POSENRICH_BACKGROUND_FILE="${PRECOMP_OUTDIR}/caastools/background.output"
     # These exist only if the source run had --caas_permulation_enrichment on. They are

@@ -16,7 +16,7 @@ output:
     fig_height: 6
     self_contained: true
 params:
-  global_meta_input: NULL
+  meta_caas_input: NULL
   position_scores_input: NULL
   output_dir: "."
   seed: "1998"
@@ -59,7 +59,7 @@ params:
 
 <!--
 Rendered by CAAS_SIGNIFICANCE_REPORT (ctpp_meta_caas.nf), after SCORING. The per-position CAAS table
-(global_meta_input: global_meta_caas.tsv, or the post-processed discovery table SCORING evaluated; one row per
+(meta_caas_input: meta_caas.tsv, or the post-processed discovery table SCORING evaluated; one row per
 Gene, Position and, when present, pattern and caap_group) is joined with position_scores.tsv (p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact)
 of the same run. It cannot be merged into 7.CAAS_pattern_annotation.Rmd, which runs before SCORING, when that
 table does not exist yet.
@@ -106,17 +106,17 @@ Load CT_META_CAAS's published meta_caas table and SCORING's published
 position score table, both from the same pipeline run.
 
 ```{r data_import}
-if (is.null(params$global_meta_input) || !file.exists(params$global_meta_input)) {
-  stop("global_meta_input (meta_caas / global_meta_caas.tsv) not found: ", params$global_meta_input)
+if (is.null(params$meta_caas_input) || !file.exists(params$meta_caas_input)) {
+  stop("meta_caas_input (meta_caas.tsv) not found: ", params$meta_caas_input)
 }
 if (is.null(params$position_scores_input) || !file.exists(params$position_scores_input)) {
   stop("position_scores_input (position_scores.tsv) not found: ", params$position_scores_input)
 }
 
-meta_caas <- read_tsv(params$global_meta_input, show_col_types = FALSE)
+meta_caas <- read_tsv(params$meta_caas_input, show_col_types = FALSE)
 position_scores <- read_tsv(params$position_scores_input, show_col_types = FALSE)
 
-cat(sprintf("Loaded meta_caas: %d rows from %s\n", nrow(meta_caas), basename(params$global_meta_input)))
+cat(sprintf("Loaded meta_caas: %d rows from %s\n", nrow(meta_caas), basename(params$meta_caas_input)))
 cat(sprintf("Loaded position_scores: %d rows from %s\n", nrow(position_scores), basename(params$position_scores_input)))
 
 required_meta_cols <- c("Gene", "Position")

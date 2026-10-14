@@ -17,15 +17,15 @@ unit of the score.
 Conceptual model
 ----------------
 For a domain ``d`` we know its MRCA node, the modal ancestral state there
-(``focal_state``, encoded in the active scheme as ``anc_enc``), and the observed
+(``focal_state``, the residue ``anc``), and the observed
 fg tip residue per phenotype side. A domain **changed on side ``s``** iff its tip
-residue is defined and differs from ``anc_enc``.
+residue is defined and differs from ``anc``.
 
 Two changed domains ``d_i``, ``d_j`` on the same side that landed on the *same*
-encoded residue form a contrast:
+residue form a contrast:
 
-    p_shared      = worst_case_any_group_probability(dist @ LCA(mrca_i, mrca_j),
-                                                     {der_i, der_j}, scheme)
+    p_shared      = worst_case_any_residue_probability(dist @ LCA(mrca_i, mrca_j),
+                                                       {der_i, der_j})
     contrib(i, j) = 1 - p_shared
 
 The distribution is read **only at the LCA node**. ``score_d`` is the
@@ -35,9 +35,7 @@ without a valid reconstruction (no modal ASR at its MRCA, unmappable tip, or
 missing ``focal_state``) is not "changed" and scores ``0``, but still occupies a
 slot in ``domain_meta`` so the pooler keeps it in the denominator.
 
-``agree`` is hard 0/1 on the encoded residue; the biochemical gradient is
-supplied by averaging the five schemes in ``scoring_compute.R`` section 2g,
-not by a soft rule here. ``convergence_type`` is derived from
+``agree`` is hard 0/1 on the residue. ``convergence_type`` is derived from
 ``(agree_num, agree_den)`` (see :func:`_convergence_type`) for the single
 hypothesis; the label across pooled hypotheses is recomputed in
 ``fop_pool.pool_domains``.
@@ -62,69 +60,49 @@ from __future__ import annotations
 from itertools import combinations
 from typing import Any, Dict, List, Optional
 
-from src.biochem.grouping import get_grouping_scheme
 
-
-# ── Encoding helpers ──────────────────────────────────────────────────────────
-def encode_aa(aa: Optional[str], scheme: Optional[str]) -> Optional[str]:
-    """Encode an amino acid in the active grouping scheme.
-
-    Under the unscored scheme ("US") the raw residue is returned unchanged so
-    single-residue comparisons are exact. Under a GS scheme the group label is
-    returned (falling back to the raw residue if the residue is unknown).
-    """
+# ── Residue helpers ───────────────────────────────────────────────────────────
+def clean_aa(aa: Optional[str]) -> Optional[str]:
+    """The residue as an upper-case letter; None for an empty or missing value."""
     if not aa:
         return None
     raw = str(aa).strip().upper()
-    if not raw:
-        return None
-    if not scheme or scheme.upper() == "US":
-        return raw
-    return get_grouping_scheme(raw, scheme) or raw
+    return raw or None
 
 
-def encoded_distribution(
-    distribution: Optional[Dict[str, float]], scheme: Optional[str]
-) -> Dict[str, float]:
-    """Collapse a node's 20-AA posterior into scheme-encoded group space.
-
-    Returns ``{encoded_group: summed_posterior}``. Under US this is essentially
-    the raw distribution; under a GS scheme residues in the same biochemical
-    group are merged, so two MRCAs that are both "polar" (but split across
-    S/T/N/Q individually) read as the *same* ancestral state.
-    """
-    enc: Dict[str, float] = {}
+def residue_distribution(distribution: Optional[Dict[str, float]]) -> Dict[str, float]:
+    """A node's posterior as ``{residue: summed_posterior}`` (keys cleaned by :func:`clean_aa`)."""
+    out: Dict[str, float] = {}
     if not distribution:
-        return enc
+        return out
     for aa, prob in distribution.items():
-        key = encode_aa(aa, scheme)
+        key = clean_aa(aa)
         if key is None:
             continue
         try:
-            enc[key] = enc.get(key, 0.0) + float(prob)
+            out[key] = out.get(key, 0.0) + float(prob)
         except (TypeError, ValueError):
             continue
-    return enc
+    return out
 
 
-def worst_case_any_group_probability(
+def worst_case_any_residue_probability(
     distribution: Optional[Dict[str, float]],
-    target_encs,
-    scheme: Optional[str],
+    target_aas,
 ) -> float:
-    """Upper bound on posterior mass for *any* of several target groups.
+    """Upper bound on posterior mass for *any* of several target residues.
 
     Sums the exact recorded mass for targets that are present, plus the
     shared unrecorded remainder *once* if at least one target is absent from
     the distribution -- not once per absent target, which would double-count
     the same unknown pool of probability mass.
     """
-    if not target_encs:
+    if not target_aas:
         return 0.0
-    enc = encoded_distribution(distribution, scheme)
+    enc = residue_distribution(distribution)
     known = 0.0
     any_unrecorded = False
-    for t in target_encs:
+    for t in target_aas:
         if t in enc:
             known += enc[t]
         else:
@@ -219,7 +197,7 @@ def _convergence_type(agree_num: int, agree_den: int) -> str:
     """Categorical label from the agreement numerator/denominator.
 
     ``agree_den`` = number of domains that changed on the side; ``agree_num`` =
-    size of the largest single-encoded-residue group among them.
+    size of the largest single-residue group among them.
     """
     if agree_den >= 2 and agree_num >= 2:
         return "convergent"
@@ -235,14 +213,13 @@ def score_domains_side(
     domains: List[Dict[str, Any]],
     node_index: Dict[int, Any],
     per_node_dist: Dict[Any, Dict[str, float]],
-    scheme: Optional[str],
 ) -> Dict[str, Any]:
     """Score one phenotype side from its **changed domains only**.
 
-    ``domains`` = ``list[{d, mrca_id, anc_enc, der_enc}]``. Domains pair up when
-    their ``der_enc`` match; for a pair the contribution is
-    ``1 - worst_case_any_group_probability(dist @ LCA(mrca_a, mrca_b),
-    {der_a, der_b}, scheme)`` (``dist`` read only at the LCA), and
+    ``domains`` = ``list[{d, mrca_id, anc, der}]``. Domains pair up when
+    their ``der`` match; for a pair the contribution is
+    ``1 - worst_case_any_residue_probability(dist @ LCA(mrca_a, mrca_b),
+    {der_a, der_b})`` (``dist`` read only at the LCA), and
     ``score_d = noisy_or`` over a domain's partner contributions (``0`` with no
     partner).
 
@@ -257,11 +234,11 @@ def score_domains_side(
     # JSON round trip.
     pair_lca: List[List[Any]] = []
     for a, b in combinations(domains, 2):
-        if a["der_enc"] != b["der_enc"]:
+        if a["der"] != b["der"]:
             continue  # agree == 0 → no contribution
         lca = find_lca(node_index, a["mrca_id"], b["mrca_id"])
-        p_shared = worst_case_any_group_probability(
-            node_dist(per_node_dist, lca), {a["der_enc"], b["der_enc"]}, scheme
+        p_shared = worst_case_any_residue_probability(
+            node_dist(per_node_dist, lca), {a["der"], b["der"]}
         )
         contrib = max(0.0, 1.0 - p_shared)
         contribs[a["d"]].append(contrib)
@@ -272,7 +249,7 @@ def score_domains_side(
 
     by_res: Dict[str, int] = {}
     for dm in domains:
-        by_res[dm["der_enc"]] = by_res.get(dm["der_enc"], 0) + 1
+        by_res[dm["der"]] = by_res.get(dm["der"], 0) + 1
     agree_den = len(domains)
     agree_num = max(by_res.values()) if by_res else 0
     return {
@@ -288,9 +265,8 @@ def compute_domain_scores(
     pair_details: Optional[List[Dict[str, Any]]],
     per_node_dist: Dict[Any, Dict[str, float]],
     node_index: Dict[int, Any],
-    scheme: Optional[str],
 ) -> Dict[str, Any]:
-    """Per-hypothesis domain scores for one ``(Gene, Position, scheme)``.
+    """Per-hypothesis domain scores for one ``(Gene, Position)``.
 
     Args:
         pair_details: list of per-domain dicts (``pair_id``, ``node_id``,
@@ -298,14 +274,13 @@ def compute_domain_scores(
             is the domain id ``d``; ``node_id`` its MRCA.
         per_node_dist: ``node_id -> {aa: posterior}`` for the focal site.
         node_index: ``node_id -> TreeNode`` (from :func:`build_node_index`).
-        scheme: active grouping scheme (``"US"`` or a GS label).
 
     Returns:
         ``{"top": <side>, "bottom": <side>, "domain_meta": {d: meta}}``.
 
         ``<side>`` carries ``domain_scores`` (only changed domains),
-        ``domain_der`` / ``domain_der_enc`` / ``domain_anc`` (raw tip, encoded
-        tip, raw ancestral; only changed domains), ``agree_num`` / ``agree_den``
+        ``domain_der`` / ``domain_anc`` (tip residue, ancestral residue;
+        only changed domains), ``agree_num`` / ``agree_den``
         / ``n_changed``, and ``convergence_type``.
 
         ``domain_meta`` carries **all domains** (every ``pair_detail``),
@@ -313,7 +288,7 @@ def compute_domain_scores(
 
             {d: {"mrca_id": int,
                  "state": raw focal_state | None,
-                 "posterior": P(anc_enc @ mrca_id) under the scheme, 0.0 if
+                 "posterior": P(anc @ mrca_id), 0.0 if
                               the domain has no reconstruction}}
     """
     pairs = pair_details or []
@@ -322,7 +297,6 @@ def compute_domain_scores(
     changed: Dict[str, List[Dict[str, Any]]] = {"top": [], "bottom": []}
     raw_der: Dict[str, Dict[Any, str]] = {"top": {}, "bottom": {}}
     raw_anc: Dict[str, Dict[Any, str]] = {"top": {}, "bottom": {}}
-    der_enc: Dict[str, Dict[Any, str]] = {"top": {}, "bottom": {}}
     der_species: Dict[str, Dict[Any, str]] = {"top": {}, "bottom": {}}
 
     for pair in pairs:
@@ -338,10 +312,10 @@ def compute_domain_scores(
             }
             continue
         focal_raw = pair.get("focal_state")
-        anc_enc = encode_aa(focal_raw, scheme)
+        anc = clean_aa(focal_raw)
         dist_mrca = node_dist(per_node_dist, mrca_id)
 
-        if anc_enc is None:
+        if anc is None:
             domain_meta[d] = {
                 "mrca_id": int(mrca_id), "state": None, "posterior": 0.0,
             }
@@ -350,32 +324,29 @@ def compute_domain_scores(
         domain_meta[d] = {
             "mrca_id": int(mrca_id),
             "state": str(focal_raw).strip().upper(),
-            "posterior": encoded_distribution(dist_mrca, scheme).get(anc_enc, 0.0),
+            "posterior": residue_distribution(dist_mrca).get(anc, 0.0),
         }
 
         for side_key, side in (("top_tip_mode", "top"), ("bottom_tip_mode", "bottom")):
             raw_tip = pair.get(side_key)
-            tip_enc = encode_aa(raw_tip, scheme)
-            if tip_enc is None or tip_enc == anc_enc:
+            tip = clean_aa(raw_tip)
+            if tip is None or tip == anc:
                 continue  # missing or conserved side → not scored
             changed[side].append(
-                {"d": d, "mrca_id": int(mrca_id),
-                 "anc_enc": anc_enc, "der_enc": tip_enc}
+                {"d": d, "mrca_id": int(mrca_id), "anc": anc, "der": tip}
             )
-            raw_der[side][d] = str(raw_tip).strip().upper()
-            raw_anc[side][d] = str(focal_raw).strip().upper()
-            der_enc[side][d] = tip_enc
+            raw_der[side][d] = tip
+            raw_anc[side][d] = anc
             sp = pair.get("top_species" if side == "top" else "bottom_species")
             if sp:
                 der_species[side][d] = str(sp[0])   # the species of the pair that carries the derived residue
 
     out: Dict[str, Any] = {}
     for side in ("top", "bottom"):
-        sc = score_domains_side(changed[side], node_index, per_node_dist, scheme)
+        sc = score_domains_side(changed[side], node_index, per_node_dist)
         out[side] = {
             "domain_scores": sc["domain_scores"],
             "domain_der": raw_der[side],
-            "domain_der_enc": der_enc[side],
             "domain_anc": raw_anc[side],
             "domain_der_species": der_species[side],
             "agree_num": sc["agree_num"],

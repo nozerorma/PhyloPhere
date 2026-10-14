@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# fop_pool.py — Pool the per-hypothesis domain records of a position and scheme into one score per side.
+# fop_pool.py — Pool the per-hypothesis domain records of a position into one score per side.
 # PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/convergence/
 
 """
 Multi-hypothesis (FOP) pooling of domain scores into one position score per phenotype side.
 
 ``pool_domains`` collapses ``M >= 1`` per-hypothesis ``compute_domain_scores``
-records for one ``(Gene, Position, scheme)`` into one score per phenotype side.
+records for one ``(Gene, Position)`` into one score per phenotype side.
 It is **treeless**: every tree lookup already happened in
 ``path_scores.compute_domain_scores``; here we only combine scalars.
 
@@ -26,10 +26,8 @@ domain, so the unit of a domain is the species that represent it, not the hypoth
 
 A species counts once however many hypotheses use it, and a domain weighs the same as any other: the weights only
 distribute the weight of a domain among its species, so a constant factor of the PSS does not change the score.
-``agree_num`` / ``agree_den`` and ``convergence_type`` come from the modal encoded derived residue per domain across
-the pooled hypotheses (a domain that splits V/I/L between hypotheses scores low under US and high under a scheme that
-co-encodes them; the encoding is already applied in each ``domain_der_enc`` upstream, so ``pool_domains`` never sees
-the scheme).
+``agree_num`` / ``agree_den`` and ``convergence_type`` come from the modal derived residue per domain across
+the pooled hypotheses.
 
 See ``docs/scoring_v3_core.md`` for the scoring contract.
 """
@@ -159,17 +157,14 @@ def pool_domains(
         core = max(0.0, min(1.0, math.fsum(s_dom.values()) / K)) if K else 0.0
 
         # Agreement across the pooled hypotheses, over the domains changed in >= 1 of them.
-        der_enc: Dict[str, List[str]] = {}
         der_raw: Dict[str, List[str]] = {}
         anc_raw: Dict[str, List[str]] = {}
         hyp_ids_by_domain: Dict[str, List[str]] = {}
         for r in hyps:
             srow = (r.get("sides") or {}).get(side) or {}
-            for dd, e in (srow.get("domain_der_enc") or {}).items():
-                der_enc.setdefault(str(dd), []).append(e)
-                hyp_ids_by_domain.setdefault(str(dd), []).append(r["hyp"])
             for dd, e in (srow.get("domain_der") or {}).items():
                 der_raw.setdefault(str(dd), []).append(e)
+                hyp_ids_by_domain.setdefault(str(dd), []).append(r["hyp"])
             for dd, e in (srow.get("domain_anc") or {}).items():
                 anc_raw.setdefault(str(dd), []).append(e)
 
@@ -183,15 +178,15 @@ def pool_domains(
                 if float(ds.get(dd, 0.0) or 0.0) > 0.0:
                     species.add(sp)
 
-        changed = list(der_enc.keys())
+        changed = list(der_raw.keys())
         agree_den = len(changed)
-        modal_enc = {sd: _modal_str(v) for sd, v in der_enc.items()}
+        modal_der = {sd: _modal_str(v) for sd, v in der_raw.items()}
         grp: Dict[Optional[str], int] = {}
         for sd in changed:
-            grp[modal_enc[sd]] = grp.get(modal_enc[sd], 0) + 1
+            grp[modal_der[sd]] = grp.get(modal_der[sd], 0) + 1
         agree_num = max(grp.values()) if grp else 0
         # A tied domain was settled by the convention of _modal_str: agreement and convergence type may rest on it.
-        agreement_tie = any(_has_tie(v) for v in der_enc.values())
+        agreement_tie = any(_has_tie(v) for v in der_raw.values())
 
         return {
             "asr_path_score": core,

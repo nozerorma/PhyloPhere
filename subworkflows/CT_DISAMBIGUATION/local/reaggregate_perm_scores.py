@@ -16,7 +16,7 @@ amplifies it.
 
 The detail is the output of pass A (disambiguation_perms_main.py --detail-only): one gz shard per gene in
 perm_pos_detail/ (or a single concatenated perm_pos_detail.tsv.gz), holding every (Gene, cycle, Position,
-caap_group, asr_path_score, n_detected, clust, side) row that pass B needs. Pass B takes minutes, whereas the
+asr_path_score, n_detected, clust, side) row that pass B needs. Pass B takes minutes, whereas the
 ASR replay that produces the detail takes hours. It can also be run alone on the detail of an earlier run to
 rebuild its null tables, then followed by scoring_caas_perms.R for caas_perms.rds:
 
@@ -185,7 +185,7 @@ def main() -> int:
 
     if removal_on:
         write_removed_units(args.output_dir / "removed_units.tsv", removed)
-        logger.info("[reaggregate] gene removal (%s): %d (cycle, group, gene) units",
+        logger.info("[reaggregate] gene removal (%s): %d (cycle, gene) units",
                     args.gene_filter_mode, len(removed))
 
     _finalize_perm_scores(

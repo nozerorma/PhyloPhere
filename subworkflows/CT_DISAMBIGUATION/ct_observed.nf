@@ -13,7 +13,7 @@
  *
  *  Consumes:  discovery.tab, observed design (trait file or traitfile_H*.tab directory),
  *             species tree, hypothesis pairs (or a NO_* sentinel)
- *  Produces:  ct_disambiguation/ (master CSV), meta_caas/ (global_meta_caas.tsv)
+ *  Produces:  ct_disambiguation/ (master CSV), meta_caas/ (meta_caas.tsv)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -36,8 +36,8 @@ process CAAS_OBSERVED {
     output:
     path "ct_disambiguation", emit: results_dir
     path "ct_disambiguation/caas_convergence_master.csv", emit: master_csv
-    path "meta_caas", emit: meta_caas
-    path "meta_caas/global_meta_caas.tsv", emit: global_meta_caas
+    path "meta_caas", emit: meta_caas_dir
+    path "meta_caas/meta_caas.tsv", emit: meta_caas
 
     script:
     def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"

@@ -588,7 +588,7 @@ def _meta_caas_build_script(report: DetectedReport, repo_dir: Path, use_singular
 
 
 # ── CAAS_SIGNIFICANCE (after SCORING; distinct from CT_META_CAAS) ─────────────
-# Joins the meta_caas/global_meta_caas.tsv of CT_META_CAAS with the
+# Joins the meta_caas/meta_caas.tsv of CT_META_CAAS with the
 # position_scores.tsv and gene_scores.tsv of SCORING, so it runs after scoring.
 
 
@@ -596,15 +596,11 @@ def _signif_significance_find_slots(outdir: Listing) -> list[InputSlot]:
     scoring = outdir / "scoring"
     slots = list(_meta_caas_find_slots(outdir))
     slots.append(
-        _slot("global_meta_input", "Filtered discovery / CAAS TSV", True,
+        _slot("meta_caas_input", "Filtered discovery / CAAS TSV", True,
               _first_match(outdir, "postproc/gene_filtering/filtered_discovery.tsv",
                             "**/*filtered_discovery.tsv",
-                            "meta_caas/meta_caas/global_meta_caas.tsv",
-                            "signification/meta_caas/global_meta_caas.tsv",
-                            "**/*global_meta_caas.tsv")
-              or _first_match(outdir, "meta_caas/meta_caas/meta_caas.tsv",
-                               "signification/meta_caas/meta_caas.tsv",
-                               "**/*meta_caas.tsv"))
+                            "meta_caas/meta_caas/meta_caas.tsv",
+                            "**/*meta_caas.tsv"))
     )
     slots.append(_slot("position_scores_input", "Position scores TSV", True,
                         _first_match(scoring, "position_scores.tsv")))
@@ -617,7 +613,7 @@ def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, us
     render = _render_call(
         "16.CAAS_significance_report.Rmd",
         [
-            f"global_meta_input = '{s['global_meta_input']}'",
+            f"meta_caas_input = '{s['meta_caas_input']}'",
             f"position_scores_input = '{s['position_scores_input']}'",
             "output_dir = '.'",
             "seed = '1998'",

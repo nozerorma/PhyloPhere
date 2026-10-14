@@ -5,7 +5,7 @@
 Post-processing filters shared by the observed chain and the permulation null.
 
 Imported by: src/utils/gene_wrapper.py, reaggregate_perm_scores.py (`load_gene_lengths`)
-Inputs: positions per labeling and caap_group, an optional position -> column map, gene lengths (TSV)
+Inputs: positions per labeling, an optional position -> column map, gene lengths (TSV)
 Outputs: flagged positions and units to remove (in memory)
 
 One implementation of the two CT_POSTPROC filters, applied per labeling to the pooled
@@ -15,10 +15,10 @@ scored rows (observed = labeling ``b_0``):
   density ``count / span`` reaches ``maxcaas`` (``span >= minlen``), with the span measured
   in the positions or, given a column map, in untrimmed alignment columns. :func:`train_flags`
   is the single entry point that decides over which positions a train is computed.
-* Gene removal: :func:`gene_removal` drops (labeling, caap_group, gene) units by
+* Gene removal: :func:`gene_removal` drops (labeling, gene) units by
   ``dubious`` (IQR outlier in distinct positions AND at least one train position) and
   ``extreme`` (density above a percentile), each calibrated within its own
-  (labeling, caap_group) pool.
+  labeling pool.
 
 Pure Python, no numpy/pandas: the null workers import it too.
 """
@@ -31,7 +31,7 @@ from typing import Dict, Hashable, Iterable, List, Mapping, NamedTuple, Optional
 
 __all__ = ["ctrain", "train_flags", "GeneUnit", "gene_unit_stats", "gene_removal", "load_gene_lengths"]
 
-Unit = Tuple[str, str, str]  # (labeling, caap_group, gene)
+Unit = Tuple[str, str]  # (labeling, gene)
 
 
 # ── Cluster trains ────────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ def train_flags(
 ) -> Dict[Hashable, Set[int]]:
     """Train positions per key, for one gene.
 
-    The key names what a train is computed over, e.g. ``(labeling, caap_group)``: the
+    The key names what a train is computed over, e.g. the labeling: the
     positions filed under one key form one train universe. Callers choose the grain by
     how they file positions; this is the only place trains are computed. ``columns`` is the
     gene's position -> untrimmed column map (:func:`ctrain`), or None to measure in the
@@ -94,10 +94,9 @@ def train_flags(
 # ── Gene removal ──────────────────────────────────────────────────────────────
 
 class GeneUnit(NamedTuple):
-    """One (labeling, caap_group, gene) unit: its distinct scored positions and whether
+    """One (labeling, gene) unit: its distinct scored positions and whether
     any of them lies in a train."""
     labeling: str
-    caap_group: str
     gene: str
     n_caas: int
     has_clustered: bool
@@ -122,7 +121,7 @@ def gene_unit_stats(
     iqr_multiplier: float = 3.0,
     extreme_percentile: float = 0.99,
 ) -> List[dict]:
-    """Per-unit statistics and outlier flags, calibrated within (labeling, caap_group).
+    """Per-unit statistics and outlier flags, calibrated within each labeling.
 
     ``dubious`` pool: every unit (it needs no length); threshold ``Q3 + k * IQR`` of the
     distinct-position counts; flagged when ``n_caas > threshold`` and the unit has a train
@@ -131,12 +130,12 @@ def gene_unit_stats(
     Units without a length have ``length``, ``density`` and ``threshold_extreme`` as None.
     """
     units = list(units)
-    pools: Dict[Tuple[str, str], List[GeneUnit]] = {}
+    pools: Dict[str, List[GeneUnit]] = {}
     for u in units:
-        pools.setdefault((u.labeling, u.caap_group), []).append(u)
+        pools.setdefault(u.labeling, []).append(u)
 
     out: List[dict] = []
-    for (labeling, group), members in pools.items():
+    for labeling, members in pools.items():
         counts = [u.n_caas for u in members]
         q1, q3 = _percentile_linear(counts, 25.0), _percentile_linear(counts, 75.0)
         thr_dub = q3 + iqr_multiplier * (q3 - q1)
@@ -151,7 +150,7 @@ def gene_unit_stats(
         for u in members:
             d = dens.get(u.gene)
             out.append({
-                "labeling": labeling, "caap_group": group, "Gene": u.gene,
+                "labeling": labeling, "Gene": u.gene,
                 "n_caas": u.n_caas,
                 "length": gene_lengths.get(u.gene) if d is not None else None,
                 "density": d,
@@ -182,15 +181,15 @@ def gene_removal(
     # Same decision rule as gene_unit_stats, but the stream is held in compact per-pool columns
     # (gene, count, train flag) instead of one stats dict per unit: the null has tens of millions
     # of units, and only the removed ones are kept.
-    pools: Dict[Tuple[str, str], Tuple[List[str], array, bytearray]] = {}
+    pools: Dict[str, Tuple[List[str], array, bytearray]] = {}
     for u in units:
-        genes, counts, flags = pools.setdefault((u.labeling, u.caap_group), ([], array("l"), bytearray()))
+        genes, counts, flags = pools.setdefault(u.labeling, ([], array("l"), bytearray()))
         genes.append(u.gene)
         counts.append(u.n_caas)
         flags.append(1 if u.has_clustered else 0)
 
     removed: Dict[Unit, str] = {}
-    for (labeling, group), (genes, counts, flags) in pools.items():
+    for labeling, (genes, counts, flags) in pools.items():
         q1, q3 = _percentile_linear(counts, 25.0), _percentile_linear(counts, 75.0)
         thr_dub = q3 + iqr_multiplier * (q3 - q1)
         dens = []
@@ -203,7 +202,7 @@ def gene_removal(
             dub = want_dub and n > thr_dub and bool(fl)
             ext = want_ext and d is not None and d > thr_ext
             if dub or ext:
-                removed[(labeling, group, g)] = "Both" if dub and ext else "Dubious" if dub else "Extreme"
+                removed[(labeling, g)] = "Both" if dub and ext else "Dubious" if dub else "Extreme"
     return removed
 
 

@@ -60,10 +60,6 @@ _AMBIGUOUS_AAS = frozenset({"X", "B", "Z", "J", "U"})
 _GAP_SYMBOLS = frozenset({"-"}) | _AMBIGUOUS_AAS
 _VEC_GAP_SYMBOLS = _GAP_SYMBOLS
 
-# Fixed values of the `mode` and `caap_group` columns of the discovery rows.
-_ROW_MODE = "CAAP"
-_ROW_GROUP = "US"
-
 
 def _threshold(value):
     """Mirror the scalar 'NO' / int-string threshold convention.
@@ -441,7 +437,7 @@ def _emit_groups_rows(groups_out, genename, hits):
             continue
         posnum = position_name.split("@", 1)[1] if "@" in position_name else position_name
         for trait in trait_names:
-            groups_out.write(f"{trait}\t{genename}\t{posnum}\t{_ROW_MODE}\t{_ROW_GROUP}\n")
+            groups_out.write(f"{trait}\t{genename}\t{posnum}\n")
 
 
 def _ungapped_sorted(cfg, species_iter, pos_dict, trait=None):
@@ -510,7 +506,7 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions,
             hit = _reconstruct_hit(cfg, pos_dict, trait, max_conserved)
             if not hit["is_match"]:
                 disagreements.append((trait, genename, posnum))
-            fields = [trait, genename, _ROW_MODE, _ROW_GROUP, str(posnum),
+            fields = [trait, genename, str(posnum),
                       hit["substitution"], hit["encoded"], hit["pattern"]]
             if max_conserved > 0:
                 fields.extend(_conserved_fields(hit["conserved_pairs"]))
@@ -522,7 +518,7 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions,
             f"(labeling, gene, position), first: {disagreements[:5]}")
 
 
-_B0_DISCOVERY_HEADER = ["gene", "mode", "caap_group", "trait", "position", "caas", "amino_encoded", "pattern",
+_B0_DISCOVERY_HEADER = ["gene", "trait", "position", "caas", "amino_encoded", "pattern",
                         "ffgn", "fbgn", "gfg", "gbg", "mfg", "mbg", "ffg", "fbg", "ms"]
 _HYPOTHESIS = re.compile(r"H\d+")
 
@@ -581,7 +577,7 @@ def _b0_discovery_rows(design_cfg, labeling_cfg, sliced_object, genename, positi
             missing = set(z.trait2missings[trait])
             ms = (sorted((sp for sp in design_cfg.trait2fg[trait] if sp in missing), key=order)
                   + sorted((sp for sp in design_cfg.trait2bg[trait] if sp in missing), key=order))
-            fields = [genename, _ROW_MODE, _ROW_GROUP, trait, str(posnum), hit["substitution"], hit["encoded"], hit["pattern"],
+            fields = [genename, trait, str(posnum), hit["substitution"], hit["encoded"], hit["pattern"],
                       str(len(fg)), str(len(bg)),
                       str(z.trait2gaps_fg.get(trait, 0)), str(z.trait2gaps_bg.get(trait, 0)),
                       str(z.trait2miss_fg.get(trait, 0)), str(z.trait2miss_bg.get(trait, 0)),
@@ -634,7 +630,7 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
     groups_handle = None
     if export_groups:
         groups_handle = open(export_groups, "w")
-        groups_handle.write("Cycle\tGene\tPosition\tMode\tGroup\n")
+        groups_handle.write("Cycle\tGene\tPosition\n")
 
     perm_discovery_handle = None
     if export_perm_discovery:
@@ -642,8 +638,6 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
         header_fields = [
             "cycle",
             "gene",
-            "mode",
-            "caap_group",
             "position",
             "caas",
             "amino_encoded",

@@ -26,7 +26,7 @@ over them, scoring each through analyze_gene_disambiguation as the observed pipe
 (src/utils/gene_wrapper.py, process_all_genes_perms). The real labeling (b_0) is
 replayed on its own into <output-dir>/b0, so it never enters the null.
 
-Pass A writes one per-(gene, cycle, position, scheme) detail shard per gene to
+Pass A writes one per-(gene, cycle, position) detail shard per gene to
 <output-dir>/perm_pos_detail/. With --detail-only the run stops there, because pass B (scoring
 against genome-wide pools) runs once over the union of the batches (reaggregate_perm_scores.py).
 Without it the same process also writes gene_cycle_scores.tsv, perm_pos_cycle_caas.tsv.gz,

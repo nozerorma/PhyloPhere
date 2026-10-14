@@ -841,13 +841,13 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             // block). It must run after SCORING because it joins
             // position_scores.tsv (p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact) onto the postproc-filtered
             // discovery table (the exact pooled dataset evaluated by SCORING),
-            // with fallback to CT_META_CAAS's global_meta_caas.tsv when standalone.
+            // with fallback to CT_META_CAAS's meta_caas.tsv when standalone.
             if (params.scoring) {
                 def signif_caas_upstream = scoring_postproc_ch
                 if (!signif_caas_upstream && core_observed) {
-                    signif_caas_upstream = core_observed.global_meta_caas
+                    signif_caas_upstream = core_observed.meta_caas
                 } else if (!signif_caas_upstream && observed_meta) {
-                    signif_caas_upstream = observed_meta.global_meta_caas
+                    signif_caas_upstream = observed_meta.meta_caas
                 }
 
                 if (signif_caas_upstream) {

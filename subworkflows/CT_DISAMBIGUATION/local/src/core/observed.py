@@ -11,13 +11,13 @@ Outputs: pooled ConvergenceResult lists and (gene, msa_pos, row) triples for src
 The null scores its labelings as thin axes records; the observed labeling needs everything the master carries
 (which hypotheses took part, the support tallies, the per-domain residues), so it goes through
 `analyze_gene_disambiguation` in full mode, ONE call per gene over all of that gene's hypothesis rows: the call
-pools the hypotheses of a position and scheme itself, with the same reducer (`fop_pool.pool_domains`) the null's
+pools the hypotheses of a position itself, with the same reducer (`fop_pool.pool_domains`) the null's
 `pool_labelings` uses.
 
-The rows come from the discovery of b_0: one row per (position, hypothesis, caap_group), with `trait` naming the
+The rows come from the discovery of b_0: one row per (position, hypothesis), with `trait` naming the
 hypothesis ('H3', 'traitfile_H3.tab' or 'b_0~H3'). The order of the entries decides the order of the output rows
 within a position and breaks the ties of the modal residues (the first residue seen wins), so a producer should
-present them in the order discovery.tab has (position, then hypothesis, then scheme). Nothing else depends on it.
+present them in the order discovery.tab has (position, then hypothesis). Nothing else depends on it.
 """
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -30,7 +30,7 @@ from src.data.models import CAASPosition
 
 
 def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosition]:
-    """CAAS entries of one gene from its discovery rows (mappings with position, trait, caap_group, caas,
+    """CAAS entries of one gene from its discovery rows (mappings with position, trait, caas,
     amino_encoded, pattern and, when present, is_conserved_meta and conserved_pair), in the order given.
     The tag of an entry is the content id of its row (`core.meta.row_id`)."""
     entries: List[CAASPosition] = []
@@ -38,7 +38,6 @@ def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosi
         pos0 = int(row["position"])
         caas = str(row.get("caas") or "")
         parts = caas.split("/") if caas else []
-        group = str(row.get("caap_group") or "US")
         amino = str(row.get("amino_encoded") or "")
         trait = str(row.get("trait") or "")
         entries.append(CAASPosition(
@@ -48,7 +47,6 @@ def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosi
             caas=caas,
             trait1_aa=normalize_amino_list(list(parts[0])) if len(parts) == 2 else [],
             trait0_aa=normalize_amino_list(list(parts[1])) if len(parts) == 2 else [],
-            caap_group=group,
             amino_encoded=amino,
             is_conserved_meta=as_bool(row.get("is_conserved_meta")),
             conserved_pair=_parse_conserved_pair(str(row.get("conserved_pair") or "")),

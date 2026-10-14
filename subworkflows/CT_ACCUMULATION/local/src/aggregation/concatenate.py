@@ -463,7 +463,7 @@ if __name__ == "__main__":
     parser.add_argument('-f', '--alignment-format', default='phylip-relaxed')
     parser.add_argument('-i', '--genomic-info',    required=True, help='Gene genomic info TSV (gene, chr, start, end, length)')
     parser.add_argument('-s', '--species-list',    required=True, help='Species traitfile (3-col, no header: species trait pair)')
-    parser.add_argument('-m', '--metadata-caas',   help='Meta-CAAS file (original or global_meta_caas.tsv format)')
+    parser.add_argument('-m', '--metadata-caas',   help='Meta-CAAS file (original or meta_caas.tsv format)')
     parser.add_argument('-b', '--bg-caas',         help='Cleaned background gene list (one gene per line, no header)')
     parser.add_argument('-o', '--output-prefix',   required=True, help='Prefix for output files')
     parser.add_argument('--entropy-dir',           help='Directory containing Valdar entropy (.entropy.tsv) files')

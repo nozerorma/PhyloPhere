@@ -1,20 +1,16 @@
-# scores.py — Position and gene CAAS scores from per-scheme path scores.
+# scores.py — Position and gene CAAS scores from the path scores of the detections.
 # PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/core/
 
 """
 Position and gene CAAS scores, shared by the observed chain (labeling b_0) and the null.
 
 Imported by: src/utils/gene_wrapper.py
-Inputs: per-scheme (or per-side) score mappings and the reference pools of position scores
+Inputs: per-side score mappings and the reference pools of position scores
 Outputs: position scores, per-direction values and gene scores (in memory)
 
 * The score of a row (``caas_row``) is its ``asr_path_score`` (identity). A position's score, per side,
-  is the score of its US row (exact residue identity), in (0, 1]. A position that US does not detect, or
-  detects with a score of 0, has no score, whatever the GS schemes say; a side without a score does not
-  enter the direction values nor the ``size_adj_max`` count of the gene. The GS schemes: the GS1-GS4 schemes recode the residues into biochemical classes
-  and describe the chemistry of a position (which schemes detect it), they do not enter the score or
-  any quantity built on it. Their per-position profile is written by scoring_compute.R and the null
-  records the scheme set of each detection (``scheme_set`` of perm_pos_cycle_caas.tsv.gz).
+  is the score of its row, in (0, 1]. A position that is not detected, or detected with a score of 0, has no
+  score; a side without a score does not enter the direction values nor the ``size_adj_max`` count of the gene.
 * Directions: ``top`` and ``bottom`` use only that side's rows; ``all`` keeps one entry per
   position, its best side, so a position detected on both sides is not counted twice.
 * Gene score: ``size_adj_max(x) = F(max(x)) ** len(x)`` with F the ECDF of the reference
@@ -33,16 +29,14 @@ import bisect
 import math
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
-__all__ = ["DIRECTIONS", "TIE_TOL", "SCORE_RULE", "GS_SCHEMES", "position_score", "collapse_sides", "direction_values",
+__all__ = ["DIRECTIONS", "TIE_TOL", "SCORE_RULE", "position_score", "collapse_sides", "direction_values",
            "size_adj_max", "gene_scores"]
 
 DIRECTIONS = ("all", "top", "bottom")
 
 # Rule of the position score. It is stamped on the null (perm_pos_cycle_caas.tsv.gz, column score_aggregation) so that
-# scoring_compute.R refuses a null scored with another rule. "us_pos_species_pss": the US score (mean over the domains of the PSS-weighted mean, over the species of the domain, of their hypothesis scores), defined only when positive.
-SCORE_RULE = "us_pos_species_pss"
-# Biochemical schemes: they describe a position and never enter its score.
-GS_SCHEMES = ("GS1", "GS2", "GS3", "GS4")
+# scoring_compute.R refuses a null scored with another rule. "caas_pos_species_pss": the CAAS score (mean over the domains of the PSS-weighted mean, over the species of the domain, of their hypothesis scores), defined only when positive.
+SCORE_RULE = "caas_pos_species_pss"
 
 # Absolute; scores lie in [0, 1]. Rounding noise of a weighted mean is ~1e-16, and real
 # differences between position scores are orders of magnitude larger.
@@ -53,13 +47,9 @@ def _is_value(x) -> bool:
     return x is not None and not (isinstance(x, float) and math.isnan(x))
 
 
-def position_score(scheme_scores: Mapping[str, float]) -> Optional[float]:
-    """Score of a position side: its US score; None when US did not score it or scored <= 0.0.
-
-    ``scheme_scores`` maps scheme name to ``caas_row``; the GS entries are ignored.
-    """
-    us = scheme_scores.get("US")
-    return float(us) if (_is_value(us) and float(us) > 0.0) else None
+def position_score(caas_row: Optional[float]) -> Optional[float]:
+    """Score of a position side: its ``caas_row``; None when it has none or it is <= 0.0."""
+    return float(caas_row) if (_is_value(caas_row) and float(caas_row) > 0.0) else None
 
 
 def collapse_sides(side_scores: Mapping[str, float]) -> Dict[str, float]:

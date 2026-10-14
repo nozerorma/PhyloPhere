@@ -4,8 +4,8 @@
 """
 Data models for convergence-type disambiguation outputs.
 
-- CAASPosition: one discovery row (position, substitution, scheme, discovering hypothesis).
-- ConvergenceResult: one scored row (position, scheme and, per side, the pooled ASR score and diagnostics).
+- CAASPosition: one discovery row (position, substitution, discovering hypothesis).
+- ConvergenceResult: one scored row (position and, per side, the pooled ASR score and diagnostics).
 
 Imported by: src/convergence/disambiguate_single.py, src/core/observed.py, src/utils/gene_wrapper.py
 """
@@ -13,7 +13,6 @@ Imported by: src/convergence/disambiguate_single.py, src/core/observed.py, src/u
 __all__ = [
     "CAASPosition",
     "ConvergenceResult",
-    "BiochemResults",
 ]
 
 from dataclasses import dataclass, field
@@ -35,7 +34,6 @@ class CAASPosition:
         default_factory=list
     )  # Low phenotype amino acids (trait=0)
     is_focus: bool = False
-    caap_group: str = "US"
     amino_encoded: str = ""
     is_conserved_meta: bool = False
     conserved_pair: str = ""
@@ -70,19 +68,18 @@ class ConvergenceResult:
     trait0_aa: List[str] = field(default_factory=list)
     tip_pattern_comment: Optional[str] = None
     pair_details: Optional[List[dict]] = None
-    caap_group: str = "US"
     amino_encoded: str = ""
     # Discovering hypothesis ("H<n>"; None for a single-contrast run). One
-    # ConvergenceResult is emitted per (position, scheme, hypothesis).
+    # ConvergenceResult is emitted per (position, hypothesis).
     hypothesis: Optional[str] = None
-    # Hypotheses pooled for this position and scheme that drove >= 1 changed
+    # Hypotheses pooled for this position that drove >= 1 changed
     # domain on THIS SIDE, comma-joined: the only hypothesis-provenance field
     # downstream (scoring_compute.R reads it by name). Per side, so the top and
     # bottom rows of a position can differ; never nulled by a multi-hypothesis
     # pool (unlike `hypothesis`).
     participating_hypotheses: Optional[str] = None
     # Number of hypotheses (M, from fop_pool.pool_domains) pooled for this
-    # (position, scheme); identical on both emitted side rows.
+    # position; identical on both emitted side rows.
     n_hypotheses: Optional[int] = None
     # Number of distinct species that carry the derived residue in a converging domain of this side.
     n_species: Optional[int] = None
@@ -152,6 +149,3 @@ class ConvergenceResult:
     # triples across hypotheses are averaged on `contrib`.
     pair_lca: Optional[List[Tuple[Any, Any, int, float]]] = None
 
-
-# Alias of ConvergenceResult, exported as BiochemResults
-BiochemResults = ConvergenceResult

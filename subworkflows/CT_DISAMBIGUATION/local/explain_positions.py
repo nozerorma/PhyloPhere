@@ -9,8 +9,7 @@ Picks the N best positions of position_scores.tsv (`core.evidence.select_top_pos
 discovery.tab, scores them again through `core.observed` with the unpooled rows kept and writes
 `evidence_top<N>.tsv` (one row per entry and domain, `core.evidence.EVIDENCE_COLUMNS`) and `top_positions.tsv`
 (gene, position, CAAS_score, p.emp in rank order). The scoring is the one of observed_b0_main.py, so the numbers
-are those of the master before the hypotheses of a position are pooled. Only the schemes a position was scored with
-are explained (`scheme_set` of position_scores.tsv, union over its sides; discovery.tab can hold more). The PSS
+are those of the master before the hypotheses of a position are pooled. The PSS
 weights act only in the pooling, so they are not an input. The tables are written with whatever could be explained;
 a chosen gene with no alignment, ASR or discovery rows, or a chosen position with no discovery row, makes the run
 exit 1 after writing them, so that missing evidence never goes unnoticed.
@@ -90,17 +89,6 @@ def _explain_gene(job):
         return gene, None
 
 
-def scored_schemes(score_rows):
-    """{(gene, position): schemes} a position was scored with: the union over its sides of `scheme_set` ('GS1+US').
-    A position whose scheme_set is missing or NA is not in the mapping (no restriction)."""
-    out = {}
-    for r in score_rows:
-        names = {s for s in str(r.get("scheme_set") or "").split("+") if s and s != "NA"}
-        if names:
-            out.setdefault((str(r["Gene"]), str(r["Position"])), set()).update(names)
-    return out
-
-
 def _write_tsv(path, columns, rows):
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh, delimiter="\t", lineterminator="\n")
@@ -157,9 +145,7 @@ def main():
 
     # rank order, not arrival order: the rows of a position keep the order evidence_rows gave them
     rank = {(g, p): k for k, (g, p, _) in enumerate(chosen)}
-    schemes = scored_schemes(score_rows)
-    flat = [r for rows in by_gene_evidence.values() for r in rows
-            if (r["gene"], r["msa_pos"]) not in schemes or r["caap_group"] in schemes[(r["gene"], r["msa_pos"])]]
+    flat = [r for rows in by_gene_evidence.values() for r in rows]
     flat.sort(key=lambda r: rank[(r["gene"], r["msa_pos"])])
     _write_tsv(evidence_path, EVIDENCE_COLUMNS, flat)
     if skipped or absent_positions:

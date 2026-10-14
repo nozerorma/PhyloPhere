@@ -59,8 +59,8 @@ workflow CT_OBSERVED {
     emit:
         results_dir = observed.results_dir
         master_csv = observed.master_csv
+        meta_caas_dir = observed.meta_caas_dir
         meta_caas = observed.meta_caas
-        global_meta_caas = observed.global_meta_caas
         design = trait_file   // the design and tree this scoring resolved, for the steps that explain its results
         tree = tree_file
 }

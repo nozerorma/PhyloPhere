@@ -7,7 +7,7 @@ Convergence-type analysis for single-gene CAAS disambiguation.
 
 For each CAAS row of a gene it collects the tip residues of the contrast pairs of the row's hypothesis, finds the
 MRCA of each pair, reads the ancestral states from the ASR posteriors, scores the domains
-(src/convergence/path_scores.py) and pools the rows of one position and scheme across hypotheses
+(src/convergence/path_scores.py) and pools the rows of one position across hypotheses
 (src/convergence/fop_pool.py). In axes-only mode (permulation replay) it returns the raw per-domain records instead
 of assembling full results.
 
@@ -37,7 +37,6 @@ from src.convergence.convergence import (
 )
 from src.asr.tree_parser import get_mrca, build_name_taxid_index
 from src.data.models import CAASPosition, ConvergenceResult
-from src.biochem.grouping import get_grouping_scheme
 from src.convergence.path_scores import build_node_index, compute_domain_scores
 from src.convergence.fop_pool import pool_domains
 from src.core.labelings import design_pairs_from
@@ -53,7 +52,7 @@ logger = logging.getLogger(__name__)
 # so it stands in for a ConvergenceResult on that path.
 PositionAxes = namedtuple(
     "PositionAxes",
-    ["position", "caap_group", "asr_path_score",
+    ["position", "asr_path_score",
      "side", "hypothesis", "domain_scores", "derived_agreement",
      "sides", "n_hypotheses", "n_species"],
 )
@@ -61,7 +60,7 @@ PositionAxes = namedtuple(
 # ``compute_domain_scores`` return ``{"top", "bottom", "domain_meta"}`` that the
 # treeless pooler (``fop_pool.pool_domains``) consumes; it is populated in the
 # axes-only replay. `n_hypotheses` is the number M of FOP hypotheses that detected the position in the cycle.
-PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None, None, None)
+PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None, None)
 
 
 def _derive_convergent_call(all_rows: List["ConvergenceResult"], attr: str) -> str:
@@ -115,7 +114,7 @@ def _emit_pooled_side_rows(
     all_rows: Optional[List[ConvergenceResult]] = None,
 ) -> List[ConvergenceResult]:
     """Pool ``M >= 1`` per-hypothesis ``compute_domain_scores`` records for one
-    ``(Gene, Position, scheme)`` and emit <= 2 per-side ConvergenceResult rows.
+    ``(Gene, Position)`` and emit <= 2 per-side ConvergenceResult rows.
 
     ``hyp_rows`` = ``[{"hyp": str, "sides": <compute_domain_scores return>}]``.
     Always calls :func:`fop_pool.pool_domains` with the pairs of the design
@@ -157,7 +156,7 @@ def _emit_pooled_side_rows(
         _derive_convergent_call(all_rows or [], "amino_encoded") or base.amino_encoded
     )
 
-    # Number of pooled hypotheses (M) for this (position, scheme).
+    # Number of pooled hypotheses (M) for this position.
     n_hypotheses = int(pooled.get("n_hypotheses", 0) or 0)
 
     sides = pooled_sides(pooled)
@@ -271,12 +270,10 @@ def _position_axes(
     axes-only perm path score each position through identical code.
 
     ``per_site_dist_cache`` (perm replay): ``per_node_dist`` depends only on
-    ``(posterior_data, site)``, not on the grouping scheme or the permuted
-    phenotype, so a recurring site is built once and reused. Keyed by
+    ``(posterior_data, site)``, not on the permuted phenotype, so a recurring site is built once and reused. Keyed by
     ``position_one_based``; the observed path passes ``None``.
     """
     paml_site = caas_pos.position_one_based
-    scheme = getattr(caas_pos, "caap_group", "US") or "US"
 
     if axes_cache is not None:
         if domain_sig is None:
@@ -290,7 +287,7 @@ def _position_axes(
                 )
                 for p in (pair_details_list or ())
             )
-        cache_key = (paml_site, scheme, domain_sig)
+        cache_key = (paml_site, domain_sig)
         cached = axes_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -310,7 +307,6 @@ def _position_axes(
         pair_details=pair_details_list,
         per_node_dist=per_node_dist,
         node_index=node_index,
-        scheme=scheme,
     )
     if axes_cache is not None:
         axes_cache[cache_key] = res
@@ -560,8 +556,8 @@ def analyze_caas_position_disambiguation(
 
     # ── CAAS convergence score on the Voronoi domain ──────────────────────────
     # ``compute_domain_scores`` returns {"top", "bottom", "domain_meta"} for this
-    # (Gene, Position, scheme, hypothesis). The per-side pooling and the <=2-row
-    # split happen once per (position, scheme) in analyze_gene_disambiguation via
+    # (Gene, Position, hypothesis). The per-side pooling and the <=2-row
+    # split happen once per position in analyze_gene_disambiguation via
     # :func:`_emit_pooled_side_rows` (M == 1 degenerates to the plain mean). Here
     # the raw record is only stored on ``base_result.sides``.
     domain_split: Optional[Dict[str, Any]] = None
@@ -609,7 +605,6 @@ def analyze_caas_position_disambiguation(
         node_state_summary=node_summary,
         state_source=state_source,
         side="none",  # set per side by _emit_pooled_side_rows
-        caap_group=getattr(caas_pos, "caap_group", "US"),
         amino_encoded=getattr(caas_pos, "amino_encoded", ""),
         hypothesis=hypothesis,
         asr_path_score=None,
@@ -623,8 +618,8 @@ def analyze_caas_position_disambiguation(
         score=None,
     )
 
-    # Raw compute_domain_scores record of this (position, scheme, hypothesis);
-    # analyze_gene_disambiguation groups them by (position, scheme) and pools
+    # Raw compute_domain_scores record of this (position, hypothesis);
+    # analyze_gene_disambiguation groups them by position and pools
     # them with _emit_pooled_side_rows.
     base_result.sides = domain_split
     return [base_result]
@@ -663,7 +658,7 @@ def analyze_gene_disambiguation(
         gene: Gene name
         alignment_data: Alignment and lookup data
         tree_data: Tree structure data
-        caas_entries: The CAAS rows to score (one per position, scheme and discovering hypothesis)
+        caas_entries: The CAAS rows to score (one per position and discovering hypothesis)
         trait_pairs: {contrast: [(high_species, low_species), ...]}, the return shape of
             core.labelings.read_trait_pairs; each entry is scored against the pairs of the contrast its
             `trait` names
@@ -1007,7 +1002,6 @@ def analyze_gene_disambiguation(
                 results.append(
                     PositionAxes(
                         position=caas_pos.position,
-                        caap_group=getattr(caas_pos, "caap_group", "US"),
                         asr_path_score=axes_score,
                         side="none",
                         hypothesis=_hyp_label,
@@ -1035,7 +1029,7 @@ def analyze_gene_disambiguation(
                 domain_sig=domain_sig,
             )
 
-            # One base row per (position, scheme, hypothesis); the per-side
+            # One base row per (position, hypothesis); the per-side
             # split and pooling happen after the loop.
             results.extend(row_list)
             logger.debug(
@@ -1052,16 +1046,14 @@ def analyze_gene_disambiguation(
         diagnostics["unpooled"] = list(results)
 
     if not axes_only and results:
-        # Group the per-hypothesis base rows by (position, scheme) and pool them onto <=2 per-side rows with the
+        # Group the per-hypothesis base rows by position and pool them onto <=2 per-side rows with the
         # treeless pooler. The design pairs are the ones of hyp_pairs_pss (species and PSS of every
         # (hypothesis, domain)), or those of trait_pairs without PSS when there is no table.
         try:
             design_pairs = hyp_pairs_pss or design_pairs_from(trait_pairs)
-            by_group: Dict[Tuple[Any, str], List[ConvergenceResult]] = {}
+            by_group: Dict[Any, List[ConvergenceResult]] = {}
             for r in results:
-                by_group.setdefault(
-                    (getattr(r, "position", None), getattr(r, "caap_group", "US")), []
-                ).append(r)
+                by_group.setdefault(getattr(r, "position", None), []).append(r)
             pooled_rows: List[ConvergenceResult] = []
             for _rows in by_group.values():
                 hyp_rows = [

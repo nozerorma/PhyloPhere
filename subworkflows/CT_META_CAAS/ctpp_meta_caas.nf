@@ -7,7 +7,7 @@
  *  CAAS_CORE_OBSERVED / CAAS_OBSERVED, not here.
  *
  *  Consumes:  CAAS_META_CAAS_REPORT: discovery file and background gene list
- *             CAAS_SIGNIFICANCE_REPORT: per-position CAAS table (global_meta_caas.tsv or the
+ *             CAAS_SIGNIFICANCE_REPORT: per-position CAAS table (meta_caas.tsv or the
  *             post-processed discovery), position_scores.tsv and gene_scores.tsv of SCORING
  *  Produces:  HTML reports (html_reports/), meta_caas/CAAS_pattern_annotation_files/ and
  *             meta_caas/significance/ (meta_caas_significance.tsv, pattern_significance_summary.tsv)
@@ -81,7 +81,7 @@ process CAAS_SIGNIFICANCE_REPORT {
     publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'
 
     input:
-    path global_meta_caas
+    path meta_caas
     path position_scores
 
     output:
@@ -103,7 +103,7 @@ process CAAS_SIGNIFICANCE_REPORT {
             rmarkdown::render(
                 '16.CAAS_significance_report.Rmd',
                 params = list(
-                    global_meta_input = '${global_meta_caas}',
+                    meta_caas_input = '${meta_caas}',
                     position_scores_input = '${position_scores}',
                     output_dir = '${outdir}',
                     seed = '${params.seed ?: 1998}'
@@ -121,7 +121,7 @@ process CAAS_SIGNIFICANCE_REPORT {
             rmarkdown::render(
                 '16.CAAS_significance_report.Rmd',
                 params = list(
-                    global_meta_input = '${global_meta_caas}',
+                    meta_caas_input = '${meta_caas}',
                     position_scores_input = '${position_scores}',
                     output_dir = '${outdir}',
                     seed = '${params.seed ?: 1998}'

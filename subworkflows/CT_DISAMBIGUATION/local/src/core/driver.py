@@ -10,7 +10,7 @@ Outputs: in-memory gene contexts, scored labelings and pooled per-side records
 
 One gene's ASR is loaded once (`load_gene_context`), every labeling is scored against it through
 `analyze_gene_disambiguation` (`score_labelings`), and the hypotheses of a cycle are collapsed into one
-domain-pooled record per position and scheme (`pool_labelings`). Reading discovery files, splitting a
+domain-pooled record per position (`pool_labelings`). Reading discovery files, splitting a
 gene into chunks and writing tables stay with the callers.
 """
 import contextlib
@@ -224,7 +224,7 @@ def score_labelings(
         fg, bg = labeling
         trait_pairs = trait_pairs_from(fg, bg)
         try:
-            biochem_results, _ = analyze_gene_disambiguation(
+            scored, _ = analyze_gene_disambiguation(
                 gene=gene,
                 alignment_data=alignment_data,
                 tree_data=tree_data,
@@ -247,20 +247,20 @@ def score_labelings(
                 contrast_obs_cache=contrast_obs_cache,
                 axes_cache=axes_cache,
             )
-            if biochem_results:
-                results.append((cyc, biochem_results))
+            if scored:
+                results.append((cyc, scored))
         except Exception as e:
             logger.debug(f"[perms] {gene} cycle {cyc} failed: {e}")
             continue
     return results
 
 
-def _expand_pooled(pos, grp, hyp_label, pooled):
+def _expand_pooled(pos, hyp_label, pooled):
     """pool_domains return -> <= 2 per-side PositionAxes rows (`side` authoritative, `asr_path_score` =
     that side's core_s). No participating domain on either side -> one `side="none"` row."""
     out = [
         PositionAxes(
-            position=pos, caap_group=grp,
+            position=pos,
             asr_path_score=sd["asr_path_score"],
             side=sd["side"], hypothesis=hyp_label,
             derived_agreement=sd["derived_agreement"],
@@ -272,7 +272,7 @@ def _expand_pooled(pos, grp, hyp_label, pooled):
     ]
     if not out:
         out.append(PositionAxes(
-            position=pos, caap_group=grp, asr_path_score=0.0,
+            position=pos, asr_path_score=0.0,
             side="none", hypothesis=hyp_label,
             n_hypotheses=(pooled or {}).get("n_hypotheses"),
         ))
@@ -287,7 +287,7 @@ def pool_labelings(
     """Collapse scored labelings into one per-side, domain-pooled record set per cycle.
 
     Every axes-only record carries `.sides`, the raw compute_domain_scores return
-    {"top": {...}, "bottom": {...}, "domain_meta": {...}} for one (position, scheme, hypothesis).
+    {"top": {...}, "bottom": {...}, "domain_meta": {...}} for one (position, hypothesis).
     fop_pool.pool_domains reduces M >= 1 such records to one score per phenotype side (M == 1 is
     the mean over the fixed Voronoi domains), the same statistic the observed path emits through
     disambiguate_single._emit_pooled_side_rows.
@@ -297,8 +297,8 @@ def pool_labelings(
     its own labeling in `labelings`.
     """
     if fop_pairs is not None:
-        # (base_cyc, pos, scheme) -> [ {hyp, sides} ]; one pool_domains call each.
-        by_pos: Dict[Tuple[str, int, str], List[Dict[str, Any]]] = {}
+        # (base_cyc, pos) -> [ {hyp, sides} ]; one pool_domains call each.
+        by_pos: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
         for cyc, results_list in results:
             base = base_cycle(cyc)
             hyp = hyp_id(cyc.split("~", 1)[1]) if "~" in cyc else "H1"
@@ -306,19 +306,18 @@ def pool_labelings(
                 pos = getattr(r, "position", None)
                 if pos is None:
                     continue
-                grp = getattr(r, "caap_group", "US")
-                by_pos.setdefault((base, pos, grp), []).append(
+                by_pos.setdefault((base, pos), []).append(
                     {"hyp": hyp, "sides": getattr(r, "sides", None) or {}}
                 )
 
         pooled_by_cycle: Dict[str, List[Any]] = {}
-        for (base, pos, grp), hyp_recs in by_pos.items():
+        for (base, pos), hyp_recs in by_pos.items():
             # The design of the cycle holds every hypothesis, also the ones that did not detect the position.
             design = fop_pairs.get(base)
             if not design:
                 raise ValueError(f"cycle {base} has no rows in fop_pairs")
             pooled = pool_domains(hyp_recs, design)
-            pooled_by_cycle.setdefault(base, []).extend(_expand_pooled(pos, grp, None, pooled))
+            pooled_by_cycle.setdefault(base, []).extend(_expand_pooled(pos, None, pooled))
         return list(pooled_by_cycle.items())
 
     # Without fop_pairs: one hypothesis per record. pool_domains still runs so the observed and
@@ -336,6 +335,6 @@ def pool_labelings(
             hyp = getattr(r, "hypothesis", None)
             pooled = pool_domains(
                 [{"hyp": hyp or "H1", "sides": getattr(r, "sides", None) or {}}], design)
-            out_recs.extend(_expand_pooled(pos, getattr(r, "caap_group", "US"), hyp, pooled))
+            out_recs.extend(_expand_pooled(pos, hyp, pooled))
         expanded.append((cyc, out_recs))
     return expanded

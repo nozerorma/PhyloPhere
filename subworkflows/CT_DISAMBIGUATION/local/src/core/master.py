@@ -36,8 +36,6 @@ def master_fields(max_pairs: int) -> List[str]:
         "caas",
         # Pattern classification
         "convergence_type",
-        # Grouping scheme of the row
-        "caap_group",
         "amino_encoded",
         # `caas`/`amino_encoded` above are the union of divergent (non-conserved)
         # residues across every pooled hypothesis, not one hypothesis's raw
@@ -52,7 +50,7 @@ def master_fields(max_pairs: int) -> List[str]:
         # same position can legitimately differ). SCORING reads it by name
         # (scoring_compute.R).
         "participating_hypotheses",
-        # Number of hypotheses (M) pooled for this (position, scheme), not per side.
+        # Number of hypotheses (M) pooled for this position, not per side.
         "n_hypotheses",
         # Distinct species that carry the derived residue in a converging domain of this side.
         "n_species",

@@ -85,7 +85,7 @@ def main():
     parser.add_argument("--alignment-dir",    help="Directory containing alignment files")
     parser.add_argument("--genomic-info",     help="TSV: gene, chr, start, end, length")
     parser.add_argument("--species-list",     help="Traitfile (3-col, no header: species trait pair)")
-    parser.add_argument("--metadata-caas",    help="Meta-CAAS file (global_meta_caas.tsv or original format)")
+    parser.add_argument("--metadata-caas",    help="Meta-CAAS file (meta_caas.tsv or original format)")
     parser.add_argument("--bg-caas",          help="Cleaned background gene list (no header)")
     parser.add_argument("--alignment-format", default="phylip-relaxed")
     parser.add_argument("--entropy-dir",      help="Directory containing Valdar entropy (.entropy.tsv) files")
@@ -96,7 +96,7 @@ def main():
                         help="caastools background.output (gene<TAB>tested msa positions). "
                              "Defines the eligible null pool; combined with --bg-caas to drop "
                              "positions in post-processing-removed genes.")
-    parser.add_argument("--caas-csv",                   help="Meta-CAAS file (global_meta_caas.tsv or CAAS CSV)")
+    parser.add_argument("--caas-csv",                   help="Meta-CAAS file (meta_caas.tsv or CAAS CSV)")
     parser.add_argument("--randomization-type",         choices=["naive", "cons_decile", "permulation"])
     parser.add_argument("--null-cycle-caas",            dest="null_cycle_caas", default=None,
                         help="perm_pos_cycle_caas.tsv.gz from a CAAS_CORE_MERGE run (the filtered null "

@@ -19,7 +19,7 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 EVIDENCE_COLUMNS = [
-    "gene", "msa_pos", "caap_group", "hypothesis", "tag", "caas", "domain",
+    "gene", "msa_pos", "hypothesis", "tag", "caas", "domain",
     "mrca_node", "mrca_state", "mrca_posterior",
     "top_species", "bottom_species", "top_tip_aa", "bottom_tip_aa",
     "top_domain_score", "bottom_domain_score", "top_pair_lca", "bottom_pair_lca",
@@ -58,7 +58,7 @@ def _lca_of_domain(pair_lca: Iterable[Any], domain: str) -> str:
 
 
 def evidence_rows(unpooled: Iterable[Any]) -> List[Dict[str, str]]:
-    """One row per unpooled scorer row and domain (EVIDENCE_COLUMNS), ordered by position, caap_group, hypothesis
+    """One row per unpooled scorer row and domain (EVIDENCE_COLUMNS), ordered by position, hypothesis
     number and domain. Every domain of the design is listed, also the ones that did not change (score and tips empty)."""
     rows: List[Dict[str, str]] = []
     for r in unpooled:
@@ -77,7 +77,6 @@ def evidence_rows(unpooled: Iterable[Any]) -> List[Dict[str, str]]:
             rows.append({
                 "gene": _text(getattr(r, "gene", "")),
                 "msa_pos": _text(getattr(r, "position", "")),
-                "caap_group": _text(getattr(r, "caap_group", "US") or "US"),
                 "hypothesis": _text(getattr(r, "hypothesis", "")),
                 "tag": _text(getattr(r, "tag", "")),
                 "caas": _text(getattr(r, "caas", "")),
@@ -94,7 +93,7 @@ def evidence_rows(unpooled: Iterable[Any]) -> List[Dict[str, str]]:
                 "top_pair_lca": _lca_of_domain(side["top"].get("pair_lca"), d),
                 "bottom_pair_lca": _lca_of_domain(side["bottom"].get("pair_lca"), d),
             })
-    rows.sort(key=lambda x: (int(x["msa_pos"]), x["caap_group"], _hypothesis_number(x["hypothesis"]),
+    rows.sort(key=lambda x: (int(x["msa_pos"]), _hypothesis_number(x["hypothesis"]),
                              (0, int(x["domain"])) if x["domain"].isdigit() else (1, x["domain"])))
     return rows
 

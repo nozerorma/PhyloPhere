@@ -20,7 +20,7 @@ feeding a precomputed result while also recomputing it is never intended.
 
 Path templates, relative to base_path/<TRAIT>, matched to the publishDir of each process:
   CT/CAAS       : caastools/{discovery,resample}.tab, caastools/background_genes.output,
-                  caastools/background.output, meta_caas/meta_caas/global_meta_caas.tsv
+                  caastools/background.output, meta_caas/meta_caas/meta_caas.tsv
                   (signification/meta_caas/ is also searched, for outdirs that use that name),
                   caas_permulation/{caas_perms.rds,gene_cycle_scores.tsv,cycle_roster.txt,
                   perm_pos_cycle_caas.tsv.gz,perm_pos_sample.tsv,perm_pos_quantiles.tsv},
@@ -112,16 +112,7 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
 
     if config.use_discovery:
         entries.append(("discovery_from", os.path.join(outdir, "caastools", "discovery.tab"), "file"))
-        # Meta-CAAS table: meta_caas/ is searched first, then signification/ (the name
-        # used by some existing outdirs), global_meta_caas.tsv before meta_caas.tsv.
-        sig_candidates = [
-            os.path.join(outdir, "meta_caas", "meta_caas", "global_meta_caas.tsv"),
-            os.path.join(outdir, "signification", "meta_caas", "global_meta_caas.tsv"),
-            os.path.join(outdir, "meta_caas", "meta_caas", "meta_caas.tsv"),
-            os.path.join(outdir, "signification", "meta_caas", "meta_caas.tsv"),
-        ]
-        sig = next((c for c in sig_candidates if os.path.isfile(c)), sig_candidates[0])
-        entries.append(("meta_caas_from", sig, "file"))
+        entries.append(("meta_caas_from", os.path.join(outdir, "meta_caas", "meta_caas", "meta_caas.tsv"), "file"))
         entries.append(("background_input", os.path.join(outdir, "caastools", "background_genes.output"), "file"))
         entries.append(("posenrich_background_file", os.path.join(outdir, "caastools", "background.output"), "file"))
         # The permulation outputs travel together: caas_perms.rds feeds the FCS

@@ -374,8 +374,8 @@ process CAAS_CORE_OBSERVED {
     path "background_genes.output",      emit: background_genes, optional: true
     path "ct_disambiguation",            emit: results_dir, optional: true
     path "ct_disambiguation/caas_convergence_master.csv", emit: master_csv, optional: true
-    path "meta_caas",                    emit: meta_caas, optional: true
-    path "meta_caas/global_meta_caas.tsv", emit: global_meta_caas, optional: true
+    path "meta_caas",                    emit: meta_caas_dir, optional: true
+    path "meta_caas/meta_caas.tsv", emit: meta_caas, optional: true
 
     script:
     def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
