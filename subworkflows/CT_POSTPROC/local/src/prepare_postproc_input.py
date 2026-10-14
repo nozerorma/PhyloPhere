@@ -25,8 +25,8 @@ from residue_descriptors import add_species_tally
 
 def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     # Only the structural keys are renamed (gene/msa_pos → Gene/Position, the names the
-    # downstream steps read). The other columns (convergence_type, pvalue, caas,
-    # amino_encoded) keep their lowercase names.
+    # downstream steps read). The other columns (convergence_type, pvalue, caas)
+    # keep their lowercase names.
     rename_map = {}
     if "gene" in df.columns:
         rename_map["gene"] = "Gene"
@@ -65,7 +65,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # keep_default_na=False + na_values=[""]: the disambiguation master has categorical
-    # amino-acid columns (caas, amino_encoded, mrca_*_aa) that can equal NA-sentinel
+    # amino-acid columns (caas, mrca_*_aa) that can equal NA-sentinel
     # strings; only an empty cell is missing here.
     # The C engine with float_precision="round_trip" keeps every bit of the float columns
     # (asr_path_score feeds a gene score that compares values exactly); the python engine

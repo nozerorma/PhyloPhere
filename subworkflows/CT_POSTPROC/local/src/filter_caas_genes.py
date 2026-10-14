@@ -32,7 +32,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CT_DISAMBIGUATION" / "local"))
 from src.core.postproc import GeneUnit, gene_removal, gene_unit_stats, load_gene_lengths  # noqa: E402
 
-# The CAAS table carries categorical amino-acid columns (caas, amino_encoded,
+# The CAAS table carries categorical amino-acid columns (caas,
 # derived_residues) whose values can equal NA-sentinel strings ("N/A" is Asn on the
 # changed side against Ala), and the default NA parsing of pandas would blank them.
 # Only an empty cell is missing data in these files.

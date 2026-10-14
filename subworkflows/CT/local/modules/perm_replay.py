@@ -463,9 +463,8 @@ def _reconstruct_hit(cfg, pos_dict, trait, max_conserved):
         max_conserved=max_conserved, multiconfig=cfg,
         fg_species_list=fg, bg_species_list=bg, trait=trait
     )
-    encoded = "".join(a for a in fg_aas if a in STANDARD_AAS) + "/" + "".join(a for a in bg_aas if a in STANDARD_AAS)
     return dict(fg=fg, bg=bg, is_match=is_match, pattern=pattern, substitution=substitution,
-                conserved_pairs=conserved_pairs, encoded=encoded)
+                conserved_pairs=conserved_pairs)
 
 
 def _conserved_fields(conserved_pairs):
@@ -507,7 +506,7 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions,
             if not hit["is_match"]:
                 disagreements.append((trait, genename, posnum))
             fields = [trait, genename, str(posnum),
-                      hit["substitution"], hit["encoded"], hit["pattern"]]
+                      hit["substitution"], hit["pattern"]]
             if max_conserved > 0:
                 fields.extend(_conserved_fields(hit["conserved_pairs"]))
             perm_discovery_out.write("\t".join(fields) + "\n")
@@ -518,7 +517,7 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions,
             f"(labeling, gene, position), first: {disagreements[:5]}")
 
 
-_B0_DISCOVERY_HEADER = ["gene", "trait", "position", "caas", "amino_encoded", "pattern",
+_B0_DISCOVERY_HEADER = ["gene", "trait", "position", "caas", "pattern",
                         "ffgn", "fbgn", "gfg", "gbg", "mfg", "mbg", "ffg", "fbg", "ms"]
 _HYPOTHESIS = re.compile(r"H\d+")
 
@@ -533,7 +532,7 @@ def _b0_discovery_rows(design_cfg, labeling_cfg, sliced_object, genename, positi
                        hits, max_conserved):
     """The rows discovery.tab holds for the b_0 hits of the kernel, as lists of fields.
 
-    The kernel says which (position, hypothesis) are CAAS. caas, amino_encoded and pattern come from
+    The kernel says which (position, hypothesis) are CAAS. caas and pattern come from
     the same reconstruction as the perm-discovery export; the other columns (species counts, gaps, missing,
     species lists) are `process_position`'s, the scalar definitions, on the real design: its trait names
     (traitfile_H3.tab, not b_0~H3) and its missing species. Rows are in a fixed order: position, then trait by
@@ -577,7 +576,7 @@ def _b0_discovery_rows(design_cfg, labeling_cfg, sliced_object, genename, positi
             missing = set(z.trait2missings[trait])
             ms = (sorted((sp for sp in design_cfg.trait2fg[trait] if sp in missing), key=order)
                   + sorted((sp for sp in design_cfg.trait2bg[trait] if sp in missing), key=order))
-            fields = [genename, trait, str(posnum), hit["substitution"], hit["encoded"], hit["pattern"],
+            fields = [genename, trait, str(posnum), hit["substitution"], hit["pattern"],
                       str(len(fg)), str(len(bg)),
                       str(z.trait2gaps_fg.get(trait, 0)), str(z.trait2gaps_bg.get(trait, 0)),
                       str(z.trait2miss_fg.get(trait, 0)), str(z.trait2miss_bg.get(trait, 0)),
@@ -640,7 +639,6 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
             "gene",
             "position",
             "caas",
-            "amino_encoded",
             "pattern"
         ]
         if max_conserved > 0:

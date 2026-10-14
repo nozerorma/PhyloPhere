@@ -95,7 +95,6 @@ def convert_convergence_result_to_dict(
         "position": getattr(result, "position", None),
         "tag": getattr(result, "tag", None),
         "caas": getattr(result, "caas", None),
-        "amino_encoded": getattr(result, "amino_encoded", ""),
         "multi_hypothesis": multi_hypothesis,
         # Hypotheses that drove at least one changed domain on THIS SIDE: the hypothesis-provenance
         # column the scoring reads (scoring_compute.R aggregates it by name). It is never blanked
@@ -104,11 +103,10 @@ def convert_convergence_result_to_dict(
         # Number of hypotheses (M) harvested for this position.
         "n_hypotheses": getattr(result, "n_hypotheses", None),
         "n_species": getattr(result, "n_species", None),
-        # Cross-hypothesis support tallies for tag, caas and amino_encoded, which above keep the
+        # Cross-hypothesis support tallies for tag and caas, which above keep the
         # value of the first row.
         "tag_support": getattr(result, "tag_support", "") or "",
         "caas_support": getattr(result, "caas_support", "") or "",
-        "amino_encoded_support": getattr(result, "amino_encoded_support", "") or "",
     }
 
     # Pattern classification
@@ -212,7 +210,6 @@ def _parse_discovery_entries(
     cyc_idx = col_indices["cycle"]
     pos_idx = col_indices["position"]
     caas_idx = col_indices.get("caas")
-    ae_idx = col_indices.get("amino_encoded")
     icm_idx = col_indices.get("is_conserved_meta")
     cp_idx = col_indices.get("conserved_pair")
     guard = max(
@@ -253,7 +250,6 @@ def _parse_discovery_entries(
             caas=caas,
             trait1_aa=trait1,
             trait0_aa=trait0,
-            amino_encoded=parts[ae_idx] if ae_idx is not None and ae_idx < len(parts) else "",
             is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,
             conserved_pair=cp,
         )

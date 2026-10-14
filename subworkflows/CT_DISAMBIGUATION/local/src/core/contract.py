@@ -35,11 +35,11 @@ BACKGROUND_SUFFIX = ".b0.background"
 MASTER_SUFFIX = ".master.csv.gz"
 
 # Header of an empty discovery.tab: the columns of discovery.tab, including the two conserved-pair columns.
-EMPTY_DISCOVERY_HEADER = ["gene", "trait", "position", "caas", "amino_encoded", "pattern",
+EMPTY_DISCOVERY_HEADER = ["gene", "trait", "position", "caas", "pattern",
                           "ffgn", "fbgn", "gfg", "gbg", "mfg", "mbg", "ffg", "fbg", "ms", "is_conserved_meta", "conserved_pair"]
 
 META_COLUMNS = ["tag", "GenePos", "Gene", "Position", "pattern", "is_conserved_meta", "conserved_pair",
-                "caas", "amino_encoded"]
+                "caas"]
 _HYP = re.compile(r"H[0-9]+")
 _HYP_LAST = re.compile(r".*(H[0-9]+).*")
 
@@ -109,7 +109,7 @@ def write_meta(discovery: Path, out_dir: Path) -> int:
                 pair = row.get("conserved_pair") or ""
                 fields = [row_id(gene, row), f"{gene}_{row['position']}", gene, row["position"], _na(row.get("pattern")),
                           "TRUE" if (row.get("is_conserved_meta") or "").strip().upper() == "TRUE" else "FALSE",
-                          re.sub(r"^\d+:", "", pair) if pair else "NA", _na(row.get("caas")), _na(row.get("amino_encoded"))]
+                          re.sub(r"^\d+:", "", pair) if pair else "NA", _na(row.get("caas"))]
                 if has_trait:
                     hyp = _HYP_LAST.sub(r"\1", trait) if trait and _HYP.search(trait) else trait
                     fields += [_na(trait), _na(hyp)]

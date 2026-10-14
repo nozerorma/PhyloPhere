@@ -9,7 +9,7 @@ Inputs: the fields of one discovery.tab row
 Outputs: a `CAAS_<hex>` id string
 
 A CAAS is one row of discovery.tab: a gene, a 0-based alignment position, a hypothesis
-and the substitution found there (caas, amino_encoded, pattern). Its id hashes exactly those fields, so the same
+and the substitution found there (caas, pattern). Its id hashes exactly those fields, so the same
 CAAS gets the same id in every run, every file and every process, and it does not depend on which other rows exist
 or on their order.
 
@@ -25,16 +25,16 @@ ID_HEX_CHARS = 16
 _SEP = "\x1f"  # unit separator: no field can contain it, so ("AB", "C") and ("A", "BC") hash differently
 
 
-def caas_id(gene, position, hypothesis, caas, amino_encoded, pattern, hex_chars: int = ID_HEX_CHARS) -> str:
+def caas_id(gene, position, hypothesis, caas, pattern, hex_chars: int = ID_HEX_CHARS) -> str:
     """Id of one CAAS row. `hypothesis` is anything `hyp_id` accepts ('H3', 'traitfile_H3.tab', 'b_0~H3')."""
-    fields = (str(gene), str(int(position)), hyp_id(hypothesis), str(caas), str(amino_encoded), str(pattern))
+    fields = (str(gene), str(int(position)), hyp_id(hypothesis), str(caas), str(pattern))
     digest = hashlib.sha256(_SEP.join(fields).encode("utf-8")).hexdigest()
     return ID_PREFIX + digest[:hex_chars].upper()
 
 
 def row_id(gene, row) -> str:
-    """Id of a discovery.tab row given as a mapping (position, trait, caas, amino_encoded, pattern);
+    """Id of a discovery.tab row given as a mapping (position, trait, caas, pattern);
     an empty or missing field counts as the empty string."""
     pattern = row.get("pattern")
     return caas_id(gene, row["position"], row.get("trait") or "",
-                   row.get("caas") or "", row.get("amino_encoded") or "", "" if pattern is None else pattern)
+                   row.get("caas") or "", "" if pattern is None else pattern)

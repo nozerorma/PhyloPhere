@@ -31,14 +31,13 @@ from src.data.models import CAASPosition
 
 def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosition]:
     """CAAS entries of one gene from its discovery rows (mappings with position, trait, caas,
-    amino_encoded, pattern and, when present, is_conserved_meta and conserved_pair), in the order given.
+    pattern and, when present, is_conserved_meta and conserved_pair), in the order given.
     The tag of an entry is the content id of its row (`core.meta.row_id`)."""
     entries: List[CAASPosition] = []
     for row in rows:
         pos0 = int(row["position"])
         caas = str(row.get("caas") or "")
         parts = caas.split("/") if caas else []
-        amino = str(row.get("amino_encoded") or "")
         trait = str(row.get("trait") or "")
         entries.append(CAASPosition(
             position=pos0,
@@ -47,7 +46,6 @@ def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosi
             caas=caas,
             trait1_aa=normalize_amino_list(list(parts[0])) if len(parts) == 2 else [],
             trait0_aa=normalize_amino_list(list(parts[1])) if len(parts) == 2 else [],
-            amino_encoded=amino,
             is_conserved_meta=as_bool(row.get("is_conserved_meta")),
             conserved_pair=_parse_conserved_pair(str(row.get("conserved_pair") or "")),
             trait=trait,

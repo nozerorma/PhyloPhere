@@ -9,7 +9,6 @@ Summary of the cluster-filter parameter sweep: the number of Discarded positions
 Called by:  CT_FILTER_SUMMARY process (ctpp_clustfilter.nf)
 Inputs:     --input-dir  directory with the *.filtered.*.tsv files of filter_caas_clusters-param.py
 Outputs:    --summary-output  one row per parameter pair (Parameter, Minlen, Maxcaas, DiscardedCount)
-            --discarded-output  one row per parameter pair (File, DiscardedCount, Minlen, Maxcaas)
 """
 
 import argparse
@@ -22,7 +21,7 @@ import pandas as pd
 
 def _parse_args():
     parser = argparse.ArgumentParser(
-        description="Build filter_summary.tsv and discarded_summary.tsv from cluster outputs."
+        description="Build filter_summary.tsv from cluster outputs."
     )
     parser.add_argument(
         "--input-dir",
@@ -33,11 +32,6 @@ def _parse_args():
         "--summary-output",
         default="filter_summary.tsv",
         help="Output path for summary TSV",
-    )
-    parser.add_argument(
-        "--discarded-output",
-        default="discarded_summary.tsv",
-        help="Output path for discarded-summary TSV",
     )
     return parser.parse_args()
 
@@ -71,13 +65,10 @@ def main() -> int:
         )
 
     summary_df = pd.DataFrame(summary_data).sort_values(["Minlen", "Maxcaas"])
-    discarded_df = summary_df[["Parameter", "DiscardedCount", "Minlen", "Maxcaas"]].rename(columns={"Parameter": "File"})
 
     summary_df.to_csv(args.summary_output, sep="\t", index=False)
-    discarded_df.to_csv(args.discarded_output, sep="\t", index=False)
 
     print(f"✓ {args.summary_output}: {len(summary_df)} parameter combinations")
-    print(f"✓ {args.discarded_output}: {len(discarded_df)} entries")
     return 0
 
 

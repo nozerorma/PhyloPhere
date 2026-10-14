@@ -229,7 +229,6 @@ workflow CT_POSTPROC {
     
     emit:
         filter_summary = filter_summary_results.summary  // filter_summary.tsv (one row per parameter pair)
-        discarded_summary = filter_summary_results.discarded_summary  // discarded_summary.tsv (the same counts, File column)
         filter_dir = filter_dir_ch
         filtered_discovery = filtered_discovery_ch
         cleaned_background = cleaned_background_main_ch

@@ -145,7 +145,7 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
     # Validate the file format and the required columns
     try:
         # keep_default_na=False + na_values=[""]: the CAAS table has categorical amino-acid
-        # columns (caas, amino_encoded, derived_residues) whose values can be NA-sentinel
+        # columns (caas, derived_residues) whose values can be NA-sentinel
         # strings ("N/A" is Asn on the changed side against Ala), and the default NA parsing
         # of pandas would blank them. Only an empty cell is missing here.
         df = pd.read_csv(path, sep="\t", header=0,

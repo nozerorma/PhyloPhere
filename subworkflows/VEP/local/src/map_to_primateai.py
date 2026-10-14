@@ -26,7 +26,7 @@ residue, every CAAS residue is accepted.
 
 Called by:  PRIMATEAI_MAP Nextflow process (primateai.nf → map_to_primateai.py)
 Inputs:     caas_file       position_scores.tsv, with Gene, Position and, when present, tag,
-                            caas, side, amino_encoded, ancestral_aa and derived_aa; the ancestral and
+                            caas, side, ancestral_aa and derived_aa; the ancestral and
                             derived residues are those of the ASR, or the caas pattern read by side when absent
             vep_map_dir     directory of the per-gene MAP files
             primateai_gz    PrimateAI-3D hg38 table (gzip TSV, with chr, pos, ref_aa, alt_aa)
@@ -101,7 +101,6 @@ with open(caas_file) as fh:
     cside_col = col.get("side") or col_lc.get("side")
     anc_col = col_lc.get('ancestral_aa')
     der_col = col_lc.get('derived_aa')
-    amino_col = col_lc.get('amino_encoded')
     dres_col = col_lc.get('derived_residues')
 
     if any(c is None for c in [gene_col, pos_col]):
@@ -127,8 +126,7 @@ with open(caas_file) as fh:
         cside = fields[cside_col] if cside_col is not None else ''
         anc_val = fields[anc_col] if anc_col is not None else ''
         der_val = fields[der_col] if der_col is not None else ''
-        amino_enc = fields[amino_col] if amino_col is not None else ''
-        caas_change = amino_enc if amino_enc else caas_pat
+        caas_change = caas_pat
 
         anc_aas, der_aas = anc_der_from_row(anc_val, der_val, caas_pat, cside)
 

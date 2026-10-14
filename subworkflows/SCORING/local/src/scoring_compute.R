@@ -356,8 +356,6 @@ pos_scores <- df %>%
     n_top_species           = if ("n_top_species" %in% names(df)) dplyr::first(n_top_species) else "",
     n_bottom_species        = if ("n_bottom_species" %in% names(df)) dplyr::first(n_bottom_species) else "",
     n_conserved_pairs       = if ("n_conserved_pairs" %in% names(df)) dplyr::first(n_conserved_pairs) else "",
-    # Residue pattern of the position, as in discovery.tab.
-    amino_encoded           = if ("amino_encoded" %in% names(df)) dplyr::first(amino_encoded) else "",
     .groups = "drop"
   )
 
@@ -834,14 +832,13 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
 # position with side != "none"; "top" / "bottom" restrict to that side, so the flag is
 # direction-aware like FADE and RER.
 #
-# Returns a tibble with Gene + accum_p<suffix> (accum_cct_p<suffix> repeats it: the empirical p, not a combined test, kept under its former name for the readers of that column),
+# Returns a tibble with Gene + accum_p<suffix> (the empirical p),
 # accum_fdr<suffix> / accum_significant<suffix> (suffix = "" for "all",
 # "_top" / "_bottom" otherwise); the suffixes let the three directions full_join onto gene_scores without colliding.
 compute_accum_significance <- function(accum_dir, direction, suffix) {
   empty <- tibble(
     Gene = character(),
     !!paste0("accum_p", suffix)       := numeric(),
-    !!paste0("accum_cct_p", suffix)   := numeric(),
     !!paste0("accum_fdr", suffix)     := numeric(),
     !!paste0("accum_significant", suffix) := logical()
   )
@@ -866,8 +863,7 @@ compute_accum_significance <- function(accum_dir, direction, suffix) {
   pvals <- as.numeric(d[[pval_col]])
   out <- tibble(
     Gene = d[[gcol]],
-    !!paste0("accum_p", suffix)       := pvals,
-    !!paste0("accum_cct_p", suffix)   := pvals
+    !!paste0("accum_p", suffix)       := pvals
   )
 
   fp_col <- paste0("accum_p", suffix)
@@ -888,9 +884,9 @@ compute_accum_significance <- function(accum_dir, direction, suffix) {
 has_accum_dir <- file_exists(accum_dir) && dir.exists(accum_dir)
 if (!has_accum_dir) cat("Accumulation: directory not available, skipping\n")
 
-.accum_all    <- if (has_accum_dir) compute_accum_significance(accum_dir, "all",    "")        else list(df = tibble(Gene = character(), accum_cct_p = numeric(), accum_fdr = numeric(), accum_significant = logical()), ok = FALSE)
-.accum_top    <- if (has_accum_dir) compute_accum_significance(accum_dir, "top",    "_top")    else list(df = tibble(Gene = character(), accum_cct_p_top = numeric(), accum_fdr_top = numeric(), accum_significant_top = logical()), ok = FALSE)
-.accum_bottom <- if (has_accum_dir) compute_accum_significance(accum_dir, "bottom", "_bottom") else list(df = tibble(Gene = character(), accum_cct_p_bottom = numeric(), accum_fdr_bottom = numeric(), accum_significant_bottom = logical()), ok = FALSE)
+.accum_all    <- if (has_accum_dir) compute_accum_significance(accum_dir, "all",    "")        else list(df = tibble(Gene = character(), accum_p = numeric(), accum_fdr = numeric(), accum_significant = logical()), ok = FALSE)
+.accum_top    <- if (has_accum_dir) compute_accum_significance(accum_dir, "top",    "_top")    else list(df = tibble(Gene = character(), accum_p_top = numeric(), accum_fdr_top = numeric(), accum_significant_top = logical()), ok = FALSE)
+.accum_bottom <- if (has_accum_dir) compute_accum_significance(accum_dir, "bottom", "_bottom") else list(df = tibble(Gene = character(), accum_p_bottom = numeric(), accum_fdr_bottom = numeric(), accum_significant_bottom = logical()), ok = FALSE)
 
 has_accum <- .accum_all$ok
 gene_rand <- .accum_all$df %>%
@@ -1010,15 +1006,12 @@ if (nrow(gene_rand) > 0) {
   gene_scores <- gene_scores %>% full_join(gene_rand, by = "Gene")
 } else {
   gene_scores$accum_p                  <- NA_real_
-  gene_scores$accum_cct_p              <- NA_real_
   gene_scores$accum_fdr                <- NA_real_
   gene_scores$accum_significant        <- NA
   gene_scores$accum_p_top              <- NA_real_
-  gene_scores$accum_cct_p_top          <- NA_real_
   gene_scores$accum_fdr_top            <- NA_real_
   gene_scores$accum_significant_top    <- NA
   gene_scores$accum_p_bottom           <- NA_real_
-  gene_scores$accum_cct_p_bottom       <- NA_real_
   gene_scores$accum_fdr_bottom         <- NA_real_
   gene_scores$accum_significant_bottom <- NA
 }
@@ -1048,7 +1041,7 @@ if (nrow(gene_fade) > 0) {
 cat("\n─── Correlation analysis ──────────────────────────────────────\n")
 
 # Correlations use gene_caas_score as the primary axis. Accumulation, RER and FADE
-# are represented by their native significance (accum_cct_p / RER p / FADE BF),
+# are represented by their native significance (accum_p / RER p / FADE BF),
 # not numeric score axes, so they are not included here.
 score_cols <- c("gene_caas_score")
 
@@ -1110,7 +1103,7 @@ pos_out <- pos_scores %>%
                   "top_species_residues", "bottom_species_residues",
                   "n_top_species", "n_bottom_species", "n_conserved_pairs")), CAAS_score,
          side,
-         any_of(c("caas", "amino_encoded")), any_of(c("ancestral_aa", "derived_aa")),
+         any_of("caas"), any_of(c("ancestral_aa", "derived_aa")),
          # p.emp: the pooled "detects AND exceeds" position p; p.adj_bh: its BH adjustment (§2h); p.emp_fact and
          # p.adj_bh_fact: the factorized p of the position and its BH adjustment.
          any_of(c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact")),
@@ -1127,9 +1120,9 @@ gene_out <- gene_scores %>%
     Gene,
     n_positions, n_positions_top, n_positions_bottom,
     gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
-    any_of(c("accum_p", "accum_cct_p", "accum_fdr", "accum_significant",
-             "accum_p_top", "accum_cct_p_top", "accum_fdr_top", "accum_significant_top",
-             "accum_p_bottom", "accum_cct_p_bottom", "accum_fdr_bottom", "accum_significant_bottom")),
+    any_of(c("accum_p", "accum_fdr", "accum_significant",
+             "accum_p_top", "accum_fdr_top", "accum_significant_top",
+             "accum_p_bottom", "accum_fdr_bottom", "accum_significant_bottom")),
     any_of(c("rer_min_pval", "rer_significant", "rer_perm_padj", "rer_significant_fdr", "rer_rho", "rer_acceleration")),
     any_of(c("fade_max_bf_top", "fade_significant_top",
              "fade_max_bf_bottom", "fade_significant_bottom"))
@@ -1197,10 +1190,10 @@ if (.nonempty("fade_max_bf_top") || .nonempty("fade_max_bf_bottom")) {
   cat("  fcs_stats_fade.tsv written (FADE BF rankings)\n")
 }
 
-if (.nonempty("accum_p") || .nonempty("accum_cct_p")) {
+if (.nonempty("accum_p")) {
   # FCS ranks in descending order (higher = more significant) while empirical p runs the other way, so
   # the ranking axis is -log10(accum_p), derived here and not stored as a column of gene_scores.
-  .afp <- suppressWarnings(as.numeric(.col(gene_scores, if ("accum_p" %in% names(gene_scores)) "accum_p" else "accum_cct_p")))
+  .afp <- suppressWarnings(as.numeric(.col(gene_scores, "accum_p")))
   write_tsv(tibble(
     gene         = gene_scores$Gene,
     score_global = ifelse(is.na(.afp), NA_real_, -log10(pmax(.afp, 1e-300)))

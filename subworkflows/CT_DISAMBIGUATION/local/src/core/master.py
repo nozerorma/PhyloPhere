@@ -36,15 +36,13 @@ def master_fields(max_pairs: int) -> List[str]:
         "caas",
         # Pattern classification
         "convergence_type",
-        "amino_encoded",
-        # `caas`/`amino_encoded` above are the union of divergent (non-conserved)
+        # `caas` is the union of divergent (non-conserved)
         # residues across every pooled hypothesis, not one hypothesis's raw
         # pattern (see disambiguate_single._derive_convergent_call). These
         # tallies carry the full per-hypothesis breakdown. There is no separate
         # row-identifier column: CT_ACCUMULATION reads `tag_support` as the row tag.
         "tag_support",
         "caas_support",
-        "amino_encoded_support",
         # Hypotheses that drove >= 1 changed domain on THIS SIDE: the only
         # hypothesis-provenance column, side-aware (top/bottom rows for the
         # same position can legitimately differ). SCORING reads it by name

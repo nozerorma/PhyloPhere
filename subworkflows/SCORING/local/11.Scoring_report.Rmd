@@ -161,7 +161,7 @@ if ("side" %in% names(pos_df)) pos_df$side <- as.character(pos_df$side)
 
 .num_cols_gene <- c(
   "gene_caas_score", "gene_caas_score_top", "gene_caas_score_bottom",
-  "accum_p", "accum_cct_p", "accum_fdr", "accum_score",
+  "accum_p", "accum_fdr", "accum_score",
   "rer_min_pval", "rer_rho", "rer_p.adj", "ami_score", "fcs_score",
   "fade_max_bf_top", "fade_max_bf_bottom"
 )
@@ -188,8 +188,7 @@ if (!"asr_score" %in% names(pos_df)) {
 
 # Provisional availability flags from gene_df; has_rand and has_rer are set again from the same
 # columns further down.
-has_rand <- ("accum_p" %in% names(gene_df) && any(!is.na(gene_df$accum_p))) ||
-            ("accum_cct_p" %in% names(gene_df) && any(!is.na(gene_df$accum_cct_p)))
+has_rand <- "accum_p" %in% names(gene_df) && any(!is.na(gene_df$accum_p))
 has_rer  <- "rer_min_pval"    %in% names(gene_df) && any(!is.na(gene_df$rer_min_pval)) &&
             "rer_rho"         %in% names(gene_df)
 
@@ -266,10 +265,9 @@ gene_df$gene_caas_top <- .num_col("gene_caas_score_top")
 gene_df$gene_caas_bot <- .num_col("gene_caas_score_bottom")
 
 # ── Gene-level accumulation significance ──────────────────────────────────────
-# Accumulation is represented by its empirical p-value (accum_p / accum_cct_p),
+# Accumulation is represented by its empirical p-value (accum_p),
 # with BH FDR (accum_fdr) and accum_significant (accum_fdr < 0.05).
-has_accum_score <- ("accum_p" %in% names(gene_df) && any(!is.na(gene_df$accum_p))) ||
-                   ("accum_cct_p" %in% names(gene_df) && any(!is.na(gene_df$accum_cct_p)))
+has_accum_score <- "accum_p" %in% names(gene_df) && any(!is.na(gene_df$accum_p))
 has_rand <- has_accum_score
 
 # ── Gene-level direction assignment ───────────────────────────────────────────
@@ -1491,7 +1489,7 @@ gridExtra::grid.arrange(
 has_caas_col <- "caas" %in% names(pos_df)
 
 dir_display_cols <- c("Gene", "Position", "CAAS_score",
-                      if (has_caas_col) c("caas", "amino_encoded"),
+                      if (has_caas_col) "caas",
                       "biochem_groupings",
                       "n_hypotheses", "participating_hypotheses",
                       "side",
@@ -2221,7 +2219,7 @@ gridExtra::grid.arrange(
 ```
 
 ```{r gene-accum-table, eval=has_accum_score}
-.acc_pcol <- intersect(c("accum_p", "accum_cct_p"), names(gene_df))[1]
+.acc_pcol <- "accum_p"
 accum_tbl <- gene_df %>%
   filter(!is.na(.data[[.acc_pcol]])) %>%
   mutate(
@@ -2229,7 +2227,7 @@ accum_tbl <- gene_df %>%
     in_bot = Gene %in% gene_bot_list
   ) %>%
   arrange(.data[[.acc_pcol]]) %>%
-  select(Gene, any_of(c("accum_p", "accum_cct_p")), any_of("accum_fdr"), accum_significant,
+  select(Gene, accum_p, any_of("accum_fdr"), accum_significant,
          gene_caas_score, gene_caas_top, gene_caas_bot,
          in_top, in_bot) %>%
   mutate(across(where(is.numeric), ~round(., 4)))
@@ -2275,7 +2273,7 @@ if (has_fade_gene && exists("gene_fade_df")) {
 }
 
 # ── Accumulation score ────────────────────────────────────────────────────────
-# accum_cct_p already on top_genes_df; no extra join needed.
+# accum_p already on top_genes_df; no extra join needed.
 
 # ── CAAS-threshold indicators (10%, 50% and 100%) per direction ───────────────
 g_top_thr_50 <- quantile(gene_df$gene_caas_top, 0.50, na.rm = TRUE)
@@ -2295,7 +2293,7 @@ gene_display_cols <- c("Gene", "n_positions",
                        "in_top_10pct", "in_top_50pct",
                        "in_bot_10pct", "in_bot_50pct")
 if (has_accum_score)
-  gene_display_cols <- c(gene_display_cols, intersect(c("accum_p", "accum_cct_p"), names(top_genes_df))[1])
+  gene_display_cols <- c(gene_display_cols, intersect("accum_p", names(top_genes_df)))
 if (has_rer)
   gene_display_cols <- c(gene_display_cols, "rer_min_pval", "rer_direction")
 if (has_fade_gene && "fade_top_max_bf" %in% names(top_genes_df))

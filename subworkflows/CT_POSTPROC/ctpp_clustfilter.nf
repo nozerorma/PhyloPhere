@@ -12,7 +12,7 @@
  *  Consumes:  disambiguation master table, optional alignments and contrast design,
  *             gene annotation (lengths), global background gene list
  *  Produces:  postproc_disambiguation_input.tsv, per-pair cluster files
- *             (*.filtered.minlen*.maxcaas*.tsv), filter_summary.tsv, discarded_summary.tsv,
+ *             (*.filtered.minlen*.maxcaas*.tsv), filter_summary.tsv,
  *             filtered_discovery.tsv, removed_genes_summary.tsv, gene_stats.tsv and
  *             cleaned_background_*.txt, under postproc/
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -104,21 +104,18 @@ process CT_FILTER {
 process CT_FILTER_SUMMARY {
     tag "filter_summary"
     publishDir "${params.outdir}/postproc/summary_statistics", mode: 'copy', overwrite: true, pattern: "filter_summary.tsv"
-    publishDir "${params.outdir}/postproc/gene_filtering", mode: 'copy', overwrite: true, pattern: "discarded_summary.tsv"
 
     input:
     path(filter_files)
 
     output:
     path "filter_summary.tsv", emit: summary
-    path "discarded_summary.tsv", emit: discarded_summary
 
     script:
     """
     python3 ${baseDir}/subworkflows/CT_POSTPROC/local/src/summarize_cluster_filters.py \
         --input-dir . \
-        --summary-output filter_summary.tsv \
-        --discarded-output discarded_summary.tsv
+        --summary-output filter_summary.tsv
     """
 }
 

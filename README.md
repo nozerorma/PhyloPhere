@@ -297,7 +297,7 @@ side, `ancestral_aa` and `derived_aa` (comma-separated, most frequent first). Th
 `<top residues>/<bottom residues>` and has no direction.
 
 **`gene_scores.tsv`**: `gene_caas_score` (+ `_top`/`_bottom`), `accum_p`
-(empirical accumulation p; `accum_cct_p` repeats it) with BH FDR `accum_fdr` and
+(empirical accumulation p) with BH FDR `accum_fdr` and
 `accum_significant`, `rer_min_pval`, `rer_acceleration`,
 `fade_max_bf_top`/`_bottom`, `fade_significant_top`/`_bottom`.
 

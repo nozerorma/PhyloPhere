@@ -504,8 +504,8 @@ def _postproc_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(postproc, "summary_statistics/filter_summary.tsv")),
         _slot("gene_ensembl_file", "Gene Ensembl length file", True,
               _first_match(outdir, "postproc/postproc_inputs/*", "**/*gene_ensembl*", "**/*ensembl*length*")),
-        _slot("gene_stats_file", "Gene stats file (discarded summary)", True,
-              _first_match(postproc, "gene_filtering/discarded_summary.tsv")),
+        _slot("gene_stats_file", "Gene stats file", True,
+              _first_match(postproc, "gene_filtering/gene_stats.tsv")),
     ]
 
 

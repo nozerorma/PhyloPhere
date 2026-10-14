@@ -64,10 +64,10 @@ PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None, None)
 
 
 def _derive_convergent_call(all_rows: List["ConvergenceResult"], attr: str) -> str:
-    """Pool one side's per-hypothesis ``caas``/``amino_encoded`` fg/bg strings into a
+    """Pool one side's per-hypothesis ``caas`` fg/bg strings into a
     single "<derived>/<ancestral>" call: exclude each pair index where fg==bg
     (conserved; caas_id.py's conserved-pair check also compares the two sides at
-    the same index, on the encoded groups), then union the surviving divergent
+    the same index), then union the surviving divergent
     residues per side across every pooled hypothesis. The union summarizes the
     whole pool instead of reflecting one hypothesis's raw pattern.
     """
@@ -124,7 +124,7 @@ def _emit_pooled_side_rows(
     the emitted rows drop the ``hypothesis`` label; a lone hypothesis keeps it.
     ``all_rows`` (the raw per-hypothesis ``ConvergenceResult`` list, same
     length and order as ``hyp_rows``) is used only for the position-level
-    ``tag_support``/``caas``/``amino_encoded`` derivation: these live on the
+    ``tag_support``/``caas`` derivation: these live on the
     result itself, not inside ``sides``, so they cannot be recovered from
     ``hyp_rows`` alone.
     """
@@ -145,16 +145,11 @@ def _emit_pooled_side_rows(
 
     tag_support = fmt_support(_tally("tag"))
     caas_support = fmt_support(_tally("caas"))
-    amino_encoded_support = fmt_support(_tally("amino_encoded"))
-    # `caas`/`amino_encoded` are the union of divergent (non-conserved)
-    # residues across every pooled hypothesis (see _derive_convergent_call).
-    # When no divergent residue survives the exclusion (every row agrees with
-    # its own background), the first row's values are kept so that caas and
-    # amino_encoded are never blank.
+    # `caas` is the union of divergent (non-conserved) residues across every
+    # pooled hypothesis (see _derive_convergent_call). When no divergent residue
+    # survives the exclusion (every row agrees with its own background), the
+    # first row's value is kept so that caas is never blank.
     derived_caas = _derive_convergent_call(all_rows or [], "caas") or base.caas
-    derived_amino_encoded = (
-        _derive_convergent_call(all_rows or [], "amino_encoded") or base.amino_encoded
-    )
 
     # Number of pooled hypotheses (M) for this position.
     n_hypotheses = int(pooled.get("n_hypotheses", 0) or 0)
@@ -193,9 +188,8 @@ def _emit_pooled_side_rows(
             domain_der_support_top_aa=None, domain_der_support_bot_aa=None,
             domain_anc_support_aa=None, pair_lca=None,
             domain_meta=None,
-            caas=derived_caas, amino_encoded=derived_amino_encoded,
+            caas=derived_caas,
             tag_support=tag_support, caas_support=caas_support,
-            amino_encoded_support=amino_encoded_support,
             n_hypotheses=n_hypotheses,
         )]
 
@@ -218,9 +212,8 @@ def _emit_pooled_side_rows(
             domain_anc_support_aa=sd["domain_anc_support"],
             pair_lca=_pooled_pair_lca(hyp_rows, s),
             domain_meta=None,
-            caas=derived_caas, amino_encoded=derived_amino_encoded,
+            caas=derived_caas,
             tag_support=tag_support, caas_support=caas_support,
-            amino_encoded_support=amino_encoded_support,
             n_hypotheses=n_hypotheses,
             n_species=sd.get("n_sp"),
         ))
@@ -605,7 +598,6 @@ def analyze_caas_position_disambiguation(
         node_state_summary=node_summary,
         state_source=state_source,
         side="none",  # set per side by _emit_pooled_side_rows
-        amino_encoded=getattr(caas_pos, "amino_encoded", ""),
         hypothesis=hypothesis,
         asr_path_score=None,
         derived_agreement=None,

@@ -34,7 +34,6 @@ class CAASPosition:
         default_factory=list
     )  # Low phenotype amino acids (trait=0)
     is_focus: bool = False
-    amino_encoded: str = ""
     is_conserved_meta: bool = False
     conserved_pair: str = ""
     # Discovering hypothesis of this row: the traitfile token (e.g. "traitfile_H5.tab"
@@ -68,7 +67,6 @@ class ConvergenceResult:
     trait0_aa: List[str] = field(default_factory=list)
     tip_pattern_comment: Optional[str] = None
     pair_details: Optional[List[dict]] = None
-    amino_encoded: str = ""
     # Discovering hypothesis ("H<n>"; None for a single-contrast run). One
     # ConvergenceResult is emitted per (position, hypothesis).
     hypothesis: Optional[str] = None
@@ -88,7 +86,6 @@ class ConvergenceResult:
     # `_emit_pooled_side_rows`). They sit beside those fields and do not replace them.
     tag_support: str = ""
     caas_support: str = ""
-    amino_encoded_support: str = ""
 
     # Node mapping and state tracking
     node_mapping: Optional[Dict[str, int]] = None

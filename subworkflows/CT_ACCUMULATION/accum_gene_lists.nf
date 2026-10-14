@@ -13,7 +13,7 @@
  *             file of that direction (CT_ACCUMULATION_RANDOMIZE)
  *  Produces:  background.txt (all genes with a result for this direction),
  *             accumulation_<direction>_significant.txt (genes with FDR below params.accumulation_fdr),
- *             fcs_stats.tsv (gene, score_accumulation = -log10 of the p, accum_p, accum_cct_p, fdr_q, flag_gate_sig)
+ *             fcs_stats.tsv (gene, score_accumulation = -log10 of the p, accum_p, fdr_q, flag_gate_sig)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -76,7 +76,6 @@ process ACCUMULATION_GENE_LISTS {
             gene               = gene_syms,
             score_accumulation = -log10(pmax(pvals, 1e-300)),
             accum_p            = pvals,
-            accum_cct_p        = pvals,
             fdr_q              = fdr_q,
             flag_gate_sig      = sig_mask
         )
