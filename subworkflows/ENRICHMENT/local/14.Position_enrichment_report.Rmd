@@ -2003,11 +2003,16 @@ bio <- biochem_df %>% dplyr::mutate(anyGS = GS1 | GS2 | GS3 | GS4, n_schemes = U
 # profile and the comparisons below show the observed side only.
 has_bio_null <- FALSE
 .f_null <- params$caas_pos_cycle_caas_file
-if (.file_ok(.f_null) && "scheme_set" %in% names(readr::read_tsv(.f_null, n_max = 0, show_col_types = FALSE))) {
-  null_cnt <- readr::read_tsv(.f_null, col_select = c(cycle, side, scheme_set),
-                              col_types = readr::cols(.default = readr::col_character())) %>%
-    dplyr::filter(side %in% c("top", "bottom"), !is.na(scheme_set)) %>%
-    dplyr::count(cycle, scheme_set, name = "n")
+if (.file_ok(.f_null) && "scheme_set" %in% strsplit(readLines(gzfile(.f_null), n = 1), "\t")[[1]]) {
+  # The null has one row per detection of every cycle (tens of millions at 1000 cycles), and readr inflates a gz file
+  # whole, so the detections are counted per (cycle, scheme_set) while the file streams through awk: memory does not
+  # depend on the number of rows.
+  .awk <- r"---(BEGIN { FS = OFS = "\t" }
+NR == 1 { for (i = 1; i <= NF; i++) col[$i] = i; cy = col["cycle"]; sd = col["side"]; ss = col["scheme_set"]; next }
+($sd == "top" || $sd == "bottom") && $ss != "" && $ss != "NA" { n[$cy OFS $ss]++ }
+END { print "cycle", "scheme_set", "n"; for (k in n) print k, n[k] })---"
+  null_cnt <- readr::read_tsv(pipe(sprintf("gzip -dcf %s | awk %s", shQuote(.f_null), shQuote(.awk))),
+                              col_types = readr::cols(cycle = "c", scheme_set = "c", n = "i"))
   has_bio_null <- nrow(null_cnt) > 0
 }
 if (has_bio_null) {
