@@ -45,9 +45,9 @@ process SCORING_REPORT {
     path fade_site_bot_file  // optional: per-site FADE table, bottom direction (NO_FADE_SITE_BOT sentinel when absent)
     path genomic_info        // optional: gene genomic coords TSV (NO_GENOMIC_INFO sentinel when absent)
     path caas_pos_cycle_caas // optional: perm_pos_cycle_caas.tsv.gz, the position-level permulation null (NO_CAAS_POS_CYCLE_CAAS or NO_FILE sentinel when absent)
-    path caas_pos_sample     // optional: per-scheme null sample (NO_CAAS_POS_SAMPLE sentinel); passed to the report, which does not read it
-    path caas_pos_quantiles  // optional: per (cycle, scheme) null quantiles (NO_CAAS_POS_QUANTILES sentinel); passed to the report, which does not read it
-    path filtered_discovery  // filtered_discovery.tsv: observed asr_path_score per (gene, position, scheme), read by the report for the biochemistry and convergence-type panels
+    path caas_pos_sample     // optional: null sample (NO_CAAS_POS_SAMPLE sentinel); passed to the report, which does not read it
+    path caas_pos_quantiles  // optional: per-cycle null quantiles (NO_CAAS_POS_QUANTILES sentinel); passed to the report, which does not read it
+    path filtered_discovery  // filtered_discovery.tsv: observed asr_path_score per (gene, position, side), read by the report for the convergence-type panels
     path background_file     // background gene list (NO_BACKGROUND or NO_FILE sentinel when absent); passed to the report, which does not read it
     path perm_manifest       // optional: permulation_manifest.tsv, design of the canonical pairs of each null cycle (NO_PERM_MANIFEST sentinel when absent)
     path hyp_pairs           // optional: contrast_hypotheses_pairs.tsv, design of the observed canonical pairs (NO_HYP_PAIRS sentinel when absent)

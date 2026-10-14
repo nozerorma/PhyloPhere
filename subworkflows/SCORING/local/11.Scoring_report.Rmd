@@ -152,7 +152,7 @@ for (.cn in intersect(.num_cols_pos, names(pos_df))) {
   pos_df[[.cn]] <- suppressWarnings(as.numeric(pos_df[[.cn]]))
 }
 
-.int_cols_pos <- c("Position", "n_schemes", "n_hypotheses", "n_top_species", "n_bottom_species")
+.int_cols_pos <- c("Position", "n_hypotheses", "n_top_species", "n_bottom_species")
 for (.cn in intersect(.int_cols_pos, names(pos_df))) {
   pos_df[[.cn]] <- suppressWarnings(as.integer(pos_df[[.cn]]))
 }
@@ -175,8 +175,7 @@ for (.cn in intersect(.int_cols_gene, names(gene_df))) {
 }
 if ("Gene" %in% names(gene_df)) gene_df$Gene <- as.character(gene_df$Gene)
 
-# position_scores.tsv carries no per-scheme factor: a position-level mean of asr_score would hide
-# scheme disagreement, and CAAS_score is already the US asr_path_score of the position.
+# position_scores.tsv carries no per-row factor, and CAAS_score is already the asr_path_score of the position.
 # `asr_score` is aliased to asr_path_score when the table has it and to CAAS_score otherwise, so
 # that the panels below always find the column.
 if (!"asr_score" %in% names(pos_df)) {
@@ -200,7 +199,7 @@ has_genomic       <- .file_ok(params$genomic_info_file)
 # Position-level null of the permulation: one row per (Gene, Position, side, cycle) detected by a null labeling.
 has_pos_null      <- .file_ok(params$caas_pos_cycle_caas_file) &&
                      length(readLines(params$caas_pos_cycle_caas_file, n = 2L)) >= 2L
-has_filtered      <- .file_ok(params$filtered_discovery_file) # observed per-scheme asr_path_score
+has_filtered      <- .file_ok(params$filtered_discovery_file) # observed asr_path_score
 # FADE site (position-level) data: use top direction if available, otherwise try bottom
 has_fade_pos      <- .file_ok(params$fade_site_top_file) || .file_ok(params$fade_site_bot_file)
 # FADE gene-level data: computed by scoring_compute.R from fade_summary_top/bottom.tsv,
@@ -267,7 +266,7 @@ gene_df$gene_caas_top <- .num_col("gene_caas_score_top")
 gene_df$gene_caas_bot <- .num_col("gene_caas_score_bottom")
 
 # ── Gene-level accumulation significance ──────────────────────────────────────
-# Accumulation is represented by its US empirical p-value (accum_p / accum_cct_p),
+# Accumulation is represented by its empirical p-value (accum_p / accum_cct_p),
 # with BH FDR (accum_fdr) and accum_significant (accum_fdr < 0.05).
 has_accum_score <- ("accum_p" %in% names(gene_df) && any(!is.na(gene_df$accum_p))) ||
                    ("accum_cct_p" %in% names(gene_df) && any(!is.na(gene_df$accum_cct_p)))
@@ -365,19 +364,19 @@ rank_norm <- function(x) {
 
 ## Introduction
 
-CAAS Scoring ranks the positions by their US convergence score, then rolls that up to a per-gene score comparable against
+CAAS Scoring ranks the positions by their convergence score, then rolls that up to a per-gene score comparable against
 independent evolutionary evidence.
 
-1. **Position score (`CAAS_score`)**: the CAAS convergence score of the US
-   scheme on the pair's Voronoi domain. Evidence that the convergence reflects
-   independent origins, not shared ancestry. The biochemical schemes GS1-GS4 do
-   not enter the score; they are described in the Biochemistry section of the
+1. **Position score (`CAAS_score`)**: the CAAS convergence score on the pair's
+   Voronoi domain. Evidence that the convergence reflects independent origins,
+   not shared ancestry. The biochemical groupings of the derived side
+   (`biochem_groupings`) do not enter the score; they are described in the
    position-level enrichment report.
 
 2. **Gene score (`gene_caas_score_top` / `_bottom`)**: the gene's strongest
    position, adjusted for how many positions the gene has, so genes are not
    rewarded simply for having more of them. Compared against:
-   `r if (has_rand) "- **accum_p**: Empirical p-value under the US scheme (+ BH FDR accum_fdr)."`
+   `r if (has_rand) "- **accum_p**: Empirical p-value of CAAS accumulation (+ BH FDR accum_fdr)."`
    `r if (has_rer) "- RERConverge p-value and direction (accelerating / decelerating)."`
    - FADE: gene is significant per direction if any position has BF >= 100.
 
@@ -421,7 +420,7 @@ reproduced independently of the pipeline code.
 
 ### Position-Level Score
 
-`CAAS_score` is built from one evidence axis; `caas_row` and the position score (the US `caas_row`) both lie in [0, 1]:
+`CAAS_score` is built from one evidence axis; `caas_row` and the position score (its `caas_row`) both lie in [0, 1]:
 
 #### 1. Position evolution: `asr_path_score` (`asr_score`)
 
@@ -437,18 +436,14 @@ Voronoi domain, built from the per-node ASR posteriors (full definitions in
 (Core v3 removed the pairwise isolation factor `s_c^s * s_d^s` and the earlier
 `independence` / `mrca_diversity` / `conservation_gate` axes from the score.)
 
-#### 2. Schemes
+#### 2. Position score and biochemical groupings
 
-A substitution is tested against five partitions of the amino acids (US, GS1-GS4); a scheme "detects" the position if the
-substitution crosses one of its group boundaries. `CAAS_score` is the `caas_row` of the US scheme, so it lies in [0, 1]:
+$$\text{caas\_row} = \text{asr\_path\_score}, \qquad \text{CAAS\_score} = \text{caas\_row}$$
 
-$$\text{caas\_row} = \text{asr\_path\_score}, \qquad \text{CAAS\_score} = \text{caas\_row}_{US}$$
-
-(`caas_row` carries no permutation-rank phenotype factor, on the observed or the null side.) A position that only GS
-schemes detect has no `CAAS_score` and is not in `position_scores.tsv`. `n_schemes` and `scheme_set` list the schemes that
-detect a position, and `GS_schemes` and `is_biochem` its biochemical profile; they are descriptors and do not enter any score.
-`position_biochem.tsv` holds the profile of every detected position, the GS-only ones included, and the Biochemistry
-section of the position-level enrichment report analyses it.
+(`caas_row` carries no permutation-rank phenotype factor, on the observed or the null side.) `biochem_groupings` lists the
+groupings GS1-GS4 in which the derived residues of the position share one class that differs from the ancestral class,
+and `is_biochem` says whether there is any; they are descriptors and do not enter any score. The position-level
+enrichment report analyses them.
 
 
 ---
@@ -471,7 +466,7 @@ from having more chances at a high maximum; raising the pool percentile to the
 
 #### gene_accum_score (`accum_p`) *(optional)*
 
-Empirical p-value of CAAS accumulation under the Unweighted Scheme (US).
+Empirical p-value of CAAS accumulation.
 Reported with BH FDR (`accum_fdr`); `accum_significant` is `accum_fdr < 0.05`.
 
 #### RERConverge characterisation *(optional)*
@@ -528,7 +523,7 @@ The formal per-pathway `p.perm` (ASR axis) is in the companion **FCS** report.
 
 # Null detections: one row per (Gene, Position, side, cycle) a permulated labeling detects; observed rows are the scored
 # positions of the run. The null table has a row per detection of every cycle (tens of millions at 1000 cycles) and
-# most of them carry no US score, which this section drops, so awk keeps only the top and bottom rows with a score
+# most of them carry no score, which this section drops, so awk keeps only the top and bottom rows with a score
 # while the gz file streams (readr would inflate it whole).
 .null_awk <- r"---(BEGIN { FS = OFS = "\t" }
 NR == 1 { for (i = 1; i <= NF; i++) col[$i] = i; g = col["Gene"]; p = col["Position"]; sd = col["side"]; cy = col["cycle"]; v = col["caas_score"]
@@ -1241,10 +1236,10 @@ print(p_combined)
 ### CAAS Score, Distribution by Direction
 
 The score distribution of convergent positions (`CAAS_score > 0`) by direction.
-Zero-scoring positions (shadow single-domain rows, divergent non-identical residues under US,
+Zero-scoring positions (shadow single-domain rows, divergent non-identical residues,
 or ancestral retentions) are filtered upstream from `position_scores.tsv` to avoid distorting
 the ECDF reference pools and multiple-testing adjustments, while remaining fully characterized in
-`filtered_discovery.tsv` and, as detections, in `position_biochem.tsv` (see the *Zero-Score Diagnostics* tab below).
+`filtered_discovery.tsv` (see the *Zero-Score Diagnostics* tab below).
 The `global` panel keeps one entry per position, its best side; `top` and `bottom` use the positions of that side.
 
 ```{r caas-score-nonzero, fig.height=5, fig.width=10, results='asis'}
@@ -1278,13 +1273,12 @@ if (nrow(.valid_caas) == 0) {
 
 ### Zero-Score Diagnostics & Structural Filtering
 
-Positions detected during discovery with `asr_path_score == 0` under the Unweighted Scheme (US)
+Positions detected during discovery with `asr_path_score == 0`
 are filtered from downstream scoring (`position_scores.tsv`) while remaining characterized in
 `filtered_discovery.tsv`. This diagnostic tabulates and visualizes the
 reasons why these position sides were filtered out:
 - **Single-domain shadow**: A single domain changed on this side ($n_{\text{changed}} = 1$) while the opposite side converged in $\ge 2$ independent lineages. A single domain cannot converge with itself.
-- **Divergent under US (biochemically convergent in GS1–GS4)**: Derived lineages mutated to different amino acids under US (e.g., `R -> C, H, Q`), but share common physicochemical properties under `GS1`–`GS4`.
-- **Divergent pure**: Lineages mutated to different residues with no biochemical convergence across any scheme.
+- **Divergent**: Derived lineages mutated to different amino acids (e.g., `R -> C, H, Q`), so no residue is shared.
 - **Symplesiomorphic / Reversion**: Retained ancestral state ($P_{\text{LCA}} = 1.0$) or cross-hypothesis non-co-occurrence.
 
 ```{r pos-zero-diag, fig.height=5, fig.width=10, results='asis'}
@@ -1293,39 +1287,24 @@ if (!has_disc) {
   cat("_`filtered_discovery_file` not available to diagnose filtered zero-score positions._\n\n")
 } else {
   .disc_all <- readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE)
-  if (!all(c("Gene", "Position", "caap_group") %in% names(.disc_all))) {
+  if (!all(c("Gene", "Position") %in% names(.disc_all))) {
     cat("_`filtered_discovery_file` missing required columns._\n\n")
   } else {
     .disc_all$Position <- suppressWarnings(as.integer(.disc_all$Position))
     .disc_all$Gene     <- as.character(.disc_all$Gene)
 
-    # Identify which positions have any biochemical convergence (GS1-GS4 with asr_path_score > 0)
-    .biochem_pos <- .disc_all %>%
-      filter(caap_group %in% c("GS1", "GS2", "GS3", "GS4")) %>%
-      mutate(score_num = suppressWarnings(as.numeric(asr_path_score))) %>%
-      filter(!is.na(score_num) & score_num > 0) %>%
-      distinct(Gene, Position) %>%
-      mutate(has_biochem = TRUE)
-
-    # Analyze US rows
+    # One row per detected position side
     .us_rows <- .disc_all %>%
-      filter(caap_group == "US") %>%
       mutate(
         score_num = suppressWarnings(as.numeric(asr_path_score)),
         side_clean = if ("side" %in% names(.)) as.character(side) else "none",
         ctype = if ("convergence_type" %in% names(.)) as.character(convergence_type) else "unknown"
       ) %>%
-      left_join(.biochem_pos, by = c("Gene", "Position")) %>%
-      mutate(has_biochem = coalesce(has_biochem, FALSE))
-
-    # Classify each US position row
-    .us_rows <- .us_rows %>%
       mutate(
         status = case_when(
           !is.na(score_num) & score_num > 0 & side_clean %in% c("top", "bottom") ~ "Retained: Convergent (CAAS_score > 0)",
           ctype == "single" ~ "Filtered: Single-domain shadow (n=1)",
-          ctype == "divergent" & has_biochem ~ "Filtered: Divergent US (biochemically convergent in GS1-GS4)",
-          ctype == "divergent" & !has_biochem ~ "Filtered: Divergent pure (no scheme converges)",
+          ctype == "divergent" ~ "Filtered: Divergent (different derived residues)",
           ctype %in% c("symplesiomorphic", "no_change") ~ "Filtered: Symplesiomorphic / Ancestral retention",
           TRUE ~ "Filtered: Non-convergent (score = 0)"
         )
@@ -1339,8 +1318,7 @@ if (!has_disc) {
     .stat_pal <- c(
       "Retained: Convergent (CAAS_score > 0)" = "#4E79A7",
       "Filtered: Single-domain shadow (n=1)" = "#F28E2B",
-      "Filtered: Divergent US (biochemically convergent in GS1-GS4)" = "#59A14F",
-      "Filtered: Divergent pure (no scheme converges)" = "#E15759",
+      "Filtered: Divergent (different derived residues)" = "#E15759",
       "Filtered: Symplesiomorphic / Ancestral retention" = "#B07AA1",
       "Filtered: Non-convergent (score = 0)" = "#BAB0AC"
     )
@@ -1352,8 +1330,8 @@ if (!has_disc) {
       coord_flip() +
       scale_fill_manual(values = .stat_pal) +
       scale_y_continuous(expand = expansion(mult = c(0, 0.25))) +
-      labs(title = "Position Filtering & Zero-Score Diagnostics (US scheme)",
-           subtitle = sprintf("Total US position sides detected: %s | Retained: %s",
+      labs(title = "Position Filtering & Zero-Score Diagnostics",
+           subtitle = sprintf("Total position sides detected: %s | Retained: %s",
                               format(nrow(.us_rows), big.mark = ","),
                               format(sum(.us_rows$status == "Retained: Convergent (CAAS_score > 0)"), big.mark = ",")),
            x = NULL, y = "Detected position sides") +
@@ -1363,7 +1341,7 @@ if (!has_disc) {
     print(p_zero)
     cat("\n\n")
     print(knitr::kable(.status_counts, col.names = c("Classification", "Count", "% of Detected"),
-                       caption = "Breakdown of US position sides: convergent vs filtered non-convergent."))
+                       caption = "Breakdown of position sides: convergent vs filtered non-convergent."))
     cat("\n\n")
   }
 }
@@ -1514,7 +1492,7 @@ has_caas_col <- "caas" %in% names(pos_df)
 
 dir_display_cols <- c("Gene", "Position", "CAAS_score",
                       if (has_caas_col) c("caas", "amino_encoded"),
-                      "n_schemes", "scheme_set",
+                      "biochem_groupings",
                       "n_hypotheses", "participating_hypotheses",
                       "side",
                       "derived_residues",
@@ -1565,28 +1543,15 @@ SCORING uses everywhere else (`top100` = every scored position, tightening to
 
 has_convtype <- .file_ok(params$filtered_discovery_file) && nrow(pos_df) > 0
 if (has_convtype) {
-  # filtered_discovery.tsv carries one row per (Gene, Position, caap_group,
-  # side) -- up to 5 scheme rows per side. pos_df (CAAS_score) carries one row
-  # per (Gene, Position, side). A join on (Gene, Position) alone would fan out
-  # into 1-10 duplicate rows per position (one per scheme x side combination),
-  # unevenly inflating positions with more supporting schemes in every
-  # downstream quantile/composition below. Collapse to one convergence_type
-  # per (Gene, Position, side) first -- same US > GS4 > GS3 > GS2 > GS1
-  # priority scoring_compute.R uses to collapse its own display-only columns
-  # (§2g) -- so the join here is 1:1 with pos_df, matching what CAAS_score
-  # itself already aggregates over.
-  .scheme_priority <- c(US = 5, GS4 = 4, GS3 = 3, GS2 = 2, GS1 = 1)
+  # filtered_discovery.tsv carries one row per (Gene, Position, side), as pos_df does, so the join below is 1:1.
   .disc_raw <- readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE) %>%
-    dplyr::select(Gene, Position, dplyr::any_of("side"), caap_group, convergence_type)
+    dplyr::select(Gene, Position, dplyr::any_of("side"), convergence_type)
   if ("Position" %in% names(.disc_raw)) .disc_raw$Position <- suppressWarnings(as.integer(.disc_raw$Position))
   if ("Gene"     %in% names(.disc_raw)) .disc_raw$Gene     <- as.character(.disc_raw$Gene)
   if ("side"     %in% names(.disc_raw)) .disc_raw$side     <- as.character(.disc_raw$side)
   .join_keys <- intersect(c("Gene", "Position", "side"), names(.disc_raw))
   .disc_df <- .disc_raw %>%
-    dplyr::mutate(.priority = .scheme_priority[caap_group]) %>%
-    dplyr::arrange(dplyr::desc(.priority)) %>%
-    dplyr::distinct(dplyr::pick(dplyr::all_of(.join_keys)), .keep_all = TRUE) %>%
-    dplyr::select(-.priority, -caap_group)
+    dplyr::distinct(dplyr::pick(dplyr::all_of(.join_keys)), .keep_all = TRUE)
   .conv_pos <- pos_df %>%
     dplyr::select(Gene, Position, CAAS_score, dplyr::any_of("side"))
   if ("Position" %in% names(.conv_pos)) .conv_pos$Position <- suppressWarnings(as.integer(.conv_pos$Position))
@@ -2256,7 +2221,6 @@ gridExtra::grid.arrange(
 ```
 
 ```{r gene-accum-table, eval=has_accum_score}
-accum_pval_cols <- grep("^accum_pval_", names(gene_df), value = TRUE)
 .acc_pcol <- intersect(c("accum_p", "accum_cct_p"), names(gene_df))[1]
 accum_tbl <- gene_df %>%
   filter(!is.na(.data[[.acc_pcol]])) %>%
@@ -2265,7 +2229,7 @@ accum_tbl <- gene_df %>%
     in_bot = Gene %in% gene_bot_list
   ) %>%
   arrange(.data[[.acc_pcol]]) %>%
-  select(Gene, any_of(c("accum_p", "accum_cct_p")), any_of("accum_fdr"), accum_significant, any_of(accum_pval_cols),
+  select(Gene, any_of(c("accum_p", "accum_cct_p")), any_of("accum_fdr"), accum_significant,
          gene_caas_score, gene_caas_top, gene_caas_bot,
          in_top, in_bot) %>%
   mutate(across(where(is.numeric), ~round(., 4)))
@@ -2275,7 +2239,7 @@ DT::datatable(
   options = list(pageLength = 20, scrollX = TRUE),
   caption = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
-    "Accumulation genes ranked by US empirical p-value - BH FDR and CAAS membership"
+    "Accumulation genes ranked by empirical p-value - BH FDR and CAAS membership"
   )
 )
 ```

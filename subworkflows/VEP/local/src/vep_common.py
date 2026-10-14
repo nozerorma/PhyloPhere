@@ -24,7 +24,7 @@ def anc_der_from_row(ancestral_aa, derived_aa, caas, side):
     """(ancestral_aas, derived_aas) of a position of position_scores.tsv.
 
     The residues are the ones the ASR inferred (the columns ancestral_aa and derived_aa, comma-separated). A position
-    without them (no US scheme row or no resolved domain) falls back to the caas pattern read in the direction of its
+    without them (no resolved domain) falls back to the caas pattern read in the direction of its
     side, see anc_der_from_caas.
     """
     anc = {a.strip().upper() for a in str(ancestral_aa or "").split(",") if a.strip()}

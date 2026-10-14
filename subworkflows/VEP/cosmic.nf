@@ -55,6 +55,6 @@ process COSMIC_MAP {
 
     stub:
     """
-    printf 'Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaas_change\tcaap_group\tscheme_weight\tCHROMOSOME\tGENOME_START\tGENOMIC_WT_ALLELE\tGENOMIC_MUT_ALLELE\tMUTATION_AA\tMUTATION_DESCRIPTION\tMUTATION_SOMATIC_STATUS\n' > cosmic_scores.tsv
+    printf 'Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaas_change\tCHROMOSOME\tGENOME_START\tGENOMIC_WT_ALLELE\tGENOMIC_MUT_ALLELE\tMUTATION_AA\tMUTATION_DESCRIPTION\tMUTATION_SOMATIC_STATUS\n' > cosmic_scores.tsv
     """
 }

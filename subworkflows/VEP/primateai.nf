@@ -16,7 +16,7 @@
  *  Consumes:  position_scores.tsv (SCORING), directory of per-gene MAP files,
  *             PrimateAI-3D hg38 table
  *  Produces:  vep/primateai_mapped.tsv, columns Gene, Position, hg38_ref_aa,
- *             caas_alt_aas, caas_change, caap_group, scheme_weight, then every
+ *             caas_alt_aas, caas_change, then every
  *             PrimateAI-3D column (header only when nothing matches; empty when
  *             the database file is missing)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -62,6 +62,6 @@ process PRIMATEAI_MAP {
 
     stub:
     """
-    printf 'Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaap_group\tscheme_weight\tchr\tpos\tref_aa\talt_aa\tscore_PAI3D\tpercentile_PAI3D\n' > primateai_mapped.tsv
+    printf 'Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tchr\tpos\tref_aa\talt_aa\tscore_PAI3D\tpercentile_PAI3D\n' > primateai_mapped.tsv
     """
 }

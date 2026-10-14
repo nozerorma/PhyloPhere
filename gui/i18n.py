@@ -379,13 +379,13 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "it": "Basato su",
         "de": "Baut auf",
     },
-    "Nextflow DSL2 pipeline for phylogenetic comparative genome-phenome analyses, centered on CAAStools-based CAAS/CAAP discovery.": {
-        "en": "Nextflow DSL2 pipeline for phylogenetic comparative genome-phenome analyses, centered on CAAStools-based CAAS/CAAP discovery.",
-        "es": "Pipeline Nextflow DSL2 para análisis genómico-fenómicos comparativos filogenéticos, centrado en la detección de CAAS/CAAP con CAAStools.",
-        "ca": "Pipeline Nextflow DSL2 per a anàlisis genòmic-fenòmiques comparatives filogenètiques, centrat en la detecció de CAAS/CAAP amb CAAStools.",
-        "fr": "Pipeline Nextflow DSL2 pour analyses comparatives génome-phénotype phylogénétiques, axé sur la détection CAAS/CAAP avec CAAStools.",
-        "it": "Pipeline Nextflow DSL2 per analisi comparative genoma-fenotipo filogenetiche, incentrata sulla rilevazione CAAS/CAAP con CAAStools.",
-        "de": "Nextflow DSL2-Pipeline für phylogenetische vergleichende Genom-Phänom-Analysen, fokussiert auf CAAS/CAAP-Entdeckung mit CAAStools.",
+    "Nextflow DSL2 pipeline for phylogenetic comparative genome-phenome analyses, centered on CAAStools-based CAAS discovery.": {
+        "en": "Nextflow DSL2 pipeline for phylogenetic comparative genome-phenome analyses, centered on CAAStools-based CAAS discovery.",
+        "es": "Pipeline Nextflow DSL2 para análisis genómico-fenómicos comparativos filogenéticos, centrado en la detección de CAAS con CAAStools.",
+        "ca": "Pipeline Nextflow DSL2 per a anàlisis genòmic-fenòmiques comparatives filogenètiques, centrat en la detecció de CAAS amb CAAStools.",
+        "fr": "Pipeline Nextflow DSL2 pour analyses comparatives génome-phénotype phylogénétiques, axé sur la détection CAAS avec CAAStools.",
+        "it": "Pipeline Nextflow DSL2 per analisi comparative genoma-fenotipo filogenetiche, incentrata sulla rilevazione CAAS con CAAStools.",
+        "de": "Nextflow DSL2-Pipeline für phylogenetische vergleichende Genom-Phänom-Analysen, fokussiert auf CAAS-Entdeckung mit CAAStools.",
     },
     "Builds on CAAStools (github.com/linudz/caastools)": {
         "en": "Builds on CAAStools (github.com/linudz/caastools)",
@@ -395,13 +395,13 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "it": "Basato su CAAStools (github.com/linudz/caastools)",
         "de": "Basiert auf CAAStools (github.com/linudz/caastools)",
     },
-    "CAAP grouping: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052": {
-        "en": "CAAP grouping: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
-        "es": "Agrupamiento CAAP: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
-        "ca": "Agrupament CAAP: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
-        "fr": "Groupement CAAP: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
-        "it": "Raggruppamento CAAP: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
-        "de": "CAAP-Gruppierung: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
+    "Amino acid groupings: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052": {
+        "en": "Amino acid groupings: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
+        "es": "Agrupaciones de aminoácidos: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
+        "ca": "Agrupacions d'aminoàcids: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
+        "fr": "Groupements d'acides aminés: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
+        "it": "Raggruppamenti di amminoacidi: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
+        "de": "Aminosäuregruppierungen: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
     },
     "RERconverge: Kowalczyk et al. (2019), Bioinformatics 35(22)": {
         "en": "RERconverge: Kowalczyk et al. (2019), Bioinformatics 35(22)",
@@ -822,14 +822,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'fr': 'Imposer les paires manquantes',
         'it': 'Imponi coppie mancanti',
         'de': 'Fehlende Paare erzwingen',
-    },
-    'CAAP mode (properties-based)': {
-        'en': 'CAAP mode (properties-based)',
-        'es': 'Modo CAAP (basado en propiedades)',
-        'ca': 'Mode CAAP (basat en propietats)',
-        'fr': 'Mode CAAP (basé sur les propriétés)',
-        'it': 'Modalità CAAP (basata sulle proprietà)',
-        'de': 'CAAP-Modus (eigenschaftsbasiert)',
     },
     'Permutation strategy': {
         'en': 'Permutation strategy',

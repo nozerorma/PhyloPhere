@@ -11,8 +11,8 @@ build_vep_hgvs.py. VEP rows whose identifier is not in the map are dropped. An i
 
 Called by:  ENSEMBL_VEP_ANNOTATE Nextflow process (ensembl_vep.nf → join_vep_output.py)
 Inputs:     vep_tab_output  VEP --tab file (## metadata lines, a #-prefixed header, rows)
-            id_map.tsv      hgvs_id, Gene, Position, side, caap_group
-Outputs:    output_tsv      Gene, Position, side, caap_group, then the VEP columns (one row per transcript)
+            id_map.tsv      hgvs_id, Gene, Position, side
+Outputs:    output_tsv      Gene, Position, side, then the VEP columns (one row per transcript)
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -24,13 +24,13 @@ import sys
 
 
 def load_id_map(path: str) -> dict:
-    """Return {hgvs_id: [(Gene, Position, side, caap_group), ...]} from the id-map TSV."""
+    """Return {hgvs_id: [(Gene, Position, side), ...]} from the id-map TSV."""
     mapping = {}
     with open(path, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
         for row in reader:
             mapping.setdefault(row["hgvs_id"], []).append(
-                (row["Gene"], row["Position"], row["side"], row["caap_group"]))
+                (row["Gene"], row["Position"], row["side"]))
     return mapping
 
 
@@ -53,14 +53,14 @@ def main():
             if line.startswith("#"):
                 header = line[1:].rstrip("\n").split("\t")
                 header = ["Ensembl_Gene" if col == "Gene" else col for col in header]
-                out.write("Gene\tPosition\tside\tcaap_group\t" + "\t".join(header) + "\n")
+                out.write("Gene\tPosition\tside\t" + "\t".join(header) + "\n")
                 continue
             if header is None:
                 continue
             fields = line.rstrip("\n").split("\t")
             hgvs_id = fields[0]
-            for gene, position, side, caap_group in id_map.get(hgvs_id, []):
-                out.write(f"{gene}\t{position}\t{side}\t{caap_group}\t" + "\t".join(fields) + "\n")
+            for gene, position, side in id_map.get(hgvs_id, []):
+                out.write(f"{gene}\t{position}\t{side}\t" + "\t".join(fields) + "\n")
                 n_written += 1
 
     print(f"Wrote {n_written} annotated rows to {output_tsv}", file=sys.stderr)

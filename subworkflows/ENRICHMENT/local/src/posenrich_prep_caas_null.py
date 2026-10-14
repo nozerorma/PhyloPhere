@@ -16,7 +16,7 @@ null_direction_subset): "top" and "bottom" keep that side, "global" keeps the ma
 over sides, and each (pos_id, cycle) pair has a single score.
 
 Called by:  POSENRICH_PREP_NULL Nextflow process (posenrich.nf → posenrich_prep_caas_null.py)
-Inputs:     --caas-cycle-null  perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_score, n_schemes);
+Inputs:     --caas-cycle-null  perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_score, score_aggregation);
                                absent or a NO_FILE* sentinel gives an empty artifact
             --cycle-roster     cycle_roster.txt of the same CAAS_CORE_MERGE run (optional): N of the null, the
                                cycles with no detection included
@@ -43,7 +43,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Pre-reduce the CAAS permulation null for POSENRICH_RUN_BATCHED.")
     p.add_argument("--caas-cycle-null", required=True,
                    help="perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, "
-                        "caas_score, n_schemes). Omit or pass a NO_FILE* sentinel to "
+                        "caas_score, score_aggregation). Omit or pass a NO_FILE* sentinel to "
                         "write an empty artifact (p.perm stays NA downstream).")
     p.add_argument("--cycle-roster", default=None,
                    help="cycle_roster.txt (one replayed cycle per line): N of the null. Without it, or when it "

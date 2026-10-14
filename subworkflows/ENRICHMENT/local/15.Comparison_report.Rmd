@@ -993,7 +993,7 @@ Prioritized gene candidates faceted by direction (**Global**, **Top**, **Bottom*
 - **Pondera** (blue): Criteria directly contributing to `Composite score`:
   - *CAAS percentiles* (`25%`, `10%`, `5%`, `1%`): collapsed to deepest nested tier (0–4).
   - *CAAS FCS evidence* (`CAAS evidence`): strongest FCS evidence tier reached (Supported = 2, Exploratory = 1, None = 0).
-  - *Accumulation* (`Accum_dir`): directional US accumulation significance (0–1).
+  - *Accumulation* (`Accum_dir`): directional accumulation significance (0–1).
   - *RER direction* (`RER_dir`): direction-matching acceleration/deceleration (0–1).
   - *RER FCS evidence* (`RER evidence`): strongest RER evidence tier reached (Supported = 2, Exploratory = 1, None = 0).
   - *FADE direction* (`FADE_dir`): directional excess divergence significance (0–1).
@@ -1471,7 +1471,7 @@ Prioritized amino-acid position candidates evaluated strictly at **position-nati
   - *CAAS percentiles* (`25%`, `10%`, `5%`, `1%`): collapsed to deepest nested tier (0–4).
   - *FADE site overlap* (`FADE_overlap`): exact codon site identified by FADE (0–1).
 - **Descriptivas** (amber): Characterization-only annotations excluded from scoring:
-  - *Biochemical profile*: `GS_schemes` (detection across the biochemical grouping schemes GS1–GS4) and `is_biochem` (hit in ≥1 GS scheme).
+  - *Biochemical profile*: `biochem_groupings` (groupings GS1–GS4 that the derived side agrees with) and `is_biochem` (agreement with ≥1 grouping).
   - *PosEnrich*: position-level functional enrichment terms (`PE_sig`, `PE term(s)`). Does not weight.
   - *Empirical statistics*: permutation p-values (`p.emp`, `p.adj_bh`).
   - *External annotations*: `COSMIC` somatic hits, `PAI3D_pathogenic` PrimateAI-3D pathogenicity calls.
@@ -1540,27 +1540,20 @@ build_interesting_positions <- function(direction) {
     base$PE_sig   <- FALSE
   }
 
-  # Biochemical profile flags (GS_schemes and is_biochem)
-  # The profile exists when position_scores.tsv carries it or its scheme_set; otherwise the columns are not shown.
-  has_biochem_pos <- any(c("GS_schemes", "scheme_set") %in% names(base))
-  if (!"GS_schemes" %in% names(base)) {
-    if ("scheme_set" %in% names(base)) {
-      base$GS_schemes <- gsub("\\+?US\\+?", "", base$scheme_set)
-      base$GS_schemes <- gsub("^\\+|\\+$", "", base$GS_schemes)
-      base$is_biochem <- grepl("GS", base$GS_schemes)
-    } else {
-      base$GS_schemes <- NA_character_
-      base$is_biochem <- FALSE
-    }
+  # Biochemical groupings of the derived side (biochem_groupings and is_biochem); the columns are not shown when
+  # position_scores.tsv does not carry them.
+  has_biochem_pos <- "biochem_groupings" %in% names(base)
+  if (!has_biochem_pos) {
+    base$biochem_groupings <- NA_character_
+    base$is_biochem <- FALSE
   }
   base$is_biochem <- dplyr::coalesce(as.logical(base$is_biochem), FALSE)
-  base$GS_schemes <- dplyr::coalesce(as.character(base$GS_schemes), "")
+  base$biochem_groupings <- dplyr::coalesce(as.character(base$biochem_groupings), "")
 
   # External characterization: PrimateAI-3D
   has_pai3d_pos <- FALSE
   if (has_vep_primateai_cmp && !is.null(vep_primateai_cmp_df) && nrow(vep_primateai_cmp_df) > 0) {
     .pai <- vep_primateai_cmp_df
-    if ("caap_group" %in% names(.pai)) .pai <- dplyr::filter(.pai, caap_group == "US")
     .pred_col <- intersect(c("prediction"), names(.pai))[1]
     if (!is.na(.pred_col)) {
       .pai_pos <- .pai %>%
@@ -1576,7 +1569,7 @@ build_interesting_positions <- function(direction) {
   # External characterization: COSMIC
   has_cosmic_pos <- FALSE
   if (has_vep_cosmic_cmp && !is.null(vep_cosmic_cmp_df) && nrow(vep_cosmic_cmp_df) > 0) {
-    .cosmic <- if ("caap_group" %in% names(vep_cosmic_cmp_df)) dplyr::filter(vep_cosmic_cmp_df, caap_group == "US") else vep_cosmic_cmp_df
+    .cosmic <- vep_cosmic_cmp_df
     .cosmic_hit <- paste(base$gene, base$Position) %in% paste(.cosmic$Gene, .cosmic$Position)
     .checkable <- if (has_pai3d_pos) base$PAI3D_pathogenic != "missing" else rep(TRUE, nrow(base))
     base$COSMIC <- dplyr::case_when(.cosmic_hit ~ "hit", .checkable ~ "no_hit", TRUE ~ "missing")
@@ -1587,7 +1580,7 @@ build_interesting_positions <- function(direction) {
   # External characterization: Ensembl VEP consequence
   has_vep_ensembl_pos <- FALSE
   if (has_vep_ensembl_cmp && !is.null(vep_ensembl_cmp_df) && nrow(vep_ensembl_cmp_df) > 0 && "Consequence" %in% names(vep_ensembl_cmp_df)) {
-    .vep_ens <- if ("caap_group" %in% names(vep_ensembl_cmp_df)) dplyr::filter(vep_ensembl_cmp_df, caap_group == "US") else vep_ensembl_cmp_df
+    .vep_ens <- vep_ensembl_cmp_df
     # One consequence per position and side (MANE Select, else canonical, else the most severe over all transcripts).
     # A table without a side column is matched by Gene and Position only.
     .vep_has_side <- "side" %in% names(.vep_ens) && "side" %in% names(base)
@@ -1690,7 +1683,7 @@ build_interesting_positions <- function(direction) {
   pond_cols <- c("25%", "10%", "5%", "1%")
   if (has_fade_pos) pond_cols <- c(pond_cols, "FADE_overlap")
 
-  desc_cols <- if (has_biochem_pos) c("GS_schemes", "is_biochem") else c()
+  desc_cols <- if (has_biochem_pos) c("biochem_groupings", "is_biochem") else c()
   if (has_pe_pos)          desc_cols <- c(desc_cols, "PE_sig", "PE term(s)")
   if (has_pemp)            desc_cols <- c(desc_cols, "p.emp")
   if (has_padj)            desc_cols <- c(desc_cols, "p.adj_bh")

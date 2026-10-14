@@ -92,7 +92,7 @@ def parse_args():
                         "for pai3d_orthogroups")
     p.add_argument("--caas-cycle-null", default=None,
                    help="perm_pos_cycle_caas.tsv.gz from CAAS_CORE_MERGE (Gene, Position, "
-                        "side, cycle, caas_score, n_schemes) - the CAAS permulation null. When "
+                        "side, cycle, caas_score, score_aggregation) - the CAAS permulation null. When "
                         "supplied, its real cycles are the null of the permulation p (lach_p.perm). "
                         "Omit or pass a NO_FILE* sentinel for no null (the permulation p is then NA). "
                         "Ignored when --caas-null-prepped is given.")
@@ -260,7 +260,7 @@ def collapse_null_sides(sub):
 
 
 def load_caas_cycle_null(path, roster_path=None):
-    """Load perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_score, n_schemes).
+    """Load perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_score, score_aggregation).
 
     Returns (long_df, all_cycle_levels, null_positions). long_df has columns pos_id, side, cycle and score,
     where score is the caas_score of the position on that side in that null cycle (the

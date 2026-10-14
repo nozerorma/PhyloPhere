@@ -128,10 +128,9 @@ workflow ENRICHMENT {
         rer_perms_ch
         caas_perms_ch
         caas_pos_sample_ch
-        caas_pos_cycle_caas_ch  // perm_pos_cycle_caas.tsv.gz (Gene,Position,side,cycle,caas_score,n_schemes,scheme_set) -> POSENRICH's p.perm and biochemistry section
+        caas_pos_cycle_caas_ch  // perm_pos_cycle_caas.tsv.gz (Gene,Position,side,cycle,caas_score,score_aggregation) -> POSENRICH's p.perm
         caas_cycle_roster_ch    // cycle_roster.txt of the same CAAS_CORE_MERGE run -> N of the null for POSENRICH (null/empty when absent)
         position_scores
-        position_biochem     // position_biochem.tsv: scheme profile of every detected position (biochemistry section of report 14)
         position_lists       // SCORING's published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv dir
         background_output_ch
         vep_primateai_ch     // optional: PrimateAI-3D score TSV (null when --vep not run)
@@ -430,7 +429,6 @@ workflow ENRICHMENT {
             def pos_cleaned_background_ch = (cleaned_background_ch ?: Channel.empty()).ifEmpty { file('NO_FILE_BACKGROUND') }
 
             def pos_caas_file_ch = (position_scores ?: Channel.empty()).ifEmpty { file('NO_FILE_CAAS') }
-            def pos_biochem_ch = (position_biochem ?: Channel.empty()).ifEmpty { file('NO_FILE_BIOCHEM') }
             // SCORING's own published position percentile slices -- posenrich's
             // SOLE foreground source (no local re-ranking fallback: SCORING is a
             // mandatory upstream dependency of posenrich, not optional). If
@@ -504,8 +502,7 @@ workflow ENRICHMENT {
                 pos_fade_sites_top_ch,
                 pos_fade_sites_bottom_ch,
                 pos_caas_cycle_null_ch,
-                pos_cycle_roster_ch,
-                pos_biochem_ch
+                pos_cycle_roster_ch
             )
             final_reports = final_reports.mix(posenrich_out.report)
         }

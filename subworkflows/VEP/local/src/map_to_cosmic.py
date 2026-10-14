@@ -9,8 +9,7 @@ change of the CAAS, in either orientation (the human residue may be the ancestra
 derived one), and writes them with their COSMIC annotation.
 
 Strategy:
-  1. Group the CAAS rows by (Gene, Position); only the `US` caap_group is used (rows
-     without a caap_group column count as `US`).
+  1. Group the CAAS rows by (Gene, Position).
   2. Translate each position to its hg38 codon with the per-gene MAP files (alignment
      column = Position + 1) and index the three nucleotides of the codon by
      (chromosome, coordinate); the strand is inferred from the MAP file.
@@ -21,14 +20,14 @@ Strategy:
 
 Called by:  COSMIC_MAP Nextflow process (cosmic.nf → map_to_cosmic.py)
 Inputs:     caas_file     position_scores.tsv, with Gene, Position and, when present, tag,
-                          caas, side, amino_encoded, caap_group, ancestral_aa and derived_aa; the ancestral and
+                          caas, side, amino_encoded, ancestral_aa and derived_aa; the ancestral and
                           derived residues are those of the ASR, or the caas pattern read by side when absent
             vep_map_dir   directory of the per-gene MAP files
             cosmic_gz     COSMIC Mutant Census GRCh38 table (gzip TSV)
             output_tsv    path of the output table
             [position_scores_tsv]  optional fifth argument, accepted and ignored
 Outputs:    output_tsv    Gene, Position, hg38_ref_aa, caas_alt_aas, caas_change,
-                          caap_group, scheme_weight, CHROMOSOME, GENOME_START,
+                          CHROMOSOME, GENOME_START,
                           GENOMIC_WT_ALLELE, GENOMIC_MUT_ALLELE, MUTATION_AA,
                           MUTATION_DESCRIPTION, MUTATION_SOMATIC_STATUS; header only
                           when no CAAS row can be mapped
@@ -53,17 +52,11 @@ from vep_common import (  # noqa: E402
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-# Weight written for each caap_group (only US is processed).
-SCHEME_WEIGHTS = {
-    "US":  1.0,
-}
-
-
 def write_header_only(output_tsv):
     """Write the output header (and no rows) and exit with status 0."""
     with open(output_tsv, 'w') as out:
         out.write(
-            "Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaas_change\tcaap_group\tscheme_weight\t"
+            "Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaas_change\t"
             "CHROMOSOME\tGENOME_START\tGENOMIC_WT_ALLELE\tGENOMIC_MUT_ALLELE\t"
             "MUTATION_AA\tMUTATION_DESCRIPTION\tMUTATION_SOMATIC_STATUS\n"
         )
@@ -103,7 +96,6 @@ def main():
         anc_col = col_lc.get('ancestral_aa')
         der_col = col_lc.get('derived_aa')
         amino_col = col_lc.get('amino_encoded')
-        caap_col = col.get('caap_group') or col_lc.get('caap_group')
         dres_col = col_lc.get('derived_residues')
 
         if any(c is None for c in [gene_col, pos_col]):
@@ -113,10 +105,6 @@ def main():
         for line in fh:
             fields = line.rstrip('\n').split('\t')
             if len(fields) < len(header):
-                continue
-
-            caap_grp = fields[caap_col] if caap_col is not None else 'US'
-            if caap_grp != 'US':
                 continue
 
             gene = fields[gene_col]
@@ -135,8 +123,6 @@ def main():
             der_val = fields[der_col] if der_col is not None else ''
             amino_enc = fields[amino_col] if amino_col is not None else ''
             caas_change = amino_enc if amino_enc else caas_pat
-            weight = SCHEME_WEIGHTS.get(caap_grp, 1.0)
-
 
             anc_aas, der_aas = anc_der_from_row(anc_val, der_val, caas_pat, cside)
 
@@ -148,8 +134,6 @@ def main():
                 'tag': tag,
                 'anc_aas': anc_aas,
                 'der_aas': der_aas,
-                'caap_group': caap_grp,
-                'weight': weight,
                 'caas_change': caas_change,
             })
 
@@ -214,7 +198,7 @@ def main():
             sys.exit(f"Missing expected column in COSMIC header: {exc}")
 
         out.write(
-            "Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaas_change\tcaap_group\tscheme_weight\t"
+            "Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaas_change\t"
             "CHROMOSOME\tGENOME_START\tGENOMIC_WT_ALLELE\tGENOMIC_MUT_ALLELE\t"
             "MUTATION_AA\tMUTATION_DESCRIPTION\tMUTATION_SOMATIC_STATUS\n"
         )
@@ -253,8 +237,6 @@ def main():
                 for entry in tag_entries:
                     der_aas = entry['der_aas']
                     anc_aas = entry['anc_aas']
-                    caap_grp = entry['caap_group']
-                    weight = entry['weight']
                     caas_change = entry['caas_change']
 
                     # Only a plain missense change (p.X123Y) can match the CAAS transition.
@@ -273,7 +255,6 @@ def main():
                     out.write(
                         f"{gene}\t{caas_pos}\t"
                         f"{ref_aa}\t{''.join(sorted(der_aas))}\t{caas_change}\t"
-                        f"{caap_grp}\t{weight}\t"
                         f"{chrom}\t{pos}\t{wt_allele}\t{mut_allele}\t"
                         f"{mut_aa}\t{mut_desc}\t{somatic_status}\n"
                     )

@@ -32,8 +32,8 @@ workflow SCORING {
         rer_perms_ch             // Channel<path> or null — RER permulation RDS (corStat) for RER FCS p.perm
         caas_perms_ch            // Channel<path> or null — CAAS permulation RDS (asr + caas null) for FCS p.perm
         caas_pos_cycle_caas_ch   // Channel<path> or null — perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator)
-        caas_pos_sample_ch       // Channel<path> or null — cycle-stratified per-scheme sample for report distribution plots
-        caas_pos_quantiles_ch    // Channel<path> or null — per (cycle,scheme) null distribution shape
+        caas_pos_sample_ch       // Channel<path> or null — cycle-stratified sample for report distribution plots
+        caas_pos_quantiles_ch    // Channel<path> or null — per-cycle null distribution shape
         hypotheses_pairs_ch      // Channel<path> or null — contrast_hypotheses_pairs.tsv (FOP domain-pool weights)
         perm_manifest_ch         // Channel<path> or null — permulation_manifest.tsv (design of the canonical pairs of each null cycle)
         perm_harvest_ch          // Channel<path> or null — permulation_harvest.tsv (draws, rejections, acceptance by PSS tolerance, capacity)
@@ -274,7 +274,7 @@ workflow SCORING {
             .map { it[0] }
 
         // filtered_discovery (resolved_postproc, a value channel) = the observed
-        // per-(gene,position,scheme) asr_path_score overlaid on the per-scheme null;
+        // per-(gene,position) asr_path_score overlaid on the null;
         // when scoring runs it is always present (same condition as position_scores).
         def report_out = SCORING_REPORT(
             compute_out.position_scores,
@@ -298,7 +298,6 @@ workflow SCORING {
 
     emit:
         position_scores  = compute_out.position_scores
-        position_biochem = compute_out.position_biochem   // scheme profile of every detected position (GS-only included)
         gene_scores      = compute_out.gene_scores
         fcs_stats        = compute_out.fcs_stats
         fcs_stats_rer    = compute_out.fcs_stats_rer

@@ -548,7 +548,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             scoring_caas_perms_ch = caas_perm_out.perms
             scoring_caas_pos_cycle_caas_ch = caas_perm_out.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))  // per (gene,position,side,cycle) caas_score -> p.emp
             scoring_caas_pos_sample_ch = caas_perm_out.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))  // cycle-stratified sample for distribution plots
-            scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))  // per (cycle,scheme) distribution shape
+            scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))  // per-cycle distribution shape
             scoring_caas_cycle_roster_ch = caas_perm_out.cycle_roster.ifEmpty(file('NO_CAAS_CYCLE_ROSTER'))  // every replayed cycle, the empty ones included
             ran_any = true
         }
@@ -814,7 +814,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 scoring_caas_perms_ch, // CAAS permulation RDS (asr+caas null) → FCS p.perm + report
                 scoring_caas_pos_cycle_caas_ch, // per (gene,position,side,cycle) caas_score → p.emp
                 scoring_caas_pos_sample_ch,  // cycle-stratified sample for report distribution plots
-                scoring_caas_pos_quantiles_ch, // per (cycle,scheme) null distribution shape
+                scoring_caas_pos_quantiles_ch, // per-cycle null distribution shape
                 scoring_hyp_pairs_ch,          // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
                 scoring_perm_manifest_ch,      // permulation_manifest.tsv — design of the null cycles (report panel)
                 scoring_perm_harvest_ch,       // permulation_harvest.tsv — what the null harvest tried and discarded (report tab)
@@ -878,7 +878,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 def gene_lists_ch = params.scoring ? SCORING.out.gene_lists : Channel.empty()
                 def gene_scores_ch = params.scoring ? SCORING.out.gene_scores : Channel.empty()
                 def position_scores_ch = params.scoring ? SCORING.out.position_scores : Channel.empty()
-                def position_biochem_ch = params.scoring ? SCORING.out.position_biochem : Channel.empty()
                 def position_lists_ch = params.scoring ? SCORING.out.position_lists : Channel.empty()
                 def scoring_vep_pai_ch     = params.vep ? VEP.out.primateai_tsv   : null
                 def scoring_vep_cosmic_ch  = params.vep ? VEP.out.cosmic_tsv      : null
@@ -945,7 +944,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     scoring_caas_pos_cycle_caas_ch,
                     scoring_caas_cycle_roster_ch,
                     position_scores_ch,
-                    position_biochem_ch,
                     position_lists_ch,
                     posenrich_background_ch,
                     scoring_vep_pai_ch,

@@ -58,7 +58,7 @@ params:
   Called by: ASR_DIAGNOSTICS_REPORT (asr_diagnostics.nf), through rmarkdown::render().
   Params:    disambig_dir (ct_disambiguation/ with caas_convergence_master.csv),
              posterior_threshold (shown in the report, not applied), output_dir.
-  A row of the master is one (gene, msa_pos, caap_group, side). asr_path_score is the score of the row on the
+  A row of the master is one (gene, msa_pos, side). asr_path_score is the score of the row on the
   Voronoi domains (fop_pool.py); derived_agreement is a descriptor and does not enter the score.
 -->
 
@@ -128,11 +128,11 @@ save_plot <- function(p, fname, width = 11, height = 6) {
 
 ## Introduction
 
-`asr_path_score` is the CAAS convergence score of a position on the K fixed Voronoi domains of the contrast design. It is computed for each scheme (US, GS1 to GS4) and each phenotype side, so a position contributes up to ten rows to the master table.
+`asr_path_score` is the CAAS convergence score of a position on the K fixed Voronoi domains of the contrast design. It is computed for each phenotype side, so a position contributes up to two rows to the master table.
 
-For one hypothesis and one side, a domain is *changed* when its observed foreground residue, encoded in the scheme, differs from the modal ancestral residue at the MRCA of its pair. A changed domain scores the noisy-OR, over the changed domains that carry the same encoded residue, of `1 - P`, where `P` is the posterior mass of that residue at the LCA of the two domains. `P` is the recorded mass of the residue and, when the residue is not in the recorded distribution of the node, the whole unrecorded mass (worst case). A changed domain without a same-residue partner scores 0. The domain scores are averaged over the hypotheses and the score of the row is their mean weighted by the PSS of each domain; domains without a valid reconstruction stay in the denominator with score 0.
+For one hypothesis and one side, a domain is *changed* when its observed foreground residue differs from the modal ancestral residue at the MRCA of its pair. A changed domain scores the noisy-OR, over the changed domains that carry the same residue, of `1 - P`, where `P` is the posterior mass of that residue at the LCA of the two domains. `P` is the recorded mass of the residue and, when the residue is not in the recorded distribution of the node, the whole unrecorded mass (worst case). A changed domain without a same-residue partner scores 0. The domain scores are averaged over the hypotheses and the score of the row is their mean weighted by the PSS of each domain; domains without a valid reconstruction stay in the denominator with score 0.
 
-`derived_agreement` is `agree_num / agree_den`: the fraction of the changed domains whose modal encoded derived residue is the most frequent one. It describes the row and does not enter the score.
+`derived_agreement` is `agree_num / agree_den`: the fraction of the changed domains whose modal derived residue is the most frequent one. It describes the row and does not enter the score.
 
 The posterior threshold removes from the recorded distribution of a node every residue below it, except the most probable one. Removed mass is unrecorded, so a higher threshold can only raise `P` and lower the scores. The threshold is applied when the ASR posteriors are read; this report shows its value and does not vary it.
 
@@ -145,10 +145,10 @@ if (!file.exists(master_csv)) {
 }
 
 # Only the columns used here are read; the support tallies of the master are large.
-base_cols <- c("gene", "msa_pos", "caap_group", "side", "convergence_type", "n_hypotheses",
+base_cols <- c("gene", "msa_pos", "side", "convergence_type", "n_hypotheses",
                "asr_path_score", "derived_agreement", "agreement_ambiguous")
 hdr  <- names(readr::read_csv(master_csv, n_max = 0, show_col_types = FALSE))
-need <- c("gene", "msa_pos", "caap_group", "side", "asr_path_score")
+need <- c("gene", "msa_pos", "side", "asr_path_score")
 if (!all(need %in% hdr)) {
   stop(sprintf("[asr_diagnostics] the master lacks the columns: %s", paste(setdiff(need, hdr), collapse = ", ")))
 }
@@ -156,7 +156,7 @@ keep <- hdr[hdr %in% base_cols]
 
 master_df <- readr::read_csv(
   master_csv, col_select = all_of(keep), show_col_types = FALSE, guess_max = 10000,
-  col_types = readr::cols(.default = readr::col_guess(), gene = "c", caap_group = "c", side = "c",
+  col_types = readr::cols(.default = readr::col_guess(), gene = "c", side = "c",
                           convergence_type = "c")
 )
 # Optional columns are present as NA when the master lacks them
@@ -171,9 +171,6 @@ master_df <- master_df %>%
 score_df <- master_df %>% filter(!is.na(asr_path_score))
 if (nrow(score_df) == 0) stop("No ASR path scores found in the provided CSV.")
 
-scheme_levels <- intersect(c("US", "GS1", "GS2", "GS3", "GS4"), unique(score_df$caap_group))
-score_df <- score_df %>% mutate(caap_group = factor(caap_group, levels = scheme_levels))
-
 n_positions <- score_df %>% distinct(gene, msa_pos) %>% nrow()
 ```
 
@@ -181,16 +178,15 @@ n_positions <- score_df %>% distinct(gene, msa_pos) %>% nrow()
 >
 > **Disambiguation directory**: `r disambig_dir`
 >
-> **Rows in the master** (gene × position × scheme × side): `r format(nrow(master_df), big.mark = ",")`
+> **Rows in the master** (gene × position × side): `r format(nrow(master_df), big.mark = ",")`
 >
 > **Scored rows**: `r format(nrow(score_df), big.mark = ",")`, over `r format(n_positions, big.mark = ",")` positions in `r n_distinct(score_df$gene)` genes
 
 ```{r rows-table}
 score_df %>%
-  count(caap_group, side) %>%
+  count(side) %>%
   pivot_wider(names_from = side, values_from = n, values_fill = 0) %>%
-  rename(Scheme = caap_group) %>%
-  kable(format = "html", caption = "Scored rows per scheme and side") %>%
+  kable(format = "html", caption = "Scored rows per side") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 ```
 
@@ -198,12 +194,10 @@ score_df %>%
 
 ## 1. Distribution of the ASR path score
 
-The schemes GS1 to GS4 co-encode residues of the same group, so two domains with different residues can agree under them; scores are therefore not expected to be equal across schemes, and each scheme is shown separately.
-
-```{r plot-score-dist, fig.height=9, fig.cap="Distribution of asr_path_score per scheme and side."}
+```{r plot-score-dist, fig.height=4, fig.cap="Distribution of asr_path_score per side."}
 p_score <- ggplot(score_df, aes(x = asr_path_score)) +
   geom_histogram(binwidth = 0.02, fill = .tableau10[1], colour = "white", alpha = 0.85) +
-  facet_grid(caap_group ~ side, scales = "free_y") +
+  facet_wrap(~ side, scales = "free_y") +
   labs(
     title = "ASR path score",
     subtitle = sprintf("%s scored rows, %s positions",
@@ -213,7 +207,7 @@ p_score <- ggplot(score_df, aes(x = asr_path_score)) +
   )
 
 print(p_score)
-save_plot(p_score, "asr_path_score_distribution.png", width = 9, height = 10)
+save_plot(p_score, "asr_path_score_distribution.png", width = 9, height = 5)
 ```
 
 ---
@@ -222,21 +216,21 @@ save_plot(p_score, "asr_path_score_distribution.png", width = 9, height = 10)
 
 `derived_agreement` is a descriptor of the row (see Introduction). `agreement_ambiguous` marks rows where a changed domain had two derived residues tied across hypotheses and the smallest residue was taken by convention; for those rows, `derived_agreement` and `convergence_type` rest on that convention.
 
-```{r plot-agreement, fig.height=9, fig.cap="Distribution of derived_agreement per scheme and side."}
+```{r plot-agreement, fig.height=4, fig.cap="Distribution of derived_agreement per side."}
 agree_df <- score_df %>% filter(!is.na(derived_agreement))
 
 p_agree <- ggplot(agree_df, aes(x = derived_agreement)) +
   geom_histogram(binwidth = 0.05, fill = .tableau10[3], colour = "white", alpha = 0.85) +
-  facet_grid(caap_group ~ side, scales = "free_y") +
+  facet_wrap(~ side, scales = "free_y") +
   labs(title = "Derived agreement", x = "derived_agreement", y = "Rows")
 
 print(p_agree)
-save_plot(p_agree, "derived_agreement_distribution.png", width = 9, height = 10)
+save_plot(p_agree, "derived_agreement_distribution.png", width = 9, height = 5)
 ```
 
 ```{r agreement-table}
 agree_tab <- score_df %>%
-  group_by(Scheme = caap_group) %>%
+  group_by(Side = side) %>%
   summarise(
     Rows = n(),
     `Convergent (%)` = 100 * mean(convergence_type == "convergent", na.rm = TRUE),
@@ -246,10 +240,10 @@ agree_tab <- score_df %>%
     .groups = "drop"
   )
 
-write_tsv_safe(agree_tab, "convergence_type_by_scheme.tsv")
+write_tsv_safe(agree_tab, "convergence_type_by_side.tsv")
 
 agree_tab %>%
-  kable(format = "html", digits = 2, caption = "Convergence type and ambiguous agreement per scheme (convergence_type_by_scheme.tsv)") %>%
+  kable(format = "html", digits = 2, caption = "Convergence type and ambiguous agreement per side (convergence_type_by_side.tsv)") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 ```
 
@@ -272,10 +266,10 @@ save_plot(p_sa, "asr_path_score_vs_derived_agreement.png", width = 10, height = 
 
 ```{r summary-table}
 summary_table <- score_df %>%
-  select(caap_group, side, asr_path_score, derived_agreement) %>%
+  select(side, asr_path_score, derived_agreement) %>%
   pivot_longer(c(asr_path_score, derived_agreement), names_to = "Variable", values_to = "value") %>%
   filter(!is.na(value)) %>%
-  group_by(Variable, Scheme = caap_group, Side = side) %>%
+  group_by(Variable, Side = side) %>%
   summarise(
     n = n(), Mean = mean(value), Median = median(value),
     SD = sd(value), Min = min(value), Max = max(value),
@@ -285,7 +279,7 @@ summary_table <- score_df %>%
 write_tsv_safe(summary_table, "asr_path_summary_statistics.tsv")
 
 summary_table %>%
-  kable(format = "html", digits = 4, caption = "Summary statistics per scheme and side (asr_path_summary_statistics.tsv)") %>%
+  kable(format = "html", digits = 4, caption = "Summary statistics per side (asr_path_summary_statistics.tsv)") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
 ```
 

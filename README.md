@@ -260,19 +260,16 @@ characterization is a separate evidence line handled by ENRICHMENT
 
 ### Position-level score (`CAAS_score`)
 
-For each alignment position and side, `CAAS_score` is the `caas_row` of the US scheme, and a side that US does not detect
-or scores 0 has no score and is not in `position_scores.tsv`. `caas_row` is `asr_score`/`asr_path_score`, the
-ancestral-state-reconstruction path score of the row. The score lies in (0, 1]. The GS1-GS4 schemes do not enter the score:
-`GS_schemes` and `is_biochem` of `position_scores.tsv` give the biochemical profile of each position, `position_biochem.tsv`
-that of every detected position (those only GS schemes detect included), and the Biochemistry section of the
-position-level enrichment report analyses it against the permulation null.
+For each alignment position and side, `CAAS_score` is the `caas_row` of the row, and a side that is not detected or scores 0
+has no score and is not in `position_scores.tsv`. `caas_row` is `asr_score`/`asr_path_score`, the
+ancestral-state-reconstruction path score of the row. The score lies in (0, 1].
 
-US is the strict test on residues, and a GS scheme tests the same substitution after recoding the residues into
-biochemical classes, so the GS term is the bonus for a divergence in chemistry. A position detected only by GS
-schemes keeps its GS term (its US term is 0) instead of dropping out, and one detected by both adds the two. How
-many GS schemes detect it is not rewarded: the four partitions are
-different axes (polarity and volume, dipole, side-chain family, functional bins), not finer and coarser versions
-of one, and `n_schemes` and `scheme_set` are descriptors, not inputs to the score.
+The derived side is annotated with four amino acid groupings, GS1-GS4, that recode residues into biochemical classes
+(polarity and volume, dipole, side-chain family, functional bins; independent axes, not finer and coarser versions of one).
+`biochem_groupings` of `position_scores.tsv` lists the groupings in which the derived residues of the position share one
+class that differs from the ancestral class, and `is_biochem` says whether there is any. The residues are read as the VEP
+annotation reads them. The annotation does not enter the score; the position-level enrichment report tests whether
+agreement is enriched among the highest scores.
 
 The permulation null and the observed score use the same rule: scoring stops when the null
 (`perm_pos_cycle_caas.tsv.gz`, column `score_aggregation`) is missing or was built with another rule, and the null
@@ -295,12 +292,12 @@ is then rebuilt (`CAAS_CORE_MERGE`, no ASR replay).
 ### Key output columns
 
 **`position_scores.tsv`**: `CAAS_score`, `asr_score`, `pvalue`,
-`change_side`, `gate_sig`, `n_schemes`, `scheme_set`, and the residues the ASR inferred for the position and
+`change_side`, `gate_sig`, `biochem_groupings`, `is_biochem`, and the residues the ASR inferred for the position and
 side, `ancestral_aa` and `derived_aa` (comma-separated, most frequent first). The `caas` column is the pattern
 `<top residues>/<bottom residues>` and has no direction.
 
 **`gene_scores.tsv`**: `gene_caas_score` (+ `_top`/`_bottom`), `accum_p`
-(empirical accumulation p of the US scheme; `accum_cct_p` repeats it) with BH FDR `accum_fdr` and
+(empirical accumulation p; `accum_cct_p` repeats it) with BH FDR `accum_fdr` and
 `accum_significant`, `rer_min_pval`, `rer_acceleration`,
 `fade_max_bf_top`/`_bottom`, `fade_significant_top`/`_bottom`.
 
@@ -724,7 +721,7 @@ When you launch your run (`nextflow run main.nf ...`), execution progress, resou
 
 PhyloPhere integrates and builds upon several key computational methods and databases:
 - **[CAAStools](https://github.com/linudz/caastools)** — Convergent amino acid substitution discovery (Barteri et al., 2022).
-- **[CAAP Grouping](https://doi.org/10.1111/1755-0998.14052)** — Amino acid properties-based grouping (Chen & Zou, 2025).
+- **[Amino acid groupings](https://doi.org/10.1111/1755-0998.14052)** — Amino acid properties-based groupings (Chen & Zou, 2025).
 - **[RERconverge](https://github.com/nclark-lab/RERconverge)** — Relative evolutionary rate correlation analysis (Kowalczyk et al., 2019).
 - **[HyPhy FADE](https://www.hyphy.org)** — Directional amino-acid selection analysis (Kosakovsky Pond et al., 2021).
 - **[PrimateAI-3D](https://www.science.org/doi/10.1126/science.abn7829)** — 3D protein structure-based variant pathogenicity scores (Gao et al., 2023).
@@ -758,7 +755,6 @@ GNU General Public License v3.0 — see [LICENSE](LICENSE).
 ## Additional docs
 
 - [Citations](docs/CITATIONS.md)
-- [CAAP mode notes](docs/CAAP_MODE.md)
 - [Multi-phenotype methods](docs/METHODS_multi_phenotype.md)
 - [ASR path score design](docs/ASR_PATH_SCORE.md)
 - [CAAS permulation-excess null](docs/CAAS_PERMULATION_EXCESS.md)

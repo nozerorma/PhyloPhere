@@ -47,9 +47,6 @@ class Namespace:  # noqa: vulture whitelist stub
     prune_data = None
     group = None
     groups = None
-    caap = None
-    scheme = None
-    schemes = None
     nboot = None
     alpha = None
     target = None

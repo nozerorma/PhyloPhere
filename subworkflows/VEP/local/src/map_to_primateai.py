@@ -22,19 +22,18 @@ Orientation: the human reference residue of PrimateAI-3D (`ref_aa`) decides whic
 residues are valid alternatives. If it is an ancestral residue of the CAAS the
 alternatives are the derived ones; if it is a derived residue they are the ancestral
 ones; if it is neither, any CAAS residue other than the human one. When that leaves no
-residue, every CAAS residue is accepted. Only rows of the `US` caap_group are used
-(rows without a caap_group column count as `US`).
+residue, every CAAS residue is accepted.
 
 Called by:  PRIMATEAI_MAP Nextflow process (primateai.nf → map_to_primateai.py)
 Inputs:     caas_file       position_scores.tsv, with Gene, Position and, when present, tag,
-                            caas, side, amino_encoded, caap_group, ancestral_aa and derived_aa; the ancestral and
+                            caas, side, amino_encoded, ancestral_aa and derived_aa; the ancestral and
                             derived residues are those of the ASR, or the caas pattern read by side when absent
             vep_map_dir     directory of the per-gene MAP files
             primateai_gz    PrimateAI-3D hg38 table (gzip TSV, with chr, pos, ref_aa, alt_aa)
             output_tsv      path of the output table
             [position_scores_tsv]  optional fifth argument, accepted and ignored
 Outputs:    output_tsv      Gene, Position, hg38_ref_aa, caas_alt_aas, caas_change,
-                            caap_group, scheme_weight, then every PrimateAI-3D column;
+                            then every PrimateAI-3D column;
                             header only when no CAAS row can be mapped
 """
 
@@ -53,12 +52,6 @@ from vep_common import (  # noqa: E402
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-# Weight written for each caap_group (only US is processed).
-SCHEME_WEIGHTS = {
-    "US":  1.0,
-}
-
-
 def write_header_only(primateai_gz, output_tsv):
     """Write the output header (and no rows), report it on stderr and exit with status 0."""
     with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
@@ -66,7 +59,6 @@ def write_header_only(primateai_gz, output_tsv):
         out.write(
             "Gene\tPosition\t"
             "hg38_ref_aa\tcaas_alt_aas\tcaas_change\t"
-            "caap_group\tscheme_weight\t"
             + pai_header + "\n"
         )
     print("No CAAS rows available for PrimateAI mapping; wrote header-only output.",
@@ -110,7 +102,6 @@ with open(caas_file) as fh:
     anc_col = col_lc.get('ancestral_aa')
     der_col = col_lc.get('derived_aa')
     amino_col = col_lc.get('amino_encoded')
-    caap_col = col.get('caap_group') or col_lc.get('caap_group')
     dres_col = col_lc.get('derived_residues')
 
     if any(c is None for c in [gene_col, pos_col]):
@@ -120,10 +111,6 @@ with open(caas_file) as fh:
     for line in fh:
         fields = line.rstrip('\n').split('\t')
         if len(fields) < len(header):
-            continue
-
-        caap_grp = fields[caap_col] if caap_col is not None else 'US'
-        if caap_grp != 'US':
             continue
 
         gene = fields[gene_col]
@@ -142,8 +129,6 @@ with open(caas_file) as fh:
         der_val = fields[der_col] if der_col is not None else ''
         amino_enc = fields[amino_col] if amino_col is not None else ''
         caas_change = amino_enc if amino_enc else caas_pat
-        weight = SCHEME_WEIGHTS.get(caap_grp, 1.0)
-
 
         anc_aas, der_aas = anc_der_from_row(anc_val, der_val, caas_pat, cside)
 
@@ -154,8 +139,6 @@ with open(caas_file) as fh:
             'tag': tag,
             'anc_aas': anc_aas,
             'der_aas': der_aas,
-            'caap_group': caap_grp,
-            'weight': weight,
             'caas_change': caas_change,
         })
 
@@ -231,7 +214,6 @@ with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
     out.write(
         "Gene\tPosition\t"
         "hg38_ref_aa\tcaas_alt_aas\tcaas_change\t"
-        "caap_group\tscheme_weight\t"
         + pai_header + "\n"
     )
 
@@ -265,8 +247,6 @@ with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
             for entry in tag_entries:
                 der_aas = entry['der_aas']
                 anc_aas = entry['anc_aas']
-                caap_grp = entry['caap_group']
-                weight = entry['weight']
                 caas_change = entry['caas_change']
 
                 # Determine valid alternative amino acids to match in PrimateAI:
@@ -289,7 +269,6 @@ with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
                 out.write(
                     f"{gene}\t{caas_pos}\t"
                     f"{ref_aa}\t{''.join(sorted(alt_aas))}\t{caas_change}\t"
-                    f"{caap_grp}\t{weight}\t"
                     f"{line}\n"
                 )
                 matched += 1

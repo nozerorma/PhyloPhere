@@ -21,8 +21,7 @@
  *             positions (background.output) and cleaned background that fix the
  *             positional universe of the null. Each optional input is a staged
  *             NO_* sentinel file when absent.
- *  Produces:  position_scores.tsv, position_biochem.tsv (scheme profile of every detected
- *             position, GS-only ones included), gene_scores.tsv, gene_correlations.tsv,
+ *  Produces:  position_scores.tsv, gene_scores.tsv, gene_correlations.tsv,
  *             fcs_stats.tsv (plus fcs_stats_{rer,fade,accum}.tsv when that evidence
  *             exists), null_universe_summary.tsv (N, size of the positional universe,
  *             observed positions the null never scored, saturation curve of the
@@ -66,7 +65,6 @@ process SCORING_COMPUTE {
 
     output:
     path "position_scores.tsv",                              emit: position_scores
-    path "position_biochem.tsv",                             emit: position_biochem
     path "gene_scores.tsv",                                  emit: gene_scores
     path "fcs_stats.tsv",                                    emit: fcs_stats
     path "fcs_stats_rer.tsv",                          optional: true, emit: fcs_stats_rer

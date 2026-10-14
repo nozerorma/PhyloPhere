@@ -12,8 +12,8 @@
  *  Steps: build_vep_hgvs.py writes one protein-level HGVS identifier per change of every
  *  (gene, position, side) (the ancestral and derived residues are the ASR ones of
  *  position_scores.tsv and differ between the two sides, so no reference proteome is needed),
- *  `vep` annotates them, and join_vep_output.py attaches the result to Gene, Position, side
- *  and caap_group. The output has one row per transcript; the reports reduce it to one
+ *  `vep` annotates them, and join_vep_output.py attaches the result to Gene, Position and
+ *  side. The output has one row per transcript; the reports reduce it to one
  *  consequence per (Gene, Position, side). The command requests --canonical and, for vep 105
  *  or later, --mane, so that the CANONICAL, MANE and MANE_SELECT columns flag the canonical
  *  and MANE Select transcripts that reduction prefers. The input is protein-level, so the
@@ -78,7 +78,7 @@ process ENSEMBL_VEP_ANNOTATE {
     cp ${local_dir}/build_vep_hgvs.py ${local_dir}/join_vep_output.py ${local_dir}/vep_common.py .
 
     header_only() {
-        printf 'Gene\tPosition\tside\tcaap_group\tUploaded_variation\tLocation\tAllele\tEnsembl_Gene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
+        printf 'Gene\tPosition\tside\tUploaded_variation\tLocation\tAllele\tEnsembl_Gene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
     }
 
     # Without the ensembl-vep package there is nothing to run: say so before anything else.
@@ -158,6 +158,6 @@ process ENSEMBL_VEP_ANNOTATE {
 
     stub:
     """
-    printf 'Gene\tPosition\tside\tcaap_group\tUploaded_variation\tLocation\tAllele\tEnsembl_Gene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
+    printf 'Gene\tPosition\tside\tUploaded_variation\tLocation\tAllele\tEnsembl_Gene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
     """
 }

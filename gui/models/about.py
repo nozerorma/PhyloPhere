@@ -24,7 +24,7 @@ class AboutInfo:
     name: str = "PhyloPhere"
     description: str = (
         "Nextflow DSL2 pipeline for phylogenetic comparative genome-phenome analyses, "
-        "centered on CAAStools-based CAAS/CAAP discovery."
+        "centered on CAAStools-based CAAS discovery."
     )
     version: str = "2.0"
     repo_url: str = "https://github.com/nozerorma/PhyloPhere"
@@ -35,7 +35,7 @@ class AboutInfo:
     logo_relpath: str = "res/logo.png"
     attributions: tuple[str, ...] = (
         "Builds on CAAStools (github.com/linudz/caastools)",
-        "CAAP grouping: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
+        "Amino acid groupings: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
         "RERconverge: Kowalczyk et al. (2019), Bioinformatics 35(22)",
         "HyPhy FADE directional selection: Kosakovsky Pond et al. (2021), Mol. Biol. Evol. 37(1)",
         "PrimateAI-3D variant pathogenicity: Gao et al. (2023), Science 380(6648)",

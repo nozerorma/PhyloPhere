@@ -343,7 +343,7 @@ Standalone mode (provide inputs directly):
 --caas_pos_cycle_caas_file                               <"perm_pos_cycle_caas.tsv.gz">  ""    (filtered position-level null of a prior run: SCORING p.emp, POSENRICH and the accumulation permulation null)
 --caas_cycle_roster_file                                 <"cycle_roster.txt">          ""    (every replayed cycle of a prior run, the empty ones included: N of the null everywhere; without it N is the number of cycles present in the null, with a log line)
 
-Position-level components: biochem, ASR, convergence, parallel, [FADE]
+Position-level components: ASR, convergence, parallel, [FADE]
 Gene-level scores: gene_caas, [gene_rer], [gene_fade], gene_composite
 """
 }

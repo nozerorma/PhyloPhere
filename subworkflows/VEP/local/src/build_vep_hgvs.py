@@ -21,7 +21,7 @@ Inputs:     caas_file          position_scores.tsv, with Gene, Position, side, c
             vep_map_dir        directory of the per-gene MAP files (alignment column → hg38 position)
             gene_ensembl_file  TSV with gene and human_protein_id (ENSP...)
 Outputs:    output_hgvs.txt    one identifier per line, e.g. ENSP00000234875.4:p.Trp24Cys
-            output_id_map.tsv  hgvs_id, Gene, Position, side, caap_group (an identifier shared by several
+            output_id_map.tsv  hgvs_id, Gene, Position, side (an identifier shared by several
                        targets appears once per target)
 """
 
@@ -63,7 +63,7 @@ def load_gene_protein_ids(gene_ensembl_file: str) -> dict:
 
 
 def load_caas_targets(caas_file: str) -> dict:
-    """(gene, position, side) → list of {anc_aas, der_aas, caap_group}, for the US scheme rows only."""
+    """(gene, position, side) → list of {anc_aas, der_aas}."""
     targets = {}
     with open(caas_file, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
@@ -81,12 +81,8 @@ def load_caas_targets(caas_file: str) -> dict:
         caas_col = col_lc.get("caas")
         anc_col = col_lc.get("ancestral_aa")
         der_col = col_lc.get("derived_aa")
-        caap_col = col_lc.get("caap_group")
 
         for row in reader:
-            caap_group = (row.get(caap_col, "US") if caap_col else "US") or "US"
-            if caap_group != "US":
-                continue
             gene = row[gene_col]
             try:
                 position = int(row[pos_col])
@@ -98,9 +94,7 @@ def load_caas_targets(caas_file: str) -> dict:
             anc_aas, der_aas = anc_der_from_row(row.get(anc_col, "") if anc_col else "", row.get(der_col, "") if der_col else "", caas, side)
             if not anc_aas or not der_aas:
                 continue
-            targets.setdefault((gene, position, side), []).append({
-                "anc_aas": anc_aas, "der_aas": der_aas, "caap_group": caap_group,
-            })
+            targets.setdefault((gene, position, side), []).append({"anc_aas": anc_aas, "der_aas": der_aas})
     return targets
 
 
@@ -119,11 +113,11 @@ def main():
 
     loaded_maps = {}
     seen_ids = set()   # identifiers already in the VEP input: each is annotated once
-    seen_rows = set()  # (hgvs_id, gene, position, side, caap_group) already in the id map
+    seen_rows = set()  # (hgvs_id, gene, position, side) already in the id map
     n_written = 0
     with open(output_hgvs, "w") as hgvs_out, open(output_id_map, "w", newline="") as map_out:
         map_writer = csv.writer(map_out, delimiter="\t", lineterminator="\n")
-        map_writer.writerow(["hgvs_id", "Gene", "Position", "side", "caap_group"])
+        map_writer.writerow(["hgvs_id", "Gene", "Position", "side"])
 
         for (gene, position, side), entries in targets.items():
             protein_id = protein_ids.get(gene)
@@ -154,7 +148,7 @@ def main():
                             seen_ids.add(hgvs_id)
                             hgvs_out.write(hgvs_id + "\n")
                             n_written += 1
-                        row_key = (hgvs_id, gene, position, side, entry["caap_group"])
+                        row_key = (hgvs_id, gene, position, side)
                         if row_key not in seen_rows:
                             seen_rows.add(row_key)
                             map_writer.writerow(list(row_key))
