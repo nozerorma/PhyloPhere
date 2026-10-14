@@ -526,10 +526,16 @@ The formal per-pathway `p.perm` (ASR axis) is in the companion **FCS** report.
 ```{r pos-null-setup, eval=has_pos_null}
 .src_pal <- c(Observed = "#E15759", Null = "grey55")
 
-# Null detections: one row per (Gene, Position, side, cycle) a permulated labeling detects (a detected position
-# can score 0); observed rows are the scored positions of the run.
-.null_pos <- readr::read_tsv(params$caas_pos_cycle_caas_file, show_col_types = FALSE,
-                             col_select = c(Gene, Position, side, cycle, caas_score),
+# Null detections: one row per (Gene, Position, side, cycle) a permulated labeling detects; observed rows are the scored
+# positions of the run. The null table has a row per detection of every cycle (tens of millions at 1000 cycles) and
+# most of them carry no US score, which this section drops, so awk keeps only the top and bottom rows with a score
+# while the gz file streams (readr would inflate it whole).
+.null_awk <- r"---(BEGIN { FS = OFS = "\t" }
+NR == 1 { for (i = 1; i <= NF; i++) col[$i] = i; g = col["Gene"]; p = col["Position"]; sd = col["side"]; cy = col["cycle"]; v = col["caas_score"]
+          print "Gene", "Position", "side", "cycle", "caas_score"; next }
+($sd == "top" || $sd == "bottom") && $v != "" && $v != "NA" && $v != "NaN" && $v != "null" && $v != "NULL" { print $g, $p, $sd, $cy, $v })---"
+.null_pos <- readr::read_tsv(pipe(sprintf("gzip -dcf %s | awk %s", shQuote(params$caas_pos_cycle_caas_file), shQuote(.null_awk))),
+                             show_col_types = FALSE,
                              col_types = readr::cols(caas_score = readr::col_character(), .default = readr::col_guess()),
                              na = c("", "NA", "NaN", "null", "NULL")) %>%
   filter(side %in% c("top", "bottom")) %>%

@@ -524,32 +524,55 @@ if (has_caas_pos_cycle_caas && length(read_lines(caas_pos_cycle_caas_file, n_max
 }
 if (has_caas_pos_cycle_caas) {
   cat("Loading per-cycle CAAS null (p.emp):", caas_pos_cycle_caas_file, "\n")
-  # caas_score is read as text and converted with as.numeric: readr's own double parser
-  # is off by an ulp for ~13% of 17-digit values.
-  cyc_caas <- read_tsv(caas_pos_cycle_caas_file, show_col_types = FALSE,
-                       col_types = cols(.default = col_guess(), caas_score = col_character()))
-  if (!"caas_score" %in% names(cyc_caas)) {
+  # The null has one row per detection of every cycle (tens of millions at 1000 cycles), most of them without a US score,
+  # and readr inflates a gz file whole. The pooled statistic is therefore taken while the file streams through awk:
+  # per (Gene, Position, cycle) the largest positive score over the sides, one gene at a time (the writer emits the
+  # rows of a gene together; a gene that comes back is reported and refused). awk compares the scores to pick the
+  # maximum but prints the original text, which is converted here with as.numeric: readr's own double parser is off by
+  # an ulp for ~13% of 17-digit values. The cycles with any row, scored or not, and the score rule of the null go to a
+  # side file.
+  .null_header <- strsplit(readLines(gzfile(caas_pos_cycle_caas_file), n = 1), "\t")[[1]]
+  if (!"caas_score" %in% .null_header) {
     stop("perm_pos_cycle_caas.tsv.gz has no caas_score column: it predates the shared position score. ",
          "Regenerate the CAAS permulation null.")
   }
+  .null_awk <- r"---(BEGIN { FS = "\t"; OFS = "\t" }
+function flush(   k) { for (k in ms) print last, k, ms[k]; for (k in ms) { delete ms[k]; delete mx[k] } }
+NR == 1 { for (i = 1; i <= NF; i++) col[$i] = i; g = col["Gene"]; p = col["Position"]; cy = col["cycle"]; v = col["caas_score"]; a = col["score_aggregation"]
+          print "Gene", "Position", "cycle", "caas_max"; next }
+{ cyc[$cy] = 1; if (a) agg[$a] = 1
+  if ($v == "") next
+  x = $v + 0
+  if (!(x > 0)) next
+  if ($g != last) { flush(); if ($g in done) split_gene[$g] = 1; done[$g] = 1; last = $g }
+  k = $p OFS $cy
+  if (!(k in mx) || x > mx[k]) { mx[k] = x; ms[k] = $v } }
+END { flush()
+      for (c in cyc) print "C", c > meta
+      for (x in agg) print "A", x > meta
+      for (x in split_gene) print "S", x > meta
+      close(meta) })---"
+  .null_meta <- tempfile(pattern = "null_meta_", fileext = ".txt")
+  cyc_pooled <- read_tsv(
+    pipe(sprintf("gzip -dcf %s | awk -v meta=%s %s", shQuote(caas_pos_cycle_caas_file), shQuote(.null_meta), shQuote(.null_awk))),
+    show_col_types = FALSE,
+    col_types = cols(Gene = col_character(), Position = col_integer(), cycle = col_character(), caas_max = col_character())) %>%
+    mutate(caas_max = suppressWarnings(as.numeric(caas_max)))
+  .meta <- if (file.exists(.null_meta)) readLines(.null_meta) else character(0)
+  unlink(.null_meta)
+  .meta_val <- function(tag) sub(paste0("^", tag, "\t"), "", grep(paste0("^", tag, "\t"), .meta, value = TRUE))
+  if (length(.meta_val("S"))) {
+    stop(sprintf("the rows of %d gene(s) of %s are not contiguous (e.g. %s): the pooled null needs one block per gene",
+                 length(.meta_val("S")), basename(caas_pos_cycle_caas_file), paste(head(.meta_val("S"), 3), collapse = ", ")))
+  }
   # The null records the rule of its caas_score. A null without the column predates the rule.
-  .null_agg <- if ("score_aggregation" %in% names(cyc_caas)) unique(as.character(cyc_caas$score_aggregation)) else "none"
+  .null_agg <- if ("score_aggregation" %in% .null_header) .meta_val("A") else "none"
   if (!identical(.null_agg, score_aggregation)) {
     stop(sprintf(paste0("the CAAS permulation null was scored with the rule '%s' and the observed scores with '%s': ",
                         "p.emp and p.adj_bh would compare different statistics. Rebuild the null (CAAS_CORE_MERGE)."),
                  paste(.null_agg, collapse = "/"), score_aggregation))
   }
-  .cycles_in_file <- unique(as.character(cyc_caas$cycle))   # every cycle with a row, scored or not
-  cyc_caas <- cyc_caas %>%
-    mutate(Position = as.integer(Position),
-           caas_score = suppressWarnings(as.numeric(caas_score))) %>%
-    filter(!is.na(caas_score) & caas_score > 0)
-
-  # per-cycle pooled null statistic = max over detected sides of the scheme-mean
-  cyc_pooled <- cyc_caas %>%
-    group_by(Gene, Position, cycle) %>%
-    summarise(caas_max = max(caas_score), .groups = "drop")
-  rm(cyc_caas)
+  .cycles_in_file <- .meta_val("C")   # every cycle with a row, scored or not
 
   # observed pooled statistic = best side per (Gene, Position) (== .pos_undirected)
   obs_max <- pos_scores %>%
