@@ -32,7 +32,6 @@ process CAAS_META_CAAS_REPORT {
     path "CAAS_pattern_annotation_files/**", emit: assets, optional: true
 
     script:
-    def caap_mode_r = params.caap_mode ? 'TRUE' : 'FALSE'
     def local_dir = "${baseDir}/subworkflows/CT_META_CAAS/local"
     if (params.use_singularity | params.use_apptainer) {
         """
@@ -44,8 +43,7 @@ process CAAS_META_CAAS_REPORT {
                 '7.CAAS_pattern_annotation.Rmd',
                 params = list(
                     discovery_input = '${discovery_input}',
-                    background_input = '${background_input}',
-                    caap_mode = ${caap_mode_r}
+                    background_input = '${background_input}'
                 ),
                 output_file = '7.CAAS_pattern_annotation.html'
             )
@@ -61,8 +59,7 @@ process CAAS_META_CAAS_REPORT {
                 '7.CAAS_pattern_annotation.Rmd',
                 params = list(
                     discovery_input = '${discovery_input}',
-                    background_input = '${background_input}',
-                    caap_mode = ${caap_mode_r}
+                    background_input = '${background_input}'
                 ),
                 output_file = '7.CAAS_pattern_annotation.html'
             )

@@ -223,7 +223,6 @@ process CAAS_CORE_BATCHED {
         _frac() { awk -v n="\$n_pairs" -v f="\$1" 'BEGIN{printf "%d", int(n*f)}'; }
         declare -a extra_opts=(--patterns "${params.patterns}")
         if [ "${params.miss_pair}" = "true" ]; then extra_opts+=(--miss_pair); fi
-        if [ "${params.caap_mode}" = "true" ]; then extra_opts+=(--caap_mode); fi
         extra_opts+=(--max_conserved \$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}'))
         extra_opts+=(--max_bg_gaps \$(_frac ${params.max_bg_gaps_fraction}) --max_fg_gaps \$(_frac ${params.max_fg_gaps_fraction}) --max_gaps \$(_frac ${params.max_gaps_fraction}))
         extra_opts+=(--max_bg_miss \$(_frac ${params.max_bg_miss_fraction}) --max_fg_miss \$(_frac ${params.max_fg_miss_fraction}) --max_miss \$(_frac ${params.max_miss_fraction}))

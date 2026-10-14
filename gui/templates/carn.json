@@ -75,7 +75,6 @@
       "max_fg_miss_fraction": "0.0",
       "max_miss_fraction": "0.0",
       "miss_pair": true,
-      "caap_mode": true,
       "perm_strategy": "auto",
       "max_tries": "100000",
       "chunk_size": "500",

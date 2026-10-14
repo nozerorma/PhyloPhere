@@ -383,7 +383,6 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `ct_tool` | `"discovery,resample"` | CT stages to run. `resample` harvests the permulated labelings (the null) and can run alone; `discovery` replays the real labeling and the harvested labelings over the alignments, so it needs the labelings of `resample` in the same run or through `--resample_from`. |
 | `patterns` | `"1,2,3"` | Comma-separated list of CAAS substitution patterns to search for. |
 | `min_divergent_fraction` | `0.5` | Minimum fraction of foreground/background pairs that must show amino-acid divergence (0.5 = at least 50%). |
-| `caap_mode` | `true` | Enables CAAP (Candidate Amino Acid Properties) grouping mode based on physicochemical properties. |
 | `perm_strategy` | `"BM"` | Permutation strategy for background null generation: `"BM"` (Brownian Motion) or `"FGBG"` (FG/BG swap). |
 | `perms_cycles` | `"100"` | Number of resampling cycles used to evaluate significance. |
 | `caas_full_perms` | `1000` | Number of full-pool permulations generated for the CAAS FCS null. |

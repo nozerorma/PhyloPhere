@@ -170,11 +170,6 @@ if tool.lower() == "perm-replay":
                     help="Maximum number of pairs allowed to share the same amino acid between FG and BG. \
                         Enables relaxed CAAS identification. Default = 0 (strict mode).", default = "0")
 
-    parser.add_option("--caap_mode", dest="caap_mode", action="store_true",
-                    help="Enable CAAP (Convergent Amino Acid Properties) mode. \
-                        Detects convergence based on physicochemical properties using 5 grouping schemes (GS0-GS4). \
-                        Each position generates one row per matching scheme with scheme-specific p-values. Default = disabled.", default = False)
-
     ###     3.3.8 Exports (at least one is required)
     parser.add_option("--export_groups", dest="export_groups",
                     help="Path to output file for exporting the permuted trait groups used in each cycle (DEBUG). Default = disabled.", default = None)
@@ -267,7 +262,6 @@ if tool.lower() == "perm-replay":
                     max_conserved = int(options.max_conserved),
 
     the_admitted_patterns = options.patterns_string,
-                    caap_mode = options.caap_mode,
                     export_groups = options.export_groups,
                     export_perm_discovery = options.export_perm_discovery,
                     export_b0_background = options.export_b0_background,

@@ -119,7 +119,6 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "posenrich_ucr": _bool_str(enrichment.posenrich_ucr),
         "posenrich_eggnog": _bool_str(enrichment.posenrich_eggnog),
         "miss_pair": _bool_str(caas.miss_pair),
-        "caap_mode": _bool_str(caas.caap_mode),
         "resample_use_n": _bool_str(getattr(caas, 'resample_use_n', True)),
         "multi_hypothesis": _bool_str(getattr(caas, 'multi_hypothesis', True)),
         "perm_match_pss": _bool_str(getattr(caas, 'perm_match_pss', True)),

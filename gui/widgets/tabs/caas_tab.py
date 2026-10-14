@@ -70,7 +70,6 @@ SPEC = ModuleTabSpec(
             editable=True,
             importance="default",
         ),
-        FieldSpec(name="caap_mode", label="CAAP mode (properties-based)", kind="bool", importance="default"),
         FieldSpec(name="multi_hypothesis", label="Multi-hypothesis mode", kind="bool", importance="default"),
         FieldSpec(
             name="max_fop",

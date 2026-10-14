@@ -569,7 +569,6 @@ def _meta_caas_build_script(report: DetectedReport, repo_dir: Path, use_singular
             f"discovery_input = '{s['discovery_input']}'",
             f"background_input = '{s['background_input']}'",
             "output_dir = '.'",
-            "caap_mode = FALSE",
             "seed = '1998'",
         ],
         output_file,

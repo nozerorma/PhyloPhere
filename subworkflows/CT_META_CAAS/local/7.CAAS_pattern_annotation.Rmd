@@ -18,7 +18,6 @@ output:
 params:
   discovery_input: NULL
   background_input: NULL
-  caap_mode: FALSE
 ---
 
 <style type="text/css">

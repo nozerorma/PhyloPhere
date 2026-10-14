@@ -685,7 +685,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "max_fg_miss_fraction": "${MAX_FG_MISS_FRACTION:-0.0}",
   "max_miss_fraction": "${MAX_MISS_FRACTION:-0.0}",
   "miss_pair": true,
-  "caap_mode": true,
   "resample_use_n": true,
   "perm_strategy": "${PERM_STRATEGY:-BM}",
   "max_tries": "${MAX_TRIES:-1000000}",

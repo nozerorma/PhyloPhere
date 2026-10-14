@@ -98,7 +98,6 @@ Usage:
 --max_fg_miss_fraction      <FLOAT 0-1>                  0.0
 --max_miss_fraction         <FLOAT 0-1>                  0.0
 --miss_pair                 <true|false>                 true
---caap_mode                 <true|false>                 true
 --ct_core_batch_size        <INTEGER>                    20    (permulation core: genes per replay + ASR replay task, observed labeling included; 1 = one task per gene)
 --publish_intermediates     <true|false>                 false
 

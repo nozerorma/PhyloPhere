@@ -67,7 +67,6 @@ class CaasConfig(ModuleConfigBase):
     max_fg_miss_fraction: str = "0.0"  # --max_fg_miss_fraction
     max_miss_fraction: str = "0.0"  # --max_miss_fraction
     miss_pair: bool = True  # --miss_pair
-    caap_mode: bool = True  # --caap_mode
     perm_strategy: str = "auto"  # --perm_strategy (auto|OU|BM)
     max_tries: str = "1000000"  # --max_tries
     chunk_size: str = "500"  # --chunk_size
