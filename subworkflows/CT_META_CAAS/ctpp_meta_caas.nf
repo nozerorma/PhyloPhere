@@ -1,4 +1,4 @@
-// ctpp_meta_caas.nf — Reports on the pattern/caap_group annotation of the CAAS and on its permulation significance.
+// ctpp_meta_caas.nf — Reports on the pattern annotation of the CAAS and on its permulation significance.
 // PhyloPhere | subworkflows/CT_META_CAAS/
 
 /*

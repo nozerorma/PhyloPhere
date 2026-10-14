@@ -51,7 +51,7 @@ params:
   }
 </style>
 
-<!-- 7.CAAS_pattern_annotation.Rmd — Distribution of the CAAS positions over contrast patterns and caap_group. -->
+<!-- 7.CAAS_pattern_annotation.Rmd — Distribution of the CAAS positions over contrast patterns. -->
 <!-- PhyloPhere | subworkflows/CT_META_CAAS/local/ -->
 
 ```{r setup, include=FALSE}
@@ -129,7 +129,7 @@ if (!file.exists(filtered_discovery_path)) {
 
 discovery_df <- read_tsv(filtered_discovery_path, show_col_types = FALSE)
 
-# The columns of discovery.tab are lowercase (gene, mode, trait, position, pattern, ffgn, ...).
+# The columns of discovery.tab are lowercase (gene, trait, position, pattern, ffgn, ...).
 # Only the structural keys are renamed to the CamelCase names this report joins on (Gene,
 # Position; GenePos = paste(Gene, Position)). The other columns, including the `pattern`
 # contrast index, keep their lowercase names.
@@ -141,21 +141,8 @@ for (.new in names(.disc_keymap)) {
   }
 }
 
-# A table without caap_group is treated as the US scheme.
-if (!"caap_group" %in% names(discovery_df)) {
-  discovery_df <- discovery_df %>% mutate(caap_group = "US")
-}
 cat(sprintf("Loaded discovery file: %s\n", basename(filtered_discovery_path)))
 cat(sprintf("  Total CAAS positions: %s\n", format(nrow(discovery_df), big.mark = ",")))
-
-# TRUE after the step above; the groups present are listed below.
-has_caap_group <- 'caap_group' %in% names(discovery_df)
-cat(sprintf("  CAAP mode detected: %s\n", has_caap_group))
-
-if (has_caap_group) {
-  groups <- unique(discovery_df$caap_group)
-  cat(sprintf("  Groups present: %s\n", paste(groups, collapse = ", ")))
-}
 
 
 # ── Filtered background ───────────────────────────────────────────────────────
@@ -203,69 +190,34 @@ caas_for_export <- discovery_df
 patterns_present <- unique(caas_for_export$pattern)
 cat(sprintf("Patterns detected: %s\n", paste(patterns_present, collapse = ", ")))
 
-# One panel per caap_group when the table has the column, one plot otherwise.
-if (has_caap_group) {
-  pattern_summary <- caas_for_export %>%
-    group_by(caap_group, pattern) %>%
-    summarize(
-      Total = n(),
-      .groups = "drop"
-    ) %>%
-    arrange(caap_group, pattern)
-  
-  cat("\nPattern Distribution by Group:\n")
-  print(kable(pattern_summary, format.args = list(big.mark = ",")))
-  
-  p_pattern <- ggplot(pattern_summary, aes(x = factor(pattern), y = Total, fill = factor(pattern))) +
-    geom_bar(stat = "identity") +
-    facet_wrap(~ caap_group, scales = "free_y") +
-    theme_minimal() +
-    labs(
-      title = "CAAS Pattern Distribution by Group",
-      x = "Pattern",
-      y = "Candidate Count",
-      fill = "Pattern"
-    ) +
-    theme(
-      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
-      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
-      plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
-      axis.text.x = element_text(angle = 0, hjust = 0.5),
-      panel.grid.major = element_line(color = "darkgray", size = 0.5),
-      legend.position = "none"
-    )
-  
-  print(p_pattern)
-} else {
-  pattern_summary <- caas_for_export %>%
-    group_by(pattern) %>%
-    summarize(
-      Total = n(),
-      .groups = "drop"
-    )
-  
-  cat("\nPattern Distribution:\n")
-  print(kable(pattern_summary, format.args = list(big.mark = ",")))
-  
-  p_pattern <- ggplot(pattern_summary, aes(x = factor(pattern), y = Total, fill = factor(pattern))) +
-    geom_bar(stat = "identity") +
-    theme_minimal() +
-    labs(
-      title = "CAAS Pattern Distribution",
-      x = "Pattern",
-      y = "Candidate Count"
-    ) +
-    theme(
-      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
-      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
-      plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
-      axis.text.x = element_text(angle = 0, hjust = 0.5),
-      panel.grid.major = element_line(color = "darkgray", size = 0.5),
-      legend.position = "none"
-    )
-  
-  print(p_pattern)
-}
+pattern_summary <- caas_for_export %>%
+  group_by(pattern) %>%
+  summarize(
+    Total = n(),
+    .groups = "drop"
+  )
+
+cat("\nPattern Distribution:\n")
+print(kable(pattern_summary, format.args = list(big.mark = ",")))
+
+p_pattern <- ggplot(pattern_summary, aes(x = factor(pattern), y = Total, fill = factor(pattern))) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(
+    title = "CAAS Pattern Distribution",
+    x = "Pattern",
+    y = "Candidate Count"
+  ) +
+  theme(
+    axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+    axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
+    plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+    axis.text.x = element_text(angle = 0, hjust = 0.5),
+    panel.grid.major = element_line(color = "darkgray", size = 0.5),
+    legend.position = "none"
+  )
+
+print(p_pattern)
 ```
 
 ---

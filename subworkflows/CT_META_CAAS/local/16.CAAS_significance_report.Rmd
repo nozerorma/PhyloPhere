@@ -60,7 +60,7 @@ params:
 <!--
 Rendered by CAAS_SIGNIFICANCE_REPORT (ctpp_meta_caas.nf), after SCORING. The per-position CAAS table
 (meta_caas_input: meta_caas.tsv, or the post-processed discovery table SCORING evaluated; one row per
-Gene, Position and, when present, pattern and caap_group) is joined with position_scores.tsv (p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact)
+Gene, Position and, when present, pattern) is joined with position_scores.tsv (p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact)
 of the same run. It cannot be merged into 7.CAAS_pattern_annotation.Rmd, which runs before SCORING, when that
 table does not exist yet.
 Outputs: significance/meta_caas_significance.tsv and significance/pattern_significance_summary.tsv.
@@ -124,7 +124,6 @@ missing_meta_cols <- setdiff(required_meta_cols, names(meta_caas))
 if (length(missing_meta_cols) > 0) {
   stop("Missing required columns in meta_caas: ", paste(missing_meta_cols, collapse = ", "))
 }
-has_caap_group <- "caap_group" %in% names(meta_caas)
 type_col <- if ("convergence_type" %in% names(meta_caas)) {
   "convergence_type"
 } else if ("pattern" %in% names(meta_caas)) {
@@ -211,8 +210,8 @@ meta_caas <- meta_caas %>%
 
 .n_meta_rows <- nrow(meta_caas)
 .n_pos_matched <- meta_caas %>% filter(!is.na(p.emp) & is.finite(p.emp)) %>% nrow()
-.n_unique_pos <- n_distinct(meta_caas$Position)
-.n_unique_pos_matched <- meta_caas %>% filter(!is.na(p.emp) & is.finite(p.emp)) %>% distinct(Position) %>% nrow()
+.n_unique_pos <- n_distinct(paste(meta_caas$Gene, meta_caas$Position))
+.n_unique_pos_matched <- meta_caas %>% filter(!is.na(p.emp) & is.finite(p.emp)) %>% distinct(Gene, Position) %>% nrow()
 .pos_rate <- if (.n_meta_rows > 0) .n_pos_matched / .n_meta_rows else 0
 cat(sprintf("  p.emp position join: matched %d/%d rows (%d/%d unique positions, %.1f%%)\n",
             .n_pos_matched, .n_meta_rows, .n_unique_pos_matched, .n_unique_pos, 100 * .pos_rate))
@@ -226,15 +225,12 @@ if (.pos_rate < 0.5 && !("convergence_type" %in% names(meta_caas))) {
 
 ## 3. Position p-values by `r type_label`
 
-Descriptive summary per `r tolower(type_label)` (and per caap_group when present): number of positions, how many
+Descriptive summary per `r tolower(type_label)`: number of positions, how many
 have a p-value, how many sit at the `p.emp` floor, the smallest p-values and the median of `p.emp_fact`. These are
 not tests and no group-level statistic is combined from them.
 
 ```{r pattern_summary_table, results='asis'}
-group_vars <- c()
-if (has_caap_group) group_vars <- c(group_vars, "caap_group")
-if (!is.null(type_col)) group_vars <- c(group_vars, type_col)
-if (length(group_vars) == 0) group_vars <- "Gene"
+group_vars <- if (!is.null(type_col)) type_col else "Gene"
 
 .min_na <- function(x) {
   x_num <- suppressWarnings(as.numeric(x))
@@ -271,7 +267,7 @@ kable(pattern_summary %>% mutate(min_p_emp = .fmt_p(min_p_emp), median_p_emp = .
 x_col <- if (!is.null(type_col)) type_col else "Gene"
 
 plot_df <- meta_caas %>%
-  select(all_of(c(x_col, if (has_caap_group) "caap_group")), p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact) %>%
+  select(all_of(x_col), p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact) %>%
   mutate(across(c(p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact), ~ suppressWarnings(as.numeric(.x)))) %>%
   pivot_longer(c(p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact), names_to = "p_value", values_to = "p") %>%
   filter(!is.na(p) & is.finite(p)) %>%
@@ -297,7 +293,7 @@ if (nrow(plot_df) > 0) {
       axis.text.x = element_text(angle = 0, hjust = 0.5),
       panel.grid.major = element_line(color = "darkgray", linewidth = 0.3)
     )
-  p_box <- if (has_caap_group) p_box + facet_grid(caap_group ~ p_value, scales = "free_y") else p_box + facet_wrap(~ p_value, scales = "free_y")
+  p_box <- p_box + facet_wrap(~ p_value, scales = "free_y")
   print(p_box)
 } else {
   cat("No p-values to plot.\n")
@@ -308,7 +304,7 @@ if (nrow(plot_df) > 0) {
 
 ```{r rowlevel_table}
 key_cols <- intersect(
-  c("Gene", "Position", "caap_group", "convergence_type", "pattern", "side",
+  c("Gene", "Position", "convergence_type", "pattern", "side",
     "p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact"),
   names(meta_caas)
 )
