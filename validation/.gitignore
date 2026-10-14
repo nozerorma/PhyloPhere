@@ -45,3 +45,12 @@ tier1/previous_work/input/**/*.tsv
 # Bytecode.
 __pycache__/
 *.pyc
+
+# Tier 2 built fixture content. scripts/build.py and scripts/rds_to_inputs.R recreate it; the alignments are not
+# written into the repository (see tier2/input/marine/README.md).
+tier2/input/**/*.nwk
+tier2/input/**/*.tsv
+tier2/input/**/*.txt
+tier2/input/**/prune/
+tier2/output/
+tier2/UCSC62mammaltrees.rds*

@@ -1,6 +1,6 @@
 # Paper validation
 
-The two cases that support the paper: one gene with a curated truth set (Tier 1, PEPC and C4 photosynthesis in sedges) and a genome-wide case in terrestrial mammals (Tier 2). They test whether PhyloPhere recovers published signal, not whether the code is correct. The tests of the code are in the sibling directory `PhyloPhere_validation/`, outside this repository.
+The two cases that support the paper: one gene with a curated truth set (Tier 1, PEPC and C4 photosynthesis in sedges) and a genome-wide case in marine mammals (Tier 2). They test whether PhyloPhere recovers published signal, not whether the code is correct. The tests of the code are in the sibling directory `PhyloPhere_validation/`, outside this repository.
 
 ## Layout
 
@@ -13,7 +13,7 @@ The two cases that support the paper: one gene with a curated truth set (Tier 1,
 | `tier1/references/` | the papers the fixture and the truth sites come from |
 | `tier1/output/` | one directory per run; ignored by git |
 | `tier1/previous_work/` | runs and negative controls made with the pipeline before the unified CAAS core; see its README |
-| `tier2/references/` | supplementary data of the terrestrial-mammal case; the case itself has no fixture or run yet |
+| `tier2/references/` | index `marine.md` and one directory per study under `marine/` with its supplementary data; the case itself has no fixture or run yet |
 | `truthsets/tier1/pepc_c4.sites.tsv` | the published C4-associated PEPC sites, in maize PEPC1 numbering |
 
 ## Tier 1 procedure

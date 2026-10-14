@@ -2,7 +2,7 @@
 """The tables of the Tier 1 PEPC resource report, from the files two runs leave behind.
 
 For each run (a results directory holding `pipeline_info/execution_trace.txt`, and the run's work directory holding
-`.nextflow.log` and the task directories) it prints the markdown of: the totals, the dominant cost centres, the RESAMPLE phase
+`.nextflow.log` and the task directories; both optional: without them the log copy in `pipeline_info/` is used and the RESAMPLE phases are omitted) it prints the markdown of: the totals, the dominant cost centres, the RESAMPLE phase
 timings and the per-process trace side by side. The numbers are read, never typed.
 
     python3 validation/tier1/scripts/pepc_resources_tables.py \\
@@ -36,9 +36,13 @@ def read_trace(results):
     return list(csv.DictReader(open(path), delimiter="\t"))
 
 
-def stats(work_run):
-    """Launch and completion time, run name and the WorkflowStats of a run's .nextflow.log."""
-    text = (Path(work_run) / ".nextflow.log").read_text(errors="ignore")
+def stats(run):
+    """Launch and completion time, run name and the WorkflowStats of a run's Nextflow log (the work directory's
+    `.nextflow.log`, or the copy in `pipeline_info/` when the work directory has been removed)."""
+    log = Path(run["work_run"]) / ".nextflow.log" if run["work_run"] else None
+    if not log or not log.exists():
+        log = Path(run["results"]) / "pipeline_info" / "nextflow.log"
+    text = log.read_text(errors="ignore")
     ts = lambda s: datetime.strptime(s, "%b-%d %H:%M:%S.%f").replace(microsecond=0, year=datetime.now().year)
     stamps = re.findall(r"^(\w{3}-\d\d \d\d:\d\d:\d\d\.\d+) \[", text, re.M)       # first and last line of the log
     done = re.search(r"Workflow completed > WorkflowStats\[(.*?)\]", text)
@@ -52,7 +56,7 @@ def hms(delta):
 
 
 def totals(geno, pheno):
-    g, p = stats(geno["work_run"]), stats(pheno["work_run"])
+    g, p = stats(geno), stats(pheno)
     gt, pt = read_trace(geno["results"]), read_trace(pheno["results"])
     fmt = lambda s: f"{s['launch']:%Y-%m-%d %H:%M:%S} → {s['done']:%H:%M:%S} ({hms(s['done'] - s['launch'])})"
     big = lambda t: max(t, key=lambda r: nbytes(r["peak_rss"]))
@@ -85,6 +89,9 @@ def cost_centres(geno, pheno, n=6):
 
 
 def resample_phases(geno, pheno):
+    if not (geno["work"] and pheno["work"] and Path(geno["work"]).is_dir() and Path(pheno["work"]).is_dir()):
+        return "Not available: the task directories of the runs were removed."
+
     def one(run):
         row = next(r for r in read_trace(run["results"]) if short(r["name"]) == "CT:RESAMPLE")
         d = next(Path(run["work"]).glob(f"{row['hash'].split('/')[0]}/{row['hash'].split('/')[1]}*"))
@@ -125,10 +132,10 @@ def side_by_side(geno, pheno):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     for k in ("geno", "pheno"):
-        ap.add_argument(f"--{k}", nargs=3, required=True, metavar=("RESULTS", "WORK_RUN", "WORK"))
+        ap.add_argument(f"--{k}", nargs="+", required=True, metavar="RESULTS [WORK_RUN WORK]")
     a = ap.parse_args()
-    geno = dict(zip(("results", "work_run", "work"), a.geno))
-    pheno = dict(zip(("results", "work_run", "work"), a.pheno))
+    geno = dict(zip(("results", "work_run", "work"), a.geno + [None, None]))
+    pheno = dict(zip(("results", "work_run", "work"), a.pheno + [None, None]))
     for title, fn in (("Totals", totals), ("Dominant cost centres", cost_centres), ("RESAMPLE phases", resample_phases), ("Per-process trace", side_by_side)):
         print(f"### {title}\n\n{fn(geno, pheno)}\n")
 
