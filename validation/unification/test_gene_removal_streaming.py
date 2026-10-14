@@ -14,7 +14,7 @@ sys.path.insert(0, str(LOCAL))
 from src.core.postproc import GeneUnit, gene_unit_stats  # noqa: E402
 from src.utils.gene_wrapper import _cycle_gene_removal_from_detail, iter_detail_rows  # noqa: E402
 
-HEADER = ["Gene", "cycle", "Position", "caap_group", "asr_path_score", "n_detected", "clust", "side", "n_hyp", "n_sp"]
+HEADER = ["Gene", "cycle", "Position", "asr_path_score", "n_detected", "clust", "side", "n_hyp", "n_sp"]
 
 
 def make_detail(root: Path, rng: random.Random, n_genes=60, n_cycles=25):
@@ -26,11 +26,10 @@ def make_detail(root: Path, rng: random.Random, n_genes=60, n_cycles=25):
         heavy = g % 7 == 0
         rows = []
         for c in range(1, n_cycles + 1):
-            for grp in ("US", "GS1", "GS2"):
-                n = rng.randint(40, 90) if heavy and rng.random() < 0.5 else rng.randint(0, 6)
-                for pos in rng.sample(range(1, 800), n):
-                    clust = 1 if (heavy and rng.random() < 0.3) else 0
-                    rows.append([gene, f"b_{c}", pos, grp, 0.5, 5, clust, "none", 1, ""])
+            n = rng.randint(40, 90) if heavy and rng.random() < 0.5 else rng.randint(0, 6)
+            for pos in rng.sample(range(1, 800), n):
+                clust = 1 if (heavy and rng.random() < 0.3) else 0
+                rows.append([gene, f"b_{c}", pos, 0.5, 5, clust, "none", 1, ""])
         with gzip.open(root / f"{gene}.tsv.gz", "wt", newline="") as fh:
             fh.write("\t".join(HEADER) + "\n")
             fh.writelines("\t".join(map(str, r)) + "\n" for r in rows)
@@ -41,17 +40,17 @@ def reference(detail: Path, lengths, mode, iqr, ext):
     """The original B0: every detected position held in memory, stats dict per unit."""
     seen, clust = {}, {}
     for row in iter_detail_rows(detail):
-        key = (row["cycle"], row["caap_group"], row["Gene"])
+        key = (row["cycle"], row["Gene"])
         seen.setdefault(key, set()).add(int(row["Position"]))
         if int(row["clust"]):
             clust[key] = True
-    units = [GeneUnit(c, g, ge, len(p), clust.get((c, g, ge), False)) for (c, g, ge), p in seen.items()]
+    units = [GeneUnit(c, ge, len(p), clust.get((c, ge), False)) for (c, ge), p in seen.items()]
     out = set()
     for s in gene_unit_stats(units, lengths, iqr, ext):
         dub = mode in ("dubious", "both") and s["dubious"]
         exm = mode in ("extreme", "both") and s["extreme"]
         if dub or exm:
-            out.add((s["labeling"], s["caap_group"], s["Gene"]))
+            out.add((s["labeling"], s["Gene"]))
     return out, sorted({u.labeling for u in units}), sum(1 for _ in iter_detail_rows(detail))
 
 
@@ -73,7 +72,7 @@ def main():
         # A gene split over two shards is refused: its position sets would be counted apart.
         with gzip.open(detail / "A_split.tsv.gz", "wt", newline="") as fh:
             fh.write("\t".join(HEADER) + "\n")
-            fh.write("\t".join(map(str, ["G003", "b_1", 5, "US", 0.5, 5, 0, "none", 1, ""])) + "\n")
+            fh.write("\t".join(map(str, ["G003", "b_1", 5, 0.5, 5, 0, "none", 1, ""])) + "\n")
         try:
             _cycle_gene_removal_from_detail(detail, lengths, "dubious", 3.0, 0.99)
         except ValueError as e:

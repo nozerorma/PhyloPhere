@@ -14,9 +14,9 @@ make_null <- function(path, n_genes = 120, n_cycles = 40, agg = "mean_species", 
     d <- data.frame(Gene = sprintf("G%03d", g), Position = sample(1:900, n, TRUE),
                     side = sample(c("top", "bottom", "none"), n, TRUE, prob = c(.4, .4, .2)),
                     cycle = sprintf("b_%d", sample(1:n_cycles, n, TRUE)),
-                    caas_score = sprintf("%.17g", runif(n)), n_schemes = 1L, scheme_set = "US",
+                    caas_score = sprintf("%.17g", runif(n)),
                     score_aggregation = agg, stringsAsFactors = FALSE)
-    d$caas_score[sample.int(n, floor(n * .6))] <- ""          # detections without a US score
+    d$caas_score[sample.int(n, floor(n * .6))] <- ""          # detections without a score
     d$caas_score[sample.int(n, floor(n * .05))] <- "0"        # a zero is not positive
     d <- rbind(d, within(d[sample.int(n, floor(n / 3)), ], side <- ifelse(side == "top", "bottom", "top")))  # both sides
     rows[[g]] <- d
