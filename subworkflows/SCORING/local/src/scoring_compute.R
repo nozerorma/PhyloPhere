@@ -465,6 +465,7 @@ if (has_caas_pos_cycle_caas) {
          "Regenerate the CAAS permulation null.")
   }
   .null_awk <- r"---(BEGIN { FS = "\t"; OFS = "\t" }
+{ sub(/\r$/, "") }
 function flush(   k) { for (k in ms) print last, k, ms[k]; for (k in ms) { delete ms[k]; delete mx[k] } }
 NR == 1 { for (i = 1; i <= NF; i++) col[$i] = i; g = col["Gene"]; p = col["Position"]; cy = col["cycle"]; v = col["caas_score"]; a = col["score_aggregation"]
           print "Gene", "Position", "cycle", "caas_max"; next }

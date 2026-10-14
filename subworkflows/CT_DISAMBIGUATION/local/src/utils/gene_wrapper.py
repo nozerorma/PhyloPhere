@@ -852,9 +852,9 @@ def _finalize_perm_scores(
     with open(scores_path, "w", newline="") as f_scores, \
          gzip.open(cycle_caas_path, "wt", newline="") as f_cc:
         reader = iter_detail_rows(detail_path)
-        writer_scores = _csv.DictWriter(f_scores, fieldnames=scores_fields, delimiter="\t")
+        writer_scores = _csv.DictWriter(f_scores, fieldnames=scores_fields, delimiter="\t", lineterminator="\n")
         writer_scores.writeheader()
-        writer_cc = _csv.DictWriter(f_cc, fieldnames=cycle_caas_fields, delimiter="\t")
+        writer_cc = _csv.DictWriter(f_cc, fieldnames=cycle_caas_fields, delimiter="\t", lineterminator="\n")
         writer_cc.writeheader()
 
         current_gene: Optional[str] = None
@@ -901,7 +901,7 @@ def _finalize_perm_scores(
     # ── Sample + quantile summaries ───────────────────────────────────────────
     sample_fields = ["Gene", "Position", "cycle", "asr_path_score"]
     with open(sample_path, "w", newline="") as f_sample:
-        writer_sample = _csv.DictWriter(f_sample, fieldnames=sample_fields, delimiter="\t")
+        writer_sample = _csv.DictWriter(f_sample, fieldnames=sample_fields, delimiter="\t", lineterminator="\n")
         writer_sample.writeheader()
         for cyc, res in reservoirs.items():
             writer_sample.writerows({
@@ -913,7 +913,7 @@ def _finalize_perm_scores(
     quant_fields = (["cycle", "metric", "n_sampled", "n_total", "mean"]
                     + [f"q{q}" for q in quant_levels])
     with open(quant_path, "w", newline="") as f_quant:
-        writer_quant = _csv.DictWriter(f_quant, fieldnames=quant_fields, delimiter="\t")
+        writer_quant = _csv.DictWriter(f_quant, fieldnames=quant_fields, delimiter="\t", lineterminator="\n")
         writer_quant.writeheader()
         for cyc, res in reservoirs.items():
             if not res:
@@ -1176,7 +1176,7 @@ def process_all_genes_perms(
 
             shard_path = detail_dir / f"{_sanitize_gene_shard(_gene)}.tsv.gz"
             with gzip.open(shard_path, "wt", newline="") as f_detail:
-                writer_detail = _csv.DictWriter(f_detail, fieldnames=detail_fields, delimiter="\t")
+                writer_detail = _csv.DictWriter(f_detail, fieldnames=detail_fields, delimiter="\t", lineterminator="\n")
                 writer_detail.writeheader()
                 writer_detail.writerows(detail_rows)
             manifest_rows.append((_gene, len(detail_rows)))
