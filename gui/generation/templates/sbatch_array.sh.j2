@@ -69,6 +69,8 @@ set -u
 # ── Global run configuration ──────────────────────────────────────────────────
 export RESUME="${RESUME:-{{ "1" if runtime.resume else "0" }}}"
 export RUN_TOWER={{ run_defaults.tower }}
+# none | prune_intermediates | remove_work: read by run_single (params.json and the post-run work/ removal)
+export CLEANUP_POLICY="${CLEANUP_POLICY:-{{ runtime.cleanup_policy }}}"
 
 if [ "{{ run_defaults.toy_mode }}" = true ]; then
     export TAG="_toy"

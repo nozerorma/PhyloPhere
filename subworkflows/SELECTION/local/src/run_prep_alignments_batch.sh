@@ -93,7 +93,7 @@ while IFS=$'\t' read -r gene_id alignment_name; do
             cp "${alignment_path}" "${tmp_fasta}"
         else
             ${PY_BIN} "${PHYLIP_TO_FASTA}" "${alignment_path}" "${tmp_fasta}" \
-                || { echo "[PREP_ALIGNMENTS_BATCHED] PHYLIP→FASTA failed for ${gene_id}, skipping" >&2; exit 0; }
+                || { echo "[PREP_ALIGNMENTS_BATCHED] PHYLIP→FASTA failed for ${gene_id}, skipping" >&2; rm -f "${tmp_fasta}"; exit 0; }
         fi
 
         # Step 2: filter to tree taxa
@@ -101,7 +101,7 @@ while IFS=$'\t' read -r gene_id alignment_name; do
             --tree   "${tree}" \
             --fasta  "${tmp_fasta}" \
             --output "${out_fasta}" \
-            || { echo "[PREP_ALIGNMENTS_BATCHED] filter_fasta_to_tree failed for ${gene_id}, skipping" >&2; rm -f "${out_fasta}"; exit 0; }
+            || { echo "[PREP_ALIGNMENTS_BATCHED] filter_fasta_to_tree failed for ${gene_id}, skipping" >&2; rm -f "${out_fasta}" "${tmp_fasta}"; exit 0; }
 
         # Remove empty outputs so optional:true does not emit them
         [ -s "${out_fasta}" ] || rm -f "${out_fasta}"

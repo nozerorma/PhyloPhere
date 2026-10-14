@@ -40,6 +40,13 @@ from gui.widgets.common import remote_context
 from gui.widgets.common.path_field import PathField
 from gui.widgets.phenotype_table.widget import PhenotypeTableWidget
 
+# (combo label, --cleanup_policy value)
+CLEANUP_POLICIES = [
+    ("Keep all work files (none)", "none"),
+    ("Delete non-vital intermediates during run (prune_intermediates)", "prune_intermediates"),
+    ("Delete non-vital intermediates + remove work/ after run (remove_work)", "remove_work"),
+]
+
 
 class RuntimeTab(QWidget):
     changed = Signal()
@@ -75,6 +82,22 @@ class RuntimeTab(QWidget):
         self.toy_mode.setChecked(self._config.toy_mode)
         self.toy_mode.toggled.connect(self._on_toy_mode_changed)
         form.addRow(self.toy_mode)
+
+        self.cleanup_policy = QComboBox()
+        for label, value in CLEANUP_POLICIES:
+            self.cleanup_policy.addItem(label, value)
+        self.cleanup_policy.setCurrentIndex(max(0, self.cleanup_policy.findData(self._config.cleanup_policy)))
+        self.cleanup_policy.setToolTip(
+            "none: every intermediate is kept (full -resume, inspection).\n"
+            "prune_intermediates: deletes, inside each task, the bulky intermediates no later process reads. "
+            "Perm-discovery exports are then not published unless 'publish intermediates' is on, "
+            "and a later run cannot reuse them.\n"
+            "remove_work: as prune_intermediates, and removes the phenotype's Nextflow work/ directory after a "
+            "successful completion (-resume is not available once work/ is deleted)."
+        )
+        self.cleanup_policy.currentIndexChanged.connect(self._on_cleanup_policy_changed)
+        self.cleanup_policy_label = QLabel("Disk cleanup policy (--cleanup_policy)")
+        form.addRow(self.cleanup_policy_label, self.cleanup_policy)
 
         self.toy_n = QLineEdit(self._config.toy_n)
         self.toy_n.textChanged.connect(self._on_toy_n_changed)
@@ -289,6 +312,10 @@ class RuntimeTab(QWidget):
 
     def _on_toy_mode_changed(self, value: bool) -> None:
         self._config.toy_mode = value
+        self.changed.emit()
+
+    def _on_cleanup_policy_changed(self, _index: int) -> None:
+        self._config.cleanup_policy = self.cleanup_policy.currentData()
         self.changed.emit()
 
     def _on_toy_n_changed(self, value: str) -> None:

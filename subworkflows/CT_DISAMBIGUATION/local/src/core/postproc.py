@@ -26,6 +26,7 @@ Pure Python, no numpy/pandas: the null workers import it too.
 from __future__ import annotations
 
 import csv
+from array import array
 from typing import Dict, Hashable, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
 
 __all__ = ["ctrain", "train_flags", "GeneUnit", "gene_unit_stats", "gene_removal", "load_gene_lengths"]
@@ -178,12 +179,31 @@ def gene_removal(
     if mode not in ("dubious", "extreme", "both"):
         return {}
     want_dub, want_ext = mode in ("dubious", "both"), mode in ("extreme", "both")
+    # Same decision rule as gene_unit_stats, but the stream is held in compact per-pool columns
+    # (gene, count, train flag) instead of one stats dict per unit: the null has tens of millions
+    # of units, and only the removed ones are kept.
+    pools: Dict[Tuple[str, str], Tuple[List[str], array, bytearray]] = {}
+    for u in units:
+        genes, counts, flags = pools.setdefault((u.labeling, u.caap_group), ([], array("l"), bytearray()))
+        genes.append(u.gene)
+        counts.append(u.n_caas)
+        flags.append(1 if u.has_clustered else 0)
+
     removed: Dict[Unit, str] = {}
-    for s in gene_unit_stats(units, gene_lengths, iqr_multiplier, extreme_percentile):
-        dub, ext = want_dub and s["dubious"], want_ext and s["extreme"]
-        if dub or ext:
-            removed[(s["labeling"], s["caap_group"], s["Gene"])] = (
-                "Both" if dub and ext else "Dubious" if dub else "Extreme")
+    for (labeling, group), (genes, counts, flags) in pools.items():
+        q1, q3 = _percentile_linear(counts, 25.0), _percentile_linear(counts, 75.0)
+        thr_dub = q3 + iqr_multiplier * (q3 - q1)
+        dens = []
+        for g, n in zip(genes, counts):
+            length = gene_lengths.get(g)
+            dens.append(n / length * 100.0 if length and length > 0 else None)
+        valid = [d for d in dens if d is not None]
+        thr_ext = _percentile_linear(valid, extreme_percentile * 100.0) if valid else None
+        for g, n, fl, d in zip(genes, counts, flags, dens):
+            dub = want_dub and n > thr_dub and bool(fl)
+            ext = want_ext and d is not None and d > thr_ext
+            if dub or ext:
+                removed[(labeling, group, g)] = "Both" if dub and ext else "Dubious" if dub else "Extreme"
     return removed
 
 

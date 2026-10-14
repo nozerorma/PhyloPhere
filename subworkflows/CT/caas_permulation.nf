@@ -45,6 +45,13 @@ def caasPostprocOn() {
     return (raw instanceof Boolean) ? raw : !(raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
 }
 
+// True when params.cleanup_policy deletes the bulky intermediates that no later process reads
+// ("prune_intermediates" and "remove_work").
+def shouldPruneIntermediates() {
+    def pol = (params.cleanup_policy ?: 'none').toString().trim().toLowerCase()
+    return pol in ['prune_intermediates', 'remove_work']
+}
+
 // CLI arguments that give disambiguation_perms_main.py the observed CT_POSTPROC filters (cluster trains and
 // gene removal) for the per-cycle null pool. Empty when the filters are off or the gene annotation file is a
 // NO_* sentinel. With params.caas_map_dir the trains measure their span in untrimmed columns, as the observed
@@ -117,6 +124,8 @@ process SUBSET_RESAMPLE_PERMS {
             --labelings-out b0_labelings.tab --pairs-out b0_pairs.tsv
         cat b0_labelings.tab resample_perms.tab > resample_perms.tmp && mv resample_perms.tmp resample_perms.tab
         cat b0_pairs.tsv >> fop_pairs.tsv
+        # The selection files are not outputs; they run to hundreds of MB in FOP mode.
+        rm -f all_resamples.tab candidates.tab base_all.txt keep_base.txt b0_labelings.tab b0_pairs.tsv fop_pairs_header.tsv
         exit 0
     fi
 
@@ -135,6 +144,7 @@ process SUBSET_RESAMPLE_PERMS {
     if [ "${n_perms}" -gt 0 ] && [ "\$n" -eq 0 ]; then echo "ERROR: no permuted labelings selected" >&2; exit 1; fi
     ${run} $baseDir/subworkflows/CT/local/scripts/build_b0_labelings.py --config ${caas_config} --labelings-out b0_labelings.tab
     cat b0_labelings.tab resample_perms.tab > resample_perms.tmp && mv resample_perms.tmp resample_perms.tab
+    rm -f all_resamples.tab candidates.tab b0_labelings.tab
     """
 }
 
@@ -156,7 +166,8 @@ process CAAS_CORE_BATCHED {
     tag "$batchID (${batchSize} genes)"
     label 'process_resample'
     publishDir path: "${params.outdir}/caas_permulation/perm_disc", mode: 'copy', overwrite: true,
-               pattern: 'perm_disc/*.perm_replay.discovery.output', saveAs: { fn -> fn.tokenize('/').last() }
+               pattern: 'perm_disc/*.perm_replay.discovery.output', saveAs: { fn -> fn.tokenize('/').last() },
+               enabled: (params.publish_intermediates as boolean)
 
     input:
     tuple val(batchID), val(batchSize), val(manifestText), path(alignmentFiles, stageAs: 'alignments/*'), path(permDiscFiles, stageAs: 'perm_disc_in/*')
@@ -184,6 +195,11 @@ process CAAS_CORE_BATCHED {
     def ensembl_file = params.gene_ensembl_file ?: ''
     def max_tasks_per_child = params.ct_disambig_max_tasks_per_child ?: 50
     def postproc_args = caasPostprocArgs(gene_lengths)
+    // The perm-discovery exports (~13-16 MB per gene at K=3) are read only by the ASR replay below; with pruning they are
+    // deleted right after it unless they are published (publish_intermediates keeps them for reuse by a later run).
+    def prune_exports = shouldPruneIntermediates() && !(params.publish_intermediates as boolean)
+    // Pruning moves the shards out of caas_perms_out instead of duplicating them.
+    def shard_move = shouldPruneIntermediates()
     """
     # One worker pool per step runs the genes in parallel; BLAS and OpenMP stay at one thread each.
     export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
@@ -254,9 +270,11 @@ process CAAS_CORE_BATCHED {
     else
         mkdir -p caas_perms_out/perm_pos_detail
     fi
-    cp -R caas_perms_out/perm_pos_detail perm_pos_detail
+    ${prune_exports ? 'rm -rf perm_disc/*.perm_replay.discovery.output' : ''}
+    ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/perm_pos_detail perm_pos_detail
     # b_0 shards sit in a subdirectory the null readers never glob; CAAS_CORE_MERGE scores them as a one-labeling run.
-    if [ -d caas_perms_out/b0/perm_pos_detail ]; then cp -R caas_perms_out/b0/perm_pos_detail perm_pos_detail/b0; fi
+    if [ -d caas_perms_out/b0/perm_pos_detail ]; then ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/b0/perm_pos_detail perm_pos_detail/b0; fi
+    ${shard_move ? 'rm -rf caas_perms_out' : ''}
 
     # The observed labeling as full records: one master shard per gene with b_0 hits.
     if compgen -G 'b0_observed/*.b0.discovery.tsv' > /dev/null; then
@@ -449,7 +467,7 @@ process CAAS_CORE_MERGE {
             --output-dir b0 \\
             --seed ${params.seed ?: 1998} ${removal_args}
         # The b_0 per-gene shards stay next to its scores
-        cp -RL "\$DETAIL/b0" b0/perm_pos_detail
+        cp -Rl "\$DETAIL/b0" b0/perm_pos_detail 2>/dev/null || cp -RL "\$DETAIL/b0" b0/perm_pos_detail
     fi
 
     ROSTER_ARG=""

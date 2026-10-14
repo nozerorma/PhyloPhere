@@ -606,35 +606,66 @@ def _cycle_gene_removal_from_detail(
     mode: str,
     iqr_multiplier: float,
     extreme_percentile: float,
+    info: Optional[Dict[str, Any]] = None,
 ) -> Set[Tuple[str, str, str]]:
     """Sub-pass B0: dubious/extreme gene removal per labeling (cycle).
 
-    One streaming read of the detail rows. Per (cycle, caap_group, Gene) it accumulates the
-    number of distinct detected positions and whether any row lies in a train (`clust`), then
+    One streaming read of the detail rows. Per (cycle, caap_group, Gene) it counts the
+    distinct detected positions and whether any row lies in a train (`clust`), then
     applies core.postproc.gene_removal, which calibrates within each (cycle, caap_group) pool.
     Returns the (cycle, caap_group, Gene) units to drop from the null pool; empty when `mode`
     is "none".
+
+    The rows of a gene are contiguous (one shard per gene), so the position sets of a gene are
+    reduced to a count when the gene ends: memory is one gene of positions plus one count per
+    unit, not every detected position of the null. When `info` is given it is filled with the
+    cycles seen ("cycles", a set) and the row count ("n_rows"), so the caller needs no separate scan.
     """
     from src.core.postproc import GeneUnit, gene_removal
 
     if (mode or "none").lower() == "none":
         return set()
 
-    seen_pos: Dict[Tuple[str, str, str], set] = {}
-    has_clust: Dict[Tuple[str, str, str], bool] = {}
-    for row in iter_detail_rows(detail_path):
-        key = (row["cycle"], row["caap_group"], row["Gene"])
-        seen_pos.setdefault(key, set()).add(int(row["Position"]))
-        if int(row.get("clust", 0) or 0):
-            has_clust[key] = True
+    cycles: Set[str] = set()
+    n_rows = 0
 
-    units = (
-        GeneUnit(cyc, grp, gene, len(pset), has_clust.get((cyc, grp, gene), False))
-        for (cyc, grp, gene), pset in seen_pos.items()
-    )
-    return set(gene_removal(units, gene_lengths, mode=mode,
-                            iqr_multiplier=iqr_multiplier,
-                            extreme_percentile=extreme_percentile))
+    def _units():
+        nonlocal n_rows
+        done: Set[str] = set()
+        current: Optional[str] = None
+        seen_pos: Dict[Tuple[str, str], set] = {}
+        has_clust: Dict[Tuple[str, str], bool] = {}
+
+        def _drain():
+            for (cyc, grp), pset in seen_pos.items():
+                yield GeneUnit(cyc, grp, current, len(pset), has_clust.get((cyc, grp), False))
+
+        for row in iter_detail_rows(detail_path):
+            gene = row["Gene"]
+            if gene != current:
+                if current is not None:
+                    yield from _drain()
+                    done.add(current)
+                if gene in done:
+                    raise ValueError(f"[perms] rows of gene {gene} are not contiguous in {detail_path}")
+                current = sys.intern(gene)
+                seen_pos, has_clust = {}, {}
+            cyc, grp = sys.intern(row["cycle"]), sys.intern(row["caap_group"])
+            cycles.add(cyc)
+            n_rows += 1
+            key = (cyc, grp)
+            seen_pos.setdefault(key, set()).add(int(row["Position"]))
+            if int(row.get("clust", 0) or 0):
+                has_clust[key] = True
+        if current is not None:
+            yield from _drain()
+
+    removed = set(gene_removal(_units(), gene_lengths, mode=mode,
+                               iqr_multiplier=iqr_multiplier,
+                               extreme_percentile=extreme_percentile))
+    if info is not None:
+        info["cycles"], info["n_rows"] = cycles, n_rows
+    return removed
 
 
 def write_removed_units(path: Path, removed: Set[Tuple[str, str, str]]) -> None:

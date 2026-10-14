@@ -149,8 +149,20 @@ def main() -> int:
         logger.warning("[reaggregate] empty null (no permuted labeling): no gene x cycle scores were written")
         return 0
 
+    # Gene removal reads every row once anyway, so with it on the same pass yields the cycles and the row
+    # count; without it a plain scan does.
+    removal_on = bool(args.gene_lengths) and args.gene_filter_mode != "none"
+    removed = set()
     logger.info("[reaggregate] scanning %s", args.detail)
-    cycle_tags, n_rows = scan_detail(args.detail)
+    if removal_on:
+        from src.core.postproc import load_gene_lengths
+        info = {}
+        removed = _cycle_gene_removal_from_detail(
+            args.detail, load_gene_lengths(args.gene_lengths), args.gene_filter_mode,
+            args.iqr_multiplier, args.extreme_percentile, info=info)
+        cycle_tags, n_rows = sorted(info["cycles"]), info["n_rows"]
+    else:
+        cycle_tags, n_rows = scan_detail(args.detail)
     logger.info("[reaggregate] %d rows across %d cycles", n_rows, len(cycle_tags))
     if not cycle_tags:
         logger.error("no cycles found in detail file; nothing to do")
@@ -171,12 +183,7 @@ def main() -> int:
                            len(silent), len(roster), ", ".join(silent[:5]), ", ..." if len(silent) > 5 else "")
         (args.output_dir / "cycle_roster.txt").write_text("".join(f"{c}\n" for c in roster))
 
-    removed = set()
-    if args.gene_lengths and args.gene_filter_mode != "none":
-        from src.core.postproc import load_gene_lengths
-        removed = _cycle_gene_removal_from_detail(
-            args.detail, load_gene_lengths(args.gene_lengths), args.gene_filter_mode,
-            args.iqr_multiplier, args.extreme_percentile)
+    if removal_on:
         write_removed_units(args.output_dir / "removed_units.tsv", removed)
         logger.info("[reaggregate] gene removal (%s): %d (cycle, group, gene) units",
                     args.gene_filter_mode, len(removed))

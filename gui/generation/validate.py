@@ -52,6 +52,9 @@ def validate(project: ProjectConfig) -> list[str]:
     require(rt.work_dir, "Runtime: work directory is required.")
     require(rt.results_dir, "Runtime: results directory is required.")
 
+    if rt.cleanup_policy not in ("none", "prune_intermediates", "remove_work"):
+        errors.append(f"Runtime: the disk cleanup policy must be none, prune_intermediates or remove_work (got {rt.cleanup_policy!r}).")
+
     if rt.toy_mode and not (rt.toy_perms.strip().isascii() and rt.toy_perms.strip().isdigit() and int(rt.toy_perms) >= 0):
         errors.append(f"Runtime: toy permulation cycles must be a non-negative integer (0 replays only the real labeling) (got {rt.toy_perms!r}).")
 

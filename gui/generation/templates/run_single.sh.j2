@@ -306,6 +306,7 @@ _RUN_ENRICHMENT="${RUN_ENRICHMENT:-{{ run_defaults.enrichment }}}"
 _RUN_POSENRICH="${RUN_POSENRICH:-{{ run_defaults.posenrich }}}"
 _ASR_DIAGNOSTICS="${ASR_DIAGNOSTICS:-{{ run_defaults.asr_diagnostics }}}"
 _TOY_MODE="${TOY_MODE:-false}"
+_CLEANUP_POLICY="${CLEANUP_POLICY:-{{ runtime.cleanup_policy }}}"
 
 # CAAS: the tool string when enabled; when off, an empty ct_tool disables the CT()
 # workflow in main.nf (an empty string is falsy in Groovy, whereas a command-line
@@ -450,6 +451,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "reporting": $_RUN_REPORTING,
   "toy_mode": $_TOY_MODE,
   "toy_n": "$TOY_N",
+  "cleanup_policy": "$_CLEANUP_POLICY",
 
   "contrast_selection": $_CONTRAST_SELECTION,
   "ct_tool": "$_CT_TOOL",
@@ -729,9 +731,24 @@ echo "======================================================"
 
 nextflow run "${REPO_DIR}/main.nf" "${NF_ENGINE[@]}"
 
+# remove_work: reached only when nextflow run exited 0 (set -e aborts earlier otherwise, so a failed run
+# keeps work/ for debugging and -resume). Both passes of a two-pass run tag RUN_TAG, hence have their own
+# WORK_DIR, RUN_DIR and NXF_HOME, and the complete pass reads the exploratory pass from its published outdir.
+cleanup_work() {
+    echo "[cleanup] Removing the Nextflow work directories of '${TRAIT}${RUN_TAG}': $WORK_DIR"
+    # The run directory is the cwd of this script; its Nextflow log is kept with the results before it goes.
+    mkdir -p "${RESULTS_BASE}/pipeline_info"
+    cp "${RUN_DIR:?}/.nextflow.log" "${RESULTS_BASE}/pipeline_info/nextflow.log" 2>/dev/null || true
+    cd "$REPO_DIR"
+    rm -rf "${WORK_DIR:?}" "${RUN_DIR:?}" "${NXF_HOME:?}"
+}
+
 if [ -f "${RESULTS_BASE}/low_contrasts.skip" ]; then
     echo "Warning: Skipped '${TRAIT}': too few foreground contrasts."
+    if [ "$_CLEANUP_POLICY" = "remove_work" ]; then cleanup_work; fi
     exit 0
 fi
+
+if [ "$_CLEANUP_POLICY" = "remove_work" ]; then cleanup_work; fi
 
 echo "Success: Completed $TRAIT"

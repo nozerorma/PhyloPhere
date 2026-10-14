@@ -122,6 +122,7 @@ process PREP_ALIGNMENTS {
         --tree "${tree}" \\
         --fasta "${gene_id}_tmp.fa" \\
         --output "${gene_id}.filtered.fa"
+    rm -f "${gene_id}_tmp.fa"
 
     [ -s "${gene_id}.filtered.fa" ] || rm -f "${gene_id}.filtered.fa"
     """

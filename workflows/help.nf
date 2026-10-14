@@ -160,6 +160,7 @@ Usage:
 --prune_list_secondary                 <"species_list">               null
 --toy_mode                           <true|false>                    false  (smoke test on a random subset of alignments; species are never subsampled)
 --toy_n                               <INTEGER>                      1000   (alignments kept in --toy_mode: the first N of a shuffle seeded by --seed; an empty value or 0 falls back to 50)
+--cleanup_policy                    <none|prune_intermediates|remove_work>  none  (prune_intermediates: tasks delete the bulky intermediates no later process reads, and the perm-discovery exports are published only with --publish_intermediates; remove_work: also removes the work directory after a successful run, done by the generated run script)
 '''
 }
 
