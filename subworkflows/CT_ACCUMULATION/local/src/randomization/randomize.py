@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# randomize.py — Per-gene empirical null for CAAS accumulation, one test per grouping scheme.
+# randomize.py — Per-gene empirical null for CAAS accumulation.
 # PhyloPhere | subworkflows/CT_ACCUMULATION/local/src/randomization/
 
 """
 Randomization: tests whether a gene accumulates more CAAS than a null predicts.
 
-Writes <prefix>_us_aggregated_results.csv, plus conservation-decile parquet tables for 'cons_decile'.
+Writes <prefix>_aggregated_results.csv, plus conservation-decile parquet tables for 'cons_decile'.
 
 Test design
 -----------
@@ -54,12 +54,8 @@ alignment column breaks the proportionality gene by gene: poorly covered genes r
 too-high expectation (conservative) and well covered genes a too-low one
 (anti-conservative), which concentrates false positives in the best-covered genes.
 
-Evaluation is Unweighted Scheme (US) only
-------------------------------------------
-Accumulation is evaluated strictly under the Unweighted Scheme (US); the biochemical grouping
-schemes (GS1-GS4) describe positions and are excluded from accumulation. Each gene's empirical p-value
-is derived from the US null distribution and adjusted directly by Benjamini-Hochberg (BH FDR)
-downstream in accum_gene_lists.nf and scoring_compute.R.
+Each gene's empirical p-value is derived from the null distribution of its CAAS count and adjusted directly by
+Benjamini-Hochberg (BH FDR) downstream in accum_gene_lists.nf and scoring_compute.R.
 
 No significance, convergence or divergence category families, FDR or gene lists are
 produced here.
@@ -68,8 +64,8 @@ Called by:  CT_ACCUMULATION Nextflow process (ctacc_run.nf CT_ACCUMULATION_RANDO
 Inputs:     --global_csv (<prefix>_global.csv of concatenate.py), --caas_csv (filtered_discovery.tsv),
             --background-positions and --bg-caas (eligible pool), --null-cycle-caas (universe U of
             'naive' and 'cons_decile'; the null of 'permulation') and --cycle-roster (permulation only)
-Outputs:    <output-prefix>_<group>_aggregated_results.csv (GeneID, Gene, ActualCount, RandsAbove,
-            RandsBelow, PValueEmpirical, MeanSim, SD, NumRands, each suffixed _<group>);
+Outputs:    <output-prefix>_aggregated_results.csv (GeneID, Gene, ActualCount, RandsAbove,
+            RandsBelow, PValueEmpirical, MeanSim, SD, NumRands);
             for cons_decile also <output-prefix>_cons_decile_global.parquet (decile, NumPositions,
             NumPool, NumObserved, Replace), <output-prefix>_cons_decile_per_gene.parquet (ungapped
             positions per gene and decile) and <output-prefix>_cons_decile_pool_per_gene.parquet
@@ -199,7 +195,7 @@ def eligible_rows(positions, masked):
     """Indices of the draw pool: one row per distinct position that is not masked.
 
     `positions` is the globally unique position id, so the repeats of a position in the merged table (one per
-    scheme or hypothesis) count once; a position that is a CAAS under k schemes would otherwise sit k times in
+    side or hypothesis) count once; a position that is a CAAS on both sides would otherwise sit twice in
     the pool and the null would re-land preferentially on genes that are already CAAS-dense.
     """
     _, first_idx = np.unique(positions, return_index=True)
@@ -218,7 +214,7 @@ def restrict_pool_to_universe(masked, gene_ids, msa_pos, observed, null_pos, gen
     """Masked flag of the universe U: (unmasked and null-positive) or observed.
 
     `masked` is True where the row is outside the tested pool (gap, untested or removed gene), `observed` flags the
-    rows of observed CAAS positions (any scheme or side). Returns the new masked array (True = outside U).
+    rows of observed CAAS positions (either side). Returns the new masked array (True = outside U).
     """
     in_null = in_null_positive(gene_ids, msa_pos, null_pos, gene_to_id)
     return ~((~np.asarray(masked, dtype=bool) & in_null) | np.asarray(observed, dtype=bool))
@@ -232,8 +228,7 @@ def _remap_caas_df(df):
 
     Renames Gene and Position to gene and msa_pos, fills the optional columns that are
     absent (tag from tag_support, side from change_side or 'both', is_conserved_meta as
-    False, caap_group from caap or group, else 'US'), upper-cases caap_group (US, GS1 to
-    GS4) and adds iscaap (any group other than US). Other columns pass through unchanged.
+    False). Other columns pass through unchanged.
     """
     # Structural keys only; the other columns already carry their lowercase names
     df = df.rename(columns={'Gene': 'gene', 'Position': 'msa_pos', 'position': 'msa_pos'})
@@ -259,20 +254,6 @@ def _remap_caas_df(df):
             df['side'] = df['change_side']
         else:
             df['side'] = 'both'
-
-    # caap_group: normalize the case of the label (GS1 to GS4, US)
-    if 'caap_group' not in df.columns:
-        for alt in ('caap', 'group'):
-            if alt in df.columns:
-                df['caap_group'] = df[alt]
-                break
-    if 'caap_group' in df.columns:
-        df['caap_group'] = df['caap_group'].astype(str).str.strip().str.upper()
-    else:
-        df['caap_group'] = 'US'
-
-    # iscaap: any labeled group other than 'US' (includes GS1 to GS4)
-    df['iscaap'] = df['caap_group'].apply(lambda x: x != 'US')
 
     logging.info("CAAS CSV: remapped filtered_discovery.tsv columns to internal schema")
     return df
@@ -355,7 +336,7 @@ class RandomizationWorker:
 
     def _prepare_keyed_eligibles(self):
         self.eligible_by_key = {}
-        # One draw slot per physical position, not one per scheme row (see eligible_rows).
+        # One draw slot per physical position, not one per side row (see eligible_rows).
         all_eligible = eligible_rows(self.positions, self.masked)
         if self.randomization_type == 'naive':
             self.eligible_by_key['global'] = all_eligible
@@ -439,12 +420,7 @@ class RandomizationWorker:
             uid = f"{os.getpid()}_{chunk_idx}_{r}" if self.export_individual else None
 
             for elig, cat_slices, key in decile_plans:
-                # Each group draws its own positions from this key's eligible set
-                # instead of partitioning one shared draw. That keeps every group's
-                # marginal p-value calibrated against the pool its observed count
-                # came from. Cross-group dependence (a position can be a CAAS under
-                # several schemes) belongs to the observed data and is handled when
-                # the p-values are combined (see the module docstring).
+                # Each category draws its positions from this key's eligible set.
                 for cat, (dest_start, dest_end) in cat_slices.items():
                     n_cat = dest_end - dest_start
                     if len(elig) < n_cat:
@@ -551,19 +527,19 @@ def _build_caas_payload(merged_df, randomization_type, decile_bins, pool_mask):
 # eligible pool. The randomized CAAS set of a gene at cycle i is the set of positions
 # the CAAS permulation detects in that gene at cycle i. It is read from
 # perm_pos_cycle_caas.tsv.gz, the same filtered null table SCORING (p.emp, p.emp_fact,
-# p.adj_bh), POSENRICH and FCS use: cluster trains and removed (cycle, scheme, gene)
+# p.adj_bh), POSENRICH and FCS use: cluster trains and removed (cycle, gene)
 # units are already out of it, as they are out of filtered_discovery.tsv on the observed
 # side, so both sides count the same kind of position. The null keeps the phenotype-tree
 # confound but is not conservation-decile matched: it answers a different question, not a
 # stricter version of the same one. The per-gene CAAS count is free in each cycle (not
 # fixed to the observed count), so this is an excess null, not an occupancy null.
 #
-# One counting rule for both sides (see _side_mask): a row is a hit when it is a US
-# detection (caas_score > 0 in the null, the US rows of filtered_discovery on the
+# One counting rule for both sides (see _side_mask): a row is a hit when it is a
+# detection (caas_score > 0 in the null, the rows of filtered_discovery on the
 # observed side) whose side is the selected one; with direction 'both' a position on
 # both sides is two rows, on either side of the comparison.
 
-_PERM_CATS = ['us']
+_PERM_CATS = ['caas']
 
 
 def _side_mask(side, change_side):
@@ -590,7 +566,7 @@ def null_counts_by_gene_cycle(null_path, change_side):
 
     Reads perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_score, ...) and keeps the
     rows with caas_score > 0 on the selected side. A (Gene, Position, side, cycle) key counts once,
-    as the observed table is deduplicated per (gene, position, scheme, side). The cycles present are
+    as the observed table is deduplicated per (gene, position, side). The cycles present are
     taken before the filter, so a cycle whose rows were all dropped is still a present cycle.
 
     Returns (counts, cycles_present): counts is a Series indexed by (Gene, cycle) with the number
@@ -703,7 +679,7 @@ def _write_empty_outputs_and_exit(args):
 
     Used when the global/CAAS join is empty, so downstream steps still find their inputs.
     """
-    categories = ['us']
+    categories = ['caas']
 
     base_dir = os.path.dirname(args.output_prefix) or '.'
     os.makedirs(base_dir, exist_ok=True)
@@ -712,16 +688,16 @@ def _write_empty_outputs_and_exit(args):
         df_cat = pd.DataFrame(columns=[
             'GeneID',
             'Gene',
-            f'ActualCount_{cat}',
-            f'RandsAbove_{cat}',
-            f'RandsBelow_{cat}',
-            f'PValueEmpirical_{cat}',
-            f'MeanSim_{cat}',
-            f'SD_{cat}',
-            f'NumRands_{cat}',
+            'ActualCount',
+            'RandsAbove',
+            'RandsBelow',
+            'PValueEmpirical',
+            'MeanSim',
+            'SD',
+            'NumRands',
         ])
 
-        out_cat = f"{args.output_prefix}_{cat}_aggregated_results.csv"
+        out_cat = f"{args.output_prefix}_aggregated_results.csv"
         df_cat.to_csv(out_cat, index=False, compression='gzip' if args.compress else None)
         logging.info(f"Results ({cat}): {out_cat} [empty]")
 
@@ -760,7 +736,7 @@ def main(args):
 
     # Keep only the columns that are used, to save memory
     required_cols = ['gene', 'msa_pos',
-                     'side', 'tag', 'convergence_type', 'iscaap', 'caap_group',
+                     'side', 'tag', 'convergence_type',
                      'is_conserved_meta']
 
     # Normalize the CAAS columns; an empty input becomes a skeleton so the left-join keys exist
@@ -773,17 +749,17 @@ def main(args):
     caas_df = caas_df[available]
     logging.info(f"CAAS df: {len(caas_df)} rows, columns: {available}")
 
-    # One slot per (gene, position, scheme, side): a position detected on both
+    # One slot per (gene, position, side): a position detected on both
     # sides is two rows (side top and bottom), and any other repeat of the key
     # (for example one row per hypothesis) is a duplicate of the same physical unit.
-    if not caas_df.empty and {'gene', 'msa_pos', 'caap_group'}.issubset(caas_df.columns):
+    if not caas_df.empty and {'gene', 'msa_pos'}.issubset(caas_df.columns):
         n_before = len(caas_df)
-        _keys = ['gene', 'msa_pos', 'caap_group']
+        _keys = ['gene', 'msa_pos']
         if 'side' in caas_df.columns:
             _keys = _keys + ['side']
         caas_df = caas_df.drop_duplicates(_keys, keep='first')
         logging.info(
-            f"CAAS df after (gene, position, scheme) dedup: {len(caas_df)} rows "
+            f"CAAS df after (gene, position, side) dedup: {len(caas_df)} rows "
             f"(collapsed {n_before - len(caas_df)} hypothesis-replay duplicates)")
 
     # One row per global position
@@ -868,11 +844,11 @@ def main(args):
             "tested/ungapped ratio rather than by its genuine opportunity to carry a CAAS. "
             "Pass caastools background.output (with --bg-caas) to define the pool properly.")
 
-    # Observed CAAS rows (any scheme, top or bottom side): the rows of the position table matched by a detection
+    # Observed CAAS rows (top or bottom side): the rows of the position table matched by a detection
     # of filtered_discovery; a side 'none' row is not a detection
     caas_bool = np.asarray(
         merged_df['iscaas'].replace({'TRUE': True, 'FALSE': False}).astype('boolean').fillna(False), dtype=bool)
-    observed_rows = merged_df['caap_group'].notna().to_numpy() & _side_mask(merged_df['side'], 'both').to_numpy()
+    observed_rows = merged_df['side'].notna().to_numpy() & _side_mask(merged_df['side'], 'both').to_numpy()
 
     pool_label = None
     if args.randomization_type != 'permulation':
@@ -936,13 +912,10 @@ def main(args):
             'cons_idx':  np.float32, 'genes': np.int32, 'iscaas': bool,
         }
 
-    # CAAS rows of the US group, filtered by side with the rule the permulation null uses
+    # CAAS rows, filtered by side with the rule the permulation null uses
     # (_side_mask): one row per side, a position on both sides is two rows.
-    _gu = merged_df['caap_group'].fillna('').astype(str).str.strip().str.upper()
-    pool_groups = {'US'}
-    pool_group_mask = _gu.isin(pool_groups)
-    caas_filter = pool_group_mask & _side_mask(merged_df['side'], args.change_side)
-    logging.info(f"Direction filter '{args.change_side}': {caas_filter.sum()} observed US rows retained")
+    caas_filter = _side_mask(merged_df['side'].fillna(''), args.change_side)
+    logging.info(f"Direction filter '{args.change_side}': {caas_filter.sum()} observed CAAS rows retained")
     if not caas_df.empty and not caas_df['side'].astype(str).str.lower().isin(['top', 'bottom']).any():
         logging.warning("the CAAS table has no row with side top or bottom: no observed CAAS counts under any direction.")
 
@@ -954,22 +927,20 @@ def main(args):
             else np.array([float(x) for x in args.decile_bins.split(',')])
         )
 
-    # Accumulation evaluates the unweighted scheme (US) only; biochemical GS schemes
-    # describe positions and are excluded from accumulation.
     pool_mask = caas_filter
-    us_mask   = pool_mask & _gu.eq('US')
+    caas_mask = pool_mask
 
-    logging.info(f"Category size: us={us_mask.sum()}")
+    logging.info(f"Category size: caas={caas_mask.sum()}")
     if args.randomization_type != 'permulation':
         # The rows counted as observed belong to the pool by construction of U; a violation is a bug
-        n_counted_outside = int((us_mask.to_numpy(dtype=bool) & masked).sum())
+        n_counted_outside = int((caas_mask.to_numpy(dtype=bool) & masked).sum())
         if n_counted_outside and pool_label.startswith('U'):
             raise AssertionError(f"{n_counted_outside} observed rows used as the observed count lie outside U")
 
     def _bc(mask):
         return np.bincount(np.asarray(genes_int[np.asarray(mask, dtype=bool)], dtype=np.int32), minlength=n_genes)
 
-    actual_counts_masks = {'us': us_mask}
+    actual_counts_masks = {'caas': caas_mask}
     actual_counts = {cat: _bc(mask) for cat, mask in actual_counts_masks.items()}
 
     if args.randomization_type == 'permulation':
@@ -1008,8 +979,8 @@ def main(args):
         else:
             pool_dec = decile_keys(cons_idx_arr[pool_idx], decile_bins)
             pool_size_by_key = {int(d): int((pool_dec == d).sum()) for d in range(len(decile_bins) - 1)}
-        short_keys = {k: (pool_size_by_key.get(k, 0), v['n_us']) for k, v in extra_key_sizes.items()
-                      if pool_size_by_key.get(k, 0) < v.get('n_us', 0)}
+        short_keys = {k: (pool_size_by_key.get(k, 0), v['n_caas']) for k, v in extra_key_sizes.items()
+                      if pool_size_by_key.get(k, 0) < v.get('n_caas', 0)}
         if short_keys:
             logging.warning(
                 f"{len(short_keys)} of {len(extra_key_sizes)} draw keys hold fewer pool positions than observed CAAS "
@@ -1074,27 +1045,27 @@ def main(args):
         df_cat = pd.DataFrame({
             'GeneID': np.arange(n_genes, dtype=int),
             'Gene':   list(id_to_gene.values()),
-            f'ActualCount_{cat}':     act,
-            f'RandsAbove_{cat}':      cnt_ge_cat,
-            f'RandsBelow_{cat}':      total_n_rands - cnt_ge_cat,
-            f'PValueEmpirical_{cat}': p_emp,
-            f'MeanSim_{cat}':         mean_cat,
-            f'SD_{cat}':              sd_cat,
-            f'NumRands_{cat}':        total_n_rands,
+            'ActualCount':     act,
+            'RandsAbove':      cnt_ge_cat,
+            'RandsBelow':      total_n_rands - cnt_ge_cat,
+            'PValueEmpirical': p_emp,
+            'MeanSim':         mean_cat,
+            'SD':              sd_cat,
+            'NumRands':        total_n_rands,
         })
         base_dir = os.path.dirname(args.output_prefix) or '.'
         os.makedirs(base_dir, exist_ok=True)
-        out_cat = f"{args.output_prefix}_{cat}_aggregated_results.csv"
+        out_cat = f"{args.output_prefix}_aggregated_results.csv"
         df_cat.to_csv(out_cat, index=False,
                       compression='gzip' if args.compress else None)
         logging.info(f"Results ({cat}): {out_cat}")
 
     # Decile occupancy (diagnostic), globally and per gene, to check a run against the replace=True fallback of
     # process_chunk. Per decile: NumPositions (ungapped positions, as before), NumPool (distinct positions of the draw
-    # pool: U when the null table was given), NumObserved (observed US rows redrawn in that decile) and Replace
+    # pool: U when the null table was given), NumObserved (observed CAAS rows redrawn in that decile) and Replace
     # (NumPool < NumObserved). The per-gene pool occupancy is written next to the per-gene ungapped table.
     if args.randomization_type == 'cons_decile':
-        # One row per physical position (as in eligible_rows): merged_df repeats each position once per scheme.
+        # One row per physical position (as in eligible_rows): merged_df repeats each position once per side.
         df_elig = (merged_df[merged_df['masked'] == False]
                    .drop_duplicates('position').copy())
         bins = decile_bins if decile_bins is not None else _compute_bins_from_series(
@@ -1111,7 +1082,7 @@ def main(args):
         df_pool['decile'] = decile_keys(df_pool['cons_idx'].to_numpy(np.float32), bins) + 1
         pool_global = df_pool.groupby('decile').size().reset_index(name='NumPool')
         obs_global = pd.DataFrame(
-            [(int(k) + 1, int(v.get('n_us', 0))) for k, v in extra_key_sizes.items()],
+            [(int(k) + 1, int(v.get('n_caas', 0))) for k, v in extra_key_sizes.items()],
             columns=['decile', 'NumObserved'])
         global_decile = (global_decile.merge(pool_global, on='decile', how='outer')
                          .merge(obs_global, on='decile', how='outer').fillna(0).sort_values('decile'))

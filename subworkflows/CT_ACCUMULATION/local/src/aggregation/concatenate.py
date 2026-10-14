@@ -7,9 +7,8 @@ Aggregator: writes <prefix>_global.csv, the table the randomization phase sample
 
 Every alignment column of every background gene gets one row with a global integer
 position, a conservation value, a mask flag (column gapped in any species of the
-traitfile) and an iscaas flag (the column is a CAAS of the filtered discovery table in
-any group). Only the keys (group, gene, msa_pos) of the discovery table are used, never
-its per-position values.
+traitfile) and an iscaas flag (the column is a CAAS of the filtered discovery table).
+Only the keys (gene, msa_pos) of the discovery table are used, never its per-position values.
 
 Called by:  CT_ACCUMULATION Nextflow process (ctacc_run.nf CT_ACCUMULATION_AGGREGATE → main.py --tool aggregate)
 Inputs:     alignment directory, genomic-info TSV (gene, chr, start, end, length), traitfile
@@ -179,16 +178,13 @@ def read_bg_info(bg_file):
 def read_metadata_caas(metadata_file):
     """Read the CAAS positions of a filtered_discovery.tsv (tab or comma separated).
 
-    Columns are matched case-insensitively: Gene, Position (or msa_pos), caap_group (or caap,
-    group), and optionally tag (or tag_support), convergence_type and amino_encoded. A row with
-    no group value goes to group '1'. A file without a Gene or Position column is skipped with
-    a warning and yields an empty table.
+    Columns are matched case-insensitively: Gene and Position (or msa_pos). A file without a Gene
+    or Position column is skipped with a warning and yields an empty table.
 
-    Returns: dict[group][gene][msa_pos] = {tag, convergence_type, caas}, where caas holds the
-    amino_encoded value. Only the (group, gene, msa_pos) keys are consumed downstream.
+    Returns: dict[gene] -> set of 0-based msa positions. Only the (gene, msa_pos) keys are consumed downstream.
     """
     logging.info(f"Reading metadata CAAS from {metadata_file if metadata_file else 'None'}")
-    metadata = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    metadata = defaultdict(set)
 
     if not metadata_file:
         return metadata
@@ -215,18 +211,6 @@ def read_metadata_caas(metadata_file):
             logging.warning(f"Metadata CAAS file has no 'Position' column (header: {raw_header[:120]}) — skipping")
             return metadata
 
-        tag_idx = col_map.get('tag')
-        if tag_idx is None:
-            tag_idx = col_map.get('tag_support')
-
-        convergence_idx = col_map.get('convergence_type')
-        amino_idx = col_map.get('amino_encoded')
-        group_idx = col_map.get('caap_group')
-        if group_idx is None:
-            group_idx = col_map.get('caap')
-        if group_idx is None:
-            group_idx = col_map.get('group')
-
         for line in f:
             line = line.strip()
             if not line:
@@ -235,23 +219,13 @@ def read_metadata_caas(metadata_file):
             try:
                 gene = parts[gene_idx].strip()
                 msa_pos = int(float(parts[pos_idx].strip()))
-                tag = parts[tag_idx].strip() if tag_idx is not None and tag_idx < len(parts) else ''
-                convergence = parts[convergence_idx].strip() if convergence_idx is not None and convergence_idx < len(parts) else ''
-                amino_conv = parts[amino_idx].strip() if amino_idx is not None and amino_idx < len(parts) else ''
-                group = parts[group_idx].strip() if group_idx is not None and group_idx < len(parts) else '1'
-                if not group or group in ('NA', 'na', 'N/A'):
-                    group = '1'
             except (IndexError, ValueError) as e:
                 logging.warning(f"Skipping malformed meta_caas line: {line[:120]} — {e}")
                 continue
 
-            metadata[group][gene][msa_pos] = {
-                'tag': tag,
-                'convergence_type': convergence,
-                'caas': amino_conv,
-            }
+            metadata[gene].add(msa_pos)
 
-    logging.debug(f"Meta-CAAS loaded. Groups: {list(metadata.keys())}")
+    logging.debug(f"Meta-CAAS loaded: {len(metadata)} genes")
     return metadata
 
 
@@ -406,10 +380,7 @@ def aggregate(args):
 
             for msa_pos in range(seq_len):
                 global_pos = gene_offsets[gene_name] + msa_pos
-                is_caas    = any(
-                    msa_pos in metadata_dict.get(g, {}).get(gene_name, {})
-                    for g in metadata_dict
-                ) if metadata_dict else False
+                is_caas    = msa_pos in metadata_dict.get(gene_name, ())
 
                 # Conservation value and mask
                 is_masked = (msa_pos in masked_pos)

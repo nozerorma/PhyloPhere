@@ -15,7 +15,7 @@
  *             cycle_roster.txt of one CAAS_CORE_MERGE run (the null of the permulation type,
  *             the universe U of the draw pool of naive and cons_decile)
  *  Produces:  entropy_dir/ (<gene>.entropy.tsv), accumulation_global.csv,
- *             accumulation_<direction>_<scheme>_aggregated_results.csv
+ *             accumulation_<direction>_aggregated_results.csv
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -113,7 +113,7 @@ process CT_ACCUMULATION_AGGREGATE {
 
 // ── Randomization ────────────────────────────────────────────────────────────
 
-// One run per direction ('top', 'bottom', 'all'): the null and the per-gene empirical p-values of the five grouping schemes
+// One run per direction ('top', 'bottom', 'all'): the null and the per-gene empirical p-values
 process CT_ACCUMULATION_RANDOMIZE {
     tag "ct_accumulation_randomize|${direction}"
     label 'process_long_compute'

@@ -11,7 +11,7 @@
  *  layout the Rmd reads (accum_root/{top,bottom,all}/randomization and accum_root/aggregation)
  *  before rendering. The two script branches differ only in the container entrypoint.
  *
- *  Consumes:  all accumulation_<direction>_<scheme>_aggregated_results.csv files (collected)
+ *  Consumes:  all accumulation_<direction>_aggregated_results.csv files (collected)
  *             and the *_global.csv files of the aggregation (collected)
  *  Produces:  10.Accumulation_report.html, accumulation_summary_*.tsv (optional)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -54,7 +54,7 @@ params:
   }
 </style>
 
-<!-- 10.Accumulation_report.Rmd — Per-gene CAAS accumulation results by direction and grouping scheme. -->
+<!-- 10.Accumulation_report.Rmd — Per-gene CAAS accumulation results by direction. -->
 <!-- PhyloPhere | subworkflows/CT_ACCUMULATION/local/ -->
 
 ```{r setup, include=FALSE}
@@ -87,32 +87,23 @@ theme_set(
     plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
   )
 )
-# Order of schemes: accumulation evaluates the unweighted scheme (US) only
-scheme_order <- c("us")
-
 fdr_thr   <- params$fdr_threshold
 pval_thr  <- fdr_thr
 accum_dir <- params$accum_dir
 ```
 
 ```{r load-data}
-# ── Load all per-scheme CSVs across directions ────────────────────────────────
+# ── Load the results CSV of each direction ────────────────────────────────────
 directions <- c("top", "bottom", "all")
-schemes    <- scheme_order
 
-load_scheme_csv <- function(direction, scheme) {
+load_direction_csv <- function(direction) {
   path <- file.path(accum_dir, direction, "randomization",
-                    sprintf("accumulation_%s_%s_aggregated_results.csv", direction, scheme))
+                    sprintf("accumulation_%s_aggregated_results.csv", direction))
   if (!file.exists(path)) return(NULL)
-  df <- read_csv(path, show_col_types = FALSE)
-  # Drop the _<scheme> suffix of the columns (ActualCount_us becomes ActualCount)
-  df <- df %>%
-    rename_with(~ str_remove(.x, paste0("_", scheme, "$"))) %>%
-    mutate(direction = direction, scheme = scheme)
-  df
+  read_csv(path, show_col_types = FALSE) %>% mutate(direction = direction)
 }
 
-raw <- map_dfr(directions, function(d) map_dfr(schemes, ~ load_scheme_csv(d, .x)))
+raw <- map_dfr(directions, load_direction_csv)
 
 has_data <- nrow(raw) > 0
 if (!has_data) stop("No accumulation CSVs found under: ", accum_dir)
@@ -120,19 +111,12 @@ if (!has_data) stop("No accumulation CSVs found under: ", accum_dir)
 # Standardize the gene column name (Gene / gene)
 if ("Gene" %in% names(raw) && !"gene" %in% names(raw)) raw <- rename(raw, gene = Gene)
 
-# Accumulation evaluates the unweighted scheme (US) only; biochemical GS schemes
-# describe positions and are excluded from accumulation.
-raw <- raw %>% filter(scheme == "us")
-
-# ── BH FDR per direction × scheme, excluding genes with ActualCount = 0 ───────
+# ── BH FDR per direction, excluding genes with ActualCount = 0 ────────────────
 # Genes with ActualCount = 0 have p = 1 by construction, not by test, and must not
 # enter the FDR denominator: they would inflate it and reduce power.
 accum <- raw %>%
-  mutate(
-    scheme    = factor(scheme, levels = scheme_order),
-    direction = factor(direction, levels = directions)
-  ) %>%
-  group_by(direction, scheme) %>%
+  mutate(direction = factor(direction, levels = directions)) %>%
+  group_by(direction) %>%
   mutate(
     FDR = {
       tested <- !is.na(ActualCount) & ActualCount > 0 & !is.na(PValueEmpirical)
@@ -176,20 +160,20 @@ if (identical(rand_type, "permulation")) {
 
 ```{r overview-table}
 summary_tbl <- accum %>%
-  group_by(direction, scheme) %>%
+  group_by(direction) %>%
   summarise(
     n_genes        = n_distinct(gene),
     n_significant  = sum(significant, na.rm = TRUE),
     pct_significant = round(100 * mean(significant, na.rm = TRUE), 2),
     .groups = "drop"
   ) %>%
-  arrange(direction, scheme)
+  arrange(direction)
 
 DT::datatable(
   summary_tbl,
   caption  = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
-    sprintf("Significant genes (FDR < %g) per direction × scheme | Trait: %s",
+    sprintf("Significant genes (FDR < %g) per direction | Trait: %s",
             fdr_thr, params$traitname)
   ),
   rownames = FALSE,
@@ -244,10 +228,9 @@ for (dir in directions) {
   sub <- accum %>% filter(direction == dir, !is.na(PValueEmpirical), !is.na(ActualCount), ActualCount > 0)
   if (nrow(sub) == 0) { cat("*No data.*\n\n"); next }
 
-  p <- ggplot(sub, aes(x = PValueEmpirical, fill = scheme)) +
-    geom_histogram(bins = 40, alpha = 0.7, colour = "white") +
+  p <- ggplot(sub, aes(x = PValueEmpirical)) +
+    geom_histogram(bins = 40, alpha = 0.7, colour = "white", fill = .tableau10[1]) +
     geom_vline(xintercept = fdr_thr, linetype = "dashed", colour = "red") +
-    scale_fill_manual(values = setNames(.tableau10[seq_along(scheme_order)], scheme_order)) +
     labs(x = "Empirical p-value", y = "Gene count",
          title = sprintf("Direction: %s", str_to_title(dir))) +
     theme_bw(base_size = 16) +
@@ -262,14 +245,14 @@ for (dir in directions) {
 
 ## Significant genes {.tabset}
 
-> Genes with at least one observed CAAS (ActualCount > 0) are tested; significance is evaluated by empirical p-value under the Unweighted Scheme (US), adjusted by Benjamini-Hochberg FDR (`FDR < 0.05`).
+> Genes with at least one observed CAAS (ActualCount > 0) are tested; significance is evaluated by empirical p-value, adjusted by Benjamini-Hochberg FDR (`FDR < 0.05`).
 
 ```{r sig-tables, results='asis'}
 for (dir in directions) {
   cat(sprintf("\n\n### %s\n\n", str_to_title(dir)))
   sig <- accum %>%
     filter(direction == dir, significant) %>%
-    select(gene, scheme, ActualCount, MeanSim, SD, PValueEmpirical, FDR, RandsAbove, RandsBelow) %>%
+    select(gene, ActualCount, MeanSim, SD, PValueEmpirical, FDR, RandsAbove, RandsBelow) %>%
     arrange(FDR, gene)
 
   if (nrow(sig) == 0) { cat("*No significant genes.*\n\n"); next }
@@ -292,11 +275,9 @@ sig_summary <- accum %>%
   filter(significant) %>%
   group_by(gene, direction) %>%
   summarise(
-    n_schemes_significant = n(),
-    min_pval              = min(PValueEmpirical, na.rm = TRUE),
-    min_fdr               = min(FDR, na.rm = TRUE),
-    schemes               = paste(sort(unique(as.character(scheme))), collapse = ","),
-    .groups               = "drop"
+    min_pval = min(PValueEmpirical, na.rm = TRUE),
+    min_fdr  = min(FDR, na.rm = TRUE),
+    .groups  = "drop"
   ) %>%
   arrange(direction, min_fdr)
 

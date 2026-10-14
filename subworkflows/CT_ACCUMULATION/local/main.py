@@ -24,7 +24,7 @@ Runs two phases, selected with --tool:
   1. aggregate  builds the global position table (<prefix>_global.csv) from the alignments,
                 the genomic-info table, the traitfile and the filtered discovery table
                 (src/aggregation/concatenate.py).
-  2. randomize  tests, for each gene and grouping scheme (us, gs1 to gs4), whether it
+  2. randomize  tests, for each gene, whether it
                 accumulates more CAAS than a null predicts and writes the empirical
                 p-values (src/randomization/randomize.py).
 With --tool both the two phases run in sequence on the same arguments.
