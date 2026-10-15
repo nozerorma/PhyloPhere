@@ -13,6 +13,7 @@
   "runtime": {
     "resume": false,
     "toy_mode": false,
+    "cleanup_policy": "remove_work",
     "toy_n": "1000",
     "toy_perms": "1000",
     "runtime_type": "slurm",
@@ -68,6 +69,7 @@
       "publish_intermediates": false,
       "ct_core_batch_size": "100",
       "min_divergent_fraction": "0.5",
+      "strict_conservation_output": true,
       "max_bg_gaps_fraction": "0.0",
       "max_fg_gaps_fraction": "0.0",
       "max_gaps_fraction": "0.0",
@@ -95,6 +97,7 @@
       "asr_diagnostics": true,
       "run_postproc_exploratory": false,
       "run_postproc_filter": true,
+      "run_strict_analysis": true,
       "caas_postproc_mode": "filter",
       "filter_minlen": "3",
       "filter_maxcaas": "0.7",

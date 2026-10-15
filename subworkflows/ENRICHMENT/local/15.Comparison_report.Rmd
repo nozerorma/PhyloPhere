@@ -989,16 +989,16 @@ for (dr in c("GLOBAL", "TOP", "BOTTOM")) {
 
 Prioritized gene candidates faceted by direction (**Global**, **Top**, **Bottom**). Columns are organized into four functional bands:
 
-- **Metadatos** (grey): Gene identifier (`Gene`).
-- **Pondera** (blue): Criteria directly contributing to `Composite score`:
+- **Metadata** (grey): Gene identifier (`Gene`).
+- **Weighted** (blue): Criteria directly contributing to `Composite score`:
   - *CAAS percentiles* (`25%`, `10%`, `5%`, `1%`): collapsed to deepest nested tier (0–4).
   - *CAAS FCS evidence* (`CAAS evidence`): strongest FCS evidence tier reached (Supported = 2, Exploratory = 1, None = 0).
   - *Accumulation* (`Accum_dir`): directional accumulation significance (0–1).
   - *RER direction* (`RER_dir`): direction-matching acceleration/deceleration (0–1).
   - *RER FCS evidence* (`RER evidence`): strongest RER evidence tier reached (Supported = 2, Exploratory = 1, None = 0).
   - *FADE direction* (`FADE_dir`): directional excess divergence significance (0–1).
-- **Descriptivas** (amber): Characterization-only annotations that do not contribute to weighting (FCS significant term descriptions, AMI/DOMINO module descriptions, and position-enrichment terms). Neither `posenrich` nor `AMI` contributes to scoring.
-- **Resultados** (green): Family subtotal scores (`caas_family`, `rer_family`, `fade_family`), `N criteria` (count of weighting criteria satisfied), and `Composite score` (total sum).
+- **Descriptive** (amber): Characterization-only annotations that do not contribute to weighting (FCS significant term descriptions, AMI/DOMINO module descriptions, and position-enrichment terms). Neither `posenrich` nor `AMI` contributes to scoring.
+- **Results** (green): Family subtotal scores (`caas_family`, `rer_family`, `fade_family`), `N criteria` (count of weighting criteria satisfied), and `Composite score` (total sum).
 
 Only columns corresponding to analyses that were executed are displayed.
 
@@ -1127,7 +1127,7 @@ Only columns corresponding to analyses that were executed are displayed.
 }
 
 # Banded table renderer: renders interactive tables styled into four functional color bands:
-# Metadatos (Charcoal #4A5568), Pondera (Blue #2B6CB0), Descriptivas (Amber #C05621), Resultados (Green #2F855A).
+# Metadata (Charcoal #4A5568), Weighted (Blue #2B6CB0), Descriptive (Amber #C05621), Results (Green #2F855A).
 render_banded_table <- function(res_obj, height = NULL) {
   if (is.null(res_obj) || !is.list(res_obj) || is.null(res_obj$data) || nrow(res_obj$data) == 0) return(NULL)
   df <- res_obj$data
@@ -1146,28 +1146,28 @@ render_banded_table <- function(res_obj, height = NULL) {
   curr_idx <- 0
 
   if (length(meta_cols) > 0) {
-    header_spec <- c(header_spec, "Metadatos" = length(meta_cols))
+    header_spec <- c(header_spec, "Metadata" = length(meta_cols))
     header_colors <- c(header_colors, "#4A5568")
     col_tints[[length(col_tints) + 1]] <- list(idx = (curr_idx + 1):(curr_idx + length(meta_cols)), bg = "#F8F9FA")
     curr_idx <- curr_idx + length(meta_cols)
     borders <- c(borders, curr_idx)
   }
   if (length(pond_cols) > 0) {
-    header_spec <- c(header_spec, "Pondera" = length(pond_cols))
+    header_spec <- c(header_spec, "Weighted" = length(pond_cols))
     header_colors <- c(header_colors, "#2B6CB0")
     col_tints[[length(col_tints) + 1]] <- list(idx = (curr_idx + 1):(curr_idx + length(pond_cols)), bg = "#EFF6FF")
     curr_idx <- curr_idx + length(pond_cols)
     borders <- c(borders, curr_idx)
   }
   if (length(desc_cols) > 0) {
-    header_spec <- c(header_spec, "Descriptivas" = length(desc_cols))
+    header_spec <- c(header_spec, "Descriptive" = length(desc_cols))
     header_colors <- c(header_colors, "#C05621")
     col_tints[[length(col_tints) + 1]] <- list(idx = (curr_idx + 1):(curr_idx + length(desc_cols)), bg = "#FFFBEB")
     curr_idx <- curr_idx + length(desc_cols)
     borders <- c(borders, curr_idx)
   }
   if (length(res_cols) > 0) {
-    header_spec <- c(header_spec, "Resultados" = length(res_cols))
+    header_spec <- c(header_spec, "Results" = length(res_cols))
     header_colors <- c(header_colors, "#2F855A")
     col_tints[[length(col_tints) + 1]] <- list(idx = (curr_idx + 1):(curr_idx + length(res_cols)), bg = "#F0FDF4")
     curr_idx <- curr_idx + length(res_cols)
@@ -1466,17 +1466,17 @@ for (dr in c("Global", "Top", "Bottom")) {
 
 Prioritized amino-acid position candidates evaluated strictly at **position-native resolution**, faceted by direction (**Global**, **Top**, **Bottom**). Gene-level criteria (RER, Accumulation, FCS, AMI) are omitted to prevent gene-wide signals from confounding position ranking. Columns are organized into four functional bands:
 
-- **Metadatos** (grey): Position coordinates (`Gene`, `Position`), ancestral and derived states (`CAAS`, lineage residues, conserved pairs), supporting hypotheses, and continuous `CAAS Score`.
-- **Pondera** (blue): Position-native criteria contributing to `Composite score`:
+- **Metadata** (grey): Position coordinates (`Gene`, `Position`), ancestral and derived states (`CAAS`, lineage residues, conserved pairs), supporting hypotheses, and continuous `CAAS Score`.
+- **Weighted** (blue): Position-native criteria contributing to `Composite score`:
   - *CAAS percentiles* (`25%`, `10%`, `5%`, `1%`): collapsed to deepest nested tier (0–4).
   - *FADE site overlap* (`FADE_overlap`): exact codon site identified by FADE (0–1).
-- **Descriptivas** (amber): Characterization-only annotations excluded from scoring:
+- **Descriptive** (amber): Characterization-only annotations excluded from scoring:
   - *Biochemical profile*: `biochem_groupings` (groupings GS1–GS4 that the derived side agrees with) and `is_biochem` (agreement with ≥1 grouping).
   - *PosEnrich*: position-level functional enrichment terms (`PE_sig`, `PE term(s)`). Does not weight.
   - *Empirical statistics*: permutation p-values (`p.emp`, `p.adj_bh`).
   - *External annotations*: `COSMIC` somatic hits, `PAI3D_pathogenic` PrimateAI-3D pathogenicity calls.
   - *Domain & selection*: `Pfam domain`/`Pfam clan`, `UCR region`, `Position variability`, and `FUBAR selection`.
-- **Resultados** (green): Family subtotal scores (`caas_family`, `fade_family`), `N criteria`, and `Composite score` (sum: 0–5).
+- **Results** (green): Family subtotal scores (`caas_family`, `fade_family`), `N criteria`, and `Composite score` (sum: 0–5).
 
 Only columns corresponding to analyses that were executed are displayed.
 
