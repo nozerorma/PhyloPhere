@@ -39,10 +39,19 @@ def per_position(path):
     return g
 
 
-def n_cycles(results):
+def roster(results):
+    """Base cycles of the null: the roster of CAAS_CORE_MERGE (it includes the cycles that detect nothing), or the cycles
+    present in the null table when there is no roster."""
+    r = results / "caas_permulation/cycle_roster.txt"
+    if r.exists():
+        return [x for x in r.read_text().split() if x]
     with gzip.open(results / "caas_permulation/perm_pos_cycle_caas.tsv.gz", "rt") as f:
         cyc = pd.read_csv(f, sep="\t", usecols=["cycle"])["cycle"]
-    return cyc.str.replace(r"~H.*$", "", regex=True).nunique()
+    return sorted(cyc.str.replace(r"~H.*$", "", regex=True).unique())
+
+
+def n_cycles(results):
+    return len(roster(results))
 
 
 def md(df):
@@ -145,7 +154,8 @@ def null_report(res, g, truth, n):
     print(md(pd.DataFrame(rows)), "\n")
     # null scale
     pooled = nul["caas_score"]
-    per_cycle = nul.groupby("cycle")["Position"].nunique().reindex(sorted(nul["cycle"].unique()), fill_value=0)
+    base = nul["cycle"].str.replace(r"~H.*$", "", regex=True)
+    per_cycle = nul.groupby(base)["Position"].nunique().reindex(roster(res), fill_value=0)       # cycles with no detection count 0
     n_obs = len(g)
     print(f"- observed score quartiles {g['score'].quantile([.25, .5, .75]).round(3).tolist()}; pooled null {pooled.quantile([.25, .5, .75]).round(3).tolist()}")
     print(f"- positions detected: observed {n_obs}; null per cycle median {per_cycle.median():.0f}, q95 {per_cycle.quantile(.95):.0f}; "

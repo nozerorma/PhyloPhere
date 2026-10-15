@@ -20,15 +20,18 @@ eval(parse(text = src[a:b]))
 
 nul <- read.delim(gzfile(file.path(res_dir, "caas_permulation/perm_pos_cycle_caas.tsv.gz")), stringsAsFactors = FALSE,
                   colClasses = c(caas_score = "character"))
-stopifnot(all(nul$score_aggregation == "us_pos_species_pss"))
+rule <- sub('.*"(.*)".*', "\\1", grep("^score_aggregation <- ", src, value = TRUE))   # the rule of the scoring step
+stopifnot(all(nul$score_aggregation == rule))
 nul$caas_score <- suppressWarnings(as.numeric(nul$caas_score))
 nul <- nul[!is.na(nul$caas_score), ]
 nul$cyc <- sub("~H.*$", "", nul$cycle)                      # mirror labels collapse to the base cycle
 nul$key <- paste(nul$Gene, nul$Position)
 # statistic of the cycle: best side of the position
 st <- aggregate(caas_score ~ key + cyc, nul, max)
-keys <- sort(unique(st$key)); cycs <- unique(st$cyc)
-N <- length(cycs)                                           # every cycle of this null scores some position
+ros <- file.path(res_dir, "caas_permulation/cycle_roster.txt")
+keys <- sort(unique(st$key))
+cycs <- if (file.exists(ros)) union(scan(ros, what = "", quiet = TRUE), unique(st$cyc)) else unique(st$cyc)   # roster: includes cycles that detect nothing
+N <- length(cycs)
 S <- matrix(NA_real_, length(keys), N, dimnames = list(keys, cycs))
 S[cbind(match(st$key, keys), match(st$cyc, cycs))] <- st$caas_score
 det <- !is.na(S)

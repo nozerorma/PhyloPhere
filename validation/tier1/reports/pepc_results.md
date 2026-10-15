@@ -102,7 +102,7 @@ Absent from the candidate set under both traits because the fixture carries no C
 
 ### Positions 572 and 573 under the genotypic trait
 
-Absent from the candidate set of the genotypic run: the C4 tips carry two residues at each (572: Q 18, K 5; 573: N 15, A 8), and only the exact-identity scheme detects positions. They are detected under the phenotypic trait (572 and 573 in 97 and 58 hypotheses).
+Absent from the candidate set of the genotypic run because the cluster filter (`filter_minlen` 3, `filter_maxcaas` 0.7) discards them: discovery detects both, and they lie in a dense group of CAAS (572, 573 and 576 to 579) that the filter removes (`postproc/filter_selected/`, flag `Discarded`). The C4 tips carry two residues at each (572: Q 18, K 5; 573: N 15, A 8). Under the phenotypic trait they are detected and kept (572 and 573 in 97 and 58 hypotheses).
 
 ### Null of each truth position
 
