@@ -79,16 +79,28 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     RUN_DISAMBIGUATION=false
     ASR_DIAGNOSTICS=false
 {% if strict_pass %}
-    # The strict pass reads the strict tables (<outdir>/strict/) that the run it derives from wrote, and everything that
-    # does not depend on conservation (curated tree, data exploration, permulation design) from that run itself. The
-    # source is the complete pass when there is one, else the plain run.
-    PASS_SOURCE_OUTDIR="${CAAS_OUTBASE}/${TRAIT}${TAG}_complete"
-    [ -d "${PASS_SOURCE_OUTDIR}/strict" ] || PASS_SOURCE_OUTDIR="${CAAS_OUTBASE}/${TRAIT}${TAG}"
-    [ -d "${PASS_SOURCE_OUTDIR}/strict" ] || {
-        echo "[ERROR] no strict tables under ${CAAS_OUTBASE}/${TRAIT}${TAG}[_complete]/strict: run the normal scripts first, with min_divergent_fraction < 1 and strict_conservation_output on" >&2
+    # The strict pass reads the strict tables (<outdir>/strict/) that the normal run wrote, and everything that does not
+    # depend on conservation (curated tree, data exploration, permulation design) from that run itself. The strict
+    # tables come from the pass that ran the permulation core: the plain run, the complete pass, or, when the exploratory
+    # and complete passes were both generated, the exploratory pass (the complete pass reuses its CAAS output).
+    NORMAL_RUN_OUTDIRS=("${CAAS_OUTBASE}/${TRAIT}${TAG}_complete" "${CAAS_OUTBASE}/${TRAIT}${TAG}" "${CAAS_OUTBASE}/${TRAIT}${TAG}_exploratory")
+    PASS_SOURCE_OUTDIR=""
+    for _d in "${NORMAL_RUN_OUTDIRS[@]}"; do
+        if [ -d "${_d}/strict" ]; then PASS_SOURCE_OUTDIR="$_d"; break; fi
+    done
+    [ -n "$PASS_SOURCE_OUTDIR" ] || {
+        echo "[ERROR] no strict tables in any of: ${NORMAL_RUN_OUTDIRS[*]} (under /strict). Run the normal scripts first, with min_divergent_fraction < 1 and strict_conservation_output on" >&2
         exit 1
     }
     CAAS_REUSE_OUTDIR="${PASS_SOURCE_OUTDIR}/strict"
+    # FADE and RER are computed by the pass that runs the downstream modules (the complete pass, not the exploratory one),
+    # so each is looked for among the normal runs on its own.
+    FADE_SOURCE_OUTDIR=""
+    RER_SOURCE_OUTDIR=""
+    for _d in "${NORMAL_RUN_OUTDIRS[@]}"; do
+        [ -z "$FADE_SOURCE_OUTDIR" ] && [ -f "${_d}/selection/fade/top/fade_summary_top.tsv" -o -f "${_d}/selection/fade/bottom/fade_summary_bottom.tsv" ] && FADE_SOURCE_OUTDIR="$_d"
+        [ -z "$RER_SOURCE_OUTDIR" ] && [ -d "${_d}/rerconverge/rer_results" ] && RER_SOURCE_OUTDIR="$_d"
+    done
 {% else %}
     PASS_SOURCE_OUTDIR="${CAAS_OUTBASE}/${TRAIT}${TAG}_exploratory"
     CAAS_REUSE_OUTDIR="$PASS_SOURCE_OUTDIR"
@@ -207,11 +219,11 @@ fi
 # FADE and RER do not depend on conservation: the strict pass reads the tables of the run it derives from instead of
 # running them again (only when that run has them).
 PRECOMP_OUTDIR="$PASS_SOURCE_OUTDIR"
-if [ "${RUN_FADE:-false}" = true ] && [ -d "${PRECOMP_OUTDIR}/selection/fade/top" ]; then
+if [ "${RUN_FADE:-false}" = true ] && [ -n "$FADE_SOURCE_OUTDIR" ]; then
     PRECOMP_USE_FADE=true
     RUN_FADE=false
 fi
-if [ "${RUN_RER:-false}" = true ] && [ -d "${PRECOMP_OUTDIR}/rerconverge/rer_results" ]; then
+if [ "${RUN_RER:-false}" = true ] && [ -n "$RER_SOURCE_OUTDIR" ]; then
     PRECOMP_USE_RER=true
     RUN_RER=false
 fi
@@ -270,29 +282,29 @@ if [ "${PRECOMP_USE_ACCUMULATION:-false}" = true ]; then
 fi
 
 if [ "${PRECOMP_USE_RER:-false}" = true ]; then
-    RER_CONTINUOUS_FILE="${PRECOMP_OUTDIR}/rerconverge/rer_results/${TRAIT}.continuous.output"
+    RER_CONTINUOUS_FILE="${RER_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/rerconverge/rer_results/${TRAIT}.continuous.output"
     # The perms RDS exists only if the source run had permulation on for this phenotype.
-    RER_PERMS_FILE="${PRECOMP_OUTDIR}/rerconverge/rer_results/${TRAIT}.continuous.perms.rds"
+    RER_PERMS_FILE="${RER_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/rerconverge/rer_results/${TRAIT}.continuous.perms.rds"
     SCORING_RER_PERMS_INPUT="$RER_PERMS_FILE"
     # Scoring takes the summary table of RER_REPORT, not the raw RER_CONT output above:
     # a different producer, whose filename carries a variable suffix, so it is resolved
     # with a glob here instead of a fixed path.
-    SCORING_RER_INPUT="$(ls "${PRECOMP_OUTDIR}/rerconverge/rer_results/"rerconverge_summary_*.tsv 2>/dev/null | head -n1 || true)"
+    SCORING_RER_INPUT="$(ls "${RER_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/rerconverge/rer_results/"rerconverge_summary_*.tsv 2>/dev/null | head -n1 || true)"
 fi
 
 if [ "${PRECOMP_USE_FADE:-false}" = true ]; then
     # One direction at a time: a run with a single FADE direction has an empty directory for the other, and main.nf
     # rejects a --fade_tables_dir_<direction> without its merged tables. The summary and site TSVs are optional emits:
     # they exist only if the report step of FADE produced them in the source run.
-    if [ -f "${PRECOMP_OUTDIR}/selection/fade/top/fade_summary_top.tsv" ]; then
-        FADE_TABLES_DIR_TOP="${PRECOMP_OUTDIR}/selection/fade/top"
-        SCORING_FADE_SUMMARY_TOP="${PRECOMP_OUTDIR}/selection/fade/top/fade_summary_top.tsv"
-        SCORING_FADE_SITE_TOP="${PRECOMP_OUTDIR}/selection/fade/top/fade_site_bf_top.tsv"
+    if [ -f "${FADE_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/selection/fade/top/fade_summary_top.tsv" ]; then
+        FADE_TABLES_DIR_TOP="${FADE_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/selection/fade/top"
+        SCORING_FADE_SUMMARY_TOP="${FADE_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/selection/fade/top/fade_summary_top.tsv"
+        SCORING_FADE_SITE_TOP="${FADE_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/selection/fade/top/fade_site_bf_top.tsv"
     fi
-    if [ -f "${PRECOMP_OUTDIR}/selection/fade/bottom/fade_summary_bottom.tsv" ]; then
-        FADE_TABLES_DIR_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom"
-        SCORING_FADE_SUMMARY_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom/fade_summary_bottom.tsv"
-        SCORING_FADE_SITE_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom/fade_site_bf_bottom.tsv"
+    if [ -f "${FADE_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/selection/fade/bottom/fade_summary_bottom.tsv" ]; then
+        FADE_TABLES_DIR_BOTTOM="${FADE_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/selection/fade/bottom"
+        SCORING_FADE_SUMMARY_BOTTOM="${FADE_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/selection/fade/bottom/fade_summary_bottom.tsv"
+        SCORING_FADE_SITE_BOTTOM="${FADE_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/selection/fade/bottom/fade_site_bf_bottom.tsv"
     fi
 fi
 
