@@ -134,7 +134,7 @@ workflow CT_POSTPROC {
             param_combinations = Channel
                 .fromList(combos)
                 .combine(prepared_discovery_ch)
-                .map { combo, disc_file -> tuple('exploratory', combo[0], combo[1], disc_file) }
+                .map { minlen, maxcaas, disc_file -> tuple('exploratory', minlen, maxcaas, disc_file) }  // combine flattens the pair
 
             log.info "🔍 Exploratory mode: testing ${combos.size()} parameter combinations"
 

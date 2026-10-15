@@ -44,12 +44,16 @@ def render_batch(
     postproc_mode: str | None = None,
     reuse_exploratory: bool = False,
     single_runner_filename: str | None = None,
+    strict_pass: bool = False,
 ) -> str:
     """Render the batch-runner script for the given project.
 
     postproc_mode ("exploratory" or "filter") selects the post-processing pass the
     pair of scripts runs; reuse_exploratory makes the "filter" pass read the output
     of the exploratory pass instead of recomputing it.
+
+    strict_pass renders the pair of scripts of the strict analysis: the "filter" pass reading the strict tables of the
+    normal run (see run_single.sh.j2).
 
     single_runner_filename overrides the derived name of the per-phenotype script
     this one dispatches to (SINGLE_RUNNER). It must match the filename under which
@@ -59,6 +63,7 @@ def render_batch(
     """
     ctx = build_context(project)
     ctx["reuse_exploratory"] = reuse_exploratory
+    ctx["strict_pass"] = strict_pass
     ctx["postproc_mode"] = postproc_mode or ""
     ctx["single_runner_filename"] = ""
     if postproc_mode:
@@ -72,11 +77,12 @@ def render_batch(
 
 
 def render_single(
-    project: ProjectConfig, postproc_mode: str | None = None, reuse_exploratory: bool = False
+    project: ProjectConfig, postproc_mode: str | None = None, reuse_exploratory: bool = False, strict_pass: bool = False
 ) -> str:
     """Render the single-phenotype runner script for the given project."""
     ctx = build_context(project)
     ctx["reuse_exploratory"] = reuse_exploratory
+    ctx["strict_pass"] = strict_pass
     if postproc_mode:
         ctx["postproc_mode"] = postproc_mode
         if "modules" in ctx and "disambiguation" in ctx["modules"]:

@@ -465,6 +465,14 @@ class MainWindow(QMainWindow):
             scripts.append((batch_name, batch_text))
             scripts.append((single_name, single_text))
 
+        if getattr(disambig, "run_strict_analysis", False):
+            # The strict analysis: the "filter" pass again, reading the strict tables the normal run wrote under
+            # <outdir>/strict/ (see strict_pass in run_single.sh.j2).
+            batch_name, single_name = script_names("_strict")
+            scripts.append((batch_name, render_batch(
+                self.project, postproc_mode="filter", single_runner_filename=single_name, strict_pass=True)))
+            scripts.append((single_name, render_single(self.project, postproc_mode="filter", strict_pass=True)))
+
         self._show_preview(scripts)
 
     def regenerate_reports_dialog(self) -> None:

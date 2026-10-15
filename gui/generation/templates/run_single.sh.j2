@@ -7,7 +7,7 @@
    rendered from sbatch_array.sh.j2, which exports the shell variables read here.
 
    Consumes: general, runtime, resources, modules, precomputed, run_defaults, profile,
-             ct_tool_string, rer_tool_string, reuse_exploratory.
+             ct_tool_string, rer_tool_string, reuse_exploratory, strict_pass.
    Produces: bash script; its run directory holds params.json, and the Nextflow
              results go to <results_dir>/<trait>[<tag>] (RESULTS_BASE). #}
 set -Eeuo pipefail
@@ -58,30 +58,53 @@ if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
     RUN_FADE=false
     RUN_RER=false
     RUN_SCORING=false
+    # The evidence table is written after SCORING; main.nf rejects it without --scoring.
+    CAAS_EVIDENCE_TOP_N=0
 elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
+{% if strict_pass %}
+    RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_strict"
+    RUN_TAG="_strict"
+{% else %}
     RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_complete"
     RUN_TAG="_complete"
-{% if reuse_exploratory %}
-    # An exploratory pass is generated alongside this script, so this pass reuses its
-    # CAAS and Disambiguation output by file instead of recomputing it (no -resume or
-    # shared work directory involved). CT discovery/resample and live Disambiguation are
-    # off. CT_POSTPROC stays on: it applies the single chosen filter_minlen/filter_maxcaas
-    # pair instead of the exploratory sweep, and reads the master CSV of Disambiguation
-    # and the background genes from the _exploratory outdir. The ASR diagnostics report was already
-    # produced during the exploratory pass (same disambiguation data) and is not rerun.
+{% endif %}
+{% if reuse_exploratory or strict_pass %}
+    # This pass reuses the CAAS and Disambiguation output of another pass by file instead of recomputing it (no -resume
+    # or shared work directory involved): the exploratory pass generated alongside this script, or, for the strict
+    # pass, the strict tables of the normal run. CT discovery/resample and live Disambiguation are off. CT_POSTPROC
+    # stays on: it applies the single chosen filter_minlen/filter_maxcaas pair instead of the exploratory sweep, and
+    # reads the master CSV of Disambiguation and the background genes from the reused outdir. The ASR diagnostics
+    # report was already produced with the same disambiguation data and is not rerun.
     RUN_CAAS=false
     RUN_DISAMBIGUATION=false
     ASR_DIAGNOSTICS=false
-    EXPLORATORY_OUTDIR="${CAAS_OUTBASE}/${TRAIT}${TAG}_exploratory"
-    DISAMBIGUATION_INPUT="${EXPLORATORY_OUTDIR}/ct_disambiguation/caas_convergence_master.csv"
-    DISAMBIGUATION_DIR="${EXPLORATORY_OUTDIR}/ct_disambiguation"
-    BACKGROUND_INPUT="${EXPLORATORY_OUTDIR}/caastools/background_genes.output"
+{% if strict_pass %}
+    # The strict pass reads the strict tables (<outdir>/strict/) that the run it derives from wrote, and everything that
+    # does not depend on conservation (curated tree, data exploration, permulation design) from that run itself. The
+    # source is the complete pass when there is one, else the plain run.
+    PASS_SOURCE_OUTDIR="${CAAS_OUTBASE}/${TRAIT}${TAG}_complete"
+    [ -d "${PASS_SOURCE_OUTDIR}/strict" ] || PASS_SOURCE_OUTDIR="${CAAS_OUTBASE}/${TRAIT}${TAG}"
+    [ -d "${PASS_SOURCE_OUTDIR}/strict" ] || {
+        echo "[ERROR] no strict tables under ${CAAS_OUTBASE}/${TRAIT}${TAG}[_complete]/strict: run the normal scripts first, with min_divergent_fraction < 1 and strict_conservation_output on" >&2
+        exit 1
+    }
+    CAAS_REUSE_OUTDIR="${PASS_SOURCE_OUTDIR}/strict"
+{% else %}
+    PASS_SOURCE_OUTDIR="${CAAS_OUTBASE}/${TRAIT}${TAG}_exploratory"
+    CAAS_REUSE_OUTDIR="$PASS_SOURCE_OUTDIR"
+{% endif %}
+    # The evidence table re-scores the rows of the observed discovery.tab, which this pass was not given through
+    # --discovery_from (that would also make it look for permulation exports next to the file).
+    CAAS_EVIDENCE_DISCOVERY="${CAAS_REUSE_OUTDIR}/caastools/discovery.tab"
+    DISAMBIGUATION_INPUT="${CAAS_REUSE_OUTDIR}/ct_disambiguation/caas_convergence_master.csv"
+    DISAMBIGUATION_DIR="${CAAS_REUSE_OUTDIR}/ct_disambiguation"
+    BACKGROUND_INPUT="${CAAS_REUSE_OUTDIR}/caastools/background_genes.output"
     # background.output (tested positions, gene<TAB>comma-separated columns) is the
     # position-level counterpart of background_genes.output; posenrich_enrich.py
     # builds its background position set from it. PRECOMP_USE_DISCOVERY sets the same
     # variable below. This pass skips live CT, so without it the file would fall back
     # to the NO_FILE sentinel and POSENRICH would fail.
-    POSENRICH_BACKGROUND_FILE="${EXPLORATORY_OUTDIR}/caastools/background.output"
+    POSENRICH_BACKGROUND_FILE="${CAAS_REUSE_OUTDIR}/caastools/background.output"
 
     # CAAS permulation-excess null. The permulation core runs only where CT ran (the
     # exploratory pass), while SCORING and ENRICHMENT, which consume it, run only in
@@ -89,13 +112,13 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     # the background substitutions above are. Without them the CAAS FCS p.perm and the
     # position-level permulation section of the report come out empty, although the
     # permulation null was computed.
-    CAAS_PERMS_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/caas_perms.rds"
-    CAAS_POS_CYCLE_CAAS_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_cycle_caas.tsv.gz"
-    CAAS_POS_SAMPLE_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
-    CAAS_POS_QUANTILES_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
-    CAAS_CYCLE_ROSTER_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/cycle_roster.txt"
-    CAAS_PERM_MANIFEST_FILE="${EXPLORATORY_OUTDIR}/caastools/permulation_manifest.tsv"
-    CAAS_PERM_HARVEST_FILE="${EXPLORATORY_OUTDIR}/caastools/permulation_harvest.tsv"
+    CAAS_PERMS_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/caas_perms.rds"
+    CAAS_POS_CYCLE_CAAS_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_cycle_caas.tsv.gz"
+    CAAS_POS_SAMPLE_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
+    CAAS_POS_QUANTILES_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
+    CAAS_CYCLE_ROSTER_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/cycle_roster.txt"
+    CAAS_PERM_MANIFEST_FILE="${PASS_SOURCE_OUTDIR}/caastools/permulation_manifest.tsv"
+    CAAS_PERM_HARVEST_FILE="${PASS_SOURCE_OUTDIR}/caastools/permulation_harvest.tsv"
     for _f in "$CAAS_PERMS_FILE" "$CAAS_POS_CYCLE_CAAS_FILE" "$CAAS_POS_SAMPLE_FILE" "$CAAS_POS_QUANTILES_FILE"; do
         [ -f "$_f" ] || echo "[WARN] expected permulation output missing, p.perm will be empty: $_f" >&2
     done
@@ -108,8 +131,8 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     # no ASR replay) instead of importing caas_perms.rds as it is. A cached null is
     # valid only while it holds the same gene-level statistic as the observed score;
     # rebuilding guarantees that, and fcs_enrich.R leaves p.perm NA when it does not hold.
-    CAAS_POS_DETAIL_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_detail"
-    [ -d "$CAAS_POS_DETAIL_FILE" ] || CAAS_POS_DETAIL_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_detail.tsv.gz"  # a single file in place of the shard directory
+    CAAS_POS_DETAIL_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_detail"
+    [ -d "$CAAS_POS_DETAIL_FILE" ] || CAAS_POS_DETAIL_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_detail.tsv.gz"  # a single file in place of the shard directory
     [ -e "$CAAS_POS_DETAIL_FILE" ] || {
         echo "[WARN] perm_pos_detail missing: cannot rebuild the null, falling back to the cached caas_perms.rds (p.perm will be NA if it is stale)" >&2
         CAAS_POS_DETAIL_FILE=""
@@ -128,12 +151,12 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     # 0.Data_pruning.Rmd is a row-filtered, tab-separated copy of the original
     # --my_traits file with the same columns, so it can stand in for TRAIT_FILE.
     RUN_REPORTING=false
-    PRUNED_TREE_CANDIDATE="${EXPLORATORY_OUTDIR}/data_exploration/0.Data-pruning/pruned_tree_file.nwk"
+    PRUNED_TREE_CANDIDATE="${PASS_SOURCE_OUTDIR}/data_exploration/0.Data-pruning/pruned_tree_file.nwk"
     if [ -f "$PRUNED_TREE_CANDIDATE" ]; then
         TREE_FILE="$PRUNED_TREE_CANDIDATE"
-        TRAIT_FILE="${EXPLORATORY_OUTDIR}/data_exploration/0.Data-pruning/pruned_trait_file.tsv"
+        TRAIT_FILE="${PASS_SOURCE_OUTDIR}/data_exploration/0.Data-pruning/pruned_trait_file.tsv"
     else
-        TREE_FILE="${EXPLORATORY_OUTDIR}/name_curation/curated_tree.nwk"
+        TREE_FILE="${PASS_SOURCE_OUTDIR}/name_curation/curated_tree.nwk"
     fi
 
     # SELECTION_PREP of FADE (subworkflows/SELECTION/selection_prep.nf) falls back to
@@ -145,8 +168,8 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     # The data_exploration/ published by the exploratory pass is symlinked in, so that
     # the existing fallback path resolves.
     mkdir -p "$RESULTS_BASE"
-    if [ -d "${EXPLORATORY_OUTDIR}/data_exploration" ] && [ ! -e "${RESULTS_BASE}/data_exploration" ]; then
-        ln -sfn "${EXPLORATORY_OUTDIR}/data_exploration" "${RESULTS_BASE}/data_exploration"
+    if [ -d "${PASS_SOURCE_OUTDIR}/data_exploration" ] && [ ! -e "${RESULTS_BASE}/data_exploration" ]; then
+        ln -sfn "${PASS_SOURCE_OUTDIR}/data_exploration" "${RESULTS_BASE}/data_exploration"
     fi
 {% endif %}
 else
@@ -180,6 +203,19 @@ elif [ ! -d "$PRECOMP_OUTDIR" ] && [ -n "${TAG:-}${RUN_TAG:-}" ] && [ -d "${PREC
     PRECOMP_OUTDIR="${PRECOMP_BASE_PATH:-}/${TRAIT}${TAG:-}${RUN_TAG:-}"
 fi
 
+{% if strict_pass %}
+# FADE and RER do not depend on conservation: the strict pass reads the tables of the run it derives from instead of
+# running them again (only when that run has them).
+PRECOMP_OUTDIR="$PASS_SOURCE_OUTDIR"
+if [ "${RUN_FADE:-false}" = true ] && [ -d "${PRECOMP_OUTDIR}/selection/fade/top" ]; then
+    PRECOMP_USE_FADE=true
+    RUN_FADE=false
+fi
+if [ "${RUN_RER:-false}" = true ] && [ -d "${PRECOMP_OUTDIR}/rerconverge/rer_results" ]; then
+    PRECOMP_USE_RER=true
+    RUN_RER=false
+fi
+{% endif %}
 if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     DISCOVERY_FROM="${PRECOMP_OUTDIR}/caastools/discovery.tab"
     # meta_caas/ is where CT_META_CAAS publishes.
@@ -245,14 +281,19 @@ if [ "${PRECOMP_USE_RER:-false}" = true ]; then
 fi
 
 if [ "${PRECOMP_USE_FADE:-false}" = true ]; then
-    FADE_TABLES_DIR_TOP="${PRECOMP_OUTDIR}/selection/fade/top"
-    FADE_TABLES_DIR_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom"
-    # The summary and site TSVs are optional emits: they exist only if the report step of
-    # FADE produced them in the source run.
-    SCORING_FADE_SUMMARY_TOP="${PRECOMP_OUTDIR}/selection/fade/top/fade_summary_top.tsv"
-    SCORING_FADE_SUMMARY_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom/fade_summary_bottom.tsv"
-    SCORING_FADE_SITE_TOP="${PRECOMP_OUTDIR}/selection/fade/top/fade_site_bf_top.tsv"
-    SCORING_FADE_SITE_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom/fade_site_bf_bottom.tsv"
+    # One direction at a time: a run with a single FADE direction has an empty directory for the other, and main.nf
+    # rejects a --fade_tables_dir_<direction> without its merged tables. The summary and site TSVs are optional emits:
+    # they exist only if the report step of FADE produced them in the source run.
+    if [ -f "${PRECOMP_OUTDIR}/selection/fade/top/fade_summary_top.tsv" ]; then
+        FADE_TABLES_DIR_TOP="${PRECOMP_OUTDIR}/selection/fade/top"
+        SCORING_FADE_SUMMARY_TOP="${PRECOMP_OUTDIR}/selection/fade/top/fade_summary_top.tsv"
+        SCORING_FADE_SITE_TOP="${PRECOMP_OUTDIR}/selection/fade/top/fade_site_bf_top.tsv"
+    fi
+    if [ -f "${PRECOMP_OUTDIR}/selection/fade/bottom/fade_summary_bottom.tsv" ]; then
+        FADE_TABLES_DIR_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom"
+        SCORING_FADE_SUMMARY_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom/fade_summary_bottom.tsv"
+        SCORING_FADE_SITE_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom/fade_site_bf_bottom.tsv"
+    fi
 fi
 
 if [ "${PRECOMP_USE_VEP:-false}" = true ]; then
@@ -324,7 +365,9 @@ fi
 # GUI never sets --caas_config). Deriving it again is safe: the contrast algorithm is
 # deterministic for the same --my_traits and tree, so it reproduces the pairing of the
 # precomputed discovery.
-if [ "$_RUN_CAAS" = true ] || [ "$_RUN_DISAMBIGUATION" = true ]; then
+# The evidence table of a pass that reuses its tables (CAAS_EVIDENCE_DISCOVERY) also needs the design and the tree of the
+# contrasts: without them its process has no input and does not run.
+if [ "$_RUN_CAAS" = true ] || [ "$_RUN_DISAMBIGUATION" = true ] || { [ -n "${CAAS_EVIDENCE_DISCOVERY:-}" ] && [ "${CAAS_EVIDENCE_TOP_N:-0}" != 0 ]; }; then
     _CONTRAST_SELECTION=true
 else
     _CONTRAST_SELECTION=false
@@ -465,6 +508,8 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "publish_intermediates": {{ run_defaults.publish_intermediates }},
   "ct_core_batch_size": "${CT_CORE_BATCH_SIZE:-20}",
   "min_divergent_fraction": "${MIN_DIVERGENT_FRACTION:-0.5}",
+  "strict_conservation_output": {{ run_defaults.strict_conservation_output }},
+  "caas_evidence_discovery": "${CAAS_EVIDENCE_DISCOVERY:-}",
   "max_bg_gaps_fraction": "${MAX_BG_GAPS_FRACTION:-0.0}",
   "max_fg_gaps_fraction": "${MAX_FG_GAPS_FRACTION:-0.0}",
   "max_gaps_fraction": "${MAX_GAPS_FRACTION:-0.0}",

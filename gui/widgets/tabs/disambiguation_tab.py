@@ -104,6 +104,19 @@ SPEC = ModuleTabSpec(
             ),
         ),
         FieldSpec(
+            name="run_strict_analysis",
+            label="Generate the strict analysis scripts",
+            kind="bool",
+            importance="optional",
+            help=(
+                "Also generates a pair of scripts (…_strict) that repeat everything from post-processing on "
+                "(accumulation, scoring, enrichment) with only the hypotheses that have no conserved pair. They read the "
+                "strict tables the normal run writes under <outdir>/strict/ (CAAS tab) and the FADE and RER tables of "
+                "that run, and write to ${OUTDIR}_strict/. Run the normal scripts first. Needs a min divergent "
+                "fraction below 1."
+            ),
+        ),
+        FieldSpec(
             name="caas_map_dir",
             label="Per-gene MAP directory (optional)",
             kind="path_dir",

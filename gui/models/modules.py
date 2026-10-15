@@ -60,6 +60,7 @@ class CaasConfig(ModuleConfigBase):
     publish_intermediates: bool = False  # --publish_intermediates
     ct_core_batch_size: str = "20"  # --ct_core_batch_size (genes per CAAS_CORE_BATCHED task of the permulation null; 1 = one task per gene)
     min_divergent_fraction: str = "0.5"  # --min_divergent_fraction
+    strict_conservation_output: bool = True  # --strict_conservation_output (strict tables of the hypotheses without conserved pairs; active when min_divergent_fraction < 1)
     max_bg_gaps_fraction: str = "0.0"  # --max_bg_gaps_fraction
     max_fg_gaps_fraction: str = "0.0"  # --max_fg_gaps_fraction
     max_gaps_fraction: str = "0.0"  # --max_gaps_fraction
@@ -98,6 +99,7 @@ class DisambiguationConfig(ModuleConfigBase):
     # outputs (see gui/generation/context.py). Parameters of conf/ct_postproc.config.
     run_postproc_exploratory: bool = True  # Run exploratory parameter sweep
     run_postproc_filter: bool = True  # Run filtering production run
+    run_strict_analysis: bool = False  # Generate the scripts of the strict analysis (needs min_divergent_fraction < 1)
     caas_postproc_mode: str = "filter"  # --caas_postproc_mode (filter|exploratory); the generated scripts set it per pass
     # Filter-mode (single run) thresholds.
     filter_minlen: str = "3"  # --filter_minlen

@@ -52,6 +52,17 @@ def validate(project: ProjectConfig) -> list[str]:
     require(rt.work_dir, "Runtime: work directory is required.")
     require(rt.results_dir, "Runtime: results directory is required.")
 
+    if project.modules.disambiguation.run_strict_analysis:
+        caas = project.modules.caas
+        try:
+            fraction = float(caas.min_divergent_fraction)
+        except ValueError:
+            fraction = None
+        if fraction is None or fraction >= 1.0:
+            errors.append("Disambiguation: the strict analysis needs a min divergent fraction below 1 (a fraction of 1 is already strict).")
+        if not caas.strict_conservation_output:
+            errors.append("Disambiguation: the strict analysis reads the strict tables of the normal run; turn on 'Also write the strict tables' in the CAAS tab.")
+
     if rt.cleanup_policy not in ("none", "prune_intermediates", "remove_work"):
         errors.append(f"Runtime: the disk cleanup policy must be none, prune_intermediates or remove_work (got {rt.cleanup_policy!r}).")
 

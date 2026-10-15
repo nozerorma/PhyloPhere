@@ -70,6 +70,17 @@ SPEC = ModuleTabSpec(
             editable=True,
             importance="default",
         ),
+        FieldSpec(
+            name="strict_conservation_output",
+            label="Also write the strict tables (no conserved pair)",
+            kind="bool",
+            importance="default",
+            help=(
+                "With a min divergent fraction below 1, the permulation core also writes, from the same replay, the "
+                "observed tables and the null of the hypotheses that have no conserved pair, under <outdir>/strict/. "
+                "They are the input of the strict analysis (Disambiguation tab). No effect with a fraction of 1."
+            ),
+        ),
         FieldSpec(name="multi_hypothesis", label="Multi-hypothesis mode", kind="bool", importance="default"),
         FieldSpec(
             name="max_fop",
