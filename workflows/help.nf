@@ -91,6 +91,7 @@ Usage:
 --ali_format                <"fasta">                    "fasta"
 --patterns                  <"1,2,3,4">                  "1,2,3"
 --min_divergent_fraction    <FLOAT 0-1>                  0.5
+--strict_conservation_output <true|false>   true   (with min_divergent_fraction < 1, also write the observed tables and the null of the hypotheses with no conserved pair under <outdir>/strict/)
 --max_bg_gaps_fraction      <FLOAT 0-1>                  0.0
 --max_fg_gaps_fraction      <FLOAT 0-1>                  0.0
 --max_gaps_fraction         <FLOAT 0-1>                  0.0
@@ -325,6 +326,7 @@ Usage:
 --scoring_gene_top_pct                       <FLOAT 0-1>             0.10
 --scoring_window_size_bp                       <INTEGER>               1000000
 --caas_evidence_top_n                          <INTEGER>               0      (evidence table of the N best positions of position_scores.tsv, written after SCORING to scoring/evidence/: MRCA, tip species and residues and the score of each domain of each hypothesis; 0 = off; needs --scoring, the observed discovery.tab and ct_disambig_asr_cache_dir)
+--caas_evidence_discovery                   <"discovery.tab">       ""     (discovery.tab for the evidence table when the observed tables are given and not recomputed; set by the generated reuse scripts)
 
 Standalone mode (provide inputs directly):
 --scoring_postproc_input        <"filtered_discovery.tsv">        ""

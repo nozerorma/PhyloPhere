@@ -283,6 +283,7 @@ def pool_labelings(
     results: List[Tuple[str, List[Any]]],
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], Tuple[str, str, float]]]],
     labelings: Optional[Dict[str, Tuple[List[str], List[str]]]] = None,
+    strict: bool = False,
 ) -> List[Tuple[str, List[Any]]]:
     """Collapse scored labelings into one per-side, domain-pooled record set per cycle.
 
@@ -295,6 +296,10 @@ def pool_labelings(
     With `fop_pairs` the "<base>~H<m>" hypotheses of a base cycle are pooled together, and the design of the cycle is
     `fop_pairs[base cycle]`; without it each labeling is its own single-hypothesis cycle, and its design the pairs of
     its own labeling in `labelings`.
+
+    With `strict` the records whose discovery row has conserved pairs (`.conserved`) are left out before pooling,
+    and a position left with no record is not detected. The design is the same, so the hypotheses that are left
+    out count as hypotheses that do not detect the position, as in a discovery run without conservation.
     """
     if fop_pairs is not None:
         # (base_cyc, pos) -> [ {hyp, sides} ]; one pool_domains call each.
@@ -304,7 +309,7 @@ def pool_labelings(
             hyp = hyp_id(cyc.split("~", 1)[1]) if "~" in cyc else "H1"
             for r in results_list:
                 pos = getattr(r, "position", None)
-                if pos is None:
+                if pos is None or (strict and getattr(r, "conserved", False)):
                     continue
                 by_pos.setdefault((base, pos), []).append(
                     {"hyp": hyp, "sides": getattr(r, "sides", None) or {}}
@@ -330,7 +335,7 @@ def pool_labelings(
         out_recs = []
         for r in recs:
             pos = getattr(r, "position", None)
-            if pos is None:
+            if pos is None or (strict and getattr(r, "conserved", False)):
                 continue
             hyp = getattr(r, "hypothesis", None)
             pooled = pool_domains(

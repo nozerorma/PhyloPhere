@@ -32,6 +32,9 @@ against genome-wide pools) runs once over the union of the batches (reaggregate_
 Without it the same process also writes gene_cycle_scores.tsv, perm_pos_cycle_caas.tsv.gz,
 perm_pos_quantiles.tsv and perm_pos_sample.tsv; scoring_caas_perms.R turns gene_cycle_scores.tsv
 into the genes x N null matrix behind the FCS p.perm.
+With --strict-output pass A also writes <output-dir>/perm_pos_detail_strict/ (and b0/perm_pos_detail_strict/): the
+same replay pooled without the hypotheses whose discovery row has conserved pairs, which is the null of an analysis that
+keeps only fully divergent hypotheses. Replay, ASR and scoring are shared; only the pooling is repeated.
 
 Called by:  CAAS_CORE_BATCHED (subworkflows/CT/caas_permulation.nf) → disambiguation_perms_main.py --detail-only
 Usage:
@@ -123,6 +126,9 @@ def parse_arguments():
     p.add_argument("--detail-only", action="store_true",
                    help="Stop after pass A: write only perm_pos_detail/ (pass B scores against genome-wide pools, "
                         "so it runs once over the union of the shards).")
+    p.add_argument("--strict-output", action="store_true",
+                   help="Also write perm_pos_detail_strict/ (and b0/perm_pos_detail_strict/): the shards of the same replay "
+                        "pooled without the hypotheses whose discovery row has conserved pairs.")
     p.add_argument("--seed", type=int, default=1998,
                    help="Pipeline seed (params.seed): perm_pos_sample.tsv reservoir sampling")
     p.add_argument("--verbose", "-v", action="store_true")
@@ -242,6 +248,7 @@ def main():
             gene_sizes=gene_sizes,
             seed=args.seed,
             detail_only=args.detail_only,
+            strict_output=args.strict_output,
         )
 
     t0 = time.time()
@@ -252,6 +259,8 @@ def main():
     else:
         logger.info("[perms] no permuted labelings (N = 0): the null has no shards")
         (output_dir / "perm_pos_detail").mkdir(parents=True, exist_ok=True)
+        if args.strict_output:
+            (output_dir / "perm_pos_detail_strict").mkdir(parents=True, exist_ok=True)
         out_path = output_dir
     if b0_tags:
         logger.info(f"b_0: replaying {len(b0_tags)} b_0 labeling(s) -> {output_dir / 'b0'}")

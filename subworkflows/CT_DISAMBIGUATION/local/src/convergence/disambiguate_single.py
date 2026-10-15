@@ -54,13 +54,15 @@ PositionAxes = namedtuple(
     "PositionAxes",
     ["position", "asr_path_score",
      "side", "hypothesis", "domain_scores", "derived_agreement",
-     "sides", "n_hypotheses", "n_species"],
+     "sides", "n_hypotheses", "n_species", "conserved"],
 )
 # `side` and the fields after it are optional. `sides` is the raw
 # ``compute_domain_scores`` return ``{"top", "bottom", "domain_meta"}`` that the
 # treeless pooler (``fop_pool.pool_domains``) consumes; it is populated in the
 # axes-only replay. `n_hypotheses` is the number M of FOP hypotheses that detected the position in the cycle.
-PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None, None)
+# `conserved` is True when the discovery row of the hypothesis has pairs that carry the same residue on both sides
+# (the tolerance of the discovery admitted them); the strict pooling leaves those rows out.
+PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None, None, False)
 
 
 def _derive_convergent_call(all_rows: List["ConvergenceResult"], attr: str) -> str:
@@ -1000,6 +1002,7 @@ def analyze_gene_disambiguation(
                         domain_scores=None,
                         derived_agreement=None,
                         sides=axes_sides,
+                        conserved=bool(caas_pos.conserved_pair),
                     )
                 )
                 logger.debug(f"✓ Axes-only position {pos}")

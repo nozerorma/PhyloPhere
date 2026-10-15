@@ -26,6 +26,11 @@ against its ASR (cache first, PAML on a miss) and writes `<gene>.master.csv.gz`:
 caas_convergence_master.csv, in master column order. The merge step (contract_main.py) concatenates the shards.
 A gene with no alignment or ASR is left out with a warning.
 
+With --strict-output-dir the rows without conserved pairs are scored again on their own (the analysis of the fully
+divergent hypotheses) and written there as the same set of files: the filtered `*.b0.discovery.tsv`, the unchanged
+`*.b0.background` and the `<gene>.master.csv.gz` shards of the strict rows. Only --b0-dir carries the conserved pairs
+of every hypothesis, so the option needs it.
+
 Called by:  CAAS_CORE_BATCHED (subworkflows/CT/caas_permulation.nf, --b0-dir) and CAAS_OBSERVED
             (subworkflows/CT_DISAMBIGUATION/ct_observed.nf, --discovery) → observed_b0_main.py
 Usage:
@@ -38,6 +43,7 @@ import argparse
 import csv
 import logging
 import multiprocessing as mp
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -48,7 +54,8 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from src.core.driver import load_gene_context
 from src.core.labelings import design_max_pairs, observed_pss, read_trait_pairs
 from src.core.master import master_fields, write_master_csv
-from src.core.observed import observed_entries, observed_master_rows, score_observed
+from src.core.contract import BACKGROUND_SUFFIX
+from src.core.observed import is_strict_row, observed_entries, observed_master_rows, score_observed
 from src.data.loaders import load_ensembl_genes
 from src.utils.concurrency import init_worker, plan_concurrency
 from src.utils.logger import configure_logging
@@ -69,6 +76,8 @@ def parse_arguments():
     src.add_argument("--b0-dir", help=f"Directory with the *{DISCOVERY_SUFFIX} files of a perm-replay batch")
     src.add_argument("--discovery", help="A discovery.tab: every gene in it is scored")
     p.add_argument("--design", required=True, help="Observed design: the trait file, or the directory of traitfile_H*.tab")
+    p.add_argument("--strict-output-dir", default=None,
+                   help="Also write the strict analysis (rows without conserved pairs) to this directory; needs --b0-dir")
     p.add_argument("--fop-pairs", default=None, help="fop_pairs.tsv holding the b_0 PSS weights (omit for a single contrast)")
     p.add_argument("--output-dir", required=True, help="Directory for the <gene>.master.csv.gz shards")
     p.add_argument("--asr-model", default="lg")
@@ -98,18 +107,48 @@ def read_b0_rows(source):
     return by_gene
 
 
+def write_strict_inputs(b0_dir, strict_dir):
+    """The b_0 files of a batch without the rows that have conserved pairs: each `*.b0.discovery.tsv` filtered with
+    its header kept, each `*.b0.background` copied as it is (the tested positions do not depend on conservation)."""
+    strict_dir = Path(strict_dir)
+    strict_dir.mkdir(parents=True, exist_ok=True)
+    n_kept = n_all = 0
+    for path in sorted(Path(b0_dir).glob(f"*{DISCOVERY_SUFFIX}")):
+        with open(path, newline="") as fh:
+            reader = csv.DictReader(fh, delimiter="\t")
+            rows = list(reader)
+            fields = reader.fieldnames
+        kept = [r for r in rows if is_strict_row(r)]
+        n_all += len(rows)
+        n_kept += len(kept)
+        with open(strict_dir / path.name, "w", newline="") as out:
+            writer = csv.DictWriter(out, fieldnames=fields, delimiter="\t", lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(kept)
+    for path in sorted(Path(b0_dir).glob(f"*{BACKGROUND_SUFFIX}")):
+        shutil.copyfile(path, strict_dir / path.name)
+    return n_kept, n_all
+
+
 def _score_gene(job):
-    """Pool worker: master rows of one gene (job is the tuple built in main), or (gene, None) when it cannot be scored."""
-    (gene, rows, alignment_dir, tree, taxid, model, cache, threshold, ensembl, trait_pairs, pss, fields) = job
+    """Pool worker: master rows of one gene (job is the tuple built in main), or (gene, None, None) when it cannot be
+    scored. The third element holds the master rows of the strict rows, or None without --strict-output-dir."""
+    (gene, rows, alignment_dir, tree, taxid, model, cache, threshold, ensembl, trait_pairs, pss, fields, strict) = job
     try:
         ctx = load_gene_context(gene, alignment_dir, tree, taxid, model, cache, threshold, ensembl)
         if ctx is None:
-            return gene, None
+            return gene, None, None
         results = score_observed(ctx, gene, observed_entries(gene, rows), trait_pairs, pss, threshold)
-        return gene, observed_master_rows(gene, results, fields)
+        strict_rows = None
+        if strict:
+            strict_in = [r for r in rows if is_strict_row(r)]
+            strict_rows = observed_master_rows(
+                gene, score_observed(ctx, gene, observed_entries(gene, strict_in), trait_pairs, pss, threshold), fields
+            ) if strict_in else []
+        return gene, observed_master_rows(gene, results, fields), strict_rows
     except Exception as exc:  # noqa: BLE001 - one gene must not end the batch; the summary reports it
         logger.error(f"[observed] {gene} failed: {exc}", exc_info=True)
-        return gene, None
+        return gene, None, None
 
 
 def main():
@@ -131,18 +170,26 @@ def main():
     if ensembl is not None:
         by_gene = {g: r for g, r in by_gene.items() if g in ensembl}
 
+    strict_dir = Path(args.strict_output_dir) if args.strict_output_dir else None
+    if strict_dir is not None:
+        if not args.b0_dir:
+            raise SystemExit("--strict-output-dir needs --b0-dir: only the b_0 discovery files carry the conserved pairs of every hypothesis")
+        n_kept, n_all = write_strict_inputs(args.b0_dir, strict_dir)
+        logger.info(f"[observed] strict rows (no conserved pair): {n_kept} of {n_all} discovery rows -> {strict_dir}")
     jobs = [(g, by_gene[g], args.alignment_dir, args.tree, args.taxid_mapping, args.asr_model, args.asr_cache_dir,
-             args.posterior_threshold, ensembl, trait_pairs, pss, fields) for g in sorted(by_gene)]
+             args.posterior_threshold, ensembl, trait_pairs, pss, fields, strict_dir is not None) for g in sorted(by_gene)]
     workers, _ = plan_concurrency(args.workers, 1, logger)
     t0 = time.time()
     written, skipped = 0, []
     with mp.Pool(processes=workers, maxtasksperchild=args.max_tasks_per_child, initializer=init_worker, initargs=(1, None)) as pool:
-        for gene, rows in pool.imap_unordered(_score_gene, jobs, chunksize=1):
+        for gene, rows, strict_rows in pool.imap_unordered(_score_gene, jobs, chunksize=1):
             if not rows:
                 skipped.append(gene)
                 continue
             stem = gene.replace("/", "__").replace("\\", "__").strip() or "_"  # a gene name is used as a file name
             write_master_csv(rows, out_dir / f"{stem}.master.csv.gz", fields)
+            if strict_rows:
+                write_master_csv(strict_rows, strict_dir / f"{stem}.master.csv.gz", fields)
             written += 1
     logger.info(f"[observed] {written} genes scored in {time.time() - t0:.1f}s; {len(skipped)} left out (no alignment, ASR or results)"
                 + (f": {sorted(skipped)[:10]}" if skipped else ""))

@@ -52,6 +52,12 @@ def shouldPruneIntermediates() {
     return pol in ['prune_intermediates', 'remove_work']
 }
 
+// True when the core also writes the strict tables: params.strict_conservation_output, and a discovery that tolerates
+// conserved pairs (min_divergent_fraction < 1); with fraction 1 the strict rows are all the rows.
+def strictOutputOn() {
+    return (params.strict_conservation_output as boolean) && ((params.min_divergent_fraction ?: 0.5) as double) < 1.0
+}
+
 // CLI arguments that give disambiguation_perms_main.py the observed CT_POSTPROC filters (cluster trains and
 // gene removal) for the per-cycle null pool. Empty when the filters are off or the gene annotation file is a
 // NO_* sentinel. With params.caas_map_dir the trains measure their span in untrimmed columns, as the observed
@@ -181,6 +187,8 @@ process CAAS_CORE_BATCHED {
     output:
     path "perm_pos_detail", emit: pos_detail
     path "b0_observed", emit: b0_observed
+    path "perm_pos_detail_strict", emit: pos_detail_strict, optional: true   // strict pooling of the same replay (strictOutputOn)
+    path "b0_observed_strict", emit: b0_observed_strict, optional: true      // b_0 rows without conserved pairs, scored on their own
     path "perm_disc/*.perm_replay.discovery.output", emit: perm_discovery, optional: true
 
     script:
@@ -200,12 +208,22 @@ process CAAS_CORE_BATCHED {
     def prune_exports = shouldPruneIntermediates() && !(params.publish_intermediates as boolean)
     // Pruning moves the shards out of caas_perms_out instead of duplicating them.
     def shard_move = shouldPruneIntermediates()
+    // The strict tables come from the same replay: the null shards pooled without the hypotheses that have conserved
+    // pairs, and the b_0 rows without conserved pairs scored again (the observed labeling is a single labeling).
+    def strict_on = strictOutputOn()
+    def strict_flag = strict_on ? '--strict-output' : ''
+    def strict_observed_flag = strict_on ? '--strict-output-dir b0_observed_strict' : ''
+    def strict_empty = strict_on ? 'mkdir -p caas_perms_out/perm_pos_detail_strict' : ''
+    def strict_move = strict_on ? """
+    ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/perm_pos_detail_strict perm_pos_detail_strict
+    if [ -d caas_perms_out/b0/perm_pos_detail_strict ]; then ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/b0/perm_pos_detail_strict perm_pos_detail_strict/b0; fi""" : ''
     """
     # One worker pool per step runs the genes in parallel; BLAS and OpenMP stay at one thread each.
     export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     # Memory of one replay worker: the ASR replay splits a gene whose replay would not fit in it into cycle chunks.
     export CAAS_PERMS_WORKER_MEM_MB=\$(( ${task.memory.toMega()} / ${task.cpus} ))
     mkdir -p perm_disc b0_observed
+    ${strict_on ? 'mkdir -p b0_observed_strict' : ''}
     PERM_DISC=perm_disc_in
     if ${replay}; then
         # Bounds the chunk buffers of the vectorized kernel, per call, to a quarter of one worker's share of task.memory.
@@ -256,7 +274,7 @@ process CAAS_CORE_BATCHED {
             --perm-discovery \$PERM_DISC \\
             --resample-dir . \\
             --output-dir caas_perms_out \\
-            --detail-only \\
+            --detail-only ${strict_flag} \\
             ${fop_pairs.name =~ /^NO_/ ? '' : "--fop-pairs ${fop_pairs}"} ${postproc_args} \\
             --asr-model ${params.ct_disambig_asr_model} \\
             --posterior-threshold ${params.ct_disambig_posterior_threshold} \\
@@ -268,11 +286,13 @@ process CAAS_CORE_BATCHED {
             ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
     else
         mkdir -p caas_perms_out/perm_pos_detail
+        ${strict_empty}
     fi
     ${prune_exports ? 'rm -rf perm_disc/*.perm_replay.discovery.output' : ''}
     ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/perm_pos_detail perm_pos_detail
     # b_0 shards sit in a subdirectory the null readers never glob; CAAS_CORE_MERGE scores them as a one-labeling run.
     if [ -d caas_perms_out/b0/perm_pos_detail ]; then ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/b0/perm_pos_detail perm_pos_detail/b0; fi
+    ${strict_move}
     ${shard_move ? 'rm -rf caas_perms_out' : ''}
 
     # The observed labeling as full records: one master shard per gene with b_0 hits.
@@ -280,7 +300,7 @@ process CAAS_CORE_BATCHED {
         ${run} ./observed_b0_main.py \\
             --alignment-dir ${params.alignment} \\
             --tree ${tree_file} \\
-            --b0-dir b0_observed \\
+            --b0-dir b0_observed ${strict_observed_flag} \\
             --design ${caas_config} \\
             ${fop_pairs.name =~ /^NO_/ ? '' : "--fop-pairs ${fop_pairs}"} \\
             --output-dir b0_observed \\
@@ -347,6 +367,8 @@ workflow CAAS_CORE {
         labelings      = subset_bc                 // the labelings file the batches replayed (the null's cycle roster)
         pos_detail     = core.pos_detail
         b0_observed    = core.b0_observed
+        pos_detail_strict = core.pos_detail_strict   // empty unless the strict tables are on
+        b0_observed_strict = core.b0_observed_strict
         perm_discovery = core.perm_discovery
 }
 
@@ -360,9 +382,11 @@ workflow CAAS_CORE {
 process CAAS_CORE_OBSERVED {
     tag "caas_core_observed"
     label 'process_low'
-    publishDir path: "${params.outdir}/caastools", mode: 'copy', overwrite: true, pattern: '{discovery.tab,background.output,background_genes.output}'
-    publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: 'meta_caas'
-    publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, pattern: 'ct_disambiguation'
+    // ext.publish_prefix is empty for this process and "/strict" for its strict alias (CAAS_CORE_OBSERVED_STRICT), which
+    // writes the same files from the strict b_0 directories.
+    publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}/caastools" }, mode: 'copy', overwrite: true, pattern: '{discovery.tab,background.output,background_genes.output}'
+    publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}/meta_caas" }, mode: 'copy', overwrite: true, pattern: 'meta_caas'
+    publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}" }, mode: 'copy', overwrite: true, pattern: 'ct_disambiguation'
 
     input:
     path b0Observed, stageAs: 'b0obs_*'   // the batches' b0_observed directories
@@ -403,7 +427,8 @@ process CAAS_CORE_OBSERVED {
 process CAAS_CORE_MERGE {
     tag "caas_core_merge"
     label 'process_medium'
-    publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true,
+    // ext.publish_prefix is "/strict" for the strict alias (CAAS_CORE_MERGE_STRICT)
+    publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}/caas_permulation" }, mode: 'copy', overwrite: true,
                pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv,perm_pos_cycle_caas.tsv.gz,cycle_roster.txt,removed_units.tsv,b0}'
 
     input:
@@ -459,7 +484,7 @@ process CAAS_CORE_MERGE {
         --seed ${params.seed ?: 1998} ${empty_null_arg} ${roster_arg} ${removal_args}
 
     # b_0 rebuilt from its merged shards as a one-labeling run: same code, own rank/size pools.
-    if [ -d "\$DETAIL/b0" ]; then
+    if [ -d "\$DETAIL/b0" ] && compgen -G "\$DETAIL/b0/*.tsv.gz" > /dev/null; then   # no shard: nothing was detected for the real labeling
         mkdir -p b0
         ${py} ./reaggregate_perm_scores.py \\
             --detail "\$DETAIL/b0" \\

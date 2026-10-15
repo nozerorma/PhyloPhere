@@ -350,6 +350,7 @@ def _perms_worker_replay(
     perm_discovery_file: str,
     ensembl_genes: Optional[Set[str]] = None,
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], Tuple[str, str, float]]]] = None,
+    strict_output: bool = False,
 ) -> Tuple[str, Optional[List[Tuple[str, List[Any]]]]]:
     """Replay step of a chunked gene replay (_perms_worker_finalize is the reduction step).
 
@@ -362,6 +363,10 @@ def _perms_worker_replay(
     _perms_worker_finalize does the whole-gene reduction (n_detected, clustering, detail rows)
     once every chunk of the gene has arrived. A chunk whose context could not be loaded, or whose
     replay raised, returns (gene, None); a chunk with nothing to report returns (gene, []).
+
+    With `strict_output` a chunk that has results returns a third element: the same records pooled without the
+    hypotheses whose discovery row has conserved pairs (`pool_labelings(strict=True)`). The records are scored once;
+    only the pooling is repeated.
     """
     try:
         _t_ctx0 = time.perf_counter()
@@ -402,7 +407,10 @@ def _perms_worker_replay(
             ctx, gene, cycle_tags, cycle_labelings, cycle_to_entries, posterior_threshold)
         if not all_cycle_results:
             return (gene, [])
-        return (gene, pool_labelings(all_cycle_results, fop_pairs, cycle_labelings))
+        pooled = pool_labelings(all_cycle_results, fop_pairs, cycle_labelings)
+        if strict_output:
+            return (gene, pooled, pool_labelings(all_cycle_results, fop_pairs, cycle_labelings, strict=True))
+        return (gene, pooled)
     except Exception as e:
         logger.error(f"[perms] replay worker failed for {gene}: {e}", exc_info=True)
         return (gene, None)
@@ -962,6 +970,7 @@ def process_all_genes_perms(
     train_map_dir: Optional[str] = None,
     train_map_suffix: str = ".map.tsv",
     detail_only: bool = False,
+    strict_output: bool = False,
 ) -> Path:
     """Genome-wide CAAS permulation null: load the ASR once per gene, replay N permuted
     labelings, and score them as the observed pipeline scores itself.
@@ -994,6 +1003,10 @@ def process_all_genes_perms(
 
     With detail_only the run stops after pass A: only perm_pos_detail/ and its manifest are written, for
     a caller that scores the union of several runs' shards in one later pass B.
+
+    With strict_output pass A also writes perm_pos_detail_strict/ (and its manifest): the shards of the same
+    replay pooled without the hypotheses whose discovery row has conserved pairs. They are the null of the
+    analysis that keeps only fully divergent hypotheses; the replay, ASR and scoring are shared with the shards above.
     """
     import csv as _csv
 
@@ -1050,6 +1063,10 @@ def process_all_genes_perms(
     detail_dir = output_dir / "perm_pos_detail"
     detail_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "perm_pos_detail.manifest.tsv"
+    strict_dir = output_dir / "perm_pos_detail_strict"
+    strict_manifest: List[Tuple[str, int]] = []
+    if strict_output:
+        strict_dir.mkdir(parents=True, exist_ok=True)
 
     # The detail rows carry `side` (a "both" position is two rows, one per side).
     detail_fields = ["Gene", "cycle", "Position", "asr_path_score",
@@ -1127,7 +1144,7 @@ def process_all_genes_perms(
     args_generator = (
         (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
          asr_cache_dir, posterior_threshold,
-         chunk, cycle_labelings, perm_discovery_file, None, fop_pairs)
+         chunk, cycle_labelings, perm_discovery_file, None, fop_pairs, strict_output)
         for gene, chunk, _est in tasks
     )
 
@@ -1145,6 +1162,7 @@ def process_all_genes_perms(
     # entry is dropped. Only the genes with chunks in flight (at most effective_workers) are
     # held partially.
     pending_pooled: Dict[str, List[Tuple[str, List[Any]]]] = {}
+    pending_strict: Dict[str, List[Tuple[str, List[Any]]]] = {}
     received: Dict[str, int] = {}
     failed_chunks: Dict[str, int] = {}
     try:
@@ -1154,17 +1172,22 @@ def process_all_genes_perms(
         # 20 genes and chunksize=10) only as many workers as bundles ever receive work.
         results_iterator = pool.imap_unordered(_perms_worker_replay_wrapper, args_generator, chunksize=1)
 
-        for _gene, chunk_pooled in results_iterator:
+        for _result in results_iterator:
+            _gene, chunk_pooled = _result[0], _result[1]
+            chunk_strict = _result[2] if len(_result) > 2 else []
             if chunk_pooled is None:
                 failed_chunks[_gene] = failed_chunks.get(_gene, 0) + 1
                 chunk_pooled = []
             pending_pooled.setdefault(_gene, []).extend(chunk_pooled)
+            if strict_output:
+                pending_strict.setdefault(_gene, []).extend(chunk_strict)
             received[_gene] = received.get(_gene, 0) + 1
             if received[_gene] < chunks_per_gene.get(_gene, 1):
                 continue  # more chunks still in flight for this gene
             _require_consistent_chunks(_gene, failed_chunks.pop(_gene, 0), chunks_per_gene.get(_gene, 1))
 
             gene_pooled = _merge_gene_chunks(pending_pooled.pop(_gene))
+            gene_strict = _merge_gene_chunks(pending_strict.pop(_gene, [])) if strict_output else None
             received.pop(_gene, None)
             _gene, detail_rows = _perms_worker_finalize(
                 _gene, gene_pooled, n_cycles_total,
@@ -1181,6 +1204,19 @@ def process_all_genes_perms(
                 writer_detail.writerows(detail_rows)
             manifest_rows.append((_gene, len(detail_rows)))
 
+            if strict_output:
+                _gene, strict_rows = _perms_worker_finalize(
+                    _gene, gene_strict, n_cycles_total,
+                    postproc_filter, clust_minlen, clust_maxcaas,
+                    _gene_train_columns(train_map_index, _gene, train_map_suffix, []),
+                )
+                if strict_rows:
+                    with gzip.open(strict_dir / f"{_sanitize_gene_shard(_gene)}.tsv.gz", "wt", newline="") as f_strict:
+                        writer_strict = _csv.DictWriter(f_strict, fieldnames=detail_fields, delimiter="\t", lineterminator="\n")
+                        writer_strict.writeheader()
+                        writer_strict.writerows(strict_rows)
+                    strict_manifest.append((_gene, len(strict_rows)))
+
             n_detail_rows += len(detail_rows)
             cycles_seen.update(row["cycle"] for row in detail_rows)
             n_genes += 1
@@ -1192,6 +1228,13 @@ def process_all_genes_perms(
         w = _csv.writer(f_man, delimiter="\t")
         w.writerow(["Gene", "n_rows"])
         w.writerows(sorted(manifest_rows))
+    if strict_output:
+        with open(output_dir / "perm_pos_detail_strict.manifest.tsv", "w", newline="") as f_man:
+            w = _csv.writer(f_man, delimiter="\t")
+            w.writerow(["Gene", "n_rows"])
+            w.writerows(sorted(strict_manifest))
+        logger.info(f"[perms] strict pooling: {sum(n for _g, n in strict_manifest)} rows in {len(strict_manifest)} shards "
+                    f"-> {strict_dir.name}/")
 
     logger.info(
         f"[perms] pass A done: {n_genes} genes, {n_detail_rows} (gene,cycle,position) "

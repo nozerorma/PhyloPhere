@@ -29,6 +29,12 @@ from src.utils.amino import normalize_amino_list
 from src.data.models import CAASPosition
 
 
+def is_strict_row(row: Dict[str, Any]) -> bool:
+    """True when the discovery row has no pair that carries the same residue on both sides (`conserved_pair` empty
+    or "0:"): the rows a discovery run without conservation tolerance would have kept."""
+    return not _parse_conserved_pair(str(row.get("conserved_pair") or ""))
+
+
 def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosition]:
     """CAAS entries of one gene from its discovery rows (mappings with position, trait, caas,
     pattern and, when present, is_conserved_meta and conserved_pair), in the order given.

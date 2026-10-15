@@ -57,7 +57,8 @@ include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}                       from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
 include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_META_CAAS/ctpp_meta_caas.nf'
-include {CAAS_CORE; CAAS_CORE_OBSERVED; CAAS_CORE_MERGE; CAAS_PERMS_PREP} from './subworkflows/CT/caas_permulation.nf'
+include {CAAS_CORE; CAAS_CORE_OBSERVED; CAAS_CORE_MERGE; CAAS_PERMS_PREP; strictOutputOn} from './subworkflows/CT/caas_permulation.nf'
+include {CAAS_CORE_OBSERVED as CAAS_CORE_OBSERVED_STRICT; CAAS_CORE_MERGE as CAAS_CORE_MERGE_STRICT} from './subworkflows/CT/caas_permulation.nf'
 include {CAAS_EVIDENCE}   from './subworkflows/CT_DISAMBIGUATION/ct_evidence.nf'
 include {ENRICHMENT}      from './workflows/enrichment.nf'
 
@@ -317,7 +318,9 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 perm_subset_ch = ct_results.caas_resample_subset
                 perm_cfg_ch = ct_results.trait_file
                 if (ct_results.caas_fop_pairs) perm_fop_pairs_ch = ct_results.caas_fop_pairs
-            } else {
+            } else if (!params.caas_perms_file && !params.caas_pos_detail_file) {
+                // A null given by file (the reuse passes of the GUI scripts: --caas_perms_file, --caas_pos_detail_file) is
+                // imported by SCORING as it is; replaying it here would only rebuild it from whatever exports are left.
                 // 1. Check if precomputed permulation discovery outputs already exist from exploratory pass:
                 def precomp_disc_files = null
                 def precomp_subset_file = null
@@ -441,6 +444,10 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 if (core_replays && !params.discovery_from && (ran_discovery || run_ct_disambiguation)) {
                     core_observed = CAAS_CORE_OBSERVED(core.b0_observed.collect(), perm_cfg_ch.collect().map { items -> items[0] })
                     evidence_inputs = [discovery: core_observed.discovery, design: perm_cfg_ch, tree: perm_tree_ch]
+                    if (strictOutputOn()) {
+                        // The observed tables of the hypotheses without conserved pairs, under <outdir>/strict/
+                        CAAS_CORE_OBSERVED_STRICT(core.b0_observed_strict.collect(), perm_cfg_ch.collect().map { items -> items[0] })
+                    }
                 }
                 ran_any = true
             }
@@ -545,6 +552,10 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         if (core) {
             def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
             def caas_perm_out = CAAS_CORE_MERGE(core.pos_detail.collect(), caas_universe_ch, caas_gene_lengths_ch.collect().map { items -> items[0] }, core.labelings)
+            if (strictOutputOn()) {
+                // The null of the hypotheses without conserved pairs, built like the null above, under <outdir>/strict/
+                CAAS_CORE_MERGE_STRICT(core.pos_detail_strict.collect(), caas_universe_ch, caas_gene_lengths_ch.collect().map { items -> items[0] }, core.labelings)
+            }
             scoring_caas_perms_ch = caas_perm_out.perms
             scoring_caas_pos_cycle_caas_ch = caas_perm_out.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))  // per (gene,position,side,cycle) caas_score -> p.emp
             scoring_caas_pos_sample_ch = caas_perm_out.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))  // cycle-stratified sample for distribution plots
@@ -826,6 +837,19 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             // The evidence of the N best positions: what each domain of each hypothesis saw. It re-scores the rows of
             // those positions from the observed discovery.tab, so it needs the one this run wrote or was given.
             if (evidence_top_n > 0) {
+                if (!evidence_inputs && params.caas_evidence_discovery) {
+                    // The observed tables were given (a master CSV) and not recomputed, so no discovery.tab went through the
+                    // run; the evidence needs it with the design and the tree of the contrasts.
+                    def evidence_design = ct_results
+                        ? ct_results.trait_file
+                        : (contrast_out ? (contrast_out.trait_dir_out ?: contrast_out.trait_file_out) : Channel.empty())
+                    def evidence_tree = ct_results
+                        ? ct_results.tree_file
+                        : (contrast_out ? contrast_out.tree_file_out : Channel.empty())
+                    def evidence_discovery = file(params.caas_evidence_discovery)
+                    assert evidence_discovery.exists() : "caas_evidence_discovery not found: ${params.caas_evidence_discovery}"
+                    evidence_inputs = [discovery: Channel.value(evidence_discovery), design: evidence_design, tree: evidence_tree]
+                }
                 if (!evidence_inputs) {
                     error "caas_evidence_top_n > 0 needs the observed discovery.tab: run the alignments through the core (ct_tool 'discovery') or give --discovery_from."
                 }
