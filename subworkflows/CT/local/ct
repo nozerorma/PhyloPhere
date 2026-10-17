@@ -170,7 +170,11 @@ if tool.lower() == "perm-replay":
                     help="Maximum number of pairs allowed to share the same amino acid between FG and BG. \
                         Enables relaxed CAAS identification. Default = 0 (strict mode).", default = "0")
 
-    ###     3.3.8 Exports (at least one is required)
+    ###     3.3.8 Minimum non-overlapping species
+    parser.add_option("--min_non_overlapping", dest="min_non_overlapping",
+                    help="Minimum number of non-overlapping (exclusive) species required on FG or BG to call a CAAS. Default = 2.", default = "2")
+
+    ###     3.3.9 Exports (at least one is required)
     parser.add_option("--export_groups", dest="export_groups",
                     help="Path to output file for exporting the permuted trait groups used in each cycle (DEBUG). Default = disabled.", default = None)
 
@@ -260,6 +264,7 @@ if tool.lower() == "perm-replay":
 
                     miss_pair = options.miss_pair,
                     max_conserved = int(options.max_conserved),
+                    min_non_overlapping = int(options.min_non_overlapping),
 
     the_admitted_patterns = options.patterns_string,
                     export_groups = options.export_groups,

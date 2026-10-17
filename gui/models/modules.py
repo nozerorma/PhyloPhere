@@ -60,6 +60,7 @@ class CaasConfig(ModuleConfigBase):
     publish_intermediates: bool = False  # --publish_intermediates
     ct_core_batch_size: str = "20"  # --ct_core_batch_size (genes per CAAS_CORE_BATCHED task of the permulation null; 1 = one task per gene)
     min_divergent_fraction: str = "0.5"  # --min_divergent_fraction
+    min_non_overlapping: str = "2"  # --min_non_overlapping
     strict_conservation_output: bool = True  # --strict_conservation_output (strict tables of the hypotheses without conserved pairs; active when min_divergent_fraction < 1)
     max_bg_gaps_fraction: str = "0.0"  # --max_bg_gaps_fraction
     max_fg_gaps_fraction: str = "0.0"  # --max_fg_gaps_fraction

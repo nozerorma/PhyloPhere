@@ -767,6 +767,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Frazione divergente minima',
         'de': 'Minimaler divergenter Anteil',
     },
+    'Min non-overlapping species': {
+        'en': 'Min non-overlapping species',
+        'es': 'Mínimo de especies no solapantes',
+        'ca': 'Mínim d\'espècies no solapants',
+        'fr': 'Nb min. d\'espèces non chevauchantes',
+        'it': 'Minimo di specie non sovrapposte',
+        'de': 'Mindestanzahl nicht-überlappender Arten',
+    },
     'Max background gaps fraction': {
         'en': 'Max background gaps fraction',
         'es': 'Fracción máxima de gaps de fondo',

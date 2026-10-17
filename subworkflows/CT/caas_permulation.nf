@@ -242,6 +242,7 @@ process CAAS_CORE_BATCHED {
         declare -a extra_opts=(--patterns "${params.patterns}")
         if [ "${params.miss_pair}" = "true" ]; then extra_opts+=(--miss_pair); fi
         extra_opts+=(--max_conserved \$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}'))
+        extra_opts+=(--min_non_overlapping "${params.min_non_overlapping ?: 2}")
         extra_opts+=(--max_bg_gaps \$(_frac ${params.max_bg_gaps_fraction}) --max_fg_gaps \$(_frac ${params.max_fg_gaps_fraction}) --max_gaps \$(_frac ${params.max_gaps_fraction}))
         extra_opts+=(--max_bg_miss \$(_frac ${params.max_bg_miss_fraction}) --max_fg_miss \$(_frac ${params.max_fg_miss_fraction}) --max_miss \$(_frac ${params.max_miss_fraction}))
         echo "\${extra_opts[@]}" > .ct_perm_replay_batch_args

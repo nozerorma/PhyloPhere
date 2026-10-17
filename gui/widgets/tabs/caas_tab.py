@@ -71,6 +71,15 @@ SPEC = ModuleTabSpec(
             importance="default",
         ),
         FieldSpec(
+            name="min_non_overlapping",
+            label="Min non-overlapping species",
+            kind="choice",
+            choices=("2", "3", "4", "5"),
+            editable=True,
+            importance="default",
+            help="Minimum number of non-overlapping (exclusive) species required on FG or BG to call a CAAS (default: 2).",
+        ),
+        FieldSpec(
             name="strict_conservation_output",
             label="Also write the strict tables (no conserved pair)",
             kind="bool",

@@ -219,7 +219,8 @@ class VectorizedPermReplay:
               maxmiss_fg, maxmiss_bg, maxmiss_all,
               max_conserved, admitted_patterns,
               b_chunk=None, collect_hits=False, miss_pair=False,
-              background_sink=None, background_base="b_0"):
+              background_sink=None, background_base="b_0",
+              min_non_overlapping=2):
         """Count CAAS hits per position across all B labelings.
 
         miss_pair mirrors the scalar path (caas_id.fetch_caas): when the fg and bg
@@ -356,7 +357,7 @@ class VectorizedPermReplay:
                 non_fg = (C_fg * ~present_bg).sum(axis=1)
                 non_bg = (C_bg * ~present_fg).sum(axis=1)
 
-                caas = (overlap <= max_conserved) & ((non_fg >= 2) | (non_bg >= 2))
+                caas = (overlap <= max_conserved) & ((non_fg >= min_non_overlapping) | (non_bg >= min_non_overlapping))
 
                 is_null = (nfg_unique == 0) | (nbg_unique == 0)
                 p1 = (nfg_unique == 1) & (nbg_unique == 1)
@@ -408,6 +409,7 @@ def _vectorized_position_counts(cfg, sliced_object, genename, positions,
                                 max_fg_gaps, max_bg_gaps, max_overall_gaps,
                                 max_fg_miss, max_bg_miss, max_overall_miss,
                                 max_conserved, admitted_patterns,
+                                min_non_overlapping=2,
                                 collect_hits=False, miss_pair=False, background_sink=None):
     """Run the vectorized kernel for one resample multiconfig.
 
@@ -425,6 +427,7 @@ def _vectorized_position_counts(cfg, sliced_object, genename, positions,
         collect_hits=collect_hits,
         miss_pair=miss_pair,
         background_sink=background_sink,
+        min_non_overlapping=min_non_overlapping,
     )
 
 
@@ -448,7 +451,7 @@ def _ungapped_sorted(cfg, species_iter, pos_dict, trait=None):
     return keep
 
 
-def _reconstruct_hit(cfg, pos_dict, trait, max_conserved):
+def _reconstruct_hit(cfg, pos_dict, trait, max_conserved, min_non_overlapping=2):
     """One kernel hit with exact pair-ordered residues: the species lists and what check_pattern says.
 
     check_pattern is the scalar path's own verdict on the same fg/bg residues; `is_match` False means the
@@ -461,7 +464,8 @@ def _reconstruct_hit(cfg, pos_dict, trait, max_conserved):
     is_match, pattern, substitution, conserved_pairs = check_pattern(
         fg_aas, bg_aas,
         max_conserved=max_conserved, multiconfig=cfg,
-        fg_species_list=fg, bg_species_list=bg, trait=trait
+        fg_species_list=fg, bg_species_list=bg, trait=trait,
+        min_non_overlapping=min_non_overlapping
     )
     return dict(fg=fg, bg=bg, is_match=is_match, pattern=pattern, substitution=substitution,
                 conserved_pairs=conserved_pairs)
@@ -479,7 +483,7 @@ def _hits_by_position(positions, genename):
 
 
 def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions,
-                              hits, max_conserved):
+                              hits, max_conserved, min_non_overlapping=2):
     """Materialize perm_discovery rows for the vectorized hits.
 
     The kernel identifies WHICH (position, labeling) are CAAS; each hit's row
@@ -502,7 +506,7 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions,
         posnum = position_name.split("@", 1)[1]
 
         for trait in trait_names:
-            hit = _reconstruct_hit(cfg, pos_dict, trait, max_conserved)
+            hit = _reconstruct_hit(cfg, pos_dict, trait, max_conserved, min_non_overlapping=min_non_overlapping)
             if not hit["is_match"]:
                 disagreements.append((trait, genename, posnum))
             fields = [trait, genename, str(posnum),
@@ -529,7 +533,7 @@ def _hypothesis_of(name):
 
 
 def _b0_discovery_rows(design_cfg, labeling_cfg, sliced_object, genename, positions,
-                       hits, max_conserved):
+                       hits, max_conserved, min_non_overlapping=2):
     """The rows discovery.tab holds for the b_0 hits of the kernel, as lists of fields.
 
     The kernel says which (position, hypothesis) are CAAS. caas and pattern come from
@@ -567,7 +571,7 @@ def _b0_discovery_rows(design_cfg, labeling_cfg, sliced_object, genename, positi
             trait = design_trait.get(_hypothesis_of(tag))
             if trait is None:
                 raise RuntimeError(f"no trait of the design matches the b_0 labeling {tag!r}: {sorted(design_trait)[:5]}")
-            hit = _reconstruct_hit(labeling_cfg, pos_dict, tag, max_conserved)
+            hit = _reconstruct_hit(labeling_cfg, pos_dict, tag, max_conserved, min_non_overlapping=min_non_overlapping)
             order = lambda sp: _pair_sort_key(design_cfg, sp, trait)
             fg = sorted(z.trait2ungapped_fg[trait], key=order)
             bg = sorted(z.trait2ungapped_bg[trait], key=order)
@@ -604,7 +608,7 @@ def _write_b0_discovery(path, rows, max_conserved):
             out.write("\t".join(fields) + "\n")
 
 
-def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, miss_pair=False, max_conserved=0, export_groups=None, export_perm_discovery=None, export_b0_background=None, export_b0_discovery=None):
+def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, miss_pair=False, max_conserved=0, min_non_overlapping=2, export_groups=None, export_perm_discovery=None, export_b0_background=None, export_b0_discovery=None):
     """
     Replay the labelings of one file over one alignment and write the requested exports.
 
@@ -659,25 +663,29 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                 max_fg_gaps, max_bg_gaps, max_overall_gaps,
                 max_fg_miss, max_bg_miss, max_overall_miss,
                 max_conserved, the_admitted_patterns,
+                min_non_overlapping=min_non_overlapping,
                 collect_hits=True, miss_pair=miss_pair, background_sink=bg_sink,
             )
             if perm_discovery_handle is not None:
                 _emit_perm_discovery_rows(
                     perm_discovery_handle, resampled_traits, the_genename,
                     positions, hits, max_conserved,
+                    min_non_overlapping=min_non_overlapping,
                 )
             if groups_handle is not None:
                 _emit_groups_rows(groups_handle, the_genename, hits)
             if export_b0_discovery:
                 _write_b0_discovery(export_b0_discovery, _b0_discovery_rows(
                     load_cfg(trait_config_file), resampled_traits, sliced_object, the_genename,
-                    positions, hits, max_conserved), max_conserved)
+                    positions, hits, max_conserved,
+                    min_non_overlapping=min_non_overlapping), max_conserved)
         else:
             _vectorized_position_counts(
                 resampled_traits, sliced_object, the_genename, positions,
                 max_fg_gaps, max_bg_gaps, max_overall_gaps,
                 max_fg_miss, max_bg_miss, max_overall_miss,
                 max_conserved, the_admitted_patterns,
+                min_non_overlapping=min_non_overlapping,
                 miss_pair=miss_pair, background_sink=bg_sink,
             )
     finally:

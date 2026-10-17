@@ -91,6 +91,7 @@ Usage:
 --ali_format                <"fasta">                    "fasta"
 --patterns                  <"1,2,3,4">                  "1,2,3"
 --min_divergent_fraction    <FLOAT 0-1>                  0.5
+--min_non_overlapping       <INTEGER>                    2      (minimum non-overlapping species required on FG or BG to define a CAAS)
 --strict_conservation_output <true|false>   true   (with min_divergent_fraction < 1, also write the observed tables and the null of the hypotheses with no conserved pair under <outdir>/strict/)
 --max_bg_gaps_fraction      <FLOAT 0-1>                  0.0
 --max_fg_gaps_fraction      <FLOAT 0-1>                  0.0

@@ -520,6 +520,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "publish_intermediates": {{ run_defaults.publish_intermediates }},
   "ct_core_batch_size": "${CT_CORE_BATCH_SIZE:-20}",
   "min_divergent_fraction": "${MIN_DIVERGENT_FRACTION:-0.5}",
+  "min_non_overlapping": "${MIN_NON_OVERLAPPING:-2}",
   "strict_conservation_output": {{ run_defaults.strict_conservation_output }},
   "caas_evidence_discovery": "${CAAS_EVIDENCE_DISCOVERY:-}",
   "max_bg_gaps_fraction": "${MAX_BG_GAPS_FRACTION:-0.0}",

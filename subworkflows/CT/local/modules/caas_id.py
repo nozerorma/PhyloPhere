@@ -241,13 +241,14 @@ def check_pattern(
     multiconfig: Any = None,
     fg_species_list: Optional[List[str]] = None,
     bg_species_list: Optional[List[str]] = None,
-    trait: Optional[str] = None
+    trait: Optional[str] = None,
+    min_non_overlapping: int = 2
 ) -> Tuple[bool, str, str, str]:
     """Check if foreground and background residue sets represent convergence.
 
     Keeps the standard amino acids as states and tests:
     1. Overlap <= max_conserved
-    2. At least 2 non-overlapping residues on foreground or background
+    2. At least min_non_overlapping non-overlapping residues on foreground or background
     3. Classification into pattern 1 (strict 1-to-1), 2 (1-to-many), 3 (many-to-1), or 4 (many-to-many).
 
     Args:
@@ -258,6 +259,7 @@ def check_pattern(
         fg_species_list: Sorted foreground species names.
         bg_species_list: Sorted background species names.
         trait: Trait name.
+        min_non_overlapping: Minimum non-overlapping residues required on FG or BG (default: 2).
 
     Returns:
         (is_convergent, pattern, substitution, conserved_pairs)
@@ -297,9 +299,9 @@ def check_pattern(
 
     # Strict (overlap == 0) vs relaxed (overlap <= max_conserved) check
     if max_conserved == 0:
-        is_convergent = (overlap == 0 and (non_overlapping_fg >= 2 or non_overlapping_bg >= 2))
+        is_convergent = (overlap == 0 and (non_overlapping_fg >= min_non_overlapping or non_overlapping_bg >= min_non_overlapping))
     else:
-        is_convergent = (overlap <= max_conserved and (non_overlapping_fg >= 2 or non_overlapping_bg >= 2))
+        is_convergent = (overlap <= max_conserved and (non_overlapping_fg >= min_non_overlapping or non_overlapping_bg >= min_non_overlapping))
 
     conserved_pairs = "0:"
     if is_convergent and max_conserved > 0 and multiconfig:
