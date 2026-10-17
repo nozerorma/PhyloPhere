@@ -138,10 +138,12 @@ process CAAS_FILTER_GENES {
     script:
     def cluster_arg = cluster_file ? "-c ${cluster_file}" : ""
     def remove_clusters_flag = params.remove_caas_clusters ? "--remove-clusters" : ""
+    def map_arg = params.caas_map_dir ? "--map-dir '${params.caas_map_dir}'" : ""
     """
     python3 ${baseDir}/subworkflows/CT_POSTPROC/local/src/filter_caas_genes.py \
         -i ${discovery_file} \
         -l ${gene_ensembl_file} \
+        ${map_arg} \
         ${cluster_arg} \
         ${remove_clusters_flag} \
         -m ${params.gene_filter_mode} \

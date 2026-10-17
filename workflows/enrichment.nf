@@ -471,7 +471,7 @@ workflow ENRICHMENT {
             // p.perm -- absent whenever CAAS_CORE_MERGE didn't run this
             // invocation (--caas_permulation_enrichment off, or CT skipped).
             def pos_caas_cycle_null_ch = (caas_pos_cycle_caas_ch ?: Channel.empty())
-                .ifEmpty { file('NO_FILE_CAAS_CYCLE_NULL') }
+                .ifEmpty { file(params.caas_pos_cycle_caas_file ?: 'NO_FILE_CAAS_CYCLE_NULL') }
             // Roster of the replayed cycles: live from CAAS_CORE_MERGE, else --caas_cycle_roster_file.
             // Without it POSENRICH takes N from the cycles present in the null and says so.
             def pos_cycle_roster_ch = (caas_cycle_roster_ch ?: Channel.empty())

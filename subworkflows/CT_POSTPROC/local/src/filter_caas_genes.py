@@ -129,8 +129,12 @@ Examples:
 
     parser.add_argument('-i', '--disambiguation-input', required=True,
                         help='Pooled CAAS discovery file (TSV with Gene and Position)')
-    parser.add_argument('-l', '--gene-ensembl-file', required=True,
-                        help='Gene annotation file (TSV with gene and length columns)')
+    parser.add_argument('-l', '--gene-ensembl-file', default=None,
+                        help='Gene annotation file (TSV with gene and length columns), used as fallback')
+    parser.add_argument('--map-dir', type=str, default=None,
+                        help="Directory of the trimmer's per-gene MAP tables for untrimmed lengths")
+    parser.add_argument('--map-suffix', type=str, default=".map.tsv",
+                        help='File-name tail of the MAP tables')
     parser.add_argument('-c', '--cluster-file', default=None,
                         help='Cluster filtering output (required for dubious gene detection)')
 
@@ -154,11 +158,12 @@ Examples:
 
     args = parser.parse_args()
 
-    for label, path in (("Disambiguation file", args.disambiguation_input),
-                        ("Gene ensembl file", args.gene_ensembl_file)):
-        if not Path(path).exists():
-            print(f"Error: {label} not found: {path}", file=sys.stderr)
-            sys.exit(1)
+    if not Path(args.disambiguation_input).exists():
+        print(f"Error: Disambiguation file not found: {args.disambiguation_input}", file=sys.stderr)
+        sys.exit(1)
+    if args.gene_ensembl_file and not Path(args.gene_ensembl_file).exists():
+        print(f"Error: Gene ensembl file not found: {args.gene_ensembl_file}", file=sys.stderr)
+        sys.exit(1)
 
     needs_clusters = args.remove_clusters or args.filter_mode in ['dubious', 'both']
     if needs_clusters and args.cluster_file is None:
@@ -171,9 +176,14 @@ Examples:
     print(f"Loading disambiguation data: {args.disambiguation_input}", file=sys.stderr)
     discovery_df = pd.read_csv(args.disambiguation_input, sep='\t', **_CAAS_READ_KW)
 
-    gene_lengths = load_gene_lengths(args.gene_ensembl_file)
-    if not gene_lengths:
-        print("Error: Gene ensembl file must have 'gene' and 'length' columns", file=sys.stderr)
+    gene_lengths = load_gene_lengths(
+        path=args.gene_ensembl_file,
+        map_dir=args.map_dir,
+        map_suffix=args.map_suffix,
+        genes=discovery_df['Gene'].unique(),
+    )
+    if not gene_lengths and args.filter_mode in ['extreme', 'both']:
+        print("Error: Could not load gene lengths from MAP directory or gene ensembl file", file=sys.stderr)
         sys.exit(1)
 
     discarded = read_discarded(args.cluster_file) if needs_clusters else set()

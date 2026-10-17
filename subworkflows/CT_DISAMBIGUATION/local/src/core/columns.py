@@ -24,7 +24,7 @@ import csv
 import os
 from typing import Dict, List, Optional, Tuple
 
-__all__ = ["read_map", "column_map", "index_files", "find_file", "gene_columns"]
+__all__ = ["read_map", "column_map", "index_files", "find_file", "gene_columns", "map_untrimmed_length"]
 
 
 def read_map(path: str) -> Tuple[List[bool], Dict[int, int]]:
@@ -88,3 +88,25 @@ def gene_columns(index: Dict[str, Optional[str]], gene: str, tail: str) -> Optio
     except FileNotFoundError:
         return None
     return column_map(path)
+
+
+def map_untrimmed_length(path: str) -> Optional[int]:
+    """Total untrimmed columns from the last row's ori_codon_col in a MAP TSV.
+
+    Fast O(1) seek from the end of the file; falls back to line scanning on short/empty files.
+    """
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            if size == 0:
+                return None
+            f.seek(max(0, size - 512))
+            chunk = f.read().decode("utf-8", errors="replace")
+            lines = [ln.strip() for ln in chunk.split("\n") if ln.strip()]
+            if not lines:
+                return None
+            last = lines[-1].split("\t")[0]
+            return int(last) if last.isdigit() else None
+    except Exception:
+        return None

@@ -1079,7 +1079,11 @@ def process_all_genes_perms(
     if postproc_filter and gene_lengths_file:
         try:
             from src.core.postproc import load_gene_lengths
-            gene_lengths = load_gene_lengths(gene_lengths_file)
+            gene_lengths = load_gene_lengths(
+                path=gene_lengths_file,
+                map_dir=train_map_dir if train_map_dir else None,
+                map_suffix=train_map_suffix if train_map_suffix else ".map.tsv",
+            )
             logger.info(f"[perms] CT_POSTPROC filter ON: {len(gene_lengths)} gene lengths, "
                         f"cluster minlen={clust_minlen} maxcaas={clust_maxcaas}, "
                         f"gene_filter_mode={gene_filter_mode}")

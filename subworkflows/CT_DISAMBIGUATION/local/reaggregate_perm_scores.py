@@ -124,6 +124,10 @@ def main() -> int:
                          "must not pass for an empty null)")
     ap.add_argument("--iqr-multiplier", type=float, default=3.0)
     ap.add_argument("--extreme-percentile", type=float, default=0.99)
+    ap.add_argument("--map-dir", "--train-map-dir", type=Path, default=None,
+                    help="directory of the trimmer's per-gene MAP tables for untrimmed lengths")
+    ap.add_argument("--map-suffix", type=str, default=".map.tsv",
+                    help="file-name tail of the MAP tables")
     args = ap.parse_args()
 
     if not (args.detail.is_dir() or args.detail.is_file()):
@@ -151,14 +155,19 @@ def main() -> int:
 
     # Gene removal reads every row once anyway, so with it on the same pass yields the cycles and the row
     # count; without it a plain scan does.
-    removal_on = bool(args.gene_lengths) and args.gene_filter_mode != "none"
+    removal_on = (bool(args.gene_lengths) or bool(args.map_dir)) and args.gene_filter_mode != "none"
     removed = set()
     logger.info("[reaggregate] scanning %s", args.detail)
     if removal_on:
         from src.core.postproc import load_gene_lengths
         info = {}
+        lengths = load_gene_lengths(
+            path=str(args.gene_lengths) if args.gene_lengths else None,
+            map_dir=str(args.map_dir) if args.map_dir else None,
+            map_suffix=args.map_suffix,
+        )
         removed = _cycle_gene_removal_from_detail(
-            args.detail, load_gene_lengths(args.gene_lengths), args.gene_filter_mode,
+            args.detail, lengths, args.gene_filter_mode,
             args.iqr_multiplier, args.extreme_percentile, info=info)
         cycle_tags, n_rows = sorted(info["cycles"]), info["n_rows"]
     else:

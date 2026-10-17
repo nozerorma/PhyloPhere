@@ -26,6 +26,7 @@ Pure Python, no numpy/pandas: the null workers import it too.
 from __future__ import annotations
 
 import csv
+import os
 from array import array
 from typing import Dict, Hashable, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
 
@@ -206,23 +207,50 @@ def gene_removal(
     return removed
 
 
-def load_gene_lengths(path: str) -> Dict[str, float]:
-    """TSV to ``{gene: length}``; case-insensitive ``gene`` and ``length`` columns."""
+def load_gene_lengths(
+    path: Optional[str] = None,
+    map_dir: Optional[str] = None,
+    map_suffix: str = ".map.tsv",
+    genes: Optional[Iterable[str]] = None,
+) -> Dict[str, float]:
+    """TSV or MAP directory to ``{gene: length}``.
+
+    Prioritizes untrimmed alignment columns from each gene's MAP table in ``map_dir`` (the same
+    coordinates used by cluster trains). Falls back to the Ensembl TSV at ``path`` (columns gene, length)
+    for any gene missing from ``map_dir`` or when ``map_dir`` is None.
+    """
     out: Dict[str, float] = {}
-    with open(path, "r", newline="") as f:
-        reader = csv.reader(f, delimiter="\t")
-        header = next(reader, None)
-        if not header:
-            return out
-        lc = [h.strip().lower() for h in header]
-        if "gene" not in lc or "length" not in lc:
-            return out
-        gi, li = lc.index("gene"), lc.index("length")
-        for row in reader:
-            if len(row) <= max(gi, li):
-                continue
-            try:
-                out[row[gi].strip()] = float(row[li])
-            except (TypeError, ValueError):
-                continue
+
+    # 1. Primary source: untrimmed alignment lengths from MAP directory
+    if map_dir and os.path.isdir(map_dir):
+        from .columns import index_files, map_untrimmed_length
+        m_index = index_files(map_dir, map_suffix)
+        target_genes = genes if genes is not None else m_index.keys()
+        for g in target_genes:
+            map_path = m_index.get(g)
+            if map_path and os.path.isfile(map_path):
+                length = map_untrimmed_length(map_path)
+                if length is not None and length > 0:
+                    out[g] = float(length)
+
+    # 2. Fallback source: Ensembl gene annotation TSV
+    if path and os.path.isfile(path):
+        with open(path, "r", newline="", encoding="utf-8", errors="replace") as f:
+            reader = csv.reader(f, delimiter="\t")
+            header = next(reader, None)
+            if header:
+                lc = [h.strip().lower() for h in header]
+                if "gene" in lc and "length" in lc:
+                    gi, li = lc.index("gene"), lc.index("length")
+                    for row in reader:
+                        if len(row) <= max(gi, li):
+                            continue
+                        gene_name = row[gi].strip()
+                        if gene_name not in out:
+                            try:
+                                val = float(row[li])
+                                if val > 0:
+                                    out[gene_name] = val
+                            except (TypeError, ValueError):
+                                continue
     return out

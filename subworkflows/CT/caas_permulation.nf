@@ -462,7 +462,8 @@ process CAAS_CORE_MERGE {
     // N is the number of cycles replayed, which the detail rows alone understate when a cycle left no row.
     // Gene removal needs the annotation file, so it is on only when gene_lengths is not a NO_* sentinel.
     def roster_arg = labelings.name.startsWith('NO_') ? "" : "--cycles-from ${labelings}"
-    def removal_args = (caasPostprocOn() && !gene_lengths.name.startsWith('NO_')) ? "--gene-lengths ${gene_lengths} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
+    def map_arg = params.caas_map_dir ? "--map-dir '${params.caas_map_dir}'" : ""
+    def removal_args = (caasPostprocOn() && !gene_lengths.name.startsWith('NO_')) ? "--gene-lengths ${gene_lengths} ${map_arg} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     # reaggregate_perm_scores.py imports src.utils.gene_wrapper relative to its own location.
