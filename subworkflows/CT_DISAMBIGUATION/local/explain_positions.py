@@ -41,7 +41,7 @@ from src.core.evidence import EVIDENCE_COLUMNS, evidence_rows, select_top_positi
 from src.core.labelings import read_trait_pairs
 from src.core.observed import analyze_observed, observed_entries
 from src.data.loaders import load_ensembl_genes
-from src.utils.concurrency import init_worker, plan_concurrency
+from src.utils.concurrency import init_worker, plan_concurrency, safe_imap_unordered
 from src.utils.logger import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -134,7 +134,7 @@ def main():
     t0 = time.time()
     by_gene_evidence, skipped = {}, []
     with mp.Pool(processes=workers, initializer=init_worker, initargs=(1, None)) as pool:
-        for gene, rows in pool.imap_unordered(_explain_gene, jobs, chunksize=1):
+        for gene, rows in safe_imap_unordered(pool, _explain_gene, jobs, chunksize=1):
             if rows is None:
                 skipped.append(gene)
             else:

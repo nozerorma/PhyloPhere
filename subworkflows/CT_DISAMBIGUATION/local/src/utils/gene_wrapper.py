@@ -33,7 +33,7 @@ from typing import List, Dict, Tuple, Optional, Set, Any
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-from src.utils.concurrency import plan_concurrency, init_worker
+from src.utils.concurrency import plan_concurrency, init_worker, safe_imap_unordered
 from src.utils.amino import normalize_amino_list
 from src.core.driver import load_gene_context, pool_labelings, score_labelings
 from src.core.scores import DIRECTIONS, SCORE_RULE, collapse_sides, direction_values, gene_scores, position_score
@@ -297,10 +297,13 @@ def _scan_perm_discovery_dir(disc_path: Path) -> Dict[str, Path]:
 
 
 # Memory model of one replay chunk (see process_all_genes_perms): MB per million rows of perm-discovery export and the
-# fixed part of a worker. Four genes of 0.8 to 6.4 million rows replayed with one worker each peaked at 2.4, 3.6, 10.9 and
-# 16.3 GB (linear fit: 2450 MB per million rows, 200 MB fixed, within 5 %); the constants round that fit up.
+# fixed part of a worker. The original fit (four genes of 0.8-6.4 M rows, one worker each: peaks 2.4, 3.6, 10.9 and
+# 16.3 GB -> 2450 MB/Mrow, 200 MB fixed) under-modeled the wide giant alignments: in the 2026-10-18 OOM run (job 7508929,
+# node cr-07-21) a 3.55 M-row RP1 chunk peaked at 14.4-14.7 GB and the 2.85 M-row RNF213 gene at 12.5 GB, i.e.
+# ~4100-4400 MB/Mrow. The constant rounds that up so that under the 10 GB/worker budget of a 40 GB x 4-cpu task RP1
+# splits into 5 chunks (~7 GB each) and RNF213 into 2, keeping 4 concurrent workers at ~28 GB.
 # MEM_HEADROOM is the share of the worker budget a chunk may use.
-_REPLAY_MB_PER_MROW = 2500.0
+_REPLAY_MB_PER_MROW = 4400.0
 _REPLAY_BASE_MB = 400.0
 _REPLAY_MEM_HEADROOM = 0.8
 
@@ -1174,7 +1177,7 @@ def process_all_genes_perms(
         # the many-cheap-tasks shape chunksize>1 is meant for. A larger chunksize bundles
         # tasks into one unit handed to a single worker, so with few tasks (for example
         # 20 genes and chunksize=10) only as many workers as bundles ever receive work.
-        results_iterator = pool.imap_unordered(_perms_worker_replay_wrapper, args_generator, chunksize=1)
+        results_iterator = safe_imap_unordered(pool, _perms_worker_replay_wrapper, args_generator, chunksize=1)
 
         for _result in results_iterator:
             _gene, chunk_pooled = _result[0], _result[1]

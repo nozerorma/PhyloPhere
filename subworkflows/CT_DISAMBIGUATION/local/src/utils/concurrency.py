@@ -16,7 +16,7 @@ Imported by: src/utils/gene_wrapper.py, src/core/driver.py, explain_positions.py
 import multiprocessing as mp
 import os
 from contextlib import contextmanager
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any, Callable, Iterable
 
 # Semaphore that gates concurrent codeml runs; set per worker by init_worker (None = no gate).
 _CODEML_SEM = None
@@ -112,3 +112,61 @@ def codeml_slot():
         return
     with _CODEML_SEM:
         yield
+
+
+def safe_imap_unordered(
+    pool: Any,
+    func: Callable[[Any], Any],
+    iterable: Iterable[Any],
+    chunksize: int = 1,
+    poll_timeout: float = 5.0,
+):
+    """Safely yields items from pool.imap_unordered(func, iterable, chunksize=chunksize).
+
+    Python's standard multiprocessing.Pool has a known issue: if a worker process is terminated
+    abruptly by SIGKILL (e.g. Linux kernel cgroup OOM-killer), the worker is repopulated but the in-flight
+    task is lost. imap_unordered then hangs indefinitely waiting for the lost item.
+
+    safe_imap_unordered hooks worker cleanup during iteration. If any worker exits with a non-zero
+    exit code (e.g. -9 / SIGKILL for OOM), iteration immediately aborts with a critical log message
+    and exits with status 137 (or 128 + signal) so that workflow orchestrators (such as Nextflow)
+    receive the failure signal and can retry with more resources rather than deadlocking.
+    """
+    import multiprocessing.pool as mpp
+    import logging
+    import sys
+
+    log = logging.getLogger(__name__)
+    abnormal_workers = []
+    orig_join = mpp.Pool._join_exited_workers
+
+    @staticmethod
+    def _monitored_join_exited_workers(pool_list):
+        for w in pool_list:
+            if w.exitcode is not None and w.exitcode != 0:
+                abnormal_workers.append((w.pid, w.exitcode))
+        return orig_join(pool_list)
+
+    mpp.Pool._join_exited_workers = _monitored_join_exited_workers
+    try:
+        it = pool.imap_unordered(func, iterable, chunksize=chunksize)
+        while True:
+            if abnormal_workers:
+                pid, code = abnormal_workers[0]
+                exit_code = 137 if code == -9 else (128 + abs(code) if code < 0 else code)
+                log.critical(
+                    f"Worker process (PID {pid}) terminated abnormally with exit code {code} "
+                    f"(likely killed by kernel OOM-killer / cgroup memory limit). "
+                    f"Aborting pool to prevent deadlock; exiting with code {exit_code}."
+                )
+                pool.terminate()
+                pool.join()
+                sys.exit(exit_code)
+            try:
+                yield it.next(timeout=poll_timeout)
+            except StopIteration:
+                break
+            except mp.TimeoutError:
+                continue
+    finally:
+        mpp.Pool._join_exited_workers = orig_join

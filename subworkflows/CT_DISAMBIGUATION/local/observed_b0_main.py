@@ -57,7 +57,7 @@ from src.core.master import master_fields, write_master_csv
 from src.core.contract import BACKGROUND_SUFFIX
 from src.core.observed import is_strict_row, observed_entries, observed_master_rows, score_observed
 from src.data.loaders import load_ensembl_genes
-from src.utils.concurrency import init_worker, plan_concurrency
+from src.utils.concurrency import init_worker, plan_concurrency, safe_imap_unordered
 from src.utils.logger import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -182,7 +182,7 @@ def main():
     t0 = time.time()
     written, skipped = 0, []
     with mp.Pool(processes=workers, maxtasksperchild=args.max_tasks_per_child, initializer=init_worker, initargs=(1, None)) as pool:
-        for gene, rows, strict_rows in pool.imap_unordered(_score_gene, jobs, chunksize=1):
+        for gene, rows, strict_rows in safe_imap_unordered(pool, _score_gene, jobs, chunksize=1):
             if not rows:
                 skipped.append(gene)
                 continue
