@@ -11,7 +11,7 @@
     "remote_root_dir": "/homes/users/mramon/scratch/"
   },
   "runtime": {
-    "resume": true,
+    "resume": false,
     "toy_mode": false,
     "cleanup_policy": "remove_work",
     "toy_n": "1000",
@@ -68,7 +68,7 @@
       "min_contrasts": "3",
       "publish_intermediates": false,
       "ct_core_batch_size": "100",
-      "min_divergent_fraction": "1.0",
+      "min_divergent_fraction": "0",
       "min_non_overlapping": "2",
       "strict_conservation_output": true,
       "max_bg_gaps_fraction": "0.0",
@@ -98,17 +98,17 @@
       "asr_diagnostics": true,
       "run_postproc_exploratory": false,
       "run_postproc_filter": true,
-      "run_strict_analysis": false,
+      "run_strict_analysis": true,
       "caas_postproc_mode": "filter",
       "filter_minlen": "3",
       "filter_maxcaas": "0.7",
       "caas_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
       "minlen_values": "2,3,4,10",
       "maxcaas_values": "0.6,0.7,0.8",
-      "gene_filter_mode": "dubious",
+      "gene_filter_mode": "extreme",
       "remove_caas_clusters": true,
       "extreme_threshold": "0.99",
-      "iqr_multiplier": "3.0"
+      "iqr_multiplier": "1.5"
     },
     "accumulation": {
       "enabled": true,
@@ -116,7 +116,7 @@
       "accumulation_n_randomizations": "1000000",
       "accumulation_randomization_type": "cons_decile",
       "accumulation_entropy_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT_VAR_RAW",
-      "accumulation_fdr": "0.05"
+      "accumulation_fdr": "0.15"
     },
     "rer": {
       "enabled": true,

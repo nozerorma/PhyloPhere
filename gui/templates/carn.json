@@ -116,7 +116,7 @@
       "accumulation_n_randomizations": "1000000",
       "accumulation_randomization_type": "cons_decile",
       "accumulation_entropy_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT_VAR_RAW",
-      "accumulation_fdr": "0.05"
+      "accumulation_fdr": "0.15"
     },
     "rer": {
       "enabled": false,
@@ -171,7 +171,7 @@
       "extra_flags": "",
       "vep_primateai_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PAI3D/PrimateAI-3D.hg38.txt.gz",
       "cosmic_db": "",
-      "vep_ensembl": true,
+      "vep_ensembl": false,
       "vep_cache_dir": "",
       "vep_species": "homo_sapiens",
       "vep_assembly": "GRCh38",

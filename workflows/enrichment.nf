@@ -76,29 +76,35 @@ process PUBLISH_UNIVERSES {
     publishDir path: "${params.outdir}/universes", mode: 'copy', overwrite: true
 
     input:
-    path rer_bg
-    path fade_bg
-    path caas_bg
+    // stageAs gives each universe a distinct staged name -- RER, FADE (single-
+    // direction runs pass their raw background.txt through) and CAAS-discovery
+    // upstream processes all emit plain 'background.txt'/'cleaned_background_main.txt',
+    // so unnamed staging collides whenever two tools ran in the same invocation.
+    path rer_bg,  stageAs: 'rer_background.universe'
+    path fade_bg, stageAs: 'fade_background.universe'
+    path caas_bg, stageAs: 'caas_background.universe'
     val  traitname
 
     output:
     // Explicit dynamic filenames (not a "*.txt" glob) -- a glob here would also
-    // match the Nextflow-staged INPUT files themselves (e.g. background.txt,
-    // fade_global_background.txt, cleaned_background_main.txt all sit in the
-    // task work dir as staged inputs), publishing confusing un-renamed
-    // duplicates alongside the trait-suffixed copies below.
+    // match the Nextflow-staged INPUT files themselves (the *.universe files
+    // staged above all sit in the task work dir), publishing confusing
+    // un-renamed duplicates alongside the trait-suffixed copies below.
     path "rer_background_${traitname}.txt",             emit: rer_universe,  optional: true
     path "fade_background_${traitname}.txt",            emit: fade_universe, optional: true
     path "cleaned_background_main_${traitname}.txt",     emit: caas_universe, optional: true
 
     script:
+    // stageAs renames the staged files, so the NO_* sentinel detection happens
+    // here (Groovy, per task -- mirroring SCORING_AMI_REPORT's gs_arg pattern)
+    // instead of basename checks in the shell, where a NO_* name never arrives.
+    def rer_ok  = !(rer_bg.name  =~ /^NO_/)
+    def fade_ok = !(fade_bg.name =~ /^NO_/)
+    def caas_ok = !(caas_bg.name =~ /^NO_/)
     """
-    rer_name=\$(basename ${rer_bg})
-    fade_name=\$(basename ${fade_bg})
-    caas_name=\$(basename ${caas_bg})
-    [[ "\${rer_name}"  == NO_* ]]  || cp ${rer_bg}  "rer_background_${traitname}.txt"
-    [[ "\${fade_name}" == NO_* ]]  || cp ${fade_bg} "fade_background_${traitname}.txt"
-    [[ "\${caas_name}" == NO_* ]]  || cp ${caas_bg} "cleaned_background_main_${traitname}.txt"
+    ${rer_ok  ? "cp rer_background.universe  \"rer_background_${traitname}.txt\"" : ''}
+    ${fade_ok ? "cp fade_background.universe \"fade_background_${traitname}.txt\"" : ''}
+    ${caas_ok ? "cp caas_background.universe  \"cleaned_background_main_${traitname}.txt\"" : ''}
     """
 }
 
