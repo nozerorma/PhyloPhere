@@ -214,14 +214,64 @@ class VectorizedPermReplay:
 
     # -- main counting --------------------------------------------------------
 
-    def count(self, positions, genename,
-              maxgaps_fg, maxgaps_bg, maxgaps_all,
-              maxmiss_fg, maxmiss_bg, maxmiss_all,
-              max_conserved, admitted_patterns,
-              b_chunk=None, collect_hits=False, miss_pair=False,
-              background_sink=None, background_base="b_0",
-              min_non_overlapping=2):
-        """Count CAAS hits per position across all B labelings.
+    def label_chunks(self, b_chunk, whole_base_cycles=False):
+        """[(start, end)] ranges of the labelings, `b_chunk` labelings each.
+
+        With `whole_base_cycles` a range is extended to the end of the base cycle it stops in, so that all the
+        hypotheses of a cycle ("<base>~H<m>") fall in the same range; a base cycle must then be contiguous in the
+        labelings file."""
+        if not whole_base_cycles:
+            return [(s, min(s + b_chunk, self.B)) for s in range(0, self.B, b_chunk)]
+        bases = [_fop_base_cycle(t) for t in self.alltraits]
+        seen = set()
+        for i, base in enumerate(bases):
+            if i and base != bases[i - 1]:
+                if base in seen:
+                    raise ValueError(f"the hypotheses of base cycle {base} are not contiguous in the labelings")
+            seen.add(base)
+        ranges, start = [], 0
+        while start < self.B:
+            end = min(start + b_chunk, self.B)
+            while end < self.B and bases[end] == bases[end - 1]:
+                end += 1
+            ranges.append((start, end))
+            start = end
+        return ranges
+
+    def count(self, positions, genename, maxgaps_fg, maxgaps_bg, maxgaps_all, maxmiss_fg, maxmiss_bg, maxmiss_all,
+              max_conserved, admitted_patterns, b_chunk=None, collect_hits=False, miss_pair=False,
+              background_sink=None, background_base="b_0", min_non_overlapping=2):
+        """Count CAAS hits per position across all B labelings (the totals of `count_chunks`).
+
+        Returns {position name: count}, and with `collect_hits` also {position name: [labeling names]}."""
+        names = [_position_name(pos_dict, genename) for pos_dict in positions]
+        results = {name: 0 for name in names}
+        hits = {name: [] for name in names} if collect_hits else None
+        for _start, _end, chunk_counts, chunk_hits in self.count_chunks(
+                positions, genename, maxgaps_fg, maxgaps_bg, maxgaps_all, maxmiss_fg, maxmiss_bg, maxmiss_all,
+                max_conserved, admitted_patterns, b_chunk=b_chunk, collect_hits=collect_hits, miss_pair=miss_pair,
+                background_sink=background_sink, background_base=background_base,
+                min_non_overlapping=min_non_overlapping):
+            for key, n in chunk_counts.items():
+                results[key] += n
+            if collect_hits:
+                for key, traits in chunk_hits.items():
+                    hits[key].extend(traits)
+        return (results, hits) if collect_hits else results
+
+    def count_chunks(self, positions, genename,
+                     maxgaps_fg, maxgaps_bg, maxgaps_all,
+                     maxmiss_fg, maxmiss_bg, maxmiss_all,
+                     max_conserved, admitted_patterns,
+                     b_chunk=None, whole_base_cycles=False, collect_hits=False, miss_pair=False,
+                     background_sink=None, background_base="b_0",
+                     min_non_overlapping=2):
+        """Count CAAS hits per position, one range of labelings at a time.
+
+        The positions are encoded once; for every range of `label_chunks(b_chunk, whole_base_cycles)` this
+        yields (start, end, {position name: count}, {position name: [labeling names]}), the hits being
+        present only for the positions that have one and only with `collect_hits`. A range holds
+        `b_chunk` labelings (the memory budget of the kernel buffers by default).
 
         miss_pair mirrors the scalar path (caas_id.fetch_caas): when the fg and bg
         thresholds are equal, a labeling whose fg and bg sides both have gapped (or missing)
@@ -267,13 +317,7 @@ class VectorizedPermReplay:
             missmat[:, pi] = missvec
             ndmat[:, pi] = ndvec
 
-            pos_num = None
-            for v in pos_dict.values():
-                parts = v.split("@")
-                if len(parts) > 1:
-                    pos_num = parts[1]
-                    break
-            position_names.append(f"{genename}@{pos_num}")
+            position_names.append(_position_name(pos_dict, genename))
 
             block = self._group_block(symbols)
             ng = block.shape[1]
@@ -281,12 +325,8 @@ class VectorizedPermReplay:
             jobs.append((pi, col_cursor, col_cursor + ng))
             col_cursor += ng
 
-        results = {position_names[pi]: 0 for pi in range(n_pos)}
-
-        hits = {key: [] for key in results} if collect_hits else None
-
         if self.B == 0 or col_cursor == 0:
-            return (results, hits) if collect_hits else results
+            return
 
         G_concat = np.hstack(blocks) if blocks else np.zeros((self.n_sp, 0), np.float32)
 
@@ -298,8 +338,9 @@ class VectorizedPermReplay:
         if background_sink is not None:
             track = np.array([_fop_base_cycle(t) == background_base for t in self.alltraits], dtype=bool)
 
-        for start in range(0, self.B, b_chunk):
-            end = min(start + b_chunk, self.B)
+        for start, end in self.label_chunks(b_chunk, whole_base_cycles):
+            results = {position_names[pi]: 0 for pi in range(n_pos)}
+            hits = {}
             Fc = self.F[start:end]
             Bc = self.Bg[start:end]
 
@@ -389,12 +430,23 @@ class VectorizedPermReplay:
 
                 if collect_hits and count:
                     local_idx = np.nonzero(hit)[0]
-                    hits[key].extend(self.alltraits[start + int(i)] for i in local_idx)
+                    hits.setdefault(key, []).extend(self.alltraits[start + int(i)] for i in local_idx)
+
+            yield start, end, results, hits
 
         if background_sink is not None:
             background_sink.update(position_names[pi].split("@", 1)[1] for pi in tested_pi)
 
-        return (results, hits) if collect_hits else results
+
+def _position_name(pos_dict, genename):
+    """'<gene>@<position number>' of one alignment column (a species -> 'AA@position' dict)."""
+    pos_num = None
+    for v in pos_dict.values():
+        parts = v.split("@")
+        if len(parts) > 1:
+            pos_num = parts[1]
+            break
+    return f"{genename}@{pos_num}"
 
 
 def _posnum_from_posdict(pos_dict):
@@ -482,21 +534,22 @@ def _hits_by_position(positions, genename):
     return {genename + "@" + str(_posnum_from_posdict(pos_dict)): pos_dict for pos_dict in positions}
 
 
-def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions,
-                              hits, max_conserved, min_non_overlapping=2):
-    """Materialize perm_discovery rows for the vectorized hits.
+class KernelDisagreement(RuntimeError):
+    """The vectorized kernel and the scalar CAAS test (check_pattern) disagree on a hit."""
 
-    The kernel identifies WHICH (position, labeling) are CAAS; each hit's row
-    is reconstructed with exact pair-ordered substitution strings.
 
-    A hit check_pattern rejects means the kernel and the scalar CAAS test disagree; that must not pass
-    silently, so it is counted and raised once every row of the call has been written.
+def perm_discovery_rows(cfg, genename, positions, hits, max_conserved, min_non_overlapping=2, posdicts=None):
+    """The perm_discovery row of every kernel hit: yields (labeling, position number, fields, agrees).
+
+    The kernel identifies WHICH (position, labeling) are CAAS; each hit's row is reconstructed with exact
+    pair-ordered substitution strings. Rows come in the order of `hits` (position, then labeling). `fields` are
+    the columns of the export row (cycle, gene, position, caas, pattern and, with max_conserved > 0,
+    is_conserved_meta and conserved_pair); `agrees` is False when check_pattern rejects the kernel hit.
+    `posdicts` is `_hits_by_position(positions, genename)`, which a caller that asks repeatedly builds once.
     """
-    if not hits or not perm_discovery_out:
+    if not hits:
         return
-    disagreements = []
-    posname_to_posdict = _hits_by_position(positions, genename)
-
+    posname_to_posdict = posdicts if posdicts is not None else _hits_by_position(positions, genename)
     for position_name, trait_names in hits.items():
         if not trait_names:
             continue
@@ -507,16 +560,30 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions,
 
         for trait in trait_names:
             hit = _reconstruct_hit(cfg, pos_dict, trait, max_conserved, min_non_overlapping=min_non_overlapping)
-            if not hit["is_match"]:
-                disagreements.append((trait, genename, posnum))
-            fields = [trait, genename, str(posnum),
-                      hit["substitution"], hit["pattern"]]
+            fields = [trait, genename, str(posnum), hit["substitution"], hit["pattern"]]
             if max_conserved > 0:
                 fields.extend(_conserved_fields(hit["conserved_pairs"]))
-            perm_discovery_out.write("\t".join(fields) + "\n")
+            yield trait, posnum, fields, bool(hit["is_match"])
+
+
+def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions,
+                              hits, max_conserved, min_non_overlapping=2):
+    """Write the perm_discovery rows of the kernel hits (see perm_discovery_rows).
+
+    A hit check_pattern rejects means the kernel and the scalar CAAS test disagree; that must not pass
+    silently, so it is counted and raised once every row of the call has been written.
+    """
+    if not hits or not perm_discovery_out:
+        return
+    disagreements = []
+    for trait, posnum, fields, agrees in perm_discovery_rows(
+            cfg, genename, positions, hits, max_conserved, min_non_overlapping=min_non_overlapping):
+        if not agrees:
+            disagreements.append((trait, genename, posnum))
+        perm_discovery_out.write("\t".join(fields) + "\n")
 
     if disagreements:
-        raise RuntimeError(
+        raise KernelDisagreement(
             f"vectorized kernel and check_pattern disagree on {len(disagreements)} hit(s) "
             f"(labeling, gene, position), first: {disagreements[:5]}")
 

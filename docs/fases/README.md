@@ -11,7 +11,7 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 | WP1 | `WP1_fcs_rer.md` | | WP0 | HECHO (p.perm de CAAS idéntico a la referencia; RER global firmado; pendiente medir RER_CONT a 10.000 y los recuentos 1, 0, 6, 6) |
 | WP2 | `WP2_exports_posenrich_limpieza.md` | | WP0 | HECHO (PEPC c4 y toy de cancer idénticos a la referencia con su caché de ASR; marine toy pendiente) |
 | WP3 | `WP3_bloques_de_ciclos.md` | Fase 1 | WP2 | HECHO (PEPC c4 a 1000 ciclos con bloque de 250 y toy de cáncer con bloques de 25 y 40 idénticos a la referencia, delta 0.0; marine toy pendiente por el disco externo) |
-| WP4 | `WP4_replay_en_flujo.md` | Fase 2 | WP3 | pendiente |
+| WP4 | `WP4_replay_en_flujo.md` | Fase 2 | WP3 | HECHO (PEPC c4 a 1000 ciclos con bloque 250 y toy de cáncer con bloques 25 y 40 idénticos a la referencia, delta 0.0; flujo sin export salvo b_0; RSS del gen mayor RP1 sin medir (cluster); marine toy pendiente) |
 | WP5 | `WP5_tablas_y_merge_por_bloque.md` | Fase 3 | WP4 | pendiente |
 | WP6 | `WP6_fcs_por_bloques.md` | Fase 4 | WP1, WP5 | pendiente |
 | WP7 | `WP7_caas_perms_por_bloques.md` | Fase 5 | WP5 | pendiente |

@@ -20,10 +20,10 @@
 """
 CAAS_CORE_BATCHED: Replays permuted phenotype labelings over cached ASR posteriors (the CAAS permulation null).
 
-Loads each gene's precomputed ASR posteriors once and replays N permuted phenotype labelings (the
-full-pool perm-discovery export of a perm-replay run, with the matching resample_*.tab labelings)
-over them, scoring each through analyze_gene_disambiguation as the observed pipeline does
-(src/utils/gene_wrapper.py, process_all_genes_perms). The real labeling (b_0) is
+For each gene of a manifest it replays the labelings of a resample directory over the gene's alignment in process (the
+CAAS kernel of `ct perm-replay`, src/utils/perm_stream.py), loads the gene's precomputed ASR posteriors once and scores
+each labeling that has a detection through analyze_gene_disambiguation as the observed pipeline does
+(src/utils/gene_wrapper.py, process_all_genes_perms). No discovery export is written. The real labeling (b_0) is
 replayed on its own into <output-dir>/b0, so it never enters the null.
 
 Pass A writes one per-(gene, cycle, position) detail shard per gene to
@@ -38,8 +38,9 @@ keeps only fully divergent hypotheses. Replay, ASR and scoring are shared; only 
 
 Called by:  CAAS_CORE_BATCHED (subworkflows/CT/caas_permulation.nf) → disambiguation_perms_main.py --detail-only
 Usage:
-    python3 disambiguation_perms_main.py --alignment-dir <dir> --tree <newick> --perm-discovery <file or dir> \\
-        --resample-dir <dir> --output-dir <dir> --asr-cache-dir <dir> [--detail-only] [OPTIONS]
+    python3 disambiguation_perms_main.py --alignment-dir <dir> --tree <newick> --manifest <file> --design <path> \\
+        --ct-dir <dir> --replay-args-file <file> --resample-dir <dir> --output-dir <dir> --asr-cache-dir <dir> \\
+        [--detail-only] [OPTIONS]
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -55,6 +56,7 @@ from typing import Tuple
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from src.utils.gene_wrapper import process_all_genes_perms, _read_resample_labelings
+from src.utils.perm_stream import ReplaySettings
 from src.convergence.fop_pool import base_cycle
 from src.utils.logger import configure_logging
 
@@ -72,9 +74,21 @@ def parse_arguments():
     p.add_argument("--alignment-dir", required=True, help="Directory with alignment files")
     p.add_argument("--tree", required=True, help="Phylogenetic tree (Newick)")
     p.add_argument(
-        "--perm-discovery", required=True,
-        help="Full-pool export_perm_discovery file or directory of files (canonical headers, Cycle column)",
+        "--manifest", required=True,
+        help="Tab-separated '<gene id>\\t<alignment file name>' per line: the genes to replay; the gene key is the "
+             "id up to its first dot",
     )
+    p.add_argument("--manifest-alignment-dir", default="alignments",
+                   help="Directory of the alignment files named in --manifest (default: alignments)")
+    p.add_argument("--design", required=True,
+                   help="Trait file, or directory of traitfile_H*.tab, of the run: the alignment is sliced against it")
+    p.add_argument("--ct-dir", required=True, help="Directory of `ct` (the `modules` package with the CAAS kernel)")
+    p.add_argument("--replay-args-file", required=True,
+                   help="File with the `ct perm-replay` thresholds (--patterns, --max_*_gaps, --max_*_miss, "
+                        "--miss_pair, --max_conserved, --min_non_overlapping)")
+    p.add_argument("--ali-format", default="clustal", help="Alignment format of the manifest files (default: clustal)")
+    p.add_argument("--chunk-labelings", type=int, default=None,
+                   help="Labelings per replay range of the kernel (default: the kernel's memory budget)")
     p.add_argument(
         "--resample-dir", required=True,
         help="Directory with resample_*.tab labelings (cycle, fg_csv, bg_csv)",
@@ -89,7 +103,7 @@ def parse_arguments():
     p.add_argument("--max-tasks-per-child", type=int, default=None)
     p.add_argument(
         "--cycles", default=None,
-        help="Comma-separated cycle tags to process (default: all cycles in the export)",
+        help="Comma-separated cycle tags to process (default: all cycles of the resample directory)",
     )
     p.add_argument(
         "--fop-pairs", default=None,
@@ -136,54 +150,22 @@ def parse_arguments():
     return p.parse_args()
 
 
-def _genes_from_export(perm_discovery_path: Path) -> Tuple[list, dict]:
-    """Genes with at least one CAAS in any cycle (the only genes worth replaying), largest workload first.
+def _read_manifest(path: Path, alignment_dir: Path) -> Tuple[list, dict]:
+    """Genes of the manifest, the largest alignment first, and {gene key: alignment path}.
 
-    Largest first is longest-processing-time scheduling: starting the biggest gene first keeps
-    it from starting late and leaving workers idle behind it (see
-    docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md). The row count (file mode) or file size
-    (directory mode) is a proxy for a gene's cycle workload, available from the same pass that
-    discovers the gene names.
-
-    Returns (genes sorted largest first, {gene: size proxy}); the sizes are passed on as
-    gene_sizes of process_all_genes_perms to decide which genes are large enough to split their
-    replay across several workers.
+    Largest first is longest-processing-time scheduling: starting the biggest gene first keeps it from starting
+    late and leaving workers idle behind it (see docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md). The gene key is
+    the manifest id up to its first dot, the symbol that find_gene_alignment and the master Gene column use.
     """
-    sizes: dict = {}
-    if perm_discovery_path.is_file():
-        with open(perm_discovery_path, "r") as f:
-            header = f.readline()
-            if not header:
-                return [], {}
-            cols = header.rstrip("\n").split("\t")
-            try:
-                gene_idx = cols.index("gene")
-            except ValueError:
-                return [], {}
-            for line in f:
-                # maxsplit=2 keeps the split short: the gene is the second column
-                parts = line.split("\t", maxsplit=2)
-                if len(parts) > gene_idx:
-                    g = parts[gene_idx].strip()
-                    if g:
-                        sizes[g] = sizes.get(g, 0) + 1
-    else:
-        # Directory mode: file names are "<alignmentID>.perm_replay.discovery.output", where
-        # alignmentID is the base name of the alignment file (for example "GENE.Homo_sapiens"
-        # from "GENE.Homo_sapiens.fa"). The gene is the first dot-delimited segment, because
-        # the bare symbol is what ensembl_genes, find_gene_alignment (which splits on the
-        # first dot) and the meta_caas Gene column use. Normalize byte size by ~35 bytes/row
-        # so the workload proxy matches the row-count scale of file mode. The observed mean of
-        # the perm-discovery export rows is ~35-37 bytes (55 underestimated rows by ~30% and
-        # with that the chunk planner under-split giant genes such as RP1/RNF213).
-        for p in perm_discovery_path.iterdir():
-            if p.is_file() and not p.name.startswith("."):
-                st_size = p.stat().st_size
-                if st_size > 0:
-                    name = p.name.split(".", 1)[0]
-                    sizes[name] = sizes.get(name, 0) + max(1, st_size // 35)
-    genes = [g for g, _ in sorted(sizes.items(), key=lambda kv: (-kv[1], kv[0]))]
-    return genes, sizes
+    alignments: dict = {}
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        gene_id, name = line.split("\t")[:2]
+        alignments[gene_id.split(".", 1)[0]] = alignment_dir / name
+    sizes = {g: a.stat().st_size for g, a in alignments.items()}
+    genes = sorted(alignments, key=lambda g: (-sizes[g], g))
+    return genes, alignments
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -203,10 +185,13 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    genes, gene_sizes = _genes_from_export(Path(args.perm_discovery))
-    logger.info(f"Genes with CAAS hits across cycles: {len(genes)}")
+    genes, gene_alignments = _read_manifest(Path(args.manifest), Path(args.manifest_alignment_dir))
+    logger.info(f"Genes to replay: {len(genes)}")
     if not genes:
-        logger.warning("No genes in export_perm_discovery; writing empty null table")
+        logger.warning("No genes in the manifest; writing empty null table")
+    replay = ReplaySettings.from_args_file(
+        args.replay_args_file, ct_dir=args.ct_dir, design=args.design, ali_format=args.ali_format,
+        chunk_labelings=args.chunk_labelings)
 
     cycles = None
     if args.cycles:
@@ -223,10 +208,11 @@ def main():
     def run(run_cycles, run_dir):
         return process_all_genes_perms(
             genes=genes,
+            gene_alignments=gene_alignments,
             alignment_dir=args.alignment_dir,
             tree_file=args.tree,
-            perm_discovery_file=args.perm_discovery,
             resample_dir=args.resample_dir,
+            replay=replay,
             taxid_mapping_path=args.taxid_mapping,
             asr_model=args.asr_model,
             asr_cache_dir=args.asr_cache_dir,
@@ -247,7 +233,6 @@ def main():
             remove_clusters=not args.keep_clusters,
             train_map_dir=args.train_map_dir,
             train_map_suffix=args.train_map_suffix,
-            gene_sizes=gene_sizes,
             seed=args.seed,
             detail_only=args.detail_only,
             strict_output=args.strict_output,

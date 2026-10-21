@@ -184,15 +184,15 @@ process SUBSET_RESAMPLE_PERMS {
     """
 }
 
-// ── 2. One task per (gene batch, cycle block): perm-replay, then the ASR replay of the same genes ───
+// ── 2. One task per (gene batch, cycle block): the replay of the block's labelings over the batch's genes ───
 // A tile is the replay of one batch of genes against the labelings of one cycle block (or of b_0, the tile
-// whose block directory is blocks/b0). The task replays the batch's alignments through `ct perm-replay` (full
-// position pool, perm-discovery export; each ct process parses the block's labelings once for all the genes it
-// takes) and feeds the exports straight into disambiguation_perms_main.py --detail-only, so no gene waits for the
-// rest of the genome between the two steps. Pass B scores each cycle against genome-wide pools and runs once, in
-// CAAS_CORE_MERGE, over the union of the tiles' shards.
-// The b_0 tile also exports the b_0 slice of each gene (the discovery.tab rows of the real labeling and the
-// positions it tested); observed_b0_main.py then scores those rows as full records.
+// whose block directory is blocks/b0). disambiguation_perms_main.py --detail-only replays the block's labelings over
+// each gene's alignment in process (the CAAS kernel of `ct perm-replay`, one base cycle at a time), scores each
+// cycle against the gene's ASR and writes the gene's detail shard; no discovery export is written, and a gene is
+// replayed in one worker, so its ASR context is loaded once per tile. Pass B scores each cycle against genome-wide
+// pools and runs once, in CAAS_CORE_MERGE, over the union of the tiles' shards.
+// The b_0 tile also runs `ct perm-replay` for the b_0 slice of each gene (the discovery.tab rows of the real labeling
+// and the positions it tested); observed_b0_main.py then scores those rows as full records.
 // Output: perm_pos_detail/ (one gz shard per gene with a detection in the block; the b_0 shards under b0/) and, for the
 // b_0 tile, b0_observed/ (per gene with b_0 hits: its discovery rows, its tested positions and its master rows).
 process CAAS_CORE_BATCHED {
@@ -223,9 +223,6 @@ process CAAS_CORE_BATCHED {
     def ensembl_file = params.gene_ensembl_file ?: ''
     def max_tasks_per_child = params.ct_disambig_max_tasks_per_child ?: 50
     def postproc_args = caasPostprocArgs(gene_lengths)
-    // The perm-discovery exports (~13-16 MB per gene at K=3) are read only by the ASR replay below; with
-    // remove_intermediates they are deleted right after it.
-    def prune_exports = removeIntermediatesOn()
     // With remove_intermediates the shards are moved out of caas_perms_out instead of duplicated.
     def shard_move = removeIntermediatesOn()
     // The strict tables come from the same replay: the null shards pooled without the hypotheses that have conserved
@@ -235,7 +232,6 @@ process CAAS_CORE_BATCHED {
     def is_b0 = (block.name == 'b0')
     def strict_flag = strict_on ? '--strict-output' : ''
     def strict_observed_flag = strict_on ? '--strict-output-dir b0_observed_strict' : ''
-    def strict_empty = strict_on ? 'mkdir -p caas_perms_out/perm_pos_detail_strict' : ''
     // The observed labeling as full records: one master shard per gene with b_0 hits (the b_0 tile only).
     def observed_b0 = !is_b0 ? '' : """
     # The observed labeling as full records: one master shard per gene with b_0 hits.
@@ -255,18 +251,28 @@ process CAAS_CORE_BATCHED {
             ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
             ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
     fi"""
+    // The b_0 slice of each gene through `ct perm-replay` (the b_0 tile only): discovery.tab rows and tested positions.
+    def ct_b0 = !is_b0 ? '' : """bash $baseDir/subworkflows/CT/local/scripts/run_ct_perm_replay_batch.sh \\
+        --batch-id ${batchID} \\
+        --manifest ${batchID}.manifest.tsv \\
+        --caas-config ${caas_config} \\
+        --resampled-path ${block}/resample_perms.tab \\
+        --workers ${task.cpus} \\
+        --ali-format ${params.ali_format} \\
+        --ct-bin ${ctBinary} \\
+        --export-groups 0 \\
+        --export-perm-discovery 0 \\
+        --export-b0 1 \\
+        --extra-args-file .ct_perm_replay_batch_args
+    find . -maxdepth 1 \\( -name '*.b0.discovery.tsv' -o -name '*.b0.background' \\) -exec mv {} b0_observed/ \\;"""
     def strict_move = strict_on ? """
     ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/perm_pos_detail_strict perm_pos_detail_strict
     if [ -d caas_perms_out/b0/perm_pos_detail_strict ]; then ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/b0/perm_pos_detail_strict perm_pos_detail_strict/b0; fi""" : ''
     """
-    # One worker pool per step runs the genes in parallel; BLAS and OpenMP stay at one thread each.
+    # One worker pool runs the genes in parallel; BLAS and OpenMP stay at one thread each.
     export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
-    # Memory of one replay worker: the ASR replay splits a gene whose replay would not fit in it into cycle chunks.
-    export CAAS_PERMS_WORKER_MEM_MB=\$(( ${task.memory.toMega()} / ${task.cpus} ))
-    mkdir -p perm_disc ${is_b0 ? 'b0_observed' : ''}
+    ${is_b0 ? 'mkdir -p b0_observed' : ''}
     ${is_b0 && strict_on ? 'mkdir -p b0_observed_strict' : ''}
-    # Bounds the chunk buffers of the vectorized kernel, per call, to a quarter of one worker's share of task.memory.
-    export CT_PERM_REPLAY_CHUNK_MEM_MB=\$(( ${task.memory.toMega()} / ${task.cpus} / 4 ))
     cat > ${batchID}.manifest.tsv <<'EOF'
 """ + manifestText + """EOF
 
@@ -286,20 +292,8 @@ process CAAS_CORE_BATCHED {
     extra_opts+=(--max_bg_miss \$(_frac ${params.max_bg_miss_fraction}) --max_fg_miss \$(_frac ${params.max_fg_miss_fraction}) --max_miss \$(_frac ${params.max_miss_fraction}))
     echo "\${extra_opts[@]}" > .ct_perm_replay_batch_args
 
-    bash $baseDir/subworkflows/CT/local/scripts/run_ct_perm_replay_batch.sh \\
-        --batch-id ${batchID} \\
-        --manifest ${batchID}.manifest.tsv \\
-        --caas-config ${caas_config} \\
-        --resampled-path ${block}/resample_perms.tab \\
-        --workers ${task.cpus} \\
-        --ali-format ${params.ali_format} \\
-        --ct-bin ${ctBinary} \\
-        --export-groups 0 \\
-        --export-perm-discovery 1 \\
-        --export-b0 ${is_b0 ? 1 : 0} \\
-        --extra-args-file .ct_perm_replay_batch_args
-    find . -maxdepth 1 -name '*.perm_replay.discovery.output' -exec mv {} perm_disc/ \\;
-    ${is_b0 ? "find . -maxdepth 1 \\( -name '*.b0.discovery.tsv' -o -name '*.b0.background' \\) -exec mv {} b0_observed/ \\;" : ''}
+    # The b_0 slice of each gene: the discovery.tab rows of the real labeling and the positions it tested.
+    ${ct_b0}
 
     # The PSS weights of the block's cycles (absent for a design without FOP hypotheses).
     FOP_PAIRS_ARG=""
@@ -308,29 +302,26 @@ process CAAS_CORE_BATCHED {
     cp -R ${local_dir}/* .
     find . -name '*.pyc' -delete 2>/dev/null || true
     mkdir -p caas_perms_out
-    # A batch whose genes have no CAAS in any cycle exports nothing: its shard directory is empty.
-    if [ -n "\$(ls -A perm_disc)" ]; then
-        ${run} ./disambiguation_perms_main.py \\
-            --alignment-dir ${params.alignment} \\
-            --tree ${tree_file} \\
-            --perm-discovery perm_disc \\
-            --resample-dir ${block} \\
-            --output-dir caas_perms_out \\
-            --detail-only ${strict_flag} \\
-            \$FOP_PAIRS_ARG ${postproc_args} \\
-            --asr-model ${params.ct_disambig_asr_model} \\
-            --posterior-threshold ${params.ct_disambig_posterior_threshold} \\
-            --workers ${task.cpus} \\
-            --max-tasks-per-child ${max_tasks_per_child} \\
-            --asr-cache-dir ${asr_cache_dir} \\
-            --seed ${params.seed ?: 1998} \\
-            ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
-            ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
-    else
-        mkdir -p caas_perms_out/perm_pos_detail
-        ${strict_empty}
-    fi
-    ${prune_exports ? 'rm -rf perm_disc/*.perm_replay.discovery.output' : ''}
+    ${run} ./disambiguation_perms_main.py \\
+        --alignment-dir ${params.alignment} \\
+        --tree ${tree_file} \\
+        --manifest ${batchID}.manifest.tsv --manifest-alignment-dir alignments \\
+        --design ${caas_config} \\
+        --ct-dir $baseDir/subworkflows/CT/local \\
+        --replay-args-file .ct_perm_replay_batch_args \\
+        --ali-format ${params.ali_format} \\
+        --resample-dir ${block} \\
+        --output-dir caas_perms_out \\
+        --detail-only ${strict_flag} \\
+        \$FOP_PAIRS_ARG ${postproc_args} \\
+        --asr-model ${params.ct_disambig_asr_model} \\
+        --posterior-threshold ${params.ct_disambig_posterior_threshold} \\
+        --workers ${task.cpus} \\
+        --max-tasks-per-child ${max_tasks_per_child} \\
+        --asr-cache-dir ${asr_cache_dir} \\
+        --seed ${params.seed ?: 1998} \\
+        ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
+        ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
     ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/perm_pos_detail perm_pos_detail
     # b_0 shards sit in a subdirectory the null readers never glob; CAAS_CORE_MERGE scores them as a one-labeling run.
     if [ -d caas_perms_out/b0/perm_pos_detail ]; then ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/b0/perm_pos_detail perm_pos_detail/b0; fi

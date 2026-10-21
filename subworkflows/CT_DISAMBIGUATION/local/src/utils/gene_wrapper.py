@@ -5,7 +5,8 @@
 """
 The permulation null per gene: replay of the labelings over each gene's ASR, with the passes that follow it.
 
-Pass A (`process_all_genes_perms`) loads each gene's ASR once, scores every labeling and writes one detail shard per
+Pass A (`process_all_genes_perms`) replays the labelings over each gene's alignment in process
+(src.utils.perm_stream), loads its ASR once, scores every labeling that has a detection and writes one detail shard per
 gene; pass B (`_finalize_perm_scores`) scores each cycle against genome-wide pools and writes the null tables. Also
 the readers of the detail shards and the per-gene record converter the master rows are built from.
 
@@ -21,7 +22,6 @@ Imported by: disambiguation_perms_main.py (process_all_genes_perms), reaggregate
 import functools
 import gzip
 import logging
-import math
 import multiprocessing as mp
 import os
 import random
@@ -34,11 +34,9 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
 from src.utils.concurrency import plan_concurrency, init_worker, safe_imap_unordered
-from src.utils.amino import normalize_amino_list
-from src.core.driver import load_gene_context, pool_labelings, score_labelings
+from src.core.driver import load_gene_context
+from src.utils.perm_stream import ReplayContext, ReplaySettings, stream_gene
 from src.core.scores import DIRECTIONS, SCORE_RULE, collapse_sides, direction_values, gene_scores, position_score
-from src.core.labelings import read_pss
-from src.data.models import CAASPosition
 
 logger = logging.getLogger(__name__)
 
@@ -173,262 +171,78 @@ def _read_resample_labelings(resample_dir: str) -> Dict[str, Tuple[List[str], Li
     return {t: (list(l.fg), list(l.bg)) for t, l in read_labelings(resample_dir).items()}
 
 
-def _read_fop_pairs(path: str) -> Dict[str, Dict[Tuple[str, int], Tuple[str, str, float]]]:
-    """fop_pairs.tsv -> {base_cycle: {(H<n>, domain): (top species, bottom species, pss_score)}} (core.labelings.read_pss)."""
-    return read_pss(path)
+# The columns of a detail row (the detail rows carry `side`: a "both" position is two rows, one per side).
+DETAIL_FIELDS = ["Gene", "cycle", "Position", "asr_path_score", "n_detected", "clust", "side", "n_hyp", "n_sp"]
 
 
-def _parse_discovery_entries(
-    handle,
-    cycle_tags,
-    gene_filter: Optional[str] = None,
-) -> Dict[str, List[CAASPosition]]:
-    """Parse a perm-replay discovery TSV stream into ``{cycle_tag: [CAASPosition, ...]}``.
+def _cycle_tags(resample_dir: str, cycles: Optional[List[str]] = None) -> List[str]:
+    """The cycle tags to replay: `cycles` when given, else every labeling of `resample_dir` in tag order."""
+    return list(cycles) if cycles else sorted(_read_resample_labelings(resample_dir))
 
-    Serves the two input layouts of ``_perms_worker_replay``:
 
-      * the single concatenated ``perm_discovery_file``, which carries a ``gene``
-        column; rows are filtered to ``gene_filter``;
-      * a per-gene shard ``perm_discovery/<gene>.tsv``, which has no ``gene`` column:
-        every row belongs to this gene (``gene_filter=None``).
+# Per-process state of the replay pool, set by _init_replay_worker (a worker started by spawn or forkserver
+# receives it through the initializer arguments, once, and parses the labelings of its block itself).
+_REPLAY: Dict[str, Any] = {}
 
-    The layouts share their columns, so one parser builds the ``CAASPosition`` objects of both.
-    Rows of cycles outside ``cycle_tags`` and rows with a non-integer position are skipped.
+
+def _init_replay_worker(config: Dict[str, Any]) -> None:
+    """Pool initializer: thread environment and logging, then the block's labelings and the CAAS kernel."""
+    init_worker(1, None)
+    _REPLAY.clear()
+    _REPLAY.update(config)
+    _REPLAY["replay"] = ReplayContext(
+        config["settings"], config["resample_dir"], config["cycle_tags"], config["fop_pairs_file"])
+
+
+def _write_shard(directory: Path, gene: str, rows: List[Dict[str, Any]]) -> None:
+    """One gz shard of detail rows for one gene."""
+    import csv as _csv
+
+    with gzip.open(directory / f"{_sanitize_gene_shard(gene)}.tsv.gz", "wt", newline="") as handle:
+        writer = _csv.DictWriter(handle, fieldnames=DETAIL_FIELDS, delimiter="\t", lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _replay_gene_task(task: Tuple[str, str, Optional[Dict[int, int]]]) -> Tuple[str, Optional[int], int, Set[str]]:
+    """Replay of one gene: stream the labelings over its alignment, reduce, and write its shards.
+
+    Returns (gene, detail rows, strict detail rows, cycles with a row); the row count is None when the gene's ASR
+    context could not be loaded (the gene is left out of the null, as it is left out of the observed) and 0 for a gene
+    without a detection. A kernel disagreement is not a gene failure: it propagates and stops the run.
     """
-    out: Dict[str, List[CAASPosition]] = {}
-    header = handle.readline()
-    if not header:
-        return out
-    cols = header.rstrip("\n").split("\t")
-    col_indices = {col: idx for idx, col in enumerate(cols)}
-    if "cycle" not in col_indices or "position" not in col_indices:
-        return out
-    gene_idx = col_indices.get("gene")
-    if gene_filter is not None and gene_idx is None:
-        return out
-
-    cyc_idx = col_indices["cycle"]
-    pos_idx = col_indices["position"]
-    caas_idx = col_indices.get("caas")
-    icm_idx = col_indices.get("is_conserved_meta")
-    cp_idx = col_indices.get("conserved_pair")
-    guard = max(
-        i for i in (cyc_idx, pos_idx, gene_idx if gene_filter is not None else None)
-        if i is not None
-    )
-    cycle_tag_set = (
-        cycle_tags if isinstance(cycle_tags, (set, frozenset)) else set(cycle_tags)
-    )
-
-    for line in handle:
-        parts = line.rstrip("\n").split("\t")
-        if len(parts) <= guard:
-            continue
-        if gene_filter is not None and parts[gene_idx].strip() != gene_filter:
-            continue
-        cyc = parts[cyc_idx].strip()
-        if not cyc or cyc not in cycle_tag_set:
-            continue
-        try:
-            pos0 = int(parts[pos_idx].strip())
-        except ValueError:
-            continue
-
-        caas = parts[caas_idx] if caas_idx is not None and caas_idx < len(parts) else ""
-        parts_caas = caas.split("/") if caas else []
-        trait1 = normalize_amino_list(list(parts_caas[0])) if len(parts_caas) == 2 else []
-        trait0 = normalize_amino_list(list(parts_caas[1])) if len(parts_caas) == 2 else []
-
-        cp = parts[cp_idx].strip() if cp_idx is not None and cp_idx < len(parts) else ""
-        if cp and ":" in cp.split(",")[0]:
-            cp = cp.split(":", 1)[1]
-
-        entry = CAASPosition(
-            position=pos0,
-            position_one_based=pos0 + 1,
-            tag=f"POS{pos0}",
-            caas=caas,
-            trait1_aa=trait1,
-            trait0_aa=trait0,
-            is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,
-            conserved_pair=cp,
-        )
-        out.setdefault(cyc, []).append(entry)
-    return out
-
-
-def build_cycle_inputs(
-    perm_discovery_path: str,
-    resample_dir: str,
-    cycles: Optional[List[str]] = None,
-) -> Tuple[List[str], Dict[str, Tuple[List[str], List[str]]]]:
-    """Resolve the (fg, bg) labeling of each cycle to replay.
-
-    Returns (cycle tags, {tag: (fg, bg)}), all in memory: `cycles` when given, else every
-    cycle of `resample_dir`; a requested tag missing from the resample files is dropped from
-    the labelings. No per-cycle trait file is written. `perm_discovery_path` is not read here.
-    """
-    labelings = _read_resample_labelings(resample_dir)
-    target_cycles = cycles if cycles else sorted(labelings.keys())
-    cycle_labelings = {c: labelings[c] for c in target_cycles if c in labelings}
-
-    logger.info(f"[perms] prepared trait inputs for {len(target_cycles)} cycles")
-    return target_cycles, cycle_labelings
-
-
-# A position's score is the caas_row of its detection (core.scores.position_score). The observed side
-# (scoring_compute.R) uses the same score.
-
-
-@functools.lru_cache(maxsize=8)
-def _scan_perm_discovery_dir(disc_path: Path) -> Dict[str, Path]:
-    """Map the gene prefix of every file in a per-gene perm-discovery shard directory to its path.
-
-    Memoized per directory: `_perms_worker_replay` calls it once per gene chunk, and listing the
-    directory each time would repeat an O(N_files) scan on the file system. The key is the file name
-    up to the first dot (the same convention as `io_utils._scan_alignment_dir`).
-    """
-    by_prefix: Dict[str, Path] = {}
-    for p in disc_path.iterdir():
-        if p.is_file():
-            prefix = p.name.split(".", 1)[0]
-            by_prefix.setdefault(prefix, p)
-    return by_prefix
-
-
-# Memory model of one replay chunk (see process_all_genes_perms): MB per million rows of perm-discovery export and the
-# fixed part of a worker. The original fit (four genes of 0.8-6.4 M rows, one worker each: peaks 2.4, 3.6, 10.9 and
-# 16.3 GB -> 2450 MB/Mrow, 200 MB fixed) under-modeled the wide giant alignments: in the 2026-10-18 OOM run (job 7508929,
-# node cr-07-21) a 3.55 M-row RP1 chunk peaked at 14.4-14.7 GB and the 2.85 M-row RNF213 gene at 12.5 GB, i.e.
-# ~4100-4400 MB/Mrow. The constant rounds that up so that under the 10 GB/worker budget of a 40 GB x 4-cpu task RP1
-# splits into 5 chunks (~7 GB each) and RNF213 into 2, keeping 4 concurrent workers at ~28 GB.
-# MEM_HEADROOM is the share of the worker budget a chunk may use.
-_REPLAY_MB_PER_MROW = 4400.0
-_REPLAY_BASE_MB = 400.0
-_REPLAY_MEM_HEADROOM = 0.8
-
-
-def replay_chunk_count(rows: int, worker_mem_mb: float, mb_per_mrow: float = _REPLAY_MB_PER_MROW,
-                       base_mb: float = _REPLAY_BASE_MB) -> int:
-    """Smallest number of chunks that brings the replay of a gene of `rows` export rows under the usable memory of
-    one worker (1 without a budget or without rows)."""
-    if worker_mem_mb <= 0 or rows <= 0:
-        return 1
-    usable_mb = max(_REPLAY_MEM_HEADROOM * worker_mem_mb - base_mb, 0.2 * worker_mem_mb)
-    return max(1, math.ceil(rows / 1e6 * mb_per_mrow / usable_mb))
-
-
-def _chunk_gene_cycles(cycle_tags: List[str], target_chunk_size: int) -> List[List[str]]:
-    """Split cycle_tags into sub-chunks of about target_chunk_size tags.
-
-    The "<base>~H*" variants of one base cycle never straddle two chunks, because the FOP
-    domain-pooling of _perms_worker_replay needs all of them together. Order-preserving; a
-    target_chunk_size at least as large as the number of tags returns a single chunk."""
-    from src.convergence.fop_pool import base_cycle as _bc
-    groups: Dict[str, List[str]] = {}
-    for tag in cycle_tags:
-        groups.setdefault(_bc(tag), []).append(tag)
-    chunks: List[List[str]] = []
-    cur: List[str] = []
-    for tags in groups.values():
-        cur.extend(tags)
-        if len(cur) >= target_chunk_size:
-            chunks.append(cur)
-            cur = []
-    if cur:
-        chunks.append(cur)
-    return chunks or [[]]
-
-
-def _perms_worker_replay(
-    gene: str,
-    alignment_dir: str,
-    tree_file: str,
-    taxid_mapping_path: Optional[str],
-    asr_model: str,
-    asr_cache_dir: str,
-    posterior_threshold: float,
-    cycle_tags: List[str],
-    cycle_labelings: Dict[str, Tuple[List[str], List[str]]],
-    perm_discovery_file: str,
-    ensembl_genes: Optional[Set[str]] = None,
-    fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], Tuple[str, str, float]]]] = None,
-    strict_output: bool = False,
-) -> Tuple[str, Optional[List[Tuple[str, List[Any]]]]]:
-    """Replay step of a chunked gene replay (_perms_worker_finalize is the reduction step).
-
-    Loads the gene's ASR context and replays ONLY the given cycle_tags: the gene's full cycle set,
-    or one base-cycle-respecting sub-chunk of it (process_all_genes_perms splits the replay of a
-    large gene across workers to bound the wall time behind the largest gene and the memory a
-    worker holds). The FOP domain-pooling of "<base>~H*" variants into one record per base cycle
-    can be done per chunk because _chunk_gene_cycles never splits the variants of a base cycle.
-    Returns the gene name and the pooled (cycle_or_base, records) pairs of this chunk;
-    _perms_worker_finalize does the whole-gene reduction (n_detected, clustering, detail rows)
-    once every chunk of the gene has arrived. A chunk whose context could not be loaded, or whose
-    replay raised, returns (gene, None); a chunk with nothing to report returns (gene, []).
-
-    With `strict_output` a chunk that has results returns a third element: the same records pooled without the
-    hypotheses whose discovery row has conserved pairs (`pool_labelings(strict=True)`). The records are scored once;
-    only the pooling is repeated.
-    """
+    gene, alignment_path, train_columns = task
+    st = _REPLAY
+    replay: ReplayContext = st["replay"]
     try:
-        _t_ctx0 = time.perf_counter()
-        ctx = load_gene_context(
-            gene, alignment_dir, tree_file, taxid_mapping_path,
-            asr_model, asr_cache_dir, posterior_threshold, ensembl_genes,
-        )
-        _t_ctx1 = time.perf_counter()
-        # The context load is paid once per chunk. Logging its time shows whether chunk_target_size
-        # keeps that fixed cost small against the replay work of a chunk; the ASR cache file size
-        # varies with the gene and the number of species.
-        logger.info(
-            f"[perms] {gene}: ctx load {_t_ctx1 - _t_ctx0:.3f}s "
-            f"(chunk of {len(cycle_tags)} cycle-tags)"
-        )
-        if ctx is None:
-            # load_gene_context computes ASR on a cache miss, so ctx is None only
-            # when the alignment could not be found or codeml/parse failed for
-            # this one gene (already warned inside).
-            return (gene, None)
+        def load_ctx():
+            return load_gene_context(
+                gene, st["alignment_dir"], st["tree_file"], st["taxid_mapping_path"],
+                st["asr_model"], st["asr_cache_dir"], st["posterior_threshold"], None)
 
-        # Load the gene's perm-replay discovery rows in memory once. Two layouts, one parser
-        # (_parse_discovery_entries):
-        #   * a single concatenated perm_discovery_file (has a `gene` column)
-        #   * a per-gene shard  perm_discovery/<gene>.tsv  (no `gene` column)
-        cycle_to_entries: Dict[str, List[CAASPosition]] = {}
-        disc_path = Path(perm_discovery_file)
-        if disc_path.is_file():
-            with open(disc_path, "r") as f:
-                cycle_to_entries = _parse_discovery_entries(f, cycle_tags, gene_filter=gene)
-        else:
-            gene_file = _scan_perm_discovery_dir(disc_path).get(gene)
-            if gene_file is not None and gene_file.exists():
-                with open(gene_file, "r") as f:
-                    cycle_to_entries = _parse_discovery_entries(f, cycle_tags)
-
-        all_cycle_results = score_labelings(
-            ctx, gene, cycle_tags, cycle_labelings, cycle_to_entries, posterior_threshold)
-        if not all_cycle_results:
-            return (gene, [])
-        pooled = pool_labelings(all_cycle_results, fop_pairs, cycle_labelings)
-        if strict_output:
-            return (gene, pooled, pool_labelings(all_cycle_results, fop_pairs, cycle_labelings, strict=True))
-        return (gene, pooled)
+        streamed = stream_gene(gene, alignment_path, replay, load_ctx, st["posterior_threshold"], st["strict_output"])
+        if streamed is None:
+            return (gene, None, 0, set())
+        pooled, pooled_strict = streamed
+        if not pooled:
+            return (gene, 0, 0, set())
+        finalize_args = (st["n_cycles_total"], st["postproc_filter"], st["clust_minlen"], st["clust_maxcaas"], train_columns)
+        _, rows = _perms_worker_finalize(gene, pooled, *finalize_args)
+        if not rows:
+            return (gene, 0, 0, set())
+        _write_shard(st["detail_dir"], gene, rows)
+        n_strict = 0
+        if st["strict_output"]:
+            _, strict_rows = _perms_worker_finalize(gene, pooled_strict, *finalize_args)
+            if strict_rows:
+                _write_shard(st["strict_dir"], gene, strict_rows)
+                n_strict = len(strict_rows)
+        return (gene, len(rows), n_strict, {row["cycle"] for row in rows})
+    except replay.pr.KernelDisagreement:
+        raise
     except Exception as e:
         logger.error(f"[perms] replay worker failed for {gene}: {e}", exc_info=True)
-        return (gene, None)
-
-
-def _merge_gene_chunks(chunk_results: List[Tuple[str, List[Any]]]) -> List[Tuple[str, List[Any]]]:
-    """Concatenated chunk results of one gene, in canonical (cycle tag) order.
-
-    Chunks come back from the worker pool as they finish (imap_unordered), so their arrival order
-    varies between runs. Everything written downstream follows this order (the detail shard, the
-    per-cycle CAAS table, the reservoir behind perm_pos_sample.tsv), so it is fixed here. The sort
-    is stable: the records of one cycle keep the order their chunk produced, and a gene replayed in
-    a single chunk is left as it was (cycle tags are replayed in sorted order).
-    """
-    return sorted(chunk_results, key=lambda item: item[0])
+        return (gene, None, 0, set())
 
 
 def _gene_train_columns(
@@ -449,19 +263,6 @@ def _gene_train_columns(
     if cols is None:
         genes_without_map.append(gene)
     return cols
-
-
-def _require_consistent_chunks(gene: str, failed: int, total: int) -> None:
-    """A gene is replayed in `total` chunks. Every chunk failing leaves the gene out of the null, as it is left out of the observed;
-    some failing leaves a null that holds only part of the cycles while N still counts all of them, so the run stops."""
-    if 0 < failed < total:
-        raise RuntimeError(
-            f"[perms] {gene}: {failed} of {total} chunks could not be replayed (ASR or replay failure); the null would hold only part "
-            "of its cycles. See the errors above.")
-
-
-def _perms_worker_replay_wrapper(args):
-    return _perms_worker_replay(*args)
 
 
 def _perms_worker_finalize(
@@ -945,9 +746,9 @@ def _finalize_perm_scores(
 
 def process_all_genes_perms(
     genes: List[str],
+    gene_alignments: Dict[str, str],
     alignment_dir: str,
     tree_file: str,
-    perm_discovery_file: str,
     resample_dir: str,
     taxid_mapping_path: Optional[str],
     asr_model: str,
@@ -955,6 +756,7 @@ def process_all_genes_perms(
     posterior_threshold: float,
     workers: Optional[int],
     output_dir: Path,
+    replay: ReplaySettings,
     ensembl_genes_file: Optional[str] = None,
     cycles: Optional[List[str]] = None,
     max_tasks_per_child: Optional[int] = None,
@@ -966,8 +768,6 @@ def process_all_genes_perms(
     iqr_multiplier: float = 3.0,
     extreme_percentile: float = 0.99,
     postproc_filter: bool = False,
-    gene_sizes: Optional[Dict[str, int]] = None,
-    worker_mem_mb: Optional[float] = None,
     seed: int = 1998,
     remove_clusters: bool = True,
     train_map_dir: Optional[str] = None,
@@ -975,19 +775,22 @@ def process_all_genes_perms(
     detail_only: bool = False,
     strict_output: bool = False,
 ) -> Path:
-    """Genome-wide CAAS permulation null: load the ASR once per gene, replay N permuted
-    labelings, and score them as the observed pipeline scores itself.
+    """Genome-wide CAAS permulation null: replay N permuted labelings over each gene, score them against its ASR
+    as the observed pipeline scores itself, and aggregate.
 
     Two passes, because the score of a gene is calibrated against the genome-wide pool of
     position scores of its cycle, while a worker sees a single gene:
 
-      Pass A (parallel, one gene per task, or per chunk of cycles for a large gene) replays
-        the labelings and streams the raw per-(gene, cycle, position) detail to
-        perm_pos_detail/<Gene>.tsv.gz (one gz shard per gene, since the reduction of a
-        gene yields its complete row list).
+      Pass A (parallel, one gene per task) streams the labelings of `resample_dir` over the gene's alignment
+        (src.utils.perm_stream: the CAAS kernel runs in the worker, one range of whole base cycles at a time, and
+        each base cycle is scored and reduced as it is produced) and writes the raw per-(gene, cycle, position)
+        detail to perm_pos_detail/<Gene>.tsv.gz (one gz shard per gene).
       Pass B (single process, streaming) re-reads the shards via iter_detail_rows(),
         builds the pool of position scores of each cycle and derives
         null_row_caas -> position scores -> per-(gene, cycle) size-adjusted max.
+
+    `genes` are the gene keys to replay, `gene_alignments` the alignment file of each; a gene is replayed against
+    the labelings of `resample_dir` (those of `cycles` when given) with the thresholds of `replay`.
 
     Outputs:
       - output_dir/gene_cycle_scores.tsv     (feeds caas_perms.rds)
@@ -1035,20 +838,15 @@ def process_all_genes_perms(
             )
         genes = [g for g in genes if g in ensembl_genes]
 
-    # FOP mirror: with a fop_pairs_file the resample directory carries "<base>~H<m>"
-    # hypothesis labelings. build_cycle_inputs resolves one labeling per hypothesis tag;
-    # _perms_worker_replay then domain-pools them back to one record per base cycle. The
-    # per-(hypothesis, domain) PSS weights are parsed once here.
-    fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], Tuple[str, str, float]]]] = None
-    if fop_pairs_file and Path(fop_pairs_file).exists():
-        fop_pairs = _read_fop_pairs(fop_pairs_file)
-        logger.info(f"[perms] FOP mirror ON: design pairs of {len(fop_pairs)} base cycles")
+    # FOP mirror: with a fop_pairs_file the labelings are "<base>~H<m>" hypotheses; the replay domain-pools them back
+    # to one record per base cycle with the per-(hypothesis, domain) PSS weights of that file.
+    fop_mirror = bool(fop_pairs_file and Path(fop_pairs_file).exists())
+    if fop_mirror:
+        logger.info(f"[perms] FOP mirror ON: design pairs of {fop_pairs_file}")
 
-    cycle_tags, cycle_labelings = build_cycle_inputs(
-        perm_discovery_file, resample_dir, cycles
-    )
+    cycle_tags = _cycle_tags(resample_dir, cycles)
     if not cycle_tags:
-        raise RuntimeError("[perms] no usable cycles (check export_perm_discovery + resample dir)")
+        raise RuntimeError("[perms] no usable cycles (check the resample dir)")
     logger.info(
         f"[perms] replaying {len(cycle_tags)} cycles over {len(genes)} genes "
         f"with {effective_workers} workers"
@@ -1059,10 +857,9 @@ def process_all_genes_perms(
     else:
         maxtasks = int(os.environ.get("CAAS_MAX_TASKS_PER_CHILD", "50"))
 
-    # One gz shard per gene rather than one monolithic file: pass A yields one gene's
-    # complete row list at a time, and every later re-aggregation (CAAS_CORE_MERGE, the
-    # same finalizer) then needs the memory of one gene only and reads shard by shard.
-    # `iter_detail_rows()` is the matching reader.
+    # One gz shard per gene rather than one monolithic file: a worker yields one gene's complete row list at a
+    # time, and every later re-aggregation (CAAS_CORE_MERGE, the same finalizer) then needs the memory of one
+    # gene only and reads shard by shard. `iter_detail_rows()` is the matching reader.
     detail_dir = output_dir / "perm_pos_detail"
     detail_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "perm_pos_detail.manifest.tsv"
@@ -1070,10 +867,6 @@ def process_all_genes_perms(
     strict_manifest: List[Tuple[str, int]] = []
     if strict_output:
         strict_dir.mkdir(parents=True, exist_ok=True)
-
-    # The detail rows carry `side` (a "both" position is two rows, one per side).
-    detail_fields = ["Gene", "cycle", "Position", "asr_path_score",
-                     "n_detected", "clust", "side", "n_hyp", "n_sp"]
 
     # CT_POSTPROC filtering of the null candidate pool (cluster trains and dubious/extreme
     # genes). Off by default; the Nextflow layer turns it on (params.caas_perms_postproc)
@@ -1106,126 +899,52 @@ def process_all_genes_perms(
 
     # n_cycles_total is the same for every gene (all genes replay the same cycle_tags),
     # so it is computed once here.
-    if fop_pairs is not None:
+    if fop_mirror:
         from src.convergence.fop_pool import base_cycle as _bc_global
         n_cycles_total = len({_bc_global(c) for c in cycle_tags})
     else:
         n_cycles_total = len(cycle_tags)
 
-    # Chunking by memory budget. A replay chunk holds the discovery rows of its cycles and their per-position
-    # records, so its memory grows linearly with the rows of the export it replays (MB_PER_MROW) on top of a
-    # fixed ASR context (BASE_MB). A gene whose whole replay would exceed the usable memory of one worker is
-    # split into the smallest number of base-cycle-respecting chunks that fits; every other gene runs as one
-    # LPT-scheduled task, so its ASR context, discovery parse and per-gene MRCA/tip/domain caches are built
-    # once and reused across all cycles. The worker budget comes from the task (task.memory / task.cpus), so a
-    # larger genome, a larger request or a retry with more memory changes the split without any threshold to
-    # retune; without a budget (0) nothing is chunked.
-    if worker_mem_mb is None:
-        worker_mem_mb = float(os.environ.get("CAAS_PERMS_WORKER_MEM_MB", "0") or 0)
-    mb_per_mrow = float(os.environ.get("CAAS_PERMS_MB_PER_MROW", _REPLAY_MB_PER_MROW))
-    base_mb = float(os.environ.get("CAAS_PERMS_BASE_MB", _REPLAY_BASE_MB))
-
-    chunk_sets: Dict[int, List[List[str]]] = {}   # n chunks -> cycle split; identical for every gene
-    tasks: List[Tuple[str, List[str], float]] = []  # (gene, chunk_cycle_tags, est_workload)
-    chunks_per_gene: Dict[str, int] = {}
-    for gene in genes:
-        size = (gene_sizes or {}).get(gene, 0)
-        k = replay_chunk_count(size, worker_mem_mb, mb_per_mrow, base_mb)
-        if k not in chunk_sets:
-            chunk_sets[k] = [cycle_tags] if k == 1 else _chunk_gene_cycles(cycle_tags, math.ceil(len(cycle_tags) / k))
-        use_chunks = chunk_sets[k]
-        chunks_per_gene[gene] = len(use_chunks)
-        for chunk in use_chunks:
-            tasks.append((gene, chunk, size / len(use_chunks)))
-    n_split = sum(1 for n in chunks_per_gene.values() if n > 1)
-    if worker_mem_mb > 0:
-        logger.info(f"[perms] worker budget {worker_mem_mb:.0f} MB: "
-                    f"{n_split} of {len(genes)} genes replayed in chunks")
-
-    # LPT (longest processing time first): the chunk with the largest estimated workload is
-    # dispatched first. `genes` arrives ordered by size (largest first) from
-    # _genes_from_export; sorting the flattened chunk list keeps that order when a gene is
-    # split into chunks of about equal size.
-    tasks.sort(key=lambda t: -t[2])
-
-    args_generator = (
-        (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
-         asr_cache_dir, posterior_threshold,
-         chunk, cycle_labelings, perm_discovery_file, None, fop_pairs, strict_output)
-        for gene, chunk, _est in tasks
+    # The genes are dispatched in the order given: the caller lists the largest first (longest processing time
+    # first), so the biggest gene does not start late and leave workers idle behind it.
+    tasks = (
+        (gene, str(gene_alignments[gene]), _gene_train_columns(train_map_index, gene, train_map_suffix, genes_without_map))
+        for gene in genes
     )
+    worker_config = {
+        "settings": replay, "resample_dir": str(resample_dir), "cycle_tags": cycle_tags,
+        "fop_pairs_file": fop_pairs_file if fop_mirror else None,
+        "alignment_dir": alignment_dir, "tree_file": tree_file, "taxid_mapping_path": taxid_mapping_path,
+        "asr_model": asr_model, "asr_cache_dir": asr_cache_dir, "posterior_threshold": posterior_threshold,
+        "n_cycles_total": n_cycles_total, "postproc_filter": postproc_filter,
+        "clust_minlen": clust_minlen, "clust_maxcaas": clust_maxcaas,
+        "detail_dir": detail_dir, "strict_dir": strict_dir, "strict_output": strict_output,
+    }
 
-    # ── Pass A: replay labelings and stream the per-gene detail shards ────────
+    # ── Pass A: replay labelings and write the per-gene detail shards ─────────
     cycles_seen: Set[str] = set()
     pool = mp.Pool(
         processes=effective_workers, maxtasksperchild=maxtasks,
-        initializer=init_worker, initargs=(1, None),
+        initializer=_init_replay_worker, initargs=(worker_config,),
     )
     n_genes = 0
+    n_failed = 0
     n_detail_rows = 0
     manifest_rows: List[Tuple[str, int]] = []
-    # Chunk bookkeeping: the pooled results of a gene accumulate here until all its chunks
-    # (chunks_per_gene[gene]) have arrived; _perms_worker_finalize then runs once and the
-    # entry is dropped. Only the genes with chunks in flight (at most effective_workers) are
-    # held partially.
-    pending_pooled: Dict[str, List[Tuple[str, List[Any]]]] = {}
-    pending_strict: Dict[str, List[Tuple[str, List[Any]]]] = {}
-    received: Dict[str, int] = {}
-    failed_chunks: Dict[str, int] = {}
     try:
-        # chunksize=1: each item is the replay of one gene chunk (seconds of work), not
-        # the many-cheap-tasks shape chunksize>1 is meant for. A larger chunksize bundles
-        # tasks into one unit handed to a single worker, so with few tasks (for example
-        # 20 genes and chunksize=10) only as many workers as bundles ever receive work.
-        results_iterator = safe_imap_unordered(pool, _perms_worker_replay_wrapper, args_generator, chunksize=1)
-
-        for _result in results_iterator:
-            _gene, chunk_pooled = _result[0], _result[1]
-            chunk_strict = _result[2] if len(_result) > 2 else []
-            if chunk_pooled is None:
-                failed_chunks[_gene] = failed_chunks.get(_gene, 0) + 1
-                chunk_pooled = []
-            pending_pooled.setdefault(_gene, []).extend(chunk_pooled)
-            if strict_output:
-                pending_strict.setdefault(_gene, []).extend(chunk_strict)
-            received[_gene] = received.get(_gene, 0) + 1
-            if received[_gene] < chunks_per_gene.get(_gene, 1):
-                continue  # more chunks still in flight for this gene
-            _require_consistent_chunks(_gene, failed_chunks.pop(_gene, 0), chunks_per_gene.get(_gene, 1))
-
-            gene_pooled = _merge_gene_chunks(pending_pooled.pop(_gene))
-            gene_strict = _merge_gene_chunks(pending_strict.pop(_gene, [])) if strict_output else None
-            received.pop(_gene, None)
-            _gene, detail_rows = _perms_worker_finalize(
-                _gene, gene_pooled, n_cycles_total,
-                postproc_filter, clust_minlen, clust_maxcaas,
-                _gene_train_columns(train_map_index, _gene, train_map_suffix, genes_without_map),
-            )
-            if not detail_rows:
+        # chunksize=1: each item is the replay of one gene (seconds to minutes of work), not the many-cheap-tasks
+        # shape chunksize>1 is meant for.
+        for _gene, n_rows, n_strict, gene_cycles in safe_imap_unordered(pool, _replay_gene_task, tasks, chunksize=1):
+            if n_rows is None:
+                n_failed += 1
                 continue
-
-            shard_path = detail_dir / f"{_sanitize_gene_shard(_gene)}.tsv.gz"
-            with gzip.open(shard_path, "wt", newline="") as f_detail:
-                writer_detail = _csv.DictWriter(f_detail, fieldnames=detail_fields, delimiter="\t", lineterminator="\n")
-                writer_detail.writeheader()
-                writer_detail.writerows(detail_rows)
-            manifest_rows.append((_gene, len(detail_rows)))
-
-            if strict_output:
-                _gene, strict_rows = _perms_worker_finalize(
-                    _gene, gene_strict, n_cycles_total,
-                    postproc_filter, clust_minlen, clust_maxcaas,
-                    _gene_train_columns(train_map_index, _gene, train_map_suffix, []),
-                )
-                if strict_rows:
-                    with gzip.open(strict_dir / f"{_sanitize_gene_shard(_gene)}.tsv.gz", "wt", newline="") as f_strict:
-                        writer_strict = _csv.DictWriter(f_strict, fieldnames=detail_fields, delimiter="\t", lineterminator="\n")
-                        writer_strict.writeheader()
-                        writer_strict.writerows(strict_rows)
-                    strict_manifest.append((_gene, len(strict_rows)))
-
-            n_detail_rows += len(detail_rows)
-            cycles_seen.update(row["cycle"] for row in detail_rows)
+            if not n_rows:
+                continue
+            manifest_rows.append((_gene, n_rows))
+            if n_strict:
+                strict_manifest.append((_gene, n_strict))
+            n_detail_rows += n_rows
+            cycles_seen.update(gene_cycles)
             n_genes += 1
     finally:
         pool.close()
@@ -1247,6 +966,9 @@ def process_all_genes_perms(
         f"[perms] pass A done: {n_genes} genes, {n_detail_rows} (gene,cycle,position) "
         f"rows across {len(cycles_seen)} cycles -> {detail_dir.name}/ ({n_genes} shards)"
     )
+    if n_failed:
+        logger.warning(f"[perms] {n_failed} genes could not be replayed (alignment or ASR unavailable) and are left out "
+                       "of the null, as they are left out of the observed")
     if n_genes < len(genes):
         logger.info(
             f"[perms] pass A scored {n_genes}/{len(genes)} genes with per-cycle CAAS — "
@@ -1260,7 +982,7 @@ def process_all_genes_perms(
         logger.error(
             "[perms] pass A produced ZERO detail rows — the permulation null is empty. "
             "Downstream caas_perms.rds / FCS p.perm will be degenerate. Check the "
-            "per-cycle perm-replay discovery (export_perm_discovery) and the ASR cache."
+            "labelings, the alignments and the ASR cache."
         )
 
     if detail_only:
@@ -1288,7 +1010,7 @@ def process_all_genes_perms(
     # the `cycle` column of the detail rows and every gene x cycle row would be a false
     # zero, leaving gene_cycle_scores.tsv and the FCS p.perm degenerate.
     finalize_cycle_tags = cycle_tags
-    if fop_pairs is not None:
+    if fop_mirror:
         from src.convergence.fop_pool import base_cycle as _bc
         finalize_cycle_tags = sorted({_bc(c) for c in cycle_tags})
         logger.info("[perms] FOP mirror: collapsed %d '<base>~H*' replay tags to "
