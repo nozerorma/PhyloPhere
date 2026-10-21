@@ -56,7 +56,7 @@ El nulo de CAAS, sus bloques y `GENE_P` (WP5 y WP6); POSENRICH (WP2).
 
 ```
 - Conversación y fechas: WP1, 2026-10-21, en la misma conversación que WP0 y WP2 (a petición del usuario), local, rama remove_caap.
-- Commit de partida / commit de cierre: e2f9515 (WP2) / pendiente (ver el final del registro).
+- Commit de partida / commit de cierre: e2f9515 (WP2) / b0786dc.
 - Qué se hizo (ficheros y cambios):
   * Parámetros: fcs_min_genes 10 y fcs_max_genes 0 en conf/enrichment.config, workflows/help.nf, README.md, gui/models/modules.py, run_single.sh.j2 (valores por defecto del JSON de parámetros), defaults de las funciones de R y las 14 plantillas de gui/templates (malignant_def tenía mínimo 2).
   * Lachenbruch fuera del FCS. fcs_enrich.R: eliminadas fcs_lach_prepare, fcs_lach_index, fcs_lach_stats, fcs_run_lachenbruch, fcs_compute_lach_p_perm, fcs_classify_evidence y las columnas lach_*, sig_wilcoxon, sig_lachenbruch, evidence_count y evidence_label. Parámetros fcs_fdr_wilcoxon y fcs_fdr_lachenbruch retirados (config, fcs.nf, GUI, run_single.sh.j2, plantillas; migrate() los descarta: _RETIRED_FIELDS["enrichment"]). POSENRICH no se toca: sigue cayendo a fcs_fdr (params.fcs_fdr_lachenbruch ?: params.fcs_fdr).
