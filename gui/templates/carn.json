@@ -69,6 +69,7 @@
       "min_contrasts": "3",
       "publish_intermediates": false,
       "ct_core_batch_size": "100",
+      "caas_cycle_block_size": "500",
       "min_divergent_fraction": "0",
       "min_non_overlapping": "3",
       "strict_conservation_output": true,

@@ -304,7 +304,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             def perm_align_ch = Channel.empty()   // alignments to replay
             def perm_cfg_ch = Channel.value(file('NO_CONFIG'))
             def perm_subset_ch = null
-            def perm_fop_pairs_ch = Channel.value(file('NO_FOP_PAIRS'))
+            def perm_blocks_ch = Channel.empty()
             // Must stay a channel: CAAS_CORE turns it into a value channel with collect().
             // ct_results.tree_file / contrast_out.tree_file_out are workflow emits (already
             // channels); the bare params.tree path needs wrapping or the call throws
@@ -316,7 +316,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 core_replays = true
                 perm_subset_ch = ct_results.caas_resample_subset
                 perm_cfg_ch = ct_results.trait_file
-                if (ct_results.caas_fop_pairs) perm_fop_pairs_ch = ct_results.caas_fop_pairs
+                perm_blocks_ch = ct_results.caas_blocks
             } else {
                 // A run that starts from a resample file (--resample_from, or the one next to a --discovery_from or --background_input): replay the alignments against it
                 def resample_src = null
@@ -353,7 +353,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                         core_replays = true
                         perm_cfg_ch = (caas_cfg_standalone instanceof java.nio.file.Path) ? Channel.value(caas_cfg_standalone) : caas_cfg_standalone
                         perm_subset_ch = perms_prep.resample_subset
-                        perm_fop_pairs_ch = perms_prep.fop_pairs
+                        perm_blocks_ch = perms_prep.blocks
                     }
                 }
             }
@@ -363,8 +363,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     perm_align_ch,
                     perm_cfg_ch,
                     perm_subset_ch,
+                    perm_blocks_ch,
                     perm_tree_ch,
-                    perm_fop_pairs_ch,
                     caas_gene_lengths_ch,
                     taxid_map_ch
                 )

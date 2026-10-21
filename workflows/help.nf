@@ -100,7 +100,8 @@ Usage:
 --max_fg_miss_fraction      <FLOAT 0-1>                  0.0
 --max_miss_fraction         <FLOAT 0-1>                  0.0
 --miss_pair                 <true|false>                 true
---ct_core_batch_size        <INTEGER>                    20    (permulation core: genes per replay + ASR replay task, observed labeling included; 1 = one task per gene)
+--ct_core_batch_size        <INTEGER>                    20    (permulation core: genes per replay + ASR replay task; 1 = one task per gene)
+--caas_cycle_block_size    <INTEGER>                    500   (permulation core: cycles per block; a task replays its genes against one block, the observed labeling against none)
 --publish_intermediates     <true|false>                 false
 
 NOTE: fractions are resolved to floor(n_pairs * fraction) at runtime.

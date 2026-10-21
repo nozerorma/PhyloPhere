@@ -1263,6 +1263,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Geni FADE per attività',
         'de': 'FADE-Gene pro Aufgabe',
     },
+    'Permulation-null cycles per block': {
+        'en': 'Permulation-null cycles per block',
+        'es': 'Ciclos del nulo de permulaciones por bloque',
+        'ca': 'Cicles del nul de permulacions per bloc',
+        'fr': 'Cycles du nul de permulations par bloc',
+        'it': 'Cicli del nullo di permulazioni per blocco',
+        'de': 'Zyklen der Permulationsnull pro Block',
+    },
     'Bayes Factor threshold': {
         'en': 'Bayes Factor threshold',
         'es': 'Umbral del factor de Bayes',

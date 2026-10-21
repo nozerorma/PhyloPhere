@@ -10,7 +10,7 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 | WP0 | `WP0_linea_base.md` | | commit del usuario (hecho: `581b999`) | HECHO con un pendiente explícito: marine toy (falta el disco externo con los alineamientos toy). PEPC y cancer_b0_toy regenerados con `a92fd2d` |
 | WP1 | `WP1_fcs_rer.md` | | WP0 | HECHO (p.perm de CAAS idéntico a la referencia; RER global firmado; pendiente medir RER_CONT a 10.000 y los recuentos 1, 0, 6, 6) |
 | WP2 | `WP2_exports_posenrich_limpieza.md` | | WP0 | HECHO (PEPC c4 y toy de cancer idénticos a la referencia con su caché de ASR; marine toy pendiente) |
-| WP3 | `WP3_bloques_de_ciclos.md` | Fase 1 | WP2 | pendiente |
+| WP3 | `WP3_bloques_de_ciclos.md` | Fase 1 | WP2 | HECHO (PEPC c4 a 1000 ciclos con bloque de 250 y toy de cáncer con bloques de 25 y 40 idénticos a la referencia, delta 0.0; marine toy pendiente por el disco externo) |
 | WP4 | `WP4_replay_en_flujo.md` | Fase 2 | WP3 | pendiente |
 | WP5 | `WP5_tablas_y_merge_por_bloque.md` | Fase 3 | WP4 | pendiente |
 | WP6 | `WP6_fcs_por_bloques.md` | Fase 4 | WP1, WP5 | pendiente |
@@ -70,3 +70,4 @@ Paralelismo posible: WP1 y WP2 son independientes (ficheros disjuntos); WP9-A1 y
 ## Hallazgos pendientes de asignar a una fase
 
 - **DOMINO debe saltarse el paso (skip silencioso) si no hay aristas suficientes** (decisión del usuario, 2026-10-21). Hoy `DOMINO_BUILD_NETWORK` (`subworkflows/ENRICHMENT/local/src/build_domino_network.py:223`) lanza `RuntimeError("no edges survived filtering ...")` y, con la estrategia de error por defecto, aborta toda la corrida. Visto en el toy de cancer (45 genes, 31 de fondo, 0 aristas con puntuación >= 700 sobre 13.715.404 enlaces de STRING). Comportamiento deseado: sin aristas, escribir las salidas vacías (como ya hace la rama de fondo ausente, que crea `network.sif`, `network_edge_scores.tsv` y `slices.txt`), avisar en el log y dejar que los pasos siguientes tomen el centinela `NO_*`. Comprobar además que `run_domino_modules.py` y `13.AMI_analysis.Rmd` toleran redes vacías. Sin código cambiado todavía; candidato a WP2 (limpieza) o WP8.
+- **Referencia del marine toy incompleta (2026-10-21).** La corrida de `golden_581b999/marine_toy` murió con el reinicio del equipo (21:07): `results/marine_complete` solo tiene las primeras etapas y `launch_resume.sh` (RESUME=1) falla mientras `/media/miguel/external` (dispositivo sda1, etiqueta external, con los alineamientos toy) no esté montado. Cuando se monte, ejecutar `bash golden_581b999/marine_toy/launch_resume.sh` (checkout `.tmp/base_a92fd2d` en el commit de la línea base) y, después, comparar WP3 en marine (bloque de 25 y otro tamaño) con `compare_null.py`.

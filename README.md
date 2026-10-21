@@ -138,7 +138,8 @@ Runs CAAStools' discovery, resample, and bootstrap tools over per-gene
 alignments to detect Candidate Amino Acid Substitutions (CAAS): positions
 where the phenotype's extremes carry distinct, convergent amino acids.
 Inputs: `--alignment`, `--caas_config`/`--traitvalues`, `--tree`. Supports
-batching large gene sets into fewer Nextflow tasks (`--ct_core_batch_size`) and a `--toy_mode`/`--toy_n` subsampling mode for
+batching large gene sets into fewer Nextflow tasks (`--ct_core_batch_size`), cutting the permulation cycles into blocks of
+`--caas_cycle_block_size` cycles so that task memory does not grow with the number of cycles, and a `--toy_mode`/`--toy_n` subsampling mode for
 quick smoke tests. Gated by `--ct_tool` (comma list of `discovery,resample`).
 
 ### CONTRAST_SELECTION — trait/tree preprocessing
@@ -414,6 +415,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 |---|---|---|
 | `publish_intermediates` | `false` | Publishes intermediate discovery and resampling files for debugging. |
 | `ct_bootstrap_batch_size` | `10` | Number of genes batched per bootstrap task. |
+| `caas_cycle_block_size` | `500` | Permulation cycles per block of the CAAS null: a replay task takes one batch of genes (`ct_core_batch_size`) and the labelings of one block, so its memory does not depend on `caas_full_perms`. |
 | `caas_config` | `""` | Path to custom CAAStools configuration file. |
 | `max_bg_gaps_fraction` / `max_fg_gaps_fraction` / `max_gaps_fraction` | `0.0` | Gap tolerance fractions allowed in background, foreground, or overall. |
 | `max_bg_miss_fraction` / `max_fg_miss_fraction` / `max_miss_fraction` | `0.0` | Missing-data tolerance fractions allowed. |

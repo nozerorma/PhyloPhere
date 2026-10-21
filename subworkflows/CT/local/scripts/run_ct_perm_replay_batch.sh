@@ -96,7 +96,7 @@ declare -a base_cmd=("${ct_bin_arr[@]}" "perm-replay")
 gene_count="$(grep -cve '^[[:space:]]*$' "$manifest" || true)"
 echo "Running batched perm-replay task $batch_id"
 echo "Genes in batch: $gene_count"
-echo "Concurrent workers: $workers"
+echo "Concurrent workers: $workers (each parses the labelings once)"
 
 terminate_children() {
     local pids
@@ -135,22 +135,6 @@ watchdog_guard() {
     done
 }
 
-wait_for_slot() {
-    while [[ "$(jobs -pr | wc -l | tr -d ' ')" -ge "$workers" ]]; do
-        # Preserve the reaped job's real exit status (e.g. 137 on an OOM SIGKILL)
-        # instead of collapsing it to a hardcoded 1 -- Nextflow's errorStrategy
-        # for this process retries on 137/140/143 with more memory, but only if
-        # that code survives to become this script's own exit status.
-        local status=0
-        wait -n || status=$?
-        if [[ "$status" -ne 0 ]]; then
-            echo "[perm-replay batch] A child perm-replay job failed (exit $status); stopping batch $batch_id" >&2
-            terminate_children
-            exit "$status"
-        fi
-    done
-}
-
 wait_for_all() {
     while [[ "$(jobs -pr | wc -l | tr -d ' ')" -gt 0 ]]; do
         local status=0
@@ -163,34 +147,36 @@ wait_for_all() {
     done
 }
 
-idx=0
-while IFS=$'\t' read -r alignment_id alignment_name _; do
-    [[ -z "${alignment_id:-}" ]] && continue
-    idx=$((idx + 1))
-    wait_for_slot
-    echo "[perm-replay batch] Launching $alignment_id ($idx/$gene_count)"
+# Each of the `workers` processes parses the labelings once and then takes genes from the manifest (a gene is taken
+# by creating its directory under claims/, so the genes spread over the processes as they finish). The export paths are
+# templates: ct replaces {id} with the gene id.
+claim_dir="claims_${batch_id}"
+rm -rf "$claim_dir"
+mkdir -p "$claim_dir"
 
-    alignment_path="alignments/$alignment_name"
+declare -a cmd=(
+    "${base_cmd[@]}"
+    --manifest "$manifest"
+    --alignment_dir alignments
+    --claim_dir "$claim_dir"
+    -t "$caas_config"
+    -s "$resampled_path"
+    --fmt "$ali_format"
+)
 
-    declare -a cmd=(
-        "${base_cmd[@]}"
-        -a "$alignment_path"
-        -t "$caas_config"
-        -s "$resampled_path"
-        --fmt "$ali_format"
-    )
+if [[ "$export_groups" == "1" ]]; then
+    cmd+=(--export_groups '{id}.perm_replay.groups.output')
+fi
+if [[ "$export_perm_discovery" == "1" ]]; then
+    cmd+=(--export_perm_discovery '{id}.perm_replay.discovery.output')
+fi
+if [[ "$export_b0" == "1" ]]; then
+    # the discovery.tab rows and the tested positions of the b_0 labeling(s); no discovery file when b_0 has no hit
+    cmd+=(--export_b0_discovery '{id}.b0.discovery.tsv' --export_b0_background '{id}.b0.background')
+fi
 
-    if [[ "$export_groups" == "1" ]]; then
-        cmd+=(--export_groups "${alignment_id}.perm_replay.groups.output")
-    fi
-    if [[ "$export_perm_discovery" == "1" ]]; then
-        cmd+=(--export_perm_discovery "${alignment_id}.perm_replay.discovery.output")
-    fi
-    if [[ "$export_b0" == "1" ]]; then
-        # the discovery.tab rows and the tested positions of the b_0 labeling(s); no discovery file when b_0 has no hit
-        cmd+=(--export_b0_discovery "${alignment_id}.b0.discovery.tsv" --export_b0_background "${alignment_id}.b0.background")
-    fi
-
+n_proc=$(( gene_count < workers ? gene_count : workers ))
+for (( p = 1; p <= n_proc; p++ )); do
     (
         "${cmd[@]}" "${extra_args[@]}" &
         worker_pid=$!
@@ -200,9 +186,9 @@ while IFS=$'\t' read -r alignment_id alignment_name _; do
         worker_status=0
         wait "$worker_pid" || worker_status=$?
         kill "$watchdog_pid" 2>/dev/null || true
-        echo "[perm-replay batch] Completed $alignment_id"
         exit "$worker_status"
     ) </dev/null &
-done <"$manifest"
+done
 
 wait_for_all
+rm -rf "$claim_dir"

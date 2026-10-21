@@ -107,6 +107,16 @@ if tool.lower() == "perm-replay":
     parser.add_option("-a", "--alignment", dest="single_alignment",
                     help="Multiple Sequence Alignment (MSA) file.", default = "none")
 
+    ###     3.2.3b Several alignments in one process (the labelings are parsed once)
+    parser.add_option("--manifest", dest="manifest",
+                    help="Tab-separated file '<gene id>\\t<alignment file name>' (one gene per line) replayed by this process in place of -a. \
+                    The export paths must then contain '{id}', replaced by the gene id. Default = disabled.", default = None)
+    parser.add_option("--alignment_dir", dest="alignment_dir",
+                    help="Directory of the alignment files named in --manifest. Default = alignments.", default = "alignments")
+    parser.add_option("--claim_dir", dest="claim_dir",
+                    help="Directory shared by the processes that split one manifest: a process takes a gene by creating <claim_dir>/<gene id> \
+                    and skips the genes already taken. Default = every gene of the manifest.", default = None)
+
     ###     3.2.4 Alignment format
     parser.add_option("--fmt", dest="ali_format",
                     help="File format of the MSA file. Default: clustal. Accepted: clustal, emboss, fasta, \
@@ -189,7 +199,7 @@ if tool.lower() == "perm-replay":
 
     ### 3.4 Usage
 
-    parser.usage = "ct perm-replay -a $alignment_file -t $trait_config_file -s $labelings_file --fmt $alignment_format (default:clustal) [--export_perm_discovery $file] [--export_b0_discovery $file] [--export_b0_background $file] [--export_groups $file]\n\nNOTE: -s is one labelings file: tag, foreground species, background species (tab-separated, no header)\nNOTE: at least one export is required"
+    parser.usage = "ct perm-replay (-a $alignment_file | --manifest $genes_file [--alignment_dir $dir] [--claim_dir $dir]) -t $trait_config_file -s $labelings_file --fmt $alignment_format (default:clustal) [--export_perm_discovery $file] [--export_b0_discovery $file] [--export_b0_background $file] [--export_groups $file]\n\nNOTE: -s is one labelings file: tag, foreground species, background species (tab-separated, no header)\nNOTE: at least one export is required; with --manifest every export path contains {id}"
 
     ### 3.5 Parse the options
 
@@ -199,8 +209,16 @@ if tool.lower() == "perm-replay":
 
     missing_option_messages = []
 
-    if options.single_alignment == "none":
+    if options.single_alignment == "none" and not options.manifest:
         missing_option_messages.append("No input MSA file provided")
+
+    if options.manifest and options.single_alignment != "none":
+        missing_option_messages.append("-a and --manifest are exclusive")
+
+    if options.manifest:
+        for export in (options.export_groups, options.export_perm_discovery, options.export_b0_discovery, options.export_b0_background):
+            if export and "{id}" not in export:
+                missing_option_messages.append("With --manifest every export path must contain {id}: " + export)
 
     if options.config_file == "none":
         missing_option_messages.append("You must provide a trait config file")
@@ -234,22 +252,25 @@ if tool.lower() == "perm-replay":
     print(application_info)
     print("")
 
-    print("[PERM-REPLAY TOOL] - Scanning", options.single_alignment, "with phenotype information from", options.config_file + "\n\n")
+    print("[PERM-REPLAY TOOL] - Scanning", (options.manifest or options.single_alignment), "with phenotype information from", options.config_file + "\n\n")
 
-    ###     3.8.1 - Slice the alignment
-
-    sliced_alignment = runslice(options)
-
-    ###     3.8.2 - Load the labelings
+    ###     3.8.1 - Load the labelings (once, whatever the number of alignments)
 
     if os.path.isdir(options.simtraits):
         print(f"\n****ERROR: -s must be one labelings file, not a directory: {options.simtraits}\n")
         exit(1)
     perm_replay_input = simtrait_revive(options.simtraits)
 
-    ###     3.8.3 - Replay the labelings over the alignment
+    ###     3.8.2 - Slice one alignment and replay the labelings over it
 
-    run_perm_replay_on_alignment(
+    def replay_alignment(alignment, gene_id=None):
+        options.single_alignment = alignment
+        sliced_alignment = runslice(options)
+
+        def export_path(path):
+            return path.replace("{id}", gene_id) if (path and gene_id is not None) else path
+
+        run_perm_replay_on_alignment(
                     trait_config_file= options.config_file,
                     resampled_traits= perm_replay_input,
                     sliced_object = sliced_alignment,
@@ -266,14 +287,31 @@ if tool.lower() == "perm-replay":
                     max_conserved = int(options.max_conserved),
                     min_non_overlapping = int(options.min_non_overlapping),
 
-    the_admitted_patterns = options.patterns_string,
-                    export_groups = options.export_groups,
-                    export_perm_discovery = options.export_perm_discovery,
-                    export_b0_background = options.export_b0_background,
-                    export_b0_discovery = options.export_b0_discovery
+                    the_admitted_patterns = options.patterns_string,
+                    export_groups = export_path(options.export_groups),
+                    export_perm_discovery = export_path(options.export_perm_discovery),
+                    export_b0_background = export_path(options.export_b0_background),
+                    export_b0_discovery = export_path(options.export_b0_discovery)
                     )
 
-    ###     3.8.4 Final output
+    if options.manifest:
+        with open(options.manifest) as manifest_handle:
+            genes = [line.split("\t")[:2] for line in manifest_handle.read().splitlines() if line.strip()]
+        if options.claim_dir:
+            os.makedirs(options.claim_dir, exist_ok=True)
+        for gene_id, alignment_name in genes:
+            if options.claim_dir:
+                try:
+                    os.mkdir(os.path.join(options.claim_dir, gene_id))
+                except FileExistsError:
+                    continue
+            print("[perm-replay batch] Launching", gene_id, flush=True)
+            replay_alignment(os.path.join(options.alignment_dir, alignment_name), gene_id)
+            print("[perm-replay batch] Completed", gene_id, flush=True)
+    else:
+        replay_alignment(options.single_alignment)
+
+    ###     3.8.3 Final output
     print("\n\nPerm-replay done.")
 
 

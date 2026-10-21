@@ -38,7 +38,8 @@
  *  Produces:  trait_file and tree_file (the ones used), and, when discovery or
  *             --caas_permulation_enrichment is requested, the inputs of CAAS_CORE:
  *             caas_align_tuple (alignments to replay), caas_resample_subset (b_0 and
- *             the first N permuted labelings) and caas_fop_pairs (FOP pair weights)
+ *             the first N permuted labelings) and caas_blocks (the labelings in blocks of
+ *             cycles, with their FOP pair weights, and b_0 apart)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -61,11 +62,11 @@ workflow CT {
         // Output channels of the emit block, defined at workflow level.
         def trait_file_emit = Channel.empty()
         // Inputs of the permulation core: the alignments to replay, the labelings subset (b_0 and the first N
-        // permuted cycles) and the FOP pair weights. They stay empty unless discovery or
+        // permuted cycles) and its cycle blocks (with the FOP pair weights). They stay empty unless discovery or
         // --caas_permulation_enrichment is requested.
         def caas_align_tuple_out = Channel.empty()
         def caas_resample_subset_out = Channel.empty()
-        def caas_fop_pairs_out = Channel.value(file('NO_FOP_PAIRS'))
+        def caas_blocks_out = Channel.empty()
         def perm_resample_dir_out = Channel.empty()
         def tree_file_emit = Channel.empty()
         
@@ -158,17 +159,17 @@ workflow CT {
             def perms_prep = CAAS_PERMS_PREP(trait_file_out, resample_dir_out)
             caas_align_tuple_out     = align_tuple
             caas_resample_subset_out = perms_prep.resample_subset
-            caas_fop_pairs_out       = perms_prep.fop_pairs
+            caas_blocks_out          = perms_prep.blocks
         }
     }
     
     emit:
         trait_file = trait_file_emit
         tree_file = tree_file_emit
-        // Inputs of CAAS_CORE (main.nf): the alignments to replay, the labelings subset and the FOP pair weights.
+        // Inputs of CAAS_CORE (main.nf): the alignments to replay, the labelings subset and its cycle blocks.
         caas_align_tuple = caas_align_tuple_out
         caas_resample_subset = caas_resample_subset_out
-        caas_fop_pairs = caas_fop_pairs_out
+        caas_blocks = caas_blocks_out
         // Directory of the harvest (resample_NNN.tab and permulation_manifest.tsv); empty when no harvest ran.
         resample_dir = perm_resample_dir_out
 }

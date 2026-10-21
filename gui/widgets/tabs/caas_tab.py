@@ -157,6 +157,11 @@ SPEC = ModuleTabSpec(
             label="Permulation-null genes per task (replay + ASR replay)",
             importance="optional",
         ),
+        FieldSpec(
+            name="caas_cycle_block_size",
+            label="Permulation-null cycles per block",
+            importance="optional",
+        ),
         Section("Permulation null"),
         FieldSpec(name="caas_perms_postproc", label="Apply post-processing filters to the permulation null", kind="bool", importance="default"),
         FieldSpec(name="caas_permulation_enrichment", label="Use CAAS permulations for the FCS Wilcoxon null", kind="bool", importance="default"),
