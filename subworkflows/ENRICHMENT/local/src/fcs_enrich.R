@@ -674,12 +674,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
         warning(sprintf(paste0(
           "CAAS permulation null is STALE: built with gene statistic '%s', but the ",
           "observed gene_caas_score uses 'size_adj_max'. p.perm left NA for the CAAS ",
-          "rankings. Rebuild it (no ASR replay needed, minutes):\n",
-          "  python3 subworkflows/CT_DISAMBIGUATION/local/reaggregate_perm_scores.py ",
-          "--detail <run>/caas_permulation/perm_pos_detail --output-dir <run>/caas_permulation\n",
-          "  Rscript subworkflows/SCORING/local/src/scoring_caas_perms.R ",
-          "--gene-cycle-scores <run>/caas_permulation/gene_cycle_scores.tsv ",
-          "--output <run>/caas_permulation/caas_perms.rds"),
+          "rankings. Rerun the null (CAAS_CORE_MERGE) to rebuild it."),
           as.character(.stat_have)))
         corStat_byrank <- corStat_byrank[
           !names(corStat_byrank) %in% names(corperms[["caas_corStat_byrank"]])]

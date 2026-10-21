@@ -13,7 +13,8 @@
   "runtime": {
     "resume": false,
     "toy_mode": false,
-    "cleanup_policy": "none",
+    "remove_intermediates": false,
+    "remove_work": false,
     "toy_n": "1000",
     "toy_perms": "100",
     "runtime_type": "slurm",

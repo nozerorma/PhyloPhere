@@ -9,7 +9,7 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 |---|---|---|---|---|
 | WP0 | `WP0_linea_base.md` | | commit del usuario (hecho: `581b999`) | HECHO con un pendiente explícito: marine toy (falta el disco externo con los alineamientos toy). PEPC y cancer_b0_toy regenerados con `a92fd2d` |
 | WP1 | `WP1_fcs_rer.md` | | WP0 | pendiente |
-| WP2 | `WP2_exports_posenrich_limpieza.md` | | WP0 | pendiente |
+| WP2 | `WP2_exports_posenrich_limpieza.md` | | WP0 | HECHO (PEPC c4 y toy de cancer idénticos a la referencia con su caché de ASR; marine toy pendiente) |
 | WP3 | `WP3_bloques_de_ciclos.md` | Fase 1 | WP2 | pendiente |
 | WP4 | `WP4_replay_en_flujo.md` | Fase 2 | WP3 | pendiente |
 | WP5 | `WP5_tablas_y_merge_por_bloque.md` | Fase 3 | WP4 | pendiente |

@@ -48,7 +48,8 @@ class RuntimeConfig:
     # --- Top toggles ---
     resume: bool = True  # -resume
     toy_mode: bool = False  # --toy_mode
-    cleanup_policy: str = "none"  # --cleanup_policy: "none" | "prune_intermediates" | "remove_work"
+    remove_intermediates: bool = False  # --remove_intermediates: tasks delete the bulky intermediates no later process reads
+    remove_work: bool = False  # --remove_work: the run script removes the work/ directory after a successful run
     toy_n: str = "1000"  # --toy_n
     toy_perms: str = "100"  # permulation cycles of a toy run (CAAS_FULL_PERMS; the generated script sets MAX_TRIES from it)
 

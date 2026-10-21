@@ -93,6 +93,8 @@ Comparador: `PhyloPhere_validation/unification/compare_null.py` (tablas del nulo
 
 4. Hallazgo: DOMINO debe saltarse el paso (skip silencioso) sin aristas suficientes (detalle en `README.md`, sección de hallazgos pendientes). En el toy de cancer se evitó con `scoring_ami` y `scoring_string` apagados.
 
+5. Hallazgo (2026-10-21, medido en WP2): **codeml no es reproducible bit a bit entre ejecuciones.** Con las mismas entradas y `fix_blength = 2`, la iteración 0 del optimizador arranca de valores distintos (`x: 1.00623` frente a `1.09603` en `MAS1L`) y, en dos corridas del toy de cancer con caché de ASR vacía, 3 de 45 genes dieron `rst` distinto (posteriores que difieren en la tercera cifra) y 11 un `lnf` distinto; el efecto llega a `gene_cycle_scores.tsv`, `perm_pos_*`, `caas_perms.rds`, `position_scores.tsv` y a las tablas FCS (delta máximo medido: 0,088 en `global_caas`, 0,0099 en `p.perm`). PEPC (1 gen) salió idéntico, por azar. **Toda comparación contra una referencia a 1e-12 debe usar la caché de ASR de la referencia** (`ct_disambig_asr_cache_dir`): `golden_581b999/cancer_b0_toy/asr_cache` y `golden_581b999/pepc_c4_tolerance/asr_cache`. Sin caché fija, las diferencias no indican un cambio de código. Mecanismo exacto del azar de codeml (semilla de `x`/alfa inicial): no investigado.
+
 ## Qué comprobar primero en WP1 y WP2 (pueden ir en paralelo)
 
 - La tubería arranca con Nextflow 25.10.4 solo con la corrección de `accum_gene_lists.nf` (incluida en el commit de cierre de WP0): partir de ese commit. Los lanzadores generados deben estar en la raíz del repo (el runner single toma REPO_DIR de su ubicación).

@@ -162,7 +162,8 @@ Usage:
 --prune_list_secondary                 <"species_list">               null
 --toy_mode                           <true|false>                    false  (smoke test on a random subset of alignments; species are never subsampled)
 --toy_n                               <INTEGER>                      1000   (alignments kept in --toy_mode: the first N of a shuffle seeded by --seed; an empty value or 0 falls back to 50)
---cleanup_policy                    <none|prune_intermediates|remove_work>  none  (prune_intermediates: tasks delete the bulky intermediates no later process reads, and the perm-discovery exports are published only with --publish_intermediates; remove_work: also removes the work directory after a successful run, done by the generated run script)
+--remove_intermediates              <true|false>                   false  (tasks delete, inside the task, the bulky intermediates no later process reads)
+--remove_work                       <true|false>                   false  (the generated run script removes the work directory after a successful run; -resume is not available afterwards)
 '''
 }
 
@@ -340,8 +341,6 @@ Standalone mode (provide inputs directly):
 --scoring_vep_primateai                            <"vep_primateai.tsv">              ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
 --scoring_vep_cosmic                                  <"vep_cosmic.tsv">                  ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
 --scoring_vep_ensembl                                <"ensembl_vep_mapped.tsv">          ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
---caas_perms_file                                        <"caas_perms.rds">                  ""    (genome-wide CAAS permulation null)
---caas_pos_detail_file                                   <"perm_pos_detail/">          ""    (rebuild the null from a prior run's per-cycle detail shard dir, or a legacy perm_pos_detail.tsv.gz; preferred over --caas_perms_file for reruns, minutes, no ASR replay)
 --caas_pos_cycle_caas_file                               <"perm_pos_cycle_caas.tsv.gz">  ""    (filtered position-level null of a prior run: SCORING p.emp, POSENRICH and the accumulation permulation null)
 --caas_cycle_roster_file                                 <"cycle_roster.txt">          ""    (every replayed cycle of a prior run, the empty ones included: N of the null everywhere; without it N is the number of cycles present in the null, with a log line)
 

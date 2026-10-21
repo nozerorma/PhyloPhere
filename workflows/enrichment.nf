@@ -181,7 +181,7 @@ workflow ENRICHMENT {
             : (rer_ran ? rer_bg_r : fcs_universe_ch)
 
         def caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
-            .ifEmpty { file(params.caas_perms_file ?: 'NO_FILE') }
+            .ifEmpty { file('NO_FILE') }
             .collect()
             .map { it[0] }
 
@@ -375,7 +375,14 @@ workflow ENRICHMENT {
 
         // ── Position-level FCS ──
         def posenrich_out = null
-        if (params.posenrich) {
+        // POSENRICH's p.perm needs the position-level permulation null: the live one of CAAS_CORE_MERGE, or
+        // --caas_pos_cycle_caas_file. Without it the module is skipped, with a warning, rather than run without its null.
+        def posenrich_null_available = (caas_pos_cycle_caas_ch != null) ||
+            (params.caas_pos_cycle_caas_file && file(params.caas_pos_cycle_caas_file).exists())
+        if (params.posenrich && !posenrich_null_available) {
+            log.warn "[POSENRICH] skipped: there is no position-level permulation null (perm_pos_cycle_caas.tsv.gz): CAAS_CORE_MERGE did not run in this invocation and --caas_pos_cycle_caas_file is not set. The position-level enrichment (report 14) is not produced."
+        }
+        if (params.posenrich && posenrich_null_available) {
             def pos_gene_ensembl_ch = Channel.fromPath(params.gene_ensembl_file).ifEmpty { file('NO_FILE') }
             def pos_domain_variability_ch
             if (!params.posenrich_domains) {

@@ -16,8 +16,7 @@
  *       full-pool perm-replay with export of the perm-discovery tables, then the ASR
  *       replay of the same genes (disambiguation_perms_main.py --detail-only), which
  *       gives the per-gene perm_pos_detail shards, and scores the b_0 labeling as full
- *       records (observed_b0_main.py) into b0_observed/. Perm-discovery exports that
- *       already exist are disambiguated without a replay.
+ *       records (observed_b0_main.py) into b0_observed/.
  *    3. CAAS_CORE_OBSERVED writes the observed contract files (discovery.tab,
  *       background.output, background_genes.output, meta_caas/,
  *       ct_disambiguation/caas_convergence_master.csv) from the batches' b_0 slices.
@@ -31,7 +30,7 @@
  *
  *  Consumes:  resample directory (RESAMPLE), observed design (trait file or
  *             traitfile_H*.tab directory), alignments, species tree, FOP pairs
- *  Produces:  caas_permulation/ (resample_perms.tab, perm_disc/, caas_perms.rds,
+ *  Produces:  caas_permulation/ (resample_perms.tab, caas_perms.rds,
  *             gene_cycle_scores.tsv, b0/, ...) and the observed contract files
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
@@ -45,11 +44,10 @@ def caasPostprocOn() {
     return (raw instanceof Boolean) ? raw : !(raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
 }
 
-// True when params.cleanup_policy deletes the bulky intermediates that no later process reads
-// ("prune_intermediates" and "remove_work").
-def shouldPruneIntermediates() {
-    def pol = (params.cleanup_policy ?: 'none').toString().trim().toLowerCase()
-    return pol in ['prune_intermediates', 'remove_work']
+// True when params.remove_intermediates is on: tasks delete the bulky intermediates that no later process reads.
+def removeIntermediatesOn() {
+    def raw = params.containsKey('remove_intermediates') ? params.remove_intermediates : false
+    return (raw instanceof Boolean) ? raw : (raw?.toString()?.toLowerCase() in ['true', '1', 'yes'])
 }
 
 // True when the core also writes the strict tables: params.strict_conservation_output, and a discovery that tolerates
@@ -160,23 +158,17 @@ process SUBSET_RESAMPLE_PERMS {
 // --detail-only, so no gene waits for the rest of the genome between the two steps. Pass B
 // scores each cycle against genome-wide pools and runs once, in CAAS_CORE_MERGE, over the
 // union of the batches' shards.
-// A batch that arrives with perm-discovery files already computed (permDiscFiles) skips the
-// replay. The replay also exports the b_0 slice of each gene (the discovery.tab rows of the
+// The replay also exports the b_0 slice of each gene (the discovery.tab rows of the
 // real labeling and the positions it tested); observed_b0_main.py then scores those rows as
 // full records.
-// Output: perm_pos_detail/ (one gz shard per gene; the b_0 shards under b0/), b0_observed/
-// (per gene with b_0 hits: its discovery rows, its tested positions and its master rows), and
-// the perm-discovery exports of a replayed batch. A batch that reuses exports has no b_0
-// slice, so its b0_observed/ is empty.
+// Output: perm_pos_detail/ (one gz shard per gene; the b_0 shards under b0/) and b0_observed/
+// (per gene with b_0 hits: its discovery rows, its tested positions and its master rows).
 process CAAS_CORE_BATCHED {
     tag "$batchID (${batchSize} genes)"
     label 'process_resample'
-    publishDir path: "${params.outdir}/caas_permulation/perm_disc", mode: 'copy', overwrite: true,
-               pattern: 'perm_disc/*.perm_replay.discovery.output', saveAs: { fn -> fn.tokenize('/').last() },
-               enabled: (params.publish_intermediates as boolean)
 
     input:
-    tuple val(batchID), val(batchSize), val(manifestText), path(alignmentFiles, stageAs: 'alignments/*'), path(permDiscFiles, stageAs: 'perm_disc_in/*')
+    tuple val(batchID), val(batchSize), val(manifestText), path(alignmentFiles, stageAs: 'alignments/*')
     path resample_subset
     file caas_config
     path tree_file
@@ -189,7 +181,6 @@ process CAAS_CORE_BATCHED {
     path "b0_observed", emit: b0_observed
     path "perm_pos_detail_strict", emit: pos_detail_strict, optional: true   // strict pooling of the same replay (strictOutputOn)
     path "b0_observed_strict", emit: b0_observed_strict, optional: true      // b_0 rows without conserved pairs, scored on their own
-    path "perm_disc/*.perm_replay.discovery.output", emit: perm_discovery, optional: true
 
     script:
     def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
@@ -197,17 +188,16 @@ process CAAS_CORE_BATCHED {
         ? "/usr/local/bin/_entrypoint.sh $baseDir/subworkflows/CT/local/ct"
         : "$baseDir/subworkflows/CT/local/ct"
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
-    def replay = manifestText.trim() ? true : false
     def asr_cache_dir = params.ct_disambig_asr_cache_dir ?: ''
     def taxid_mapping = taxid_map.name != 'NO_FILE' ? taxid_map : ''
     def ensembl_file = params.gene_ensembl_file ?: ''
     def max_tasks_per_child = params.ct_disambig_max_tasks_per_child ?: 50
     def postproc_args = caasPostprocArgs(gene_lengths)
-    // The perm-discovery exports (~13-16 MB per gene at K=3) are read only by the ASR replay below; with pruning they are
-    // deleted right after it unless they are published (publish_intermediates keeps them for reuse by a later run).
-    def prune_exports = shouldPruneIntermediates() && !(params.publish_intermediates as boolean)
-    // Pruning moves the shards out of caas_perms_out instead of duplicating them.
-    def shard_move = shouldPruneIntermediates()
+    // The perm-discovery exports (~13-16 MB per gene at K=3) are read only by the ASR replay below; with
+    // remove_intermediates they are deleted right after it.
+    def prune_exports = removeIntermediatesOn()
+    // With remove_intermediates the shards are moved out of caas_perms_out instead of duplicated.
+    def shard_move = removeIntermediatesOn()
     // The strict tables come from the same replay: the null shards pooled without the hypotheses that have conserved
     // pairs, and the b_0 rows without conserved pairs scored again (the observed labeling is a single labeling).
     def strict_on = strictOutputOn()
@@ -224,55 +214,51 @@ process CAAS_CORE_BATCHED {
     export CAAS_PERMS_WORKER_MEM_MB=\$(( ${task.memory.toMega()} / ${task.cpus} ))
     mkdir -p perm_disc b0_observed
     ${strict_on ? 'mkdir -p b0_observed_strict' : ''}
-    PERM_DISC=perm_disc_in
-    if ${replay}; then
-        # Bounds the chunk buffers of the vectorized kernel, per call, to a quarter of one worker's share of task.memory.
-        export CT_PERM_REPLAY_CHUNK_MEM_MB=\$(( ${task.memory.toMega()} / ${task.cpus} / 4 ))
-        cat > ${batchID}.manifest.tsv <<'EOF'
+    # Bounds the chunk buffers of the vectorized kernel, per call, to a quarter of one worker's share of task.memory.
+    export CT_PERM_REPLAY_CHUNK_MEM_MB=\$(( ${task.memory.toMega()} / ${task.cpus} / 4 ))
+    cat > ${batchID}.manifest.tsv <<'EOF'
 """ + manifestText + """EOF
 
-        # With multi_hypothesis the design is a directory of traitfile_H*.tab (same K): one .tab gives the pair count
-        if [ -d "${caas_config}" ]; then
-            _cfg_file=\$(find -L ${caas_config} -type f -name '*.tab' | sort | head -n 1)
-        else
-            _cfg_file="${caas_config}"
-        fi
-        n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' "\$_cfg_file" | sort -nu | wc -l | tr -d ' ')
-        _frac() { awk -v n="\$n_pairs" -v f="\$1" 'BEGIN{printf "%d", int(n*f)}'; }
-        declare -a extra_opts=(--patterns "${params.patterns}")
-        if [ "${params.miss_pair}" = "true" ]; then extra_opts+=(--miss_pair); fi
-        extra_opts+=(--max_conserved \$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}'))
-        extra_opts+=(--min_non_overlapping "${params.min_non_overlapping ?: 2}")
-        extra_opts+=(--max_bg_gaps \$(_frac ${params.max_bg_gaps_fraction}) --max_fg_gaps \$(_frac ${params.max_fg_gaps_fraction}) --max_gaps \$(_frac ${params.max_gaps_fraction}))
-        extra_opts+=(--max_bg_miss \$(_frac ${params.max_bg_miss_fraction}) --max_fg_miss \$(_frac ${params.max_fg_miss_fraction}) --max_miss \$(_frac ${params.max_miss_fraction}))
-        echo "\${extra_opts[@]}" > .ct_perm_replay_batch_args
-
-        bash $baseDir/subworkflows/CT/local/scripts/run_ct_perm_replay_batch.sh \\
-            --batch-id ${batchID} \\
-            --manifest ${batchID}.manifest.tsv \\
-            --caas-config ${caas_config} \\
-            --resampled-path ${resample_subset} \\
-            --workers ${task.cpus} \\
-            --ali-format ${params.ali_format} \\
-            --ct-bin ${ctBinary} \\
-            --export-groups 0 \\
-            --export-perm-discovery 1 \\
-            --export-b0 1 \\
-            --extra-args-file .ct_perm_replay_batch_args
-        find . -maxdepth 1 -name '*.perm_replay.discovery.output' -exec mv {} perm_disc/ \\;
-        find . -maxdepth 1 \\( -name '*.b0.discovery.tsv' -o -name '*.b0.background' \\) -exec mv {} b0_observed/ \\;
-        PERM_DISC=perm_disc
+    # With multi_hypothesis the design is a directory of traitfile_H*.tab (same K): one .tab gives the pair count
+    if [ -d "${caas_config}" ]; then
+        _cfg_file=\$(find -L ${caas_config} -type f -name '*.tab' | sort | head -n 1)
+    else
+        _cfg_file="${caas_config}"
     fi
+    n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' "\$_cfg_file" | sort -nu | wc -l | tr -d ' ')
+    _frac() { awk -v n="\$n_pairs" -v f="\$1" 'BEGIN{printf "%d", int(n*f)}'; }
+    declare -a extra_opts=(--patterns "${params.patterns}")
+    if [ "${params.miss_pair}" = "true" ]; then extra_opts+=(--miss_pair); fi
+    extra_opts+=(--max_conserved \$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}'))
+    extra_opts+=(--min_non_overlapping "${params.min_non_overlapping ?: 2}")
+    extra_opts+=(--max_bg_gaps \$(_frac ${params.max_bg_gaps_fraction}) --max_fg_gaps \$(_frac ${params.max_fg_gaps_fraction}) --max_gaps \$(_frac ${params.max_gaps_fraction}))
+    extra_opts+=(--max_bg_miss \$(_frac ${params.max_bg_miss_fraction}) --max_fg_miss \$(_frac ${params.max_fg_miss_fraction}) --max_miss \$(_frac ${params.max_miss_fraction}))
+    echo "\${extra_opts[@]}" > .ct_perm_replay_batch_args
+
+    bash $baseDir/subworkflows/CT/local/scripts/run_ct_perm_replay_batch.sh \\
+        --batch-id ${batchID} \\
+        --manifest ${batchID}.manifest.tsv \\
+        --caas-config ${caas_config} \\
+        --resampled-path ${resample_subset} \\
+        --workers ${task.cpus} \\
+        --ali-format ${params.ali_format} \\
+        --ct-bin ${ctBinary} \\
+        --export-groups 0 \\
+        --export-perm-discovery 1 \\
+        --export-b0 1 \\
+        --extra-args-file .ct_perm_replay_batch_args
+    find . -maxdepth 1 -name '*.perm_replay.discovery.output' -exec mv {} perm_disc/ \\;
+    find . -maxdepth 1 \\( -name '*.b0.discovery.tsv' -o -name '*.b0.background' \\) -exec mv {} b0_observed/ \\;
 
     cp -R ${local_dir}/* .
     find . -name '*.pyc' -delete 2>/dev/null || true
     mkdir -p caas_perms_out
     # A batch whose genes have no CAAS in any cycle exports nothing: its shard directory is empty.
-    if [ -n "\$(ls -A \$PERM_DISC)" ]; then
+    if [ -n "\$(ls -A perm_disc)" ]; then
         ${run} ./disambiguation_perms_main.py \\
             --alignment-dir ${params.alignment} \\
             --tree ${tree_file} \\
-            --perm-discovery \$PERM_DISC \\
+            --perm-discovery perm_disc \\
             --resample-dir . \\
             --output-dir caas_perms_out \\
             --detail-only ${strict_flag} \\
@@ -317,13 +303,10 @@ process CAAS_CORE_BATCHED {
 }
 
 // ── Permulation core workflow ────────────────────────────────────────────────
-// Batches of `ct_core_batch_size` genes (1 = one task per gene), in gene-name order. Alignments to
-// replay, or perm-discovery files already computed (reuse), arrive on separate channels; each batch
-// carries its own kind and the other slot holds a sentinel.
+// Batches of `ct_core_batch_size` genes (1 = one task per gene), in gene-name order.
 workflow CAAS_CORE {
     take:
-        align_tuple      // Channel<tuple(id, alignmentFile)> to replay (empty when reusing exports)
-        reuse_disc       // Channel<List<file>> of perm-discovery exports to disambiguate (empty when replaying)
+        align_tuple      // Channel<tuple(id, alignmentFile)> to replay
         caas_config
         resample_subset
         tree_file        // species tree
@@ -341,15 +324,7 @@ workflow CAAS_CORE {
             .map { batch ->
                 def id = String.format('caas_core_batch_%05d', ++liveCounter)
                 def manifest = batch.collect { row -> "${row[0]}\t${row[1].name}" }.join('\n') + '\n'
-                tuple(id, batch.size(), manifest, batch.collect { row -> row[1] }.unique { f -> f.name }, file('NO_PERM_DISC'))
-            }
-        def reuseCounter = 0
-        def reuse = reuse_disc
-            .flatMap { files -> files.sort { f -> f.name } }
-            .collate(batchSize)
-            .map { batch ->
-                def id = String.format('caas_core_reuse_batch_%05d', ++reuseCounter)
-                tuple(id, batch.size(), '', file('NO_ALIGNMENTS'), batch)
+                tuple(id, batch.size(), manifest, batch.collect { row -> row[1] }.unique { f -> f.name })
             }
         // The single-item inputs (resample subset, FOP pairs, gene lengths, trait file, tree) are queue
         // channels once they have crossed a take:/emit: boundary, not value channels. A process pairs its
@@ -362,7 +337,7 @@ workflow CAAS_CORE {
         def config_bc = caas_config.collect().map { items -> items[0] }
         def tree_bc   = tree_file.collect().map { items -> items[0] }
         def taxid_bc  = taxid_map.collect().map { items -> items[0] }
-        def core = CAAS_CORE_BATCHED(live.mix(reuse), subset_bc, config_bc, tree_bc, fop_bc, lengths_bc, taxid_bc)
+        def core = CAAS_CORE_BATCHED(live, subset_bc, config_bc, tree_bc, fop_bc, lengths_bc, taxid_bc)
 
     emit:
         labelings      = subset_bc                 // the labelings file the batches replayed (the null's cycle roster)
@@ -370,7 +345,6 @@ workflow CAAS_CORE {
         b0_observed    = core.b0_observed
         pos_detail_strict = core.pos_detail_strict   // empty unless the strict tables are on
         b0_observed_strict = core.b0_observed_strict
-        perm_discovery = core.perm_discovery
 }
 
 // ── 3. The observed contract files, from the b_0 slices of the batches ───────
@@ -509,7 +483,7 @@ process CAAS_CORE_MERGE {
 
 // ── Resample subset workflow ─────────────────────────────────────────────────
 // Called by workflows/ct.nf, where the resample directory is available, and by main.nf for a run that
-// reuses a CAAStools output.
+// starts from a resample file (--resample_from).
 workflow CAAS_PERMS_PREP {
     take:
         caas_config        // observed design (trait file, or directory of traitfile_H*.tab)

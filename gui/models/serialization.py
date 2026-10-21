@@ -36,6 +36,9 @@ _RETIRED_CAAS_FIELDS = ("ct_perm_replay_batch_size", "ct_disambig_perms_batch_si
 
 # Parameters that no process reads: those of tasks the pipeline does not have (the per-gene discovery task, the chunking of
 # the observed disambiguation) and the ASR mode (a gene is read from the ASR cache when it is there and computed when not).
+# cleanup_policy of older project files -> (remove_intermediates, remove_work)
+_CLEANUP_POLICY_OPTIONS = {"none": (False, False), "prune_intermediates": (True, False), "remove_work": (True, True)}
+
 _RETIRED_FIELDS = {
     "caas": ("ct_discovery_batch_size", "export_groups", "export_perm_discovery"),
     "disambiguation": ("ct_disambig_asr_mode", "ct_disambig_batch_size"),
@@ -83,6 +86,15 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
             f"Unsupported project schema_version={version!r}; "
             f"this build only supports version {SCHEMA_VERSION}."
         )
+    # The single cleanup_policy of older project files became two independent options.
+    runtime = data.get("runtime")
+    if isinstance(runtime, dict) and "cleanup_policy" in runtime:
+        policy = runtime.pop("cleanup_policy")
+        if policy not in _CLEANUP_POLICY_OPTIONS:
+            logger.warning("project parameter cleanup_policy=%r is not a known value; remove_intermediates and remove_work are left off", policy)
+        remove_intermediates, remove_work = _CLEANUP_POLICY_OPTIONS.get(policy, (False, False))
+        runtime.setdefault("remove_intermediates", remove_intermediates)
+        runtime.setdefault("remove_work", remove_work)
     # Older project files hold the per-gene MAP directory as vep.vep_map_dir; it is
     # copied to disambiguation.caas_map_dir unless that is already set.
     modules = data.get("modules")

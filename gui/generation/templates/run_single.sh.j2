@@ -124,30 +124,19 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     # the background substitutions above are. Without them the CAAS FCS p.perm and the
     # position-level permulation section of the report come out empty, although the
     # permulation null was computed.
-    CAAS_PERMS_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/caas_perms.rds"
     CAAS_POS_CYCLE_CAAS_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_cycle_caas.tsv.gz"
     CAAS_POS_SAMPLE_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
     CAAS_POS_QUANTILES_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
     CAAS_CYCLE_ROSTER_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/cycle_roster.txt"
     CAAS_PERM_MANIFEST_FILE="${PASS_SOURCE_OUTDIR}/caastools/permulation_manifest.tsv"
     CAAS_PERM_HARVEST_FILE="${PASS_SOURCE_OUTDIR}/caastools/permulation_harvest.tsv"
-    for _f in "$CAAS_PERMS_FILE" "$CAAS_POS_CYCLE_CAAS_FILE" "$CAAS_POS_SAMPLE_FILE" "$CAAS_POS_QUANTILES_FILE"; do
+    for _f in "$CAAS_POS_CYCLE_CAAS_FILE" "$CAAS_POS_SAMPLE_FILE" "$CAAS_POS_QUANTILES_FILE"; do
         [ -f "$_f" ] || echo "[WARN] expected permulation output missing, p.perm will be empty: $_f" >&2
     done
     # The roster gives N of the null (cycles with no detection included); a null of an older run has none
     [ -f "$CAAS_CYCLE_ROSTER_FILE" ] || {
         echo "[WARN] cycle_roster.txt missing: N will be the number of cycles present in the null (understated when a cycle detected nothing)" >&2
         CAAS_CYCLE_ROSTER_FILE=""
-    }
-    # When set, SCORING rebuilds the null from this directory (CAAS_CORE_MERGE: minutes,
-    # no ASR replay) instead of importing caas_perms.rds as it is. A cached null is
-    # valid only while it holds the same gene-level statistic as the observed score;
-    # rebuilding guarantees that, and fcs_enrich.R leaves p.perm NA when it does not hold.
-    CAAS_POS_DETAIL_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_detail"
-    [ -d "$CAAS_POS_DETAIL_FILE" ] || CAAS_POS_DETAIL_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_detail.tsv.gz"  # a single file in place of the shard directory
-    [ -e "$CAAS_POS_DETAIL_FILE" ] || {
-        echo "[WARN] perm_pos_detail missing: cannot rebuild the null, falling back to the cached caas_perms.rds (p.perm will be NA if it is stale)" >&2
-        CAAS_POS_DETAIL_FILE=""
     }
 
     # REPORTING (dataset exploration, tree name curation and, for a row with a
@@ -234,13 +223,10 @@ if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     META_CAAS_FROM="${PRECOMP_OUTDIR}/meta_caas/meta_caas/meta_caas.tsv"
     BACKGROUND_INPUT="${PRECOMP_OUTDIR}/caastools/background_genes.output"
     POSENRICH_BACKGROUND_FILE="${PRECOMP_OUTDIR}/caastools/background.output"
-    # These exist only if the source run had --caas_permulation_enrichment on. They are
-    # wired together: caas_perms.rds alone gives the FCS p.perm; perm_pos_cycle_caas.tsv.gz
-    # carries the position-level p.emp null (used when SCORING does not rebuild the null
-    # from perm_pos_detail); the sample and quantile files feed the position-level null
-    # plots of the report. The reuse_exploratory branch above sets the same variables;
-    # keep the two lists in sync.
-    CAAS_PERMS_FILE="${PRECOMP_OUTDIR}/caas_permulation/caas_perms.rds"
+    # These exist only if the source run had --caas_permulation_enrichment on. The
+    # perm_pos_cycle_caas.tsv.gz file carries the position-level p.emp null; the sample and
+    # quantile files feed the position-level null plots of the report. The reuse_exploratory
+    # branch above sets the same variables; keep the two lists in sync.
     CAAS_POS_CYCLE_CAAS_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_cycle_caas.tsv.gz"
     CAAS_POS_SAMPLE_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
     CAAS_POS_QUANTILES_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
@@ -251,13 +237,6 @@ if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     }
     CAAS_PERM_MANIFEST_FILE="${PRECOMP_OUTDIR}/caastools/permulation_manifest.tsv"
     CAAS_PERM_HARVEST_FILE="${PRECOMP_OUTDIR}/caastools/permulation_harvest.tsv"
-    # Triggers CAAS_CORE_MERGE in SCORING (see the reuse_exploratory branch).
-    CAAS_POS_DETAIL_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_detail"
-    [ -d "$CAAS_POS_DETAIL_FILE" ] || CAAS_POS_DETAIL_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_detail.tsv.gz"  # a single file in place of the shard directory
-    [ -e "$CAAS_POS_DETAIL_FILE" ] || {
-        echo "[WARN] perm_pos_detail missing: cannot rebuild the null, falling back to the cached caas_perms.rds (p.perm will be NA if it is stale)" >&2
-        CAAS_POS_DETAIL_FILE=""
-    }
 fi
 if [ "${PRECOMP_USE_RESAMPLE:-false}" = true ]; then
     RESAMPLE_FROM="${PRECOMP_OUTDIR}/caastools/resample.tab"
@@ -363,7 +342,8 @@ _RUN_ENRICHMENT="${RUN_ENRICHMENT:-{{ run_defaults.enrichment }}}"
 _RUN_POSENRICH="${RUN_POSENRICH:-{{ run_defaults.posenrich }}}"
 _ASR_DIAGNOSTICS="${ASR_DIAGNOSTICS:-{{ run_defaults.asr_diagnostics }}}"
 _TOY_MODE="${TOY_MODE:-false}"
-_CLEANUP_POLICY="${CLEANUP_POLICY:-{{ runtime.cleanup_policy }}}"
+_REMOVE_INTERMEDIATES="${REMOVE_INTERMEDIATES:-{{ 'true' if runtime.remove_intermediates else 'false' }}}"
+_REMOVE_WORK="${REMOVE_WORK:-{{ 'true' if runtime.remove_work else 'false' }}}"
 
 # CAAS: the tool string when enabled; when off, an empty ct_tool disables the CT()
 # workflow in main.nf (an empty string is falsy in Groovy, whereas a command-line
@@ -510,7 +490,8 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "reporting": $_RUN_REPORTING,
   "toy_mode": $_TOY_MODE,
   "toy_n": "$TOY_N",
-  "cleanup_policy": "$_CLEANUP_POLICY",
+  "remove_intermediates": $_REMOVE_INTERMEDIATES,
+  "remove_work": $_REMOVE_WORK,
 
   "contrast_selection": $_CONTRAST_SELECTION,
   "ct_tool": "$_CT_TOOL",
@@ -643,13 +624,11 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring_fade_site_bottom": "${SCORING_FADE_SITE_BOTTOM:-}",
   "scoring_vep_cosmic": "${SCORING_VEP_COSMIC:-}",
   "scoring_vep_ensembl": "${SCORING_VEP_ENSEMBL:-}",
-  "caas_perms_file": "${CAAS_PERMS_FILE:-}",
   "caas_pos_cycle_caas_file": "${CAAS_POS_CYCLE_CAAS_FILE:-}",
   "caas_pos_sample_file": "${CAAS_POS_SAMPLE_FILE:-}",
   "caas_pos_quantiles_file": "${CAAS_POS_QUANTILES_FILE:-}",
   "caas_perm_manifest_file": "${CAAS_PERM_MANIFEST_FILE:-}",
   "caas_perm_harvest_file": "${CAAS_PERM_HARVEST_FILE:-}",
-  "caas_pos_detail_file": "${CAAS_POS_DETAIL_FILE:-}",
   "caas_cycle_roster_file": "${CAAS_CYCLE_ROSTER_FILE:-}",
 
   "vep": $_RUN_VEP,
@@ -805,10 +784,10 @@ cleanup_work() {
 
 if [ -f "${RESULTS_BASE}/low_contrasts.skip" ]; then
     echo "Warning: Skipped '${TRAIT}': too few foreground contrasts."
-    if [ "$_CLEANUP_POLICY" = "remove_work" ]; then cleanup_work; fi
+    if [ "$_REMOVE_WORK" = true ]; then cleanup_work; fi
     exit 0
 fi
 
-if [ "$_CLEANUP_POLICY" = "remove_work" ]; then cleanup_work; fi
+if [ "$_REMOVE_WORK" = true ]; then cleanup_work; fi
 
 echo "Success: Completed $TRAIT"

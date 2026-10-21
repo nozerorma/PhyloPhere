@@ -266,7 +266,7 @@ class ScoringConfig(ModuleConfigBase):
     scoring_hypotheses_pairs: str = ""  # --scoring_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for SCORING)
 
     # Precomputed inputs (scoring_postproc_input, scoring_accum_dir, scoring_vep_primateai, scoring_vep_cosmic, scoring_vep_ensembl,
-    # scoring_background_input, caas_perms_file, scoring_fade_site_top/bottom) are derived
+    # scoring_background_input, scoring_fade_site_top/bottom) are derived
     # from PrecomputedConfig.
 
 

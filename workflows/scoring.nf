@@ -14,7 +14,6 @@
 
 include { SCORING_COMPUTE }                                                           from '../subworkflows/SCORING/scoring_compute.nf'
 include { SCORING_REPORT }                                                            from '../subworkflows/SCORING/scoring_report.nf'
-include { CAAS_CORE_MERGE }                                                           from '../subworkflows/CT/caas_permulation.nf'
 
 
 workflow SCORING {
@@ -165,60 +164,22 @@ workflow SCORING {
             resolved_perm_harvest = Channel.value(file('NO_PERM_HARVEST'))
         }
 
-        // CAAS permulation null (corStat_byrank rds) — resolved ONCE, before
-        // SCORING_COMPUTE, so both it (Tier 1A per-gene p.perm) and the scoring
-        // report / FCS report (p.perm) consume the SAME null. Hoisted above the
-        // SCORING_COMPUTE call for exactly this reason.
-        // Value channel via collect()/map (NOT .first(), which warns on a value channel).
-        //
-        // Three ways to get here, in precedence order:
-        //   1. caas_perms_ch      — CAAS_CORE_MERGE ran live in this pass; always valid.
-        //   2. caas_pos_detail_file — no live null, but a prior run's raw per-cycle
-        //      detail is available: CAAS_CORE_MERGE rebuilds it rather than importing a cached RDS. The null
-        //      must hold the same gene-level statistic as the observed gene score
-        //      (see scoring_compute.R section 4a); a cached caas_perms.rds carries no
-        //      such guarantee, and rebuilding costs minutes because no ASR replay is
-        //      involved. fcs_enrich.R detects the mismatch and NAs p.perm otherwise,
-        //      so this is the difference between working p.perm and no p.perm.
-        //   3. caas_perms_file    — import as-is; only safe if it was produced by the
-        //      current scoring formula.
-        def caas_perms_resolved
-        def _rebuild = null
-        if (!caas_perms_ch && params.caas_pos_detail_file) {
-            def _detail = file(params.caas_pos_detail_file)
-            assert _detail.exists() : "SCORING: --caas_pos_detail_file not found: ${params.caas_pos_detail_file}"
-            log.info "SCORING: rebuilding CAAS permulation null from ${_detail.name} (no ASR replay)"
-            // A cycle roster of the original run (one tag per line) stands in for the labelings file, so the rebuilt
-            // null counts the cycles that detected nothing; without it N is read from the detail rows.
-            def _roster_in = (params.caas_cycle_roster_file && file(params.caas_cycle_roster_file).exists())
-                ? file(params.caas_cycle_roster_file) : file('NO_LABELINGS')
-            _rebuild = CAAS_CORE_MERGE(Channel.value(_detail), resolved_background, Channel.value(params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE')), Channel.value(_roster_in))
-            caas_perms_resolved = _rebuild.perms.collect().map { it[0] }
-        } else {
-            caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
-                .ifEmpty { file(params.caas_perms_file ?: 'NO_FILE') }
-                .collect()
-                .map { it[0] }
-        }
+        // CAAS permulation null (caas_perms.rds) — resolved ONCE, before SCORING_COMPUTE, so both it (Tier 1A per-gene
+        // p.perm) and the scoring report / FCS report (p.perm) consume the SAME null. It is the one CAAS_CORE_MERGE
+        // built in this run; without it every consumer receives the NO_FILE sentinel. Value channel via
+        // collect()/map (NOT .first(), which warns on a value channel).
+        def caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
+            .ifEmpty { file('NO_FILE') }
+            .collect()
+            .map { it[0] }
 
         // Position-level per-cycle CAAS numerator/denominator (perm_pos_cycle_caas.tsv.gz).
         // Feeds scoring_compute.R §2f-ter's pooled p.emp, the sole position-level
-        // permulation p. Resolved ONCE here — same hoist-above-SCORING_COMPUTE
-        // reasoning as caas_perms_resolved above. A --caas_pos_detail_file rebuild
-        // (CAAS_CORE_MERGE above) regenerates it too, so prefer that when the
-        // live channel is absent.
-        def caas_pos_cycle_caas_resolved
-        if (!caas_pos_cycle_caas_ch && _rebuild != null) {
-            caas_pos_cycle_caas_resolved = _rebuild.pos_cycle_caas
-                .ifEmpty { file(params.caas_pos_cycle_caas_file ?: 'NO_CAAS_POS_CYCLE_CAAS') }
-                .collect()
-                .map { it[0] }
-        } else {
-            caas_pos_cycle_caas_resolved = (caas_pos_cycle_caas_ch ?: Channel.empty())
-                .ifEmpty { file(params.caas_pos_cycle_caas_file ?: 'NO_CAAS_POS_CYCLE_CAAS') }
-                .collect()
-                .map { it[0] }
-        }
+        // permulation p. Resolved ONCE here, with the same reasoning as caas_perms_resolved above.
+        def caas_pos_cycle_caas_resolved = (caas_pos_cycle_caas_ch ?: Channel.empty())
+            .ifEmpty { file(params.caas_pos_cycle_caas_file ?: 'NO_CAAS_POS_CYCLE_CAAS') }
+            .collect()
+            .map { it[0] }
 
         // Positional universe and N of the null (see scoring_compute.R, section 2f-ter). The tested positions are
         // the live background.output, else --posenrich_background_file (the same file POSENRICH and CT_ACCUMULATION
@@ -306,10 +267,6 @@ workflow SCORING {
         gene_lists       = compute_out.gene_lists
         position_lists   = compute_out.position_lists
         report           = final_reports
-        // The CAAS null actually used here — which may have been REBUILT from
-        // --caas_pos_detail_file rather than imported. ENRICHMENT must consume this
-        // one, not re-resolve from params, or its FCS p.perm would fall back to the
-        // cached (possibly stale) caas_perms.rds while the scoring report used the
-        // rebuilt one — two different nulls in the same run.
+        // The CAAS null used here; ENRICHMENT consumes this one, so the FCS p.perm and the scoring report share it.
         caas_perms       = caas_perms_resolved
 }

@@ -1,6 +1,6 @@
 # POSENRICH sin Lachenbruch: evaluación del porte
 
-Estado: documento de trabajo. POSENRICH queda desactivado, con aviso, mientras no se decida lo que sigue. No hay cambios de código aplicados.
+Estado: documento de trabajo. Implementado en WP2: POSENRICH se omite, con aviso, cuando no hay nulo por posición (el vivo de CAAS_CORE_MERGE o `--caas_pos_cycle_caas_file`). Mientras ese nulo exista, el módulo sigue ejecutándose en las corridas normales; dejará de hacerlo de forma efectiva cuando WP5 retire `perm_pos_cycle_caas.tsv.gz`. Qué portar sigue sin decidirse.
 Contexto: `docs/PLAN_NULO_10K_PERMULACIONES.md` (decisión D1: Lachenbruch sale del FCS y de POSENRICH) y plan de implementación WP2.
 
 ## 1. Qué hace hoy (verificado en el código)
@@ -16,7 +16,7 @@ Contexto: `docs/PLAN_NULO_10K_PERMULACIONES.md` (decisión D1: Lachenbruch sale 
 
 - El fichero `perm_pos_cycle_caas.tsv.gz` (80,9 millones de filas a 1000 ciclos en cáncer; ~800 millones a 10.000) desaparece del nulo (WP5): SCORING pasa a contadores por bloque y la acumulación a un indicador por posición.
 - Lachenbruch sale del FCS. POSENRICH tiene su propia copia del test, de modo que podría conservarlo, pero ya no tendría el nulo por posición que lo alimenta.
-- Mientras tanto: módulo omitido con aviso explícito (informe 14 incluido).
+- Mientras tanto: módulo omitido con aviso explícito (informe 14 incluido) cuando falta el nulo por posición (implementado en WP2, `workflows/enrichment.nf`).
 
 ## 3. Opciones
 

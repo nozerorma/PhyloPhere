@@ -13,7 +13,8 @@
   "runtime": {
     "resume": false,
     "toy_mode": false,
-    "cleanup_policy": "remove_work",
+    "remove_intermediates": true,
+    "remove_work": true,
     "toy_n": "",
     "toy_perms": "100",
     "runtime_type": "local",

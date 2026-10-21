@@ -302,7 +302,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         if (run_caas_permulation) {
 
             def perm_align_ch = Channel.empty()   // alignments to replay
-            def perm_reuse_ch = Channel.empty()   // perm-discovery exports that already exist
             def perm_cfg_ch = Channel.value(file('NO_CONFIG'))
             def perm_subset_ch = null
             def perm_fop_pairs_ch = Channel.value(file('NO_FOP_PAIRS'))
@@ -318,112 +317,43 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 perm_subset_ch = ct_results.caas_resample_subset
                 perm_cfg_ch = ct_results.trait_file
                 if (ct_results.caas_fop_pairs) perm_fop_pairs_ch = ct_results.caas_fop_pairs
-            } else if (!params.caas_perms_file && !params.caas_pos_detail_file) {
-                // A null given by file (the reuse passes of the GUI scripts: --caas_perms_file, --caas_pos_detail_file) is
-                // imported by SCORING as it is; replaying it here would only rebuild it from whatever exports are left.
-                // 1. Check if precomputed permulation discovery outputs already exist from exploratory pass:
-                def precomp_disc_files = null
-                def precomp_subset_file = null
-
-                def candidate_base_dirs = []
-                if (params.resample_from)           candidate_base_dirs.add(file(params.resample_from).parent.parent)
-                if (params.disambiguation_input)    candidate_base_dirs.add(file(params.disambiguation_input).parent.parent)
-                if (params.discovery_from)         candidate_base_dirs.add(file(params.discovery_from).parent.parent)
-                if (params.background_input)        candidate_base_dirs.add(file(params.background_input).parent.parent)
-                if (params.meta_caas_from)          candidate_base_dirs.add(file(params.meta_caas_from).parent.parent)
-                candidate_base_dirs.add(file(params.outdir))
-
-                // First candidate dir holding both a resample file and per-cycle discovery files wins.
-                def precomp_found = candidate_base_dirs.findResult { base_dir ->
-                    if (!base_dir || !base_dir.exists()) return null
-
-                    // 1. Resample file resolution
-                    def resample_candidates = [
-                        file("${base_dir}/caas_permulation/resample_perms.tab"),
-                        file("${base_dir}/caastools/resample.tab"),
-                        file("${base_dir}/caastools/resample"),
-                        params.resample_from ? file(params.resample_from) : null
-                    ]
-                    def subset_f = resample_candidates.find { rf -> rf && rf.exists() }
-
-                    // 2. Discovery / perm-replay permulation files resolution
-                    // NOTE: Must be per-cycle *.perm_replay.discovery.output files (legacy runs:
-                    // *.bootstrap.discovery.output). Summary bootstrap.tab lacks the per-cycle
-                    // 'cycle' column needed by disambiguation_perms_main.py.
-                    def disc_candidates = []
-                    def disc_dir = file("${base_dir}/caas_permulation/perm_disc")
-                    def runtime_boot_dir = file("${base_dir}/runtime/filter/bootstrap")
-                    def caas_boot_dir = file("${base_dir}/caastools/bootstrap")
-
-                    if (disc_dir.exists() && file("${disc_dir}/*.perm_replay.discovery.output")) {
-                        disc_candidates = file("${disc_dir}/*.perm_replay.discovery.output")
-                    } else if (disc_dir.exists() && file("${disc_dir}/*.bootstrap.discovery.output")) {
-                        disc_candidates = file("${disc_dir}/*.bootstrap.discovery.output")
-                    } else if (runtime_boot_dir.exists() && file("${runtime_boot_dir}/*.bootstrap.discovery.output")) {
-                        disc_candidates = file("${runtime_boot_dir}/*.bootstrap.discovery.output")
-                    } else if (caas_boot_dir.exists() && file("${caas_boot_dir}/*.bootstrap.discovery.output")) {
-                        disc_candidates = file("${caas_boot_dir}/*.bootstrap.discovery.output")
-                    } else if (file("${base_dir}/caas_permulation/*.perm_replay.discovery.output")) {
-                        disc_candidates = file("${base_dir}/caas_permulation/*.perm_replay.discovery.output")
-                    } else if (file("${base_dir}/caas_permulation/*.bootstrap.discovery.output")) {
-                        disc_candidates = file("${base_dir}/caas_permulation/*.bootstrap.discovery.output")
-                    } else if (file("${base_dir}/caastools/*.bootstrap.discovery.output")) {
-                        disc_candidates = file("${base_dir}/caastools/*.bootstrap.discovery.output")
-                    }
-
-                    return (disc_candidates && subset_f) ? [disc: disc_candidates, subset: subset_f] : null
+            } else {
+                // A run that starts from a resample file (--resample_from, or the one next to a --discovery_from or --background_input): replay the alignments against it
+                def resample_src = null
+                def candidate_resamples = []
+                if (params.resample_from) candidate_resamples.add(params.resample_from)
+                if (params.discovery_from) {
+                    def p = file(params.discovery_from).parent
+                    candidate_resamples.add("${p}/resample.tab")
+                    candidate_resamples.add("${p}/resample")
                 }
-                precomp_disc_files = precomp_found?.disc
-                precomp_subset_file = precomp_found?.subset
+                if (params.background_input) {
+                    def p = file(params.background_input).parent
+                    candidate_resamples.add("${p}/resample.tab")
+                    candidate_resamples.add("${p}/resample")
+                }
+                candidate_resamples.add("${params.outdir}/caastools/resample.tab")
+                candidate_resamples.add("${params.outdir}/caastools/resample")
 
-                if (precomp_disc_files && precomp_subset_file) {
-                    // The exports were made from the labelings file next to them; b_0 is its first row when the
-                    // run replayed the real labeling. Exports without it carry no b_0 slice.
-                    def first_labeling = precomp_subset_file.withReader { r -> r.readLine() } ?: ''
-                    if (!(first_labeling ==~ /^b_0(~[^\t]*)?\t.*/)) {
-                        error "[CAAS_CORE] The perm-discovery exports to reuse were made without the real labeling (b_0): ${precomp_subset_file} has no b_0 rows. Rerun the null to replay it."
-                    }
-                    log.info "[CAAS_CORE] Reusing precomputed permulation discovery (${precomp_disc_files.size()} file(s)) + resample file (${precomp_subset_file.name}) for ASR re-disambiguation"
-                    perm_reuse_ch = Channel.fromPath(precomp_disc_files).collect()
-                    perm_subset_ch = Channel.value(precomp_subset_file)
-                } else {
-                    // 2. Precomputed CAAStools run without precomputed perm_disc: check if resample source is available for CAAS_PERMS_PREP
-                    def resample_src = null
-                    def candidate_resamples = []
-                    if (params.resample_from) candidate_resamples.add(params.resample_from)
-                    if (params.discovery_from) {
-                        def p = file(params.discovery_from).parent
-                        candidate_resamples.add("${p}/resample.tab")
-                        candidate_resamples.add("${p}/resample")
-                    }
-                    if (params.background_input) {
-                        def p = file(params.background_input).parent
-                        candidate_resamples.add("${p}/resample.tab")
-                        candidate_resamples.add("${p}/resample")
-                    }
-                    candidate_resamples.add("${params.outdir}/caastools/resample.tab")
-                    candidate_resamples.add("${params.outdir}/caastools/resample")
+                def resample_hit = candidate_resamples.find { cp -> cp && file(cp).exists() }
+                if (resample_hit) resample_src = file(resample_hit)
 
-                    def resample_hit = candidate_resamples.find { cp -> cp && file(cp).exists() }
-                    if (resample_hit) resample_src = file(resample_hit)
-
-                    if (resample_src && params.alignment) {
-                        def all_ali_files = listAlignmentFiles(params.alignment)
-                        if (all_ali_files) {
-                            if (params.toy_mode) {
-                                def n = (params.toy_n ?: 50) as int
-                                all_ali_files = sampleAlignmentFiles(all_ali_files, n, params.seed ?: 1998)
-                            }
-                            def align_tuple_standalone = Channel.fromList(all_ali_files.collect { f -> tuple(f.baseName, f) })
-                            def caas_cfg_standalone = contrast_out ? contrast_out.trait_file_out : (params.caas_config ? file(params.caas_config) : (ct_results ? ct_results.trait_file : Channel.empty()))
-
-                            def perms_prep = CAAS_PERMS_PREP(caas_cfg_standalone, resample_src)
-                            perm_align_ch = align_tuple_standalone
-                            core_replays = true
-                            perm_cfg_ch = (caas_cfg_standalone instanceof java.nio.file.Path) ? Channel.value(caas_cfg_standalone) : caas_cfg_standalone
-                            perm_subset_ch = perms_prep.resample_subset
-                            perm_fop_pairs_ch = perms_prep.fop_pairs
+                if (resample_src && params.alignment) {
+                    def all_ali_files = listAlignmentFiles(params.alignment)
+                    if (all_ali_files) {
+                        if (params.toy_mode) {
+                            def n = (params.toy_n ?: 50) as int
+                            all_ali_files = sampleAlignmentFiles(all_ali_files, n, params.seed ?: 1998)
                         }
+                        def align_tuple_standalone = Channel.fromList(all_ali_files.collect { f -> tuple(f.baseName, f) })
+                        def caas_cfg_standalone = contrast_out ? contrast_out.trait_file_out : (params.caas_config ? file(params.caas_config) : (ct_results ? ct_results.trait_file : Channel.empty()))
+
+                        def perms_prep = CAAS_PERMS_PREP(caas_cfg_standalone, resample_src)
+                        perm_align_ch = align_tuple_standalone
+                        core_replays = true
+                        perm_cfg_ch = (caas_cfg_standalone instanceof java.nio.file.Path) ? Channel.value(caas_cfg_standalone) : caas_cfg_standalone
+                        perm_subset_ch = perms_prep.resample_subset
+                        perm_fop_pairs_ch = perms_prep.fop_pairs
                     }
                 }
             }
@@ -431,7 +361,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             if (perm_subset_ch) {
                 core = CAAS_CORE(
                     perm_align_ch,
-                    perm_reuse_ch,
                     perm_cfg_ch,
                     perm_subset_ch,
                     perm_tree_ch,
@@ -884,11 +813,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             }
 
             if (params.enrichment) {
-                // SCORING may have REBUILT the CAAS null from --caas_pos_detail_file
-                // instead of importing caas_perms.rds. Take the null it actually
-                // resolved so ENRICHMENT's FCS p.perm uses the same matrices the
-                // scoring report did; re-resolving here would silently fall back to
-                // the cached (possibly stale) file.
+                // The null SCORING resolved, so ENRICHMENT's FCS p.perm uses the same matrices as the scoring report.
                 def caas_perms_for_enrich = params.scoring ? SCORING.out.caas_perms : scoring_caas_perms_ch
                 def fcs_stats_ch = params.scoring ? SCORING.out.fcs_stats : Channel.empty()
                 def fcs_stats_rer_ch = params.scoring ? SCORING.out.fcs_stats_rer : Channel.empty()
