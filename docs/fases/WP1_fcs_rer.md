@@ -92,3 +92,20 @@ A petición del usuario, junto a la regla de q.perm se informa la regla publicad
 Comprobado: sobre las cuatro tablas reales, fcs_classify_significance da el mismo recuento que un cálculo independiente (p.adj < nivel y p.perm < 0,025 y stat > 0): 192, 248 y 299 (neoplasia estricto), 155, 219 y 255 (maligno estricto), 67, 97 y 137 (neoplasia completo), 80, 111 y 144 (maligno completo), a 0,05, 0,10 y 0,15. Con q.perm < 0,05 y < 0,10 la regla nueva da 0 conjuntos en las cuatro (mínimo q.perm 0,108 a 0,344). Pruebas nuevas en test_fcs_no_null.py (nivel mínimo, niveles como parámetro, independencia de sig_perm, ranking firmado); sin fallos nuevos en unification (302 passed, mismo conjunto de 252 fallos y 17 errores) ni en wiring (55 fallos de la línea base; 110 passed).
 
 Lachenbruch (pregunta abierta del usuario, sin cambios de código): medido sobre las tablas reales, dentro de los 9 conjuntos de la regla nueva (6 de neoplasia completo y 3 de maligno completo) lo pasa la puerta antigua (lach_p.adj < 0,15 y lach_p.perm < 0,025) en 1 y 2 respectivamente; frente al Wilcoxon antiguo (299, 255, 137, 144) exigir también Lachenbruch dejaba 73, 19, 44 y 68. Su p de permulación está inflado en los estrictos (proporción con p < 0,05: 0,083 y 0,073 frente a 0,035 y 0,037 del Wilcoxon). Opciones registradas: devolverlo como anotación sin voto, o como filtro opcional apagado por defecto; la decisión es del usuario.
+
+## Adenda (2026-10-21): medición de RER_CONT (permulaciones de RER)
+
+Qué se midió: RER_CONT (`continuous_rer.R`, el del commit `d246e82` del cluster, sin cambios) sobre las entradas reales de neoplasia (RER de 16.109 genes, `rer_minsp` 15, `ha_logit`), 4 CPU y 32 GB pedidos, en 14 tareas independientes de un array de SLURM (trabajo 7571897): los primeros G genes de un orden aleatorio fijo (semilla 1998, subconjuntos anidados) con N permulaciones en lotes de 100 (y una con lotes de 1.000). Cada tarea registra tiempo, memoria máxima (VmHWM), CPU y tamaño del objeto. Datos y scripts: `PhyloPhere_validation/golden_581b999/wp1_checks/{rer_cont_scaling.tsv,rer_cont_scaling_raw.txt,rer_cont_rally.sh,rally_params.tsv}`.
+
+Resultados medidos (tiempo, pico de memoria y objeto de permulaciones):
+- 16.109 genes: 500 permulaciones 1.102 s, 1,07 GB, 184 MB; 1.000: 2.153 s, 1,58 GB, 368 MB; 2.000: 4.255 s, 2,46 GB, 737 MB.
+- 4.000 genes, 10.000 permulaciones: lotes de 100 5.477 s y 3,29 GB; lotes de 1.000 5.467 s y 2,80 GB (objeto de 914 MB).
+- 1.000 genes, 10.000 permulaciones: 1.682 s y 1,16 GB. 200 genes, 10.000: 650 s y 649 MB.
+- El tiempo de CPU es igual al de reloj en todas las tareas (un solo hilo efectivo). El tamaño del objeto es 24·G·N bytes (corP, corRho y corStat).
+
+Lectura (ajuste sobre las tareas de 1.000 permulaciones con G de 1.000 en adelante): T ≈ 60 s + 0,13 s por gen por cada 1.000 permulaciones. Predice 5.256 s para 4.000 genes y 10.000 permulaciones frente a 5.467 y 5.477 medidos (4 % por debajo). El reparto en lotes no cambia el tiempo (5.467 frente a 5.477 s) y cambia la memoria: el pico es unos 2,55 bytes por byte de objeto con lotes de 1.000 y unos 3,08 con lotes de 100, además de ~470 MB de base.
+
+Extrapolación (NO medida) a 16.109 genes y 10.000 permulaciones: unas 5,8 a 6,1 h (lineal en N, validado hasta 10.000 con 4.000 genes) y un pico de unos 9,9 GB con lotes de 1.000 o 11,8 GB con lotes de 100 (objeto de 3,7 GB). Cabe en los 32 GB de RER_CONT; el tiempo cabe en 8 h del primer intento con poco margen. No se midió la esquina completa (6 h) ni RER_BIN (el rasgo binario comparte `rer_perm_batches` y usa otra permulación; en el toy marino costó 16 min por 1.000 permulaciones con 121 genes).
+
+Pendiente: decidir el valor por defecto (la medición apoya 10.000 permulaciones con 10 lotes de 1.000) y, si se quiere, ajustar los recursos de RER_CONT (1 CPU, más tiempo); `rer_perm_batches` y `rer_perms_per_batch` son campos de la GUI y de la configuración.
+

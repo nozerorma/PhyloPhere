@@ -353,3 +353,5 @@ Aplicado en `581b999` + commits de WP0 a WP2: significación por BH sobre el p d
 
 Medido al aplicarlo: con la regla nueva, las cuatro tablas reales dan 0, 0, 6 y 3 conjuntos significativos (neoplasia estricto, maligno estricto, neoplasia completo, maligno completo), frente a 1, 0, 6 y 6 de la sección 5, que salieron del script de control; quitar copias y casi copias (Jaccard >= 0,9) retira el 10,5 a 10,8 % de las filas sin cambiar esos recuentos.
 
+Medición de RER_CONT (P10, 2026-10-21): el coste de las permulaciones de RER es lineal en N (unos 2,1 a 2,2 s por permulación con 16.109 genes; 4.000 genes con 10.000 permulaciones: 5.470 s y 2,8 a 3,3 GB según el tamaño de lote), la memoria crece con el objeto (24·G·N bytes) y el proceso usa un solo hilo; detalle y extrapolación señalada en `docs/fases/WP1_fcs_rer.md`.
+
