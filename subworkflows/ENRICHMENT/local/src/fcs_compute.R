@@ -4,7 +4,7 @@
 # =============================================================================
 # Called by:  FCS_COMPUTE_BATCHED Nextflow process (fcs.nf → Rscript fcs_compute.R ...)
 #
-# Runs fcs_run_all() (Wilcoxon-AUC and Lachenbruch tests) over
+# Runs fcs_run_all() (Wilcoxon-AUC test with permulation p and BH significance) over
 # every GMT database of --gmt-dir, so the expensive part can run as independent tasks
 # batched by GMT file. The BH correction of fcs_enrich.R is scoped per database, so the
 # rows of one batch never need reconciling with another and a row-concat of all batches
@@ -12,17 +12,16 @@
 #
 # Left to 12.FCS_general_report.Rmd, after the batches are merged:
 #   - the GMT description join, which uses the full (unbatched) GMT directory;
-#   - evidence_score, which ranks each statistic as a percentile among all the terms
-#     tested in that ranking across every database.
+#   - the redundancy reduction of the significant terms (fcs_cluster.R).
 #
 # Args (named flags, from task.script):
 #   --stats-file        gene scores, one score_<ranking> column per ranking
 #   --universe-file     gene universe, or NO_FILE (then the genes of --stats-file)
 #   --gmt-dir           directory of the *.gmt files of this batch
-#   --perms-file        null permutations for the permulation p of both tests, or NO_FILE
+#   --perms-file        null permutations for the permulation p, or NO_FILE
 #   --num-g, --max-g    minimum and maximum gene-set size (max-g 0 = no limit)
-#   --fdr-thr           default FDR; --fdr-wilcoxon and --fdr-lachenbruch override it per test
-#   --pperm-thr         permutation p-value threshold
+#   --fdr-thr           BH threshold on the permulation p (q.perm)
+#   --pperm-thr         second threshold, on the permulation p itself
 #   --output            output TSV
 # =============================================================================
 
@@ -49,8 +48,6 @@ perms_file    <- get_arg("--perms-file", "NO_FILE")
 num_g         <- as.numeric(get_arg("--num-g", "10"))
 max_g         <- as.numeric(get_arg("--max-g", "0"))
 fdr_thr       <- as.numeric(get_arg("--fdr-thr", "0.15"))
-fdr_wilcoxon  <- as.numeric(get_arg("--fdr-wilcoxon", as.character(fdr_thr)))
-fdr_lachenbruch <- as.numeric(get_arg("--fdr-lachenbruch", as.character(fdr_thr)))
 pperm_thr     <- as.numeric(get_arg("--pperm-thr", "0.025"))
 out_file      <- get_arg("--output", "fcs_enrich_partial.tsv")
 
@@ -101,7 +98,6 @@ gmts <- fcs_load_gmts(gmt_dir)
 
 enrich <- fcs_run_all(rankings, gmts, num_g = num_g, max_g = max_g,
                       perms_file = perms_file, fdr_thr = fdr_thr,
-                      fdr_wilcoxon = fdr_wilcoxon, fdr_lachenbruch = fdr_lachenbruch,
                       p_perm_thr = pperm_thr)
 
 

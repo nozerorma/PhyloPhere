@@ -34,17 +34,17 @@ logger = logging.getLogger(__name__)
 # Batch-size parameters of the permulation null that ct_core_batch_size covers; the value of ct_core_batch_size is used instead.
 _RETIRED_CAAS_FIELDS = ("ct_perm_replay_batch_size", "ct_disambig_perms_batch_size")
 
-# Parameters that no process reads: those of tasks the pipeline does not have (the per-gene discovery task, the chunking of
-# the observed disambiguation) and the ASR mode (a gene is read from the ASR cache when it is there and computed when not).
 # cleanup_policy of older project files -> (remove_intermediates, remove_work)
 _CLEANUP_POLICY_OPTIONS = {"none": (False, False), "prune_intermediates": (True, False), "remove_work": (True, True)}
 
+# Parameters that no process reads: those of tasks the pipeline does not have (the per-gene discovery task, the chunking of
+# the observed disambiguation) and the ASR mode (a gene is read from the ASR cache when it is there and computed when not).
 _RETIRED_FIELDS = {
     "caas": ("ct_discovery_batch_size", "export_groups", "export_perm_discovery"),
     "disambiguation": ("ct_disambig_asr_mode", "ct_disambig_batch_size"),
     "scoring": ("scoring_weight_caas", "scoring_weight_rer", "scoring_weight_fade", "scoring_rer_direction", "scoring_stress", "scoring_stress_top_n",
                 "scoring_stress_rank_metric", "scoring_ami", "scoring_string", "scoring_compare_fdr", "scoring_compare_top_n"),
-    "enrichment": ("cosmic_db",),
+    "enrichment": ("cosmic_db", "fcs_fdr_wilcoxon", "fcs_fdr_lachenbruch"),
     "accumulation": ("accumulation_n_randomizations", "accumulation_randomization_type", "accumulation_entropy_dir"),
 }
 

@@ -282,13 +282,13 @@ class EnrichmentConfig(ModuleConfigBase):
     auto_fetch_eggnog: bool = False  # Download the eggNOG pair instead of using the versioned copy
 
     # FCS (ranked-Wilcoxon) enrichment
-    fcs_min_genes: str = "5"  # --fcs_min_genes
-    fcs_max_genes: str = "1000"  # --fcs_max_genes (0 = no limit)
-    fcs_fdr: str = "0.15"  # --fcs_fdr
-    fcs_fdr_wilcoxon: str = ""  # --fcs_fdr_wilcoxon (blank -> the FCS FDR)
-    fcs_fdr_lachenbruch: str = ""  # --fcs_fdr_lachenbruch (blank -> the FCS FDR)
+    fcs_min_genes: str = "10"  # --fcs_min_genes
+    fcs_max_genes: str = "0"  # --fcs_max_genes (0 = no limit)
+    fcs_fdr: str = "0.15"  # --fcs_fdr (BH on the permulation p: q.perm)
     pfam_cache_dir: str = ""  # --pfam_cache_dir (blank -> ~/.cache/phylophere/pfam)
-    fcs_pperm_thr: str = "0.025"  # --fcs_pperm_thr
+    fcs_pperm_thr: str = "0.025"  # --fcs_pperm_thr (second threshold, on p.perm)
+    fcs_cluster_similarity: str = "jaccard"  # --fcs_cluster_similarity: "jaccard" | "overlap"
+    fcs_cluster_threshold: str = "0.5"  # --fcs_cluster_threshold
     fcs_top_n: str = "20"  # --fcs_top_n
     fcs_batch_size: str = "4"  # --fcs_batch_size (GMTs per FCS_COMPUTE_BATCHED task)
     # caas_permulation_enrichment (conf/enrichment.config) is a field of CaasConfig, not

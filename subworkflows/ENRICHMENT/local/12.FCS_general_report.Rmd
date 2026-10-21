@@ -1,5 +1,5 @@
 ---
-title: "FCS Enrichment (Multi-Method) - `r params$project_name`"
+title: "FCS Enrichment - `r params$project_name`"
 subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 author: "PhyloPhere pipeline"
@@ -23,12 +23,11 @@ params:
   gmt_dir:      NULL          # directory of curated *.gmt files
   project_name: "FCS"
   num_g:        10            # min genes per set (fastwilcoxGMT num.g)
-  max_g:        500           # max genes per set (0 / Inf = no limit)
-  fdr_thr:      0.15          # BH (adjusted-p) cutoff - RERconverge categorical default (msae210);
-                              # display default + fallback for the per-method gates below
-  fdr_wilcoxon:    0.15       # sig_wilcoxon BH gate (defaults to fdr_thr if NULL)
-  fdr_lachenbruch: 0.05       # sig_lachenbruch BH gate - analytic, stricter
-  pperm_thr:    0.025         # permulation-p cutoff - applied in addition to fdr_wilcoxon when perms exist
+  max_g:        0             # max genes per set (0 / Inf = no limit)
+  fdr_thr:      0.15          # BH threshold on the permulation p of each set (q.perm), per ranking and database
+  pperm_thr:    0.025         # second threshold: a significant set also needs p.perm below this value (sig_top)
+  cluster_similarity: "jaccard" # redundancy reduction: leading-edge similarity, jaccard or overlap
+  cluster_threshold:  0.5     # redundancy reduction: similarity at which a set joins a representative
   top_n:        20            # rows shown per database x ranking
   leading_edge_top_n: 100     # rows shown in the pooled (all-database) leading-edge
                               # composition table, deliberately more generous than
@@ -125,6 +124,9 @@ src_candidates <- c(file.path(this_dir, "src", "fcs_enrich.R"), "src/fcs_enrich.
 src <- src_candidates[file.exists(src_candidates)][1]
 if (is.na(src)) stop("fcs_enrich.R not found under src/ or next to FCS_general.Rmd")
 suppressMessages(invisible(capture.output(source(src))))
+src_cluster <- file.path(dirname(src), "fcs_cluster.R")
+if (!file.exists(src_cluster)) stop("fcs_cluster.R not found next to fcs_enrich.R")
+source(src_cluster)
 
 # HTML table with the report style; optional scroll box of fixed height.
 kbl_html <- function(df, height = NULL, escape = TRUE, caption = NULL, ...) {
@@ -163,10 +165,9 @@ if (length(universe) < 2) {
 score_cols <- grep("^score_", names(stats), value = TRUE)
 if (length(score_cols) == 0) stop("stats_file has no score_<ranking> columns")
 ranking_names_raw <- sub("^score_", "", score_cols)
-# Canonical tab order: global, top, bottom, accelerating, decelerating (the order of
-# the other enrichment reports). The column order of stats_file is incidental and must
-# not drive it; a ranking outside this set is appended at the end in file order.
-RANKING_ORDER <- c("global", "top", "bottom", "accelerating", "decelerating")
+# Canonical tab order: global, top, bottom. The column order of stats_file is incidental and
+# must not drive it; a ranking outside this set is appended at the end in file order.
+RANKING_ORDER <- c("global", "top", "bottom")
 ranking_names <- c(intersect(RANKING_ORDER, ranking_names_raw),
                    setdiff(ranking_names_raw, RANKING_ORDER))
 
@@ -198,77 +199,52 @@ desc_map <- suppressMessages(fcs_load_descriptions(gmt_dir))
 ```{r overview, echo=FALSE}
 tibble::tibble(
   Field = c("Project", "Trait", "Genes (stats)", "Universe genes", "Rankings",
-            "Flags", "GMT databases", "num.g (min set)", "max.g (max set)", "BH threshold"),
+            "Flags", "GMT databases", "num.g (min set)", "max.g (max set)", "Significance (BH on p.perm, second threshold)"),
   Value = c(params$project_name, params$traitname, nrow(stats), length(universe),
             paste(ranking_names, collapse = ", "),
             if (length(flag_cols)) paste(sub("^flag_", "", flag_cols), collapse = ", ") else "(none)",
             length(gmts), params$num_g,
             ifelse(is.null(params$max_g) || params$max_g <= 0 || !is.finite(params$max_g), "(none)", as.character(params$max_g)),
-            params$fdr_thr)
+            sprintf("q.perm < %s and p.perm < %s", params$fdr_thr, params$pperm_thr))
 ) %>% kbl_html()
 ```
 
 # Methods
 
-This report tests every gene set in every GMT database with **two
-complementary methods**, both of which ask a *relative* question: is this
-pathway higher than the OTHER GENES in this same ranking?
+Every gene set of every GMT database is tested against each ranking with the
+**Wilcoxon-AUC test** (`RERconverge::fastwilcoxGMTall`), a rank-sum test that asks
+whether the genes of the set sit systematically higher in the ranking than the other
+genes of the universe. Its statistic, the **AUC** (`stat + 0.5`, range 0 to 1), is the
+probability that a random gene of the set outranks a random gene outside it; 0.5 means
+no shift. On a ranking where most genes score 0 the analytic p accounts for the ties
+(the variance of the rank sum carries the tie term). A ranking with negative values
+(a signed statistic) is tested two-sided, and a set can be enriched on either side.
 
-When a phylogenetic permulation null is available, each method ALSO requires
-that this holds up against a null built by randomly reassigning the phenotype
-across species on the real tree (`W.perm`/`L.perm`, gated at
-`r params$pperm_thr`). Both conditions must hold; the relative comparison is
-the primary test, the phylogenetic one is an additional requirement on top of it.
+The analytic p (`p.adj`, BH within the database) assumes independent genes and species.
+The decision rests on the **permulation p** (`p.perm`) instead: the same test is run on
+every column of a null built by reassigning the phenotype across species on the real
+tree, and `p.perm` is the fraction of null columns at least as extreme as the observed
+one, with a pseudo-count. On a ranking with many tied genes the permulation p compares
+the tie-corrected p of the test, not the AUC, so that null columns with a different
+number of tied genes share one scale.
 
-* **Wilcoxon-AUC FCS** (`RERconverge::fastwilcoxGMTall`) - a rank-sum test:
-  do this pathway's genes sit systematically higher in the ranking than every
-  other gene in the universe? Its statistic, **AUC** (`W.AUC`, `stat + 0.5`,
-  range 0–1), is the probability that a random pathway gene outranks a random
-  background gene; 0.5 = no shift. Significance is BH-adjusted p (`W.adj`)
-  below the threshold, and - when permulations are available - permulation p
-  (`W.perm`) below `r params$pperm_thr` as well. On a ranking where most genes
-  score 0 the p accounts for the ties (the variance of the rank sum has the tie
-  term), and the permulation p compares that p, not the AUC, with the same p
-  of every null column, so that columns with a different number of tied genes
-  share one scale.
-* **Lachenbruch Two-Part** - built for the zero-inflated shape of these
-  rankings, where most genes carry no signal at all (score = 0). It splits
-  the question in two: a Fisher exact test on *prevalence* (are pathway genes
-  over-represented among the genes that scored above zero at all, relative to
-  every other gene?) and a rank-sum test on *magnitude* (among only the genes
-  that scored above zero, do pathway genes score higher than other scoring
-  genes? normal approximation with the tie term), combined into one χ²(df=2)
-  p-value (`L.adj`). The observed ranking and every null column go through the
-  same code, and POSENRICH runs the same test on positions. Its statistic,
-  **`L.frac_mag`**, is the fraction of that combined signal coming from the
-  magnitude half rather than the prevalence half - a set near 1 is driven by
-  a few strongly-scoring genes, a set near 0 by many weakly-scoring ones.
+* **Significant set** (`sig_perm`): `q.perm` below `r params$fdr_thr`, where `q.perm` is
+  the Benjamini-Hochberg adjustment of `p.perm` within each ranking and database.
+* **Second threshold** (`sig_top`): a significant set whose `p.perm` is also below
+  `r params$pperm_thr`.
+* A ranking without a permulation null has no `p.perm` and so no significant set; the
+  analytic `p.adj` is shown for reference.
 
-Each method casts one vote (its own FDR gate, plus direction where
-applicable); a set passing **2/2** is labelled **Supported** and **1/2**
-**Exploratory** (`evidence_count` / `evidence_label`). Lachenbruch only runs
-for non-negative (zero-floored) rankings - a signed ranking (e.g. RER's
-two-sided global statistic) is Wilcoxon-only, since "score > 0" carries no
-"has signal" meaning there, so its best label is Exploratory.
+The sets are ordered everywhere by `q.perm`, then `p.perm`, then the size of the effect
+(`|stat|`), then description.
 
-**Ranking convention.** Wherever this report ranks or orders significant
-terms - the Multi-Method Evidence table, the per-database Enriched gene set
-tables, the Overall dotplot, and the Leading-edge composition table - it uses
-the same three-key convention: **evidence tier first** (Supported >
-Exploratory), **then `evidence_score`**, **then alphabetical** by description
-as a final tie-break.
-
-`evidence_score` exists because evidence tier alone leaves every term in the
-same tier tied - e.g. every "Supported" (2/2) term looks identical unless
-something breaks the tie. Each **passing** method's statistic is first
-converted to its own percentile rank (0–1) among every term tested in that
-ranking - putting both on the same unitless scale - and a method that
-didn't pass its own gate contributes 0. Summing the two gives a 0–2 score:
-a continuous version of `evidence_count` that still rewards passing more
-tests, but among terms tied on tier also rewards being relatively stronger
-on the tests that did pass. It is a ranking heuristic, not a statistic in
-its own right - the evidence tier, not `evidence_score`, is what carries the
-actual significance claim.
+**Redundancy reduction.** Gene sets of different databases, and parent and child terms
+of one database, share genes. The significant sets of each ranking are grouped by the
+similarity of their leading edges (`r params$cluster_similarity`, threshold
+`r params$cluster_threshold`): the set with the smallest `q.perm` is a representative,
+and each following set joins the first representative at least that similar to it, or
+becomes a new representative (`cluster_id`, `is_representative`). The grouping is
+applied after the significance call and changes no p or q value.
 
 ```{r run, include=FALSE}
 # fcs_run_all() over every GMT database is the expensive step. The pipeline runs it as
@@ -290,8 +266,6 @@ if (!is.null(params$enrich_file) && nzchar(params$enrich_file) && file.exists(pa
                                          max_g        = params$max_g,
                                          perms_file   = params$perms_file,
                                          fdr_thr      = params$fdr_thr,
-                                         fdr_wilcoxon    = params$fdr_wilcoxon    %||% params$fdr_thr,
-                                         fdr_lachenbruch = params$fdr_lachenbruch %||% params$fdr_thr,
                                          p_perm_thr   = params$pperm_thr))
 }
 # Gene-set descriptions need the full GMT directory, so they are joined after the merge.
@@ -307,64 +281,35 @@ attr_df <- pct_flags
 if (length(flag_cols)) attr_df <- dplyr::left_join(pct_flags, annot[, c("gene", flag_cols)], by = "gene")
 attr_cols_all <- setdiff(names(attr_df), "gene")
 
-# The leading edge keeps only the genes that drive each enrichment: pathway members with
-# signal (score > 0) in that ranking. gene.vals of fastwilcoxGMT lists every member in
-# the universe, including zero-floored genes, and summarizing over those would dilute
-# the composition with non-drivers. score_long supplies the score used to filter them.
+# A ranking with negative scores is signed (tested two-sided).
 score_long <- stats %>%
   dplyr::select(gene, dplyr::all_of(score_cols)) %>%
   tidyr::pivot_longer(-gene, names_to = "ranking", values_to = "drv_score") %>%
   dplyr::mutate(ranking = sub("^score_", "", ranking))
+ranking_signed <- vapply(split(score_long$drv_score, score_long$ranking), function(v) any(v < 0, na.rm = TRUE), logical(1))
+
+# The leading edge keeps only the genes that drive each enrichment. In a magnitude ranking
+# these are the members with signal (score > 0); gene.vals of fastwilcoxGMT lists every
+# member in the universe, including zero-floored genes, and summarizing over those would
+# dilute the composition with non-drivers. In a signed ranking they are the members whose
+# score has the sign of the enrichment of the set (positive scores for a set enriched in
+# the upper tail, negative for one enriched in the lower tail).
 leading <- fcs_annotate_leading_edge(enrich, attr_df) %>%
   dplyr::left_join(score_long, by = c("gene", "ranking")) %>%
-  dplyr::filter(!is.na(drv_score) & drv_score > 0) %>%
-  dplyr::select(-drv_score)
+  dplyr::mutate(.signed = unname(ranking_signed[ranking])) %>%
+  dplyr::filter(!is.na(drv_score) &
+                  dplyr::if_else(.signed, drv_score != 0 & sign(drv_score) == sign(stat), drv_score > 0)) %>%
+  dplyr::select(-drv_score, -.signed)
 
-# Wilcoxon significance: adjusted p < fdr_thr and, when permulations are
-# available, permulation p < pperm_thr. The permulation p corrects for the
-# non-independence of gene ranks: a low value means that the BH significance follows
-# the phenotype and not other correlation in the data. Without permulations
-# (perms_file = NO_FILE) the permulation clause is vacuous and the BH cutoff decides.
-#
-# Each permulation cycle pairs foreground and background species with the same
-# candidate gate, ranking and greedy pair assembly as the observed selector
-# (lean_candidate_df() and greedy_dunn_select() of lean_contrast_selector.R, shared
-# with fop_pair_sel.f of selection_algorithm.R), applied to the permuted trait vector.
-# A cycle is accepted when at most one pair falls below modified Dunn 1 and rejected
-# when two or more do, so p.perm isolates the phenotype effect under the pairing
-# methodology of the observed contrast.
-#
-# evidence_count, evidence_label and sig_* come from fcs_run_all(). sig marks the terms
-# that pass at least one method and gates the dotplots and the leading edge.
-#
-# evidence_rank and evidence_score implement the ranking convention of the Methods
-# section (evidence tier, then evidence_score, then alphabetical description) once, so
-# every table and plot below orders terms identically. evidence_score sums, over the
-# methods that pass their own gate, the percentile rank (0-1) of the method statistic
-# among all terms tested in the same ranking. The percentile puts AUC and L.frac_mag
-# on one unitless scale. A method
-# that does not pass contributes 0, so the score (0-2) refines the integer
-# evidence_count by breaking the ties among terms that clear the same number of gates.
-enrich <- enrich %>%
-  dplyr::group_by(ranking) %>%
-  dplyr::mutate(
-    .auc_pct = dplyr::percent_rank(stat + 0.5),
-    .lfm_pct = dplyr::percent_rank(lach_frac_magnitude)
-  ) %>%
-  dplyr::ungroup() %>%
-  dplyr::mutate(
-    sig = evidence_count >= 1L,
-    evidence_rank = dplyr::case_when(
-      evidence_label == "Supported"   ~ 1L,
-      evidence_label == "Exploratory" ~ 2L,
-      TRUE                            ~ 3L
-    ),
-    evidence_score = dplyr::if_else(sig_wilcoxon %in% TRUE,    dplyr::coalesce(.auc_pct, 0), 0) +
-                     dplyr::if_else(sig_lachenbruch %in% TRUE, dplyr::coalesce(.lfm_pct, 0), 0)
-  ) %>%
-  dplyr::select(-.auc_pct, -.lfm_pct)
+# Redundancy reduction of the significant sets of each ranking (fcs_cluster.R).
+enrich <- fcs_add_clusters(enrich, leading,
+                           threshold = params$cluster_threshold, method = params$cluster_similarity) %>%
+  dplyr::mutate(sig = sig_perm %in% TRUE)
 has_perm_any <- any(!is.na(enrich$p.perm))
 n_sig <- sum(enrich$sig, na.rm = TRUE)
+
+# Table order of the report: q.perm, p.perm, size of the effect, description.
+ord_sig <- function(d) dplyr::arrange(d, q.perm, p.perm, dplyr::desc(abs(stat)), description)
 
 dir.create("fcs_results", showWarnings = FALSE)
 readr::write_tsv(enrich %>% select(-any_of("gene.vals")), "fcs_results/fcs_all_results.tsv")
@@ -372,117 +317,78 @@ readr::write_tsv(leading, "fcs_results/fcs_leading_edge.tsv")
 ```
 
 ```{r banner, echo=FALSE, results='asis'}
-n_supp  <- sum(enrich$evidence_count == 2L, na.rm = TRUE)
-n_expl  <- sum(enrich$evidence_count == 1L, na.rm = TRUE)
+n_top   <- sum(enrich$sig_top %in% TRUE)
+n_rep   <- sum(enrich$is_representative %in% TRUE)
 n_dbs   <- dplyr::n_distinct(enrich$database)
 cat(sprintf(
-  "**%d supported** (2/2) | **%d exploratory** (1/2) gene sets across %d databases.\n\n",
-  n_supp, n_expl, n_dbs))
-cat("_Methods: Wilcoxon-AUC FCS &nbsp;|&nbsp; Lachenbruch Two-Part. FDR threshold: ",
-    params$fdr_thr, "_\n\n")
+  "**%d significant** gene sets (`q.perm` < %s), **%d** of them also with `p.perm` < %s, in **%d groups** of overlapping sets, across %d databases.\n\n",
+  n_sig, params$fdr_thr, n_top, params$pperm_thr, n_rep, n_dbs))
+if (!has_perm_any) cat("_No permulation null was available: `p.perm` is empty and no set can be called significant._\n\n")
+no_null_rk <- ranking_names[vapply(ranking_names, function(r) all(is.na(enrich$p.perm[enrich$ranking == r])), logical(1))]
+if (has_perm_any && length(no_null_rk)) {
+  cat(sprintf("_Rankings without a permulation null (no significant set): %s._\n\n", paste(no_null_rk, collapse = ", ")))
+}
 ```
 
-# Multi-Method Evidence {.tabset .tabset-fade}
+# Significant gene sets {.tabset .tabset-fade}
 
-All terms where **at least one test** passed its significance gate, grouped by
-direction. Columns: `W.AUC` (Wilcoxon effect size), `W.adj` (Wilcoxon BH p), `W.perm` (Wilcoxon permulation p),
-`L.adj` (Lachenbruch BH p), `L.frac_mag` (fraction of Lachenbruch signal from
-magnitude vs prevalence), `L.perm` (Lachenbruch permulation p). NA = test not
-applicable (signed ranking) or not run. Orange = Supported (2/2), grey =
-Exploratory (1/2). Rows follow the ranking convention from Methods above:
-evidence tier, then mean(`W.AUC`, `L.frac_mag`), then alphabetical.
+All sets with `q.perm` below the threshold, per ranking. `AUC` is the Wilcoxon effect size,
+`p.adj` the analytic BH-adjusted p (reference only), `p.perm` the permulation p and `q.perm`
+its BH adjustment. `2nd` marks the sets that also pass the second threshold on `p.perm`.
+`Group` is the redundancy group of the set and `Rep` marks its representative (the set of the
+group with the smallest `q.perm`).
 
-```{r evidence_table, results='asis'}
-evidence_colours <- c(
-  "Supported"   = "#e67e22",
-  "Exploratory" = "#7f8c8d"
-)
+```{r significant_table, results='asis'}
 for (rk in ranking_names) {
   cat(sprintf("\n## %s\n\n", rk))
-  # Raw permulation p-values against the CAAS/RER null (empirical, floor 1/(N+1)).
-  # Both are shown so that the null-model result of each test is visible next to
-  # the pass mark and the BH-adjusted p.
-  has_w_perm <- any(!is.na(enrich$p.perm))
-  has_l_perm <- "lach_p.perm" %in% names(enrich) && any(!is.na(enrich$lach_p.perm))
   ev <- enrich %>%
-    dplyr::filter(ranking == rk, evidence_count >= 1L) %>%
-    dplyr::arrange(evidence_rank, dplyr::desc(evidence_score), description) %>%
+    dplyr::filter(ranking == rk, sig) %>%
+    ord_sig() %>%
     dplyr::mutate(
-      Description  = stringr::str_trunc(description, 60),
-      W.AUC        = round(stat + 0.5, 3),
-      W.adj        = signif(p.adj, 3),
-      W.perm       = if (has_w_perm) signif(p.perm, 3) else NA_real_,
-      L.adj        = signif(lach_p.adj, 3),
-      L.perm       = if (has_l_perm) signif(lach_p.perm, 3) else NA_real_,
-      L.frac_mag   = round(lach_frac_magnitude, 2),
-      Wilcoxon     = ifelse(dplyr::coalesce(sig_wilcoxon, FALSE), "X", ""),
-      Lachenbruch  = ifelse(dplyr::coalesce(sig_lachenbruch, FALSE), "X", "")
+      Description = stringr::str_trunc(description, 60),
+      AUC         = round(stat + 0.5, 3),
+      p.adj       = signif(p.adj, 3),
+      p.perm      = signif(p.perm, 3),
+      q.perm      = signif(q.perm, 3),
+      `2nd`       = ifelse(dplyr::coalesce(sig_top, FALSE), "X", ""),
+      Direction   = direction,
+      Group       = cluster_id,
+      Rep         = ifelse(dplyr::coalesce(is_representative, FALSE), "X", "")
     ) %>%
-    dplyr::select(evidence_label, pathway, Description, num.genes,
-                  Wilcoxon, Lachenbruch,
-                  W.AUC, W.adj, any_of("W.perm"),
-                  L.adj, any_of("L.perm"), L.frac_mag)
-  if (nrow(ev) == 0) { cat("_No terms passed any significance gate._\n"); next }
-  # Color the evidence_label column with kableExtra::cell_spec.
-  ev$evidence_label <- kableExtra::cell_spec(
-    ev$evidence_label, "html",
-    color = "white",
-    background = evidence_colours[ev$evidence_label],
-    bold = TRUE, extra_css = "padding: 2px 6px; border-radius: 3px;"
-  )
-  print(kbl_html(ev, escape = FALSE, height = if (nrow(ev) > 15) "460px" else NULL))
+    dplyr::select(database, pathway, Description, num.genes, AUC, p.adj, p.perm, q.perm, `2nd`, Direction, Group, Rep)
+  if (nrow(ev) == 0) { cat("_No set passed the significance threshold._\n"); next }
+  print(kbl_html(ev, escape = TRUE, height = if (nrow(ev) > 15) "460px" else NULL))
 }
 ```
 
 # Enriched gene sets {.tabset .tabset-fade}
 
-Displays the top `r params$top_n` positively-enriched sets per database (`stat` > 0, i.e. Wilcoxon AUC > 0.5), ordered by the ranking convention from Methods above (evidence tier, then mean of the methods' own statistics, then alphabetical). Significance is evaluated independently by two complementary tests: **Wilcoxon** (rank-sum AUC / BH p) and **Lachenbruch** (two-part test), each against its own threshold. The **Wilcoxon** and **Lachenbruch** columns indicate which tests passed (`X`).
+The top `r params$top_n` enriched sets per database ordered by `q.perm` (a magnitude ranking shows
+the sets with `stat` > 0, i.e. AUC > 0.5; a signed ranking shows both sides, with their direction),
+whether or not they pass the thresholds.
 
 ```{r tables, results='asis'}
-# top_sel[[rk]] stores the rows shown per database (full precision, table order), so
-# that the Overall dotplot pools exactly the same selection.
-top_sel <- list()
 for (rk in ranking_names) {
   cat(sprintf("\n## %s {.tabset}\n", rk))
-  sub <- enrich %>% filter(ranking == rk, stat > 0)
-  if (nrow(sub) == 0) { cat("\n_No positively-enriched sets._\n"); top_sel[[rk]] <- sub; next }
-
-  # Ranking convention of the Methods section: evidence tier, then evidence_score
-  # (descending), then alphabetical description.
-  sub <- sub %>% dplyr::arrange(evidence_rank, dplyr::desc(evidence_score), description)
-
+  sub <- enrich %>% filter(ranking == rk)
+  if (!isTRUE(ranking_signed[[rk]])) sub <- sub %>% filter(stat > 0)
+  if (nrow(sub) == 0) { cat("\n_No enriched sets._\n"); next }
+  sub <- sub %>% ord_sig()
   db_sel <- sub %>% dplyr::group_by(database) %>% dplyr::slice_head(n = params$top_n) %>% dplyr::ungroup()
-  top_sel[[rk]] <- db_sel
 
   for (db in unique(sub$database)) {
-    dbres <- db_sel %>% filter(database == db) %>%
-      mutate(AUC = round(stat + 0.5, 3),
-             Description = stringr::str_trunc(description, 70),
-             pval = signif(pval, 3),
-             p.adj = signif(p.adj, 3))
-    n_supp_db  <- sum(dbres$evidence_count == 2L, na.rm = TRUE)
-    n_expl_db  <- sum(dbres$evidence_count == 1L, na.rm = TRUE)
-
-    has_lach <- any(!is.na(dbres$lach_p.adj))
-    has_w_perm_db <- any(!is.na(dbres$p.perm))
-    has_l_perm_db <- "lach_p.perm" %in% names(dbres) && any(!is.na(dbres$lach_p.perm))
-
-    disp <- dbres %>%
-      mutate(evidence = evidence_label,
-             W.AUC = round(stat + 0.5, 3),
-             W.adj = signif(p.adj, 3),
-             W.perm = if (has_w_perm_db) signif(p.perm, 3) else NA_real_,
-             L.adj = if (has_lach) signif(lach_p.adj, 3) else NA_real_,
-             L.perm = if (has_l_perm_db) signif(lach_p.perm, 3) else NA_real_,
-             L.frac_mag = if (has_lach) round(lach_frac_magnitude, 2) else NA_real_,
-             Wilcoxon    = ifelse(dplyr::coalesce(sig_wilcoxon, FALSE), "X", ""),
-             Lachenbruch = ifelse(dplyr::coalesce(sig_lachenbruch, FALSE), "X", "")) %>%
-      select(evidence, pathway, Description, num.genes, Wilcoxon, Lachenbruch,
-             W.AUC, W.adj, any_of(c("W.perm", "L.adj", "L.perm", "L.frac_mag")))
-
+    disp <- db_sel %>% filter(database == db) %>%
+      mutate(Description = stringr::str_trunc(description, 70),
+             AUC     = round(stat + 0.5, 3),
+             p.adj   = signif(p.adj, 3),
+             p.perm  = signif(p.perm, 3),
+             q.perm  = signif(q.perm, 3),
+             `2nd`   = ifelse(dplyr::coalesce(sig_top, FALSE), "X", ""),
+             Sig     = ifelse(dplyr::coalesce(sig_perm, FALSE), "X", ""),
+             Direction = ifelse(stat > 0, "positive", "negative")) %>%
+      select(pathway, Description, num.genes, AUC, p.adj, p.perm, q.perm, Sig, `2nd`, Direction)
     cat(sprintf("\n### %s\n\n", db))
-    cat(sprintf("_%d shown - supported: %d | exploratory: %d._\n\n",
-                nrow(disp), n_supp_db, n_expl_db))
+    cat(sprintf("_%d shown - significant: %d._\n\n", nrow(disp), sum(disp$Sig == "X")))
     print(kbl_html(disp, height = if (nrow(disp) > 15) "420px" else NULL))
   }
 }
@@ -490,116 +396,15 @@ for (rk in ranking_names) {
 
 # Overall dotplot {.tabset .tabset-fade}
 
-One dotplot per direction, pooling across all databases and restricted to the
-top `r params$top_n` significant terms, ordered top-to-bottom by the same
-ranking convention as the tables above (evidence tier, then evidence_score,
-then alphabetical). Each term shows up to two horizontal arms - one per
-method that ran - laid out on a **shared x-axis of `-log10(BH-adjusted p)`**
-(so both methods' significance is directly comparable on one scale: the
-BH threshold is the same dashed line for both). An arm's **colour**
-encodes that method's own effect-size statistic (AUC for Wilcoxon, `L.frac_mag`
-for Lachenbruch) - light-to-dark within that method's own
-colour family, darker meaning a larger statistic among the terms shown. Faint
-(low-alpha) arms mark a method that ran but did not pass its own significance
-gate for that term. The **tip marker** sits at the term's single
-most-significant arm, drawn in a dark, saturated shade of that arm's colour
-family (bigger than the arm dots) so the strongest single piece of evidence
-per term is immediately visible; its shape encodes the evidence tier (triangle
-= Supported, square = Exploratory - a lone pass, see Methods) and its size the
-gene-set size.
-
-```{r overall_dotplot_prep, include=FALSE}
-DIR_MAP <- c(top = "top", accelerating = "top", bottom = "bottom", decelerating = "bottom")
-evidence_shapes <- c("Supported" = 17, "Exploratory" = 15)
-
-# Darken a hex color toward black by `amount` (0-1); the tip marker uses it to take a
-# deeper shade of the color of its own arm.
-.darken_hex <- function(hex, amount = 0.3) {
-  rgb <- grDevices::col2rgb(hex) / 255
-  rgb <- rgb * (1 - amount)
-  grDevices::rgb(rgb[1, ], rgb[2, ], rgb[3, ])
-}
-
-# Light-to-dark gradient bar of one method, used as its legend key:
-# scale_colour_identity() draws only flat swatches, so the color ramp would otherwise
-# be absent from the legend.
-.method_gradient_legend <- function(title, light, dark) {
-  df <- data.frame(y = 1, v = seq(0, 1, length.out = 100))
-  ggplot(df, aes(x = v, y = y, fill = v)) +
-    geom_tile() +
-    scale_fill_gradientn(colours = c(light, dark), guide = "none") +
-    scale_x_continuous(breaks = c(0, 1), labels = c("low", "high")) +
-    scale_y_continuous(breaks = NULL) +
-    labs(title = title, x = NULL, y = NULL) +
-    theme_minimal(base_size = 8) +
-    theme(plot.title = element_text(size = 8, hjust = 0.5),
-          panel.grid = element_blank(),
-          plot.margin = margin(2, 2, 2, 2))
-}
-
-# Light and dark color anchors per method. The arm color interpolates between them by
-# the statistic of the method, normalized within the terms shown.
-.test_hue_dark  <- c(Wilcoxon = "#08306b", Lachenbruch = "#8c2d04")
-.test_hue_light <- c(Wilcoxon = "#d1e5f0", Lachenbruch = "#fee0b6")
-
-# One row per (term, method that ran). test_signal = -log10(BH-adjusted p of the
-# method) is a common axis, since every method reports its own adjusted p. arm_colour
-# encodes the effect-size statistic of the method (AUC or L.frac_mag), mapped
-# light to dark within the color family of the method and normalized over the rows
-# passed in, so it is relative to the terms on the plot.
-.fcs_test_dotplot_data <- function(df) {
-  test_specs <- tibble::tribble(
-    ~test,          ~p_col,        ~sig_col,          ~raw_col,
-    "Wilcoxon",     "p.adj",       "sig_wilcoxon",     "stat",
-    "Lachenbruch",  "lach_p.adj",  "sig_lachenbruch",  "lach_frac_magnitude"
-  )
-  out <- purrr::map_dfr(seq_len(nrow(test_specs)), function(i) {
-    sp <- test_specs[i, ]
-    if (!sp$p_col %in% names(df)) return(tibble::tibble())
-    p_val   <- df[[sp$p_col]]
-    sig_val <- if (sp$sig_col %in% names(df)) dplyr::coalesce(df[[sp$sig_col]], FALSE) else FALSE
-    raw     <- if (sp$raw_col %in% names(df)) df[[sp$raw_col]] else NA_real_
-    stat_value <- if (sp$test == "Wilcoxon") raw + 0.5 else raw
-    df %>%
-      dplyr::mutate(test = sp$test, test_p_adj = p_val, test_sig = sig_val,
-                    test_signal = -log10(pmax(test_p_adj, 1e-300)),
-                    stat_value = stat_value) %>%
-      dplyr::filter(!is.na(test_p_adj), is.finite(test_signal))
-  })
-  if (nrow(out) == 0) return(out)
-  out %>%
-    dplyr::group_by(test) %>%
-    dplyr::mutate(
-      # .min and .rng are per-group constants stored as columns recycled to the group
-      # length, so any test on them must be vectorized: a scalar `if` receives a
-      # length-n logical and, from R 4.3 on, errors for every group with more than one
-      # term.
-      .min  = suppressWarnings(min(stat_value, na.rm = TRUE)),
-      .rng  = suppressWarnings(diff(range(stat_value, na.rm = TRUE))),
-      # Two kinds of group cannot be normalized and take a fixed ramp position (0.7):
-      #   - no finite statistic: range(na.rm = TRUE) of an all-NA vector is (Inf, -Inf),
-      #     so .rng is -Inf and not NA. Lachenbruch reaches this when every term has
-      #     chi_total == 0, because fcs_enrich.R then writes lach_frac_magnitude = NA.
-      #   - a single distinct value (.rng == 0), where the position is arbitrary.
-      .frac = dplyr::if_else(is.finite(.rng) & .rng > 0,
-                             (stat_value - .min) / .rng,
-                             0.7),
-      # A lone NA statistic in an otherwise normalizable group would index the ramp
-      # with NA below.
-      .frac = dplyr::if_else(is.finite(.frac), .frac, 0.7)
-    ) %>%
-    dplyr::ungroup() %>%
-    dplyr::rowwise() %>%
-    dplyr::mutate(arm_colour = grDevices::colorRampPalette(
-      c(.test_hue_light[[test]], .test_hue_dark[[test]]))(101)[max(1, min(101, round(.frac * 100) + 1))]) %>%
-    dplyr::ungroup() %>%
-    dplyr::select(-.rng, -.frac, -.min)
-}
-```
+One dotplot per ranking with its top `r params$top_n` significant sets, in the order of the tables
+(`q.perm` first), on an axis of `-log10(q.perm)`; the dashed line is the BH threshold. Colour is the
+AUC, size the number of genes of the set, and the marker shape tells whether the set also passes the
+second threshold on `p.perm` (triangle) or not (square). Only the representative of each group of
+overlapping sets is drawn, so a block of near-identical terms does not fill the plot.
 
 ```{r overall_dotplot, results='asis', fig.height=6}
 # knitr opens the figure device once per chunk with the fig.height in effect at the
-# start, so setting it inside the per-direction loop does not resize the image written
+# start, so setting it inside the per-ranking loop does not resize the image written
 # out. Each plot is rendered and embedded as a base64 PNG instead, which allows a
 # different height per plot in one asis chunk.
 .emit_sized_plot <- function(p, height_in, width_in = knitr::opts_chunk$get("fig.width"),
@@ -611,109 +416,49 @@ evidence_shapes <- c("Supported" = 17, "Exploratory" = 15)
               base64enc::base64encode(f)))
 }
 
-for (dr in c("global", "top", "bottom")) {
-  cat(sprintf("\n## %s\n\n", tools::toTitleCase(dr)))
-  rks <- if (dr == "global") {
-    intersect("global", ranking_names)
-  } else {
-    intersect(names(DIR_MAP)[DIR_MAP == dr], ranking_names)
-  }
-  if (length(rks) == 0) { cat("_No ranking for this direction in this report._\n\n"); next }
-
-  sig_terms <- enrich %>% filter(ranking %in% rks, sig)
-  if (nrow(sig_terms) == 0) { cat(sprintf("_No significant terms (%s)._\n\n", dr)); next }
-
-  # One row per (database, pathway): its best-evidence ranking under the convention
-  # of the report. A direction can pool two rankings (top and accelerating), and a term
-  # must appear once.
-  term_best <- sig_terms %>%
-    dplyr::group_by(database, pathway) %>%
-    dplyr::slice_min(evidence_rank, n = 1, with_ties = TRUE) %>%
-    dplyr::slice_max(evidence_score, n = 1, with_ties = FALSE) %>%
-    dplyr::ungroup()
-
-  dp <- term_best %>%
-    dplyr::arrange(evidence_rank, dplyr::desc(evidence_score), description) %>%
+for (rk in ranking_names) {
+  cat(sprintf("\n## %s\n\n", tools::toTitleCase(rk)))
+  dp <- enrich %>%
+    filter(ranking == rk, sig, is_representative %in% TRUE) %>%
+    ord_sig() %>%
     head(params$top_n) %>%
-    dplyr::mutate(label = stringr::str_trunc(dplyr::coalesce(description, pathway), 55))
+    dplyr::mutate(label = stringr::str_trunc(dplyr::coalesce(description, pathway), 55),
+                  signal = -log10(pmax(q.perm, 1e-300)),
+                  second = factor(ifelse(sig_top %in% TRUE, "passes", "does not pass"),
+                                  levels = c("passes", "does not pass")))
+  if (nrow(dp) == 0) { cat("_No significant sets for this ranking._\n\n"); next }
+  # y index 1 is the bottom of the plot: reversing the order puts the best term at the top.
+  term_levels <- rev(make.unique(dp$label))
+  dp$label <- make.unique(dp$label)
+  dp <- dp %>% dplyr::mutate(y = as.numeric(factor(label, levels = term_levels)))
 
-  if (nrow(dp) == 0) { cat("_No terms to display._\n\n"); next }
-
-  # y index 1 is the bottom of the plot: reversing the order puts the best-ranked term
-  # (lowest tier, highest evidence_score) at the top.
-  term_levels <- rev(unique(dp$label))
-  dp <- dp %>% dplyr::mutate(y_base = as.numeric(factor(label, levels = term_levels)))
-
-  line_df <- .fcs_test_dotplot_data(dp) %>%
-    dplyr::mutate(y = y_base + dplyr::case_when(test == "Wilcoxon" ~ 0.11,
-                                                TRUE ~ -0.11))
-  if (nrow(line_df) == 0) { cat("_No test results to plot for this direction._\n\n"); next }
-
-  # Tip marker: the most significant arm of the term (smallest BH p across the
-  # methods), centered on the row of the term and drawn in a darkened shade of the color
-  # of that arm.
-  cap_df <- line_df %>%
-    dplyr::group_by(pathway) %>%
-    dplyr::slice_min(test_p_adj, n = 1, with_ties = FALSE) %>%
-    dplyr::ungroup() %>%
-    dplyr::mutate(tip_colour = .darken_hex(arm_colour),
-                  ev_shape = factor(evidence_label, levels = c("Supported", "Exploratory")))
-
-  p <- ggplot(line_df, aes(y = y)) +
-    geom_segment(aes(x = 0, xend = test_signal, yend = y, colour = arm_colour, alpha = test_sig),
-                 linewidth = 1.1, lineend = "round") +
-    geom_point(data = cap_df,
-               aes(x = test_signal, y = y, size = num.genes, shape = ev_shape, colour = tip_colour),
-               alpha = 1) +
-    scale_y_continuous(breaks = seq_along(term_levels), labels = term_levels) +
-    scale_alpha_manual(name = "test passed", values = c(`TRUE` = 1, `FALSE` = 0.25), drop = FALSE) +
-    scale_colour_identity() +
-    scale_size_continuous(name = "set genes") +
-    scale_shape_manual(name = "evidence", values = evidence_shapes, drop = FALSE) +
-    # Legend strip at the bottom (evidence, test passed, set genes). The guides are part
-    # of p itself (legend.position = "bottom") and the method gradient bars are
-    # appended as a further row below the plot, so both read as one column.
-    guides(shape = guide_legend(order = 1, nrow = 1), alpha = guide_legend(order = 2, nrow = 1),
-           size = guide_legend(order = 3, nrow = 1)) +
+  p <- ggplot(dp, aes(x = signal, y = y)) +
+    geom_segment(aes(x = 0, xend = signal, yend = y), colour = "grey70", linewidth = 0.8) +
+    geom_point(aes(size = num.genes, shape = second, colour = stat + 0.5)) +
     geom_vline(xintercept = -log10(params$fdr_thr), linetype = "dashed", colour = "grey50") +
-    labs(title = sprintf("%s - %s", params$project_name, dr),
-         subtitle = "Wilcoxon, Lachenbruch",
-         x = expression(-log[10]~"BH-adjusted p"), y = NULL) +
+    scale_y_continuous(breaks = seq_along(term_levels), labels = term_levels) +
+    scale_colour_gradient2(name = "AUC", low = "#2166ac", mid = "#d9d9d9", high = "#b2182b",
+                           midpoint = 0.5, limits = c(0, 1)) +
+    scale_size_continuous(name = "set genes") +
+    scale_shape_manual(name = sprintf("p.perm < %s", params$pperm_thr),
+                       values = c(passes = 17, `does not pass` = 15), drop = FALSE) +
+    labs(title = sprintf("%s - %s", params$project_name, rk),
+         x = expression(-log[10]~q[perm]), y = NULL) +
     theme_minimal(base_size = 10) +
-    theme(axis.text.y = element_text(colour = "black",
-                                      size = pmax(8, pmin(11, 220 / length(term_levels)))),
-          plot.subtitle = element_text(margin = margin(b = 12)),
-          legend.position = "bottom",
-          legend.box = "horizontal")
-
-  # Method legend: one gradient bar per method (light = weak statistic, dark = strong),
-  # in a single row directly under p. scale_colour_identity() above draws only flat
-  # swatches, so the ramp needs its own key.
-  method_stat_labels <- c(Wilcoxon = "AUC", Lachenbruch = "L.frac_mag")
-  gradient_row <- purrr::reduce(names(.test_hue_dark), function(acc, m) {
-    g <- .method_gradient_legend(sprintf("%s (%s)", m, method_stat_labels[[m]]),
-                                  .test_hue_light[[m]], .test_hue_dark[[m]])
-    if (is.null(acc)) g else acc | g
-  }, .init = NULL)
-
-  # The gradient row has a fixed absolute height (0.18 in): a relative split would make
-  # the bars grow with the main plot on reports with many terms.
-  combo <- p / gradient_row + patchwork::plot_layout(heights = grid::unit(c(1, 0.18), c("null", "in")))
-  .emit_sized_plot(combo, height_in = pmax(5, pmin(22, 2.6 + 0.4 * length(term_levels))))
+    theme(axis.text.y = element_text(colour = "black", size = pmax(8, pmin(11, 220 / length(term_levels)))),
+          legend.position = "bottom", legend.box = "horizontal")
+  .emit_sized_plot(p, height_in = pmax(4, pmin(22, 2.2 + 0.35 * length(term_levels))))
 }
 ```
 
 # Leading-edge composition {.tabset .tabset-fade}
 
-For each significantly-enriched set (BH < `r params$fdr_thr``r if (has_perm_any) sprintf(" ∩ permulation p < %.3g", params$pperm_thr) else ""`), the
-**percentage of its leading-edge genes** carrying each attribute - significance
-gates, directional score percentiles, and cross-module support. Pooled across
-databases per direction, **ordered by the same convention as every other table
-in this report** (evidence tier, then evidence_score, then alphabetical - see
-Methods above, and the Overall dotplot, whose term order matches this table's
-row order) and capped at `r params$leading_edge_top_n %||% 100` rows; if a
-direction has more significant sets than that, the table says so explicitly
-rather than silently dropping the low-ranked ones.
+For each significant set (`q.perm` < `r params$fdr_thr`), the **percentage of its leading-edge
+genes** carrying each attribute: directional score percentiles and cross-module support. Sets are
+ordered as in the tables above (`q.perm` first) and capped at `r params$leading_edge_top_n %||% 100`
+rows; if a ranking has more significant sets than that, the table says so explicitly rather than
+silently dropping the low-ranked ones. `Group` and `Rep` give the redundancy group of the set and
+whether it is the representative.
 
 ```{r leadingedge, results='asis'}
 # Display names of the attribute columns.
@@ -746,19 +491,18 @@ for (rk in ranking_names) {
   want <- cols_by_rk[[rk]] %||% attr_cols_all
 
   sig_terms_rk <- enrich %>% filter(ranking == rk, sig)
-  if (nrow(sig_terms_rk) == 0) { cat("_No sets passed the significance thresholds for this direction._\n"); next }
+  if (nrow(sig_terms_rk) == 0) { cat("_No sets passed the significance thresholds for this ranking._\n"); next }
 
   le_rk_all <- leading %>% filter(ranking == rk) %>%
     semi_join(sig_terms_rk, by = c("ranking", "database", "pathway"))
-  if (nrow(le_rk_all) == 0) { cat("_No sets passed the significance thresholds for this direction._\n"); next }
+  if (nrow(le_rk_all) == 0) { cat("_No sets passed the significance thresholds for this ranking._\n"); next }
 
-  # Order by the report convention (evidence tier, evidence_score descending,
-  # alphabetical) over every significant term before cutting the table, so the rank of a
-  # term does not depend on the cut. It is the order of the Overall dotplot.
+  # Order by the report convention over every significant term before cutting the table,
+  # so the rank of a term does not depend on the cut. It is the order of the tables above.
   ltn <- params$leading_edge_top_n %||% 100
   n_sig_rk <- nrow(sig_terms_rk)
   term_order <- sig_terms_rk %>%
-    dplyr::arrange(evidence_rank, dplyr::desc(evidence_score), description) %>%
+    ord_sig() %>%
     head(ltn) %>%
     dplyr::mutate(.rank = dplyr::row_number()) %>%
     dplyr::select(database, pathway, .rank)
@@ -766,7 +510,7 @@ for (rk in ranking_names) {
   le_rk <- le_rk_all %>% semi_join(term_order, by = c("database", "pathway"))
 
   if (n_sig_rk > ltn) {
-    cat(sprintf("_Showing the top %d of %d significant sets for this direction (ranking convention above); the rest are truncated here but remain in `fcs_results/fcs_leading_edge.tsv` (unbounded) and, if within a database's own top %d, in the Enriched gene sets tables above._\n\n",
+    cat(sprintf("_Showing the top %d of %d significant sets for this ranking (order above); the rest are truncated here but remain in `fcs_results/fcs_leading_edge.tsv` (unbounded) and, if within a database's own top %d, in the Enriched gene sets tables above._\n\n",
                 ltn, n_sig_rk, params$top_n))
   }
 
@@ -774,13 +518,15 @@ for (rk in ranking_names) {
     dplyr::left_join(term_order, by = c("database", "pathway")) %>%
     dplyr::arrange(.rank) %>%
     dplyr::select(-.rank) %>%
-    dplyr::left_join(sig_terms_rk %>% dplyr::select(database, pathway, evidence_label, sig_wilcoxon, sig_lachenbruch), by = c("database", "pathway")) %>%
+    dplyr::left_join(sig_terms_rk %>% dplyr::select(database, pathway, q.perm, sig_top, cluster_id, is_representative),
+                     by = c("database", "pathway")) %>%
     left_join(desc_map, by = c("database", "pathway")) %>%
     mutate(Description = stringr::str_trunc(coalesce(description, pathway), 50),
-           Wilcoxon    = ifelse(dplyr::coalesce(sig_wilcoxon, FALSE), "X", ""),
-           Lachenbruch = ifelse(dplyr::coalesce(sig_lachenbruch, FALSE), "X", "")) %>%
-    select(database, pathway, Description, n_le, any_of("evidence_label"),
-           Wilcoxon, Lachenbruch,
+           q.perm      = signif(q.perm, 3),
+           `2nd`       = ifelse(dplyr::coalesce(sig_top, FALSE), "X", ""),
+           Group       = cluster_id,
+           Rep         = ifelse(dplyr::coalesce(is_representative, FALSE), "X", "")) %>%
+    select(database, pathway, Description, n_le, q.perm, `2nd`, Group, Rep,
            any_of(intersect(want, names(.))))
   # Rename the attribute columns to their display names.
   present_attr <- intersect(want, names(summ))
@@ -801,25 +547,23 @@ if (nrow(le_comp_export) > 0) {
 # Method
 
 ```{r method, echo=FALSE}
-cat("Engines    : (1) Wilcoxon-AUC FCS | (2) Lachenbruch Two-Part\n")
-cat("Evidence   : 2/2 Supported | 1/2 Exploratory - FDR <", params$fdr_thr, "per method\n")
-cat("Wilcoxon   : RERconverge::fastwilcoxGMTall; 'greater' for zero-floored rankings, 'two.sided' for signed rankings; BH per GMT\n")
-cat("Lachenbruch: Fisher exact (prevalence) + rank-sum (magnitude), chi2(df=2) combined; zero-floored rankings only\n")
+cat("Test       : Wilcoxon-AUC (RERconverge::fastwilcoxGMTall); 'greater' for zero-floored rankings, 'two.sided' for signed rankings\n")
+cat("Null       : permulation p of the test on every null column (p.perm), pseudo-count (1 + n) / (N + 1)\n")
+cat("Significant: q.perm < ", params$fdr_thr, " (BH on p.perm per ranking and database); second threshold p.perm < ", params$pperm_thr, "\n", sep = "")
 cat("Universe   : cleaned_background; no-signal genes floored to 0 (zero-floor)\n")
-cat("MTC        : Benjamini-Hochberg, per GMT database, per method\n")
-cat("Ranking    : evidence tier, then evidence_score (per-method percentile rank, zeroed when not significant, summed), then alphabetical (see Methods above)\n")
+cat("Groups     : greedy by significance, leading-edge ", params$cluster_similarity, " >= ", params$cluster_threshold, " to a representative\n", sep = "")
+cat("Order      : q.perm, p.perm, |stat|, description\n")
 ```
 
 ---
 
 ## Summary
 
-This report presents multi-method Functional Class Scoring (FCS) enrichment
-results for **`r params$traitname`** across `r length(gmts)` GMT database(s)
-and `r length(ranking_names)` ranking(s) (`r paste(ranking_names, collapse = ", ")`),
-combining Wilcoxon-AUC and Lachenbruch Two-Part tests
-as described in Methods above. `r n_sig` term(s) passed at least one test's
-significance gate.
+This report presents Functional Class Scoring (FCS) enrichment results for
+**`r params$traitname`** across `r length(gmts)` GMT database(s) and
+`r length(ranking_names)` ranking(s) (`r paste(ranking_names, collapse = ", ")`),
+tested with the Wilcoxon-AUC test and called significant on the BH-adjusted
+permulation p as described in Methods above. `r n_sig` set(s) are significant.
 
 ---
 

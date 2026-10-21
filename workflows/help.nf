@@ -363,10 +363,12 @@ enrichment, and optional position-level Fisher-exact enrichment (POSENRICH).
 Usage:
 --enrichment                        <true|false>          false
 --gmt_dir                            <"gmt_dir">              null
---fcs_min_genes                        <INTEGER>                5
---fcs_max_genes                        <INTEGER>                1000  (0 = no cap)
---fcs_fdr                                <FLOAT 0-1>              0.15
---fcs_pperm_thr                            <FLOAT 0-1>              0.025
+--fcs_min_genes                        <INTEGER>                10
+--fcs_max_genes                        <INTEGER>                0     (0 = no cap)
+--fcs_fdr                                <FLOAT 0-1>              0.15   (BH on the permulation p of each set, per ranking and database: q.perm; also the FDR of POSENRICH)
+--fcs_pperm_thr                            <FLOAT 0-1>              0.025  (second threshold: a significant set also needs p.perm below it)
+--fcs_cluster_similarity                    <jaccard|overlap>        jaccard (leading-edge similarity of the redundancy groups of significant sets)
+--fcs_cluster_threshold                     <FLOAT 0-1>              0.5    (similarity at which a set joins the first representative)
 --fcs_top_n                                  <INTEGER>                20
 --caas_permulation_enrichment                    <true|false>             true
 

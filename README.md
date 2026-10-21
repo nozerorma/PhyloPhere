@@ -233,7 +233,14 @@ characterization is handled by ENRICHMENT (POSENRICH), not SCORING.
 
 ### ENRICHMENT — functional & network enrichment
 Runs FCS (a ranked, Wilcoxon-AUC, GMT-based enrichment engine — the single
-enrichment engine now used for both CAAS and RER gene rankings), an
+enrichment engine now used for both CAAS and RER gene rankings; a set is
+significant when the Benjamini-Hochberg adjustment of its permulation p
+(`q.perm`, per ranking and database) is below `--fcs_fdr`, with a second threshold
+`--fcs_pperm_thr` on the permulation p itself, and the significant sets of each
+ranking are grouped by the similarity of their leading edges so that overlapping
+terms are read as one; the RER ranking is the signed statistic
+`sign(Rho) * -log10(P)` of RERconverge and its null is the same statistic computed
+on every permulated phenotype), an
 orthogonal cross-module Comparison report, optional DOMINO active-module
 detection + STRING functional enrichment (`--scoring_ami`), and optional
 POSENRICH position-level Fisher-exact enrichment (`--posenrich`) integrating
@@ -468,9 +475,10 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `domino_network_score_thr` | `700` | STRING combined-score threshold for edges included in DOMINO network construction. |
 | `domino_slice_thr` | `0.3` | Relevance threshold for DOMINO network slicing. |
 | `domino_module_thr` | `0.05` | Bonferroni-corrected p-value cutoff for accepting DOMINO active modules. |
-| `fcs_min_genes` / `fcs_max_genes` | `5` / `1000` | Minimum / maximum gene set size required for FCS enrichment evaluation (`0` = no upper limit). |
-| `fcs_fdr` | `0.15` | Benjamini-Hochberg FDR threshold for FCS gene-set significance. |
-| `fcs_pperm_thr` | `0.025` | Permulation p-value threshold for filtering phylogenetic non-independence. |
+| `fcs_min_genes` / `fcs_max_genes` | `10` / `0` | Minimum / maximum gene set size required for FCS enrichment evaluation (`0` = no upper limit). |
+| `fcs_fdr` | `0.15` | Benjamini-Hochberg threshold on the permulation p of each gene set (`q.perm`), per ranking and database. |
+| `fcs_cluster_similarity` / `fcs_cluster_threshold` | `jaccard` / `0.5` | Redundancy reduction of the significant sets of each ranking, applied after the significance call (no p or q value changes): the sets are grouped greedily by significance, a set joining the first representative whose leading edge is at least this similar (`jaccard`, or `overlap`, which over-merges hierarchical databases). Gives `cluster_id` and `is_representative`. |
+| `fcs_pperm_thr` | `0.025` | Second threshold: a set significant by `q.perm` also needs `p.perm` below this value (`sig_top`). It corrects for the non-independence of gene ranks and of the phylogeny. |
 | `fcs_top_n` | `20` | Number of top-ranked gene sets highlighted in report tables. |
 | `caas_permulation_enrichment` | `true` | Runs the permulation core (CAAS_CORE, CAAS_CORE_MERGE) to build the genome-wide null used for CAAS's FCS permulation p-value. |
 | `posenrich_min_size` / `posenrich_max_size` | `2` / `0` | Position set size boundaries for POSENRICH (0 = un-capped). |

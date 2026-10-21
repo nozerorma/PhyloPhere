@@ -61,8 +61,6 @@ process SCORING_FCS_REPORT {
     def num_g     = params.fcs_min_genes
     def max_g     = params.fcs_max_genes ?: 0
     def fdr_thr   = params.fcs_fdr
-    def fdr_wilcoxon    = params.fcs_fdr_wilcoxon    ?: params.fcs_fdr
-    def fdr_lachenbruch = params.fcs_fdr_lachenbruch ?: params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     // Published gene_lists/ of the scoring module. This is the CAAS report, so the
@@ -81,9 +79,9 @@ process SCORING_FCS_REPORT {
                 num_g         = ${num_g},
                 max_g         = ${max_g},
                 fdr_thr       = ${fdr_thr},
-                fdr_wilcoxon    = ${fdr_wilcoxon},
-                fdr_lachenbruch = ${fdr_lachenbruch},
                 pperm_thr     = ${pperm_thr},
+                cluster_similarity = '${params.fcs_cluster_similarity}',
+                cluster_threshold  = ${params.fcs_cluster_threshold},
                 top_n         = ${top_n},
                 traitname     = '${traitname}',
                 perms_file    = '${perms_file}',
@@ -140,8 +138,6 @@ process RER_FCS_REPORT {
     def num_g     = params.fcs_min_genes
     def max_g     = params.fcs_max_genes ?: 0
     def fdr_thr   = params.fcs_fdr
-    def fdr_wilcoxon    = params.fcs_fdr_wilcoxon    ?: params.fcs_fdr
-    def fdr_lachenbruch = params.fcs_fdr_lachenbruch ?: params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     def enrich_file_arg = (enrich_file.name =~ /^NO_/) ? 'NULL' : "'${enrich_file}'"
@@ -156,9 +152,9 @@ process RER_FCS_REPORT {
                 num_g         = ${num_g},
                 max_g         = ${max_g},
                 fdr_thr       = ${fdr_thr},
-                fdr_wilcoxon    = ${fdr_wilcoxon},
-                fdr_lachenbruch = ${fdr_lachenbruch},
                 pperm_thr     = ${pperm_thr},
+                cluster_similarity = '${params.fcs_cluster_similarity}',
+                cluster_threshold  = ${params.fcs_cluster_threshold},
                 top_n         = ${top_n},
                 traitname     = '${params.traitname ?: "trait"}',
                 perms_file    = '${perms_file}',
@@ -213,8 +209,6 @@ process FCS_COMPUTE_BATCHED {
     def num_g     = params.fcs_min_genes
     def max_g     = params.fcs_max_genes ?: 0
     def fdr_thr   = params.fcs_fdr
-    def fdr_wilcoxon    = params.fcs_fdr_wilcoxon    ?: params.fcs_fdr
-    def fdr_lachenbruch = params.fcs_fdr_lachenbruch ?: params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def rscript_cmd = (params.use_singularity || params.use_apptainer) ?
         "/usr/local/bin/_entrypoint.sh Rscript" : "Rscript"
@@ -228,8 +222,6 @@ process FCS_COMPUTE_BATCHED {
         --num-g ${num_g} \
         --max-g ${max_g} \
         --fdr-thr ${fdr_thr} \
-        --fdr-wilcoxon ${fdr_wilcoxon} \
-        --fdr-lachenbruch ${fdr_lachenbruch} \
         --pperm-thr ${pperm_thr} \
         --output fcs_enrich_partial.tsv
     """

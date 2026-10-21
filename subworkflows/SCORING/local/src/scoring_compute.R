@@ -945,6 +945,9 @@ if (has_rer) {
     rer$rer_perm_padj <- NA_real_
   }
 
+  # rer_P is the parametric P of the correlation (RERconverge's getStat takes sign(Rho) * -log10(P) as the gene statistic).
+  rer$rer_P <- if ("p" %in% names(rer)) as.numeric(rer[["p"]]) else NA_real_
+
   gene_rer <- rer %>%
     filter(!is.na(.data[[pval_col]])) %>%
     mutate(
@@ -959,7 +962,7 @@ if (has_rer) {
         TRUE           ~ "neutral"
       )
     ) %>%
-    select(Gene = gene, rer_min_pval, rer_significant, rer_perm_padj, rer_significant_fdr, rer_rho, rer_acceleration) %>%
+    select(Gene = gene, rer_min_pval, rer_P, rer_significant, rer_perm_padj, rer_significant_fdr, rer_rho, rer_acceleration) %>%
     mutate(Gene = as.character(Gene))
 
   cat(sprintf("  RERConverge: %d genes, %d significant (p <= 0.05, uncorrected), %d with BH-adjusted p <= 0.05\n",
@@ -967,7 +970,7 @@ if (has_rer) {
               sum(gene_rer$rer_significant_fdr, na.rm = TRUE)))
 } else {
   cat("RERConverge: not available, skipping\n")
-  gene_rer <- tibble(Gene = character(), rer_min_pval = numeric(),
+  gene_rer <- tibble(Gene = character(), rer_min_pval = numeric(), rer_P = numeric(),
                      rer_significant = logical(), rer_perm_padj = numeric(),
                      rer_significant_fdr = logical(), rer_rho = numeric(),
                      rer_acceleration = character())
@@ -1026,6 +1029,7 @@ if (nrow(gene_rer) > 0) {
   gene_scores <- gene_scores %>% full_join(gene_rer, by = "Gene")
 } else {
   gene_scores$rer_min_pval      <- NA_real_
+  gene_scores$rer_P             <- NA_real_
   gene_scores$rer_significant   <- NA
   gene_scores$rer_perm_padj     <- NA_real_
   gene_scores$rer_significant_fdr <- NA
@@ -1129,7 +1133,7 @@ gene_out <- gene_scores %>%
     any_of(c("accum_p", "accum_fdr", "accum_significant",
              "accum_p_top", "accum_fdr_top", "accum_significant_top",
              "accum_p_bottom", "accum_fdr_bottom", "accum_significant_bottom")),
-    any_of(c("rer_min_pval", "rer_significant", "rer_perm_padj", "rer_significant_fdr", "rer_rho", "rer_acceleration")),
+    any_of(c("rer_min_pval", "rer_P", "rer_significant", "rer_perm_padj", "rer_significant_fdr", "rer_rho", "rer_acceleration")),
     any_of(c("fade_max_bf_top", "fade_significant_top",
              "fade_max_bf_bottom", "fade_significant_bottom"))
   ) %>%
@@ -1176,15 +1180,15 @@ cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom)\n",
 .nonempty <- function(col) .has(gene_scores, col) && any(!is.na(gene_scores[[col]]))
 
 if (has_rer) {
-  .rp <- pmax(suppressWarnings(as.numeric(.col(gene_scores, "rer_min_pval"))), 1e-300)
+  # The RER ranking is the signed parametric statistic sign(Rho) * -log10(P), the gene statistic of RERconverge (getStat) and the
+  # one its permulations (corStat) carry for the null.
+  .rp <- pmax(suppressWarnings(as.numeric(.col(gene_scores, "rer_P"))), 1e-300)
   .rr <- suppressWarnings(as.numeric(.col(gene_scores, "rer_rho")))
   write_tsv(tibble(
-    gene               = gene_scores$Gene,
-    score_global       = sign(.rr) * -log10(.rp),
-    score_accelerating = ifelse(.rr > 0, -log10(.rp), 0),
-    score_decelerating = ifelse(.rr < 0, -log10(.rp), 0)
+    gene         = gene_scores$Gene,
+    score_global = sign(.rr) * -log10(.rp)
   ), "fcs_stats_rer.tsv")
-  cat("  fcs_stats_rer.tsv written (RER rankings)\n")
+  cat("  fcs_stats_rer.tsv written (RER global ranking)\n")
 }
 
 if (.nonempty("fade_max_bf_top") || .nonempty("fade_max_bf_bottom")) {

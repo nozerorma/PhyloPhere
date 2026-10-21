@@ -346,3 +346,10 @@ Los datos y scripts de esta revisión están fuera del repositorio:
 - `~/.cc/caas_fcs/`: tablas del FCS de CAAS de las cuatro corridas.
 - `~/.cc/msae210/`: texto del artículo y del suplemento de Redlich.
 - `~/.cc/enrich/ctrl_calib4.R` y `ctrl_sum.R`: control "ciclo nulo como observado" de Carn.
+
+## 9. Implementación (WP1, 2026-10-21)
+
+Aplicado en `581b999` + commits de WP0 a WP2: significación por BH sobre el p de permulación (`q.perm`, `sig_perm`, `sig_top`), Lachenbruch fuera del FCS, RER solo con el ranking global firmado `sign(Rho) * -log10(P)` y su nulo `corStat`, reducción de redundancia a posteriori (`fcs_cluster.R`) e informes 12 y 15 reescritos. Registro completo, comprobaciones y diferencias abiertas: `docs/fases/WP1_fcs_rer.md`. Lo no aplicado: subir las permulaciones de RER por defecto (P10; falta medir `RER_CONT`).
+
+Medido al aplicarlo: con la regla nueva, las cuatro tablas reales dan 0, 0, 6 y 3 conjuntos significativos (neoplasia estricto, maligno estricto, neoplasia completo, maligno completo), frente a 1, 0, 6 y 6 de la sección 5, que salieron del script de control; quitar copias y casi copias (Jaccard >= 0,9) retira el 10,5 a 10,8 % de las filas sin cambiar esos recuentos.
+
