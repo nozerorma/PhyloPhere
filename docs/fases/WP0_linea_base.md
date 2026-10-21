@@ -1,6 +1,6 @@
 # WP0. Línea base congelada
 
-Estado: CASI CERRADA (2026-10-21). Hecho: huellas del cluster, suite, `compare_null.py`, PEPC regenerado; pendiente: marine toy (disco externo) y cancer_b0_toy (opcional). Depende de: commit del usuario (hecho: `581b999`, rama `remove_caap`).
+Estado: CASI CERRADA (2026-10-21). Hecho: huellas del cluster, suite, `compare_null.py`, PEPC y cancer_b0_toy regenerados; pendiente solo marine toy (disco externo). Depende de: commit del usuario (hecho: `581b999`, rama `remove_caap`).
 Conversación independiente. Antes de empezar, leer `docs/fases/README.md`.
 
 ## Objetivo
@@ -67,7 +67,7 @@ Cambios de código del pipeline. Cualquier cómputo del cluster solo por `sbatch
   * Los scripts run_tier1_pepc_* del árbol eran anteriores a los parámetros actuales: se renderizaron de nuevo. El primer lanzamiento falló en la compilación de Nextflow 25.10.4: accum_gene_lists.nf línea 52, grep('^PValue$', ...) dentro de un bloque de comillas triples (el $' se interpreta como inicio de GString). La línea entró en 581b999 (en d246e82 era 'PValueEmpirical'). El módulo se importa aunque accumulation esté desactivada, así que con 581b999 sin corrección ningún run local arrancaba. Tras la corrección el pipeline compila y corre; búsqueda de otro $' o $" sin escapar en los .nf versionados: ninguno. Log del fallo en pepc_c4_tolerance/failed_attempt/.
   * La salida PEPC del 15/10 no se usa como referencia por sí misma (HEAD 9ae9bd2), pero la comparación anterior demuestra que coincide con la regenerada.
   * Marine toy: pendiente por decisión del usuario (el disco externo con los alineamientos toy, /media/miguel/external/phylophere_tier2/input/alignments/toy, no está disponible). Las salidas del 20/10 (HEAD d246e82, relanzadas con -resume, estado del árbol no registrado) no se copian como referencia hasta confirmarlo.
-  * cancer_b0_toy: no regenerado (es anterior a la unificación y no se usa de momento).
+  * cancer_b0_toy: regenerado en local con a92fd2d (ver índice). Parámetros distintos de los del cluster: toy_n 45, AMI y STRING apagados (el fondo de 31 genes no tiene aristas de STRING a 700) y VEP y POSENRICH apagados. Lanzamiento con -resume tras el fallo de DOMINO. Que los alineamientos phylip-relaxed sean los mismos que los BMGE en fasta del cluster lo afirma el usuario; no lo he verificado.
 - Pendiente que pasa a otra fase: ver "Pendiente de WP0" y "Qué comprobar primero" abajo.
 ```
 
@@ -83,13 +83,15 @@ Directorio: `/home/miguel/IBE-UPF/PhD/PhyloPhere_validation/golden_581b999/` (fu
 | WP9-A1 (estadístico génico) | `a1_gene_statistic/` | `581b999` | Hecho (preparación) |
 | PEPC tier 1, c4 y c4_phenotypic, tolerante, 1000 ciclos | `pepc_c4_tolerance/results/{c4,c4_phenotypic}_complete` (+ scripts renderizados, `PROVENANCE.txt`, `run.log`, `failed_attempt/`) | `581b999` + corrección de `accum_gene_lists.nf` (commit de cierre), 2026-10-21 | Hecho; igual bit a bit a la salida del 15/10 en c4 |
 | Marine toy (121 genes, 100 ciclos, 4 corridas) | `validation/tier2/output/marine_toy/results/` (no copiado) | `d246e82`, 2026-10-20, relanzamientos con `-resume`; lanzadores en la raíz del repo (`run_tier2_marine_toy_{local,single}_{complete,strict}.sh`, ignorados por git) | PENDIENTE (falta el disco externo) |
-| cancer_b0_toy | `../unification/cancer_b0_toy/` | anterior a la unificación | No regenerado |
+| cancer_b0_toy local (template `gui/templates/cancer_no_prune_multi_toy.json` con rutas locales, `toy_n` 45 = 31 genes tras filtros, 100 ciclos, VEP, POSENRICH, AMI y STRING apagados, alineamientos `Primate_alignments` en `phylip-relaxed`) | `cancer_b0_toy/results/neoplasia_prevalence_toy_complete` (+ `build_project.py`, `project.json`, scripts, `PROVENANCE.txt`, `run.log`, `run_attempt1_domino_failed.log`) | `a92fd2d`, 2026-10-21; el segundo lanzamiento usó `-resume` sobre el primero, que solo falló en `DOMINO_BUILD_NETWORK` | Hecho (exit 0; 272 MB). Sin referencia previa comparable atada a commit; la carpeta `unification/cancer_b0_toy` es anterior a la unificación |
 
 Comparador: `PhyloPhere_validation/unification/compare_null.py` (tablas del nulo, `b0/`, `caas_perms.rds`, `scoring/position_scores.tsv`, tablas FCS; `--extra` para más), tolerancia 1e-12.
 
 ## Pendiente de WP0
 
 1. Marine toy: con el disco montado, regenerar las cuatro corridas (acumulado medido el 20/10: 51 min lenient marine, 1 h 16 min lenient control, 10 min cada strict) o aceptar las salidas del 20/10 como provisionales.
+
+4. Hallazgo: DOMINO debe saltarse el paso (skip silencioso) sin aristas suficientes (detalle en `README.md`, sección de hallazgos pendientes). En el toy de cancer se evitó con `scoring_ami` y `scoring_string` apagados.
 
 ## Qué comprobar primero en WP1 y WP2 (pueden ir en paralelo)
 

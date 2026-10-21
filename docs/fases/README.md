@@ -66,3 +66,7 @@ Paralelismo posible: WP1 y WP2 son independientes (ficheros disjuntos); WP9-A1 y
 - WP9-A1 ejecutado (resultados en `WP9_estadistico_gen.md`; ficheros en `/home/miguel/IBE-UPF/PhD/PhyloPhere_validation/golden_581b999/a1_gene_statistic/`).
 - `docs/POSENRICH_PORTE_EVALUACION.md` redactado (entregable de WP2).
 - Medidas de recursos a 1000 a 10.000 ciclos (FCS, `scoring_caas_perms.R`, RESAMPLE, parseo de etiquetas): `docs/PLAN_NULO_10K_PERMULACIONES.md`, secciones 3, 5 y 8.
+
+## Hallazgos pendientes de asignar a una fase
+
+- **DOMINO debe saltarse el paso (skip silencioso) si no hay aristas suficientes** (decisión del usuario, 2026-10-21). Hoy `DOMINO_BUILD_NETWORK` (`subworkflows/ENRICHMENT/local/src/build_domino_network.py:223`) lanza `RuntimeError("no edges survived filtering ...")` y, con la estrategia de error por defecto, aborta toda la corrida. Visto en el toy de cancer (45 genes, 31 de fondo, 0 aristas con puntuación >= 700 sobre 13.715.404 enlaces de STRING). Comportamiento deseado: sin aristas, escribir las salidas vacías (como ya hace la rama de fondo ausente, que crea `network.sif`, `network_edge_scores.tsv` y `slices.txt`), avisar en el log y dejar que los pasos siguientes tomen el centinela `NO_*`. Comprobar además que `run_domino_modules.py` y `13.AMI_analysis.Rmd` toleran redes vacías. Sin código cambiado todavía; candidato a WP2 (limpieza) o WP8.
