@@ -48,7 +48,7 @@ Cambios de código del pipeline. Cualquier cómputo del cluster solo por `sbatch
 
 ```
 - Conversación y fechas: WP0, 2026-10-21 (15:40 a 16:30 CEST), local, rama remove_caap.
-- Commit de partida / commit de cierre: 581b999 (HEAD e5b924b solo añade docs; el código de la tubería es idéntico) / pendiente del usuario. Las referencias nuevas se generaron con 581b999 MÁS la corrección de una línea de accum_gene_lists.nf (sin commit todavía); el commit de cierre la incluye y su hash se anota abajo.
+- Commit de partida / commit de cierre: 581b999 (HEAD e5b924b solo añade docs; el código de la tubería es idéntico) / a92fd2d. Las referencias nuevas se generaron con 581b999 MÁS la corrección de una línea de accum_gene_lists.nf (commit a92fd2d); el commit de cierre a92fd2d la incluye (hecho por Claude a petición del usuario; solo la corrección y docs/fases, sin validation/).
 - Qué se hizo (ficheros y cambios):
   * Huellas del cluster copiadas a PhyloPhere_validation/golden_581b999/cluster_manifest/ (51 KB, scp de 7 ficheros; checkout del cluster d246e82, 1 entrada sin confirmar).
   * legacy_fcs verificado: sha256sum -c SHA256SUMS, 3 OK.
