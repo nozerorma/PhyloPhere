@@ -7,7 +7,7 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 
 | WP | Fichero | Fase del plan de 10.000 ciclos | Depende de | Estado |
 |---|---|---|---|---|
-| WP0 | `WP0_linea_base.md` | | commit del usuario (hecho: `581b999`) | CASI CERRADA: suite, huellas, comparador y PEPC (equivalente al 15/10) hechos; pendiente marine toy (disco externo) |
+| WP0 | `WP0_linea_base.md` | | commit del usuario (hecho: `581b999`) | HECHO con un pendiente explícito: marine toy (falta el disco externo con los alineamientos toy). PEPC y cancer_b0_toy regenerados con `a92fd2d` |
 | WP1 | `WP1_fcs_rer.md` | | WP0 | pendiente |
 | WP2 | `WP2_exports_posenrich_limpieza.md` | | WP0 | pendiente |
 | WP3 | `WP3_bloques_de_ciclos.md` | Fase 1 | WP2 | pendiente |

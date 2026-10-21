@@ -1,6 +1,6 @@
 # WP0. Línea base congelada
 
-Estado: CASI CERRADA (2026-10-21). Hecho: huellas del cluster, suite, `compare_null.py`, PEPC y cancer_b0_toy regenerados; pendiente solo marine toy (disco externo). Depende de: commit del usuario (hecho: `581b999`, rama `remove_caap`).
+Estado: CERRADA el 2026-10-21 con un pendiente explícito (marine toy, falta el disco externo con los alineamientos toy; ver "Pendiente de WP0"). Depende de: commit del usuario (hecho: `581b999`, rama `remove_caap`).
 Conversación independiente. Antes de empezar, leer `docs/fases/README.md`.
 
 ## Objetivo
