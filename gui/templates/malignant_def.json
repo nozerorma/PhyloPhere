@@ -105,17 +105,14 @@
       "caas_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
       "minlen_values": "2,3,4,10",
       "maxcaas_values": "0.6,0.7,0.8",
-      "gene_filter_mode": "dubious",
+      "gene_filter_mode": "both",
       "remove_caas_clusters": true,
       "extreme_threshold": "0.99",
-      "iqr_multiplier": "1.5"
+      "iqr_multiplier": "3"
     },
     "accumulation": {
       "enabled": true,
       "extra_flags": "",
-      "accumulation_n_randomizations": "1000000",
-      "accumulation_randomization_type": "cons_decile",
-      "accumulation_entropy_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT_VAR_RAW",
       "accumulation_fdr": "0.15"
     },
     "rer": {
@@ -235,7 +232,7 @@
     }
   },
   "precomputed": {
-    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/malignant_def_selection/malignant_prevalence_complete",
+    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/malignant_def_selection",
     "use_ct": false,
     "use_discovery": false,
     "use_resample": false,

@@ -65,7 +65,7 @@ workflow SCORING {
             .ifEmpty { file(params.scoring_fade_summary_bottom ?: 'NO_FADE_BOTTOM') }
 
         def resolved_rer = (rer_summary_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_rer_input ?: (params.rer_continuous_file ?: 'NO_RER')) }
+            .ifEmpty { file(params.scoring_rer_input ?: (params.rer_continuous_file ?: (params.rer_binary_file ?: 'NO_RER'))) }
 
         // Accumulation: collect all CSVs (top + bottom + all) into a single value channel.
         // The R script selects accumulation_all_* files via pattern matching.
@@ -73,8 +73,8 @@ workflow SCORING {
         if (params.scoring_accum_dir) {
             def accum_dir = params.scoring_accum_dir ?: ''
             accum_source = accum_source.ifEmpty {
-                // Recursive: live output is accumulation/{top,bottom,all}/randomization/*.csv,
-                // three levels below accum_dir, not flat inside it — a plain listFiles() here
+                // Recursive: live output is accumulation/{top,bottom,all}/accumulation_<direction>_results.csv,
+                // one level below accum_dir, not flat inside it — a plain listFiles() here
                 // would find zero matches against the real directory-layout.
                 if (accum_dir && file(accum_dir).isDirectory()) {
                     def csvs = []

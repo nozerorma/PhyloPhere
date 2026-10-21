@@ -29,6 +29,7 @@ params:
   secondary_trait: ""
   branch_trait: ""
   pss_top_pct: "0.05"
+  pair_center_gate: "none"
   perm_strategy: "best_model"
   trait_type: ""
 ---
@@ -394,6 +395,14 @@ create_pairwise_data <- function(ci_data) {
       pairwise$trait_overlap[.stage1] <- FALSE
       debug_log("Type gate: %d candidate pairs (PSS ranks, does not gate)", length(.stage1))
     }
+  }
+  # Centre gate (pair_center_gate): a candidate must have its members on opposite sides of the median or mean of the trait.
+  if (pair_center_gate != "none") {
+    .ctr <- if (pair_center_gate == "median") stats::median(ci_subset$trait, na.rm = TRUE) else mean(ci_subset$trait, na.rm = TRUE)
+    .cross <- !is.na(pairwise$trait1) & !is.na(pairwise$trait2) &
+      pmax(pairwise$trait1, pairwise$trait2) >= .ctr & pmin(pairwise$trait1, pairwise$trait2) <= .ctr
+    pairwise$trait_overlap <- pairwise$trait_overlap | !.cross
+    debug_log("Centre gate (%s = %.4g): %d candidate pairs left", pair_center_gate, .ctr, sum(!pairwise$trait_overlap, na.rm = TRUE))
   }
   pairwise$diff_value  <- pairwise$trait_diff
   pairwise$overlap_use <- pairwise$trait_overlap

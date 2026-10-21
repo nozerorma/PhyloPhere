@@ -61,3 +61,6 @@ run_phenotype_*.sh
 /res/*.tsv.gz
 papers
 .Rhistory
+
+# Validation fixtures and reports are kept outside the repository
+validation/

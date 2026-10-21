@@ -85,14 +85,12 @@ if [ "{{ run_defaults.toy_mode }}" = true ]; then
     # fill the pool to about a minute, where the full-run budget would spend 1M draws
     # plus two escalations before failing, which would defeat a smoke test.
     export MAX_TRIES="$(( CAAS_FULL_PERMS > 0 ? CAAS_FULL_PERMS * 200 : 200 ))"
-    export N_RANDOMIZATIONS="1000"
 else
     export TAG=""
     export TOY_MODE=false
     export TOY_N=""
     export CAAS_FULL_PERMS="${CAAS_FULL_PERMS:-{{ modules.caas.caas_full_perms }}}"
     export MAX_TRIES="{{ modules.caas.max_tries }}"
-    export N_RANDOMIZATIONS="{{ modules.accumulation.accumulation_n_randomizations }}"
 fi
 # RERconverge permulations: the values of the RERconverge tab, in toy mode too.
 export RER_PERM_BATCHES="{{ modules.rer.rer_perm_batches }}"
@@ -141,6 +139,7 @@ export REF_SPECIES_TAXID="{{ runtime.ref_species_taxid }}"
 export CAAS_CONFIG="{{ modules.caas.caas_config_path }}"
 export PATTERNS="{{ modules.caas.patterns }}"
 export PSS_TOP_PCT="{{ modules.caas.pss_top_pct }}"
+export PAIR_CENTER_GATE="{{ modules.caas.pair_center_gate }}"
 export MAX_CONTRASTS="{{ modules.caas.max_contrasts }}"
 export MIN_CONTRASTS="{{ modules.caas.min_contrasts }}"
 export CT_CORE_BATCH_SIZE="{{ modules.caas.ct_core_batch_size }}"
@@ -182,8 +181,6 @@ export PRECOMP_USE_DISAMBIGUATION="{{ 'true' if precomputed.use_disambiguation e
 export PRECOMP_USE_POSTPROC="{{ 'true' if precomputed.use_postproc else 'false' }}"
 
 # ── Accumulation ──────────────────────────────────────────────────────────────
-export ACCUMULATION_RANDOMIZATION_TYPE="{{ modules.accumulation.accumulation_randomization_type }}"
-export ENTROPY_DIR="{{ modules.accumulation.accumulation_entropy_dir }}"
 export ACCUMULATION_FDR="{{ modules.accumulation.accumulation_fdr }}"
 export PRECOMP_USE_ACCUMULATION="{{ 'true' if precomputed.use_accumulation else 'false' }}"
 

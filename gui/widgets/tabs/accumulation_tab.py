@@ -20,62 +20,26 @@ from gui.widgets.common.specs import FieldSpec, ModuleTabSpec, Section
 SPEC = ModuleTabSpec(
     title="Accumulation",
     blurb=(
-        "Tests whether CAAS hits accumulate on specific genes more than expected under "
-        "a randomized background, using per-site Valdar-variability conservation weighting.\n\n"
-        "ℹ️ Randomization type:\n"
-        "• naive: uniform random placement across the eligible positions — the simplest "
-        "null, ignores conservation entirely.\n"
-        "• cons_decile: bins positions into conservation deciles (from the Valdar "
-        "variability score) and randomizes within each gene's own decile profile — "
-        "controls for genes differing in overall conservation. Default.\n"
-        "• permulation: counts the hits of the filtered permulation null that SCORING "
-        "also uses (perm_pos_cycle_caas.tsv.gz, with its cycle roster for N; auto-wired "
-        "when that module ran upstream, or via --caas_pos_cycle_caas_file and "
-        "--caas_cycle_roster_file) — holds the phenotype-tree confound "
-        "but is NOT conservation-decile matched. Opt-in.\n\n"
-        "Pool of naive and cons_decile: when the filtered permulation null "
-        "(perm_pos_cycle_caas.tsv.gz, auto-wired when the CAAS permulation ran upstream, or via "
-        "--caas_pos_cycle_caas_file) is available, they draw only from the universe U shared "
-        "with Scoring and Position enrichment: the positions CAAStools tested that score in at "
-        "least one null cycle, plus the observed CAAS positions. Without it they draw from all "
-        "tested positions.\n"
+        "Tests, gene by gene, whether CAAS positions accumulate on a gene more than its share of "
+        "the position universe predicts (exact hypergeometric test, one p-value per gene and "
+        "direction, adjusted by Benjamini-Hochberg over the genes with observed CAAS).\n\n"
+        "ℹ️ Universe U: the positions CAAStools tested (in genes that survive post-processing) "
+        "that score in at least one cycle of the filtered permulation null that SCORING also "
+        "uses (perm_pos_cycle_caas.tsv.gz, auto-wired when the CAAS permulation ran upstream, "
+        "or via --caas_pos_cycle_caas_file), plus the observed CAAS positions. It is the same "
+        "universe as in Scoring and Position enrichment, and a gene's length enters through its "
+        "number of positions in U (PoolPositions in the results). A position detected on both "
+        "sides counts once in the 'all' direction.\n\n"
+        "Positions are treated as independent draws, which understates the variance of genes with "
+        "many positions in U: read the results as a ranking, not as a list of significant genes.\n"
     ),
     disclaimer=(
         "Enrichment's accumulation gene lists need this module's output. Check 'Use "
         "precomputed Accumulation output' on the Precomputed Run tab instead."
     ),
     essential_fields=(
-        Section("Randomization and burden parameters"),
-        # The randomization type sets the null model of the burden test, so it
-        # determines what the accumulation p-values mean (uniform,
-        # conservation-matched or permulation-derived null).
-        FieldSpec(
-            name="accumulation_randomization_type",
-            label="Randomization type",
-            kind="choice",
-            choices=("cons_decile", "naive", "permulation"),
-            importance="default",
-        ),
-        FieldSpec(name="accumulation_n_randomizations", label="Randomizations", importance="default"),
+        Section("Accumulation parameters"),
         FieldSpec(name="accumulation_fdr", label="FDR threshold", importance="default"),
-    ),
-    advanced_fields=(
-        Section("Entropy and standalone inputs"),
-        FieldSpec(
-            name="accumulation_entropy_dir",
-            label="Entropy directory (optional)",
-            kind="path_dir",
-            help=(
-                "Only used by 'cons_decile' randomization. Leave blank to auto-generate "
-                "per-gene Valdar variability files directly from the alignment (a "
-                "verbatim port of the ortholog_characterizator scoring, requires "
-                "--tax_id to be set — see the Runtime tab). If left blank with no "
-                "tax_id available, falls back to raw majority-residue conservation "
-                "computed straight from the alignment (no external file needed either "
-                "way, just a coarser conservation measure)."
-            ),
-            importance="optional",
-        ),
     ),
 )
 

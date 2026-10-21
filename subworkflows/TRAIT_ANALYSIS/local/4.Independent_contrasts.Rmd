@@ -30,6 +30,7 @@ params:
   secondary_trait: ""
   branch_trait: ""
   pss_top_pct: "0.05"
+  pair_center_gate: "none"
   perm_strategy: "best_model"
   trait_type: ""
   max_contrasts: "0"
@@ -217,6 +218,7 @@ fop_results <- fop_pair_sel.f(
   ci_lb = sel_ci_lb, ci_ub = sel_ci_ub, n_vec = sel_n,
   ordinal = sel_ordinal,
   top_pct = pss_top_pct,
+  center_gate = pair_center_gate,
   max_contrasts = max_contrasts,
   max_fop = { .mf <- suppressWarnings(as.integer(params$max_fop)); if (is.na(.mf) || .mf < 1) 100L else .mf },
   seed = as.integer(seed_val)

@@ -122,7 +122,8 @@ process RESAMPLE {
         ${task.cpus} \\
         ${params.seed ?: 1998} \\
         ${params.perm_match_pss != null ? params.perm_match_pss : true} \\
-        ${params.perm_match_pss_tol ?: 0.25}
+        ${params.perm_match_pss_tol ?: 0.25} \\
+        "${params.pair_center_gate ?: 'none'}"
         """
     } else {
         """
@@ -183,7 +184,8 @@ process RESAMPLE {
         ${task.cpus} \\
         ${params.seed ?: 1998} \\
         ${params.perm_match_pss != null ? params.perm_match_pss : true} \\
-        ${params.perm_match_pss_tol ?: 0.25}
+        ${params.perm_match_pss_tol ?: 0.25} \\
+        "${params.pair_center_gate ?: 'none'}"
         """
     }
 }

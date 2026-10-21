@@ -95,16 +95,16 @@ process PUBLISH_UNIVERSES {
     path "cleaned_background_main_${traitname}.txt",     emit: caas_universe, optional: true
 
     script:
-    // stageAs renames the staged files, so the NO_* sentinel detection happens
-    // here (Groovy, per task -- mirroring SCORING_AMI_REPORT's gs_arg pattern)
-    // instead of basename checks in the shell, where a NO_* name never arrives.
-    def rer_ok  = !(rer_bg.name  =~ /^NO_/)
-    def fade_ok = !(fade_bg.name =~ /^NO_/)
-    def caas_ok = !(caas_bg.name =~ /^NO_/)
+    // stageAs renames every staged input, so the original NO_* sentinel name is
+    // lost by the time the script block sees it -- a Groovy name check on the
+    // staged variable can never match.  Sentinel inputs arrive as dangling
+    // symlinks (file('NO_FADE_BACKGROUND') points to a file that does not
+    // exist), so a shell -f test (which follows symlinks) is the reliable way
+    // to skip them.
     """
-    ${rer_ok  ? "cp rer_background.universe  \"rer_background_${traitname}.txt\"" : ''}
-    ${fade_ok ? "cp fade_background.universe \"fade_background_${traitname}.txt\"" : ''}
-    ${caas_ok ? "cp caas_background.universe  \"cleaned_background_main_${traitname}.txt\"" : ''}
+    if [ -f rer_background.universe ];  then cp rer_background.universe  "rer_background_${traitname}.txt"; fi
+    if [ -f fade_background.universe ]; then cp fade_background.universe "fade_background_${traitname}.txt"; fi
+    if [ -f caas_background.universe ];  then cp caas_background.universe  "cleaned_background_main_${traitname}.txt"; fi
     """
 }
 
@@ -175,7 +175,7 @@ workflow ENRICHMENT {
         // PUBLISH_UNIVERSES/DOMINO but previously never reached the FCS report) >
         // CAAS's background as a last-resort fallback for runs where RER didn't
         // run this invocation and no override was given (preserves prior behaviour).
-        def rer_ran = (params.rer_tool || params.rer_continuous_file) as boolean
+        def rer_ran = (params.rer_tool || params.rer_continuous_file || params.rer_binary_file) as boolean
         def rer_universe_ch  = params.rer_universe_file
             ? Channel.value(file(params.rer_universe_file))
             : (rer_ran ? rer_bg_r : fcs_universe_ch)

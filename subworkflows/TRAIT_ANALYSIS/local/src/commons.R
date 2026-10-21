@@ -235,8 +235,11 @@ if (!is.na(branch_trait_resolved)) {
 trait_type <- if (exists("params") && !is.null(params$trait_type) && nzchar(params$trait_type)) tolower(params$trait_type) else "auto"
 pss_top_pct <- if (exists("params") && !is.null(params$pss_top_pct) && nzchar(as.character(params$pss_top_pct))) as.numeric(params$pss_top_pct) else 0.01
 perm_strategy <- if (exists("params") && !is.null(params$perm_strategy) && nzchar(params$perm_strategy)) params$perm_strategy else "best_model"
+# pair_center_gate: "none", "median" or "mean"; candidate pairs must straddle that centre of the trait.
+pair_center_gate <- if (exists("params") && !is.null(params$pair_center_gate) && nzchar(as.character(params$pair_center_gate))) tolower(as.character(params$pair_center_gate)) else "none"
+if (!pair_center_gate %in% c("none", "median", "mean")) stop("pair_center_gate must be none, median or mean (got '", pair_center_gate, "').")
 
-debug_log("trait_type = %s, pss_top_pct = %.4f, perm_strategy = %s", trait_type, pss_top_pct, perm_strategy)
+debug_log("trait_type = %s, pss_top_pct = %.4f, perm_strategy = %s, pair_center_gate = %s", trait_type, pss_top_pct, perm_strategy, pair_center_gate)
 
 # Maximum number of contrasts for the selection algorithm (0 or unset gives Inf: as many as the data support).
 max_contrasts <- if (exists("params") && !is.null(params$max_contrasts) && nzchar(as.character(params$max_contrasts)) && as.integer(params$max_contrasts) > 0L) {

@@ -35,6 +35,7 @@ import gzip
 import os
 import shutil
 import sys
+import time
 import urllib.request
 
 
@@ -65,18 +66,69 @@ def parse_args():
 # ── STRING files ──────────────────────────────────────────────────────────────
 
 
+def _is_valid_gzip(path):
+    """Check that a .gz file is not truncated and decompresses to non-empty content.
+
+    A truncated download (interrupted transfer, HTML error page saved as .gz, …)
+    raises EOFError or BadGzipFile partway through.  An empty file passes gzip.open
+    (Python treats it as a valid empty stream) so we also require at least one byte
+    of decompressed data.  Reading the whole file is intentional — the links file is
+    ~1 GB and this runs once per download.
+    """
+    try:
+        total = 0
+        with gzip.open(path, "rb") as f:
+            while True:
+                chunk = f.read(1 << 20)
+                if not chunk:
+                    break
+                total += len(chunk)
+        return total > 0
+    except (EOFError, OSError, gzip.BadGzipFile):
+        return False
+
+
+def _download_atomic(url, dest, max_tries=3):
+    """Download url to dest atomically: temp file + rename, with retry and validation."""
+    part = dest + ".part"
+    for attempt in range(1, max_tries + 1):
+        print(f"[build_domino_network] downloading {url} (attempt {attempt}/{max_tries})",
+              file=sys.stderr)
+        try:
+            urllib.request.urlretrieve(url, part)
+            if not os.path.exists(part) or os.path.getsize(part) == 0:
+                raise RuntimeError("downloaded file is empty")
+            if not _is_valid_gzip(part):
+                raise RuntimeError("downloaded file is corrupt/truncated (failed gzip integrity check)")
+            os.rename(part, dest)
+            return dest
+        except Exception as e:
+            print(f"[build_domino_network] attempt {attempt} failed: {e}", file=sys.stderr)
+            if os.path.exists(part):
+                os.remove(part)
+            if attempt < max_tries:
+                time.sleep(min(30, attempt * 5))
+    raise RuntimeError(f"failed to download {url} after {max_tries} attempts")
+
+
 def ensure_cached(kind, species, version, string_db_dir, cache_dir):
     """Return the path of the cached STRING file of `kind` ('links' or 'info').
 
     Lookup order: the cache directory, then string_db_dir (copied into the cache), then a
-    download from STRING. Raises RuntimeError when no source yields a non-empty file.
+    download from STRING.  A cached file is accepted only when it passes a gzip integrity
+    check; a corrupt/truncated cache entry is deleted and re-downloaded.  Downloads are
+    atomic (temp file + rename) so an interrupted transfer never poisons the cache.
     """
     fname = f"{species}.protein.{kind}.v{version}.txt.gz"
     dest = os.path.join(cache_dir, fname)
     os.makedirs(cache_dir, exist_ok=True)
 
-    if os.path.exists(dest) and os.path.getsize(dest) > 0:
-        return dest
+    if os.path.exists(dest):
+        if os.path.getsize(dest) > 0 and _is_valid_gzip(dest):
+            return dest
+        print(f"[build_domino_network] cached {fname} is corrupt/truncated, re-downloading",
+              file=sys.stderr)
+        os.remove(dest)
 
     if string_db_dir:
         local_src = os.path.join(string_db_dir, fname)
@@ -87,11 +139,7 @@ def ensure_cached(kind, species, version, string_db_dir, cache_dir):
 
     rel = f"protein.{kind}.v{version}/{fname}"
     url = f"{STRING_BASE}/{rel}"
-    print(f"[build_domino_network] downloading {url}", file=sys.stderr)
-    urllib.request.urlretrieve(url, dest)
-    if not os.path.exists(dest) or os.path.getsize(dest) == 0:
-        raise RuntimeError(f"failed to obtain {fname} (from {string_db_dir} or {url})")
-    return dest
+    return _download_atomic(url, dest)
 
 
 def load_id2symbol(info_path):

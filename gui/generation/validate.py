@@ -161,11 +161,6 @@ def validate(project: ProjectConfig) -> list[str]:
     accum = project.modules.accumulation
     scoring = project.modules.scoring
     if accum.enabled:
-        # accumulation_entropy_dir is not required: left blank, Valdar variability
-        # files are generated from the alignment (bin/compute_alignment_entropy.py).
-        # That needs --tax_id, itself optional because it is generated from the
-        # tree; without a tax_id, Accumulation falls back to a coarser conservation
-        # measure computed from the alignment (raw majority-residue conservation).
         if not disambig.enabled and not pc.use_postproc:
             errors.append(
                 "Accumulation is enabled but Post-processing is disabled with no "
@@ -269,7 +264,6 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("Runtime: taxonomy ID mapping", runtime.tax_id_file, "file"),
         ("CAAS: config file", m.caas.caas_config_path, "file"),
         ("Disambiguation: ASR cache directory", m.disambiguation.ct_disambig_asr_cache_dir, "dir"),
-        ("Accumulation: entropy directory", m.accumulation.accumulation_entropy_dir, "dir"),
         ("RERconverge: gene trees", m.rer.gene_trees, "file"),
         ("RERconverge: tested-gene universe file", m.rer.rer_universe_file, "file"),
         ("RERconverge: cross-module gene scores", m.rer.rer_gene_scores, "file"),

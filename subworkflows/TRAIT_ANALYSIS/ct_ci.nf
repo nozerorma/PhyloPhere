@@ -53,6 +53,7 @@ process CI_COMPOSITION_REPORT {
     def branch_trait = params.branch_trait ?: ''
     def secondary_trait = params.secondary_trait ?: ''
     def pss_top_pct = params.pss_top_pct ?: '0.05'
+    def pair_center_gate = params.pair_center_gate ?: 'none'
     def perm_strategy = params.perm_strategy ?: 'best_model'
     def trait_type = params.trait_type ?: ''
 
@@ -83,6 +84,7 @@ process CI_COMPOSITION_REPORT {
                     branch_trait = '${branch_trait}',
                     trait_type = '${trait_type}',
                     pss_top_pct = '${pss_top_pct}',
+                    pair_center_gate = '${pair_center_gate}',
                     perm_strategy = '${perm_strategy}'
                 ),
                 output_file = '3.CI-composition.html',
@@ -117,6 +119,7 @@ process CI_COMPOSITION_REPORT {
                     branch_trait = '${branch_trait}',
                     trait_type = '${trait_type}',
                     pss_top_pct = '${pss_top_pct}',
+                    pair_center_gate = '${pair_center_gate}',
                     perm_strategy = '${perm_strategy}'
                 ),
                 output_file = '3.CI-composition.html',

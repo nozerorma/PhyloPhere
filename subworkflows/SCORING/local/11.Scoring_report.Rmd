@@ -265,7 +265,7 @@ gene_df$gene_caas_top <- .num_col("gene_caas_score_top")
 gene_df$gene_caas_bot <- .num_col("gene_caas_score_bottom")
 
 # ── Gene-level accumulation significance ──────────────────────────────────────
-# Accumulation is represented by its empirical p-value (accum_p),
+# Accumulation is represented by its exact hypergeometric p-value (accum_p),
 # with BH FDR (accum_fdr) and accum_significant (accum_fdr < 0.05).
 has_accum_score <- "accum_p" %in% names(gene_df) && any(!is.na(gene_df$accum_p))
 has_rand <- has_accum_score
@@ -374,7 +374,7 @@ independent evolutionary evidence.
 2. **Gene score (`gene_caas_score_top` / `_bottom`)**: the gene's strongest
    position, adjusted for how many positions the gene has, so genes are not
    rewarded simply for having more of them. Compared against:
-   `r if (has_rand) "- **accum_p**: Empirical p-value of CAAS accumulation (+ BH FDR accum_fdr)."`
+   `r if (has_rand) "- **accum_p**: Exact hypergeometric p-value of CAAS accumulation (+ BH FDR accum_fdr)."`
    `r if (has_rer) "- RERConverge p-value and direction (accelerating / decelerating)."`
    - FADE: gene is significant per direction if any position has BF >= 100.
 
@@ -464,7 +464,7 @@ from having more chances at a high maximum; raising the pool percentile to the
 
 #### gene_accum_score (`accum_p`) *(optional)*
 
-Empirical p-value of CAAS accumulation.
+Exact hypergeometric p-value of CAAS accumulation.
 Reported with BH FDR (`accum_fdr`); `accum_significant` is `accum_fdr < 0.05`.
 
 #### RERConverge characterisation *(optional)*
@@ -2237,7 +2237,7 @@ DT::datatable(
   options = list(pageLength = 20, scrollX = TRUE),
   caption = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
-    "Accumulation genes ranked by empirical p-value - BH FDR and CAAS membership"
+    "Accumulation genes ranked by exact hypergeometric p-value - BH FDR and CAAS membership"
   )
 )
 ```

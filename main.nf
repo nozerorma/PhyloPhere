@@ -292,7 +292,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         def scoring_caas_pos_cycle_caas_ch = null   // perm_pos_cycle_caas.tsv.gz — p.emp numerator/denominator
         def scoring_caas_pos_sample_ch = null
         def scoring_caas_pos_quantiles_ch = null
-        def scoring_caas_cycle_roster_ch = null      // cycle_roster.txt — N of the null for SCORING, POSENRICH and the CT_ACCUMULATION permulation null
+        def scoring_caas_cycle_roster_ch = null      // cycle_roster.txt — N of the null for SCORING and POSENRICH
         def core = null               // the permulation core: shard directories and b_0 slices of the batches
         def core_observed = null      // the observed contract files, written from the b_0 slices
         def core_replays = false      // true when the core replays the alignments (it then has a b_0 slice)
@@ -576,20 +576,19 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 error "CT_ACCUMULATION requires CT post-processing output (--ct_postproc) or a standalone CAAS file (--accumulation_caas_input)."
             }
 
-            // The permulation null of this run has no cycle when only b_0 is replayed (--caas_full_perms 0). Written without
-            // `?:`: Groovy reads a numeric 0 as false.
-            if (core && params.accumulation_randomization_type == 'permulation' && params.caas_full_perms != null && (params.caas_full_perms as int) == 0) {
-                error "CT_ACCUMULATION with --accumulation_randomization_type permulation needs the permuted null, which is empty with --caas_full_perms 0: use naive or cons_decile, or raise --caas_full_perms."
+            // The universe U is defined by the permuted null, which has no cycle when only b_0 is replayed
+            // (--caas_full_perms 0). Written without `?:`: Groovy reads a numeric 0 as false.
+            if (core && params.caas_full_perms != null && (params.caas_full_perms as int) == 0) {
+                error "CT_ACCUMULATION needs the permuted null to define the universe U, and it is empty with --caas_full_perms 0: raise --caas_full_perms or disable CT_ACCUMULATION."
             }
 
             // Use filtered_discovery.tsv from postproc (gene_filtering stage)
             def acc_caas_ch       = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
             def acc_background_ch = pp_cleaned_bg    ?: Channel.empty()
-            def acc_trait_file_ch = ct_results       ? ct_results.trait_file
-                : (contrast_out ? (contrast_out.trait_dir_out ?: contrast_out.trait_file_out) : (curated_trait_ch ?: Channel.empty()))
-            // background.output = the positions CAAStools actually TESTED. This is the
-            // accumulation null's eligible pool (intersected with the cleaned-background
-            // genes inside the subworkflow). Resolved exactly like POSENRICH's own
+            // background.output = the positions CAAStools actually TESTED. They are the starting point of
+            // the accumulation universe U (intersected with the cleaned-background genes and
+            // restricted to the null-positive positions inside the subworkflow), the same U as SCORING.
+            // Resolved exactly like POSENRICH's own
             // background: live CT output when discovery ran, else the precomputed param.
             def acc_tested_pos_ch = core_observed
                 ? core_observed.background
@@ -597,17 +596,13 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     ? Channel.fromPath(params.posenrich_background_file)
                     : Channel.empty())
 
-            // The permulation type reads the same filtered null SCORING uses
-            // (perm_pos_cycle_caas.tsv.gz) and takes N from the cycle roster; both fall back to
-            // --caas_pos_cycle_caas_file / --caas_cycle_roster_file for reruns without a live
-            // permulation core (resolved inside CT_ACCUMULATION). Without a roster N is the
-            // number of cycles present in the null, with a warning (see randomize.py).
+            // The universe U reads the same filtered null SCORING uses (perm_pos_cycle_caas.tsv.gz); it
+            // falls back to --caas_pos_cycle_caas_file for reruns without a live permulation core
+            // (resolved inside CT_ACCUMULATION).
             def acc_null_cycle_caas_ch = scoring_caas_pos_cycle_caas_ch
-            def acc_cycle_roster_ch    = scoring_caas_cycle_roster_ch
 
-            accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch, acc_trait_file_ch,
-                                            acc_tested_pos_ch, acc_null_cycle_caas_ch, acc_cycle_roster_ch,
-                                            taxid_map_ch)
+            accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch,
+                                            acc_tested_pos_ch, acc_null_cycle_caas_ch)
             ran_any = true
 
         }
@@ -724,7 +719,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // rer_continuous_file lets RER_MAIN render 5.RERconverge_report.html from a
         // precomputed *.continuous.output RDS even when --rer_tool itself is off
         // this invocation (see rerconverge.nf's own params.rer_continuous_file branch).
-        if (params.rer_tool || params.rer_continuous_file) {
+        if (params.rer_tool || params.rer_continuous_file || params.rer_binary_file) {
             // NOTE: RER_TRAIT requires the original phenotype file (with proper column
             // headers), NOT the caastools traitfile (headerless 3-col format).
             def rer_traitfile_ch = curated_trait_ch ?: Channel.empty()
@@ -775,8 +770,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             // ENRICHMENT consumes the same channel.
             def scoring_fade_site_top_ch = params.fade ? FADE.out.sites_csv_top    : fade_precomp_sites_top_ch
             def scoring_fade_site_bot_ch = params.fade ? FADE.out.sites_csv_bottom : fade_precomp_sites_bot_ch
-            def scoring_rer_ch           = (params.rer_tool || params.rer_continuous_file) ? RER_MAIN.out.summary_tsv : null
-            def scoring_rer_perms_ch     = (params.rer_tool || params.rer_continuous_file) ? RER_MAIN.out.perms      : null
+            def scoring_rer_ch           = (params.rer_tool || params.rer_continuous_file || params.rer_binary_file) ? RER_MAIN.out.summary_tsv : null
+            def scoring_rer_perms_ch     = (params.rer_tool || params.rer_continuous_file || params.rer_binary_file) ? RER_MAIN.out.perms      : null
             def scoring_accum_ch         = accum_results     ? accum_results.results               : null
             // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
             // scoring_caas_* are built above, outside this block — see the comment there.
@@ -922,7 +917,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 // so it's re-derived here from fade_precomp_{top,bot}_out the
                 // same way scoring_fade_top_ch/scoring_fade_bot_ch already do
                 // above, rather than requiring a live --fade run just for AMI.
-                def rer_ran  = params.rer_tool || params.rer_continuous_file
+                def rer_ran  = params.rer_tool || params.rer_continuous_file || params.rer_binary_file
                 def rer_gene_lists_bg_ch       = rer_ran    ? RER_MAIN.out.gene_lists_bg       : Channel.empty()
                 def rer_gene_lists_interest_ch = rer_ran    ? RER_MAIN.out.gene_lists_interest : Channel.empty()
 

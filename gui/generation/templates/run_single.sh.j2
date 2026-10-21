@@ -282,9 +282,17 @@ if [ "${PRECOMP_USE_ACCUMULATION:-false}" = true ]; then
 fi
 
 if [ "${PRECOMP_USE_RER:-false}" = true ]; then
-    RER_CONTINUOUS_FILE="${RER_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/rerconverge/rer_results/${TRAIT}.continuous.output"
+    # The source run wrote <trait>.binary.* for a binary trait and <trait>.continuous.* otherwise.
+    _RER_RES="${RER_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/rerconverge/rer_results"
+    if [ -f "${_RER_RES}/${TRAIT}.binary.output" ] && [ ! -f "${_RER_RES}/${TRAIT}.continuous.output" ]; then
+        _RER_KIND=binary
+        RER_BINARY_FILE="${_RER_RES}/${TRAIT}.binary.output"
+    else
+        _RER_KIND=continuous
+        RER_CONTINUOUS_FILE="${_RER_RES}/${TRAIT}.continuous.output"
+    fi
     # The perms RDS exists only if the source run had permulation on for this phenotype.
-    RER_PERMS_FILE="${RER_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/rerconverge/rer_results/${TRAIT}.continuous.perms.rds"
+    RER_PERMS_FILE="${_RER_RES}/${TRAIT}.${_RER_KIND}.perms.rds"
     SCORING_RER_PERMS_INPUT="$RER_PERMS_FILE"
     # Scoring takes the summary table of RER_REPORT, not the raw RER_CONT output above:
     # a different producer, whose filename carries a variable suffix, so it is resolved
@@ -515,6 +523,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "caas_perms_postproc": {{ run_defaults.caas_perms_postproc }},
   "caas_full_perms": "$CAAS_FULL_PERMS",
   "pss_top_pct": "${PSS_TOP_PCT:-0.01}",
+  "pair_center_gate": "${PAIR_CENTER_GATE:-none}",
   "max_contrasts": "${MAX_CONTRASTS:-0}",
   "min_contrasts": "${MIN_CONTRASTS:-3}",
   "publish_intermediates": {{ run_defaults.publish_intermediates }},
@@ -567,9 +576,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "ensembl_dataset": "${ENSEMBL_DATASET:-}",
 
   "ct_accumulation": $_RUN_ACCUMULATION,
-  "accumulation_n_randomizations": "$N_RANDOMIZATIONS",
-  "accumulation_randomization_type": "${ACCUMULATION_RANDOMIZATION_TYPE:-cons_decile}",
-  "accumulation_entropy_dir": "$ENTROPY_DIR",
   "accumulation_fdr": "${ACCUMULATION_FDR:-0.1}",
   "accumulation_caas_input": "${ACCUMULATION_CAAS_INPUT:-}",
   "accumulation_background_input": "${ACCUMULATION_BACKGROUND_INPUT:-}",
@@ -594,6 +600,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "rer_universe_file": "${RER_UNIVERSE_FILE:-}",
   "rer_gene_scores": "${RER_GENE_SCORES:-}",
   "rer_continuous_file": "${RER_CONTINUOUS_FILE:-}",
+  "rer_binary_file": "${RER_BINARY_FILE:-}",
   "rer_perms_file": "${RER_PERMS_FILE:-}",
 
   "fade": $_RUN_FADE,

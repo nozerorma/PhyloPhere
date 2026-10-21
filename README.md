@@ -170,9 +170,16 @@ triggers **ASR_DIAGNOSTICS**, an independent report that describes the observed
 Voronoi domains, without altering the main data path. Emits gene lists consumed by FADE's `gene_set` mode.
 
 ### CT_ACCUMULATION — per-gene CAAS burden
-Permutation test for whether a gene accumulates more CAAS than expected by
-chance, run once per direction (top/bottom/all). Requires `--alignment` and
-`--gene_ensembl_file`; standalone via `--accumulation_caas_input`.
+Exact hypergeometric test for whether a gene holds more CAAS positions than its
+share of the position universe U predicts, run once per direction
+(top/bottom/all). U is the set of positions CAAStools tested that score in the
+filtered permulation null (`perm_pos_cycle_caas.tsv.gz`), plus the observed
+positions; a gene's length enters through its number of positions in U
+(`PoolPositions`), and a position detected on both sides counts once. It takes
+`filtered_discovery.tsv`, the cleaned background, the tested positions and the
+permulation null (no alignment needed); standalone via
+`--accumulation_caas_input`, `--accumulation_background_input`,
+`--posenrich_background_file` and `--caas_pos_cycle_caas_file`.
 
 ### VEP — pathogenicity annotation
 Annotates filtered CAAS positions with PrimateAI-3D pathogenicity scores and
@@ -297,7 +304,7 @@ side, `ancestral_aa` and `derived_aa` (comma-separated, most frequent first). Th
 `<top residues>/<bottom residues>` and has no direction.
 
 **`gene_scores.tsv`**: `gene_caas_score` (+ `_top`/`_bottom`), `accum_p`
-(empirical accumulation p) with BH FDR `accum_fdr` and
+(exact hypergeometric accumulation p) with BH FDR `accum_fdr` and
 `accum_significant`, `rer_min_pval`, `rer_acceleration`,
 `fade_max_bf_top`/`_bottom`, `fade_significant_top`/`_bottom`.
 
@@ -358,6 +365,7 @@ These parameters define the primary input data files, phenotype target, and modu
 | `secondary_trait` / `branch_trait` | `""` | Optional secondary trait column for reports / trait column for branch coloring. |
 | `trait_type` | `""` | `""`/`auto` infers; `continuous` forces the Phylogenetic Shift Score (PSS, OU/BM) pair-selection path; `ordinal` treats the trait as a foreground/background code (highest level = foreground, lowest = background, any middle level = intermediate and excluded from contrasts) — use for binary presence/absence or ordinal category phenotypes. Auto-inference flags a trait as ordinal when it has 2–5 distinct integer values. The foreground/background partition is produced by `4.Independent_contrasts.Rmd` from the phylogenetically-independent selected pairs. |
 | `pss_top_pct` | `"0.05"` | Top percentile of candidate species pairs (by PSS) kept as contrast candidates for continuous traits. |
+| `pair_center_gate` | `"none"` | `none`, `median` or `mean`. A candidate pair must have its two members on opposite sides of that centre of the trait (foreground ≥ centre ≥ background). It applies after the trait-type gate and the PSS gate, to every trait type, in the observed selection and in the permulation null (the permulated vectors keep the observed distribution, so both use the same centre). `median` splits the species in halves and is robust; `mean` is pulled by the tail, so in zero-inflated or right-skewed traits it sits higher and keeps only pairs that change from the bulk to the upper tail. For ordinal and 0/1 traits it adds nothing to the level gate, and for count traits the interval gate already requires separation. |
 | `perm_strategy` | `"auto"` | Evolutionary model for PSS and permulation: `auto` (best-fit BM vs OU by AICc), `OU`, or `BM`. |
 | `max_contrasts` | `"0"` | Maximum number of contrast pairs to select (`0` = dynamic discovery until Dunn < 1). |
 | `min_contrasts` | `3` | Minimum foreground contrast pairs required to proceed with CT analysis. |
@@ -557,9 +565,6 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 |---|---|---|
 | `accumulation_caas_input` | `""` | Standalone `filtered_discovery.tsv` input file. |
 | `accumulation_background_input` | `""` | Standalone background gene list or directory. |
-| `accumulation_entropy_dir` | `""` | Directory containing Valdar entropy (`.entropy.tsv`) files per gene. |
-| `accumulation_n_randomizations` | `1000000` | Number of randomizations for gene burden permutation test. |
-| `accumulation_randomization_type` | `"cons_decile"` | Randomization strategy: `"cons_decile"`, `"naive"` or `"permulation"`. `naive` and `cons_decile` redraw the observed CAAS count from a position pool; when the filtered permulation null (`perm_pos_cycle_caas.tsv.gz`, from this run or `--caas_pos_cycle_caas_file`) is available, the pool is the universe U shared with SCORING and POSENRICH: the positions tested by CAAStools (genes of the cleaned background) that score `caas_score > 0` in at least one null cycle, plus the observed CAAS positions. Positions the null can never score are not drawn. `cons_decile` keeps the observed count per conservation decile within U (decile edges from the whole position table); a decile with fewer pool positions than observed CAAS is drawn with replacement, which the log and `*_cons_decile_global.parquet` (`NumPool`, `NumObserved`, `Replace`) report. Without the null table both types draw from the tested positions, and the log says so. `permulation` counts the hits of that null directly (see `caas_cycle_roster_file`). |
 | `accumulation_fdr` | `0.1` | Benjamini-Hochberg FDR cutoff for significant accumulation (governs both gene lists and report tables). |
 
 </details>

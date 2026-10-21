@@ -5,7 +5,9 @@
 # =============================================================================
 # Candidates pass the trait-type gate (count: Jeffreys CI non-overlap; ordinal: top
 # level vs bottom level; continuous: top `pss_top_pct` by Phylogenetic Shift Score under
-# the AIC-selected OU/BM model) and are ranked by PSS. The canonical contrast (H1) is
+# the AIC-selected OU/BM model) and are ranked by PSS. The optional `center_gate` ("median" |
+# "mean") keeps only the pairs whose members lie on opposite sides of the trait's median or mean
+# (foreground >= centre >= background). The canonical contrast (H1) is
 # assembled greedily under the modified Dunn index; the FOP harvest adds Dunn-independent
 # alternative hypotheses (H2..Hn) drawn from the Voronoi domains of the canonical pairs.
 # The file defines functions only. The PSS engine is pss_core.R.
@@ -258,13 +260,24 @@ greedy_dunn_select <- function(ranked, D, target = Inf, enforce_dunn = TRUE) {
 #' model covariances, then the trait-type gate (CI non-overlap / ordinal levels /
 #' continuous top_pct), then rank_candidates().
 #'
+#' @param center_gate "none" | "median" | "mean". With "median" or "mean" a candidate must have its
+#'   members on opposite sides of that centre of the trait (higher member >= centre >= lower
+#'   member). It applies after the type gate and the PSS top_pct gate, to every trait type. The
+#'   permulated vectors keep the marginal distribution of the observed trait, so the null uses the
+#'   same centre as the observed run.
 #' @return list(cand_df = ranked data.frame | NULL, mode = "ci"|"ordinal"|"pss",
 #'              reason = NULL | character). cand_df carries species1, species2,
 #'              distance, abs_diff, pss_score (+ pair_n when n_vec given).
 lean_candidate_df <- function(trait_vec, D, target_pairs,
                               tree = NULL, cov_bm = NULL, cov_ou = NULL,
                               selected_model = "OU", ci_lb = NULL, ci_ub = NULL,
-                              top_pct = 0.01, ordinal = NULL, n_vec = NULL) {
+                              top_pct = 0.01, ordinal = NULL, n_vec = NULL,
+                              center_gate = "none") {
+  center_gate <- tolower(as.character(center_gate)[1])
+  if (is.na(center_gate) || !nzchar(center_gate)) center_gate <- "none"
+  if (!center_gate %in% c("none", "median", "mean")) {
+    stop("center_gate must be 'none', 'median' or 'mean' (got '", center_gate, "')", call. = FALSE)
+  }
   D <- as.matrix(D)
   sp <- intersect(names(trait_vec), rownames(D))
   if (length(sp) < 2L * target_pairs) return(list(cand_df = NULL, mode = "na", reason = "too few species with distances"))
@@ -316,6 +329,14 @@ lean_candidate_df <- function(trait_vec, D, target_pairs,
     keep_i <- s1
   }
   keep <- logical(length(c_hi)); keep[keep_i] <- TRUE
+
+  # Centre gate: the two members of a pair must lie on opposite sides of the trait's median or mean.
+  if (center_gate != "none") {
+    centre <- if (center_gate == "median") stats::median(trait_vec, na.rm = TRUE) else mean(trait_vec, na.rm = TRUE)
+    keep <- keep & (trait_vec[c_hi] >= centre) & (trait_vec[c_lo] <= centre)
+    if (!any(keep)) return(list(cand_df = NULL, mode = if (use_ci) "ci" else if (isTRUE(ordinal)) "ordinal" else "pss",
+                                reason = paste0("no candidate pair crosses the trait ", center_gate)))
+  }
 
   cand_df <- data.frame(
     species1 = c_hi[keep], species2 = c_lo[keep],
@@ -381,10 +402,11 @@ match_pss_select <- function(ranked, D, target_pss, tol = 0.25, max_probe = 60L)
 #' Costly (an exhaustive greedy assembly): meant for the observed trait and a sample of the null draws.
 #' @return c(pool_gated, pool_ungated, capacity); NA where the trait has no candidate pair.
 lean_draw_capacity <- function(trait_vec, D, tree, cov_bm, cov_ou, selected_model,
-                               ci_lb = NULL, ci_ub = NULL, top_pct = 0.01, ordinal = NULL, n_vec = NULL) {
+                               ci_lb = NULL, ci_ub = NULL, top_pct = 0.01, ordinal = NULL, n_vec = NULL,
+                               center_gate = "none") {
   D <- as.matrix(D)
-  gated   <- lean_candidate_df(trait_vec, D, 1L, tree, cov_bm, cov_ou, selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec)$cand_df
-  ungated <- lean_candidate_df(trait_vec, D, 1L, tree, cov_bm, cov_ou, selected_model, ci_lb, ci_ub, 1,       ordinal, n_vec)$cand_df
+  gated   <- lean_candidate_df(trait_vec, D, 1L, tree, cov_bm, cov_ou, selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec, center_gate)$cand_df
+  ungated <- lean_candidate_df(trait_vec, D, 1L, tree, cov_bm, cov_ou, selected_model, ci_lb, ci_ub, 1,       ordinal, n_vec, center_gate)$cand_df
   if (is.null(gated) || is.null(ungated)) return(c(pool_gated = NA_real_, pool_ungated = NA_real_, capacity = NA_real_))
   cap <- nrow(greedy_dunn_select(gated, D, target = Inf, enforce_dunn = TRUE)$selected)
   c(pool_gated = nrow(gated), pool_ungated = nrow(ungated), capacity = cap)
@@ -415,9 +437,9 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
                              tree = NULL, cov_bm = NULL, cov_ou = NULL,
                              selected_model = "OU", ci_lb = NULL, ci_ub = NULL,
                              top_pct = 0.01, ordinal = NULL, n_vec = NULL,
-                             max_fop = 100L, seed, canon_pairs = NULL) {
+                             max_fop = 100L, seed, canon_pairs = NULL, center_gate = "none") {
   cc <- lean_candidate_df(trait_vec, D, target_pairs, tree, cov_bm, cov_ou,
-                          selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec)
+                          selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec, center_gate)
   cand_df <- cc$cand_df
   if (is.null(cand_df) || nrow(cand_df) < 1) return(list(hypotheses = list(), K = 0L))
 
@@ -575,6 +597,8 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
 #'                        (the pairs themselves set the PSS range), and the draw is accepted (Tier 1) only if
 #'                        every pair is within `pss_tol` of its target. Ignored for count (CI) traits.
 #' @param pss_tol         Relative PSS tolerance of the matching.
+#' @param center_gate     "none" | "median" | "mean": candidate pairs must straddle that centre of the trait
+#'                        (see lean_candidate_df); the same value as the observed run.
 #' @return list(tier, n_pairs, dunn_min, n_below, fg, bg, canon, mean_pss, mismatch, reason)
 evaluate_lean_contrast_selection <- function(trait_vec,
                                              D,
@@ -589,7 +613,8 @@ evaluate_lean_contrast_selection <- function(trait_vec,
                                              ordinal = NULL,
                                              n_vec = NULL,
                                              pss_profile = NULL,
-                                             pss_tol = 0.25) {
+                                             pss_tol = 0.25,
+                                             center_gate = "none") {
 
   reject <- function(reason, n_pairs = 0L, dunn = 0, n_below = NA_integer_, mismatch = NA_real_) {
     list(tier = 0L, n_pairs = n_pairs, dunn_min = dunn, n_below = n_below,
@@ -602,7 +627,7 @@ evaluate_lean_contrast_selection <- function(trait_vec,
   use_match <- !is.null(pss_profile) && is.null(ci_lb)
   if (use_match && length(pss_profile) != target_pairs) return(reject("pss_profile length differs from target_pairs"))
   cc <- lean_candidate_df(trait_vec, D, target_pairs, tree, cov_bm, cov_ou,
-                          selected_model, ci_lb, ci_ub, if (use_match) 1 else top_pct, ordinal, n_vec)
+                          selected_model, ci_lb, ci_ub, if (use_match) 1 else top_pct, ordinal, n_vec, center_gate)
   if (is.null(cc$cand_df)) return(reject(cc$reason))
   ranked <- cc$cand_df
 

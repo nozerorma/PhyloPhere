@@ -32,7 +32,7 @@ Path templates, relative to base_path/<TRAIT>, matched to the publishDir of each
   Post-processing: postproc/gene_filtering/filtered_discovery.tsv,
                   postproc/cleaned_backgrounds/cleaned_background_main.txt
   Accumulation  : accumulation/ (dir; workflows/scoring.nf reads
-                  <dir>/{top,bottom,all}/randomization/*.csv)
+                  <dir>/{top,bottom,all}/accumulation_<direction>_results.csv)
   RER           : rerconverge/rer_results/<TRAIT>.continuous.{output,perms.rds},
                   rerconverge/rer_results/rerconverge_summary_<TRAIT>.tsv (resolved by glob
                   at generation time, because the filename carries a variable suffix)
@@ -157,8 +157,13 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
 
     if config.use_rer:
         rer_dir = os.path.join(outdir, "rerconverge", "rer_results")
-        entries.append(("rer_continuous_file", os.path.join(rer_dir, f"{trait}.continuous.output"), "file"))
-        entries.append(("rer_perms_file / scoring_rer_perms_input", os.path.join(rer_dir, f"{trait}.continuous.perms.rds"), "file"))
+        # Same rule as run_single.sh.j2: binary output only when no continuous one exists.
+        binary_only = os.path.isfile(os.path.join(rer_dir, f"{trait}.binary.output")) and not os.path.isfile(
+            os.path.join(rer_dir, f"{trait}.continuous.output")
+        )
+        kind = "binary" if binary_only else "continuous"
+        entries.append((f"rer_{kind}_file", os.path.join(rer_dir, f"{trait}.{kind}.output"), "file"))
+        entries.append(("rer_perms_file / scoring_rer_perms_input", os.path.join(rer_dir, f"{trait}.{kind}.perms.rds"), "file"))
         matches = sorted(glob.glob(os.path.join(rer_dir, "rerconverge_summary_*.tsv")))
         if matches:
             entries.append(("scoring_rer_input", matches[0], "file"))

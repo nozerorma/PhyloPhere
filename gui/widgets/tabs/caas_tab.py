@@ -164,6 +164,13 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="publish_intermediates", label="Publish intermediate files", kind="bool", importance="optional"),
         Section("Contrast-selection tuning (conf/common.config)"),
         FieldSpec(name="pss_top_pct", label="PSS top percentile candidate gate", importance="default"),
+        FieldSpec(
+            name="pair_center_gate",
+            label="Candidate pairs must straddle the trait centre",
+            kind="choice",
+            choices=("none", "median", "mean"),
+            importance="default",
+        ),
         FieldSpec(name="max_contrasts", label="Max contrasts (0 = dynamic)", importance="default"),
         FieldSpec(name="min_contrasts", label="Minimum foreground contrasts", importance="default"),
     ),

@@ -21,7 +21,7 @@
 #   --fade_top, --fade_bottom         gene-level FADE summaries (fade_summary_{top,bottom}.tsv)
 #   --fade_site_top, --fade_site_bot  per-site FADE tables (comma-delimited)
 #   --rer                 rerconverge_summary_<trait>.tsv
-#   --accum_dir           directory with accumulation_<direction>_aggregated_results.csv
+#   --accum_dir           directory with accumulation_<direction>_results.csv
 #   --caas_perms          caas_perms.rds (scoring_caas_perms.R); its cycle roster gives N for the position p when no roster file is given
 #   --caas_pos_cycle_caas perm_pos_cycle_caas.tsv.gz, the position-level null for p.emp
 #   --cycle_roster        cycle_roster.txt of the CAAS_CORE_MERGE run: N of the null, the cycles with no detection included
@@ -828,7 +828,7 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
             sum(!is.na(gene_caas$gene_caas_score_bottom))))
 
 # ── 4b. Gene Accumulation Score (optional) ────────────────────────────────────
-# Reads accumulation_<direction>_aggregated_results.csv for direction in {all, top, bottom};
+# Reads accumulation_<direction>_results.csv for direction in {all, top, bottom};
 # ct_accumulation.nf runs the three directions and stages all of them in accum_dir. "all" pools every
 # position with side != "none"; "top" / "bottom" restrict to that side, so the flag is
 # direction-aware like FADE and RER.
@@ -844,7 +844,7 @@ compute_accum_significance <- function(accum_dir, direction, suffix) {
     !!paste0("accum_significant", suffix) := logical()
   )
 
-  pattern <- paste0("accumulation_", direction, "_aggregated_results.csv")
+  pattern <- paste0("accumulation_", direction, "_results.csv")
   f <- list.files(accum_dir, pattern = pattern, full.names = TRUE)
   if (length(f) == 0) {
     cat(sprintf("Accumulation (%s): file not found (%s), skipping\n", direction, pattern))
@@ -855,9 +855,9 @@ compute_accum_significance <- function(accum_dir, direction, suffix) {
   d <- read_csv(f[1], show_col_types = FALSE)
 
   gcol <- intersect(c("Gene", "gene"), names(d))[1]
-  pval_col <- grep("PValueEmpirical", names(d), value = TRUE)[1]
+  pval_col <- grep("^PValue$", names(d), value = TRUE)[1]
   if (is.na(gcol) || is.na(pval_col)) {
-    cat(sprintf("  Accumulation (%s): missing Gene or PValueEmpirical column, skipping\n", direction))
+    cat(sprintf("  Accumulation (%s): missing Gene or PValue column, skipping\n", direction))
     return(list(df = empty, ok = FALSE))
   }
 
@@ -868,16 +868,21 @@ compute_accum_significance <- function(accum_dir, direction, suffix) {
   )
 
   fp_col <- paste0("accum_p", suffix)
-  # BH FDR on genes with at least one observed CAAS (p < 1 strictly). Genes
+  # BH FDR on genes with at least one observed CAAS (ActualCount > 0). Genes
   # with no CAAS have p = 1 by construction - they are background members
   # only and must not enter the FDR denominator.
-  tested <- !is.na(out[[fp_col]]) & out[[fp_col]] < 1
+  act_col <- grep("ActualCount", names(d), value = TRUE)[1]
+  if (is.na(act_col)) {
+    cat(sprintf("  Accumulation (%s): missing ActualCount column, skipping\n", direction))
+    return(list(df = empty, ok = FALSE))
+  }
+  tested <- !is.na(out[[fp_col]]) & !is.na(d[[act_col]]) & as.numeric(d[[act_col]]) > 0
   fdr_q  <- rep(NA_real_, nrow(out))
   if (any(tested)) fdr_q[tested] <- p.adjust(out[[fp_col]][tested], method = "BH")
   out[[paste0("accum_fdr", suffix)]] <- fdr_q
   out[[paste0("accum_significant", suffix)]] <- !is.na(fdr_q) & fdr_q < 0.05
 
-  cat(sprintf("  Accumulation (%s): %d genes, %d significant (empirical p, BH FDR < 0.05)\n",
+  cat(sprintf("  Accumulation (%s): %d genes, %d significant (exact hypergeometric p, BH FDR < 0.05)\n",
               direction, nrow(out), sum(out[[paste0("accum_significant", suffix)]], na.rm = TRUE)))
   list(df = out, ok = TRUE)
 }

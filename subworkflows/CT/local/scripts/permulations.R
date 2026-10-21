@@ -26,6 +26,7 @@
 #   args[18] seed                 RNG seed; required with multi_hypothesis
 #   args[19] match_pss            match the PSS profile of the observed canonical pairs (default true; not applied to count traits)
 #   args[20] match_pss_tol        relative PSS tolerance of that matching (default 0.25)
+#   args[21] pair_center_gate     none | median | mean: candidate pairs must straddle that centre of the trait (default none)
 #
 # Method: the trait is simulated under BM on the species tree (rescaled to the fitted OU
 # when OU is the selected model), and the simulated ranks are mapped back onto the observed
@@ -88,7 +89,7 @@ if (length(args) < 6) {
   stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
        "[chunk_size] [pss_top_pct] [max_tries] [pheno_col] ",
        "[n_col] [c_col] [resample_use_n] [trait_type] [multi_hypothesis] [max_fop] ",
-       "[n_cpus] [seed]")
+       "[n_cpus] [seed] [match_pss] [match_pss_tol] [pair_center_gate]")
 }
 
 arg_or <- function(i, default, cast = as.character) {
@@ -133,6 +134,10 @@ seed_arg <- arg_or(18, NA_integer_, as.integer)
 match_pss     <- tolower(arg_or(19, "true")) %in% c("1", "true", "t", "yes", "y")
 match_pss_tol <- arg_or(20, 0.25, as.numeric)
 if (!is.finite(match_pss_tol) || match_pss_tol <= 0) stop("match_pss_tol must be a positive number.")
+# The same gate as the observed selector (lean_candidate_df): the permulated vectors keep the marginal distribution
+# of the observed trait, so the median or mean it straddles is the observed one.
+pair_center_gate <- tolower(arg_or(21, "none"))
+if (!pair_center_gate %in% c("none", "median", "mean")) stop("pair_center_gate must be none, median or mean.")
 if (!is.na(seed_arg)) {
   set.seed(seed_arg)
   log_msg("INFO", sprintf("RNG seeded with %d (L'Ecuyer-CMRG); FOP mirror uses %d core(s)",
@@ -332,7 +337,8 @@ if (match_pss && use_ci) {
   obs_cand <- lean_candidate_df(
     starting.values, D, target_pairs, pruned.tree, cov_bm, cov_ou, selected_model,
     top_pct = 1,
-    ordinal = if (trait_type == "ordinal") TRUE else if (trait_type == "continuous") FALSE else NULL)$cand_df
+    ordinal = if (trait_type == "ordinal") TRUE else if (trait_type == "continuous") FALSE else NULL,
+    center_gate = pair_center_gate)$cand_df
   pid <- sort(unique(as.integer(cfg$V3)))
   obs_pss <- vapply(pid, function(i) {
     f <- cfg$V1[cfg$V2 == "1" & as.integer(cfg$V3) == i]; b <- cfg$V1[cfg$V2 == "0" & as.integer(cfg$V3) == i]
@@ -367,7 +373,8 @@ obs_cap <- tryCatch(
     if (use_ci) setNames(phenotype.df$ci_ub, phenotype.df$species)[names(starting.values)] else NULL,
     pss_top_pct,
     if (trait_type == "ordinal") TRUE else if (trait_type == "continuous") FALSE else NULL,
-    if (use_ci) setNames(phenotype.df$n_pop, phenotype.df$species)[names(starting.values)] else NULL),
+    if (use_ci) setNames(phenotype.df$n_pop, phenotype.df$species)[names(starting.values)] else NULL,
+    center_gate = pair_center_gate),
   error = function(err) c(pool_gated = NA_real_, pool_ungated = NA_real_, capacity = NA_real_))
 
 # ── Harvest ───────────────────────────────────────────────────────────────────
@@ -441,7 +448,8 @@ fop_hypotheses <- function(e, label) {
       ordinal = if (trait_type == "ordinal") TRUE
                 else if (trait_type == "continuous") FALSE else NULL,
       canon_pairs = if (!is.null(e$canon)) e$canon
-                    else data.frame(species1 = e$fg, species2 = e$bg, stringsAsFactors = FALSE)),
+                    else data.frame(species1 = e$fg, species2 = e$bg, stringsAsFactors = FALSE),
+      center_gate = pair_center_gate),
     error = function(err) { log_msg("WARN", sprintf("FOP harvest %s: %s", label, conditionMessage(err))); NULL })
 }
 # Hypotheses a cycle contributes; an empty harvest falls back to H1 only.
@@ -494,7 +502,8 @@ repeat {
           pss_profile = pss_profile, pss_tol = match_pss_tol,
           ordinal = if (trait_type == "ordinal") TRUE
                     else if (trait_type == "continuous") FALSE
-                    else NULL
+                    else NULL,
+          center_gate = pair_center_gate
         ),
         error = function(err) list(tier = 0L, n_pairs = 0L, dunn_min = 0,
                                    n_below = NA_integer_, fg = NULL, bg = NULL,
@@ -506,7 +515,7 @@ repeat {
       if (total_draws <= CAP_SAMPLE) {
         cap_rows[[total_draws]] <- tryCatch(
           lean_draw_capacity(pvec, D, pruned.tree, cov_bm, cov_ou, selected_model, ci_lb_draw, ci_ub_draw,
-                             pss_top_pct, ordinal_arg, n_draw),
+                             pss_top_pct, ordinal_arg, n_draw, center_gate = pair_center_gate),
           error = function(err) c(pool_gated = NA_real_, pool_ungated = NA_real_, capacity = NA_real_))
       }
 
@@ -678,6 +687,7 @@ rbind_fast <- function(lst) {
 .add("run", "escalations", value = escalations)
 .add("settings", "match_pss", value = as.numeric(!is.null(pss_profile)))
 .add("settings", "match_pss_tol", value = match_pss_tol)
+.add("settings", "center_gate", value = match(pair_center_gate, c("none", "median", "mean")) - 1L)
 .add("settings", "top_pct", value = pss_top_pct)
 .add("settings", "n_hyp_obs", value = n_hyp_obs)
 .add("settings", "target_pairs", value = target_pairs)

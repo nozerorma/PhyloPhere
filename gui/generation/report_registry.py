@@ -446,36 +446,30 @@ def _accumulation_find_slots(outdir: Listing) -> list[InputSlot]:
     accum = outdir / "accumulation"
     dirs_present = [
         d for d in ("top", "bottom", "all")
-        if next(iter((accum / d / "randomization").glob("*_aggregated_results.csv")), None) is not None
+        if next(iter((accum / d).glob(f"accumulation_{d}_results.csv")), None) is not None
     ]
     return [
-        _slot("randomization", "Per-direction randomization CSVs", True,
+        _slot("results", "Per-direction accumulation results CSVs", True,
               accum if dirs_present else None,
               note=f"directions found: {', '.join(dirs_present) or 'none'}"),
-        _slot("global_csv", "Global aggregation CSV", True,
-              _first_match(accum / "aggregation", "*_global.csv")),
     ]
 
 
 def _accumulation_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     accum = report.html_path.parent.parent / "accumulation"
     output_file = "10.Accumulation_report.html"
-    pre_lines = [
-        "mkdir -p accum_root/top/randomization accum_root/bottom/randomization "
-        "accum_root/all/randomization accum_root/aggregation",
-    ]
+    pre_lines = ["mkdir -p accum_root"]
     for direction in ("top", "bottom", "all"):
         pre_lines.append(
-            f'for f in "{accum}/{direction}/randomization"/*_aggregated_results.csv; do '
-            f'[ -f "$f" ] && cp "$f" accum_root/{direction}/randomization/; done'
+            f'[ -f "{accum}/{direction}/accumulation_{direction}_results.csv" ] && '
+            f'cp "{accum}/{direction}/accumulation_{direction}_results.csv" accum_root/ || true'
         )
-    pre_lines.append(f'for f in "{accum}/aggregation"/*_global.csv; do [ -f "$f" ] && cp "$f" accum_root/aggregation/; done')
     render = _render_call(
         "10.Accumulation_report.Rmd",
         [
             "accum_dir      = 'accum_root'",
             f"traitname      = '{report.traitname}'",
-            "pval_threshold = 0.05",
+            "fdr_threshold  = 0.05",
             "output_dir     = '.'",
         ],
         output_file,
@@ -487,7 +481,7 @@ def _accumulation_build_script(report: DetectedReport, repo_dir: Path, use_singu
         pre_lines=pre_lines,
         render_block=render,
         output_file=output_file,
-        publish_targets=[accum / "aggregation", report.html_path.parent],
+        publish_targets=[accum, report.html_path.parent],
         use_singularity=use_singularity,
     )
 
@@ -1123,7 +1117,7 @@ def _ta_ci_build_script(report: DetectedReport, repo_dir: Path, use_singularity:
             "n_trait = ''", "c_trait = ''", "tax_id = ''",
             "secondary_trait = ''", "branch_trait = ''",
             "trait_type = ''",
-            "pss_top_pct = '0.05'", "perm_strategy = 'best_model'",
+            "pss_top_pct = '0.05'", "pair_center_gate = 'none'", "perm_strategy = 'best_model'",
         ],
         output_file,
         extra_arg="envir = new.env()",
@@ -1161,7 +1155,7 @@ def _ta_contrast_build_script(report: DetectedReport, repo_dir: Path, use_singul
             "n_trait = ''", "c_trait = ''", "tax_id = ''",
             "secondary_trait = ''", "branch_trait = ''",
             "trait_type = ''",
-            "pss_top_pct = '0.05'", "perm_strategy = 'best_model'",
+            "pss_top_pct = '0.05'", "pair_center_gate = 'none'", "perm_strategy = 'best_model'",
             "max_contrasts = '0'",
         ],
         output_file,

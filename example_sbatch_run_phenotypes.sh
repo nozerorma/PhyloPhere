@@ -36,7 +36,6 @@ if [ "$IS_TOY" = true ]; then
     export TOY_N="1000"
     export PERMS_CYCLES="1000"
     export CAAS_FULL_PERMS="100"
-    export N_RANDOMIZATIONS="1000"
     export RER_PERM_BATCHES="10"
     export RER_PERMS_PER_BATCH="10"
 else
@@ -45,7 +44,6 @@ else
     export TOY_N=""
     export PERMS_CYCLES="1000000"
     export CAAS_FULL_PERMS="${CAAS_FULL_PERMS:-1000}"
-    export N_RANDOMIZATIONS="1000000"
     export RER_PERM_BATCHES="10"
     export RER_PERMS_PER_BATCH="100"
 fi
@@ -71,7 +69,6 @@ export WORK_BASE="/path/to/work_dirs"
 export ASR_CACHE_DIR="${DATADIR}/ASR_cache"
 
 export MAP_DIR="${ALI_WORSKPACE}/MAP"
-export ENTROPY_DIR="${ALI_WORSKPACE}/PROT_VAR_RAW"
 
 # --- CAAS & TRAIT INPUTS ---
 export TRAIT_FILE="${DATADIR}/traits.csv"

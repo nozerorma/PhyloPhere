@@ -9,9 +9,8 @@ so that the per-gene <gene>.entropy.tsv files exist without a prior ortholog_cha
 compute_variability.py (same directory) computes one gene per call; this driver only adds the
 batching. All numbers come from that script.
 
-Called by:  COMPUTE_ALIGNMENT_ENTROPY Nextflow process (subworkflows/CT_ACCUMULATION/ctacc_run.nf →
-            compute_alignment_entropy.py); consumed by CT_ACCUMULATION (accumulation_entropy_dir)
-            and by UCR_GENERATION
+Called by:  COMPUTE_ALIGNMENT_ENTROPY Nextflow process (subworkflows/ENRICHMENT/ucr_generation.nf →
+            compute_alignment_entropy.py); consumed by RUN_UCR_DETECTION and AGGREGATE_UCR_POSITIONS
 Inputs:     --alignment-dir    directory of FASTA alignments, one file per gene
             --taxid-tsv        required by compute_variability.py for its per-clade output
             --family-order-tsv optional family → order table; --alpha/--beta/--gamma Valdar exponents
@@ -26,7 +25,7 @@ Notes:
   * Clade rows need a taxid table with at least 5 columns (species in column 2, family in
     column 3, name class "scientific name" in column 5). A 2-column table such as the one of
     generate_taxid_map.py gives an empty clade file, with no error. The consumers
-    (CT_ACCUMULATION, detect_ucr.py, aggregate_ucr.py) read only <gene>.entropy.tsv.
+    (detect_ucr.py, aggregate_ucr.py) read only <gene>.entropy.tsv.
 
 Usage:
     compute_alignment_entropy.py --alignment-dir <dir> --output-dir <dir> \

@@ -16,10 +16,9 @@ output:
     fig_height: 6
     self_contained: true
 params:
-  accum_dir:      "."       # path to accumulation/ root (contains top/, bottom/, all/, aggregation/)
+  accum_dir:      "."       # directory with accumulation_<direction>_results.csv
   traitname:      "unknown_trait"
   fdr_threshold:  0.1
-  randomization_type: "cons_decile"
   output_dir:     "."
 ---
 
@@ -97,8 +96,7 @@ accum_dir <- params$accum_dir
 directions <- c("top", "bottom", "all")
 
 load_direction_csv <- function(direction) {
-  path <- file.path(accum_dir, direction, "randomization",
-                    sprintf("accumulation_%s_aggregated_results.csv", direction))
+  path <- file.path(accum_dir, sprintf("accumulation_%s_results.csv", direction))
   if (!file.exists(path)) return(NULL)
   read_csv(path, show_col_types = FALSE) %>% mutate(direction = direction)
 }
@@ -119,41 +117,32 @@ accum <- raw %>%
   group_by(direction) %>%
   mutate(
     FDR = {
-      tested <- !is.na(ActualCount) & ActualCount > 0 & !is.na(PValueEmpirical)
+      tested <- !is.na(ActualCount) & ActualCount > 0 & !is.na(PValue)
       q      <- rep(NA_real_, n())
       if (any(tested))
-        q[tested] <- p.adjust(PValueEmpirical[tested], method = "BH")
+        q[tested] <- p.adjust(PValue[tested], method = "BH")
       q
     }
   ) %>%
   ungroup() %>%
   mutate(significant = !is.na(FDR) & FDR < pval_thr)
-
-# Global position table of the aggregation, if present
-global_path  <- file.path(accum_dir, "aggregation", "accumulation_global.csv")
-has_global   <- file.exists(global_path)
-if (has_global)  global_df  <- read_csv(global_path,  show_col_types = FALSE)
 ```
 
 ---
 
-```{r rand-type-caveat, results='asis'}
-rand_type <- if (!is.null(params$randomization_type)) params$randomization_type else "cons_decile"
-if (identical(rand_type, "permulation")) {
-  cat(
-    "> **Null model: permulation.** The randomised CAAS set for each gene at each ",
-    "cycle is that gene's ACTUAL detections replayed from a prior CAAS permulation ",
-    "run (the same phenotype-label permutations CAAS's own genome-wide null uses ",
-    "elsewhere), not a synthetic draw from a conservation- or position-matched pool. ",
-    "This holds the phenotype-tree confound but is **not** conservation-decile ",
-    "matched -- it answers a different question than `cons_decile`, not a stricter ",
-    "version of it. The per-gene CAAS count is free to vary per cycle (it is not ",
-    "pinned to the observed count, as an occupancy null would pin it), so this is ",
-    "an *excess* null: a gene is significant when it accumulates more CAAS across ",
-    "permuted labelings than its own null replay would predict.\n\n",
-    sep = ""
-  )
-}
+```{r test-description, results='asis'}
+cat(
+  "> **Test.** For each direction, a gene is tested with an exact hypergeometric test: the K observed ",
+  "CAAS positions of the direction are taken as a uniform draw without replacement from the universe U ",
+  "(the positions CAAStools tested that score in at least one cycle of the filtered permulation null, ",
+  "plus the observed positions), and the p-value is the probability that the gene holds at least its ",
+  "observed number of CAAS positions. `PoolPositions` is the number of positions of the gene in U, ",
+  "through which its length enters; `MeanNull` and `SD` are the mean and standard deviation of the null ",
+  "count. A position detected on both sides counts once in `all`. Positions are treated as independent ",
+  "draws, which understates the variance of genes with many positions in U, so the results are a ",
+  "ranking rather than a list of significant genes.\n\n",
+  sep = ""
+)
 ```
 
 ## Overview
@@ -163,8 +152,9 @@ summary_tbl <- accum %>%
   group_by(direction) %>%
   summarise(
     n_genes        = n_distinct(gene),
+    n_tested       = sum(!is.na(ActualCount) & ActualCount > 0),
     n_significant  = sum(significant, na.rm = TRUE),
-    pct_significant = round(100 * mean(significant, na.rm = TRUE), 2),
+    pct_significant = round(100 * sum(significant, na.rm = TRUE) / max(n_tested, 1), 2),
     .groups = "drop"
   ) %>%
   arrange(direction)
@@ -188,7 +178,7 @@ DT::datatable(
 
 ---
 
-## Actual vs Simulated count distributions {.tabset}
+## Observed vs expected count {.tabset}
 
 ```{r scatter-tabs, results='asis'}
 for (dir in directions) {
@@ -196,16 +186,16 @@ for (dir in directions) {
   sub <- accum %>% filter(direction == dir)
   if (nrow(sub) == 0) { cat("*No data.*\n\n"); next }
 
-  p <- ggplot(sub, aes(x = MeanSim, y = ActualCount, colour = significant)) +
+  p <- ggplot(sub, aes(x = MeanNull, y = ActualCount, colour = significant)) +
     geom_point(alpha = 0.5, size = 1.2) +
     geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey50") +
     geom_text_repel(
-      data = sub %>% filter(significant) %>% arrange(PValueEmpirical) %>% slice_head(n = 20),
+      data = sub %>% filter(significant) %>% arrange(PValue) %>% slice_head(n = 20),
       aes(label = gene), size = 2.5, max.overlaps = 20, show.legend = FALSE
     ) +
     scale_colour_manual(values = c("FALSE" = "grey70", "TRUE" = dir_colours[[dir]])) +
     labs(
-      x      = "Mean simulated count",
+      x      = "Expected count under the null",
       y      = "Actual count",
       colour = sprintf("FDR < %g", fdr_thr),
       title  = sprintf("Direction: %s | Trait: %s", str_to_title(dir), params$traitname)
@@ -220,18 +210,18 @@ for (dir in directions) {
 
 ---
 
-## Empirical p-value distributions {.tabset}
+## P-value distributions {.tabset}
 
 ```{r pval-tabs, results='asis'}
 for (dir in directions) {
   cat(sprintf("\n\n### %s\n\n", str_to_title(dir)))
-  sub <- accum %>% filter(direction == dir, !is.na(PValueEmpirical), !is.na(ActualCount), ActualCount > 0)
+  sub <- accum %>% filter(direction == dir, !is.na(PValue), !is.na(ActualCount), ActualCount > 0)
   if (nrow(sub) == 0) { cat("*No data.*\n\n"); next }
 
-  p <- ggplot(sub, aes(x = PValueEmpirical)) +
+  p <- ggplot(sub, aes(x = PValue)) +
     geom_histogram(bins = 40, alpha = 0.7, colour = "white", fill = .tableau10[1]) +
     geom_vline(xintercept = fdr_thr, linetype = "dashed", colour = "red") +
-    labs(x = "Empirical p-value", y = "Gene count",
+    labs(x = "Exact hypergeometric p-value", y = "Gene count",
          title = sprintf("Direction: %s", str_to_title(dir))) +
     theme_bw(base_size = 16) +
     theme(legend.position = "none")
@@ -245,15 +235,16 @@ for (dir in directions) {
 
 ## Significant genes {.tabset}
 
-> Genes with at least one observed CAAS (ActualCount > 0) are tested; significance is evaluated by empirical p-value, adjusted by Benjamini-Hochberg FDR (`FDR < 0.05`).
+> Genes with at least one observed CAAS (ActualCount > 0) are tested; significance is evaluated by exact hypergeometric p-value, adjusted by Benjamini-Hochberg FDR (`FDR <` the threshold set by `fdr_threshold`).
 
 ```{r sig-tables, results='asis'}
 for (dir in directions) {
   cat(sprintf("\n\n### %s\n\n", str_to_title(dir)))
   sig <- accum %>%
     filter(direction == dir, significant) %>%
-    select(gene, ActualCount, MeanSim, SD, PValueEmpirical, FDR, RandsAbove, RandsBelow) %>%
-    arrange(FDR, gene)
+    select(gene, ActualCount, PoolPositions, MeanNull, SD, PValue, FDR) %>%
+    arrange(FDR, gene) %>%
+    mutate(PValue = formatC(PValue, format = "e", digits = 2))
 
   if (nrow(sig) == 0) { cat("*No significant genes.*\n\n"); next }
 
@@ -275,7 +266,7 @@ sig_summary <- accum %>%
   filter(significant) %>%
   group_by(gene, direction) %>%
   summarise(
-    min_pval = min(PValueEmpirical, na.rm = TRUE),
+    min_pval = min(PValue, na.rm = TRUE),
     min_fdr  = min(FDR, na.rm = TRUE),
     .groups  = "drop"
   ) %>%

@@ -60,6 +60,7 @@ if (nzchar(selector_script_path) && file.exists(selector_script_path)) {
 # @param n_vec         per-species sample sizes (count traits), else NULL.
 # @param ordinal       TRUE/FALSE ordinal level gate (NULL = auto).
 # @param top_pct       continuous-trait PSS gate (params.pss_top_pct).
+# @param center_gate   "none" | "median" | "mean": candidates must straddle that centre of the trait (params.pair_center_gate).
 # @param max_contrasts cap on canonical pairs (Inf = until Dunn stops it).
 # @param max_fop       cap on hypotheses (H1 included).
 # @param seed          pipeline seed (params.seed).
@@ -68,7 +69,7 @@ if (nzchar(selector_script_path) && file.exists(selector_script_path)) {
 #   Jaccard overlap of its species with H1, pair composition).
 fop_pair_sel.f <- function(ctx, ci_lb = NULL, ci_ub = NULL, n_vec = NULL,
                            ordinal = NULL, top_pct, max_contrasts = Inf,
-                           max_fop = 100L, seed) {
+                           max_fop = 100L, seed, center_gate = "none") {
   empty <- list(
     canon_pairs = data.frame(species1 = character(), species2 = character(),
                              stringsAsFactors = FALSE),
@@ -77,7 +78,7 @@ fop_pair_sel.f <- function(ctx, ci_lb = NULL, ci_ub = NULL, n_vec = NULL,
   )
 
   cc <- lean_candidate_df(ctx$trait_vec, ctx$D, 1L, ctx$tree, ctx$cov_bm, ctx$cov_ou,
-                          ctx$selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec)
+                          ctx$selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec, center_gate)
   if (is.null(cc$cand_df) || nrow(cc$cand_df) == 0) {
     warning("fop_pair_sel.f: no candidate contrast pairs (", cc$reason, "). Returning 0 pairs.")
     return(empty)
@@ -91,7 +92,7 @@ fop_pair_sel.f <- function(ctx, ci_lb = NULL, ci_ub = NULL, n_vec = NULL,
 
   hv <- lean_fop_harvest(ctx$trait_vec, ctx$D, K, ctx$tree, ctx$cov_bm, ctx$cov_ou,
                          ctx$selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec,
-                         max_fop = max_fop, seed = seed, canon_pairs = canon_pairs)
+                         max_fop = max_fop, seed = seed, canon_pairs = canon_pairs, center_gate = center_gate)
   hypotheses <- hv$hypotheses
   debug_log("fop_pair_sel.f: K=%d canonical pairs, %d hypotheses", K, length(hypotheses))
 

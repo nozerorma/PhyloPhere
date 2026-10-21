@@ -153,6 +153,7 @@ Usage:
 --sp_colname                  <"species">                    "species"
 --trait_type                   <"auto|continuous|ordinal">   "auto"  (auto-infers; continuous = PSS, ordinal = coded fg/bg)
 --pss_top_pct                   <FLOAT 0-1>                   0.05   (top PSS percentile gate, continuous traits)
+--pair_center_gate               <"none|median|mean">          "none" (candidate pairs must straddle the trait median or mean; observed selection and permulation null)
 --perm_strategy                  <"auto|OU|BM">               "auto"  (evolutionary model for PSS / permulation)
 --max_contrasts                   <INTEGER>                     0     (0 = dynamic discovery)
 --min_contrasts                    <INTEGER>                     3     (min foreground pairs required)
@@ -212,15 +213,12 @@ def accumulation_help() {
     return '''
 CT Accumulation — Help
 =============================================
-Permutation test for whether a gene accumulates more CAAS than expected by
-chance; runs once per direction (top/bottom/all).
+Exact hypergeometric test for whether a gene holds more CAAS positions than its
+share of the position universe U predicts; runs once per direction (top/bottom/all).
 
 Usage:
 --accumulation_caas_input             <"filtered_discovery.tsv">   null  (standalone entry)
 --accumulation_background_input        <"background_file">           null
---accumulation_entropy_dir               <"entropy_dir">                null
---accumulation_randomization_type          <"naive|cons_decile|permulation">          "cons_decile"   (naive and cons_decile draw from the universe U, the tested positions scored by the permulation null plus the observed ones, when the null table is available)
---accumulation_n_randomizations              <INTEGER>                      1000000
 --accumulation_fdr                               <FLOAT 0-1>                    0.1
 '''
 }
@@ -304,7 +302,8 @@ Usage:
 --rer_transform                                 <"auto|ha_logit|logit|arcsin|log10|none">            "ha_logit"
 --rer_universe_file                               <"gene_list">                                        null  (else falls back to cleaned background)
 --rer_continuous_file                               <"trait.continuous.output">                          null  (render report from precomputed RDS)
---rer_perms_file                                      <"trait.continuous.perms.rds">                        null
+--rer_binary_file                                    <"trait.binary.output">                              null  (same, for binary traits)
+--rer_perms_file                                      <"trait.{continuous,binary}.perms.rds">                        null
 '''
 }
 

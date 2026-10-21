@@ -7,7 +7,7 @@
  *  UCR_GENERATION: builds the ucr_positions.tsv that POSENRICH takes as
  *  --ucr_positions_file when the file is not provided. Three steps:
  *    1. COMPUTE_ALIGNMENT_ENTROPY (compute_alignment_entropy.py): per-gene Valdar
- *       variability, shared with CT_ACCUMULATION.
+ *       variability.
  *    2. RUN_UCR_DETECTION (run_ucr_detection.py, which calls detect_ucr.py): UCR
  *       windows per gene.
  *    3. AGGREGATE_UCR_POSITIONS (aggregate_ucr.py): ucr_positions.tsv with the columns
@@ -18,18 +18,36 @@
  *  step needs the taxonomy table); otherwise no UCR layer is built, which POSENRICH
  *  accepts as an absent optional layer.
  *
- *  When CT_ACCUMULATION runs with accumulation_entropy_dir unset, its own
- *  COMPUTE_ALIGNMENT_ENTROPY call (workflows/ct_accumulation.nf) computes the same
- *  entropy files again; the two calls are not merged, and only -resume reuses the
- *  cached task.
- *
  *  Consumes:  alignment directory, tax_id table
  *  Produces:  core_inputs/ucr_positions.tsv
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
-include { COMPUTE_ALIGNMENT_ENTROPY } from '../CT_ACCUMULATION/ctacc_run.nf'
 
+// ── Alignment variability ──────────────────────────────────────────────────────
+
+// Valdar variability per column and gene (compute_alignment_entropy.py)
+process COMPUTE_ALIGNMENT_ENTROPY {
+    tag "auto-generate Valdar variability"
+    label 'process_medium'
+
+    publishDir "${params.outdir}/core_inputs", mode: 'copy', overwrite: true
+
+    input:
+    path alignment_dir
+    path taxid_tsv
+
+    output:
+    path "entropy_dir", emit: entropy_dir
+
+    script:
+    """
+    python3 ${baseDir}/bin/compute_alignment_entropy.py \\
+        --alignment-dir "${alignment_dir}" \\
+        --output-dir entropy_dir \\
+        --taxid-tsv "${taxid_tsv}"
+    """
+}
 
 // ── UCR detection ──────────────────────────────────────────────────────────────
 

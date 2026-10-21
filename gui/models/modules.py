@@ -53,6 +53,7 @@ class CaasConfig(ModuleConfigBase):
     # Contrast-selection tuning (conf/common.config), used when --contrast_selection
     # runs upstream of CT.
     pss_top_pct: str = "0.05"  # --pss_top_pct
+    pair_center_gate: str = "none"  # --pair_center_gate (none|median|mean)
     max_contrasts: str = "0"  # --max_contrasts (0 = dynamic discovery)
     min_contrasts: str = "3"  # --min_contrasts
 
@@ -126,9 +127,6 @@ class DisambiguationConfig(ModuleConfigBase):
 
 @dataclass(kw_only=True)
 class AccumulationConfig(ModuleConfigBase):
-    accumulation_n_randomizations: str = "1000000"  # --accumulation_n_randomizations
-    accumulation_randomization_type: str = "cons_decile"  # --accumulation_randomization_type (naive|cons_decile|permulation)
-    accumulation_entropy_dir: str = ""  # --accumulation_entropy_dir
     accumulation_fdr: str = "0.1"  # --accumulation_fdr
 
     # Precomputed inputs (accumulation_caas_input, accumulation_background_input) are
@@ -181,7 +179,7 @@ class RerConfig(ModuleConfigBase):
     # leading-edge table.
     rer_gene_scores: str = ""  # --rer_gene_scores
 
-    # Precomputed RER inputs (rer_continuous_file, rer_perms_file, scoring_rer_input,
+    # Precomputed RER inputs (rer_continuous_file or rer_binary_file, rer_perms_file, scoring_rer_input,
     # scoring_rer_perms_input) are derived from PrecomputedConfig (use_rer).
 
 

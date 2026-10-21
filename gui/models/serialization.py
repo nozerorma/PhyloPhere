@@ -42,6 +42,7 @@ _RETIRED_FIELDS = {
     "scoring": ("scoring_weight_caas", "scoring_weight_rer", "scoring_weight_fade", "scoring_rer_direction", "scoring_stress", "scoring_stress_top_n",
                 "scoring_stress_rank_metric", "scoring_ami", "scoring_string", "scoring_compare_fdr", "scoring_compare_top_n"),
     "enrichment": ("cosmic_db",),
+    "accumulation": ("accumulation_n_randomizations", "accumulation_randomization_type", "accumulation_entropy_dir"),
 }
 
 

@@ -60,7 +60,7 @@ def resolve_cycle_levels(roster_path, cycles_present):
 
     The roster counts the cycles that detected nothing, which the null file cannot show; falling back to the
     cycles present can only raise the permulation p-values. The choice is printed either way. The same rule as
-    scoring_compute.R and randomize.py (accumulation).
+    scoring_compute.R.
     """
     present = {str(c) for c in cycles_present}
     if roster_path and os.path.exists(roster_path) and not os.path.basename(roster_path).startswith("NO_"):

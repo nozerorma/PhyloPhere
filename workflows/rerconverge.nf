@@ -147,14 +147,19 @@ workflow RER_MAIN {
         }
 
         // Check if we have precomputed continuous RDS files but still want to run report/downstream
-        if (params.rer_continuous_file && !(rerToolStr && rerToolStr.split(',').contains('continuous'))) {
-            def cont_output_ch = Channel.value(file(params.rer_continuous_file))
-            def cont_report = RER_REPORT_CONT(cont_output_ch)
+        // A binary trait yields <trait>.binary.output, a continuous one <trait>.continuous.output;
+        // each precomputed RDS goes to the report process of its own type.
+        def rerToolList = rerToolStr ? rerToolStr.split(',') : []
+        if (params.rer_continuous_file && !rerToolList.contains('continuous')) {
+            def cont_report = RER_REPORT_CONT(Channel.value(file(params.rer_continuous_file)))
             rer_report_out = cont_report.summary_tsv
-            
-            if (params.rer_perms_file) {
-                rer_perms_out = Channel.value(file(params.rer_perms_file))
-            }
+        }
+        if (params.rer_binary_file && !rerToolList.contains('binary')) {
+            def bin_report = RER_REPORT_BIN(Channel.value(file(params.rer_binary_file)))
+            rer_report_out = bin_report.summary_tsv
+        }
+        if ((params.rer_continuous_file || params.rer_binary_file) && params.rer_perms_file) {
+            rer_perms_out = Channel.value(file(params.rer_perms_file))
         }
 
         // ── Gene list extraction (always automatic — no --ami flag anymore) ──
