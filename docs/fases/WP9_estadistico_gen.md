@@ -15,7 +15,7 @@ Decidir con qué estadístico se construye el p de permulación del gen que sirv
 
 ## A1: resultado (neoplasia estricto, 1000 ciclos nulos, 208 de nivel parecido)
 
-Datos y código: `~/.cc/golden_581b999/a1_gene_statistic/` (`a1_variants.R`, `a1_variants.out`, `a1_variants_out.rds`); entradas locales `~/.cc/calib_ctrl/pos.rds` (posiciones con score de los 1000 ciclos nulos) y `b0_pos.tsv.gz` (observado). 11.344 genes; el observado puntúa 2480 (73 % con n = 1).
+Datos y código: `/home/miguel/IBE-UPF/PhD/PhyloPhere_validation/golden_581b999/a1_gene_statistic/` (`a1_variants.R`, `a1_variants.out`, `a1_variants_out.rds`); entradas locales `~/.cc/calib_ctrl/pos.rds` (posiciones con score de los 1000 ciclos nulos) y `b0_pos.tsv.gz` (observado). 11.344 genes; el observado puntúa 2480 (73 % con n = 1).
 
 | Variante | KS | ρ con n | ρ con propensión | ICC | p ≤ 0,01: observado / nulo / % nulos ≥ obs | p ≤ 0,05: observado / nulo / % nulos ≥ obs | ρ nivel |
 |---|---|---|---|---|---|---|---|
@@ -44,7 +44,7 @@ Lectura (medida, una sola corrida):
 ```
 - Conversación y fechas: A1 en la conversación del 2026-10-21 (plan y mediciones)
 - Commit de partida / commit de cierre: 581b999 / pendiente
-- Qué se hizo (ficheros y cambios): análisis local sin cambios de código (script en ~/.cc/golden_581b999/a1_gene_statistic/)
+- Qué se hizo (ficheros y cambios): análisis local sin cambios de código (script en /home/miguel/IBE-UPF/PhD/PhyloPhere_validation/golden_581b999/a1_gene_statistic/)
 - Comprobaciones ejecutadas (comando, conjunto de datos, tolerancia, resultado): ver tabla de A1
 - Mediciones (recurso antes y después): no aplica
 - Desviaciones del plan y decisiones tomadas (con su justificación): ninguna todavía; la elección entre variantes queda abierta

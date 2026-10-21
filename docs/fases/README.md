@@ -7,7 +7,7 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 
 | WP | Fichero | Fase del plan de 10.000 ciclos | Depende de | Estado |
 |---|---|---|---|---|
-| WP0 | `WP0_linea_base.md` | | commit del usuario (hecho: `581b999`) | pendiente (preparación hecha) |
+| WP0 | `WP0_linea_base.md` | | commit del usuario (hecho: `581b999`) | CASI CERRADA: suite, huellas, comparador y PEPC (equivalente al 15/10) hechos; pendiente marine toy (disco externo) |
 | WP1 | `WP1_fcs_rer.md` | | WP0 | pendiente |
 | WP2 | `WP2_exports_posenrich_limpieza.md` | | WP0 | pendiente |
 | WP3 | `WP3_bloques_de_ciclos.md` | Fase 1 | WP2 | pendiente |
@@ -23,10 +23,10 @@ Paralelismo posible: WP1 y WP2 son independientes (ficheros disjuntos); WP9-A1 y
 
 ## Reglas de trabajo comunes
 
-- **Nada cambia un número sin comparación con lo actual.** Referencias congeladas en `~/.cc/golden_581b999/` (local) y, para el cluster, en las salidas de `~/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/{neoplasia,malignant}_def/*_prevalence_complete` con la huella de `~/scratch/0.Phylophere/.tmp/golden/*_manifest.sha256`. Código de referencia del FCS: `PhyloPhere_validation/unification/legacy_fcs/` (con `SHA256SUMS`).
+- **Nada cambia un número sin comparación con lo actual.** Referencias congeladas en `/home/miguel/IBE-UPF/PhD/PhyloPhere_validation/golden_581b999/` (local) y, para el cluster, en las salidas de `~/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/{neoplasia,malignant}_def/*_prevalence_complete` con la huella de `~/scratch/0.Phylophere/.tmp/golden/*_manifest.sha256`. Código de referencia del FCS: `PhyloPhere_validation/unification/legacy_fcs/` (con `SHA256SUMS`).
 - **Commits:** los hace el usuario. No hacer commit ni push. El commit de partida de la línea base es `581b999` (rama `remove_caap`); el checkout del cluster está en `d246e82`, y entre ambos la cadena del nulo es idéntica (RESAMPLE solo añade `pair_center_gate`, sin efecto con `none`; la acumulación pasa a la prueba exacta).
 - **Cluster:** nada de cómputo en el nodo de entrada (`sbatch`, `salloc` o `srun --pty`); solo lecturas baratas. Sin lecturas pesadas (`wc -l` de una tabla de 1 GB colgó el nodo). Nunca editar código en el cluster: el usuario lo sincroniza por git. Directorio temporal: `~/scratch/0.Phylophere/.tmp`. Tras una caída de la VPN, `ssh correfoc` se cuelga con un socket obsoleto: usar `ssh -o ControlPath=none -o ControlMaster=no correfoc`.
-- **Local:** nunca `/tmp`, usar `~/.cc` (y `TMPDIR` bajo `~/.cc` para R y pytest). Entorno con pandas, R y RERconverge: `~/micromamba/envs/phylophere/bin/{python,Rscript}`.
+- **Local:** nunca `/tmp`. Temporales grandes en la partición IBE (`/home/miguel/IBE-UPF/PhD/PhyloPhere_validation/.tmp`, también como `TMPDIR` de R y pytest); `/home` está casi lleno. Entorno con pandas, R y RERconverge: `~/micromamba/envs/phylophere/bin/{python,Rscript}`.
 - **Código:** los comentarios describen solo el comportamiento actual (sin historia, fechas ni "antes era"). Todo parámetro nuevo lleva campo en la GUI y se sincroniza en `gui/templates/*.json` y `validation/tier*/templates`. El modo toy no fija parámetros. Cada desviación de RERconverge se justifica (referencia: commit 2bd328f y el walkthrough de Saputra).
 - **Medidas:** distinguir medido, leído en el código y supuesto. No citar extrapolaciones como medidas. No usar la cifra de 61 GB del merge (anterior a su corrección).
 - **Memoria:** al cerrar la fase, actualizar `project_fcs_10k_implementation_plan_2026-10-21.md` de la memoria del proyecto con el estado.
@@ -63,6 +63,6 @@ Paralelismo posible: WP1 y WP2 son independientes (ficheros disjuntos); WP9-A1 y
 - Plan aprobado y copiado aquí; commit `581b999` hecho por el usuario.
 - `PhyloPhere_validation/unification/legacy_fcs/` con `fcs_enrich.R`, `fcs_compute.R` y `percentile_flags.R` idénticos a los del commit (verificado por SHA-256).
 - Trabajo 7568379 en el cluster: huellas SHA-256 de las salidas de neoplasia y maligno completo en `~/scratch/0.Phylophere/.tmp/golden/` y revisión del checkout (`d246e82`).
-- WP9-A1 ejecutado (resultados en `WP9_estadistico_gen.md`; ficheros en `~/.cc/golden_581b999/a1_gene_statistic/`).
+- WP9-A1 ejecutado (resultados en `WP9_estadistico_gen.md`; ficheros en `/home/miguel/IBE-UPF/PhD/PhyloPhere_validation/golden_581b999/a1_gene_statistic/`).
 - `docs/POSENRICH_PORTE_EVALUACION.md` redactado (entregable de WP2).
 - Medidas de recursos a 1000 a 10.000 ciclos (FCS, `scoring_caas_perms.R`, RESAMPLE, parseo de etiquetas): `docs/PLAN_NULO_10K_PERMULACIONES.md`, secciones 3, 5 y 8.

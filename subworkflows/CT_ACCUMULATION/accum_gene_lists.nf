@@ -49,7 +49,7 @@ process ACCUMULATION_GENE_LISTS {
             stop('No aggregated results CSV found for direction ${direction}')
         d     <- read.csv(files[1], stringsAsFactors = FALSE)
         gcol  <- intersect(c('Gene', 'gene'), names(d))[1]
-        pcol  <- grep('^PValue$', names(d), value = TRUE)[1]
+        pcol  <- grep('^PValue\$', names(d), value = TRUE)[1]
         acol  <- grep('ActualCount',     names(d), value = TRUE)[1]
         if (is.na(gcol) || is.na(pcol))
             stop('Missing Gene or PValue column in the accumulation results')

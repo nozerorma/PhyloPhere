@@ -54,7 +54,7 @@ Paralelismo: WP1 y WP2/WP3 tocan ficheros disjuntos; WP9-A1 corre aparte; WP4 y 
 
 ### WP0. Línea base
 
-- El usuario hace commit y etiqueta. Salidas de referencia en `~/.cc/golden_<etiqueta>/` con el código sin modificar:
+- El usuario hace commit y etiqueta. Salidas de referencia en `/home/miguel/IBE-UPF/PhD/PhyloPhere_validation/golden_581b999/` con el código sin modificar:
   - `validation/tier2` marine toy (121 genes, 100 ciclos, script `run_tier2_marine_toy_local_complete.sh`), `validation/tier1` pepc (1 gen, 1000 ciclos, 100 hipótesis) y `validation/unification/cancer_b0_toy` (45 genes).
   - Salidas completas del cluster de neoplasia y maligno completo (incluido `strict/`), con sumas de comprobación (por `sbatch`).
   - `fcs_stats.tsv`, `caas_perms.rds`, un `.continuous.perms.rds` de RER y las tablas FCS antiguas.
@@ -155,7 +155,7 @@ Hay dos usos distintos y la diferencia importa para tu duda.
 ## Verificación extremo a extremo
 
 1. Suite existente: `RUN_SLOW=1 python3 -m pytest -q unification resources` en `PhyloPhere_validation/` tras cada WP, más las pruebas nuevas (`migrate()`, scripts generados, `test_stream_vs_export`, invarianza al bloque).
-2. `compare_null.py` y `compare_b0.py` contra `~/.cc/golden_<etiqueta>/` en marine toy, pepc y cancer_b0_toy, tolerancia 1e-12.
+2. `compare_null.py` y `compare_b0.py` contra `/home/miguel/IBE-UPF/PhD/PhyloPhere_validation/golden_581b999/` en marine toy, pepc y cancer_b0_toy, tolerancia 1e-12.
 3. Escala real por `sbatch`: neoplasia y maligno completo a 1000 ciclos frente a los directorios de referencia (matrices, `removed_units`, `position_scores.tsv`, FCS), incluido `strict/`.
 4. Recursos: tras WP5 y WP6, medir RSS y tiempo a 1000, 4000 y 10.000 ciclos con las trazas de Nextflow y `sacct`; criterio: memoria por tarea independiente de N.
 5. Objetivo final: una corrida a 10.000 ciclos de neoplasia completo con memoria por tarea de pocos GB y los mismos resultados que la versión actual donde ambas son comparables.
