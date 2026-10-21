@@ -477,6 +477,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `domino_module_thr` | `0.05` | Bonferroni-corrected p-value cutoff for accepting DOMINO active modules. |
 | `fcs_min_genes` / `fcs_max_genes` | `10` / `0` | Minimum / maximum gene set size required for FCS enrichment evaluation (`0` = no upper limit). |
 | `fcs_fdr` | `0.15` | Benjamini-Hochberg threshold on the permulation p of each gene set (`q.perm`), per ranking and database. |
+| `fcs_analytic_levels` | `0.05,0.1,0.15` | Analytic rule of Redlich et al. 2024, reported next to the permulation rule as `redlich_level` (the smallest level met, empty when none): the analytic BH-adjusted p (`p.adj`) below the level and `p.perm` below `fcs_pperm_thr`. It does not enter `sig_perm`. |
 | `fcs_cluster_similarity` / `fcs_cluster_threshold` | `jaccard` / `0.5` | Redundancy reduction of the significant sets of each ranking, applied after the significance call (no p or q value changes): the sets are grouped greedily by significance, a set joining the first representative whose leading edge is at least this similar (`jaccard`, or `overlap`, which over-merges hierarchical databases). Gives `cluster_id` and `is_representative`. |
 | `fcs_pperm_thr` | `0.025` | Second threshold: a set significant by `q.perm` also needs `p.perm` below this value (`sig_top`). It corrects for the non-independence of gene ranks and of the phylogeny. |
 | `fcs_top_n` | `20` | Number of top-ranked gene sets highlighted in report tables. |

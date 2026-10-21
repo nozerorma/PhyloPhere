@@ -80,6 +80,7 @@ process SCORING_FCS_REPORT {
                 max_g         = ${max_g},
                 fdr_thr       = ${fdr_thr},
                 pperm_thr     = ${pperm_thr},
+                analytic_levels = '${params.fcs_analytic_levels}',
                 cluster_similarity = '${params.fcs_cluster_similarity}',
                 cluster_threshold  = ${params.fcs_cluster_threshold},
                 top_n         = ${top_n},
@@ -153,6 +154,7 @@ process RER_FCS_REPORT {
                 max_g         = ${max_g},
                 fdr_thr       = ${fdr_thr},
                 pperm_thr     = ${pperm_thr},
+                analytic_levels = '${params.fcs_analytic_levels}',
                 cluster_similarity = '${params.fcs_cluster_similarity}',
                 cluster_threshold  = ${params.fcs_cluster_threshold},
                 top_n         = ${top_n},
@@ -223,6 +225,7 @@ process FCS_COMPUTE_BATCHED {
         --max-g ${max_g} \
         --fdr-thr ${fdr_thr} \
         --pperm-thr ${pperm_thr} \
+        --analytic-levels ${params.fcs_analytic_levels} \
         --output fcs_enrich_partial.tsv
     """
 }

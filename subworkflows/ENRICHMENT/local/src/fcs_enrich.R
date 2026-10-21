@@ -14,8 +14,11 @@
 # Significance (fcs_classify_significance) rests on the permulation p of each set: BH over
 # p.perm within each ranking and database gives q.perm, a set is significant when
 # q.perm < fdr_thr, and it passes the second threshold (sig_top) when its p.perm is also
-# below p_perm_thr. The analytic p.adj stays in the table as a column and does not decide.
-# A ranking without a permulation null has no p.perm and so no significant sets.
+# below p_perm_thr. A ranking without a permulation null has no p.perm and so no significant sets.
+#
+# The rule of Redlich et al. 2024 is reported next to it (redlich_level): the analytic p.adj (BH of the
+# test within each database) below a level, and p.perm below p_perm_thr. redlich_level is the smallest of
+# the levels (default 0.05, 0.10, 0.15) that the set meets, NA when it meets none. It does not enter sig_perm.
 #
 # Design:
 #   * The universe is the full tested background (cleaned_background). Genes without
@@ -421,7 +424,7 @@ fcs_enrich_col_types <- function() {
     q.perm = readr::col_double(),
     num.genes = readr::col_double(), gene.vals = readr::col_character(),
     sig_perm = readr::col_logical(), sig_top = readr::col_logical(),
-    direction = readr::col_character(),
+    direction = readr::col_character(), redlich_level = readr::col_double(),
     .default = readr::col_guess()
   )
 }
@@ -432,8 +435,11 @@ fcs_enrich_col_types <- function() {
 # passes the second threshold (sig_top) when its p.perm is also below p_perm_thr. direction is the sign of stat for a
 # significant set (a signed ranking is tested two-sided, so a set can be significant on either side). Rows without p.perm
 # (no null for the ranking, or a set the null could not evaluate) have q.perm NA and are not significant.
-fcs_classify_significance <- function(enrich_df, fdr_thr, p_perm_thr) {
-  enrich_df %>%
+# redlich_level: the smallest of analytic_levels with p.adj below it, among the sets with p.perm below p_perm_thr (a
+# one-sided ranking gives a depleted set p.perm of 0.5 or more, so only enriched sets reach it); NA otherwise.
+fcs_classify_significance <- function(enrich_df, fdr_thr, p_perm_thr, analytic_levels = c(0.05, 0.10, 0.15)) {
+  levels <- sort(unique(analytic_levels), decreasing = TRUE)
+  out <- enrich_df %>%
     dplyr::group_by(ranking, database) %>%
     dplyr::mutate(q.perm = p.adjust(p.perm, method = "BH")) %>%
     dplyr::ungroup() %>%
@@ -442,6 +448,10 @@ fcs_classify_significance <- function(enrich_df, fdr_thr, p_perm_thr) {
       sig_top   = sig_perm & p.perm < p_perm_thr,
       direction = dplyr::case_when(!sig_perm ~ NA_character_, stat > 0 ~ "positive", stat < 0 ~ "negative", TRUE ~ NA_character_)
     )
+  eligible <- !is.na(out$p.adj) & !is.na(out$p.perm) & out$p.perm < p_perm_thr
+  out$redlich_level <- NA_real_
+  for (L in levels) out$redlich_level[eligible & out$p.adj < L] <- L
+  out
 }
 
 
@@ -456,7 +466,7 @@ fcs_classify_significance <- function(enrich_df, fdr_thr, p_perm_thr) {
 #   top and bottom).
 # Returns one row per (ranking, database, pathway): the columns of fcs_enrich_col_types.
 fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_FILE",
-                        fdr_thr = 0.15, p_perm_thr = 0.025) {
+                        fdr_thr = 0.15, p_perm_thr = 0.025, analytic_levels = c(0.05, 0.10, 0.15)) {
   corStat_byrank <- NULL; base_corStat <- NULL
   res <- list(); alts <- list()
   for (rk in names(rankings)) {
@@ -469,7 +479,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_
       ranking = character(), database = character(), pathway = character(),
       stat = numeric(), pval = numeric(), p.adj = numeric(), p.perm = numeric(), q.perm = numeric(),
       num.genes = numeric(), gene.vals = character(),
-      sig_perm = logical(), sig_top = logical(), direction = character()
+      sig_perm = logical(), sig_top = logical(), direction = character(), redlich_level = numeric()
     ))
   }
   enrich_df <- dplyr::bind_rows(res)
@@ -570,10 +580,10 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_
   }
 
   # ── Significance ──
-  enrich_df <- fcs_classify_significance(enrich_df, fdr_thr = fdr_thr, p_perm_thr = p_perm_thr)
+  enrich_df <- fcs_classify_significance(enrich_df, fdr_thr = fdr_thr, p_perm_thr = p_perm_thr, analytic_levels = analytic_levels)
 
   enrich_df %>% dplyr::relocate(ranking, database, pathway, stat, pval, p.adj, p.perm, q.perm,
-                                num.genes, gene.vals, sig_perm, sig_top, direction)
+                                num.genes, gene.vals, sig_perm, sig_top, direction, redlich_level)
 }
 
 # ── Leading edge ──────────────────────────────────────────────────────────────

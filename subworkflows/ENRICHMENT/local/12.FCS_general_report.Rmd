@@ -26,6 +26,7 @@ params:
   max_g:        0             # max genes per set (0 / Inf = no limit)
   fdr_thr:      0.15          # BH threshold on the permulation p of each set (q.perm), per ranking and database
   pperm_thr:    0.025         # second threshold: a significant set also needs p.perm below this value (sig_top)
+  analytic_levels: "0.05,0.1,0.15" # analytic rule (Redlich et al. 2024): BH levels of the analytic p, with p.perm < pperm_thr
   cluster_similarity: "jaccard" # redundancy reduction: leading-edge similarity, jaccard or overlap
   cluster_threshold:  0.5     # redundancy reduction: similarity at which a set joins a representative
   top_n:        20            # rows shown per database x ranking
@@ -232,8 +233,14 @@ number of tied genes share one scale.
   the Benjamini-Hochberg adjustment of `p.perm` within each ranking and database.
 * **Second threshold** (`sig_top`): a significant set whose `p.perm` is also below
   `r params$pperm_thr`.
-* A ranking without a permulation null has no `p.perm` and so no significant set; the
-  analytic `p.adj` is shown for reference.
+* A ranking without a permulation null has no `p.perm` and so no significant set.
+
+**Analytic rule (Redlich et al. 2024).** The rule published with RERconverge calls a set
+enriched when its analytic BH-adjusted p (`p.adj`) is below a level and its permulation
+p is below `r params$pperm_thr`, the permulation p being used as a filter and not corrected
+for multiple testing. It is reported next to the rule above as `redlich_level`: the smallest of
+the levels `r params$analytic_levels` that the set meets (empty when it meets none). It does not
+enter `sig_perm`, `sig_top` or the redundancy groups.
 
 The sets are ordered everywhere by `q.perm`, then `p.perm`, then the size of the effect
 (`|stat|`), then description.
@@ -323,6 +330,21 @@ n_dbs   <- dplyr::n_distinct(enrich$database)
 cat(sprintf(
   "**%d significant** gene sets (`q.perm` < %s), **%d** of them also with `p.perm` < %s, in **%d groups** of overlapping sets, across %d databases.\n\n",
   n_sig, params$fdr_thr, n_top, params$pperm_thr, n_rep, n_dbs))
+levels_chr <- strsplit(params$analytic_levels, ",")[[1]]
+levels_num <- sort(as.numeric(trimws(levels_chr)))
+cnt <- function(d, f) vapply(split(d, factor(d$ranking, levels = ranking_names)), f, integer(1))
+rules_tbl <- tibble::tibble(
+  Ranking = ranking_names,
+  !!sprintf("q.perm < %s", params$fdr_thr) := unname(cnt(enrich, function(x) sum(x$sig_perm %in% TRUE))),
+  !!sprintf("... and p.perm < %s", params$pperm_thr) := unname(cnt(enrich, function(x) sum(x$sig_top %in% TRUE)))
+)
+for (L in levels_num) {
+  rules_tbl[[sprintf("analytic p.adj < %s and p.perm < %s", L, params$pperm_thr)]] <-
+    unname(cnt(enrich, function(x) sum(!is.na(x$redlich_level) & x$redlich_level <= L)))
+}
+cat("Sets called by each rule (the analytic ones are cumulative: a set at a smaller level also counts at the larger ones):\n\n")
+print(kbl_html(rules_tbl))
+cat("\n")
 if (!has_perm_any) cat("_No permulation null was available: `p.perm` is empty and no set can be called significant._\n\n")
 no_null_rk <- ranking_names[vapply(ranking_names, function(r) all(is.na(enrich$p.perm[enrich$ranking == r])), logical(1))]
 if (has_perm_any && length(no_null_rk)) {
@@ -358,6 +380,31 @@ for (rk in ranking_names) {
     dplyr::select(database, pathway, Description, num.genes, AUC, p.adj, p.perm, q.perm, `2nd`, Direction, Group, Rep)
   if (nrow(ev) == 0) { cat("_No set passed the significance threshold._\n"); next }
   print(kbl_html(ev, escape = TRUE, height = if (nrow(ev) > 15) "460px" else NULL))
+}
+```
+
+# Analytic rule (Redlich et al. 2024) {.tabset .tabset-fade}
+
+The sets that meet the analytic rule at the largest level of `r params$analytic_levels`, per ranking, in
+order of level and then `p.adj`, capped at `r params$leading_edge_top_n %||% 100` rows. `Level` is the smallest
+level met, `q.perm` and `Sig` tell whether the set is also significant by the permulation rule.
+
+```{r redlich_table, results='asis'}
+for (rk in ranking_names) {
+  cat(sprintf("\n## %s\n\n", rk))
+  rd <- enrich %>%
+    dplyr::filter(ranking == rk, !is.na(redlich_level)) %>%
+    dplyr::arrange(redlich_level, p.adj, p.perm, description)
+  n_rd <- nrow(rd)
+  if (n_rd == 0) { cat("_No set meets the analytic rule._\n"); next }
+  ltn <- params$leading_edge_top_n %||% 100
+  if (n_rd > ltn) cat(sprintf("_Showing the first %d of %d sets; all are in `fcs_results/fcs_all_results.tsv` (`redlich_level`)._\n\n", ltn, n_rd))
+  rd <- rd %>% head(ltn) %>%
+    dplyr::mutate(Description = stringr::str_trunc(description, 60), AUC = round(stat + 0.5, 3),
+                  p.adj = signif(p.adj, 3), p.perm = signif(p.perm, 3), q.perm = signif(q.perm, 3),
+                  Level = redlich_level, Sig = ifelse(dplyr::coalesce(sig_perm, FALSE), "X", "")) %>%
+    dplyr::select(database, pathway, Description, num.genes, AUC, p.adj, p.perm, Level, q.perm, Sig)
+  print(kbl_html(rd, height = if (nrow(rd) > 15) "460px" else NULL))
 }
 ```
 
@@ -552,6 +599,7 @@ cat("Null       : permulation p of the test on every null column (p.perm), pseud
 cat("Significant: q.perm < ", params$fdr_thr, " (BH on p.perm per ranking and database); second threshold p.perm < ", params$pperm_thr, "\n", sep = "")
 cat("Universe   : cleaned_background; no-signal genes floored to 0 (zero-floor)\n")
 cat("Groups     : greedy by significance, leading-edge ", params$cluster_similarity, " >= ", params$cluster_threshold, " to a representative\n", sep = "")
+cat("Analytic   : p.adj < level and p.perm < ", params$pperm_thr, ", levels ", params$analytic_levels, " (Redlich et al. 2024; redlich_level)\n", sep = "")
 cat("Order      : q.perm, p.perm, |stat|, description\n")
 ```
 

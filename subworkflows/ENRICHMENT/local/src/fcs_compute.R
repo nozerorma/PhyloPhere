@@ -22,6 +22,7 @@
 #   --num-g, --max-g    minimum and maximum gene-set size (max-g 0 = no limit)
 #   --fdr-thr           BH threshold on the permulation p (q.perm)
 #   --pperm-thr         second threshold, on the permulation p itself
+#   --analytic-levels   comma-separated BH levels of the analytic-p rule (Redlich et al. 2024), default 0.05,0.1,0.15
 #   --output            output TSV
 # =============================================================================
 
@@ -49,6 +50,7 @@ num_g         <- as.numeric(get_arg("--num-g", "10"))
 max_g         <- as.numeric(get_arg("--max-g", "0"))
 fdr_thr       <- as.numeric(get_arg("--fdr-thr", "0.15"))
 pperm_thr     <- as.numeric(get_arg("--pperm-thr", "0.025"))
+analytic_levels <- as.numeric(strsplit(get_arg("--analytic-levels", "0.05,0.1,0.15"), ",")[[1]])
 out_file      <- get_arg("--output", "fcs_enrich_partial.tsv")
 
 stopifnot(!is.null(stats_file), file.exists(stats_file))
@@ -98,7 +100,7 @@ gmts <- fcs_load_gmts(gmt_dir)
 
 enrich <- fcs_run_all(rankings, gmts, num_g = num_g, max_g = max_g,
                       perms_file = perms_file, fdr_thr = fdr_thr,
-                      p_perm_thr = pperm_thr)
+                      p_perm_thr = pperm_thr, analytic_levels = analytic_levels)
 
 
 # ── Output ────────────────────────────────────────────────────────────────────
