@@ -8,7 +8,7 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 | WP | Fichero | Fase del plan de 10.000 ciclos | Depende de | Estado |
 |---|---|---|---|---|
 | WP0 | `WP0_linea_base.md` | | commit del usuario (hecho: `581b999`) | HECHO. PEPC y cancer_b0_toy regenerados con `a92fd2d`; marine toy completada el 2026-10-22 (WP5) |
-| WP1 | `WP1_fcs_rer.md` | | WP0 | HECHO (p.perm de CAAS idéntico a la referencia; RER global firmado; pendiente medir RER_CONT a 10.000 y los recuentos 1, 0, 6, 6) |
+| WP1 | `WP1_fcs_rer.md` | | WP0 | EN REVISIÓN (RER: NA excluidos, bilateralidad explícita y ajustes observado/nulo compartidos; pruebas y procesos Nextflow pequeños validados; pendientes restantes y decisión a 10.000 en el registro) |
 | WP2 | `WP2_exports_posenrich_limpieza.md` | | WP0 | HECHO (PEPC c4 y toy de cancer idénticos a la referencia con su caché de ASR; marine toy validado en WP5) |
 | WP3 | `WP3_bloques_de_ciclos.md` | Fase 1 | WP2 | HECHO (PEPC c4 a 1000 ciclos con bloque de 250 y toy de cáncer con bloques de 25 y 40 idénticos a la referencia, delta 0.0; marine toy validado en WP5) |
 | WP4 | `WP4_replay_en_flujo.md` | Fase 2 | WP3 | HECHO (PEPC c4 a 1000 ciclos con bloque 250 y toy de cáncer con bloques 25 y 40 idénticos a la referencia, delta 0.0; flujo sin export salvo b_0; RSS del gen mayor RP1 sin medir (cluster); marine toy validado en WP5) |
@@ -20,6 +20,12 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 
 Actualiza esta tabla (estado y, en el fichero de la fase, el registro) al cerrar cada fase.
 Paralelismo posible: WP1 y WP2 son independientes (ficheros disjuntos); WP9-A1 ya está hecho; WP4 y WP5 son seriales porque comparten el formato de tabla de la tesela.
+
+## Validación y commits por WP (decisión del usuario, 2026-10-22)
+
+Cada WP se guarda en un commit temático con sus pruebas dirigidas, referencias guardadas y pendientes explícitos. No se exige una ejecución completa del pipeline por cada WP. La regeneración del nulo, la corrida completa y la aceptación a escala se planifican conjuntamente al terminar la integración de los WP, usando las referencias congeladas para contrastar los resultados. Las mediciones específicas de recursos pueden reutilizar esa corrida integrada o ejecutarse como benchmarks focalizados.
+
+Un commit de implementación o de avance parcial no implica haber superado la aceptación integrada ni haber medido 10.000 ciclos. Los estados y registros deben distinguir esas situaciones. Esta decisión sustituye los requisitos históricos de volver a ejecutar una corrida completa como condición de cada commit de WP. El usuario autoriza los commits temáticos y el push de esta revisión; no se reescribe el historial.
 
 ## Reglas de trabajo comunes
 

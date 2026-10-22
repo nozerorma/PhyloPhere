@@ -288,7 +288,7 @@ class EnrichmentConfig(ModuleConfigBase):
     fcs_max_genes: str = "0"  # --fcs_max_genes (0 = no limit)
     fcs_fdr: str = "0.15"  # --fcs_fdr (BH on the permulation p: q.perm)
     pfam_cache_dir: str = ""  # --pfam_cache_dir (blank -> ~/.cache/phylophere/pfam)
-    fcs_pperm_thr: str = "0.025"  # --fcs_pperm_thr (second threshold, on p.perm)
+    fcs_pperm_thr: str = "0.025"  # --fcs_pperm_thr (Redlich rule, raw p.perm)
     fcs_analytic_levels: str = "0.05,0.1,0.15"  # --fcs_analytic_levels (comma-separated)
     fcs_cluster_similarity: str = "jaccard"  # --fcs_cluster_similarity: "jaccard" | "overlap"
     fcs_cluster_threshold: str = "0.5"  # --fcs_cluster_threshold

@@ -30,6 +30,8 @@ args <- commandArgs(TRUE)
 
 library(dplyr)
 library(RERconverge)
+script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
+source(file.path(dirname(normalizePath(script_file)), "rer_permulations.R"))
 
 # ── Load trait vector and count vectors ───────────────────────────────────────
 
@@ -162,14 +164,18 @@ if (length(charpaths) != ncol(traitRERw)) {
 # ── Continuous RER correlation ────────────────────────────────────────────────
 
 message("[RER] Running correlateWithContinuousPhenotype ...")
-res <- correlateWithContinuousPhenotype(
+res <- rer_score_paths(
   traitRERw,
   charpaths,
-  min.sp         = as.numeric(args[6]),
-  winsorizeRER   = as.numeric(args[7]),
-  winsorizetrait = as.numeric(args[8])
+  mode   = "continuous",
+  min.sp = as.numeric(args[6]),
+  winR   = as.numeric(args[7]),
+  winT   = as.numeric(args[8])
 )
 message(sprintf("[RER] Correlation done: %d genes tested.", nrow(res)))
+attr(res, "rer_settings") <- list(mode = "continuous", min.sp = as.numeric(args[6]),
+                                   winR = rer_winsor_limit(as.numeric(args[7])),
+                                   winT = rer_winsor_limit(as.numeric(args[8])))
 
 # ── Permulation null (Brownian-motion phenotypes) ─────────────────────────────
 
@@ -188,8 +194,8 @@ if (num_batches > 0 && perms_per_batch > 0) {
 
   # ── Master tree for the simulation ─────────────────────────────────────────
 
-  # getPermsContinuous() simulates the null phenotypes with geiger::ratematrix() and
-  # geiger::sim.char(), which need a rooted, fully dichotomous tree whose tips are
+  # RERconverge::simpermvec uses geiger::ratematrix() and geiger::sim.char(), which
+  # need a rooted, fully dichotomous tree whose tips are
   # the species of the complete-case trait vector. That tree is built here and passed
   # only as `mastertree=`. `trees=` must stay the original treesObj: replacing its
   # master tree with a multi2di() tree leaves its cached $paths, $matIndex and $ap
@@ -218,14 +224,13 @@ if (num_batches > 0 && perms_per_batch > 0) {
   ))
 
   message(sprintf("  [RER] Permutation batch 1 / %d", num_batches))
-  perms_combined <- getPermsContinuous(
+  perms_combined <- rer_perms_continuous(
     numperms        = perms_per_batch,
     traitvec        = sim_trait,
     RERmat          = traitRERw,
-    annotlist       = NULL,
     trees           = geneTrees,
     mastertree      = sim_master,
-    calculateenrich = FALSE,
+    min.sp          = as.numeric(args[6]),
     winR            = as.numeric(args[7]),
     winT            = as.numeric(args[8])
   )
@@ -233,14 +238,13 @@ if (num_batches > 0 && perms_per_batch > 0) {
   if (num_batches > 1) {
     for (i in 2:num_batches) {
       message(sprintf("  [RER] Permutation batch %d / %d", i, num_batches))
-      batch_i <- getPermsContinuous(
+      batch_i <- rer_perms_continuous(
         numperms        = perms_per_batch,
         traitvec        = sim_trait,
         RERmat          = traitRERw,
-        annotlist       = NULL,
         trees           = geneTrees,
         mastertree      = sim_master,
-        calculateenrich = FALSE,
+        min.sp          = as.numeric(args[6]),
         winR            = as.numeric(args[7]),
         winT            = as.numeric(args[8])
       )
@@ -278,6 +282,7 @@ if (num_batches > 0 && perms_per_batch > 0) {
   
   # The raw permutations object (null statistics matrices) is kept for the FCS and comparison stages
   perms_path <- sub("\\.output$", ".perms.rds", args[5])
+  attr(perms_combined, "rer_settings") <- attr(res, "rer_settings")
   saveRDS(perms_combined, file = perms_path)
   message("[RER] Saved raw null permutations RDS to: ", perms_path)
 } else {

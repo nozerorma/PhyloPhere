@@ -86,7 +86,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="fcs_min_genes", label="FCS minimum genes per set", importance="default"),
         FieldSpec(name="fcs_max_genes", label="FCS maximum genes per set (0 = uncapped)", importance="default"),
         FieldSpec(name="fcs_fdr", label="FCS FDR threshold", importance="default"),
-        FieldSpec(name="fcs_pperm_thr", label="FCS permulation p threshold", importance="default"),
+        FieldSpec(name="fcs_pperm_thr", label="FCS Redlich permulation p threshold", importance="default"),
         FieldSpec(name="fcs_analytic_levels", label="FCS analytic rule (Redlich): BH levels, comma-separated", importance="default"),
         FieldSpec(name="fcs_cluster_similarity", label="FCS redundancy groups: leading-edge similarity", kind="choice", choices=("jaccard", "overlap"), importance="default"),
         FieldSpec(name="fcs_cluster_threshold", label="FCS redundancy groups: similarity threshold", importance="default"),

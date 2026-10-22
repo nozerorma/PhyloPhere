@@ -399,7 +399,7 @@ gene_attr_df <- if (has_fcs_stats_cmp) {
 # not three drifting copies.
 #
 # Each angle uses ITS OWN module's significance definition (not "any
-# leading-edge/described membership"), FCS/RER's dual p.adj+p.perm gate,
+# leading-edge/described membership"), FCS/RER's sig_perm (BH on p.perm),
 # posenrich's own p_adj gate, DOMINO's own module-significance cutoff.
 # FCS and posenrich both carry a genuine "global" ranking (CAAS's undirected
 # composite; posenrich's own directions = ["global","top","bottom"]), so
@@ -595,7 +595,7 @@ below and as weighted criteria in the Interesting Genes/Positions tables further
 down. A gene set is "significant" when `q.perm` (BH on the permulation p of the Wilcoxon-AUC
 test, per ranking and database) is below `r params$fdr_thr` - see
 [12.FCS_general_report.Rmd](12.FCS_general_report.Rmd)'s Methods section for the test, the
-second threshold on `p.perm` and the grouping of overlapping sets (`cluster_id`) that
+separate Redlich rule and the grouping of overlapping sets (`cluster_id`) that
 this report's tables use. CAAS has the global, top and bottom rankings; RER has its signed
 global ranking only.
 

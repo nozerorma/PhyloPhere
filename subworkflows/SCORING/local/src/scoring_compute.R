@@ -865,7 +865,7 @@ cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom)\n",
 if (has_rer) {
   # The RER ranking is the signed parametric statistic sign(Rho) * -log10(P), the gene statistic of RERconverge (getStat) and the
   # one its permulations (corStat) carry for the null.
-  .rp <- pmax(suppressWarnings(as.numeric(.col(gene_scores, "rer_P"))), 1e-300)
+  .rp <- suppressWarnings(as.numeric(.col(gene_scores, "rer_P")))
   .rr <- suppressWarnings(as.numeric(.col(gene_scores, "rer_rho")))
   write_tsv(tibble(
     gene         = gene_scores$Gene,

@@ -208,7 +208,7 @@ workflow ENRICHMENT {
         def trait_lbl = params.traitname ?: 'trait'
 
         if (run_fcs) {
-            def scoring_fcs_compute = FCS_COMPUTE_SCORING(fcs_stats, fcs_universe_ch, caas_perms_resolved)
+            def scoring_fcs_compute = FCS_COMPUTE_SCORING(fcs_stats, fcs_universe_ch, caas_perms_resolved, 'caas')
             def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch, caas_perms_resolved, gene_lists_ch,
                                               scoring_fcs_compute.enrich_file)
             fcs_out_report = fcs_out.report
@@ -217,7 +217,7 @@ workflow ENRICHMENT {
             caas_le_comp = fcs_out.fcs_leading_edge_composition.ifEmpty { file('NO_LEADING_EDGE_COMPOSITION') }
 
             if (rer_ran) {
-                def rer_fcs_compute = FCS_COMPUTE_RER(fcs_stats_rer, rer_universe_ch, rer_perms_resolved)
+                def rer_fcs_compute = FCS_COMPUTE_RER(fcs_stats_rer, rer_universe_ch, rer_perms_resolved, 'rer')
                 def rer_fcs = MODULE_FCS_RER(
                     Channel.value('scoring/rer'),   fcs_stats_rer,
                     rer_universe_ch, Channel.value("12.FCS_rer_${trait_lbl}"),

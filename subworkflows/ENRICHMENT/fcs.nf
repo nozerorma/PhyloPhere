@@ -6,12 +6,13 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *  SCORING_FCS_REPORT, RER_FCS_REPORT, FCS_COMPUTE_BATCHED, FCS_CONCAT, FCS_COMPUTE:
  *  rank-based, threshold-free gene-set enrichment (Wilcoxon-AUC through
- *  RERconverge::fastwilcoxGMTall, plus the Lachenbruch two-part test of
- *  fcs_enrich.R) over the GMT files of subworkflows/ENRICHMENT/dat.
+ *  RERconverge::fastwilcoxGMTall, with permulation p and BH correction)
+ *  over the GMT files of subworkflows/ENRICHMENT/dat.
  *
  *  The report processes render 12.FCS_general_report.Rmd against a generic stats TSV
  *  (gene, score_<ranking> and flag_<name> columns) and a universe file (the
- *  cleaned background, genes without signal floored to 0).
+ *  cleaned background for CAAS, genes without signal floored to 0). RER ranks only
+ *  genes with a non-missing statistic, retaining measured zeros.
  *
  *    SCORING_FCS_REPORT : CAAS report (global/top/bottom rankings, cross-module flags)
  *    RER_FCS_REPORT     : RERconverge report (also takes the CAAS stats as annot_file)
@@ -151,6 +152,7 @@ process RER_FCS_REPORT {
                 universe_file = '${universe}',
                 gmt_dir       = '${gmt_dir}',
                 project_name  = '${report_label}',
+                score_source  = 'rer',
                 num_g         = ${num_g},
                 max_g         = ${max_g},
                 fdr_thr       = ${fdr_thr},
@@ -183,7 +185,7 @@ process RER_FCS_REPORT {
 
 // ── Batched FCS statistics ───────────────────────────────────────────────────
 // fcs_run_all() over every GMT database is the expensive step behind both report
-// processes (Wilcoxon-AUC and Lachenbruch for every
+// processes (Wilcoxon-AUC with permulation p for every
 // score_<ranking> column against every GMT). The BH correction of fcs_enrich.R is
 // scoped per database, so the GMT set can be split across independent tasks and the
 // partial tables row-concatenated without any reconciliation: the result is exact.
@@ -204,12 +206,18 @@ process FCS_COMPUTE_BATCHED {
     path stats_file
     path universe_file
     path perms_file
+    val score_source
 
     output:
     path "fcs_enrich_partial.tsv", emit: partial
 
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
+    def sources = ['fcs_enrich.R', 'fcs_compute.R', 'percentile_flags.R'].collect {
+        file("${local_dir}/src/${it}").text
+    }.join('\n')
+    def source_hash = java.security.MessageDigest.getInstance('SHA-256')
+        .digest(sources.getBytes('UTF-8')).encodeHex().toString()
     def num_g     = params.fcs_min_genes
     def max_g     = params.fcs_max_genes ?: 0
     def fdr_thr   = params.fcs_fdr
@@ -217,6 +225,7 @@ process FCS_COMPUTE_BATCHED {
     def rscript_cmd = (params.use_singularity || params.use_apptainer) ?
         "/usr/local/bin/_entrypoint.sh Rscript" : "Rscript"
     """
+    # FCS sources SHA256: ${source_hash}
     cp ${local_dir}/src/fcs_enrich.R ${local_dir}/src/fcs_compute.R ${local_dir}/src/percentile_flags.R .
     ${rscript_cmd} fcs_compute.R \
         --stats-file ${stats_file} \
@@ -229,6 +238,7 @@ process FCS_COMPUTE_BATCHED {
         --pperm-thr ${pperm_thr} \
         --analytic-levels ${params.fcs_analytic_levels} \
         --gene-stat ${params.gene_stat ?: 'size_adj_max'} \
+        --score-source ${score_source} \
         --output fcs_enrich_partial.tsv
     """
 }
@@ -287,11 +297,13 @@ process FCS_CONCAT {
 // ── FCS_COMPUTE: GMT-batched fcs_run_all() ───────────────────────────────────────
 // Takes the same stats, universe and permutations files as the report processes and
 // reads the GMT files of params.gmt_dir (the directory the reports use as gmt_dir).
+// score_source is set by the caller: 'caas' uses a zero floor; 'rer' excludes missing scores.
 workflow FCS_COMPUTE {
     take:
     stats_file
     universe_file
     perms_file
+    score_source
 
     main:
     def batchSize = (params.fcs_batch_size ?: 4) as int
@@ -315,7 +327,7 @@ workflow FCS_COMPUTE {
     def universe_file_bc = universe_file.collect().map { it[0] }
     def perms_file_bc    = perms_file.collect().map { it[0] }
 
-    FCS_COMPUTE_BATCHED(batches, stats_file_bc, universe_file_bc, perms_file_bc)
+    FCS_COMPUTE_BATCHED(batches, stats_file_bc, universe_file_bc, perms_file_bc, score_source)
     FCS_CONCAT(FCS_COMPUTE_BATCHED.out.partial.collect())
 
     emit:

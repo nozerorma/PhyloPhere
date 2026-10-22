@@ -39,12 +39,20 @@ process RER_BIN {
     script:
     def perm_batches    = params.rer_perm_batches    ?: 0
     def perms_per_batch = params.rer_perms_per_batch ?: 100
-    def min_pos         = params.rer_min_pos         ?: 2
+    def min_pos         = params.rer_min_pos == null ? 2 : params.rer_min_pos
     def binary_clade    = params.rer_binary_clade    ?: 'all'
+    // Include external R sources in the task hash so resume cannot reuse a null
+    // computed with a different correlation implementation.
+    def sources = ['binary_rer.R', 'rer_permulations.R'].collect {
+        file("${baseDir}/subworkflows/RERCONVERGE/local/${it}").text
+    }.join('\n')
+    def source_hash = java.security.MessageDigest.getInstance('SHA-256')
+        .digest(sources.getBytes('UTF-8')).encodeHex().toString()
 
     if (params.use_singularity || params.use_apptainer) {
         """
         echo "Using Singularity/Apptainer"
+        # RER sources SHA256: ${source_hash}
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/binary_rer.R' \\
         ${trait_file} \\
@@ -62,6 +70,7 @@ process RER_BIN {
     } else {
         """
         echo "Running locally"
+        # RER sources SHA256: ${source_hash}
         Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/binary_rer.R' \\
         ${trait_file} \\

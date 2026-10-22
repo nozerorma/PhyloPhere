@@ -7,22 +7,20 @@
 #
 # Tests the gene sets of GMT files against a gene ranking with the Wilcoxon-AUC test
 # (RERconverge::fastwilcoxGMTall): rank shift of the set. On a zero-floored ranking its
-# one-sided p carries the tie term of the rank sum, and its permulation p compares that p
-# (not the AUC) with the same p of every null column, so that columns with a different
-# number of tied genes share one scale.
+# one-sided p carries the tie term of the rank sum. Permulation p-values compare the
+# enrichment statistic (AUC - 0.5) with the null statistics, matching RERconverge.
 #
 # Significance (fcs_classify_significance) rests on the permulation p of each set: BH over
 # p.perm within each ranking and database gives q.perm, a set is significant when
-# q.perm < fdr_thr, and it passes the second threshold (sig_top) when its p.perm is also
-# below p_perm_thr. A ranking without a permulation null has no p.perm and so no significant sets.
+# q.perm < fdr_thr. A ranking without a permulation null has no p.perm and so no significant sets.
 #
 # The rule of Redlich et al. 2024 is reported next to it (redlich_level): the analytic p.adj (BH of the
 # test within each database) below a level, and p.perm below p_perm_thr. redlich_level is the smallest of
 # the levels (default 0.05, 0.10, 0.15) that the set meets, NA when it meets none. It does not enter sig_perm.
 #
 # Design:
-#   * The universe is the full tested background (cleaned_background). Genes without
-#     signal are floored to 0, never dropped or penalized.
+#   * CAAS uses the full tested background (cleaned_background), with absent signal
+#     floored to 0. RER uses only genes with a non-missing association statistic.
 #   * Direction by membership: a "top" ranking keeps the score of the top and both
 #     genes and floors the rest to 0; "bottom" keeps bottom and both. A gene of both
 #     directions contributes its full score to each.
@@ -112,11 +110,40 @@ fcs_load_gmts <- function(gmt_dir) {
 
 # scores: named numeric vector (gene -> score) of the signal genes only.
 # universe: all tested genes (cleaned_background).
-# Returns a named numeric vector over union(universe, names(scores)); genes without a
-# score, or with NA, get `floor` (0). The caller handles direction by passing only the
-# scores of the directional subset (top and both, or bottom and both).
-fcs_build_vals <- function(scores, universe, floor = 0) {
+# CAAS returns a named vector over union(universe, names(scores)); genes without a
+# score, or with NA, get `floor` (0). RER excludes missing scores and adds no genes
+# from the background, matching getStat. Measured zero scores remain in both cases.
+# The caller handles CAAS direction by passing the directional subset's scores.
+# Gene IDs are opaque: keep suffixes; never silently collapse distinct IDs or
+# select one of several scores for an exact duplicate. Missing scores do not
+# exempt an input from this contract.
+fcs_check_gene_ids <- function(ids, n, context) {
+  if (n == 0L) return(invisible(NULL))
+  if (length(ids) != n || anyNA(ids) || any(!nzchar(trimws(ids))))
+    stop(context, ": missing or empty gene IDs")
+  if (anyDuplicated(ids))
+    stop(context, ": duplicate gene IDs: ", paste(head(unique(ids[duplicated(ids)]), 5), collapse = ", "))
+  invisible(NULL)
+}
+
+# getStat treats a shared prefix before a dot as one gene. Reject that ambiguity
+# rather than reproducing its inconsistent choice of which score to retain.
+fcs_check_rer_gene_ids <- function(ids, n, context) {
+  fcs_check_gene_ids(ids, n, context)
+  base_ids <- sub("\\..*", "", ids)
+  if (anyDuplicated(base_ids))
+    stop(context, ": ambiguous RER gene IDs sharing a prefix before '.': ",
+         paste(head(unique(base_ids[duplicated(base_ids)]), 5), collapse = ", "))
+  invisible(NULL)
+}
+
+fcs_build_vals <- function(scores, universe, floor = 0, score_source = c("caas", "rer")) {
+  fcs_check_gene_ids(names(scores), length(scores), "gene scores")
+  score_source <- match.arg(score_source)
+  if (score_source == "rer")
+    fcs_check_rer_gene_ids(names(scores), length(scores), "RER gene scores")
   scores <- scores[!is.na(scores)]
+  if (score_source == "rer") return(scores)
   genes  <- union(universe, names(scores))
   vals   <- setNames(rep(floor, length(genes)), genes)
   vals[names(scores)] <- as.numeric(scores)
@@ -142,7 +169,7 @@ fcs_rank_sum_sd <- function(n1, n2, tie) {
 # ── Wilcoxon-AUC test ─────────────────────────────────────────────────────────
 
 # Wilcoxon-AUC test of one ranking over all GMTs.
-# vals: named numeric vector (full universe, zero-floored).
+# vals: named numeric vector (CAAS background with zero floor, or scored RER genes).
 # gmts: named list of RERconverge gmt objects.
 # num_g, max_g: minimum and maximum genes per set (max_g 0 or Inf = no limit).
 # alternative: "greater" or "two.sided" (see fcs_alternative).
@@ -151,6 +178,7 @@ fcs_rank_sum_sd <- function(n1, n2, tie) {
 # fastwilcoxGMT is internal to RERconverge; the exported fastwilcoxGMTall loops it over a
 # named list of GMTs and adjusts per GMT, so it is called once and the databases stitched.
 fcs_run_ranking <- function(vals, gmts, num_g = 10, max_g = 0, alternative = "two.sided") {
+  fcs_check_gene_ids(names(vals), length(vals), "observed ranking")
   if (!is.null(max_g) && is.finite(max_g) && max_g > 0) {
     gmts_to_run <- lapply(gmts, function(gmt) {
       gs <- gmt$genesets
@@ -179,6 +207,15 @@ fcs_run_ranking <- function(vals, gmts, num_g = 10, max_g = 0, alternative = "tw
       res <- res[res$num.genes <= max_g, , drop = FALSE]
       if (nrow(res) == 0) next
     }
+    # Use the same evaluable domain as the vectorized null: at least three
+    # annotated background genes outside the set. Native fastwilcoxGMT falls
+    # back outside the GMT when its complement is empty, using incompatible
+    # ranks; that degenerate result is not an annotated-background AUC.
+    gmt <- gmts_to_run[[db]]
+    bg <- vals[intersect(unique(unlist(gmt$genesets)), names(vals))]
+    res <- res[length(bg) - res$num.genes > 2, , drop = FALSE]
+    if (nrow(res) == 0) next
+    res$p.adj <- p.adjust(res$pval, method = "BH")
     # The p-value of fastwilcoxGMT (simpleAUCgenesRanks) is always two-sided. For
     # one-sided magnitude rankings (non-negative, zero-floored: CAAS, FADE and
     # accumulation scores) the analytic p-value is
@@ -210,10 +247,12 @@ fcs_run_ranking <- function(vals, gmts, num_g = 10, max_g = 0, alternative = "tw
 
 # ── Test sidedness ────────────────────────────────────────────────────────────
 
-# A ranking with negative values (a signed statistic such as sign(Rho) * -log10(P)) is
-# two-sided; a non-negative magnitude ranking is one-sided "greater". It is read from
-# the values, so callers need not pass it.
-fcs_alternative <- function(vals) if (any(vals < 0, na.rm = TRUE)) "two.sided" else "greater"
+# RER binary/continuous rankings are two-sided, even if this sample has no negative
+# scores. Other rankings infer direction from their values unless the caller sets RER.
+fcs_alternative <- function(vals, score_source = c("auto", "caas", "rer")) {
+  score_source <- match.arg(score_source)
+  if (score_source == "rer" || any(vals < 0, na.rm = TRUE)) "two.sided" else "greater"
+}
 
 # ── Progress logging ──────────────────────────────────────────────────────────
 
@@ -265,6 +304,7 @@ fcs_membership_matrix <- function(genesets_named, set_names, genes) {
 # Returns a named list db -> (sets x N) matrix of AUC - 0.5, rows aligned to
 # rownames(realenrich[[db]]).
 fcs_null_enrichstat_vectorized <- function(corStat, gmts, realenrich, num_g = 10, max_g = 0) {
+  fcs_check_gene_ids(rownames(corStat), nrow(corStat), "null matrix")
   enrichStat <- list()
   genes_all  <- rownames(corStat)
   for (db in names(realenrich)) {
@@ -335,64 +375,94 @@ fcs_permpvalenrich_vectorized <- function(realenrich, enrichStat, alternative = 
   out
 }
 
-# ── Wilcoxon: null of the tie-corrected p ─────────────────────────────────────
-
-# The null of the one-sided p of the Wilcoxon-AUC test: for every permulation column, the p that fcs_run_ranking gives a set
-# if that column were the ranking (normal approximation with the tie term of the column over the annotated genes of the GMT).
-# A column of a zero-floored ranking has its own number of tied genes, so the AUC is not on one scale across the columns of
-# the null and across the observed ranking; the standardized p is. Built from the null of the statistic (enrichStat, from
-# fcs_null_enrichstat_vectorized) and the tie term of every column.
-# Returns a named list db -> (sets x N) matrix, NA where the statistic is NA.
-fcs_null_wilcoxon_p_vectorized <- function(corStat, gmts, realenrich, enrichStat, num_g = 10, max_g = 0) {
-  out <- list()
-  genes_all <- rownames(corStat)
-  for (db in names(realenrich)) {
-    stat <- enrichStat[[db]]
-    gmt <- gmts[[db]]
-    set_names <- rownames(realenrich[[db]])
-    if (is.null(gmt) || is.null(stat) || length(set_names) == 0) { out[[db]] <- stat; next }
-    gs <- gmt$genesets; names(gs) <- gmt$geneset.names
-    if (!is.null(max_g) && is.finite(max_g) && max_g > 0) {
-      gs <- gs[vapply(gs, function(set) length(intersect(set, genes_all)) <= max_g, logical(1))]
-    }
-    genes_db <- intersect(unique(unlist(gs)), genes_all)
-    if (length(genes_db) < 3) { out[[db]] <- stat * NA_real_; next }
-    M     <- fcs_membership_matrix(gs, set_names, genes_db)
-    sub   <- corStat[genes_db, , drop = FALSE]
-    notNA <- !is.na(sub)
-    n1    <- as.matrix(M %*% (notNA * 1.0))
-    n2    <- matrix(colSums(notNA), nrow(M), ncol(sub), byrow = TRUE) - n1
-    tie   <- matrix(vapply(seq_len(ncol(sub)), function(j) fcs_tie_term(sub[notNA[, j], j]), 0), nrow(M), ncol(sub), byrow = TRUE)
-    out[[db]] <- pnorm((stat + 0.5) * n1 * n2, n1 * n2 / 2, fcs_rank_sum_sd(n1, n2, tie), lower.tail = FALSE)
-  }
-  out
-}
-
-# Empirical permulation p-value of the one-sided Wilcoxon p, per set: (1 + #{null p <= observed p}) / (N_valid + 1); the
-# smaller p is the more extreme.
-fcs_permpval_from_p_vectorized <- function(realenrich, nullP) {
-  out <- list()
-  for (db in names(realenrich)) {
-    null <- nullP[[db]]
-    if (is.null(null) || nrow(null) == 0) next
-    obs   <- realenrich[[db]]$pval[match(rownames(null), rownames(realenrich[[db]]))]
-    count <- rowSums(null <= obs * (1 + 1e-9), na.rm = TRUE)
-    p <- (count + 1) / (rowSums(!is.na(null)) + 1)
-    p[is.na(obs)] <- NA_real_
-    names(p) <- rownames(null)
-    out[[db]] <- p
-  }
-  out
-}
-
 # The null of a ranking on the genes of that ranking: rows in the order of `genes`, and a gene without a row in the null has
 # no signal (0) in every permulation. Observed and null then share the universe, so a set has the same genes on both sides.
 fcs_align_null <- function(m, genes) {
   m <- as.matrix(m)
+  fcs_check_gene_ids(rownames(m), nrow(m), "null matrix")
+  fcs_check_gene_ids(genes, length(genes), "observed universe")
   out <- matrix(0, length(genes), ncol(m), dimnames = list(genes, colnames(m)))
   common <- intersect(genes, rownames(m))
   out[common, ] <- m[common, , drop = FALSE]
   out
+}
+
+# ── Observed statistic ───────────────────────────────────────────────────────
+
+# The observed enrichment of every ranking: one row per (ranking, database, pathway) from fcs_run_ranking, the test
+# alternative of each ranking (`alts`), and `enrich` = NULL when no ranking has a set. Needs no null.
+fcs_observed <- function(rankings, gmts, num_g = 10, max_g = 0, score_source = "auto") {
+  res <- list(); alts <- list()
+  for (rk in names(rankings)) {
+    alts[[rk]] <- fcs_alternative(rankings[[rk]], score_source = score_source)
+    r <- fcs_run_ranking(rankings[[rk]], gmts, num_g = num_g, max_g = max_g, alternative = alts[[rk]])
+    if (nrow(r) > 0) res[[rk]] <- dplyr::mutate(r, ranking = rk)
+  }
+  list(enrich = if (length(res) > 0) dplyr::bind_rows(res) else NULL, alts = alts)
+}
+
+# ── Permulation counts by block of null columns ──────────────────────────────
+
+# Counts of the permulation p of every set of one ranking over the columns of `corStat` (genes x columns, any subset of
+# the null): magnitude rankings compare AUC - 0.5 with `>=`; signed rankings compare `abs(AUC - 0.5)` with `>=`, matching
+# RERconverge's enrichment-statistic comparison. `valid` counts evaluable null columns. Both are sums over columns, so
+# counts of disjoint blocks add up to the counts of the whole null.
+fcs_null_count <- function(corStat, gmts, realenrich, alt, num_g = 10, max_g = 0) {
+  out <- list()
+  null_all <- fcs_null_enrichstat_vectorized(corStat, gmts, realenrich, num_g = num_g, max_g = max_g)
+  for (db in names(realenrich)) {
+    null <- null_all[[db]]
+    if (is.null(null) || nrow(null) == 0) next
+    obs <- realenrich[[db]]$stat[match(rownames(null), rownames(realenrich[[db]]))]
+    count <- if (alt == "greater") rowSums(null >= obs, na.rm = TRUE)
+             else                  rowSums(abs(null) >= abs(obs), na.rm = TRUE)
+    count[is.na(obs)] <- NA_real_
+    out[[db]] <- tibble::tibble(database = db, pathway = rownames(null),
+                                count = as.numeric(count), valid = as.numeric(rowSums(!is.na(null))))
+  }
+  dplyr::bind_rows(out)
+}
+
+# Counts of the enrich rows `obs_rk` over a list of null matrices (genes x columns, one per block of cycles). The counts
+# of the matrices are summed; a failed matrix gives NULL for the whole ranking, as the unblocked code did.
+fcs_null_counts_by_matrices <- function(rk, obs_rk, mats, gmts, alt, num_g = 10, max_g = 0) {
+  realenrich <- list()
+  for (db in unique(obs_rk$database)) {
+    db_df <- obs_rk %>% dplyr::filter(database == db) %>% as.data.frame()
+    rownames(db_df) <- db_df$pathway
+    realenrich[[db]] <- db_df[, c("pval", "stat"), drop = FALSE]
+  }
+  for (m in mats) fcs_check_gene_ids(rownames(m), nrow(m), "null matrix")
+  parts <- lapply(mats, function(m) {
+    tryCatch(fcs_null_count(m, gmts, realenrich, alt, num_g = num_g, max_g = max_g),
+             error = function(e) { fcs_progress(sprintf("null stats failed [%s]: %s", rk, e$message)); NULL })
+  })
+  if (any(vapply(parts, is.null, logical(1)))) return(NULL)
+  counts <- dplyr::bind_rows(parts) %>%
+    dplyr::group_by(database, pathway) %>%
+    dplyr::summarise(count = sum(count), valid = sum(valid), .groups = "drop")
+  dplyr::mutate(counts, ranking = rk)
+}
+
+# Counts over the null in blocks of `block_cols` columns of one matrix (NULL: one block).
+fcs_null_counts_by_block <- function(rk, obs_rk, corStat, gmts, alt, num_g = 10, max_g = 0, block_cols = NULL) {
+  n <- ncol(corStat)
+  if (is.null(block_cols) || block_cols >= n) block_cols <- n
+  mats <- lapply(seq(1L, n, by = block_cols), function(s) corStat[, s:min(n, s + block_cols - 1L), drop = FALSE])
+  fcs_null_counts_by_matrices(rk, obs_rk, mats, gmts, alt, num_g = num_g, max_g = max_g)
+}
+
+# Sets the permulation p of the enrich rows from the counts: p.perm = (count + 1) / (valid + 1), NA where there is no count.
+fcs_close_counts <- function(enrich_df, counts) {
+  if (is.null(counts) || nrow(counts) == 0) return(enrich_df)
+  enrich_df$.row <- seq_len(nrow(enrich_df))
+  m <- dplyr::left_join(enrich_df[, c(".row", "ranking", "database", "pathway")], counts,
+                        by = c("ranking", "database", "pathway"))
+  p <- (m$count + 1) / (m$valid + 1)
+  hit <- !is.na(p)
+  enrich_df$p.perm[m$.row[hit]] <- p[hit]
+  enrich_df$.row <- NULL
+  enrich_df
 }
 
 # ── Null per ranking ──────────────────────────────────────────────────────────
@@ -423,7 +493,7 @@ fcs_enrich_col_types <- function() {
     pval = readr::col_double(), p.adj = readr::col_double(), p.perm = readr::col_double(),
     q.perm = readr::col_double(),
     num.genes = readr::col_double(), gene.vals = readr::col_character(),
-    sig_perm = readr::col_logical(), sig_top = readr::col_logical(),
+    sig_perm = readr::col_logical(),
     direction = readr::col_character(), redlich_level = readr::col_double(),
     .default = readr::col_guess()
   )
@@ -431,13 +501,14 @@ fcs_enrich_col_types <- function() {
 
 # ── Significance classification ───────────────────────────────────────────────
 
-# BH over p.perm within each (ranking, database) gives q.perm. A set is significant (sig_perm) when q.perm < fdr_thr, and
-# passes the second threshold (sig_top) when its p.perm is also below p_perm_thr. direction is the sign of stat for a
+# BH over p.perm within each (ranking, database) gives q.perm. A set is significant (sig_perm) when q.perm < fdr_thr.
+# direction is the sign of stat for a
 # significant set (a signed ranking is tested two-sided, so a set can be significant on either side). Rows without p.perm
 # (no null for the ranking, or a set the null could not evaluate) have q.perm NA and are not significant.
-# redlich_level: the smallest of analytic_levels with p.adj below it, among the sets with p.perm below p_perm_thr (a
-# one-sided ranking gives a depleted set p.perm of 0.5 or more, so only enriched sets reach it); NA otherwise.
+# redlich_level: the smallest of analytic_levels with p.adj below it, among the sets with p.perm below p_perm_thr;
+# NA otherwise. Neither classification adds a sign filter.
 fcs_classify_significance <- function(enrich_df, fdr_thr, p_perm_thr, analytic_levels = c(0.05, 0.10, 0.15)) {
+  enrich_df <- dplyr::select(enrich_df, -dplyr::any_of("sig_top"))
   levels <- sort(unique(analytic_levels), decreasing = TRUE)
   out <- enrich_df %>%
     dplyr::group_by(ranking, database) %>%
@@ -445,7 +516,6 @@ fcs_classify_significance <- function(enrich_df, fdr_thr, p_perm_thr, analytic_l
     dplyr::ungroup() %>%
     dplyr::mutate(
       sig_perm  = !is.na(q.perm) & q.perm < fdr_thr,
-      sig_top   = sig_perm & p.perm < p_perm_thr,
       direction = dplyr::case_when(!sig_perm ~ NA_character_, stat > 0 ~ "positive", stat < 0 ~ "negative", TRUE ~ NA_character_)
     )
   eligible <- !is.na(out$p.adj) & !is.na(out$p.perm) & out$p.perm < p_perm_thr
@@ -458,7 +528,7 @@ fcs_classify_significance <- function(enrich_df, fdr_thr, p_perm_thr, analytic_l
 # ── Full run ──────────────────────────────────────────────────────────────────
 
 # Runs the Wilcoxon-AUC test on every ranking and classifies the significance.
-# rankings: named list of named numeric vectors (zero-floored, see fcs_build_vals).
+# rankings: named list of named numeric vectors (see fcs_build_vals).
 # gmts: named list of RERconverge gmt objects (fcs_load_gmts).
 # perms_file: RDS of the permulation null, or "NO_FILE". Two shapes are read: RER
 #   (corStat, genes x N, the sign(Rho) * -log10(P) of every null phenotype; one matrix for its
@@ -466,26 +536,23 @@ fcs_classify_significance <- function(enrich_df, fdr_thr, p_perm_thr, analytic_l
 #   top and bottom).
 # gene_stat: the gene statistic of the observed gene scores (size_adj_max, fmax or max); the CAAS null is used only when
 #   it was built with the same one.
+# score_source: "rer" fixes a two-sided test; "auto"/"caas" infer it from the scores.
 # Returns one row per (ranking, database, pathway): the columns of fcs_enrich_col_types.
 fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_FILE",
                         fdr_thr = 0.15, p_perm_thr = 0.025, analytic_levels = c(0.05, 0.10, 0.15),
-                        gene_stat = "size_adj_max") {
+                        gene_stat = "size_adj_max", null_block_cols = NULL, score_source = "auto") {
   corStat_byrank <- NULL; base_corStat <- NULL
-  res <- list(); alts <- list()
-  for (rk in names(rankings)) {
-    alts[[rk]] <- fcs_alternative(rankings[[rk]])
-    r <- fcs_run_ranking(rankings[[rk]], gmts, num_g = num_g, max_g = max_g, alternative = alts[[rk]])
-    if (nrow(r) > 0) res[[rk]] <- dplyr::mutate(r, ranking = rk)
-  }
-  if (length(res) == 0) {
+  observed <- fcs_observed(rankings, gmts, num_g = num_g, max_g = max_g, score_source = score_source)
+  alts <- observed$alts
+  if (is.null(observed$enrich)) {
     return(tibble::tibble(
       ranking = character(), database = character(), pathway = character(),
       stat = numeric(), pval = numeric(), p.adj = numeric(), p.perm = numeric(), q.perm = numeric(),
       num.genes = numeric(), gene.vals = character(),
-      sig_perm = logical(), sig_top = logical(), direction = character(), redlich_level = numeric()
+      sig_perm = logical(), direction = character(), redlich_level = numeric()
     ))
   }
-  enrich_df <- dplyr::bind_rows(res)
+  enrich_df <- observed$enrich
   enrich_df$p.perm <- NA_real_
 
   if (!is.null(perms_file) && perms_file != "NO_FILE" && file.exists(perms_file)) {
@@ -522,6 +589,8 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_
     }
     if (!is.null(corperms) && (!is.null(corperms[["corStat"]]) || !is.null(corStat_byrank))) {
       base_corStat <- if (!is.null(corperms[["corStat"]])) as.matrix(corperms[["corStat"]]) else NULL
+      if (!is.null(base_corStat))
+        fcs_check_rer_gene_ids(rownames(base_corStat), nrow(base_corStat), "RER null matrix")
       n_perms      <- if (!is.null(base_corStat)) ncol(base_corStat)
                       else if (length(corStat_byrank)) ncol(corStat_byrank[[1]]) else 0L
       fcs_progress(sprintf("Vectorized pathway permulations: N=%d, %d GMTs, %d rankings",
@@ -543,40 +612,14 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_
       for (rk in names(rankings)) {
         obs_rk <- enrich_df %>% dplyr::filter(ranking == rk)
         if (nrow(obs_rk) == 0) next
-        t0  <- Sys.time()
-        alt <- alts[[rk]]
-
-        # Null of this ranking (resolved above).
         corStat_rk <- corStat_byrk[[rk]]
         if (is.null(corStat_rk)) next  # no null for this ranking: p.perm stays NA
-
-        # Observed statistic per set and database (rows = pathways).
-        realenrich <- list()
-        for (db in unique(obs_rk$database)) {
-          db_df <- obs_rk %>% dplyr::filter(database == db) %>% as.data.frame()
-          rownames(db_df) <- db_df$pathway
-          realenrich[[db]] <- db_df[, c("pval", "stat"), drop = FALSE]
-        }
-
-        enrichStat <- tryCatch(
-          fcs_null_enrichstat_vectorized(corStat_rk, gmts, realenrich, num_g = num_g, max_g = max_g),
-          error = function(e) { fcs_progress(sprintf("null stats failed [%s]: %s", rk, e$message)); NULL })
-        if (is.null(enrichStat)) next
-
-        # Magnitude rankings: the permulated statistic is the tie-corrected p of the AUC, on one scale across the columns
-        # of the null whatever their number of tied genes. Signed rankings have no ties: the AUC itself, as RERconverge.
-        if (alt == "greater") {
-          nullP <- fcs_null_wilcoxon_p_vectorized(corStat_rk, gmts, realenrich, enrichStat, num_g = num_g, max_g = max_g)
-          ppv   <- fcs_permpval_from_p_vectorized(realenrich, nullP)
-        } else {
-          ppv <- fcs_permpvalenrich_vectorized(realenrich, enrichStat, alternative = alt)
-        }
-        for (db in names(ppv)) {
-          idx <- which(enrich_df$ranking == rk & enrich_df$database == db)
-          if (length(idx)) enrich_df$p.perm[idx] <- ppv[[db]][enrich_df$pathway[idx]]
-        }
+        t0 <- Sys.time()
+        counts <- fcs_null_counts_by_block(rk, obs_rk, corStat_rk, gmts, alts[[rk]], num_g = num_g, max_g = max_g,
+                                           block_cols = null_block_cols)
+        enrich_df <- fcs_close_counts(enrich_df, counts)
         fcs_progress(sprintf("ranking %-13s done (%s) | %d sets across %d GMTs | %.1fs",
-                             rk, alt, nrow(obs_rk), length(realenrich),
+                             rk, alts[[rk]], nrow(obs_rk), length(unique(obs_rk$database)),
                              as.numeric(difftime(Sys.time(), t0, units = "secs"))))
       }
     }
@@ -586,7 +629,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_
   enrich_df <- fcs_classify_significance(enrich_df, fdr_thr = fdr_thr, p_perm_thr = p_perm_thr, analytic_levels = analytic_levels)
 
   enrich_df %>% dplyr::relocate(ranking, database, pathway, stat, pval, p.adj, p.perm, q.perm,
-                                num.genes, gene.vals, sig_perm, sig_top, direction, redlich_level)
+                                num.genes, gene.vals, sig_perm, direction, redlich_level)
 }
 
 # ── Leading edge ──────────────────────────────────────────────────────────────

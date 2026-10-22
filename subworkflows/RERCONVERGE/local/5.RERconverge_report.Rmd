@@ -217,7 +217,7 @@ top1_pct <- 0.01
 
 rer_df <- rer_df %>%
   mutate(
-    rer_stat      = sign(Rho) * -log10(pmax(P, 1e-300)),
+    rer_stat      = sign(Rho) * -log10(P),
     is_top_10_acc = .dir_top(rer_stat, top_pct,  "acc"),
     is_top_5_acc  = .dir_top(rer_stat, top5_pct, "acc"),
     is_top_1_acc  = .dir_top(rer_stat, top1_pct, "acc"),

@@ -236,8 +236,8 @@ characterization is handled by ENRICHMENT (POSENRICH), not SCORING.
 Runs FCS (a ranked, Wilcoxon-AUC, GMT-based enrichment engine — the single
 enrichment engine now used for both CAAS and RER gene rankings; a set is
 significant when the Benjamini-Hochberg adjustment of its permulation p
-(`q.perm`, per ranking and database) is below `--fcs_fdr`, with a second threshold
-`--fcs_pperm_thr` on the permulation p itself, and the significant sets of each
+(`q.perm`, per ranking and database) is below `--fcs_fdr`. The separate Redlich rule
+uses analytic BH levels and the raw permulation-p threshold `--fcs_pperm_thr`. The significant sets of each
 ranking are grouped by the similarity of their leading edges so that overlapping
 terms are read as one; the RER ranking is the signed statistic
 `sign(Rho) * -log10(P)` of RERconverge and its null is the same statistic computed
@@ -483,7 +483,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `fcs_fdr` | `0.15` | Benjamini-Hochberg threshold on the permulation p of each gene set (`q.perm`), per ranking and database. |
 | `fcs_analytic_levels` | `0.05,0.1,0.15` | Analytic rule of Redlich et al. 2024, reported next to the permulation rule as `redlich_level` (the smallest level met, empty when none): the analytic BH-adjusted p (`p.adj`) below the level and `p.perm` below `fcs_pperm_thr`. It does not enter `sig_perm`. |
 | `fcs_cluster_similarity` / `fcs_cluster_threshold` | `jaccard` / `0.5` | Redundancy reduction of the significant sets of each ranking, applied after the significance call (no p or q value changes): the sets are grouped greedily by significance, a set joining the first representative whose leading edge is at least this similar (`jaccard`, or `overlap`, which over-merges hierarchical databases). Gives `cluster_id` and `is_representative`. |
-| `fcs_pperm_thr` | `0.025` | Second threshold: a set significant by `q.perm` also needs `p.perm` below this value (`sig_top`). It corrects for the non-independence of gene ranks and of the phylogeny. |
+| `fcs_pperm_thr` | `0.025` | Raw permulation-p threshold of the Redlich rule, combined with the three analytic BH levels. It does not filter `sig_perm` (the RER rule). |
 | `fcs_top_n` | `20` | Number of top-ranked gene sets highlighted in report tables. |
 | `caas_permulation_enrichment` | `true` | Runs the permulation core (CAAS_CORE, CAAS_CORE_MERGE) to build the genome-wide null used for CAAS's FCS permulation p-value. |
 | `posenrich_min_size` / `posenrich_max_size` | `2` / `0` | Position set size boundaries for POSENRICH (0 = un-capped). |

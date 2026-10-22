@@ -30,6 +30,8 @@ args <- commandArgs(TRUE)
 
 library(dplyr)
 library(RERconverge)
+script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
+source(file.path(dirname(normalizePath(script_file)), "rer_permulations.R"))
 
 # ── Load trait vector ─────────────────────────────────────────────────────────
 
@@ -96,27 +98,27 @@ message(sprintf(
   "[RER_BIN] Running correlateWithBinaryPhenotype (min.sp=%d, min.pos=%d, winsorizeRER=%s) ...",
   min_sp, min_pos, if (is.null(winR)) "NULL" else winR
 ))
-res <- correlateWithBinaryPhenotype(
+res <- rer_score_paths(
   traitRERw,
   fg_paths,
-  min.sp         = min_sp,
-  min.pos        = min_pos,
-  weighted       = "auto",
-  winsorizeRER   = winR,
-  winsorizetrait = NULL
+  mode    = "binary",
+  min.sp  = min_sp,
+  min.pos = min_pos,
+  winR    = winR
 )
 message(sprintf("[RER_BIN] Correlation done: %d genes tested.", nrow(res)))
+attr(res, "rer_settings") <- list(mode = "binary", min.sp = min_sp, min.pos = min_pos,
+                                   winR = winR, clade = rer_clade)
 
 # ── Permulation null (CC) ─────────────────────────────────────────────────────
 
-# getPermsBinary(permmode = "cc") builds the null foreground histories with
-# categoricalPermulations(): an Mk (equal-rates) transition matrix fitted on the
+# The CC null builds foreground histories with categoricalPermulations(): an Mk
+# (equal-rates) transition matrix fitted on the
 # observed 0/1 trait, then stochastically mapped null tip and node states, polished
 # per tree. It needs no Brownian-motion simulation and no rooted tree.
 #
-# This requires RERconverge >= 0.3.0. Earlier builds send permmode = "cc" to
-# simBinPhenoCC(), which needs an outgroup (`root_sp`) that the pipeline does not
-# define, so the checks below stop the script on those builds.
+# rer_perms_binary scores these histories with the observed correlation settings.
+# categoricalPermulations is required; the legacy CC simulator needs an outgroup.
 num_batches     <- as.integer(args[10])
 perms_per_batch <- as.integer(args[11])
 
@@ -126,36 +128,21 @@ if (num_batches > 0 && perms_per_batch > 0) {
     num_batches, perms_per_batch
   ))
 
-  if (!exists("getPermsBinary")) {
-    stop("[RER_BIN] RERconverge::getPermsBinary() not found. Update RERconverge.")
-  }
   if (!exists("categoricalPermulations")) {
-    stop(paste0("[RER_BIN] This RERconverge build routes getPermsBinary(permmode=",
-                "'cc') through simBinPhenoCC(), which needs an outgroup (root_sp) ",
-                "that PhyloPhere does not define. Install RERconverge >= 0.3.0 ",
-                "(provides categoricalPermulations), or set rer_perm_batches = 0."))
+    stop(paste0("[RER_BIN] categoricalPermulations() not found. Install the pinned ",
+                "RERconverge build providing categoricalPermulations, ",
+                "or set rer_perm_batches = 0."))
   }
 
-  # getPermsBinary() scores every null with correlateWithBinaryPhenotype() at its
-  # defaults: clade = "all" foreground paths, weighted = "auto", no RER winsorization,
-  # min.sp = 10, min.pos = 2. permpvalcor() needs an observed reference computed the
-  # same way, so res_ref uses those settings. `res` (the requested clade and
-  # winsorizeRER) keeps the reported Rho and P; res_ref only serves p.perm.
-  fg_paths_all <- foreground2Paths(fg_sp, geneTrees, clade = "all")
-  res_ref      <- correlateWithBinaryPhenotype(traitRERw, fg_paths_all,
-                                               weighted = "auto")
-
-  run_bin_perm_batch <- function(n) getPermsBinary(
+  run_bin_perm_batch <- function(n) rer_perms_binary(
     numperms        = n,
     fg_vec          = fg_sp,
-    sisters_list    = NA,          # used only when calculateenrich = TRUE
-    root_sp         = NA,          # not used by the categoricalPermulations CC path
     RERmat          = traitRERw,
     trees           = geneTrees,   # the original treesObj: path length equals ncol(RERmat)
-    mastertree      = geneTrees$masterTree,
-    permmode        = "cc",
-    method          = "k",
-    calculateenrich = FALSE
+    min.sp          = min_sp,
+    min.pos         = min_pos,
+    winR            = winR,
+    clade           = rer_clade
   )
 
   message(sprintf("  [RER_BIN] Permutation batch 1 / %d", num_batches))
@@ -178,7 +165,7 @@ if (num_batches > 0 && perms_per_batch > 0) {
   #   * the commit pinned in environment/install_env.sh (2bd328f7): data.frame(permpval,
   #     permstats) with a median-centered two-tailed empirical p and the
   #     (num + 1)/(denom + 1) pseudo-count already applied; permpval is used as is.
-  ppc <- permpvalcor(res_ref, perms_combined)
+  ppc <- permpvalcor(res, perms_combined)
   if (is.data.frame(ppc)) {
     permpvals <- setNames(ppc$permpval, rownames(ppc))
   } else {
@@ -197,6 +184,7 @@ if (num_batches > 0 && perms_per_batch > 0) {
   
   # The raw permutations object (null statistics matrices) is kept for the FCS and comparison stages
   perms_path <- sub("\\.output$", ".perms.rds", args[5])
+  attr(perms_combined, "rer_settings") <- attr(res, "rer_settings")
   saveRDS(perms_combined, file = perms_path)
   message("[RER_BIN] Saved raw null permutations RDS to: ", perms_path)
 } else {

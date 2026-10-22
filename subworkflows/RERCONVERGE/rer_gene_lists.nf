@@ -69,7 +69,7 @@ process RER_GENE_LISTS {
         flag_rer_decc <- rer_sig & df\$Rho < 0
 
         # Gene score: sign(Rho) * -log10(P), the parametric statistic of RERconverge (getStat).
-        log_p    <- -log10(pmax(df\$P, 1e-300))
+        log_p    <- -log10(df\$P)
 
         fcs_stats <- data.frame(
             gene = df\$gene,

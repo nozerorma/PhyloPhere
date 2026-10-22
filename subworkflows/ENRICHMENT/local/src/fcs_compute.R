@@ -21,9 +21,10 @@
 #   --perms-file        null permutations for the permulation p, or NO_FILE
 #   --num-g, --max-g    minimum and maximum gene-set size (max-g 0 = no limit)
 #   --fdr-thr           BH threshold on the permulation p (q.perm)
-#   --pperm-thr         second threshold, on the permulation p itself
+#   --pperm-thr         raw permulation-p threshold of the Redlich rule
 #   --analytic-levels   comma-separated BH levels of the analytic-p rule (Redlich et al. 2024), default 0.05,0.1,0.15
 #   --gene-stat         gene statistic of the observed gene scores (size_adj_max, fmax or max); the CAAS null must hold the same one
+#   --score-source      caas (zero floor, default) or rer (exclude missing statistics)
 #   --output            output TSV
 # =============================================================================
 
@@ -53,6 +54,7 @@ fdr_thr       <- as.numeric(get_arg("--fdr-thr", "0.15"))
 pperm_thr     <- as.numeric(get_arg("--pperm-thr", "0.025"))
 analytic_levels <- as.numeric(strsplit(get_arg("--analytic-levels", "0.05,0.1,0.15"), ",")[[1]])
 gene_stat     <- get_arg("--gene-stat", "size_adj_max")
+score_source  <- match.arg(get_arg("--score-source", "caas"), c("caas", "rer"))
 out_file      <- get_arg("--output", "fcs_enrich_partial.tsv")
 
 stopifnot(!is.null(stats_file), file.exists(stats_file))
@@ -92,7 +94,8 @@ if (length(score_cols) == 0) stop("stats_file has no score_<ranking> columns")
 rankings <- list()
 for (sc in score_cols) {
   rk <- sub("^score_", "", sc)
-  rankings[[rk]] <- fcs_build_vals(setNames(stats[[sc]], stats$gene), universe)
+  rankings[[rk]] <- fcs_build_vals(setNames(stats[[sc]], stats$gene), universe,
+                                  score_source = score_source)
 }
 
 
@@ -102,7 +105,8 @@ gmts <- fcs_load_gmts(gmt_dir)
 
 enrich <- fcs_run_all(rankings, gmts, num_g = num_g, max_g = max_g,
                       perms_file = perms_file, fdr_thr = fdr_thr,
-                      p_perm_thr = pperm_thr, analytic_levels = analytic_levels, gene_stat = gene_stat)
+                      p_perm_thr = pperm_thr, analytic_levels = analytic_levels, gene_stat = gene_stat,
+                      score_source = score_source)
 
 
 # ── Output ────────────────────────────────────────────────────────────────────

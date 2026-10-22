@@ -25,8 +25,9 @@ params:
   num_g:        10            # min genes per set (fastwilcoxGMT num.g)
   max_g:        0             # max genes per set (0 / Inf = no limit)
   fdr_thr:      0.15          # BH threshold on the permulation p of each set (q.perm), per ranking and database
-  pperm_thr:    0.025         # second threshold: a significant set also needs p.perm below this value (sig_top)
+  pperm_thr:    0.025         # raw permulation-p threshold of the Redlich rule
   gene_stat: "size_adj_max"      # gene statistic of the observed gene scores; the CAAS null must hold the same one
+  score_source: "caas"       # pipeline source: caas (zero floor) or rer (exclude missing statistics)
   analytic_levels: "0.05,0.1,0.15" # analytic rule (Redlich et al. 2024): BH levels of the analytic p, with p.perm < pperm_thr
   cluster_similarity: "jaccard" # redundancy reduction: leading-edge similarity, jaccard or overlap
   cluster_threshold:  0.5     # redundancy reduction: similarity at which a set joins a representative
@@ -200,14 +201,14 @@ desc_map <- suppressMessages(fcs_load_descriptions(gmt_dir))
 
 ```{r overview, echo=FALSE}
 tibble::tibble(
-  Field = c("Project", "Trait", "Genes (stats)", "Universe genes", "Rankings",
-            "Flags", "GMT databases", "num.g (min set)", "max.g (max set)", "Significance (BH on p.perm, second threshold)"),
+  Field = c("Project", "Trait", "Genes (stats)", "Background genes", "Rankings",
+            "Flags", "GMT databases", "num.g (min set)", "max.g (max set)", "Significance rules"),
   Value = c(params$project_name, params$traitname, nrow(stats), length(universe),
             paste(ranking_names, collapse = ", "),
             if (length(flag_cols)) paste(sub("^flag_", "", flag_cols), collapse = ", ") else "(none)",
             length(gmts), params$num_g,
             ifelse(is.null(params$max_g) || params$max_g <= 0 || !is.finite(params$max_g), "(none)", as.character(params$max_g)),
-            sprintf("q.perm < %s and p.perm < %s", params$fdr_thr, params$pperm_thr))
+            sprintf("RER: q.perm < %s; Redlich: analytic levels %s and p.perm < %s", params$fdr_thr, params$analytic_levels, params$pperm_thr))
 ) %>% kbl_html()
 ```
 
@@ -219,21 +220,28 @@ whether the genes of the set sit systematically higher in the ranking than the o
 genes of the universe. Its statistic, the **AUC** (`stat + 0.5`, range 0 to 1), is the
 probability that a random gene of the set outranks a random gene outside it; 0.5 means
 no shift. On a ranking where most genes score 0 the analytic p accounts for the ties
-(the variance of the rank sum carries the tie term). A ranking with negative values
-(a signed statistic) is tested two-sided, and a set can be enriched on either side.
+(the variance of the rank sum carries the tie term). RER is tested two-sided,
+regardless of the observed signs; a set can be enriched on either side. Other rankings
+use a two-sided test when they contain negative values, and a one-sided test otherwise.
+
+For RER, genes without an association statistic are excluded from the observed
+ranking; measured zero statistics remain. Missing null statistics are excluded
+separately within each permulation. CAAS uses the tested background, filling genes
+without a score with zero. Each GMT database restricts its background to annotated genes.
 
 The analytic p (`p.adj`, BH within the database) assumes independent genes and species.
 The decision rests on the **permulation p** (`p.perm`) instead: the same test is run on
 every column of a null built by reassigning the phenotype across species on the real
 tree, and `p.perm` is the fraction of null columns at least as extreme as the observed
-one, with a pseudo-count. On a ranking with many tied genes the permulation p compares
-the tie-corrected p of the test, not the AUC, so that null columns with a different
-number of tied genes share one scale.
+one, with a pseudo-count. The compared statistic is `AUC - 0.5`: CAAS magnitude
+rankings use the upper tail (`stat_null >= stat_observed`), targeting concentration
+among genes with stronger convergence evidence. Signed RER rankings use both tails
+(`abs(stat_null) >= abs(stat_observed)`). Both use `(1 + count) / (1 + valid cycles)`.
+The analytic p is a separate column and is not the permulated quantity. Sets need
+at least three annotated background genes outside the set on each side of the calculation.
 
-* **Significant set** (`sig_perm`): `q.perm` below `r params$fdr_thr`, where `q.perm` is
+* **RER rule** (`sig_perm`): `q.perm` below `r params$fdr_thr`, where `q.perm` is
   the Benjamini-Hochberg adjustment of `p.perm` within each ranking and database.
-* **Second threshold** (`sig_top`): a significant set whose `p.perm` is also below
-  `r params$pperm_thr`.
 * A ranking without a permulation null has no `p.perm` and so no significant set.
 
 **Analytic rule (Redlich et al. 2024).** The rule published with RERconverge calls a set
@@ -241,7 +249,7 @@ enriched when its analytic BH-adjusted p (`p.adj`) is below a level and its perm
 p is below `r params$pperm_thr`, the permulation p being used as a filter and not corrected
 for multiple testing. It is reported next to the rule above as `redlich_level`: the smallest of
 the levels `r params$analytic_levels` that the set meets (empty when it meets none). It does not
-enter `sig_perm`, `sig_top` or the redundancy groups.
+enter `sig_perm` or the redundancy groups. Neither rule imposes a positive-statistic filter.
 
 The sets are ordered everywhere by `q.perm`, then `p.perm`, then the size of the effect
 (`|stat|`), then description.
@@ -264,19 +272,23 @@ if (!is.null(params$enrich_file) && nzchar(params$enrich_file) && file.exists(pa
   enrich <- readr::read_tsv(params$enrich_file, show_col_types = FALSE,
                              col_types = fcs_enrich_col_types())
 } else {
-  # One zero-floored ranking vector per score_<ranking> column.
+  # One ranking vector per score_<ranking> column, with the source's missing-score policy.
   rankings <- list()
   for (sc in score_cols) {
     rk <- sub("^score_", "", sc)
-    rankings[[rk]] <- fcs_build_vals(setNames(stats[[sc]], stats$gene), universe)
+    rankings[[rk]] <- fcs_build_vals(setNames(stats[[sc]], stats$gene), universe,
+                                    score_source = params$score_source)
   }
   enrich <- suppressMessages(fcs_run_all(rankings, gmts, num_g = params$num_g,
                                          max_g        = params$max_g,
                                          perms_file   = params$perms_file,
                                          fdr_thr      = params$fdr_thr,
                                          p_perm_thr   = params$pperm_thr,
-                                         gene_stat    = params$gene_stat))
+                                         analytic_levels = as.numeric(strsplit(params$analytic_levels, ",")[[1]]),
+                                         gene_stat    = params$gene_stat,
+                                         score_source = params$score_source))
 }
+enrich <- enrich %>% dplyr::select(-dplyr::any_of("sig_top"))
 # Gene-set descriptions need the full GMT directory, so they are joined after the merge.
 enrich <- enrich %>%
   dplyr::left_join(desc_map, by = c("database", "pathway")) %>%
@@ -295,7 +307,8 @@ score_long <- stats %>%
   dplyr::select(gene, dplyr::all_of(score_cols)) %>%
   tidyr::pivot_longer(-gene, names_to = "ranking", values_to = "drv_score") %>%
   dplyr::mutate(ranking = sub("^score_", "", ranking))
-ranking_signed <- vapply(split(score_long$drv_score, score_long$ranking), function(v) any(v < 0, na.rm = TRUE), logical(1))
+ranking_signed <- vapply(split(score_long$drv_score, score_long$ranking),
+                         function(v) params$score_source == "rer" || any(v < 0, na.rm = TRUE), logical(1))
 
 # The leading edge keeps only the genes that drive each enrichment. In a magnitude ranking
 # these are the members with signal (score > 0); gene.vals of fastwilcoxGMT lists every
@@ -326,19 +339,17 @@ readr::write_tsv(leading, "fcs_results/fcs_leading_edge.tsv")
 ```
 
 ```{r banner, echo=FALSE, results='asis'}
-n_top   <- sum(enrich$sig_top %in% TRUE)
 n_rep   <- sum(enrich$is_representative %in% TRUE)
 n_dbs   <- dplyr::n_distinct(enrich$database)
 cat(sprintf(
-  "**%d significant** gene sets (`q.perm` < %s), **%d** of them also with `p.perm` < %s, in **%d groups** of overlapping sets, across %d databases.\n\n",
-  n_sig, params$fdr_thr, n_top, params$pperm_thr, n_rep, n_dbs))
+  "**%d significant** gene sets by the RER rule (`q.perm` < %s), in **%d groups** of overlapping sets, across %d databases.\n\n",
+  n_sig, params$fdr_thr, n_rep, n_dbs))
 levels_chr <- strsplit(params$analytic_levels, ",")[[1]]
 levels_num <- sort(as.numeric(trimws(levels_chr)))
 cnt <- function(d, f) vapply(split(d, factor(d$ranking, levels = ranking_names)), f, integer(1))
 rules_tbl <- tibble::tibble(
   Ranking = ranking_names,
-  !!sprintf("q.perm < %s", params$fdr_thr) := unname(cnt(enrich, function(x) sum(x$sig_perm %in% TRUE))),
-  !!sprintf("... and p.perm < %s", params$pperm_thr) := unname(cnt(enrich, function(x) sum(x$sig_top %in% TRUE)))
+  !!sprintf("RER: q.perm < %s", params$fdr_thr) := unname(cnt(enrich, function(x) sum(x$sig_perm %in% TRUE)))
 )
 for (L in levels_num) {
   rules_tbl[[sprintf("analytic p.adj < %s and p.perm < %s", L, params$pperm_thr)]] <-
@@ -358,7 +369,7 @@ if (has_perm_any && length(no_null_rk)) {
 
 All sets with `q.perm` below the threshold, per ranking. `AUC` is the Wilcoxon effect size,
 `p.adj` the analytic BH-adjusted p (reference only), `p.perm` the permulation p and `q.perm`
-its BH adjustment. `2nd` marks the sets that also pass the second threshold on `p.perm`.
+its BH adjustment.
 `Group` is the redundancy group of the set and `Rep` marks its representative (the set of the
 group with the smallest `q.perm`).
 
@@ -374,12 +385,11 @@ for (rk in ranking_names) {
       p.adj       = signif(p.adj, 3),
       p.perm      = signif(p.perm, 3),
       q.perm      = signif(q.perm, 3),
-      `2nd`       = ifelse(dplyr::coalesce(sig_top, FALSE), "X", ""),
       Direction   = direction,
       Group       = cluster_id,
       Rep         = ifelse(dplyr::coalesce(is_representative, FALSE), "X", "")
     ) %>%
-    dplyr::select(database, pathway, Description, num.genes, AUC, p.adj, p.perm, q.perm, `2nd`, Direction, Group, Rep)
+    dplyr::select(database, pathway, Description, num.genes, AUC, p.adj, p.perm, q.perm, Direction, Group, Rep)
   if (nrow(ev) == 0) { cat("_No set passed the significance threshold._\n"); next }
   print(kbl_html(ev, escape = TRUE, height = if (nrow(ev) > 15) "460px" else NULL))
 }
@@ -432,10 +442,9 @@ for (rk in ranking_names) {
              p.adj   = signif(p.adj, 3),
              p.perm  = signif(p.perm, 3),
              q.perm  = signif(q.perm, 3),
-             `2nd`   = ifelse(dplyr::coalesce(sig_top, FALSE), "X", ""),
              Sig     = ifelse(dplyr::coalesce(sig_perm, FALSE), "X", ""),
              Direction = ifelse(stat > 0, "positive", "negative")) %>%
-      select(pathway, Description, num.genes, AUC, p.adj, p.perm, q.perm, Sig, `2nd`, Direction)
+      select(pathway, Description, num.genes, AUC, p.adj, p.perm, q.perm, Sig, Direction)
     cat(sprintf("\n### %s\n\n", db))
     cat(sprintf("_%d shown - significant: %d._\n\n", nrow(disp), sum(disp$Sig == "X")))
     print(kbl_html(disp, height = if (nrow(disp) > 15) "420px" else NULL))
@@ -447,8 +456,7 @@ for (rk in ranking_names) {
 
 One dotplot per ranking with its top `r params$top_n` significant sets, in the order of the tables
 (`q.perm` first), on an axis of `-log10(q.perm)`; the dashed line is the BH threshold. Colour is the
-AUC, size the number of genes of the set, and the marker shape tells whether the set also passes the
-second threshold on `p.perm` (triangle) or not (square). Only the representative of each group of
+AUC and size the number of genes of the set. Only the representative of each group of
 overlapping sets is drawn, so a block of near-identical terms does not fill the plot.
 
 ```{r overall_dotplot, results='asis', fig.height=6}
@@ -472,9 +480,7 @@ for (rk in ranking_names) {
     ord_sig() %>%
     head(params$top_n) %>%
     dplyr::mutate(label = stringr::str_trunc(dplyr::coalesce(description, pathway), 55),
-                  signal = -log10(pmax(q.perm, 1e-300)),
-                  second = factor(ifelse(sig_top %in% TRUE, "passes", "does not pass"),
-                                  levels = c("passes", "does not pass")))
+                  signal = -log10(pmax(q.perm, 1e-300)))
   if (nrow(dp) == 0) { cat("_No significant sets for this ranking._\n\n"); next }
   # y index 1 is the bottom of the plot: reversing the order puts the best term at the top.
   term_levels <- rev(make.unique(dp$label))
@@ -483,14 +489,12 @@ for (rk in ranking_names) {
 
   p <- ggplot(dp, aes(x = signal, y = y)) +
     geom_segment(aes(x = 0, xend = signal, yend = y), colour = "grey70", linewidth = 0.8) +
-    geom_point(aes(size = num.genes, shape = second, colour = stat + 0.5)) +
+    geom_point(aes(size = num.genes, colour = stat + 0.5)) +
     geom_vline(xintercept = -log10(params$fdr_thr), linetype = "dashed", colour = "grey50") +
     scale_y_continuous(breaks = seq_along(term_levels), labels = term_levels) +
     scale_colour_gradient2(name = "AUC", low = "#2166ac", mid = "#d9d9d9", high = "#b2182b",
                            midpoint = 0.5, limits = c(0, 1)) +
     scale_size_continuous(name = "set genes") +
-    scale_shape_manual(name = sprintf("p.perm < %s", params$pperm_thr),
-                       values = c(passes = 17, `does not pass` = 15), drop = FALSE) +
     labs(title = sprintf("%s - %s", params$project_name, rk),
          x = expression(-log[10]~q[perm]), y = NULL) +
     theme_minimal(base_size = 10) +
@@ -567,15 +571,14 @@ for (rk in ranking_names) {
     dplyr::left_join(term_order, by = c("database", "pathway")) %>%
     dplyr::arrange(.rank) %>%
     dplyr::select(-.rank) %>%
-    dplyr::left_join(sig_terms_rk %>% dplyr::select(database, pathway, q.perm, sig_top, cluster_id, is_representative),
+    dplyr::left_join(sig_terms_rk %>% dplyr::select(database, pathway, q.perm, cluster_id, is_representative),
                      by = c("database", "pathway")) %>%
     left_join(desc_map, by = c("database", "pathway")) %>%
     mutate(Description = stringr::str_trunc(coalesce(description, pathway), 50),
            q.perm      = signif(q.perm, 3),
-           `2nd`       = ifelse(dplyr::coalesce(sig_top, FALSE), "X", ""),
            Group       = cluster_id,
            Rep         = ifelse(dplyr::coalesce(is_representative, FALSE), "X", "")) %>%
-    select(database, pathway, Description, n_le, q.perm, `2nd`, Group, Rep,
+    select(database, pathway, Description, n_le, q.perm, Group, Rep,
            any_of(intersect(want, names(.))))
   # Rename the attribute columns to their display names.
   present_attr <- intersect(want, names(summ))
@@ -596,10 +599,14 @@ if (nrow(le_comp_export) > 0) {
 # Method
 
 ```{r method, echo=FALSE}
-cat("Test       : Wilcoxon-AUC (RERconverge::fastwilcoxGMTall); 'greater' for zero-floored rankings, 'two.sided' for signed rankings\n")
-cat("Null       : permulation p of the test on every null column (p.perm), pseudo-count (1 + n) / (N + 1)\n")
-cat("Significant: q.perm < ", params$fdr_thr, " (BH on p.perm per ranking and database); second threshold p.perm < ", params$pperm_thr, "\n", sep = "")
-cat("Universe   : cleaned_background; no-signal genes floored to 0 (zero-floor)\n")
+cat("Test       : Wilcoxon-AUC (RERconverge::fastwilcoxGMTall); RER always 'two.sided'; other rankings 'greater' unless they contain negative scores\n")
+cat("Null       : AUC - 0.5 per null column; upper tail for magnitude rankings, absolute statistic for signed rankings; pseudo-count (1 + n) / (N + 1)\n")
+cat("RER rule   : q.perm < ", params$fdr_thr, " (BH on p.perm per ranking and database)\n", sep = "")
+if (params$score_source == "rer") {
+  cat("Universe   : genes with a non-missing RER statistic; measured zeros retained; null NA excluded per permulation\n")
+} else {
+  cat("Universe   : cleaned_background; no-signal genes floored to 0 (zero-floor)\n")
+}
 cat("Groups     : greedy by significance, leading-edge ", params$cluster_similarity, " >= ", params$cluster_threshold, " to a representative\n", sep = "")
 cat("Analytic   : p.adj < level and p.perm < ", params$pperm_thr, ", levels ", params$analytic_levels, " (Redlich et al. 2024; redlich_level)\n", sep = "")
 cat("Order      : q.perm, p.perm, |stat|, description\n")

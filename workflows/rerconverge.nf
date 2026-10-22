@@ -195,7 +195,7 @@ workflow RER_MAIN {
         // runs: it renders the annotated, centralized RER FCS (with p.perm +
         // cross-module flags). Avoids per-tool + centralized duplication.
         if (params.enrichment && !params.scoring) {
-            def rer_fcs_compute = FCS_COMPUTE(rer_lists.fcs_stats, rer_bg_ch, perms_file_ch)
+            def rer_fcs_compute = FCS_COMPUTE(rer_lists.fcs_stats, rer_bg_ch, perms_file_ch, 'rer')
             RER_FCS_REPORT(
                 Channel.value('rerconverge'),
                 rer_lists.fcs_stats,

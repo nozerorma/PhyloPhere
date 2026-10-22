@@ -44,11 +44,19 @@ process RER_CONT {
     def perm_batches    = params.rer_perm_batches      ?: 0
     def perms_per_batch = params.rer_perms_per_batch   ?: 100
     def perm_mode       = 'cc'
+    // Include external R sources in the task hash so resume cannot reuse a null
+    // computed with a different correlation implementation.
+    def sources = ['continuous_rer.R', 'rer_permulations.R'].collect {
+        file("${baseDir}/subworkflows/RERCONVERGE/local/${it}").text
+    }.join('\n')
+    def source_hash = java.security.MessageDigest.getInstance('SHA-256')
+        .digest(sources.getBytes('UTF-8')).encodeHex().toString()
 
     if (params.use_singularity || params.use_apptainer) {
 
         """
         echo "Using Singularity/Apptainer"
+        # RER sources SHA256: ${source_hash}
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/continuous_rer.R' \\
         ${trait_file} \\
@@ -67,6 +75,7 @@ process RER_CONT {
     } else {
         """
         echo "Running locally"
+        # RER sources SHA256: ${source_hash}
         Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/continuous_rer.R' \\
         ${trait_file} \\

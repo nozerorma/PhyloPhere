@@ -1669,13 +1669,13 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Soglia FDR FCS',
         'de': 'FCS-FDR-Schwellenwert',
     },
-    'FCS permulation p threshold': {
-        'en': 'FCS permulation p threshold',
-        'es': 'Umbral p de permulación FCS',
-        'ca': 'Llindar p de permulació FCS',
-        'fr': 'Seuil p de permulation FCS',
-        'it': 'Soglia p di permulazione FCS',
-        'de': 'FCS-Permulation-P-Schwellenwert',
+    'FCS Redlich permulation p threshold': {
+        'en': 'FCS Redlich permulation p threshold',
+        'es': 'Umbral p de permulación FCS (Redlich)',
+        'ca': 'Llindar p de permulació FCS (Redlich)',
+        'fr': 'Seuil p de permulation FCS (Redlich)',
+        'it': 'Soglia p di permulazione FCS (Redlich)',
+        'de': 'FCS-Permulation-P-Schwellenwert (Redlich)',
     },
     'FCS top-N leading edge': {
         'en': 'FCS top-N leading edge',
