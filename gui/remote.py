@@ -80,7 +80,7 @@ def check_remote_paths(
 
     script_lines = []
     for i, (_label, path, kind) in enumerate(filled):
-        flag = "-f" if kind == "file" else "-d"
+        flag = "-e" if kind == "path" else ("-f" if kind == "file" else "-d")
         script_lines.append(f"test {flag} {shlex.quote(path)} || echo MISSING:{i}")
     script = "\n".join(script_lines)
 
@@ -94,7 +94,7 @@ def check_remote_paths(
     problems = []
     for i, (label, path, kind) in enumerate(filled):
         if i in missing_indices:
-            noun = "file" if kind == "file" else "directory"
+            noun = "path" if kind == "path" else ("file" if kind == "file" else "directory")
             problems.append(f"{label}: {noun} not found on {host} — {path}")
     return problems
 

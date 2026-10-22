@@ -7,12 +7,12 @@
  *  RER_CONT: runs continuous_rer.R, which transforms the trait (rer_transform), converts
  *  it to phylogenetic paths on the master tree and correlates the paths with the RER
  *  matrix (correlateWithContinuousPhenotype), with an optional Brownian-motion
- *  permulation null (rer_perm_batches > 0). A failed task is ignored.
+ *  permulation null (rer_perm_batches > 0). A failed task stops the workflow.
  *
  *  Consumes:  polished trait RData (trait_vector, n_vector, c_vector), master gene-trees
  *             RDS (RER_TREES), RER matrix RDS (RER_MATRIX)
  *  Produces:  <trait>.char2path.output, <trait>.continuous.output,
- *             <trait>.continuous.perms.rds (only with permutations)
+ *             <trait>.continuous.perms.rds (directory of corStat blocks, only with permutations)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -21,7 +21,7 @@
 
 process RER_CONT {
     tag "$rer_matrix"
-    errorStrategy 'ignore'
+    errorStrategy 'terminate'
     label 'process_medium'
 
 
@@ -46,7 +46,7 @@ process RER_CONT {
     def perm_mode       = 'cc'
     // Include external R sources in the task hash so resume cannot reuse a null
     // computed with a different correlation implementation.
-    def sources = ['continuous_rer.R', 'rer_permulations.R'].collect {
+    def sources = ['continuous_rer.R', 'rer_permulations.R', 'rer_batches.R'].collect {
         file("${baseDir}/subworkflows/RERCONVERGE/local/${it}").text
     }.join('\n')
     def source_hash = java.security.MessageDigest.getInstance('SHA-256')
@@ -57,6 +57,7 @@ process RER_CONT {
         """
         echo "Using Singularity/Apptainer"
         # RER sources SHA256: ${source_hash}
+        rm -rf -- '${params.traitname}.continuous.perms.rds' '${params.traitname}.continuous.perms.rds.gene_slices'
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/continuous_rer.R' \\
         ${trait_file} \\
@@ -70,12 +71,14 @@ process RER_CONT {
         ${perm_batches} \\
         ${perms_per_batch} \\
         ${perm_mode} \\
-        "${params.rer_transform ?: 'auto'}"
+        "${params.rer_transform ?: 'auto'}" \\
+        ${params.rer_batch_seed}
         """
     } else {
         """
         echo "Running locally"
         # RER sources SHA256: ${source_hash}
+        rm -rf -- '${params.traitname}.continuous.perms.rds' '${params.traitname}.continuous.perms.rds.gene_slices'
         Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/continuous_rer.R' \\
         ${trait_file} \\
@@ -89,7 +92,8 @@ process RER_CONT {
         ${perm_batches} \\
         ${perms_per_batch} \\
         ${perm_mode} \\
-        "${params.rer_transform ?: 'auto'}"
+        "${params.rer_transform ?: 'auto'}" \\
+        ${params.rer_batch_seed}
         """
     }
 

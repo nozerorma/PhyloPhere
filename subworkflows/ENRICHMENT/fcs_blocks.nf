@@ -8,6 +8,7 @@
 // Batch boundaries of genes come from the universe file in every step: ceil(lines / fcs_block_batch_genes) batches.
 
 nextflow.enable.dsl = 2
+include { FCS_CONCAT } from './fcs.nf'
 
 process FCS_BLOCK_TRANSPOSE {
     tag "${block_id}"
@@ -22,11 +23,15 @@ process FCS_BLOCK_TRANSPOSE {
     path "{global,top,bottom}_b*.rds", emit: slices   // the slices only, not the staged matrices.rds
 
     script:
+    def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
+    def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
+        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R','percentile_flags.R'].collect {
+            file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
+        }.join('\n').getBytes('UTF-8')).encodeHex().toString()
     """
-    for rk in global top bottom; do
-        Rscript ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_blocks.R transpose --matrices ${matrices} \\
-            --universe ${universe} --batch ${batch_size} --rank \$rk --block ${block_id} --out .
-    done
+    # FCS sources: ${source_hash}
+    ${rs} ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_blocks.R transpose --matrices ${matrices} \\
+        --universe ${universe} --batch ${batch_size} --rank all --block ${block_id} --gene-stat ${params.gene_stat} --out .
     """
 }
 
@@ -43,9 +48,15 @@ process FCS_GENE_P {
     path "obs_*.tsv",  emit: obs
 
     script:
+    def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
+    def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
+        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R','percentile_flags.R'].collect {
+            file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
+        }.join('\n').getBytes('UTF-8')).encodeHex().toString()
     """
+    # FCS sources: ${source_hash}
     blocks=\$(ls ${rank}_b\$(printf '%04d' ${k})_*.rds | sed -E "s/^${rank}_b[0-9]{4}_//; s/[.]rds\$//" | paste -sd, -)
-    Rscript ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_blocks.R gene_p --batch ${k} --rank ${rank} \\
+    ${rs} ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_blocks.R gene_p --batch ${k} --rank ${rank} \\
         --blocks "\$blocks" --slices . --obs ${stats_file} --obs-col ${obs_col} --out .
     """
 }
@@ -60,13 +71,19 @@ process FCS_OBSERVED {
     path universe
 
     output:
-    tuple val(batchID), path("observed.tsv"), emit: observed
+    tuple val(batchID), path("observed.rds"), emit: observed
 
     script:
+    def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
+    def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
+        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R','percentile_flags.R'].collect {
+            file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
+        }.join('\n').getBytes('UTF-8')).encodeHex().toString()
     """
-    Rscript ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_blocks.R observed --obs-dir . --universe ${universe} \\
+    # FCS sources: ${source_hash}
+    ${rs} ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_blocks.R observed --obs-dir . --universe ${universe} \\
         --rankings global,top,bottom --gmt-dir gmts --num-g ${params.fcs_min_genes} \\
-        --max-g ${params.fcs_max_genes ?: 0} --out observed.tsv
+        --max-g ${params.fcs_max_genes ?: 0} --out observed.rds
     """
 }
 
@@ -75,8 +92,7 @@ process FCS_NULL_BLOCK {
     label 'process_fcs_batched'
 
     input:
-    tuple val(batchID), val(batchSize), path(gmtFiles, stageAs: 'gmts/*'), path(observed), val(block_id), val(rank)
-    path gp_files
+    tuple val(batchID), val(batchSize), path(gmtFiles, stageAs: 'gmts/*'), path(observed), val(block_id), val(rank), path(gp_files)
     path universe
     val batch_size
 
@@ -84,9 +100,15 @@ process FCS_NULL_BLOCK {
     tuple val(batchID), path("counts_${batchID}_${block_id}_${rank}.tsv"), emit: counts
 
     script:
+    def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
+    def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
+        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R','percentile_flags.R'].collect {
+            file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
+        }.join('\n').getBytes('UTF-8')).encodeHex().toString()
     """
+    # FCS sources: ${source_hash}
     nb=\$(( (\$(grep -c . ${universe}) + ${batch_size} - 1) / ${batch_size} ))
-    Rscript ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_blocks.R null_block --observed ${observed} --slices . \\
+    ${rs} ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_blocks.R null_block --observed ${observed} --slices . \\
         --universe ${universe} --block ${block_id} --batches "\$(seq -s, 1 \$nb)" --rank ${rank} --alt greater \\
         --gmt-dir gmts --num-g ${params.fcs_min_genes} --max-g ${params.fcs_max_genes ?: 0} \\
         --out counts_${batchID}_${block_id}_${rank}.tsv
@@ -104,8 +126,14 @@ process FCS_CLOSE {
     path "fcs_enrich_partial.tsv", emit: partial
 
     script:
+    def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
+    def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
+        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R','percentile_flags.R'].collect {
+            file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
+        }.join('\n').getBytes('UTF-8')).encodeHex().toString()
     """
-    Rscript ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_blocks.R close --observed ${observed} \\
+    # FCS sources: ${source_hash}
+    ${rs} ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_blocks.R close --observed ${observed} \\
         --counts \$(ls counts_*.tsv | paste -sd, -) --fdr-thr ${params.fcs_fdr} --pperm-thr ${params.fcs_pperm_thr} \\
         --analytic-levels ${params.fcs_analytic_levels} --out fcs_enrich_partial.tsv
     """
@@ -113,7 +141,7 @@ process FCS_CLOSE {
 
 workflow FCS_COMPUTE_BLOCKS {
     take:
-    stats_file        // path: gene scores with the observed statistic columns (gene_caas_score, _top, _bottom)
+    stats_file        // path: gene + score_global, score_top, score_bottom (selected gene_stat)
     universe_file     // path: gene universe
     blocks            // channel of tuple(block_id, matrices.rds)
 
@@ -133,25 +161,30 @@ workflow FCS_COMPUTE_BLOCKS {
     FCS_BLOCK_TRANSPOSE(blocks, universe_v, batchSize)
     def slices_v = FCS_BLOCK_TRANSPOSE.out.slices.collect()
 
-    def rank_cols = Channel.of(['global', 'gene_caas_score'], ['top', 'gene_caas_score_top'], ['bottom', 'gene_caas_score_bottom'])
+    def rank_cols = Channel.of(['global', 'score_global'], ['top', 'score_top'], ['bottom', 'score_bottom'])
     def gp_jobs = rank_cols.combine(nb_ch).map { rank, col, k -> tuple(rank, k, col) }
-        .combine(slices_v.map { files -> [files] }).map { rank, k, col, sl -> tuple(rank, k, col, sl) }   // the list stays one item
+        .combine(slices_v.map { files -> [files] }).map { rank, k, col, sl -> tuple(rank, k, col, sl.findAll { it.name.startsWith(String.format('%s_b%04d_', rank, k)) }) }   // the list stays one item
     FCS_GENE_P(gp_jobs, stats_v)
     def gp_v  = FCS_GENE_P.out.gp.collect()
     def obs_v = FCS_GENE_P.out.obs.collect()
 
-    FCS_OBSERVED(gmtBatches, obs_v.first(), universe_v)
+    FCS_OBSERVED(gmtBatches, obs_v.filter { it }.first(), universe_v)
 
     // every GMT batch with its observed rows, crossed with each block and rank
     def batch_obs = gmtBatches.join(FCS_OBSERVED.out.observed.map { id, f -> tuple(id, f) }, by: 0)
         .map { id, size, gmts, obs -> tuple(id, size, gmts, obs) }
     def nul_jobs = batch_obs.combine(blocks.map { it[0] }).combine(Channel.of('global', 'top', 'bottom'))
-        .map { id, size, gmts, obs, block, rank -> tuple(id, size, gmts, obs, block, rank) }
-    FCS_NULL_BLOCK(nul_jobs, gp_v.first(), universe_v, batchSize)
+        .combine(gp_v.map { files -> [files] })
+        .map { id, size, gmts, obs, block, rank, files ->
+            tuple(id, size, gmts, obs, block, rank, files.findAll { it.name.startsWith("${rank}_gp_") && it.name.endsWith("_${block}.rds") }) }
+    FCS_NULL_BLOCK(nul_jobs, universe_v, batchSize)
 
     def counts_by_batch = FCS_NULL_BLOCK.out.counts.groupTuple(by: 0)
     FCS_CLOSE(FCS_OBSERVED.out.observed.join(counts_by_batch, by: 0).map { id, obs, cts -> tuple(id, obs, cts) })
 
+    FCS_CONCAT(FCS_CLOSE.out.partial.collect().filter { it })
+
     emit:
+    enrich_file = FCS_CONCAT.out.enrich
     partials = FCS_CLOSE.out.partial.collect()   // concatenate with FCS_CONCAT (fcs.nf)
 }

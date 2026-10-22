@@ -41,24 +41,71 @@ empty_fcs_table <- function() {
     num.genes = numeric(), gene.vals = character(),
     sig_perm = logical(), direction = character(), redlich_level = numeric())
 }
+read_observed <- function(path) {
+  if (grepl('[.]rds$', path)) readRDS(path) else read_tsv(path, show_col_types=FALSE)
+}
+write_observed <- function(tab, path) {
+  if (grepl('[.]rds$', path)) saveRDS(tab, path) else write_tsv(tab, path)
+}
 read_universe <- function(path) {
   u <- unique(trimws(readLines(path))); u[nzchar(u)]
 }
 obs_col_name <- function(rk) c(global = "gene_caas_score", top = "gene_caas_score_top", bottom = "gene_caas_score_bottom")[[rk]]
 
+rer_rankings <- function() {
+  tab <- read_tsv(get_arg('--obs'), show_col_types = FALSE)
+  fcs_check_gene_ids(tab$gene, nrow(tab), 'RER observed')
+  u <- read_universe(get_arg('--universe'))
+  cols <- grep('^score_', names(tab), value = TRUE)
+  setNames(lapply(cols, function(c) fcs_build_vals(setNames(tab[[c]], tab$gene), u, score_source='rer')),
+           sub('^score_', '', cols))
+}
+empty_counts <- function() tibble::tibble(database=character(), pathway=character(), count=numeric(), valid=numeric(), ranking=character())
 switch(step,
+  rer_observed = {
+    obs <- fcs_observed(rer_rankings(), fcs_load_gmts(get_arg('--gmt-dir')),
+                        num_g=as.integer(get_arg('--num-g',10)), max_g=as.integer(get_arg('--max-g',0)), score_source='rer')
+    write_observed(if(is.null(obs$enrich)) empty_fcs_table() else obs$enrich, get_arg('--out'))
+  },
+  rer_null = {
+    m <- readRDS(get_arg('--matrices'))$corStat
+    counts <- empty_counts()
+    if (!is.null(m)) {
+      m <- as.matrix(m)
+      fcs_check_rer_gene_ids(rownames(m), nrow(m), 'RER block')
+      obs <- read_observed(get_arg('--observed'))
+      rankings <- rer_rankings()
+      gmts <- fcs_load_gmts(get_arg('--gmt-dir'))
+      counts <- bind_rows(lapply(names(rankings), function(rk) {
+        # RER excludes unavailable scores separately in each null column.
+        # Genes unavailable in the observed ranking can be evaluable in the null.
+        aligned <- m
+        rows <- obs[obs$ranking == rk,,drop=FALSE]
+        if (!nrow(rows)) return(NULL)
+        fcs_null_counts_by_matrices(rk, rows, list(aligned), gmts, 'two.sided',
+                                    num_g=as.integer(get_arg('--num-g',10)), max_g=as.integer(get_arg('--max-g',0)))
+      }))
+      if (!nrow(counts)) counts <- empty_counts()
+    }
+    write_tsv(counts, get_arg('--out'))
+  },
   transpose = {
     m <- readRDS(get_arg("--matrices"))
     rk <- get_arg("--rank", "global")
     universe <- read_universe(get_arg("--universe"))
     batches <- caas_batches(universe, as.integer(get_arg("--batch")))
-    caas_transpose_block(m$stat[[rk]], batches, rk, get_arg("--block"), get_arg("--out"))
+    if (!identical(as.character(m$gene_stat), get_arg('--gene-stat', 'size_adj_max')))
+      stop('CAAS gene_stat mismatch; rebuild the null before calibrating rankings')
+    ranks <- if (rk == 'all') c('global','top','bottom') else rk
+    for (rank in ranks) caas_transpose_block(m$stat[[rank]], batches, rank, get_arg('--block'), get_arg('--out'))
   },
   gene_p = {
     k <- as.integer(get_arg("--batch")); rk <- get_arg("--rank", "global")
     blocks <- strsplit(get_arg("--blocks"), ",")[[1]]
     obs_tab <- read_tsv(get_arg("--obs"), show_col_types = FALSE)
     col <- get_arg("--obs-col", obs_col_name(rk))
+    if (!col %in% names(obs_tab)) stop('Missing observed score column: ', col)
+    fcs_check_gene_ids(obs_tab$gene, nrow(obs_tab), 'CAAS observed')
     obs <- setNames(as.numeric(obs_tab[[col]]), obs_tab$gene)
     out <- get_arg("--out"); dir.create(out, showWarnings = FALSE, recursive = TRUE)
     slices <- get_arg("--slices")                         # the -log10 p slices are written beside the input slices
@@ -82,10 +129,10 @@ switch(step,
     gmts <- fcs_load_gmts(get_arg("--gmt-dir"))
     obs <- fcs_observed(rankings, gmts, num_g = as.integer(get_arg("--num-g", 10)), max_g = as.integer(get_arg("--max-g", 0)))
     out <- if (is.null(obs$enrich)) empty_fcs_table() else obs$enrich
-    write_tsv(out, get_arg("--out"))
+    write_observed(out, get_arg("--out"))
   },
   null_block = {
-    obs <- read_tsv(get_arg("--observed"), show_col_types = FALSE)
+    obs <- read_observed(get_arg("--observed"))
     rk <- get_arg("--rank", "global")
     obs_rk <- obs[obs$ranking == rk, , drop = FALSE]
     universe <- read_universe(get_arg("--universe"))
@@ -99,7 +146,7 @@ switch(step,
                                                   valid = numeric(), ranking = character()) else counts, get_arg("--out"))
   },
   close = {
-    obs <- read_tsv(get_arg("--observed"), show_col_types = FALSE)
+    obs <- read_observed(get_arg("--observed"))
     files <- strsplit(get_arg("--counts", ""), ",")[[1]]
     files <- files[nzchar(files)]
     # the counts of the blocks add up: one row per (ranking, database, pathway) before the close

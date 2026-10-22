@@ -95,6 +95,7 @@ SPEC = ModuleTabSpec(
         Section("Permutation null calibration"),
         FieldSpec(name="rer_perm_batches", label="Permutation batches", importance="default"),
         FieldSpec(name="rer_perms_per_batch", label="Permutations per batch", importance="default"),
+        FieldSpec(name="rer_batch_seed", label="Null batch seed", importance="optional"),
         Section("Binary mode options"),
         FieldSpec(
             name="rer_binary_clade",

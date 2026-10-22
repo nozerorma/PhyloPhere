@@ -9,11 +9,9 @@
 include { SCORING_AMI_REPORT; SCORING_COMPARE_REPORT } from '../subworkflows/ENRICHMENT/scoring_enrichment.nf'
 include { SCORING_FCS_REPORT }                            from '../subworkflows/ENRICHMENT/fcs.nf'
 include { RER_FCS_REPORT  as MODULE_FCS_RER }             from '../subworkflows/ENRICHMENT/fcs.nf'
-// FCS_COMPUTE (GMT-batched fcs_run_all(), see fcs.nf) is called once per FCS
-// report below, each against a different stats/universe -- distinct aliases
-// for the same DuplicateProcessInvocation reason as DOMINO_MODULES below.
-include { FCS_COMPUTE as FCS_COMPUTE_SCORING }            from '../subworkflows/ENRICHMENT/fcs.nf'
-include { FCS_COMPUTE as FCS_COMPUTE_RER }                from '../subworkflows/ENRICHMENT/fcs.nf'
+// CAAS calibrates per-gene rankings; both sources count pathway AUC by null block.
+include { FCS_CAAS as FCS_COMPUTE_SCORING } from '../subworkflows/ENRICHMENT/fcs_inputs.nf'
+include { FCS_RER as FCS_COMPUTE_RER } from '../subworkflows/ENRICHMENT/fcs_inputs.nf'
 include { POSENRICH }                                      from '../subworkflows/ENRICHMENT/posenrich.nf'
 include { UCR_GENERATION }                                  from '../subworkflows/ENRICHMENT/ucr_generation.nf'
 include { DOMAIN_VARIABILITY_GENERATION }                   from '../subworkflows/ENRICHMENT/domain_variability_generation.nf'
@@ -133,6 +131,7 @@ workflow ENRICHMENT {
         cleaned_background_ch
         rer_perms_ch
         caas_perms_ch
+        caas_blocks_ch
         caas_pos_sample_ch
         position_scores
         position_lists       // SCORING's published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv dir
@@ -208,7 +207,7 @@ workflow ENRICHMENT {
         def trait_lbl = params.traitname ?: 'trait'
 
         if (run_fcs) {
-            def scoring_fcs_compute = FCS_COMPUTE_SCORING(fcs_stats, fcs_universe_ch, caas_perms_resolved, 'caas')
+            def scoring_fcs_compute = FCS_COMPUTE_SCORING(fcs_stats, fcs_universe_ch, caas_perms_resolved, caas_blocks_ch.ifEmpty([]))
             def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch, caas_perms_resolved, gene_lists_ch,
                                               scoring_fcs_compute.enrich_file)
             fcs_out_report = fcs_out.report
@@ -217,7 +216,7 @@ workflow ENRICHMENT {
             caas_le_comp = fcs_out.fcs_leading_edge_composition.ifEmpty { file('NO_LEADING_EDGE_COMPOSITION') }
 
             if (rer_ran) {
-                def rer_fcs_compute = FCS_COMPUTE_RER(fcs_stats_rer, rer_universe_ch, rer_perms_resolved, 'rer')
+                def rer_fcs_compute = FCS_COMPUTE_RER(fcs_stats_rer, rer_universe_ch, rer_perms_resolved)
                 def rer_fcs = MODULE_FCS_RER(
                     Channel.value('scoring/rer'),   fcs_stats_rer,
                     rer_universe_ch, Channel.value("12.FCS_rer_${trait_lbl}"),

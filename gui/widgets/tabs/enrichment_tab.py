@@ -92,6 +92,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="fcs_cluster_threshold", label="FCS redundancy groups: similarity threshold", importance="default"),
         FieldSpec(name="fcs_top_n", label="FCS top-N leading edge", importance="optional"),
         FieldSpec(name="fcs_batch_size", label="FCS GMTs per task", importance="optional"),
+        FieldSpec(name="fcs_block_batch_genes", label="GENE_P genes per task", importance="optional"),
         Section("DOMINO active module identification thresholds"),
         FieldSpec(
             name="scoring_ami",

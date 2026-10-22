@@ -94,7 +94,7 @@ class PrecomputedConfig:
 def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str, str]]:
     """List (label, path, kind) for every path implied by the checked boxes, for one TRAIT.
 
-    kind is "file" or "dir". Python mirror of the PRECOMP_OUTDIR construction of
+    kind is "file", "dir", or "path" (either kind). Python mirror of the PRECOMP_OUTDIR construction of
     run_single.sh.j2, used by gui/generation/validate.py for existence checks. The shell
     script builds the same paths at run time, so both must follow the layout in this
     module's docstring.
@@ -143,7 +143,7 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         )
         kind = "binary" if binary_only else "continuous"
         entries.append((f"rer_{kind}_file", os.path.join(rer_dir, f"{trait}.{kind}.output"), "file"))
-        entries.append(("rer_perms_file / scoring_rer_perms_input", os.path.join(rer_dir, f"{trait}.{kind}.perms.rds"), "file"))
+        entries.append(("rer_perms_file / scoring_rer_perms_input", os.path.join(rer_dir, f"{trait}.{kind}.perms.rds"), "path"))
         matches = sorted(glob.glob(os.path.join(rer_dir, "rerconverge_summary_*.tsv")))
         if matches:
             entries.append(("scoring_rer_input", matches[0], "file"))

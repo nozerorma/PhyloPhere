@@ -49,6 +49,7 @@ if(length(a)) {
   if(mode=='gene_p') { gp <- gene_p(full,obs); obs <- setNames(gp$nlog10_obs,rownames(full)); full <- gp$nlog10_null }
   vals <- fcs_build_vals(obs,rownames(full)); m <- fcs_align_null(full[,js,drop=FALSE],names(vals))
   observed <- fcs_run_ranking(vals,gmts,num_g=10,alternative='greater')
+  if (!nrow(observed)) {cat(sprintf('PASS: saved %s/%s has no evaluable pathways\n',rk,mode));next}
   real <- lapply(split(as.data.frame(observed),observed$database),function(d){rownames(d)<-d$pathway;d})
   vec <- fcs_null_enrichstat_vectorized(m,gmts,real,num_g=10)
   refs <- lapply(vec,function(x) x*NA_real_)

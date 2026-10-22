@@ -480,6 +480,8 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `domino_slice_thr` | `0.3` | Relevance threshold for DOMINO network slicing. |
 | `domino_module_thr` | `0.05` | Bonferroni-corrected p-value cutoff for accepting DOMINO active modules. |
 | `fcs_min_genes` / `fcs_max_genes` | `10` / `0` | Minimum / maximum gene set size required for FCS enrichment evaluation (`0` = no upper limit). |
+| `fcs_block_batch_genes` | `1000` | Genes per CAAS calibration task. GENE_P needs all cycles of these genes; memory grows with their number and total cycles. |
+| `fcs_batch_size` | `4` | GMT databases per FCS task; null tasks consume one block of cycles. |
 | `fcs_fdr` | `0.15` | Benjamini-Hochberg threshold on the permulation p of each gene set (`q.perm`), per ranking and database. |
 | `fcs_analytic_levels` | `0.05,0.1,0.15` | Analytic rule of Redlich et al. 2024, reported next to the permulation rule as `redlich_level` (the smallest level met, empty when none): the analytic BH-adjusted p (`p.adj`) below the level and `p.perm` below `fcs_pperm_thr`. It does not enter `sig_perm`. |
 | `fcs_cluster_similarity` / `fcs_cluster_threshold` | `jaccard` / `0.5` | Redundancy reduction of the significant sets of each ranking, applied after the significance call (no p or q value changes): the sets are grouped greedily by significance, a set joining the first representative whose leading edge is at least this similar (`jaccard`, or `overlap`, which over-merges hierarchical databases). Gives `cluster_id` and `is_representative`. |
@@ -550,7 +552,8 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `trait_out` / `trees_out` / `matrix_out` | — | Output file paths for intermediate RER objects (`build_trait`, `build_trees`, `build_matrix`). |
 | `rer_minsp` | `"15"` | Minimum number of species required per gene tree. |
 | `winsorizeRER` / `winsorizeTrait` | `"3"` / `"3"` | Winsorization quantile cutoffs for RER relative rates and trait values. |
-| `rer_perm_batches` / `rer_perms_per_batch` | `10` / `100` | Permutation batches and iterations per batch for Brownian Motion null generation. |
+| `rer_perm_batches` / `rer_perms_per_batch` | `10` / `100` | Null batches and cycles per batch (Brownian continuous / categorical binary). Use `100` / `100` for 10,000 cycles. |
+| `rer_batch_seed` | `1998` | Batch i uses seed + i - 1. Reproducibility requires fixed batch boundaries, R/package versions and inputs. |
 | `rer_binary_clade` | `"all"` | Branch marking strategy for binary traits (`"all"`, `"ancestral"`, `"terminal"`). |
 | `rer_min_pos` | `2` | Minimum independent foreground lineages required per gene. |
 | `rer_pval_threshold` | `0.05` | P-value threshold for report tables. |

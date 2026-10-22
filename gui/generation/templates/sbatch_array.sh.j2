@@ -96,6 +96,7 @@ fi
 # RERconverge permulations: the values of the RERconverge tab, in toy mode too.
 export RER_PERM_BATCHES="{{ modules.rer.rer_perm_batches }}"
 export RER_PERMS_PER_BATCH="{{ modules.rer.rer_perms_per_batch }}"
+export RER_BATCH_SEED="{{ modules.rer.rer_batch_seed }}"
 
 # ── Module toggles ────────────────────────────────────────────────────────────
 # There is no global RUN_PRUNE: pruning is per phenotype row and is triggered by the
@@ -267,6 +268,7 @@ export FCS_CLUSTER_SIMILARITY="{{ modules.enrichment.fcs_cluster_similarity }}"
 export FCS_CLUSTER_THRESHOLD="{{ modules.enrichment.fcs_cluster_threshold }}"
 export FCS_TOP_N="{{ modules.enrichment.fcs_top_n }}"
 export FCS_BATCH_SIZE="{{ modules.enrichment.fcs_batch_size }}"
+export FCS_BLOCK_BATCH_GENES="{{ modules.enrichment.fcs_block_batch_genes }}"
 export STRING_DB_DIR="{{ modules.enrichment.string_db_dir }}"
 export STRING_CACHE_DIR="{{ modules.enrichment.string_cache_dir }}"
 export STRING_SPECIES="{{ modules.enrichment.string_species if modules.enrichment.string_species else runtime.ref_species_taxid }}"

@@ -904,6 +904,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     pp_cleaned_bg,
                     scoring_rer_perms_ch,
                     caas_perms_for_enrich,
+                    (scoring_null_blocks_ch ?: (params.caas_null_dir ? Channel.value(files("${params.caas_null_dir}/blocks/*").sort()) : Channel.value([]))),
                     scoring_caas_pos_sample_ch,
                     position_scores_ch,
                     position_lists_ch,

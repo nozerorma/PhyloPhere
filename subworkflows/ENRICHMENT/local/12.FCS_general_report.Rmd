@@ -214,6 +214,12 @@ tibble::tibble(
 
 # Methods
 
+CAAS ranks genes by `-log10(p_gene)` of the selected `gene_stat`. The observed
+p uses `(1 + count) / (N_valid + 1)` and each null cycle uses leave-one-out
+comparisons against the other cycles. Absent raw CAAS scores are filled with zero
+before calibration. Without a usable null, calibrated CAAS pathway tests are unavailable.
+RER uses the signed parametric score `sign(Rho) * -log10(P)`.
+
 Every gene set of every GMT database is tested against each ranking with the
 **Wilcoxon-AUC test** (`RERconverge::fastwilcoxGMTall`), a rank-sum test that asks
 whether the genes of the set sit systematically higher in the ranking than the other
@@ -272,6 +278,7 @@ if (!is.null(params$enrich_file) && nzchar(params$enrich_file) && file.exists(pa
   enrich <- readr::read_tsv(params$enrich_file, show_col_types = FALSE,
                              col_types = fcs_enrich_col_types())
 } else {
+  if (params$score_source == 'caas') stop('CAAS FCS requires the calibrated enrich_file produced by FCS_CAAS')
   # One ranking vector per score_<ranking> column, with the source's missing-score policy.
   rankings <- list()
   for (sc in score_cols) {

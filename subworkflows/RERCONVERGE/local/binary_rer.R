@@ -32,6 +32,10 @@ library(dplyr)
 library(RERconverge)
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
 source(file.path(dirname(normalizePath(script_file)), "rer_permulations.R"))
+source(file.path(dirname(normalizePath(script_file)), "rer_batches.R"))
+batch_seed <- if (length(args) >= 12) as.integer(args[12]) else 1998L
+set.seed(batch_seed)
+
 
 # ── Load trait vector ─────────────────────────────────────────────────────────
 
@@ -145,48 +149,8 @@ if (num_batches > 0 && perms_per_batch > 0) {
     clade           = rer_clade
   )
 
-  message(sprintf("  [RER_BIN] Permutation batch 1 / %d", num_batches))
-  perms_combined <- run_bin_perm_batch(perms_per_batch)
-
-  if (num_batches > 1) {
-    for (i in 2:num_batches) {
-      message(sprintf("  [RER_BIN] Permutation batch %d / %d", i, num_batches))
-      perms_combined <- combinePermData(
-        perms_combined, run_bin_perm_batch(perms_per_batch), enrich = FALSE
-      )
-    }
-  }
-
-  n_perms <- num_batches * perms_per_batch
-
-  # The return type of permpvalcor() depends on the RERconverge build:
-  #   * bioconda v0.3.0 tag: named numeric vector with the raw proportion
-  #     sum(|null| > |obs|) / N, so the (x*N + 1)/(N + 1) pseudo-count is added here.
-  #   * the commit pinned in environment/install_env.sh (2bd328f7): data.frame(permpval,
-  #     permstats) with a median-centered two-tailed empirical p and the
-  #     (num + 1)/(denom + 1) pseudo-count already applied; permpval is used as is.
-  ppc <- permpvalcor(res, perms_combined)
-  if (is.data.frame(ppc)) {
-    permpvals <- setNames(ppc$permpval, rownames(ppc))
-  } else {
-    permpvals <- (as.numeric(ppc) * n_perms + 1) / (n_perms + 1)
-    names(permpvals) <- names(ppc)
-  }
-
-  res$p.perm     <- permpvals[rownames(res)]
-  # BH adjustment across genes
-  res$p.perm.adj <- p.adjust(res$p.perm, method = "BH")
-  attr(res, "n_perms") <- n_perms
-  message(sprintf(
-    "[RER_BIN] Permutation p-values computed for %d / %d genes (N=%d perms).",
-    sum(!is.na(res$p.perm)), nrow(res), n_perms
-  ))
-  
-  # The raw permutations object (null statistics matrices) is kept for the FCS and comparison stages
-  perms_path <- sub("\\.output$", ".perms.rds", args[5])
-  attr(perms_combined, "rer_settings") <- attr(res, "rer_settings")
-  saveRDS(perms_combined, file = perms_path)
-  message("[RER_BIN] Saved raw null permutations RDS to: ", perms_path)
+  res <- rer_write_batches(res, num_batches, perms_per_batch, batch_seed,
+                           run_bin_perm_batch, sub("\\.output$", ".perms.rds", args[5]))
 } else {
   message("[RER_BIN] Permutation testing skipped (rer_perm_batches = 0).")
 }

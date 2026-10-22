@@ -24,7 +24,9 @@ caas_slice_path <- function(dir, rk, k, block_id) file.path(dir, sprintf("%s_b%0
 # Writes one slice per batch of the block `stat_mat` (genes x cycles, row names = genes; any gene of U may be absent).
 caas_transpose_block <- function(stat_mat, batches, rk, block_id, dir) {
   dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  if (is.null(rownames(stat_mat)) || anyNA(rownames(stat_mat)) || anyDuplicated(rownames(stat_mat))) stop('Invalid block gene IDs')
   cols <- colnames(stat_mat)
+  if (is.null(cols) || anyNA(cols) || anyDuplicated(cols) || any(!nzchar(cols))) stop('Invalid block cycle IDs')
   for (k in seq_along(batches)) {
     rows <- batches[[k]]
     vals <- matrix(0, length(rows), length(cols), dimnames = list(rows, cols))
@@ -40,6 +42,10 @@ caas_transpose_block <- function(stat_mat, batches, rk, block_id, dir) {
 caas_gene_p_batch <- function(k, rk, block_ids, dir, obs, tie_tol = TIE_TOL_GENE_P) {
   parts <- lapply(block_ids, function(b) readRDS(caas_slice_path(dir, rk, k, b)))
   rows <- parts[[1]]$rows
+  if (anyDuplicated(block_ids) || !all(vapply(parts, function(p) identical(p$rows, rows) &&
+      identical(rownames(p$values), rows) && identical(colnames(p$values), p$cols), logical(1)))) stop('Inconsistent gene batch slices')
+  cycles <- unlist(lapply(parts, function(p) p$cols), use.names=FALSE)
+  if (anyDuplicated(cycles)) stop('Overlapping null cycles across blocks')
   S <- do.call(cbind, lapply(parts, function(p) p$values))
   cols <- unlist(lapply(parts, function(p) p$cols))
   colnames(S) <- cols

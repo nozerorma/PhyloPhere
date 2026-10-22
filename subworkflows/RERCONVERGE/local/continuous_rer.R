@@ -32,6 +32,10 @@ library(dplyr)
 library(RERconverge)
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
 source(file.path(dirname(normalizePath(script_file)), "rer_permulations.R"))
+source(file.path(dirname(normalizePath(script_file)), "rer_batches.R"))
+batch_seed <- if (length(args) >= 13) as.integer(args[13]) else 1998L
+set.seed(batch_seed)
+
 
 # ── Load trait vector and count vectors ───────────────────────────────────────
 
@@ -181,8 +185,7 @@ attr(res, "rer_settings") <- list(mode = "continuous", min.sp = as.numeric(args[
 
 # Null phenotypes are simulated under Brownian motion (permulations, Saputra et al. 2021, who typically
 # use 1,000); the configured default (conf/rerconverge.config) is 10 batches x 100 permutations.
-# p.perm is the empirical p-value computed by permpvalcor() from the null correlations, centred on the median of
-# each gene's null, so its smallest value is about 1 / (N/2 + 1).
+# Gene p values use native permpvalcor on the full cycle set of each gene batch.
 num_batches      <- as.integer(args[9])
 perms_per_batch  <- as.integer(args[10])
 
@@ -223,68 +226,10 @@ if (num_batches > 0 && perms_per_batch > 0) {
     ape::is.rooted(sim_master), ape::is.binary(sim_master)
   ))
 
-  message(sprintf("  [RER] Permutation batch 1 / %d", num_batches))
-  perms_combined <- rer_perms_continuous(
-    numperms        = perms_per_batch,
-    traitvec        = sim_trait,
-    RERmat          = traitRERw,
-    trees           = geneTrees,
-    mastertree      = sim_master,
-    min.sp          = as.numeric(args[6]),
-    winR            = as.numeric(args[7]),
-    winT            = as.numeric(args[8])
-  )
-
-  if (num_batches > 1) {
-    for (i in 2:num_batches) {
-      message(sprintf("  [RER] Permutation batch %d / %d", i, num_batches))
-      batch_i <- rer_perms_continuous(
-        numperms        = perms_per_batch,
-        traitvec        = sim_trait,
-        RERmat          = traitRERw,
-        trees           = geneTrees,
-        mastertree      = sim_master,
-        min.sp          = as.numeric(args[6]),
-        winR            = as.numeric(args[7]),
-        winT            = as.numeric(args[8])
-      )
-      perms_combined <- combinePermData(perms_combined, batch_i, enrich = FALSE)
-    }
-  }
-
-  n_perms <- num_batches * perms_per_batch
-
-  # The return type of permpvalcor() depends on the RERconverge build:
-  #   * bioconda v0.3.0 tag: named numeric vector with the raw proportion
-  #     sum(|null| > |obs|) / N, so the (x*N + 1)/(N + 1) pseudo-count is added here.
-  #   * the commit pinned in environment/install_env.sh (2bd328f7): data.frame(permpval,
-  #     permstats) with a median-centered two-tailed empirical p and the
-  #     (num + 1)/(denom + 1) pseudo-count already applied; permpval is used as is.
-  ppc <- permpvalcor(res, perms_combined)
-  if (is.data.frame(ppc)) {
-    permpvals <- setNames(ppc$permpval, rownames(ppc))
-  } else {
-    permpvals <- (as.numeric(ppc) * n_perms + 1) / (n_perms + 1)
-    names(permpvals) <- names(ppc)
-  }
-
-  # Match by gene name (row names of res)
-  res$p.perm <- permpvals[rownames(res)]
-  # BH adjustment across genes
-  res$p.perm.adj <- p.adjust(res$p.perm, method = "BH")
-  # The total number of permutations lets the report show the smallest detectable
-  # p.perm instead of 0.
-  attr(res, "n_perms") <- n_perms
-  message(sprintf(
-    "[RER] Permutation p-values computed for %d / %d genes (N=%d perms total).",
-    sum(!is.na(res$p.perm)), nrow(res), n_perms
-  ))
-  
-  # The raw permutations object (null statistics matrices) is kept for the FCS and comparison stages
-  perms_path <- sub("\\.output$", ".perms.rds", args[5])
-  attr(perms_combined, "rer_settings") <- attr(res, "rer_settings")
-  saveRDS(perms_combined, file = perms_path)
-  message("[RER] Saved raw null permutations RDS to: ", perms_path)
+  res <- rer_write_batches(res, num_batches, perms_per_batch, batch_seed,
+    function(n) rer_perms_continuous(n, sim_trait, traitRERw, geneTrees, sim_master,
+                                    min.sp=as.numeric(args[6]), winR=as.numeric(args[7]), winT=as.numeric(args[8])),
+    sub("\\.output$", ".perms.rds", args[5]))
 } else {
   message("[RER] Permutation testing skipped (rer_perm_batches = 0).")
 }

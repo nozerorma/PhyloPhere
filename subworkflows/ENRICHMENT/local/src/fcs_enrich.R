@@ -454,6 +454,7 @@ fcs_null_counts_by_block <- function(rk, obs_rk, corStat, gmts, alt, num_g = 10,
 
 # Sets the permulation p of the enrich rows from the counts: p.perm = (count + 1) / (valid + 1), NA where there is no count.
 fcs_close_counts <- function(enrich_df, counts) {
+  if (!"p.perm" %in% names(enrich_df)) enrich_df$p.perm <- NA_real_
   if (is.null(counts) || nrow(counts) == 0) return(enrich_df)
   enrich_df$.row <- seq_len(nrow(enrich_df))
   m <- dplyr::left_join(enrich_df[, c(".row", "ranking", "database", "pathway")], counts,

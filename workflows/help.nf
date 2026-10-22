@@ -299,6 +299,7 @@ Usage:
 --winsorizeRER, --winsorizeTrait     <INTEGER>                                            3
 --rer_perm_batches                    <INTEGER>                                            10   (0 = skip permulation)
 --rer_perms_per_batch                   <INTEGER>                                            100
+--rer_batch_seed                        <INTEGER>                                            1998 (batch i: seed + i - 1; fixed boundaries required for reproducibility)
 --rer_binary_clade                        <"all|ancestral|terminal">                           "all"
 --rer_min_pos                               <INTEGER>                                            2
 --rer_pval_threshold                          <FLOAT 0-1>                                          0.05
@@ -372,6 +373,8 @@ Usage:
 --fcs_cluster_similarity                    <jaccard|overlap>        jaccard (leading-edge similarity of the redundancy groups of significant sets)
 --fcs_cluster_threshold                     <FLOAT 0-1>              0.5    (similarity at which a set joins the first representative)
 --fcs_top_n                                  <INTEGER>                20
+--fcs_batch_size                             <INTEGER>                4 (GMT databases per task)
+--fcs_block_batch_genes                      <INTEGER>                1000 (GENE_P genes per task; all cycles retained for these genes)
 --caas_permulation_enrichment                    <true|false>             true
 
 DOMINO / STRING:

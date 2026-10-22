@@ -317,8 +317,8 @@ def validate_paths(project: ProjectConfig) -> list[str]:
     for label, path, kind in path_entries(project):
         if not path.strip():
             continue  # a blank path is validate()'s concern
-        exists = os.path.isfile(path) if kind == "file" else os.path.isdir(path)
+        exists = os.path.exists(path) if kind == "path" else (os.path.isfile(path) if kind == "file" else os.path.isdir(path))
         if not exists:
-            noun = "file" if kind == "file" else "directory"
+            noun = "path" if kind == "path" else ("file" if kind == "file" else "directory")
             problems.append(f"{label}: {noun} not found — {path}")
     return problems

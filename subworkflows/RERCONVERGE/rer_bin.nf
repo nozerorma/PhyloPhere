@@ -7,12 +7,12 @@
  *  RER_BIN: runs binary_rer.R, which builds the foreground paths of the 0/1 trait on
  *  the master tree and correlates them with the RER matrix
  *  (correlateWithBinaryPhenotype), with an optional permulation null
- *  (rer_perm_batches > 0). A failed task is ignored.
+ *  (rer_perm_batches > 0). A failed task stops the workflow.
  *
  *  Consumes:  polished trait RData (trait_vector, 0/1), master gene-trees RDS (RER_TREES),
  *             RER matrix RDS (RER_MATRIX)
  *  Produces:  <trait>.fg_paths.output, <trait>.binary.output,
- *             <trait>.binary.perms.rds (only with permutations)
+ *             <trait>.binary.perms.rds (directory of corStat blocks, only with permutations)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -22,7 +22,7 @@
 process RER_BIN {
     tag "$rer_matrix"
     label 'process_medium'
-    errorStrategy 'ignore'
+    errorStrategy 'terminate'
 
     publishDir path: "${params.outdir}/rerconverge/rer_results", mode: 'copy', saveAs: { filename -> filename.equals('versions.yml') ? null : filename }
 
@@ -43,7 +43,7 @@ process RER_BIN {
     def binary_clade    = params.rer_binary_clade    ?: 'all'
     // Include external R sources in the task hash so resume cannot reuse a null
     // computed with a different correlation implementation.
-    def sources = ['binary_rer.R', 'rer_permulations.R'].collect {
+    def sources = ['binary_rer.R', 'rer_permulations.R', 'rer_batches.R'].collect {
         file("${baseDir}/subworkflows/RERCONVERGE/local/${it}").text
     }.join('\n')
     def source_hash = java.security.MessageDigest.getInstance('SHA-256')
@@ -53,6 +53,7 @@ process RER_BIN {
         """
         echo "Using Singularity/Apptainer"
         # RER sources SHA256: ${source_hash}
+        rm -rf -- '${params.traitname}.binary.perms.rds' '${params.traitname}.binary.perms.rds.gene_slices'
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/binary_rer.R' \\
         ${trait_file} \\
@@ -65,12 +66,14 @@ process RER_BIN {
         ${params.winsorizeRER} \\
         ${binary_clade} \\
         ${perm_batches} \\
-        ${perms_per_batch}
+        ${perms_per_batch} \\
+        ${params.rer_batch_seed}
         """
     } else {
         """
         echo "Running locally"
         # RER sources SHA256: ${source_hash}
+        rm -rf -- '${params.traitname}.binary.perms.rds' '${params.traitname}.binary.perms.rds.gene_slices'
         Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/binary_rer.R' \\
         ${trait_file} \\
@@ -83,7 +86,8 @@ process RER_BIN {
         ${params.winsorizeRER} \\
         ${binary_clade} \\
         ${perm_batches} \\
-        ${perms_per_batch}
+        ${perms_per_batch} \\
+        ${params.rer_batch_seed}
         """
     }
 }

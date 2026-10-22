@@ -149,6 +149,7 @@ class RerConfig(ModuleConfigBase):
     gene_trees: str = ""  # --gene_trees
     rer_perm_batches: str = "10"  # --rer_perm_batches
     rer_perms_per_batch: str = "100"  # --rer_perms_per_batch
+    rer_batch_seed: str = "1998"
 
     # Intermediate-output paths (conf/rerconverge.config). Blank selects the
     # defaults derived from ${params.traitname}.
@@ -294,6 +295,7 @@ class EnrichmentConfig(ModuleConfigBase):
     fcs_cluster_threshold: str = "0.5"  # --fcs_cluster_threshold
     fcs_top_n: str = "20"  # --fcs_top_n
     fcs_batch_size: str = "4"  # --fcs_batch_size (GMTs per FCS_COMPUTE_BATCHED task)
+    fcs_block_batch_genes: str = "1000"
     # caas_permulation_enrichment (conf/enrichment.config) is a field of CaasConfig, not
     # of this class: it also gates whether CT's permulation core (CAAS_CORE) runs
     # (see main.nf), so the CAAS tab owns it.
