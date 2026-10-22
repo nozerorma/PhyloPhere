@@ -13,7 +13,7 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 | WP3 | `WP3_bloques_de_ciclos.md` | Fase 1 | WP2 | HECHO (PEPC c4 a 1000 ciclos con bloque de 250 y toy de cáncer con bloques de 25 y 40 idénticos a la referencia, delta 0.0; marine toy validado en WP5) |
 | WP4 | `WP4_replay_en_flujo.md` | Fase 2 | WP3 | IMPLEMENTADO; VALIDACIÓN DE ESCALA ABIERTA (90c06a4; equivalencia CAAS validada; referencia escalar reparada, 89 pruebas focalizadas pasan; faltan RP1 B=500 y resolver el criterio de memoria) |
 | WP5 | `WP5_tablas_y_merge_por_bloque.md` | Fase 3 | WP4 | REVISADO en local: guardas de ciclos corregidas; 68 controles dirigidos pasan; reconstrucciones PEPC/cáncer/marine completo y strict reproducen matrices y contadores; cableado 38 PASS y 7 fallos ya registrados. Pendientes adaptar esos tests y validar escala real en el cluster; scripts renderizados, sin lanzar en esta revisión |
-| WP6 | `WP6_fcs_por_bloques.md` | Fase 4 | WP1, WP5 | pendiente |
+| WP6 | `WP6_fcs_por_bloques.md` | Fase 4 | WP1, WP5 | PARCIAL: funciones y subflujo CAAS por bloques; falta integración productiva, RER por lotes y validación integrada |
 | WP7 | `WP7_caas_perms_por_bloques.md` | Fase 5 | WP5 | pendiente |
 | WP8 | `WP8_cierre.md` | | WP5 | pendiente |
 | WP9 | `WP9_estadistico_gen.md` | | A1 ya; A2 tras WP5 | A1 hecho, A2 pendiente |

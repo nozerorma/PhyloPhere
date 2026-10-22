@@ -1,6 +1,6 @@
 # WP6. Fase 4: FCS por bloques de columnas y etapa `GENE_P`
 
-Estado: pendiente. Depende de: WP1 (clasificación nueva, RER paramétrico) y WP5 (matrices por bloque).
+Estado: IMPLEMENTACIÓN PARCIAL; avance temático sin cierre. Depende de: WP1 (clasificación nueva, RER paramétrico) y WP5 (matrices por bloque).
 Conversación independiente. Antes de empezar, leer `docs/fases/README.md`.
 
 ## Objetivo
@@ -9,7 +9,9 @@ Que el FCS (CAAS y RER) use memoria constante en N procesando bloques de columna
 
 ## Decisiones aplicables (del usuario)
 
-- Ranking del FCS de CAAS = −log10 del p de permulación del gen (el estadístico base que lo construye lo decide WP9).
+- Ranking del FCS de CAAS = −log10 del p de permulación del gen, construido sobre el parámetro `gene_stat` (el estadístico base lo decide WP9; sin interruptor de ranking crudo en el código: la comparación con el crudo es de validación).
+- GENE_P por transposición previa: un paso por bloque escribe trozos por lote de genes; cada GENE_P lee solo sus trozos.
+- RER: `RER_CONT` escribe `corStat` por lote, con semilla por lote como parámetro (desviación de RERconverge a justificar); sustituye a `RER_PERMS_SPLIT`.
 - RER: estadístico paramétrico (WP1); permulaciones a 10.000.
 - El coste del FCS es asumible si también lo es para RER; aun así se implementa por bloques.
 
@@ -21,7 +23,7 @@ Que el FCS (CAAS y RER) use memoria constante en N procesando bloques de columna
 
 ## Hallazgo que fija el diseño
 
-Con el ranking por p de gen el nulo **no es independiente por columna**: el −log10 p de un gen en el ciclo j se puntúa contra los otros N−1 ciclos (`ge/N`, como `loo_log10p` de los controles y `fcs_empirical_corstat` en RER antiguo), de modo que necesita las puntuaciones del gen en todos los ciclos. Hace falta una etapa `GENE_P` antes de los bloques del FCS: dispersión por lote de genes, que lee las filas de esos genes de todos los bloques y escribe los p por bloque. Pseudo-cuenta decidida una vez y aplicada igual al observado y al nulo (observado: `(1 + nº de ciclos nulos con score ≥ obs)/(N + 1)`; nulo: `ge/N`), con comparaciones por `TIE_TOL`. En RER no hace falta (paramétrico).
+Con el ranking por p de gen el nulo **no es independiente por columna**: el −log10 p de un gen en el ciclo j se puntúa contra los otros N−1 ciclos (`ge/N`, como `loo_log10p` de los controles y `fcs_empirical_corstat` en RER antiguo), de modo que necesita las puntuaciones del gen en todos los ciclos. Hace falta una etapa `GENE_P` antes de los bloques del FCS: dispersión por lote de genes, que lee las filas de esos genes de todos los bloques y escribe los p por bloque. Pseudo-cuenta decidida una vez y aplicada igual al observado y al nulo (observado: `(1 + c)/(N + 1)`, con c = nº de ciclos nulos con score ≥ obs; nulo: `(1 + ge)/N`, con ge = nº de otros ciclos con score ≥ el del ciclo; la regla es `(1 + recuento)/(M + 1)` con M = nº de comparaciones, así que `ge/N` daría p = 0 cuando el ciclo tiene el máximo estricto del gen), con comparaciones por `TIE_TOL`. En RER no hace falta (paramétrico).
 
 ## Alcance (ficheros)
 
@@ -64,3 +66,11 @@ Construcción de las matrices por bloque (WP5), formato del RDS único (WP7).
 - Desviaciones del plan y decisiones tomadas (con su justificación):
 - Pendiente que pasa a otra fase:
 ```
+
+## Avance temático guardado (2026-10-22)
+
+Se versionan `gene_p.R`, `caas_blocks.R`, `fcs_blocks.R` y `fcs_blocks.nf`: transposición, calibración por gen, observado, recuentos por bloque y cierre. La prueba de contrato AUC compartida con WP1 se incluye en `tests/test_fcs_auc_contract.R` y utiliza el helper `gene_p.R` de esta fase. El camino productivo sigue leyendo el RDS único; este commit no activa el subflujo de bloques.
+
+Pendientes: cableado productivo y parámetros/GUI, RER por lotes, calibración amplia, pruebas de memoria/E/S y aceptación integrada. Las referencias al comparador anterior de p analíticos de CAAS deben actualizarse para usar la decisión AUC de WP1. Por decisión del usuario no se hace una corrida completa por WP; el avance se guarda para continuar la integración y ejecutar después la aceptación conjunta.
+
+Pruebas dirigidas antes del commit parcial: `test_gene_p.py` (oráculo de conteo exhaustivo) y `test_caas_blocks.py::test_batches_over_blocks_equal_the_whole_null`: **2 passed**. Las comprobaciones que comparan con el comparador anterior de p analíticos no son todavía un criterio vigente tras la decisión AUC de WP1; deben actualizarse al continuar esta fase.
