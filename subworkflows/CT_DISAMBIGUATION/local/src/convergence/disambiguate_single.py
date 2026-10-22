@@ -285,7 +285,18 @@ def _position_axes(
         cache_key = (paml_site, domain_sig)
         cached = axes_cache.get(cache_key)
         if cached is not None:
-            return cached
+            # Scores depend on the reconstructed states; species support belongs to the current hypothesis.
+            result = dict(cached)
+            for side, species_key in (("top", "top_species"), ("bottom", "bottom_species")):
+                summary = dict(cached[side])
+                derived = summary.get("domain_der") or {}
+                summary["domain_der_species"] = {
+                    pair["pair_id"]: str(pair[species_key][0])
+                    for pair in (pair_details_list or ())
+                    if pair.get("pair_id") in derived and pair.get(species_key)
+                }
+                result[side] = summary
+            return result
 
     if per_site_dist_cache is not None:
         per_node_dist = per_site_dist_cache.get(paml_site)
