@@ -1,6 +1,6 @@
 # WP5. Fase 3: tablas por (gen, ciclo), merge por bloque, SCORING y acumulación
 
-Estado: HECHO en local (2026-10-22), pendiente la validación a escala real en el cluster (scripts preparados, sin lanzar). Depende de: WP4. Serial con WP4 (formato de tesela).
+Estado: implementación local revisada (2026-10-22); validación a escala real pendiente. Estado vigente de esta revisión al final de la página. Los resultados del registro original se conservan como historial. Depende de: WP4. Serial con WP4 (formato de tesela).
 Conversación independiente. Antes de empezar, leer `docs/fases/README.md`.
 
 ## Objetivo
@@ -90,7 +90,7 @@ Formato: Parquet (pyarrow, zstd, f64). `pyarrow` está en `environment/phylopher
 
 ```
 - Conversación y fechas: WP5, 2026-10-22, conversación independiente, local, rama remove_caap.
-- Commit de partida / commit de cierre: 90c06a4 (cierre de WP4, hecho por Claude con la autorización del usuario: código y docs/, sin validation/) / (lo anota el usuario al hacer el commit).
+- Commit de partida / commit de cierre: 90c06a4 (cierre de WP4, hecho por Claude con la autorización del usuario: código y docs/, sin validation/) / 0834081 (cierre de la implementación inicial; la revisión actual añade cambios locales sin commit).
 - Qué se hizo (ficheros y cambios): ver "Diseño" arriba. Nuevos: src/utils/null_tables.py, src/utils/null_merge.py, merge_null_block.py, reduce_null_blocks.py (CT_DISAMBIGUATION/local), SCORING/local/src/{null_position_stats.py, null_position_p.R, assemble_block_matrices.R}, SCORING/scoring_null_positions.nf. Reescritos: scoring_caas_perms.R, gene_wrapper.py (réplica por gen -> tablas), disambiguation_perms_main.py, caas_permulation.nf (CAAS_CORE_MERGE por bloque + CAAS_CORE_MERGE_REDUCE), main.nf, workflows/{scoring,enrichment,ct_accumulation}.nf, scoring_compute.R/.nf, scoring_report.nf, 11.Scoring_report.Rmd (lee cycle_summary/cycle_hist), accumulation_test.py (lee null_positions.parquet), core/scores.py (gene_stat, cycle_order_key), observed_core_scores.py (--gene-stat), fcs_enrich.R/fcs_compute.R/fcs.nf/12.FCS_general_report.Rmd (estampa sigue gene_stat; comentario del eje ASR corregido), conf/{scoring,resources}.config, help.nf, README, GUI (campo gene_stat, caas_null_dir en Precomputed Run, report_registry, run_single/sbatch_array, 14 plantillas de gui/templates). Eliminados: reaggregate_perm_scores.py, union_shards.sh, merge_block_shards.py, el eje ASR, perm_pos_cycle_caas.tsv.gz, gene_cycle_scores.tsv, n_detected y los parámetros caas_pos_cycle_caas_file, caas_pos_sample_file, caas_pos_quantiles_file, caas_cycle_roster_file. POSENRICH: bloque retirado de enrichment.nf con aviso (su código no se tocó).
 - Comprobaciones ejecutadas (comando, conjunto de datos, tolerancia, resultado):
   * Paso 0 (marine toy de WP3 y WP4): ver el registro de WP4. Referencia a92fd2d completada (17 min), el commit 90c06a4 con bloques 25 y 40 igual a ella en el lado CAAS, con delta 0.0; golden_marine_wp4/.
@@ -126,3 +126,45 @@ Formato: Parquet (pyarrow, zstd, f64). `pyarrow` está en `environment/phylopher
 2. **Lo que WP5 no hizo:** `caas_perms.rds` se sigue construyendo entero en `CAAS_CORE_MERGE_REDUCE` (7,6 GB en R con 20 bloques, sintético): WP7 lo sustituye, y mientras tanto la petición de memoria de ese proceso crece con N (`conf/resources.config`). Las variantes `max`, `fmax` y `n` están en `parts` de cada bloque; `F(max)^(n^β)` de WP9 se construye de `fmax` y `n` (el exponente en R no es bit a bit el de Python: solo la variante elegida lo es).
 3. **Validación pendiente:** no hay medidas con datos reales a 1000, 4000 ni 10.000 ciclos de los procesos nuevos; la corrida del cluster (scripts preparados) da las trazas, y con ellas hay que revisar las peticiones de `conf/resources.config`, que hoy salen de datos sintéticos.
 4. **Trampas:** la permulación de RER no es reproducible entre corridas (comparar solo stat y pval); corridas de validación desde una copia del árbol; `compare_null.py` acepta ahora ambos formatos (tablas y bloques).
+
+## Revisión de WP5 (2026-10-22, posterior a la revisión de WP1)
+
+### Fallo reproducido y corrección
+
+El reductor aceptaba ciclos repetidos dentro de un bloque o compartidos por dos bloques. Al pasar dos veces un bloque de dos ciclos, `cycle_roster.txt` contenía dos ciclos pero `counts.json` sumaba cuatro; la tabla de detecciones también se sumaba dos veces. El ensamblador R aceptaba esas mismas columnas y las sobrescribía sin error. Esto se reprodujo ejecutando ambos scripts, no se detectó únicamente por inspección. No se ha demostrado que las corridas guardadas contengan ese solapamiento.
+
+- `reduce_null_blocks.py` rechaza ciclos repetidos, solapamiento entre bloques y discrepancias entre `counts.json` y el roster de cada bloque, antes de publicar el roster final.
+- `scoring_caas_perms.R` rechaza ciclos repetidos dentro o entre matrices, también si el ciclo no tiene detecciones. Los bloques válidos conservan sus resultados.
+- Se añadieron seis casos en `PhyloPhere_validation/unification/test_null_blocks_cli.py`: seis fallos antes de la corrección; todos incluidos en la regresión posterior.
+
+### Evidencia nueva
+
+- Entorno: `micromamba/envs/phylophere`; `TMPDIR` y `--basetemp` bajo `PhyloPhere_validation/.tmp/wp5_review_20261022/`. Logs y JSON de comparación en ese directorio.
+- Suite dirigida (pytest, siete archivos: `test_null_tables`, `test_null_position_stats`, `test_null_blocks_cli`, `test_gene_stat`, `test_accumulation_universe`, `test_compare_null`, `test_tile_driver`): **62 passed antes** y **68 passed después** de añadir las guardas y los seis controles. No sustituye la suite completa de unification/resources.
+- Comparaciones repetidas de las corridas guardadas, tolerancia 1e-12: PEPC completo 8 PASS, 0 FAIL; estricto 6/0. Cáncer completo 11 PASS y 2 FAIL en tablas FCS; estricto 7/0. Marino completo 10 PASS y 6 FAIL en tablas FCS/RER; estricto 6/0. Cáncer bloques 25 frente a 40: completo 14/0, estricto 8/0. Los fallos FCS/RER se registran como tales; no se cuentan como equivalencia global. Los controles de matrices, posiciones, roster y SCORING de WP5 pasan. Son salidas guardadas de la implementación anterior, no una nueva ejecución completa del pipeline corregido.
+- Reconstrucción con el código corregido a partir de bloques guardados: PEPC (1000 ciclos), cáncer y marino (100 cada uno), completo y strict. Las seis reducciones y ensamblados reproducen `caas_perms.rds` (`all.equal TRUE`, tolerancia 1e-12), roster, `null_positions.parquet` y `counts.json`: 24 controles aprobados. No se regeneró el replay de las teselas.
+- Cableado real con Nextflow (`test_core_batched`, `test_stream_vs_export`, `test_subset_b0`, `test_wiring`): **38 passed, 7 failed**. Los 14 controles de core/replay pasan. Los siete casos fallidos ya aparecen entre los nueve del log previo `.tmp/wp4_tree_wiring.log`; no se declara verde la suite general. Fallan aserciones sobre la ruta de acumulación, un informe ASR no activado en el caso, una ruta de discovery con la configuración actual, exports retirados y el parser estático de `publishDir`. Las comprobaciones funcionales de publicación sí pasan. Estos tests generales siguen pendientes de adaptar; no se cambió código para satisfacer contratos retirados.
+- Preparación de cluster: el generador actual renderiza correctamente neoplasia y maligno; `bash -n` pasa en los cuatro scripts. No se ha lanzado ningún trabajo ni sincronizado código al cluster.
+
+### Pendiente vigente
+
+- Corridas reales de 1000 ciclos en neoplasia y maligno completo, con strict y la misma caché ASR que las referencias; comparación de los resultados y trazas de recursos.
+- Medición real de las teselas (incluido RP1), merge y contadores; los números de 4000/10.000 del registro siguen siendo sintéticos. Las medidas reales a esas escalas siguen pendientes en el plan de escalado.
+- Recalibrar recursos a partir de esas trazas y conservar explícitamente la reducción R que crece con N hasta WP7.
+- Actualizar la memoria de aceptación cuando se satisfagan los criterios integrados. La entrega temática de esta revisión queda autorizada por el usuario y no acredita la validación de escala.
+
+Casos pendientes de `test_wiring.py` en esta revisión:
+
+- `test_the_live_null_replays_and_disambiguates_in_one_process_family`
+- `test_the_live_observed_labeling_is_the_b0_slice_of_the_core_and_feeds_everything_downstream`
+- `test_a_discovery_tab_that_already_exists_is_scored_by_caas_observed_and_the_core_writes_no_observed_files`
+- `test_perm_discovery_exports_that_already_exist_go_to_the_same_process`
+- `test_perm_discovery_exports_made_without_the_real_labeling_are_rejected[b_1~H1\ta\tb\n]`
+- `test_perm_discovery_exports_made_without_the_real_labeling_are_rejected[b_1\ta\tb\n]`
+- `test_the_observed_processes_publish_their_output_directories_by_name`
+
+### Entrega temática y aceptación integrada
+
+Por decisión del usuario (2026-10-22), se entregan las guardas de ciclos y las pruebas locales en un commit de WP5. La corrida completa de neoplasia/maligno, la comparación a escala y los recursos se integran en una validación conjunta tras los WP; no se repite una corrida completa para cada fase. Los siete tests generales de cableado registrados siguen pendientes de adaptar. El commit no acredita validación de escala. Las seis regresiones de ciclos se incluyen también en `tests/test_wp5_null_blocks_cli.py`, dentro del repositorio, para acompañar el cambio versionado.
+
+Prueba versionada antes del commit: `python -m pytest -q tests/test_wp5_null_blocks_cli.py` con TMPDIR en IBE: **19 passed**. Esta prueba se ejecuta sin el checkout externo de validación.

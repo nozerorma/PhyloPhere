@@ -38,6 +38,11 @@ cycles_file   <- get_arg("--cycles", NULL)
 stopifnot(length(block_files) > 0, all(file.exists(block_files)))
 
 blocks <- lapply(block_files, readRDS)
+block_cycles <- unlist(lapply(blocks, function(b) b$cycles), use.names = FALSE)
+if (anyDuplicated(block_cycles)) {
+  overlap <- unique(block_cycles[duplicated(block_cycles)])
+  stop(sprintf("cycles occur more than once within or across blocks: %s", paste(head(overlap, 5), collapse = ", ")))
+}
 stats <- unique(vapply(blocks, function(b) as.character(b$gene_stat), ""))
 if (length(stats) != 1) stop(sprintf("the blocks hold different gene statistics: %s", paste(stats, collapse = ", ")))
 GENE_STAT <- stats

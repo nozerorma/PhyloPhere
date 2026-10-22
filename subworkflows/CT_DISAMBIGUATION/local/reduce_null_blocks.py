@@ -40,7 +40,7 @@ def read_rows(path: Path):
 
 
 def join_tables(blocks, name, out: Path, sort_rows: bool = False):
-    """Concatenate the `name` table of every block that has it (same header) into out/name; False when none has it."""
+    """Concatenate the `name` table of every block that has it (same header) into out/name, rows in cycle order; False when none has it."""
     header, rows = None, []
     for b in blocks:
         path = b / name
@@ -53,7 +53,12 @@ def join_tables(blocks, name, out: Path, sort_rows: bool = False):
         rows.extend(r)
     if header is None:
         return False
-    if sort_rows:
+    # Canonical row order: by cycle in replay order, then the rest of the row, so the joined table does not depend on
+    # how the cycles were split into blocks; a table without a cycle column is sorted as a whole when asked.
+    if "cycle" in header:
+        ci = header.index("cycle")
+        rows.sort(key=lambda r: (cycle_order_key(r[ci]), r))
+    elif sort_rows:
         rows.sort()
     with open(out / name, "w", newline="") as fh:
         w = csv.writer(fh, delimiter="\t", lineterminator="\n")
@@ -96,7 +101,16 @@ def main() -> int:
 
     roster = set()
     for b in blocks:
-        roster.update(c for c in (b / "cycles.txt").read_text().splitlines() if c)
+        cycles = [c for c in (b / "cycles.txt").read_text().splitlines() if c]
+        if len(cycles) != len(set(cycles)):
+            raise ValueError(f"repeated cycle in block {b}")
+        overlap = roster.intersection(cycles)
+        if overlap:
+            raise ValueError(f"cycle belongs to more than one block: {', '.join(sorted(overlap)[:5])}")
+        meta = json.loads((b / "counts.json").read_text())
+        if meta["cycles"] != len(cycles):
+            raise ValueError(f"cycle count in {b / 'counts.json'} differs from its roster")
+        roster.update(cycles)
     (args.output_dir / "cycle_roster.txt").write_text("".join(f"{c}\n" for c in sorted(roster)))
 
     join_tables(blocks, "removed_units.tsv", args.output_dir, sort_rows=True)
