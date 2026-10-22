@@ -11,7 +11,7 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 | WP1 | `WP1_fcs_rer.md` | | WP0 | EN REVISIÓN (RER: NA excluidos, bilateralidad explícita y ajustes observado/nulo compartidos; pruebas y procesos Nextflow pequeños validados; pendientes restantes y decisión a 10.000 en el registro) |
 | WP2 | `WP2_exports_posenrich_limpieza.md` | | WP0 | HECHO (PEPC c4 y toy de cancer idénticos a la referencia con su caché de ASR; marine toy validado en WP5) |
 | WP3 | `WP3_bloques_de_ciclos.md` | Fase 1 | WP2 | HECHO (PEPC c4 a 1000 ciclos con bloque de 250 y toy de cáncer con bloques de 25 y 40 idénticos a la referencia, delta 0.0; marine toy validado en WP5) |
-| WP4 | `WP4_replay_en_flujo.md` | Fase 2 | WP3 | HECHO (PEPC c4 a 1000 ciclos con bloque 250 y toy de cáncer con bloques 25 y 40 idénticos a la referencia, delta 0.0; flujo sin export salvo b_0; RSS del gen mayor RP1 sin medir (cluster); marine toy validado en WP5) |
+| WP4 | `WP4_replay_en_flujo.md` | Fase 2 | WP3 | IMPLEMENTADO; VALIDACIÓN DE ESCALA ABIERTA (90c06a4; equivalencia CAAS validada; referencia escalar reparada, 89 pruebas focalizadas pasan; faltan RP1 B=500 y resolver el criterio de memoria) |
 | WP5 | `WP5_tablas_y_merge_por_bloque.md` | Fase 3 | WP4 | HECHO en local (marine, cáncer con bloques 25 y 40 y PEPC a 1000 ciclos idénticos a la referencia vieja, delta 0.0; merge medido con datos sintéticos); pendiente la validación a 1000 ciclos en el cluster (scripts preparados, sin lanzar) |
 | WP6 | `WP6_fcs_por_bloques.md` | Fase 4 | WP1, WP5 | pendiente |
 | WP7 | `WP7_caas_perms_por_bloques.md` | Fase 5 | WP5 | pendiente |

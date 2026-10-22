@@ -1,6 +1,6 @@
 # WP4. Fase 2: replay en flujo y fusión de descubrimiento y replay
 
-Estado: HECHO (2026-10-21/22), validado con PEPC c4 (1000 ciclos, bloque 250), el toy de cáncer (bloques 25 y 40) y el marine toy (bloques 25 y 40, comprobado en la conversación de WP5, 2026-10-22). Depende de: WP3. Serial con WP5 (comparten el formato de la tesela).
+Estado: IMPLEMENTADO; VALIDACIÓN DE ESCALA ABIERTA (revisión 2026-10-22). Equivalencia CAAS validada en PEPC, cáncer y marine; RP1 con bloque 500 y criterio de independencia de memoria pendientes. Depende de WP3.
 Conversación independiente. Antes de empezar, leer `docs/fases/README.md`.
 
 ## Qué hay que comprobar primero (anotado al cerrar WP3)
@@ -70,7 +70,7 @@ Cambiar el formato de la salida de la tesela (WP5), FCS (WP6).
 
 ```
 - Conversación y fechas: WP4, 2026-10-21 (noche) y 2026-10-22, conversación independiente, local, rama remove_caap.
-- Commit de partida / commit de cierre: 8169f5c / (lo anota el usuario al hacer el commit; ver el final de este registro).
+- Commit de partida / commit de cierre: 8169f5c / 90c06a4.
 - Qué se hizo (ficheros y cambios):
   * subworkflows/CT/local/modules/perm_replay.py (kernel de ct): `VectorizedPermReplay.count` pasa a ser el total de un generador nuevo, `count_chunks`, que codifica las posiciones una sola vez y emite (inicio, fin, recuentos, aciertos) por rango de etiquetados; `label_chunks` parte los etiquetados en rangos de ciclos base completos (rechaza hipótesis no contiguas). Las filas del export salen de un generador compartido, `perm_discovery_rows`, que usan el export de ct y el flujo (misma reconstrucción de cada acierto); `KernelDisagreement` (subclase de RuntimeError) es la señal de desacuerdo kernel/escalar. El export de ct sigue existiendo, y en la tubería solo lo usa la tesela b0 (exports de b_0).
   * subworkflows/CT_DISAMBIGUATION/local/src/utils/perm_stream.py (nuevo): `ReplaySettings` (umbrales de `ct perm-replay` leídos del mismo fichero de argumentos que arma la tarea), `ReplayContext` (etiquetados del bloque y kernel, por proceso), `stream_gene` (por rango de ciclos base: aciertos -> entradas -> `score_labelings` -> `pool_labelings` -> registros reducidos `SlimRecord`; el contexto de ASR se carga solo al primer ciclo con acierto).
@@ -111,3 +111,27 @@ Cambiar el formato de la salida de la tesela (WP5), FCS (WP6).
 2. **Lo que produce el flujo hacia WP5:** `perm_stream.stream_gene` devuelve, por gen, `[(ciclo o ciclo base, [SlimRecord(position, asr_path_score, side, n_hypotheses, n_species)])]` en orden de texto del ciclo, y lo mismo con el pooling strict. Es el punto natural para reducir a tablas por (gen, ciclo) sin pasar por el detalle por fila.
 3. **Lo que WP4 no hizo o hizo distinto:** (a) RP1 sin medir (cluster); (b) el trozo de salida del gen sigue ∝ a sus filas reducidas (0,29 GB por millón de filas medido en PEPC); (c) un gen es una tarea indivisible; (d) las etiquetas se parsean una vez por proceso del pool (forkserver); (e) marine toy validado en WP5 (ver Comprobaciones); (f) no hay parámetro nuevo; (g) test_kernel_fuzz y test_discovery_kernel siguen sin servir; (h) las pruebas con Nextflow rotas antes (11 de test_wiring.py, 2 de test_core_batched.py, 4 de test_perm_replay_cli/runner con --caap_mode) siguen igual.
 4. **Trampas de validación (siguen vigentes):** caché de ASR de la referencia a `<outdir>/scripts/asr_cache` con `cp -a`; lanzar pytest con el `Rscript` de micromamba en el PATH; `--continue-on-collection-errors` para la suite (17 errores de recolección previos); no lanzar dos corridas de Nextflow a la vez (14 GB de RAM).
+
+## Revisión de cierre (2026-10-22)
+
+La etiqueta HECHO del registro original describía la implementación. No acredita todavía todos los criterios de paso del plan aprobado. El commit de implementación es `90c06a4`; las correcciones de esta revisión se entregan en un commit temático autorizado por el usuario.
+
+- Referencia escalar reparada en `PhyloPhere_validation/unification/reference_discovery.py`: enumera todas las posiciones y todas las hipótesis con las definiciones actuales de aminoácidos, gaps, especies ausentes, pares y patrones. No utiliza `VectorizedPermReplay` ni su lista de aciertos. Comparte las definiciones escalares de `process_position` y `check_pattern` con el emisor; no es una implementación independiente de esas definiciones.
+- `test_kernel_fuzz.py` y `test_discovery_kernel.py` adaptados a CAAS: retiradas las opciones y columnas CAAP/GS; comparados aciertos presentes y ausentes, patrón, pares conservados y fondo de posiciones probadas. Referencia y pruebas aplicadas en PhyloPhere_validation. Suites escalares: **64 passed**, incluidas 60 semillas. Suite focalizada completa (esas suites y los cuatro módulos de flujo/rangos/errores/símbolos): **89 passed en 33,01 s**, con multiprocessing real. Comando: `PYTHONDONTWRITEBYTECODE=1 TMPDIR=<temporal autorizado> OPENBLAS_NUM_THREADS=1 ~/micromamba/envs/phylophere/bin/python -m pytest -q -p no:cacheprovider unification/test_kernel_fuzz.py unification/test_discovery_kernel.py`.
+- El intento inicial de la suite focalizada tuvo **16 passed y 9 fallos de entorno** al crear sockets de forkserver en el sandbox. Tras habilitar los permisos, se repitió la suite completa y **las 89 pruebas pasaron**, incluidos los procesos del pool. No se cambió el método de arranque ni el código del pipeline para sortear el error. Las pruebas de equivalencia actuales comparan las tablas de WP5, no el detalle gzip del commit WP4; el registro histórico de WP4 conserva esa comparación.
+- Comparaciones repetidas sobre salidas guardadas, sin relanzar las corridas: `compare_null.py --tol 1e-12`, referencia PEPC c4 frente a `wp4_check/pepc_b250/scripts/results/c4_complete`: **11 passed, 0 failed, 10 skipped**; strict: **9 passed, 0 failed, 12 skipped**. Delta máximo 0,0; RDS `all.equal TRUE`. Marine frente a `golden_marine_wp4/scripts/results/marine_complete`: **11 passed, 8 failed, 2 skipped**; nulo CAAS, b0 y position_scores idénticos; el conjunto completo conserva diferencias de esquema/FCS/RER. No equivale a todas las tablas idénticas.
+- Traza PEPC guardada: cuatro teselas de 250 ciclos, 18,3/23,1/24,5/34,1 s y 1,5 GB de peak_rss; b0, 7,7 s y 585,9 MB. Son medidas históricas re-leídas, no medidas nuevas ni de RP1.
+
+### Memoria y alcance pendiente
+
+WP4 mantiene todos los SlimRecord reducidos del gen antes de escribir su detalle. Por tanto, reduce mucho la memoria pero **no cumple literalmente independencia respecto al número de filas del gen**. WP5 cambia el formato y reduce por ciclo, pero conserva posiciones puntuadas en listas/tablas del gen y resultados de genes en el padre; su mera presencia no demuestra memoria constante. No se considera resuelto ese criterio sin una medida o una modificación validada de la retención de salidas.
+
+El benchmark preparado en `PhyloPhere_validation/wp4_check/cluster/benchmark_rp1.py` compara WP3 (`8169f5c`) y WP4 (`90c06a4`) con una única alineación RP1, el mismo bloque de 500 ciclos y copias de la misma caché ASR. Requiere Slurm, checkouts limpios sincronizados por el usuario y rutas de entradas reales. Registra tiempo y GNU time MaxRSS por etapa y exige igualdad SHA-256 del detalle normal y strict tras descomprimir. Ese máximo no es la suma de RSS concurrente de toda una tesela. Un punto a B=500 cuantifica RP1, pero por sí solo no demuestra independencia asintótica de memoria.
+
+**No ejecutado:** RP1 y cualquier cómputo en cluster. Con los permisos nuevos SSH conecta a correfoc-01. El checkout remoto está en `d246e82` y no contiene `90c06a4`; la caché ASR de RP1 existe y Slurm está disponible con shell de login. Solo se hicieron lecturas baratas; el usuario debe sincronizar el código por git antes de la medición. No se editaron ficheros remotos. Todos los temporales y salidas deben estar bajo `~/scratch`, nunca `/tmp`; el benchmark lo exige y fija TMPDIR dentro de su salida. El script está comprobado por sintaxis y generación del plan, no mediante una ejecución completa. Mantener abierto WP4 hasta incorporar la medida y resolver explícitamente el criterio de memoria.
+
+### Entrega temática de la revisión
+
+Se guarda en un commit de WP4 la selección determinista del trait de diseño: se prioriza un nombre con token H explícito frente al fichero FOP sin token y se ordenan los nombres para que la elección no dependa del directorio. La entrega conserva la evidencia local del registro. Por decisión del usuario (2026-10-22), RP1 y la aceptación de recursos se planifican con la validación integrada; no se exige una corrida completa por WP.
+
+Comprobación repetida antes de esta entrega: `test_kernel_fuzz.py` y `test_discovery_kernel.py`, entorno phylophere, TMPDIR en IBE: **64 passed**.

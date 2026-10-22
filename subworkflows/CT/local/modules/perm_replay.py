@@ -593,10 +593,25 @@ _B0_DISCOVERY_HEADER = ["gene", "trait", "position", "caas", "pattern",
 _HYPOTHESIS = re.compile(r"H\d+")
 
 
+def _hypothesis_token(name):
+    """The hypothesis token of a trait or labeling name ('H3'), or None when it has none."""
+    m = _HYPOTHESIS.search(str(name).split("~", 1)[1] if "~" in str(name) else str(name))
+    return m.group(0) if m else None
+
+
 def _hypothesis_of(name):
     """'b_0~H3' / 'traitfile_H3.tab' -> 'H3'; no hypothesis token (a single contrast) -> 'H1'."""
-    m = _HYPOTHESIS.search(str(name).split("~", 1)[1] if "~" in str(name) else str(name))
-    return m.group(0) if m else "H1"
+    return _hypothesis_token(name) or "H1"
+
+
+def _design_traits(alltraits):
+    """One trait file per hypothesis of the design; a name with a hypothesis token wins over one without (the FOP design
+    file traitfile_fop.tab falls back to H1), and the names are visited in sorted order, so the result does not depend on
+    the directory listing."""
+    design_trait = {}
+    for name in sorted(alltraits, key=lambda n: (_hypothesis_token(n) is None, str(n))):
+        design_trait.setdefault(_hypothesis_of(name), name)
+    return design_trait
 
 
 def _b0_discovery_rows(design_cfg, labeling_cfg, sliced_object, genename, positions,
@@ -613,9 +628,9 @@ def _b0_discovery_rows(design_cfg, labeling_cfg, sliced_object, genename, positi
     """
     if not hits:
         return []
-    design_trait = {}
-    for name in design_cfg.alltraits:
-        design_trait.setdefault(_hypothesis_of(name), name)
+    # A trait file with a hypothesis token wins over one without (the FOP design file traitfile_fop.tab falls back to H1),
+    # and the names are visited in sorted order, so the choice does not depend on the directory listing.
+    design_trait = _design_traits(design_cfg.alltraits)
     trait_rank = {name: i for i, name in enumerate(sorted(design_cfg.alltraits))}
     posname_to_posdict = _hits_by_position(positions, genename)
     processed = {}
