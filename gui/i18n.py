@@ -1263,6 +1263,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Geni FADE per attività',
         'de': 'FADE-Gene pro Aufgabe',
     },
+    'Gene statistic (permulation null and observed gene score)': {
+        'en': 'Gene statistic (permulation null and observed gene score)',
+        'es': 'Estadístico de gen (nulo de permulaciones y score de gen observado)',
+        'ca': 'Estadístic de gen (nul de permulacions i score de gen observat)',
+        'fr': 'Statistique de gène (nul de permulations et score de gène observé)',
+        'it': 'Statistica di gene (nullo di permulazioni e score di gene osservato)',
+        'de': 'Gen-Statistik (Permulationsnull und beobachteter Gen-Score)',
+    },
     'Permulation-null cycles per block': {
         'en': 'Permulation-null cycles per block',
         'es': 'Ciclos del nulo de permulaciones por bloque',

@@ -11,7 +11,7 @@ It is **treeless**: every tree lookup already happened in
 ``path_scores.compute_domain_scores``; here we only combine scalars.
 
 Imported by: src/convergence/disambiguate_single.py, src/core/driver.py, disambiguation_perms_main.py and
-reaggregate_perm_scores.py (`base_cycle`)
+merge_null_block.py (`base_cycle`)
 Inputs: lists of {"hyp", "sides"} records and the design pairs {(hypothesis, domain): (top species, bottom species, pss)}
 Outputs: the pooled per-side aggregates described in `pool_domains`
 

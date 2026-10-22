@@ -13,9 +13,10 @@ Inputs:     --input  filtered_discovery.tsv, one row per (Gene, Position, side) 
 Outputs:    --positions-out  TSV [Gene, Position, side, CAAS_score]; one row per detected position side,
                              CAAS_score being its asr_path_score (core.scores)
             --genes-out      TSV [Gene, gene_caas_score, gene_caas_score_top,
-                             gene_caas_score_bottom]; size_adj_max against the pool of the
-                             same direction (all positions of the run), NA when the gene has no
-                             scored position in that direction
+                             gene_caas_score_bottom]; the gene statistic chosen with --gene-stat
+                             (size_adj_max by default) against the pool of the same direction
+                             (all positions of the run), NA when the gene has no scored position
+                             in that direction
 
 Needs only the standard library plus src/core/scores.py, which the process stages next to it.
 """
@@ -34,7 +35,7 @@ for _cand in (_here.parent, _here.parents[3] / "CT_DISAMBIGUATION" / "local"):
     if (_cand / "src" / "core" / "scores.py").exists():
         sys.path.insert(0, str(_cand))
         break
-from src.core.scores import direction_values, gene_scores, position_score  # noqa: E402
+from src.core.scores import GENE_STATS, direction_values, gene_scores, position_score  # noqa: E402
 
 
 def _num(x):
@@ -72,6 +73,8 @@ def main():
     ap.add_argument("--input", required=True, help="filtered_discovery.tsv")
     ap.add_argument("--positions-out", required=True)
     ap.add_argument("--genes-out", required=True)
+    ap.add_argument("--gene-stat", default="size_adj_max", choices=GENE_STATS,
+                    help="gene statistic of the gene scores; the permulation null must hold the same one")
     a = ap.parse_args()
 
     try:
@@ -87,7 +90,7 @@ def main():
         for (g, p, side), v in sorted(scores.items()):
             w.writerow([g, p, side, _fmt(v)])
 
-    # Reference pools: every scored position of the run, per direction (sorted ascending, as size_adj_max requires).
+    # Reference pools: every scored position of the run, per direction (sorted ascending, as the gene statistic requires).
     by_pos = {}
     for (g, p, side), v in scores.items():
         by_pos.setdefault((g, p), {})[side] = v
@@ -99,7 +102,7 @@ def main():
         w = csv.writer(f, delimiter="\t", lineterminator="\n")
         w.writerow(["Gene", "gene_caas_score", "gene_caas_score_top", "gene_caas_score_bottom"])
         for g in sorted(per_gene):
-            s = gene_scores(per_gene[g], pools)
+            s = gene_scores(per_gene[g], pools, a.gene_stat)
             w.writerow([g, _fmt(s["all"]), _fmt(s["top"]), _fmt(s["bottom"])])
     print(f"observed core scores: {len(scores)} position rows, {len(per_gene)} genes; "
           f"pools all={len(pools['all'])} top={len(pools['top'])} bottom={len(pools['bottom'])}", file=sys.stderr)

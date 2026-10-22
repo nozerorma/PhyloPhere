@@ -26,6 +26,7 @@ params:
   max_g:        0             # max genes per set (0 / Inf = no limit)
   fdr_thr:      0.15          # BH threshold on the permulation p of each set (q.perm), per ranking and database
   pperm_thr:    0.025         # second threshold: a significant set also needs p.perm below this value (sig_top)
+  gene_stat: "size_adj_max"      # gene statistic of the observed gene scores; the CAAS null must hold the same one
   analytic_levels: "0.05,0.1,0.15" # analytic rule (Redlich et al. 2024): BH levels of the analytic p, with p.perm < pperm_thr
   cluster_similarity: "jaccard" # redundancy reduction: leading-edge similarity, jaccard or overlap
   cluster_threshold:  0.5     # redundancy reduction: similarity at which a set joins a representative
@@ -273,7 +274,8 @@ if (!is.null(params$enrich_file) && nzchar(params$enrich_file) && file.exists(pa
                                          max_g        = params$max_g,
                                          perms_file   = params$perms_file,
                                          fdr_thr      = params$fdr_thr,
-                                         p_perm_thr   = params$pperm_thr))
+                                         p_perm_thr   = params$pperm_thr,
+                                         gene_stat    = params$gene_stat))
 }
 # Gene-set descriptions need the full GMT directory, so they are joined after the merge.
 enrich <- enrich %>%

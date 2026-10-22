@@ -4,7 +4,7 @@
 """
 Post-processing filters shared by the observed chain and the permulation null.
 
-Imported by: src/utils/gene_wrapper.py, reaggregate_perm_scores.py (`load_gene_lengths`)
+Imported by: src/utils/null_tables.py (`ctrain`), src/utils/null_merge.py (`gene_removal`), merge_null_block.py (`load_gene_lengths`)
 Inputs: positions per labeling, an optional position -> column map, gene lengths (TSV)
 Outputs: flagged positions and units to remove (in memory)
 

@@ -1,6 +1,6 @@
 # WP5. Fase 3: tablas por (gen, ciclo), merge por bloque, SCORING y acumulación
 
-Estado: pendiente. Depende de: WP4. Serial con WP4 (formato de tesela).
+Estado: HECHO en local (2026-10-22), pendiente la validación a escala real en el cluster (scripts preparados, sin lanzar). Depende de: WP4. Serial con WP4 (formato de tesela).
 Conversación independiente. Antes de empezar, leer `docs/fases/README.md`.
 
 ## Objetivo
@@ -60,14 +60,69 @@ FCS por bloques (WP6), formato del RDS único (WP7), POSENRICH.
 - Orden de sumas y empates (`TIE_TOL`): mantener `math.fsum` y las comparaciones por `bisect_right(pool, max + TIE_TOL)`.
 - El esquema equivocado descubierto tarde: probar en toy, luego a 1000 ciclos en el cluster y solo después a 10.000.
 
+## Diseño (lo que produce esta fase)
+
+Formato: Parquet (pyarrow, zstd, f64). `pyarrow` está en `environment/phylophere.yml` (25.0.0 en el entorno local, 23.0.1 en el lock); R no tiene `arrow` ni `nanoparquet`, ni en el entorno local ni en la especificación del contenedor, así que solo procesos Python leen tablas de tesela y de bloque, y lo que lee R es pequeño (matrices en RDS, contadores en TSV). Decidido con el usuario: no se añade `r-arrow`.
+
+**Tesela** (`null_tables/`, y `null_tables_strict/` con el pooling estricto; un par de ficheros por lote de genes y bloque; `src/utils/null_tables.py`):
+
+- `units.parquet`: una fila por (gen, ciclo) con detección: `gene, cycle, n_pos` (posiciones detectadas distintas, todas las filas: el recuento de `gene_removal`), `clust` (alguna posición en tren), `n_rows` (registros que quedan tras quitar trenes), `n_top, n_bottom, n_all` (posiciones con score > 0 por dirección o en cualquiera) y `max_top, max_bottom, max_all` (NaN si n = 0).
+- `scores.parquet`: una fila por (gen, ciclo, posición) con algún score > 0, tras quitar trenes: `gene, cycle, position, top, bottom` (NaN si ese lado no puntúa; `all = max(top, bottom)`).
+- Las filas sin score (47 % en marine, 58 % en el toy de cáncer, medido) no se guardan: solo su recuento (`n_rows - n_top - n_bottom`).
+- `meta.json`: `by_labeling` (el grano de los ciclos: ciclo base con FOP, etiqueta sin él).
+
+**Merge por bloque** (`CAAS_CORE_MERGE`, una tarea por bloque y una para `b0`; `merge_null_block.py`, `src/utils/null_merge.py`): `gene_removal` por ciclo con `core.postproc`, pools exactos por (ciclo, dirección) con las unidades no eliminadas, y por (gen, ciclo, dirección) `n`, `max`, `fmax = bisect_right(pool, max + TIE_TOL) / len(pool)` y `size_adj_max = fmax ** n` (potencia en Python puro, la misma expresión de `core.scores`). Salida en `caas_permulation/blocks/<bloque>/` (y `caas_permulation/b0/`):
+
+- `matrices.rds`: `list(genes, cycles, gene_stat, n_units, stat = list(global, top, bottom), parts = list(max = list(...), fmax = list(...), n = list(...)))`. Matrices genes x ciclos del bloque, 0 donde la unidad no tiene valor. `stat` es el estadístico elegido con `gene_stat`; `parts` conserva lo que hace falta para cualquier variante (también `F(max)^(n^β)` de WP9). **Esta es la interfaz hacia WP6 y WP7.**
+- `positions.parquet` (`gene, cycle, position, all`: las posiciones puntuadas de las unidades no eliminadas, sin trenes si se quitan), `detections.parquet` (por posición: `nd` y el primer ciclo en orden de reproducción), `removed_units.tsv`, `cycles.txt` (el roster del bloque), `perm_pos_sample.tsv`, `perm_pos_quantiles.tsv` (RNG sembrado con la semilla y el ciclo), `cycle_summary.tsv` y `cycle_hist.tsv` (por ciclo y dirección: entradas con score, genes con una, histograma en bins de 0,01; los lee el informe 11), `counts.json` (unidades, eliminadas, posiciones, ciclos con fila, `score_rule`).
+
+**Reducción** (`CAAS_CORE_MERGE_REDUCE`; `reduce_null_blocks.py`, `scoring_caas_perms.R`): `cycle_roster.txt` (N de todos los consumidores), `removed_units.tsv`, `perm_pos_sample.tsv`, `perm_pos_quantiles.tsv`, `cycle_summary.tsv`, `cycle_hist.tsv`, `counts.json`, `null_positions.parquet` (por posición que puntúa el nulo: `nd`, `first_rank`) y `caas_perms.rds` (`list(caas_corStat_byrank = list(global, top, bottom), gene_stat)`, las matrices de todos los bloques con las columnas `sort(unique(roster))` de siempre; lo sustituye WP7). Con `--caas_full_perms 0` solo se fusiona `b0/` y no hay reducción.
+
+**Contadores de SCORING** (`subworkflows/SCORING/scoring_null_positions.nf`, `null_position_stats.py`; cada contador es entero y suma entre bloques):
+
+- `CAAS_NULL_UNIVERSE` (una vez): `nd` (suma de bloques) -> universo U (conjunto testado, genes del fondo, regla de tasa >= 0,5; más toda posición observada) -> clases de propensión de `p.emp_fact` (percentiles de detecciones: peso `v x nº de posiciones con nd = v`) -> `null_classes.parquet`, `null_fit.tsv`, `null_universe_base.tsv`.
+- `CAAS_NULL_COUNT` (por bloque): `k_emp` (ciclos con `all >= obs - TIE_TOL`) y `c_k` (detecciones de las posiciones de la clase k con score >= obs - TIE_TOL) por posición observada.
+- `CAAS_NULL_COUNTERS` (una vez): suma -> `null_counters.tsv`. `null_position_p.R` calcula `p.emp`, `p.emp_fact` y las familias BH (las posiciones solo del nulo entran con p = 1, solo por el tamaño de la familia) con las mismas fórmulas y guardas de antes; `scoring_compute.R` ya no lee ninguna tabla por posición.
+
+**Parámetros nuevos:** `gene_stat` (`size_adj_max` por defecto, `fmax`, `max`; campo en la pestaña CAAS de la GUI y en las 14 plantillas de `gui/templates`; sigue el merge, `observed_core_scores.py` y la estampa de `fcs_enrich.R`) y `caas_null_dir` (directorio `caas_permulation/` de una corrida anterior, sustituye a `caas_pos_cycle_caas_file`, `caas_pos_sample_file`, `caas_pos_quantiles_file` y `caas_cycle_roster_file`). **Desaparecen:** el eje ASR, `perm_pos_cycle_caas.tsv.gz`, `gene_cycle_scores.tsv`, `union_shards.sh`, `merge_block_shards.py`, `reaggregate_perm_scores.py` y `n_detected`; POSENRICH deja de ejecutarse de hecho (su código no se ha tocado, ver `docs/POSENRICH_PORTE_EVALUACION.md`).
+
 ## Registro de la fase
 
 ```
-- Conversación y fechas:
-- Commit de partida / commit de cierre:
-- Qué se hizo (ficheros y cambios):
+- Conversación y fechas: WP5, 2026-10-22, conversación independiente, local, rama remove_caap.
+- Commit de partida / commit de cierre: 90c06a4 (cierre de WP4, hecho por Claude con la autorización del usuario: código y docs/, sin validation/) / (lo anota el usuario al hacer el commit).
+- Qué se hizo (ficheros y cambios): ver "Diseño" arriba. Nuevos: src/utils/null_tables.py, src/utils/null_merge.py, merge_null_block.py, reduce_null_blocks.py (CT_DISAMBIGUATION/local), SCORING/local/src/{null_position_stats.py, null_position_p.R, assemble_block_matrices.R}, SCORING/scoring_null_positions.nf. Reescritos: scoring_caas_perms.R, gene_wrapper.py (réplica por gen -> tablas), disambiguation_perms_main.py, caas_permulation.nf (CAAS_CORE_MERGE por bloque + CAAS_CORE_MERGE_REDUCE), main.nf, workflows/{scoring,enrichment,ct_accumulation}.nf, scoring_compute.R/.nf, scoring_report.nf, 11.Scoring_report.Rmd (lee cycle_summary/cycle_hist), accumulation_test.py (lee null_positions.parquet), core/scores.py (gene_stat, cycle_order_key), observed_core_scores.py (--gene-stat), fcs_enrich.R/fcs_compute.R/fcs.nf/12.FCS_general_report.Rmd (estampa sigue gene_stat; comentario del eje ASR corregido), conf/{scoring,resources}.config, help.nf, README, GUI (campo gene_stat, caas_null_dir en Precomputed Run, report_registry, run_single/sbatch_array, 14 plantillas de gui/templates). Eliminados: reaggregate_perm_scores.py, union_shards.sh, merge_block_shards.py, el eje ASR, perm_pos_cycle_caas.tsv.gz, gene_cycle_scores.tsv, n_detected y los parámetros caas_pos_cycle_caas_file, caas_pos_sample_file, caas_pos_quantiles_file, caas_cycle_roster_file. POSENRICH: bloque retirado de enrichment.nf con aviso (su código no se tocó).
 - Comprobaciones ejecutadas (comando, conjunto de datos, tolerancia, resultado):
+  * Paso 0 (marine toy de WP3 y WP4): ver el registro de WP4. Referencia a92fd2d completada (17 min), el commit 90c06a4 con bloques 25 y 40 igual a ella en el lado CAAS, con delta 0.0; golden_marine_wp4/.
+  * Pruebas nuevas contra una definición directa (oráculo escrito en la prueba) o contra el código original de 581b999 (unification/legacy_scoring/, sin cambios): test_null_tables (matrices bit a bit con 1 y 3 teselas, sin y con trenes, posiciones, muestra, resumen), test_null_position_stats (p.emp, p.emp_fact, BH, universo y curva de saturación idénticos al código viejo sobre una tabla en formato viejo, con 1, 3 y 6 bloques, con y sin conjunto testado, y las guardas), test_null_blocks_cli, test_gene_stat, test_accumulation_universe, test_compare_null (modos nuevos), test_tile_driver y las reescritas test_chunk_failures, test_dotted_gene_keys, test_postproc_wiring, test_train_columns, test_factorized_p_calibration. Mutación (quitar TIE_TOL de la comparación del pool): la prueba de matrices falla.
+  * compare_null.py --tol 1e-12 contra la referencia vieja (formato tablas) de cada conjunto: PEPC c4 a 1000 ciclos con bloque 250: 8 passed, 0 failed (caas_perms.rds eje CAAS all.equal TRUE, posiciones por (gen, posición, ciclo) delta 0.0, b0, roster, scoring/position_scores.tsv con p.emp y p.emp_fact delta 0.0, fcs_stats); strict 6 passed, 0 failed. Toy de cáncer (bloques 25 y 40): matrices, posiciones, removed_units, roster, b0, position_scores, fcs_stats y leading edge de CAAS idénticos; muestra y cuantiles estadísticamente iguales (filas por ciclo idénticas, |z| máx 0,52); los 2 fallos son las tablas del FCS con esquema anterior a WP1; strict 7 passed. Marine toy (bloque 25) contra la referencia vieja y contra golden_marine_wp4: lado CAAS idéntico; difieren solo el lado RER (WP1 y permulación de RER no reproducible, ver abajo) y el esquema del FCS; strict 6 passed.
+  * Bloque 25 contra bloque 40 (toy de cáncer): 14 passed, 0 failed, incluidas muestra y cuantiles (el RNG es por ciclo: no dependen del bloque); strict 8 passed.
+  * Suites: unification y resources con RUN_SLOW=1 --continue-on-collection-errors: 235 failed, 354 passed, 17 errors (WP4: 250, 314, 17); ningún fallo fuera de la lista de la línea base. wiring sin Nextflow (GUI, auditoría de parámetros, nombres retirados): 55 failed, 110 passed, los mismos 55 de la lista. NO ejecutadas tras el cierre: las pruebas de wiring con Nextflow (test_core_batched, test_stream_vs_export, test_wiring, test_subset_b0), reescritas pero sin correr; la corrida real de la tubería en los tres conjuntos sí las ejercita.
 - Mediciones (recurso antes y después):
+  * Toy (medido en trazas de Nextflow): CAAS_CORE_MERGE de 4 a 192 MB y 1 a 2 s por bloque; CAAS_NULL_* de 4 a 45 MB; teselas de 0,26 a 2,4 GB (como en WP4, no cambian).
+  * Escala de cáncer, SINTÉTICA (teselas generadas con las densidades del nulo de 1000 ciclos de cáncer: 11.800 genes, 9000 unidades y 22.400 posiciones puntuadas por ciclo, bloque de 500 ciclos; wp5_check/scale_merge.py y scale_bench.sh; una ejecución): merge_null_block.py 43 s y 2,9 GB de RSS; ensamblado del RDS del bloque 13 s y 0,6 GB; matrices en bruto 473 MB, matrices.rds 198 MB, positions.parquet 41 MB y las 590 teselas 161 MB. Reducción (reduce_null_blocks.py + scoring_caas_perms.R, bloques copia del primero con ciclos propios): 2 bloques (1000 ciclos) 11 + 12 s, 2,4 y 1,3 GB; 8 bloques (4000) 23 + 44 s, 2,7 y 4,9 GB; 20 bloques (10.000) 49 + 160 s, 2,7 y 7,6 GB. El merge de un bloque no depende de N (el tamaño del bloque lo fija); la reducción final en R sí crece con N porque caas_perms.rds sigue siendo un objeto único (lo sustituye WP7). Antes: merge de 32,5 min y 4,1 GB (neoplasia y maligno completo, 1000 ciclos), y scoring_caas_perms.R leía la tabla ancha entera.
+  * No medido: los contadores de SCORING a escala (solo toy, 4 a 45 MB); RP1 (RSS de la tesela del gen mayor con el flujo de WP4); nada a 4000 o 10.000 ciclos con datos reales.
 - Desviaciones del plan y decisiones tomadas (con su justificación):
+  * Lado en columnas (top, bottom) en vez de filas por lado, y strict como un segundo par de tablas en vez de una columna conserved (el pooling estricto cambia el score, no solo filtra filas). Confirmadas con el usuario.
+  * Formato Parquet solo para Python; R lee RDS y TSV pequeños (R no tiene arrow; no se añade r-arrow). Confirmado con el usuario.
+  * perm_pos_sample.tsv: las filas sin score muestreadas llevan Position NA (no se guardan). Sin lector en el repositorio. Confirmado.
+  * caas_perms.rds sigue existiendo como un objeto único (3 matrices del estadístico elegido), porque FCS (WP6) y el RDS único (WP7) no están hechos.
+  * Sin permuladas (--caas_full_perms 0) no hay reducción ni caas_perms.rds (antes salía un RDS vacío): los consumidores toman el centinela y p.perm queda NA; CT_ACCUMULATION con permulación sigue parando con su error.
+  * Se corrige un límite latente del código viejo: en R, K * cumsum(n) de las clases de p.emp_fact es entero y se desborda (NA) con más de 107 millones de detecciones (K = 20); el código nuevo usa enteros de 64 bits.
+  * La estampa de la regla de score (SCORE_RULE) pasa de la columna score_aggregation de la tabla por posición a counts.json (score_rule); null_position_stats.py rechaza un nulo con otra regla.
+  * remove_intermediates ya no actúa sobre nada (las teselas no se duplican); su destino lo decide WP8.
+  * POSENRICH: el nulo por posición ya no existe como tabla, así que el módulo deja de ejecutarse con aviso; su código queda para el porte (docs/POSENRICH_PORTE_EVALUACION.md).
+  * Las corridas de validación usan una copia del árbol (.tmp/code_wp5_*), porque las tareas copian el código al arrancar: editar el repositorio durante una corrida la rompe (ocurrió una vez).
+  * validation/tier*/templates no se han tocado (las gestiona el usuario): sin gene_stat toman size_adj_max.
 - Pendiente que pasa a otra fase:
+  * Validación a 1000 ciclos en neoplasia y maligno completo en el cluster (y RP1 de WP4): scripts en PhyloPhere_validation/wp5_check/cluster/ (README.md, prepare_wp5_cluster.py); el usuario sincroniza y lanza.
+  * Hallazgo (no de WP5): la permulación de RER no es reproducible entre dos corridas del mismo código (p.perm de RER difiere hasta 0,07 y q.perm hasta 0,15 en marine toy, bloques 25 y 40); stat y pval son idénticos.
+  * test_scoring_compute y otras pruebas de la línea base siguen rotas por el código con CAAP (no se arreglan aquí).
 ```
+
+## Qué debe comprobar primero WP6 (y WP7)
+
+1. **Interfaz de entrada:** `caas_permulation/blocks/<bloque>/matrices.rds` (estructura arriba). Las filas de cada bloque son el universo (cleaned_background_main.txt) más los genes con alguna unidad en el bloque: WP6 debe alinear por nombre de gen y tomar 0 donde falta. Cada bloque lleva su estampa `gene_stat`; el control de `fcs_enrich.R` (nulo construido con otro estadístico: p.perm NA) debe conservarse al leer por bloques. Orden de columnas: `sort(unique(roster))` de R en `caas_perms.rds`; los bloques traen sus ciclos y el orden numérico es el de réplica.
+2. **Lo que WP5 no hizo:** `caas_perms.rds` se sigue construyendo entero en `CAAS_CORE_MERGE_REDUCE` (7,6 GB en R con 20 bloques, sintético): WP7 lo sustituye, y mientras tanto la petición de memoria de ese proceso crece con N (`conf/resources.config`). Las variantes `max`, `fmax` y `n` están en `parts` de cada bloque; `F(max)^(n^β)` de WP9 se construye de `fmax` y `n` (el exponente en R no es bit a bit el de Python: solo la variante elegida lo es).
+3. **Validación pendiente:** no hay medidas con datos reales a 1000, 4000 ni 10.000 ciclos de los procesos nuevos; la corrida del cluster (scripts preparados) da las trazas, y con ellas hay que revisar las peticiones de `conf/resources.config`, que hoy salen de datos sintéticos.
+4. **Trampas:** la permulación de RER no es reproducible entre corridas (comparar solo stat y pval); corridas de validación desde una copia del árbol; `compare_null.py` acepta ahora ambos formatos (tablas y bloques).

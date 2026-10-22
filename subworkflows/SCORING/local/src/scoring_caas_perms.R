@@ -1,72 +1,58 @@
 #!/usr/bin/env Rscript
-# scoring_caas_perms.R — Gene×cycle score table of the permulation null → genes×N matrices in caas_perms.rds.
+# scoring_caas_perms.R — The block matrices of the permulation null → the genes×N matrices of caas_perms.rds.
 # PhyloPhere | subworkflows/SCORING/local/src/
 # =============================================================================
-# Called by:  CAAS_CORE_MERGE Nextflow process (caas_permulation.nf → Rscript scoring_caas_perms.R ...)
+# Called by:  CAAS_CORE_MERGE_REDUCE Nextflow process (caas_permulation.nf → Rscript scoring_caas_perms.R ...)
 #
-# Turns the long table gene_cycle_scores.tsv (one row per gene and permulation cycle) into
-# one genes×N matrix per direction and axis, the null that fcs_enrich.R (FCS p.perm),
-# scoring_compute.R (gene permulation p) and 11.Scoring_report.Rmd read.
+# Joins the per-block matrices (assemble_block_matrices.R: the genes of one block x its cycles) into one genes×N matrix
+# per direction, the null that fcs_enrich.R (FCS p.perm), scoring_compute.R and 11.Scoring_report.Rmd read.
 #
 # Args (named flags, from task.script):
-#   --gene-cycle-scores  TSV with Gene, cycle, global_asr, top_asr, bottom_asr,
-#                        global_caas, top_caas, bottom_caas
-#   --universe           gene universe, one gene per line (a "Gene" header is ignored),
-#                        or NO_FILE (default; then the genes of the table)
-#   --cycles             cycles replayed, one tag per line; N counts them even when a
-#                        cycle left no row in the table (optional)
-#   --output             output RDS (default caas_perms.rds)
+#   --blocks    the block RDS files (every flag value up to the next flag)
+#   --universe  gene universe, one gene per line (a "Gene" header is ignored), or NO_FILE (default; then the genes of
+#               the blocks)
+#   --cycles    cycles replayed, one tag per line; N counts them even when a cycle left no row (optional)
+#   --output    output RDS (default caas_perms.rds)
 #
-# Output RDS: list(corStat_byrank = list(global_asr, top_asr, bottom_asr),
-#                  caas_corStat_byrank = list(global, top, bottom),
-#                  gene_stat, asr_stat); each matrix has genes in rows and cycles in
-#                  columns, and 0 where a gene has no signal in a cycle.
+# Output RDS: list(caas_corStat_byrank = list(global, top, bottom), gene_stat); each matrix has genes in rows and cycles
+# in columns, and 0 where a gene has no signal in a cycle. gene_stat names the gene statistic of the matrices
+# (size_adj_max, fmax or max): fcs_enrich.R compares it with the statistic of the observed gene score.
 # =============================================================================
 
-suppressPackageStartupMessages({
-  library(readr)
-})
-
-# ── Parse arguments ───────────────────────────────────────────────────────────
-
 args <- commandArgs(trailingOnly = TRUE)
-get_arg <- function(flag, default = NULL) {
+flags <- grep("^--", args)
+get_args <- function(flag) {
   i <- match(flag, args)
-  if (is.na(i) || i == length(args)) return(default)
-  args[i + 1]
+  if (is.na(i)) return(NULL)
+  j <- flags[flags > i]
+  args[(i + 1):(if (length(j)) j[1] - 1 else length(args))]
 }
-gcs_file      <- get_arg("--gene-cycle-scores")
+get_arg <- function(flag, default = NULL) {
+  v <- get_args(flag)
+  if (is.null(v) || !length(v)) default else v[1]
+}
+block_files   <- get_args("--blocks")
 universe_file <- get_arg("--universe", "NO_FILE")
 out_file      <- get_arg("--output", "caas_perms.rds")
-# cycles replayed (one tag per line): N counts them even when a cycle left no row
 cycles_file   <- get_arg("--cycles", NULL)
+stopifnot(length(block_files) > 0, all(file.exists(block_files)))
 
-stopifnot(!is.null(gcs_file), file.exists(gcs_file))
+blocks <- lapply(block_files, readRDS)
+stats <- unique(vapply(blocks, function(b) as.character(b$gene_stat), ""))
+if (length(stats) != 1) stop(sprintf("the blocks hold different gene statistics: %s", paste(stats, collapse = ", ")))
+GENE_STAT <- stats
+dirs <- c("global", "top", "bottom")
 
-# ── Load inputs ───────────────────────────────────────────────────────────────
-
-gcs <- read_tsv(gcs_file, show_col_types = FALSE)
-
-# Statistic stamps: they pin the null to the observed-side formula it must match.
-#   gene_stat : the gene-level CAAS aggregator (scoring_compute.R `size_adj_max`, mirrored
-#               by gene_wrapper.py `_size_adj_max_null`). fcs_enrich.R (p.perm left NA)
-#               and scoring_compute.R (stops) check it before using `caas_corStat_byrank`.
-#   asr_stat  : the aggregator of the ASR path scores behind `corStat_byrank` (`*_asr`),
-#               the 90th percentile per gene and direction (gene_wrapper.py `_q90`).
-GENE_STAT <- "size_adj_max"
-ASR_STAT  <- "q90"
-
-if (nrow(gcs) == 0) {
+if (sum(vapply(blocks, function(b) as.numeric(b$n_units), 0)) == 0) {
   message("[caas_perms] no scored rows; writing empty RDS")
-  saveRDS(list(corStat_byrank = list(), caas_corStat_byrank = list(),
-               gene_stat = GENE_STAT, asr_stat = ASR_STAT), out_file)
+  saveRDS(list(caas_corStat_byrank = list(), gene_stat = GENE_STAT), out_file)
   quit(status = 0)
 }
 
 # ── Cycle roster and gene universe ────────────────────────────────────────────
 
-# Columns: the roster when given (a table cycle absent from it is an error), else the cycles of the table.
-cycle_levels <- sort(unique(gcs$cycle))
+# Columns: the roster when given (a block cycle absent from it is an error), else the cycles of the blocks.
+cycle_levels <- sort(unique(unlist(lapply(blocks, function(b) b$cycles))))
 if (!is.null(cycles_file)) {
   roster <- trimws(readLines(cycles_file)); roster <- roster[nzchar(roster)]
   stray <- setdiff(cycle_levels, roster)
@@ -76,59 +62,27 @@ if (!is.null(cycles_file)) {
 }
 n_perms <- length(cycle_levels)
 
-# Rows: the genes of the table plus those of the universe file when given (genes with no row stay at 0).
-perm_genes <- sort(unique(gcs$Gene))
-universe <- perm_genes
+# Rows: the genes with a unit in some block plus those of the universe file when given (genes with no row stay at 0).
+# A block holds the universe and its own genes, so the union of the blocks is both.
+universe <- sort(unique(unlist(lapply(blocks, function(b) b$genes))))
 if (!is.null(universe_file) && universe_file != "NO_FILE" && file.exists(universe_file)) {
   u <- tryCatch(readLines(universe_file), error = function(e) character(0))
   u <- trimws(u); u <- u[nzchar(u) & u != "Gene"]
-  if (length(u)) universe <- sort(unique(c(u, perm_genes)))
+  if (length(u)) universe <- sort(unique(c(u, universe)))
 }
 
-# ── Build the genes×N matrices ────────────────────────────────────────────────
+# ── Join the blocks ───────────────────────────────────────────────────────────
 
-# All six value columns share one lookup of (Gene, cycle) -> (row, column), computed once.
-# Each matrix is then filled by a single vectorized linear-index write, so no wide
-# intermediate of the genome-wide genes × cycles table is built per column. A missing
-# gene/cycle pair stays 0 (no signal) and an NA value is written as 0.
-gene_idx  <- match(gcs$Gene, universe)
-cycle_idx <- match(gcs$cycle, cycle_levels)
-valid     <- !is.na(gene_idx) & !is.na(cycle_idx)
-gene_idx  <- gene_idx[valid]
-cycle_idx <- cycle_idx[valid]
-lin_idx   <- gene_idx + (cycle_idx - 1L) * length(universe)
-
-value_cols <- c("global_asr", "top_asr", "bottom_asr",
-                 "global_caas", "top_caas", "bottom_caas")
-stopifnot(all(value_cols %in% names(gcs)))
-
-# Matrix of one value column: genes in rows, cycles in columns.
-build_matrix <- function(col) {
-  mat <- matrix(0.0, nrow = length(universe), ncol = n_perms,
-                dimnames = list(universe, cycle_levels))
-  v <- gcs[[col]][valid]
-  v[is.na(v)] <- 0.0
-  mat[lin_idx] <- v
+caas_corStat_byrank <- lapply(dirs, function(d) {
+  mat <- matrix(0.0, nrow = length(universe), ncol = n_perms, dimnames = list(universe, cycle_levels))
+  for (b in blocks) {
+    if (!length(b$genes) || !length(b$cycles)) next
+    mat[match(b$genes, universe), match(b$cycles, cycle_levels)] <- b$stat[[d]]
+  }
   mat
-}
+})
+names(caas_corStat_byrank) <- dirs
 
-# ── Assemble and save ─────────────────────────────────────────────────────────
-
-# ASR axis (path scores) and CAAS axis (size-adjusted gene scores), one matrix per direction.
-corStat_byrank <- list(
-  global_asr = build_matrix("global_asr"),
-  top_asr    = build_matrix("top_asr"),
-  bottom_asr = build_matrix("bottom_asr")
-)
-caas_corStat_byrank <- list(
-  global = build_matrix("global_caas"),
-  top    = build_matrix("top_caas"),
-  bottom = build_matrix("bottom_caas")
-)
-
-saveRDS(list(corStat_byrank = corStat_byrank,
-             caas_corStat_byrank = caas_corStat_byrank,
-             gene_stat = GENE_STAT, asr_stat = ASR_STAT), out_file)
-cat(sprintf("[caas_perms] wrote %s — %d genes × %d cycles, asr+caas nulls (%s)\n",
-            out_file, length(universe), n_perms,
-            paste(names(corStat_byrank), collapse = ", ")))
+saveRDS(list(caas_corStat_byrank = caas_corStat_byrank, gene_stat = GENE_STAT), out_file)
+cat(sprintf("[caas_perms] wrote %s — %d genes × %d cycles, %d blocks, gene_stat %s\n",
+            out_file, length(universe), n_perms, length(blocks), GENE_STAT))

@@ -9,8 +9,8 @@
  *  the same command.
  *
  *  Consumes:  filtered_discovery.tsv and cleaned background list (CT_POSTPROC), the tested
- *             positions (background.output) and perm_pos_cycle_caas.tsv.gz of one
- *             CAAS_CORE_MERGE run (with the observed positions, the universe U)
+ *             positions (background.output) and null_positions.parquet of one
+ *             CAAS_CORE_MERGE_REDUCE run (with the observed positions, the universe U)
  *  Produces:  accumulation_<direction>_results.csv
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
@@ -30,7 +30,7 @@ process CT_ACCUMULATION_TEST {
     path caas_csv
     path background_positions   // caastools background.output (tested positions)
     path bg_caas_universe       // cleaned_background_main.txt (surviving genes)
-    path null_cycle_caas        // perm_pos_cycle_caas.tsv.gz from CAAS_CORE_MERGE, the filtered null SCORING also uses:
+    path null_positions         // null_positions.parquet from CAAS_CORE_MERGE_REDUCE, the filtered null SCORING also uses:
                                  // the tested positions that score in it, plus the observed ones, are the universe U
 
     output:
@@ -48,7 +48,7 @@ process CT_ACCUMULATION_TEST {
         --caas-csv '${caas_csv}' \\
         --background-positions '${background_positions}' \\
         --bg-caas '${bg_caas_universe}' \\
-        --null-cycle-caas '${null_cycle_caas}' \\
+        --null-positions '${null_positions}' \\
         --change-side '${change_side_arg}' \\
         --output '${out_file}'
     """

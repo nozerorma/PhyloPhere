@@ -464,9 +464,12 @@ fcs_classify_significance <- function(enrich_df, fdr_thr, p_perm_thr, analytic_l
 #   (corStat, genes x N, the sign(Rho) * -log10(P) of every null phenotype; one matrix for its
 #   "global" ranking) and CAAS (caas_corStat_byrank, one genes x N matrix per ranking global,
 #   top and bottom).
+# gene_stat: the gene statistic of the observed gene scores (size_adj_max, fmax or max); the CAAS null is used only when
+#   it was built with the same one.
 # Returns one row per (ranking, database, pathway): the columns of fcs_enrich_col_types.
 fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_FILE",
-                        fdr_thr = 0.15, p_perm_thr = 0.025, analytic_levels = c(0.05, 0.10, 0.15)) {
+                        fdr_thr = 0.15, p_perm_thr = 0.025, analytic_levels = c(0.05, 0.10, 0.15),
+                        gene_stat = "size_adj_max") {
   corStat_byrank <- NULL; base_corStat <- NULL
   res <- list(); alts <- list()
   for (rk in names(rankings)) {
@@ -495,24 +498,24 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_
     #          (global, top, bottom) of genes x N null matrices. The direction is already
     #          in each matrix (the side of each labeling partitions it).
     corStat_byrank <- c(corperms[["corStat_byrank"]], corperms[["caas_corStat_byrank"]])
-    # The corStat_byrank entries named *_asr (global_asr, top_asr, bottom_asr) do not match
-    # the ranking names (global, top, bottom), so they are never selected here; the
-    # ancestral-state-axis null is used by 11.Scoring_report.Rmd.
+    # The RDS holds the CAAS axis only (caas_corStat_byrank: one matrix per ranking global, top and bottom).
 
     if (!is.null(corperms[["caas_corStat_byrank"]])) {
       .stat_have <- corperms[["gene_stat"]]
       if (is.null(.stat_have)) {
         # An RDS without a gene_stat stamp is taken as built with size_adj_max, the
-        # aggregator scoring_caas_perms.R uses; it is reported and kept.
+        # aggregator of the default; it is reported and kept when that is the observed one.
         fcs_progress(paste0(
           "CAAS permulation null carries no gene_stat stamp (pre-stamp build); ",
           "assuming 'size_adj_max' (the only historical aggregator) and using it."))
-      } else if (!identical(as.character(.stat_have), "size_adj_max")) {
+        .stat_have <- "size_adj_max"
+      }
+      if (!identical(as.character(.stat_have), as.character(gene_stat))) {
         warning(sprintf(paste0(
           "CAAS permulation null is STALE: built with gene statistic '%s', but the ",
-          "observed gene_caas_score uses 'size_adj_max'. p.perm left NA for the CAAS ",
+          "observed gene_caas_score uses '%s'. p.perm left NA for the CAAS ",
           "rankings. Rerun the null (CAAS_CORE_MERGE) to rebuild it."),
-          as.character(.stat_have)))
+          as.character(.stat_have), as.character(gene_stat)))
         corStat_byrank <- corStat_byrank[
           !names(corStat_byrank) %in% names(corperms[["caas_corStat_byrank"]])]
       }

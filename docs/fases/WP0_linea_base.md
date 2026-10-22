@@ -1,6 +1,6 @@
 # WP0. Línea base congelada
 
-Estado: CERRADA el 2026-10-21 con un pendiente explícito (marine toy, falta el disco externo con los alineamientos toy; ver "Pendiente de WP0"). Depende de: commit del usuario (hecho: `581b999`, rama `remove_caap`).
+Estado: CERRADA el 2026-10-21; el pendiente de marine toy se cerró el 2026-10-22 (referencia completada, ver el registro de WP4). Depende de: commit del usuario (hecho: `581b999`, rama `remove_caap`).
 Conversación independiente. Antes de empezar, leer `docs/fases/README.md`.
 
 ## Objetivo
@@ -82,7 +82,7 @@ Directorio: `/home/miguel/IBE-UPF/PhD/PhyloPhere_validation/golden_581b999/` (fu
 | Línea base de la suite | `pytest_baseline/{passing_tests,failing_tests}.txt`, `pytest_full.log` | `581b999`; comando en el registro | Hecho |
 | WP9-A1 (estadístico génico) | `a1_gene_statistic/` | `581b999` | Hecho (preparación) |
 | PEPC tier 1, c4 y c4_phenotypic, tolerante, 1000 ciclos | `pepc_c4_tolerance/results/{c4,c4_phenotypic}_complete` (+ scripts renderizados, `PROVENANCE.txt`, `run.log`, `failed_attempt/`) | `581b999` + corrección de `accum_gene_lists.nf` (commit de cierre), 2026-10-21 | Hecho; igual bit a bit a la salida del 15/10 en c4 |
-| Marine toy (121 genes, 100 ciclos, 4 corridas) | `validation/tier2/output/marine_toy/results/` (no copiado) | `d246e82`, 2026-10-20, relanzamientos con `-resume`; lanzadores en la raíz del repo (`run_tier2_marine_toy_{local,single}_{complete,strict}.sh`, ignorados por git) | PENDIENTE (falta el disco externo) |
+| Marine toy (121 genes, 100 ciclos, 4 corridas) | `validation/tier2/output/marine_toy/results/` (no copiado) | `d246e82`, 2026-10-20, relanzamientos con `-resume`; lanzadores en la raíz del repo (`run_tier2_marine_toy_{local,single}_{complete,strict}.sh`, ignorados por git) | COMPLETADA el 2026-10-22 en `golden_581b999/marine_toy` (corrida de la línea base reanudada, solo la fila marine; 17 min) |
 | cancer_b0_toy local (template `gui/templates/cancer_no_prune_multi_toy.json` con rutas locales, `toy_n` 45 = 31 genes tras filtros, 100 ciclos, VEP, POSENRICH, AMI y STRING apagados, alineamientos `Primate_alignments` en `phylip-relaxed`) | `cancer_b0_toy/results/neoplasia_prevalence_toy_complete` (+ `build_project.py`, `project.json`, scripts, `PROVENANCE.txt`, `run.log`, `run_attempt1_domino_failed.log`) | `a92fd2d`, 2026-10-21; el segundo lanzamiento usó `-resume` sobre el primero, que solo falló en `DOMINO_BUILD_NETWORK` | Hecho (exit 0; 272 MB). Sin referencia previa comparable atada a commit; la carpeta `unification/cancer_b0_toy` es anterior a la unificación |
 
 Comparador: `PhyloPhere_validation/unification/compare_null.py` (tablas del nulo, `b0/`, `caas_perms.rds`, `scoring/position_scores.tsv`, tablas FCS; `--extra` para más), tolerancia 1e-12.

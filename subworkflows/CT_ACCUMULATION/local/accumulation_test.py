@@ -9,8 +9,9 @@ Universe U
 ----------
 U is the set of positions an observed CAAS could come from, the same universe SCORING and POSENRICH use:
 the positions CAAStools tested (background.output) in the genes that survive post-processing
-(cleaned_background_main.txt), kept when they score caas_score > 0 in at least one cycle and side of the
-filtered permulation null (perm_pos_cycle_caas.tsv.gz), plus every observed CAAS position. A position the
+(cleaned_background_main.txt), kept when they score > 0 in at least one cycle and side of the
+filtered permulation null (null_positions.parquet: one row per position the null scores, with the number of
+cycles that score it), plus every observed CAAS position. A position the
 null never scores cannot produce a CAAS under the permulation labelings, so it is not part of the
 opportunity of a gene.
 
@@ -29,8 +30,8 @@ many positions in U.
 
 Called by:  CT_ACCUMULATION Nextflow process (ctacc_run.nf CT_ACCUMULATION_TEST)
 Inputs:     --caas-csv (filtered_discovery.tsv: one row per gene, position and side), --background-positions
-            (caastools background.output), --bg-caas (cleaned_background_main.txt), --null-cycle-caas
-            (perm_pos_cycle_caas.tsv.gz)
+            (caastools background.output), --bg-caas (cleaned_background_main.txt), --null-positions
+            (null_positions.parquet)
 Outputs:    --output CSV with columns Gene, ActualCount, PoolPositions, MeanNull, SD, PValue
 """
 
@@ -82,28 +83,22 @@ def load_tested_keys(background_file, gene_to_id):
 
 
 def load_null_positive_keys(null_path, gene_to_id):
-    """Keys (gene id, position) with caas_score > 0 in any cycle and side of the filtered null table.
+    """Keys (gene id, position) of the positions the filtered null scores (null_positions.parquet).
 
-    The table is read in chunks and reduced to distinct keys chunk by chunk, so memory follows the number of
-    distinct null-positive positions, not the number of (position, cycle) rows. Genes of the null outside
-    `gene_to_id` are ignored.
+    The table has one row per (gene, position) with at least one cycle that scores it on either side. Genes of the null
+    outside `gene_to_id` are ignored.
     """
-    cols = ['Gene', 'Position', 'caas_score']
-    if os.path.getsize(null_path) == 0:
-        return np.empty(0, dtype=np.int64)
-    header = pd.read_csv(null_path, sep='\t', nrows=0).columns
-    missing = [c for c in cols if c not in header]
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(null_path, columns=['gene', 'position', 'nd'])
+    missing = [c for c in ('gene', 'position', 'nd') if c not in table.column_names]
     if missing:
-        raise ValueError(f"{null_path} lacks column(s) {missing}: regenerate the CAAS permulation null (CAAS_CORE_MERGE).")
-    parts = []
-    for ch in pd.read_csv(null_path, sep='\t', usecols=cols, chunksize=2_000_000,
-                          dtype={'Gene': str, 'Position': str, 'caas_score': str}):
-        ch = ch[pd.to_numeric(ch['caas_score'], errors='coerce') > 0]
-        gene = ch['Gene'].map(gene_to_id)
-        pos = pd.to_numeric(ch['Position'], errors='coerce')
-        ok = (gene.notna() & pos.notna()).to_numpy()
-        parts.append(np.unique(pair_keys(gene[ok].to_numpy(), pos[ok].to_numpy())))
-    return np.unique(np.concatenate(parts)) if parts else np.empty(0, dtype=np.int64)
+        raise ValueError(f"{null_path} lacks column(s) {missing}: regenerate the CAAS permulation null (CAAS_CORE_MERGE_REDUCE).")
+    df = table.to_pandas()
+    df = df[df['nd'] > 0]
+    gene = df['gene'].map(gene_to_id)
+    ok = gene.notna().to_numpy()
+    return np.unique(pair_keys(gene[ok].to_numpy(), df['position'][ok].to_numpy()))
 
 
 def load_observed_keys(caas_csv, gene_to_id):
@@ -151,7 +146,7 @@ def hypergeometric_test(obs, n_pool, M, K):
 def run(args):
     """Run the exact accumulation test of one direction and write the results CSV.
 
-    Reads from args: caas_csv, background_positions, bg_caas, null_cycle_caas, change_side, output.
+    Reads from args: caas_csv, background_positions, bg_caas, null_positions, change_side, output.
     """
     genes = load_universe_genes(args.bg_caas)
     gene_to_id = {g: i for i, g in enumerate(genes)}
@@ -159,9 +154,9 @@ def run(args):
     logging.info(f"Universe (cleaned background) genes: {n_genes}")
 
     tested = load_tested_keys(args.background_positions, gene_to_id)
-    null_positive = load_null_positive_keys(args.null_cycle_caas, gene_to_id)
+    null_positive = load_null_positive_keys(args.null_positions, gene_to_id)
     if null_positive.size == 0:
-        raise ValueError(f"{args.null_cycle_caas} has no position with caas_score > 0 (a null without cycles, for "
+        raise ValueError(f"{args.null_positions} has no position the null scores (a null without cycles, for "
                          f"example --caas_full_perms 0): the universe U cannot be defined.")
     top, bottom = load_observed_keys(args.caas_csv, gene_to_id)
 
@@ -201,8 +196,8 @@ def main():
     parser.add_argument("--background-positions", required=True,
                         help="caastools background.output (gene<TAB>tested msa positions)")
     parser.add_argument("--bg-caas", required=True, help="cleaned_background_main.txt (genes that survive post-processing)")
-    parser.add_argument("--null-cycle-caas", required=True,
-                        help="perm_pos_cycle_caas.tsv.gz from CAAS_CORE_MERGE, the filtered null that SCORING also uses")
+    parser.add_argument("--null-positions", required=True,
+                        help="null_positions.parquet from CAAS_CORE_MERGE_REDUCE, the filtered null that SCORING also uses")
     parser.add_argument("--change-side", default="both", choices=["top", "bottom", "both"],
                         help="Phenotype direction tested (default: both, each position counted once)")
     parser.add_argument("--output", required=True, help="Results CSV")

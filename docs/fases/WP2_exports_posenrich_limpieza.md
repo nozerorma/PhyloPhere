@@ -1,6 +1,6 @@
 # WP2. Eliminar la reutilización de exports, desactivar POSENRICH y separar las opciones de limpieza
 
-Estado: HECHO (2026-10-21), validado con PEPC c4 y el toy de cancer; marine toy pendiente (disco externo). Depende de: WP0. Independiente de WP1.
+Estado: HECHO (2026-10-21), validado con PEPC c4 y el toy de cancer; marine toy validado después, con el código de WP4 (registro de WP4). Depende de: WP0. Independiente de WP1.
 Conversación independiente. Antes de empezar, leer `docs/fases/README.md`.
 
 ## Objetivo

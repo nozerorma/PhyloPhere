@@ -1,6 +1,6 @@
 # WP3. Fase 1: bloques de ciclos
 
-Estado: HECHO (2026-10-21), validado con PEPC c4 (1000 ciclos, bloque de 250) y el toy de cáncer (100 ciclos, bloques de 25 y de 40); marine toy pendiente (disco externo sin montar). Depende de: WP2 (una sola vía en `CAAS_CORE_BATCHED`).
+Estado: HECHO (2026-10-21), validado con PEPC c4 (1000 ciclos, bloque de 250) y el toy de cáncer (100 ciclos, bloques de 25 y de 40); marine toy validado después, con el código de WP4 (registro de WP4). Depende de: WP2 (una sola vía en `CAAS_CORE_BATCHED`).
 Conversación independiente. Antes de empezar, leer `docs/fases/README.md`.
 
 ## Objetivo

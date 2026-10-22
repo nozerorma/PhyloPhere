@@ -1,32 +1,29 @@
 #!/usr/bin/env python3
-# gene_wrapper.py — Permulation null per gene: replay of the labelings over each gene's ASR and the passes after it.
+# gene_wrapper.py — Permulation null per gene: replay of the labelings over each gene's ASR, reduced to tile tables.
 # PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/utils/
 
 """
-The permulation null per gene: replay of the labelings over each gene's ASR, with the passes that follow it.
+The permulation null per gene: replay of the labelings over each gene's ASR, reduced to the tables of a tile.
 
-Pass A (`process_all_genes_perms`) replays the labelings over each gene's alignment in process
-(src.utils.perm_stream), loads its ASR once, scores every labeling that has a detection and writes one detail shard per
-gene; pass B (`_finalize_perm_scores`) scores each cycle against genome-wide pools and writes the null tables. Also
-the readers of the detail shards and the per-gene record converter the master rows are built from.
+`process_all_genes_perms` replays the labelings over each gene's alignment in process (src.utils.perm_stream), loads its
+ASR once, scores every labeling that has a detection and reduces each cycle as it is produced to a unit row and the
+scored positions of the cycle (src.utils.null_tables). The tables of the genes of the tile are written together as
+``null_tables/`` (and ``null_tables_strict/``, the strict pooling of the same replay). The gene and position statistics
+that need every gene of a cycle (gene removal, the reference pools) are computed later, once per block of cycles, by
+src.utils.null_merge. Also the per-gene record converter the master rows are built from.
 
 The null gives CAAS a genome-wide excess null for FCS pathway enrichment: N permuted phenotype labelings are replayed
 through the full position pool and scored on the same ASR posteriors as the observed run. The posteriors depend only
 on alignment and tree (not on the phenotype), so they are loaded once per gene and reused for every labeling. The
 scoring goes through the same code as the observed run, so the null is calibrated against the observed by construction.
 
-Imported by: disambiguation_perms_main.py (process_all_genes_perms), reaggregate_perm_scores.py (pass B and the
-             detail readers), src/core/observed.py (convert_convergence_result_to_dict)
+Imported by: disambiguation_perms_main.py (process_all_genes_perms), src/core/observed.py (convert_convergence_result_to_dict)
 """
 
-import functools
-import gzip
 import logging
 import multiprocessing as mp
 import os
-import random
 import sys
-import time
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Set, Any
 
@@ -35,8 +32,8 @@ sys.path.insert(0, str(project_root / "src"))
 
 from src.utils.concurrency import plan_concurrency, init_worker, safe_imap_unordered
 from src.core.driver import load_gene_context
+from src.utils.null_tables import CycleReducer, concat_tables, gene_tables, write_tables
 from src.utils.perm_stream import ReplayContext, ReplaySettings, stream_gene
-from src.core.scores import DIRECTIONS, SCORE_RULE, collapse_sides, direction_values, gene_scores, position_score
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +158,8 @@ def convert_convergence_result_to_dict(
     return result_dict
 
 
-# ── Permulation null: readers, chunking and the per-gene replay ───────────────
+
+# ── Permulation null: readers and the per-gene replay ─────────────────────────
 
 
 def _read_resample_labelings(resample_dir: str) -> Dict[str, Tuple[List[str], List[str]]]:
@@ -169,10 +167,6 @@ def _read_resample_labelings(resample_dir: str) -> Dict[str, Tuple[List[str], Li
     from src.core.labelings import read_labelings
 
     return {t: (list(l.fg), list(l.bg)) for t, l in read_labelings(resample_dir).items()}
-
-
-# The columns of a detail row (the detail rows carry `side`: a "both" position is two rows, one per side).
-DETAIL_FIELDS = ["Gene", "cycle", "Position", "asr_path_score", "n_detected", "clust", "side", "n_hyp", "n_sp"]
 
 
 def _cycle_tags(resample_dir: str, cycles: Optional[List[str]] = None) -> List[str]:
@@ -194,22 +188,14 @@ def _init_replay_worker(config: Dict[str, Any]) -> None:
         config["settings"], config["resample_dir"], config["cycle_tags"], config["fop_pairs_file"])
 
 
-def _write_shard(directory: Path, gene: str, rows: List[Dict[str, Any]]) -> None:
-    """One gz shard of detail rows for one gene."""
-    import csv as _csv
+def _replay_gene_task(task: Tuple[str, str, Optional[Dict[int, int]]]):
+    """Replay of one gene: stream the labelings over its alignment and reduce every cycle to its unit and scores.
 
-    with gzip.open(directory / f"{_sanitize_gene_shard(gene)}.tsv.gz", "wt", newline="") as handle:
-        writer = _csv.DictWriter(handle, fieldnames=DETAIL_FIELDS, delimiter="\t", lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def _replay_gene_task(task: Tuple[str, str, Optional[Dict[int, int]]]) -> Tuple[str, Optional[int], int, Set[str]]:
-    """Replay of one gene: stream the labelings over its alignment, reduce, and write its shards.
-
-    Returns (gene, detail rows, strict detail rows, cycles with a row); the row count is None when the gene's ASR
-    context could not be loaded (the gene is left out of the null, as it is left out of the observed) and 0 for a gene
-    without a detection. A kernel disagreement is not a gene failure: it propagates and stops the run.
+    Returns (gene, status, tables, strict tables): status is None when the gene's ASR context could not be loaded (the
+    gene is left out of the null, as it is left out of the observed) and 0 for a gene without a detection; otherwise it
+    is the number of units. `tables` and `strict tables` are (units, scores) pyarrow tables, None without a detection
+    (the strict ones also when the strict pooling is off). A kernel disagreement is not a gene failure: it propagates
+    and stops the run.
     """
     gene, alignment_path, train_columns = task
     st = _REPLAY
@@ -220,29 +206,21 @@ def _replay_gene_task(task: Tuple[str, str, Optional[Dict[int, int]]]) -> Tuple[
                 gene, st["alignment_dir"], st["tree_file"], st["taxid_mapping_path"],
                 st["asr_model"], st["asr_cache_dir"], st["posterior_threshold"], None)
 
-        streamed = stream_gene(gene, alignment_path, replay, load_ctx, st["posterior_threshold"], st["strict_output"])
+        reducer = CycleReducer(st["postproc_filter"], st["remove_clusters"], st["clust_minlen"], st["clust_maxcaas"], train_columns)
+        streamed = stream_gene(gene, alignment_path, replay, load_ctx, st["posterior_threshold"], st["strict_output"], reduce=reducer)
         if streamed is None:
-            return (gene, None, 0, set())
+            return (gene, None, None, None)
         pooled, pooled_strict = streamed
         if not pooled:
-            return (gene, 0, 0, set())
-        finalize_args = (st["n_cycles_total"], st["postproc_filter"], st["clust_minlen"], st["clust_maxcaas"], train_columns)
-        _, rows = _perms_worker_finalize(gene, pooled, *finalize_args)
-        if not rows:
-            return (gene, 0, 0, set())
-        _write_shard(st["detail_dir"], gene, rows)
-        n_strict = 0
-        if st["strict_output"]:
-            _, strict_rows = _perms_worker_finalize(gene, pooled_strict, *finalize_args)
-            if strict_rows:
-                _write_shard(st["strict_dir"], gene, strict_rows)
-                n_strict = len(strict_rows)
-        return (gene, len(rows), n_strict, {row["cycle"] for row in rows})
+            return (gene, 0, None, None)
+        tables = gene_tables(gene, [unit for _, unit in pooled])
+        strict_tables = gene_tables(gene, [unit for _, unit in pooled_strict]) if pooled_strict else None
+        return (gene, len(pooled), tables, strict_tables)
     except replay.pr.KernelDisagreement:
         raise
     except Exception as e:
         logger.error(f"[perms] replay worker failed for {gene}: {e}", exc_info=True)
-        return (gene, None, 0, set())
+        return (gene, None, None, None)
 
 
 def _gene_train_columns(
@@ -265,485 +243,6 @@ def _gene_train_columns(
     return cols
 
 
-def _perms_worker_finalize(
-    gene: str,
-    all_cycle_results: List[Tuple[str, List[Any]]],
-    n_cycles_total: int,
-    postproc_filter: bool = False,
-    clust_minlen: int = 3,
-    clust_maxcaas: float = 0.7,
-    train_columns: Optional[Dict[int, int]] = None,
-) -> Tuple[str, List[Dict[str, Any]]]:
-    """Reduction step of a chunked gene replay: the whole-gene pass over the merged, already
-    FOP-pooled chunk results of _perms_worker_replay.
-
-    Computes n_detected (which needs the gene's full set of detected cycles), the CT_POSTPROC
-    cluster flags and the detail rows. The output does not depend on how many replay chunks fed
-    into it. The `n_cycles_total` argument is the full cycle (or, under FOP pooling, base-cycle)
-    universe of the run and is not used inside this function.
-    """
-    if not all_cycle_results:
-        return (gene, [])
-
-    # ── 1. Detection count per position ───────────────────────────────────────
-    # n_detected counts, per Position, how many permuted-labeling cycles
-    # re-detected that CAAS. It only fills the `n_detected` column of the detail rows; the
-    # position-level permulation p is p.emp of scoring_compute.R, computed from
-    # perm_pos_cycle_caas.tsv.gz.
-    n_detected = {}
-    for cyc, scored in all_cycle_results:
-        for r in scored:
-            pos = getattr(r, "position", None)
-            if pos is not None:
-                n_detected.setdefault(pos, set()).add(cyc)
-
-    n_detected_count = {key: len(cycles_set) for key, cycles_set in n_detected.items()}
-
-    # ── 2. Emit raw per-(cycle, position) detail ──────────────────────────────
-    # Gene scores are not computed here. size_adj_max calibrates a gene's score against the
-    # genome-wide reference pool of its cycle (_build_cycle_score_pools), and a worker sees
-    # one gene only, so the pool cannot be formed at this level. The parent scores in pass B
-    # (see _finalize_perm_scores) once every gene's rows are written.
-    #
-    # Each record is already per side (a "both" position is two records, each with its own
-    # `side`), so the detail rows carry `side` directly.
-    #
-    # ── CT_POSTPROC cluster trains ────────────────────────────────────────────
-    # core.postproc.train_flags flags the detected positions of this gene per base cycle.
-    # The flag is written per detail row as `clust` (0/1): sub-pass B0 reads it
-    # for the dubious-gene test, and B1/B2 skip clust == 1 rows (_is_clustered) when the
-    # trains are removed. Nothing is flagged unless postproc_filter is on.
-    clust_by: Dict[str, set] = {}
-    if postproc_filter:
-        from src.core.postproc import train_flags
-        pos_by_cyc: Dict[str, set] = {}
-        for cyc, scored in all_cycle_results:
-            for r in scored:
-                p = getattr(r, "position", None)
-                if p is None:
-                    continue
-                pos_by_cyc.setdefault(cyc, set()).add(int(p))
-        clust_by = train_flags(pos_by_cyc, clust_maxcaas, clust_minlen, train_columns)
-
-    detail_rows = []
-    for cyc, scored in all_cycle_results:
-        for r in scored:
-            pos = getattr(r, "position", None)
-            if pos is None:
-                continue
-            asr_val = getattr(r, "asr_path_score", 0.0)
-            if asr_val is None:
-                asr_val = 0.0
-            side = getattr(r, "side", "none") or "none"
-            # `r` is already FOP-domain-pooled (or a single-contrast record) and per side;
-            # `side` comes from the record and is the direction key downstream.
-            row = {
-                "Gene": gene,
-                "cycle": cyc,
-                "Position": pos,
-                "asr_path_score": asr_val,
-                "n_detected": n_detected_count.get(pos, 1),
-                "clust": 1 if int(pos) in clust_by.get(cyc, ()) else 0,
-                "side": side,
-                "n_hyp": getattr(r, "n_hypotheses", None),
-                "n_sp": getattr(r, "n_species", None),
-            }
-            detail_rows.append(row)
-
-    return (gene, detail_rows)
-
-
-def _null_row_caas(row: Dict[str, Any]) -> float:
-    """caas_row of one null detail row: its asr_path_score (mirror of scoring_compute.R section 2f).
-
-    The observed side takes the same identity, with no rank factor. One definition for all
-    the finalize sub-passes.
-    """
-    return float(row["asr_path_score"])
-
-
-def _sanitize_gene_shard(gene: str) -> str:
-    """Filesystem-safe stem for a per-gene detail shard.
-
-    Gene ids (Ensembl ids, HGNC symbols) are normally clean; this only neutralizes path
-    separators so that a stray one cannot escape the shard directory."""
-    return gene.replace(os.sep, "__").replace("/", "__").replace("\\", "__").strip() or "_"
-
-
-def _is_clustered(row: Dict[str, Any]) -> bool:
-    """True for a detail row whose position lies in a cluster train (`clust` = 1)."""
-    return int(row.get("clust", 0) or 0) == 1
-
-
-def iter_detail_rows(detail_path: Path):
-    """Yield perm_pos_detail rows (dicts) from either layout:
-
-      * a per-gene shard directory  ``perm_pos_detail/<Gene>.tsv.gz``
-      * a single concatenated file  ``perm_pos_detail.tsv.gz``
-
-    Shards are read in sorted-filename order and one shard holds exactly one gene, so the
-    rows of a gene stay contiguous, which ``_build_cycle_score_pools`` and
-    ``_finalize_perm_scores`` pass B2 rely on. A concatenated file must keep that property.
-    """
-    import csv as _csv
-
-    p = Path(detail_path)
-    if p.is_dir():
-        shards = sorted(p.glob("*.tsv.gz"))
-        if not shards:
-            raise FileNotFoundError(f"[perms] no *.tsv.gz shards under {p}")
-        for shard in shards:
-            with gzip.open(shard, "rt", newline="") as f_in:
-                yield from _csv.DictReader(f_in, delimiter="\t")
-    else:
-        with gzip.open(p, "rt", newline="") as f_in:
-            yield from _csv.DictReader(f_in, delimiter="\t")
-
-
-def _cycle_gene_removal_from_detail(
-    detail_path: Path,
-    gene_lengths: Dict[str, float],
-    mode: str,
-    iqr_multiplier: float,
-    extreme_percentile: float,
-    info: Optional[Dict[str, Any]] = None,
-) -> Set[Tuple[str, str]]:
-    """Sub-pass B0: dubious/extreme gene removal per labeling (cycle).
-
-    One streaming read of the detail rows. Per (cycle, Gene) it counts the
-    distinct detected positions and whether any row lies in a train (`clust`), then
-    applies core.postproc.gene_removal, which calibrates within each cycle pool.
-    Returns the (cycle, Gene) units to drop from the null pool; empty when `mode`
-    is "none".
-
-    The rows of a gene are contiguous (one shard per gene), so the position sets of a gene are
-    reduced to a count when the gene ends: memory is one gene of positions plus one count per
-    unit, not every detected position of the null. When `info` is given it is filled with the
-    cycles seen ("cycles", a set) and the row count ("n_rows"), so the caller needs no separate scan.
-    """
-    from src.core.postproc import GeneUnit, gene_removal
-
-    if (mode or "none").lower() == "none":
-        return set()
-
-    cycles: Set[str] = set()
-    n_rows = 0
-
-    def _units():
-        nonlocal n_rows
-        done: Set[str] = set()
-        current: Optional[str] = None
-        seen_pos: Dict[str, set] = {}
-        has_clust: Dict[str, bool] = {}
-
-        def _drain():
-            for cyc, pset in seen_pos.items():
-                yield GeneUnit(cyc, current, len(pset), has_clust.get(cyc, False))
-
-        for row in iter_detail_rows(detail_path):
-            gene = row["Gene"]
-            if gene != current:
-                if current is not None:
-                    yield from _drain()
-                    done.add(current)
-                if gene in done:
-                    raise ValueError(f"[perms] rows of gene {gene} are not contiguous in {detail_path}")
-                current = sys.intern(gene)
-                seen_pos, has_clust = {}, {}
-            cyc = sys.intern(row["cycle"])
-            cycles.add(cyc)
-            n_rows += 1
-            seen_pos.setdefault(cyc, set()).add(int(row["Position"]))
-            if int(row.get("clust", 0) or 0):
-                has_clust[cyc] = True
-        if current is not None:
-            yield from _drain()
-
-    removed = set(gene_removal(_units(), gene_lengths, mode=mode,
-                               iqr_multiplier=iqr_multiplier,
-                               extreme_percentile=extreme_percentile))
-    if info is not None:
-        info["cycles"], info["n_rows"] = cycles, n_rows
-    return removed
-
-
-def write_removed_units(path: Path, removed: Set[Tuple[str, str]]) -> None:
-    """Write the (cycle, Gene) units dropped by gene removal (TSV), so the removal
-    of each labeling can be audited."""
-    import csv as _csv
-
-    with open(path, "w", newline="") as f_rm:
-        w = _csv.writer(f_rm, delimiter="\t")
-        w.writerow(["cycle", "Gene"])
-        w.writerows(sorted(removed))
-
-
-def _build_cycle_score_pools(
-    detail_path: Path,
-    removed: Optional[Set[Tuple[str, str]]] = None,
-    remove_clusters: bool = True,
-) -> Dict[str, Dict[str, Any]]:
-    """Sub-pass B1: per-cycle, per-direction pool of position-level null scores.
-
-    The gene-level null statistic is size_adj_max = F(max)^n (core.scores), the statistic of
-    scoring_compute.R section 4a. F must be the ECDF of the pool the positions of the gene were
-    drawn from, so every cycle needs its own pool, as the observed side calibrates against its
-    own. Otherwise the null would be calibrated against a different reference than the observed
-    score and the FCS p.perm comparison would not be valid.
-
-    Directions are kept separate because scoring_compute.R uses direction-matched reference
-    pools for the top and bottom scores.
-
-    Pools are stored exactly (sorted array.array('d')), not as a binned histogram: F is raised
-    to the power n, so a small ECDF error is amplified n-fold, and the null scores are heavily
-    tied, so a bin would absorb many distinct values. A pool is per cycle (the positions of one
-    cycle, not of the whole file), so keeping the exact values of all cycles stays affordable.
-
-    Returns {cycle: {"all"|"top"|"bottom": sorted array.array('d') of scores}}.
-    """
-    import array
-    import csv as _csv
-
-    _rm = removed or set()
-    acc: Dict[str, Dict[str, Any]] = {}
-
-    def _per_cycle(cyc: str) -> Dict[str, Any]:
-        pc = acc.get(cyc)
-        if pc is None:
-            pc = {k: array.array("d") for k in ("all", "top", "bottom")}
-            acc[cyc] = pc
-        return pc
-
-    def _drain_side(agg: Dict[Any, float]) -> None:
-        # agg is keyed (cyc, pos, side) -> caas_row. core.scores turns each into
-        # the score of the position per side, then into one entry per direction: the directional
-        # pools take the score of that side, the "all" pool one entry per position (its best
-        # side), so a "both" position is not counted twice.
-        by_pos: Dict[Tuple[str, int], Dict[str, float]] = {}
-        for (cyc, pos, side), caas_row in agg.items():
-            score = position_score(caas_row)
-            if score is not None:
-                by_pos.setdefault((cyc, pos), {})[side] = score
-        for (cyc, pos), sides in by_pos.items():
-            pc = _per_cycle(cyc)
-            for d, v in collapse_sides(sides).items():
-                pc[d].append(v)
-
-    current_gene: Optional[str] = None
-    pos_agg: Dict[Any, float] = {}
-    for row in iter_detail_rows(detail_path):
-        gene = row["Gene"]
-        if gene != current_gene:
-            if current_gene is not None:
-                _drain_side(pos_agg)
-            current_gene = gene
-            pos_agg = {}
-        if _rm and (row["cycle"], gene) in _rm:
-            continue
-        if remove_clusters and _is_clustered(row):
-            continue
-        key = (row["cycle"], int(row["Position"]), row.get("side") or "none")
-        pos_agg[key] = _null_row_caas(row)
-    if current_gene is not None:
-        _drain_side(pos_agg)
-
-    return {cyc: {k: array.array("d", sorted(v)) for k, v in per_cycle.items()}
-            for cyc, per_cycle in acc.items()}
-
-
-def _finalize_perm_scores(
-    detail_path: Path,
-    output_dir: Path,
-    cycle_tags: List[str],
-    sample_per_cycle: Optional[int] = None,
-    removed: Optional[Set[Tuple[str, str]]] = None,
-    seed: int = 1998,
-    remove_clusters: bool = True,
-) -> None:
-    """Pass B: score the detail rows and aggregate them to gene x cycle statistics.
-
-    Follows the observed pipeline of scoring_compute.R:
-
-        null_row_caas   = asr_path_score
-        position score  = null_row_caas (core.scores.position_score)
-        gene x cycle    = size_adj_max over the cycle's positions, per direction
-                          (CAAS axis; the ASR axis is the 90th percentile of the position scores)
-
-    Runs as two sub-passes over the detail rows: B1 builds the position-score pool of each
-    cycle (_build_cycle_score_pools), B2 scores the genes against it. The second read is
-    needed because size_adj_max calibrates a gene against the distribution of its own cycle,
-    which is known only after every position of that cycle has been seen.
-
-    The detail rows are gene-contiguous (one shard per gene), so a single streaming pass
-    aggregates per gene and holds the rows of one gene at a time.
-
-    Outputs in output_dir: gene_cycle_scores.tsv, perm_pos_cycle_caas.tsv.gz,
-    perm_pos_sample.tsv and perm_pos_quantiles.tsv.
-    """
-    import csv as _csv
-    import numpy as np
-
-    scores_path = output_dir / "gene_cycle_scores.tsv"
-    sample_path = output_dir / "perm_pos_sample.tsv"
-    quant_path = output_dir / "perm_pos_quantiles.tsv"
-    # Per-(Gene, Position, side, cycle) position score of the null cycle (core.scores), the
-    # definition shared by the readers: scoring_compute.R (p.emp, SAM) and the
-    # position enrichment. caas_score is empty when the score of the detection is not positive.
-    cycle_caas_path = output_dir / "perm_pos_cycle_caas.tsv.gz"
-    # score_aggregation records the rule of caas_score (core.scores.SCORE_RULE), so that scoring_compute.R can
-    # refuse an observed score built with another one.
-    cycle_caas_fields = ["Gene", "Position", "side", "cycle", "caas_score", "score_aggregation"]
-
-    # Reservoir size per cycle. It bounds the sample and the quantile summaries
-    # at about K x n_cycles rows regardless of the run size; the full detail
-    # rows stay on disk.
-    if sample_per_cycle is None:
-        sample_per_cycle = int(os.environ.get("CAAS_PERMS_SAMPLE_PER_CYCLE", "200"))
-
-    scores_fields = ["Gene", "cycle", "global_asr", "top_asr", "bottom_asr",
-                     "global_caas", "top_caas", "bottom_caas"]
-
-    rng = random.Random(seed)
-    reservoirs: Dict[str, List[Tuple[str, int, float]]] = {}
-    seen: Dict[str, int] = {}
-    _rm = removed or set()
-
-    # ── Sub-pass B1: per-cycle reference pools for the size-adjusted max ──────
-    cycle_pools = _build_cycle_score_pools(detail_path, removed=_rm, remove_clusters=remove_clusters)
-    logger.info("[perms] pass B1 done: size-adjust reference pools built for %d cycles",
-                len(cycle_pools))
-
-    # The detail rows always carry a `side` column (a "both" position is two rows, one per
-    # side), so positions are keyed by (cyc, pos, side) and the "all" pool keeps the best
-    # side per position.
-
-    def _q90(vals) -> float:
-        return float(np.percentile(vals, 90)) if vals else 0.0
-
-    def _na(x) -> Any:
-        return "NA" if x is None else x
-
-    def _flush(gene: str, pos_side: Dict[Any, float], writer) -> None:
-        # pos_side is keyed (cyc, pos, side) -> caas_row. The per-cycle
-        # position scores are written first (perm_pos_cycle_caas.tsv.gz).
-        by_pos: Dict[Tuple[str, int], Dict[str, float]] = {}
-        cc_rows = []
-        for (cyc, pos, side), caas_row in pos_side.items():
-            score = position_score(caas_row)
-            cc_rows.append({"Gene": gene, "Position": pos, "side": side, "cycle": cyc,
-                            "caas_score": score, "score_aggregation": SCORE_RULE})
-            if score is not None:
-                by_pos.setdefault((cyc, pos), {})[side] = score
-        if writer_cc is not None and cc_rows:
-            writer_cc.writerows(cc_rows)
-
-        positions_by_cycle: Dict[str, List[Dict[str, float]]] = {}
-        for (cyc, _pos), sides in by_pos.items():
-            positions_by_cycle.setdefault(cyc, []).append(sides)
-
-        no_pool = {d: () for d in DIRECTIONS}
-        rows = []
-        for cyc in cycle_tags:
-            positions = positions_by_cycle.get(cyc, [])
-            vals = direction_values(positions)
-            caas = gene_scores(positions, cycle_pools.get(cyc, no_pool))
-            # The ASR axis is the 90th percentile of the position scores (0 when empty), like
-            # the observed gene_caas_asr_* columns; asr_path_score is the caas_row, so it
-            # shares the position scores. The CAAS axis is what FCS consumes
-            # (caas_corStat_byrank). A cycle with no scored position in a direction has no
-            # score there (NA); scoring_caas_perms.R fills those cells with 0 when it builds
-            # the dense genes x cycles matrix.
-            rows.append({
-                "Gene": gene, "cycle": cyc,
-                "global_asr": _q90(vals["all"]), "top_asr": _q90(vals["top"]), "bottom_asr": _q90(vals["bottom"]),
-                "global_caas": _na(caas["all"]), "top_caas": _na(caas["top"]), "bottom_caas": _na(caas["bottom"]),
-            })
-        writer.writerows(rows)
-
-    n_rows = 0
-    with open(scores_path, "w", newline="") as f_scores, \
-         gzip.open(cycle_caas_path, "wt", newline="") as f_cc:
-        reader = iter_detail_rows(detail_path)
-        writer_scores = _csv.DictWriter(f_scores, fieldnames=scores_fields, delimiter="\t", lineterminator="\n")
-        writer_scores.writeheader()
-        writer_cc = _csv.DictWriter(f_cc, fieldnames=cycle_caas_fields, delimiter="\t", lineterminator="\n")
-        writer_cc.writeheader()
-
-        current_gene: Optional[str] = None
-        pos_side: Dict[Tuple[str, int, str], float] = {}
-
-        for row in reader:
-            gene = row["Gene"]
-            if gene != current_gene:
-                if current_gene is not None:
-                    _flush(current_gene, pos_side, writer_scores)
-                current_gene = gene
-                pos_side = {}
-
-            cyc = row["cycle"]
-            if _rm and (cyc, gene) in _rm:
-                continue
-            if remove_clusters and _is_clustered(row):
-                continue
-            pos = int(row["Position"])
-            asr = float(row["asr_path_score"])
-
-            rc = asr  # caas_row is the asr_path_score itself
-
-            pos_side[(cyc, pos, row.get("side") or "none")] = rc
-
-            # Reservoir sample stratified by cycle: every cycle contributes up to
-            # the same K rows however many detections it produced, so each cycle is equally
-            # represented and per-cycle summaries can be formed. Sampling per gene instead
-            # would weight genes by the number of cycles that hit them.
-            seen[cyc] = seen.get(cyc, 0) + 1
-            res = reservoirs.setdefault(cyc, [])
-            item = (gene, pos, asr)
-            if len(res) < sample_per_cycle:
-                res.append(item)
-            else:
-                j = rng.randrange(seen[cyc])
-                if j < sample_per_cycle:
-                    res[j] = item
-            n_rows += 1
-
-        if current_gene is not None:
-            _flush(current_gene, pos_side, writer_scores)
-
-    # ── Sample + quantile summaries ───────────────────────────────────────────
-    sample_fields = ["Gene", "Position", "cycle", "asr_path_score"]
-    with open(sample_path, "w", newline="") as f_sample:
-        writer_sample = _csv.DictWriter(f_sample, fieldnames=sample_fields, delimiter="\t", lineterminator="\n")
-        writer_sample.writeheader()
-        for cyc, res in reservoirs.items():
-            writer_sample.writerows({
-                "Gene": g, "Position": p, "cycle": cyc,
-                "asr_path_score": a,
-            } for (g, p, a) in res)
-
-    quant_levels = [5, 10, 25, 50, 75, 90, 95]
-    quant_fields = (["cycle", "metric", "n_sampled", "n_total", "mean"]
-                    + [f"q{q}" for q in quant_levels])
-    with open(quant_path, "w", newline="") as f_quant:
-        writer_quant = _csv.DictWriter(f_quant, fieldnames=quant_fields, delimiter="\t", lineterminator="\n")
-        writer_quant.writeheader()
-        for cyc, res in reservoirs.items():
-            if not res:
-                continue
-            vals = np.asarray([r[2] for r in res], dtype=float)
-            rec = {"cycle": cyc, "metric": "asr_path_score",
-                   "n_sampled": len(vals), "n_total": seen.get(cyc, len(vals)),
-                   "mean": float(vals.mean())}
-            for q, v in zip(quant_levels, np.percentile(vals, quant_levels)):
-                rec[f"q{q}"] = float(v)
-            writer_quant.writerow(rec)
-
-    logger.info(
-        "[perms] pass B done: scored %d rows -> %s; sample=%s quantiles=%s cycle_caas=%s",
-        n_rows, scores_path.name, sample_path.name, quant_path.name, cycle_caas_path.name,
-    )
-
-
 def process_all_genes_perms(
     genes: List[str],
     gene_alignments: Dict[str, str],
@@ -761,61 +260,29 @@ def process_all_genes_perms(
     cycles: Optional[List[str]] = None,
     max_tasks_per_child: Optional[int] = None,
     fop_pairs_file: Optional[str] = None,
-    gene_lengths_file: Optional[str] = None,
     clust_minlen: int = 3,
     clust_maxcaas: float = 0.7,
-    gene_filter_mode: str = "none",
-    iqr_multiplier: float = 3.0,
-    extreme_percentile: float = 0.99,
     postproc_filter: bool = False,
-    seed: int = 1998,
     remove_clusters: bool = True,
     train_map_dir: Optional[str] = None,
     train_map_suffix: str = ".map.tsv",
-    detail_only: bool = False,
     strict_output: bool = False,
 ) -> Path:
-    """Genome-wide CAAS permulation null: replay N permuted labelings over each gene, score them against its ASR
-    as the observed pipeline scores itself, and aggregate.
+    """Replay of the labelings of a tile over each gene, written as the tile tables of the null.
 
-    Two passes, because the score of a gene is calibrated against the genome-wide pool of
-    position scores of its cycle, while a worker sees a single gene:
-
-      Pass A (parallel, one gene per task) streams the labelings of `resample_dir` over the gene's alignment
-        (src.utils.perm_stream: the CAAS kernel runs in the worker, one range of whole base cycles at a time, and
-        each base cycle is scored and reduced as it is produced) and writes the raw per-(gene, cycle, position)
-        detail to perm_pos_detail/<Gene>.tsv.gz (one gz shard per gene).
-      Pass B (single process, streaming) re-reads the shards via iter_detail_rows(),
-        builds the pool of position scores of each cycle and derives
-        null_row_caas -> position scores -> per-(gene, cycle) size-adjusted max.
-
-    `genes` are the gene keys to replay, `gene_alignments` the alignment file of each; a gene is replayed against
-    the labelings of `resample_dir` (those of `cycles` when given) with the thresholds of `replay`.
+    `genes` are the gene keys to replay, `gene_alignments` the alignment file of each; a gene is replayed against the
+    labelings of `resample_dir` (those of `cycles` when given) with the thresholds of `replay`. One task per gene streams
+    the labelings over the gene's alignment (src.utils.perm_stream: the CAAS kernel runs in the worker, one range of
+    whole base cycles at a time) and reduces each scored cycle to its unit row and scored positions
+    (src.utils.null_tables); the parent writes the tables of all the genes together.
 
     Outputs:
-      - output_dir/gene_cycle_scores.tsv     (feeds caas_perms.rds)
-      - output_dir/perm_pos_cycle_caas.tsv.gz (per (Gene, Position, side, cycle)
-                                              caas_score, the core.scores position
-                                              score of the cycle; the R side takes
-                                              the max over sides for the pooled
-                                              p.emp, the sole position-level
-                                              permulation p)
-      - output_dir/perm_pos_detail/<Gene>.tsv.gz  (one shard per gene; re-scoring
-                                              needs no ASR replay, and re-aggregation
-                                              stays at one-gene peak RAM)
-      - output_dir/perm_pos_detail.manifest.tsv   (Gene, n_rows per shard)
-      - output_dir/perm_pos_quantiles.tsv    (per cycle distribution shape)
-      - output_dir/perm_pos_sample.tsv       (cycle-stratified sample for violins)
-
-    With detail_only the run stops after pass A: only perm_pos_detail/ and its manifest are written, for
-    a caller that scores the union of several runs' shards in one later pass B.
-
-    With strict_output pass A also writes perm_pos_detail_strict/ (and its manifest): the shards of the same
-    replay pooled without the hypotheses whose discovery row has conserved pairs. They are the null of the
-    analysis that keeps only fully divergent hypotheses; the replay, ASR and scoring are shared with the shards above.
+      - output_dir/null_tables/{units,scores}.parquet and meta.json
+      - output_dir/null_tables_strict/ (with strict_output): the same replay pooled without the hypotheses whose
+        discovery row has conserved pairs; the replay, ASR and scoring are shared with the tables above.
+    With `postproc_filter` the cluster trains of each cycle are flagged and, with `remove_clusters`, their rows are left
+    out of the scores; the gene-removal thresholds and the reference pools are the merge's.
     """
-    import csv as _csv
-
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -857,36 +324,6 @@ def process_all_genes_perms(
     else:
         maxtasks = int(os.environ.get("CAAS_MAX_TASKS_PER_CHILD", "50"))
 
-    # One gz shard per gene rather than one monolithic file: a worker yields one gene's complete row list at a
-    # time, and every later re-aggregation (CAAS_CORE_MERGE, the same finalizer) then needs the memory of one
-    # gene only and reads shard by shard. `iter_detail_rows()` is the matching reader.
-    detail_dir = output_dir / "perm_pos_detail"
-    detail_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = output_dir / "perm_pos_detail.manifest.tsv"
-    strict_dir = output_dir / "perm_pos_detail_strict"
-    strict_manifest: List[Tuple[str, int]] = []
-    if strict_output:
-        strict_dir.mkdir(parents=True, exist_ok=True)
-
-    # CT_POSTPROC filtering of the null candidate pool (cluster trains and dubious/extreme
-    # genes). Off by default; the Nextflow layer turns it on (params.caas_perms_postproc)
-    # so that the null follows the same filters as the observed filtered_discovery.tsv.
-    gene_lengths: Dict[str, float] = {}
-    if postproc_filter and gene_lengths_file:
-        try:
-            from src.core.postproc import load_gene_lengths
-            gene_lengths = load_gene_lengths(
-                path=gene_lengths_file,
-                map_dir=train_map_dir if train_map_dir else None,
-                map_suffix=train_map_suffix if train_map_suffix else ".map.tsv",
-            )
-            logger.info(f"[perms] CT_POSTPROC filter ON: {len(gene_lengths)} gene lengths, "
-                        f"cluster minlen={clust_minlen} maxcaas={clust_maxcaas}, "
-                        f"gene_filter_mode={gene_filter_mode}")
-        except Exception as exc:
-            logger.warning(f"[perms] could not load gene lengths ({exc}); "
-                           "extreme-gene filter disabled")
-
     # Optional untrimmed coordinates: with a MAP directory, the cluster trains of each gene
     # measure their span in untrimmed alignment columns (core.columns). A gene without a MAP
     # file keeps the trimmed coordinates.
@@ -896,14 +333,6 @@ def process_all_genes_perms(
         from src.core.columns import index_files
         train_map_index = index_files(train_map_dir, train_map_suffix)
         logger.info(f"[perms] cluster trains in untrimmed coordinates: {len(train_map_index)} MAP files in {train_map_dir}")
-
-    # n_cycles_total is the same for every gene (all genes replay the same cycle_tags),
-    # so it is computed once here.
-    if fop_mirror:
-        from src.convergence.fop_pool import base_cycle as _bc_global
-        n_cycles_total = len({_bc_global(c) for c in cycle_tags})
-    else:
-        n_cycles_total = len(cycle_tags)
 
     # The genes are dispatched in the order given: the caller lists the largest first (longest processing time
     # first), so the biggest gene does not start late and leave workers idle behind it.
@@ -916,115 +345,65 @@ def process_all_genes_perms(
         "fop_pairs_file": fop_pairs_file if fop_mirror else None,
         "alignment_dir": alignment_dir, "tree_file": tree_file, "taxid_mapping_path": taxid_mapping_path,
         "asr_model": asr_model, "asr_cache_dir": asr_cache_dir, "posterior_threshold": posterior_threshold,
-        "n_cycles_total": n_cycles_total, "postproc_filter": postproc_filter,
-        "clust_minlen": clust_minlen, "clust_maxcaas": clust_maxcaas,
-        "detail_dir": detail_dir, "strict_dir": strict_dir, "strict_output": strict_output,
+        "postproc_filter": postproc_filter, "remove_clusters": remove_clusters,
+        "clust_minlen": clust_minlen, "clust_maxcaas": clust_maxcaas, "strict_output": strict_output,
     }
 
-    # ── Pass A: replay labelings and write the per-gene detail shards ─────────
     cycles_seen: Set[str] = set()
+    parts: List[Tuple[Any, Any]] = []
+    strict_parts: List[Tuple[Any, Any]] = []
     pool = mp.Pool(
         processes=effective_workers, maxtasksperchild=maxtasks,
         initializer=_init_replay_worker, initargs=(worker_config,),
     )
     n_genes = 0
     n_failed = 0
-    n_detail_rows = 0
-    manifest_rows: List[Tuple[str, int]] = []
+    n_units = 0
     try:
         # chunksize=1: each item is the replay of one gene (seconds to minutes of work), not the many-cheap-tasks
         # shape chunksize>1 is meant for.
-        for _gene, n_rows, n_strict, gene_cycles in safe_imap_unordered(pool, _replay_gene_task, tasks, chunksize=1):
-            if n_rows is None:
+        for _gene, status, tables, strict_tables in safe_imap_unordered(pool, _replay_gene_task, tasks, chunksize=1):
+            if status is None:
                 n_failed += 1
                 continue
-            if not n_rows:
+            if not status:
                 continue
-            manifest_rows.append((_gene, n_rows))
-            if n_strict:
-                strict_manifest.append((_gene, n_strict))
-            n_detail_rows += n_rows
-            cycles_seen.update(gene_cycles)
+            parts.append(tables)
+            if strict_tables is not None:
+                strict_parts.append(strict_tables)
+            cycles_seen.update(tables[0]["cycle"].to_pylist())
+            n_units += status
             n_genes += 1
     finally:
         pool.close()
         pool.join()
 
-    with open(manifest_path, "w", newline="") as f_man:
-        w = _csv.writer(f_man, delimiter="\t")
-        w.writerow(["Gene", "n_rows"])
-        w.writerows(sorted(manifest_rows))
+    meta = {"by_labeling": not fop_mirror, "strict": False}
+    write_tables(output_dir / "null_tables", *concat_tables(parts), meta=meta)
     if strict_output:
-        with open(output_dir / "perm_pos_detail_strict.manifest.tsv", "w", newline="") as f_man:
-            w = _csv.writer(f_man, delimiter="\t")
-            w.writerow(["Gene", "n_rows"])
-            w.writerows(sorted(strict_manifest))
-        logger.info(f"[perms] strict pooling: {sum(n for _g, n in strict_manifest)} rows in {len(strict_manifest)} shards "
-                    f"-> {strict_dir.name}/")
+        write_tables(output_dir / "null_tables_strict", *concat_tables(strict_parts), meta={**meta, "strict": True})
+        logger.info(f"[perms] strict pooling: {len(strict_parts)} genes -> null_tables_strict/")
 
     logger.info(
-        f"[perms] pass A done: {n_genes} genes, {n_detail_rows} (gene,cycle,position) "
-        f"rows across {len(cycles_seen)} cycles -> {detail_dir.name}/ ({n_genes} shards)"
+        f"[perms] replay done: {n_genes} genes, {n_units} (gene, cycle) units "
+        f"across {len(cycles_seen)} cycles -> null_tables/"
     )
     if n_failed:
         logger.warning(f"[perms] {n_failed} genes could not be replayed (alignment or ASR unavailable) and are left out "
                        "of the null, as they are left out of the observed")
     if n_genes < len(genes):
         logger.info(
-            f"[perms] pass A scored {n_genes}/{len(genes)} genes with per-cycle CAAS — "
+            f"[perms] {n_genes}/{len(genes)} genes with per-cycle CAAS — "
             f"{len(genes) - n_genes} contributed nothing (no CAAS survived any replayed "
             f"labeling, or the alignment / ASR failed for that gene)."
         )
     if train_map_index is not None and genes_without_map:
         logger.warning(f"[perms] {len(genes_without_map)} genes have no MAP file and keep trimmed-coordinate "
                        f"trains, e.g. {sorted(genes_without_map)[:5]}")
-    if n_detail_rows == 0:
+    if n_units == 0:
         logger.error(
-            "[perms] pass A produced ZERO detail rows — the permulation null is empty. "
+            "[perms] the replay produced ZERO units — the permulation null is empty. "
             "Downstream caas_perms.rds / FCS p.perm will be degenerate. Check the "
             "labelings, the alignments and the ASR cache."
         )
-
-    if detail_only:
-        return output_dir
-
-    # ── Pass B: score each cycle against its own pool, aggregate ──────────────
-
-    # ── Sub-pass B0: cycle-aware dubious/extreme gene removal ─────────────────
-    removed: Set[Tuple[str, str]] = set()
-    if postproc_filter and (gene_filter_mode or "none").lower() != "none":
-        removed = _cycle_gene_removal_from_detail(
-            detail_dir, gene_lengths, gene_filter_mode,
-            iqr_multiplier, extreme_percentile,
-        )
-        logger.info("[perms] pass B0: %d (cycle, gene) units removed "
-                    "(mode=%s) — mirrors CAAS_FILTER_GENES on the null pool",
-                    len(removed), gene_filter_mode)
-        write_removed_units(output_dir / "removed_units.tsv", removed)
-
-    # _finalize_perm_scores aggregates the detail shards, which are keyed by base cycle.
-    # Under the FOP mirror the `cycle_tags` of build_cycle_inputs are "<base>~H<m>"
-    # hypothesis tags, but _perms_worker_replay domain-pools them to one record per base
-    # cycle before any detail row is written. The finalizer needs the base-collapsed list:
-    # with the hypothesis tags, the `for cyc in cycle_tags` loop of _flush would never match
-    # the `cycle` column of the detail rows and every gene x cycle row would be a false
-    # zero, leaving gene_cycle_scores.tsv and the FCS p.perm degenerate.
-    finalize_cycle_tags = cycle_tags
-    if fop_mirror:
-        from src.convergence.fop_pool import base_cycle as _bc
-        finalize_cycle_tags = sorted({_bc(c) for c in cycle_tags})
-        logger.info("[perms] FOP mirror: collapsed %d '<base>~H*' replay tags to "
-                    "%d base cycles for gene x cycle aggregation",
-                    len(cycle_tags), len(finalize_cycle_tags))
-
-    _finalize_perm_scores(
-        detail_path=detail_dir,
-        output_dir=output_dir,
-        cycle_tags=finalize_cycle_tags,
-        removed=removed,
-        seed=seed,
-        remove_clusters=remove_clusters,
-    )
-
-    logger.info(f"[perms] successfully aggregated {n_genes} genes to summaries inside {output_dir}")
     return output_dir

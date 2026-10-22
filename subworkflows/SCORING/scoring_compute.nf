@@ -16,11 +16,10 @@
  *
  *  Consumes:  postproc_file (filtered_discovery.tsv, mandatory); optional FADE gene
  *             summaries and per-site tables, RERConverge summary, accumulation results,
- *             hypothesis pairs, CAAS permulation null (caas_perms.rds and
- *             perm_pos_cycle_caas.tsv.gz) with its cycle roster (N), and the tested
- *             positions (background.output) and cleaned background that fix the
- *             positional universe of the null. Each optional input is a staged
- *             NO_* sentinel file when absent.
+ *             hypothesis pairs, and the counters of the CAAS permulation null
+ *             (null_counters.tsv, null_fit.tsv and null_universe_base.tsv of
+ *             SCORING_NULL_POSITIONS) with its cycle roster (N). Each optional input
+ *             is a staged NO_* sentinel file when absent.
  *  Produces:  position_scores.tsv, gene_scores.tsv, gene_correlations.tsv,
  *             fcs_stats.tsv (plus fcs_stats_{rer,fade,accum}.tsv when that evidence
  *             exists), null_universe_summary.tsv (N, size of the positional universe,
@@ -57,11 +56,10 @@ process SCORING_COMPUTE {
     path rer_summary
     path accum_files
     path hypotheses_pairs   // optional: contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS sentinel otherwise
-    path caas_perms         // optional: caas_perms.rds; its cycle roster gives N for the position p; NO_FILE sentinel otherwise
-    path caas_pos_cycle_caas // optional: perm_pos_cycle_caas.tsv.gz, the position-level null for p.emp; NO_FILE sentinel otherwise
+    path null_counters      // optional: null_counters.tsv, the counters of the position-level null (SCORING_NULL_POSITIONS); NO_* sentinel otherwise
+    path null_fit           // optional: null_fit.tsv, the propensity classes of p.emp_fact; NO_* sentinel otherwise
+    path null_base          // optional: null_universe_base.tsv, what the null fixes of the universe summary; NO_* sentinel otherwise
     path cycle_roster       // optional: cycle_roster.txt, N of the null (cycles with no detection included); NO_* sentinel otherwise
-    path tested_positions   // optional: caastools background.output; the null is limited to these positions; NO_* sentinel otherwise
-    path universe           // optional: cleaned_background_main.txt; the null is limited to these genes; NO_* sentinel otherwise
 
     output:
     path "position_scores.tsv",                              emit: position_scores
@@ -88,21 +86,22 @@ process SCORING_COMPUTE {
     def fs_top_arg        = fade_site_top.name =~ /^NO_FADE_SITE_TOP/ ? 'NO_FADE_SITE_TOP' : "${fade_site_top}"
     def fs_bot_arg        = fade_site_bot.name =~ /^NO_FADE_SITE_BOT/ ? 'NO_FADE_SITE_BOT' : "${fade_site_bot}"
     def hp_arg            = hypotheses_pairs.name =~ /^NO_/ ? 'NO_HYP_PAIRS' : "${hypotheses_pairs}"
-    def cp_arg            = caas_perms.name =~ /^NO_/ ? 'NO_FILE' : "${caas_perms}"
-    def cpcc_arg          = caas_pos_cycle_caas.name =~ /^NO_/ ? 'NO_FILE' : "${caas_pos_cycle_caas}"
+    def counters_arg      = null_counters.name =~ /^NO_/ ? 'NO_FILE' : "${null_counters}"
+    def fit_arg           = null_fit.name =~ /^NO_/ ? 'NO_FILE' : "${null_fit}"
+    def base_arg          = null_base.name =~ /^NO_/ ? 'NO_FILE' : "${null_base}"
     def roster_arg        = cycle_roster.name =~ /^NO_/ ? 'NO_FILE' : "${cycle_roster}"
-    def tested_arg        = tested_positions.name =~ /^NO_/ ? 'NO_FILE' : "${tested_positions}"
-    def universe_arg      = universe.name =~ /^NO_/ ? 'NO_FILE' : "${universe}"
+    def gene_stat         = params.gene_stat ?: 'size_adj_max'
 
     if (params.use_singularity || params.use_apptainer) {
         """
-        cp ${local_dir}/scoring_compute.R ${local_dir}/aa_grouping.R ${local_dir}/observed_core_scores.py .
+        cp ${local_dir}/scoring_compute.R ${local_dir}/aa_grouping.R ${local_dir}/null_position_p.R ${local_dir}/observed_core_scores.py .
         mkdir -p src/core && cp ${core_dir}/scores.py src/core/ && touch src/__init__.py src/core/__init__.py
 
         /usr/local/bin/_entrypoint.sh python3 observed_core_scores.py \
             --input '${postproc_file}' \
             --positions-out core_positions.tsv \
-            --genes-out core_genes.tsv
+            --genes-out core_genes.tsv \
+            --gene-stat ${gene_stat}
 
         /usr/local/bin/_entrypoint.sh Rscript scoring_compute.R \
             --postproc       '${postproc_file}' \
@@ -115,11 +114,10 @@ process SCORING_COMPUTE {
             --rer            '${rer_summary}' \
             --accum_dir      '${accum_arg}' \
             --hypotheses_pairs '${hp_arg}' \
-            --caas_perms      '${cp_arg}' \
-            --caas_pos_cycle_caas '${cpcc_arg}' \
+            --null_counters   '${counters_arg}' \
+            --null_fit        '${fit_arg}' \
+            --null_base       '${base_arg}' \
             --cycle_roster    '${roster_arg}' \
-            --tested_positions '${tested_arg}' \
-            --universe        '${universe_arg}' \
             --top_pct              ${top_pct} \
             --top25_pct            0.25 \
             --top5_pct             0.05 \
@@ -131,13 +129,14 @@ process SCORING_COMPUTE {
         """
     } else {
         """
-        cp ${local_dir}/scoring_compute.R ${local_dir}/aa_grouping.R ${local_dir}/observed_core_scores.py .
+        cp ${local_dir}/scoring_compute.R ${local_dir}/aa_grouping.R ${local_dir}/null_position_p.R ${local_dir}/observed_core_scores.py .
         mkdir -p src/core && cp ${core_dir}/scores.py src/core/ && touch src/__init__.py src/core/__init__.py
 
         python3 observed_core_scores.py \
             --input '${postproc_file}' \
             --positions-out core_positions.tsv \
-            --genes-out core_genes.tsv
+            --genes-out core_genes.tsv \
+            --gene-stat ${gene_stat}
 
         Rscript scoring_compute.R \
             --postproc       '${postproc_file}' \
@@ -150,11 +149,10 @@ process SCORING_COMPUTE {
             --rer            '${rer_summary}' \
             --accum_dir      '${accum_arg}' \
             --hypotheses_pairs '${hp_arg}' \
-            --caas_perms      '${cp_arg}' \
-            --caas_pos_cycle_caas '${cpcc_arg}' \
+            --null_counters   '${counters_arg}' \
+            --null_fit        '${fit_arg}' \
+            --null_base       '${base_arg}' \
             --cycle_roster    '${roster_arg}' \
-            --tested_positions '${tested_arg}' \
-            --universe        '${universe_arg}' \
             --top_pct              ${top_pct} \
             --top25_pct            0.25 \
             --top5_pct             0.05 \

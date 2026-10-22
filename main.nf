@@ -57,8 +57,8 @@ include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}                       from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
 include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_META_CAAS/ctpp_meta_caas.nf'
-include {CAAS_CORE; CAAS_CORE_OBSERVED; CAAS_CORE_MERGE; CAAS_PERMS_PREP; strictOutputOn} from './subworkflows/CT/caas_permulation.nf'
-include {CAAS_CORE_OBSERVED as CAAS_CORE_OBSERVED_STRICT; CAAS_CORE_MERGE as CAAS_CORE_MERGE_STRICT} from './subworkflows/CT/caas_permulation.nf'
+include {CAAS_CORE; CAAS_CORE_OBSERVED; CAAS_CORE_MERGE; CAAS_CORE_MERGE_REDUCE; CAAS_PERMS_PREP; strictOutputOn} from './subworkflows/CT/caas_permulation.nf'
+include {CAAS_CORE_OBSERVED as CAAS_CORE_OBSERVED_STRICT; CAAS_CORE_MERGE as CAAS_CORE_MERGE_STRICT; CAAS_CORE_MERGE_REDUCE as CAAS_CORE_MERGE_REDUCE_STRICT} from './subworkflows/CT/caas_permulation.nf'
 include {CAAS_EVIDENCE}   from './subworkflows/CT_DISAMBIGUATION/ct_evidence.nf'
 include {ENRICHMENT}      from './workflows/enrichment.nf'
 
@@ -289,7 +289,10 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         def pp_cleaned_bg     = null   // cleaned_background_main (single file, value channel)
 
         def scoring_caas_perms_ch = null
-        def scoring_caas_pos_cycle_caas_ch = null   // perm_pos_cycle_caas.tsv.gz — p.emp numerator/denominator
+        def scoring_null_positions_ch = null        // null_positions.parquet: the positions the null scores, with nd
+        def scoring_null_blocks_ch = null           // the blocks' scored positions (permuted cycles)
+        def scoring_null_counts_ch = null           // counts.json of the null (cycles with a row)
+        def scoring_null_summary_ch = null          // cycle_summary.tsv + cycle_hist.tsv: the report's null panels
         def scoring_caas_pos_sample_ch = null
         def scoring_caas_pos_quantiles_ch = null
         def scoring_caas_cycle_roster_ch = null      // cycle_roster.txt — N of the null for SCORING and POSENRICH
@@ -479,17 +482,31 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         }
 
         if (core) {
-            def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
-            def caas_perm_out = CAAS_CORE_MERGE(core.pos_detail.collect(), caas_universe_ch, caas_gene_lengths_ch.collect().map { items -> items[0] }, core.labelings)
-            if (strictOutputOn()) {
-                // The null of the hypotheses without conserved pairs, built like the null above, under <outdir>/strict/
-                CAAS_CORE_MERGE_STRICT(core.pos_detail_strict.collect(), caas_universe_ch, caas_gene_lengths_ch.collect().map { items -> items[0] }, core.labelings)
+            def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }.collect().map { items -> items[0] }
+            def caas_lengths_bc = caas_gene_lengths_ch.collect().map { items -> items[0] }
+            // One merge per block of cycles (and one for b_0), from the tiles of all the gene batches of the block; the
+            // blocks are then joined: the roster, the small tables, caas_perms.rds and the positions the null scores.
+            def merged = CAAS_CORE_MERGE(core.null_tables.groupTuple().join(core.blocks), caas_universe_ch, caas_lengths_bc)
+            // With --caas_full_perms 0 only b_0 is replayed: its block is merged (b0/), and the null has no permuted cycle to
+            // join (written without `?:`, because Groovy reads a numeric 0 as false).
+            def null_has_cycles = !(params.caas_full_perms != null && (params.caas_full_perms as int) == 0)
+            if (null_has_cycles) {
+                def merged_blocks = merged.block_out.filter { it[0] != 'b0' }.map { it[1] }.collect()
+                def caas_perm_out = CAAS_CORE_MERGE_REDUCE(merged_blocks, caas_universe_ch)
+                if (strictOutputOn()) {
+                    // The null of the hypotheses without conserved pairs, built like the null above, under <outdir>/strict/
+                    def merged_strict = CAAS_CORE_MERGE_STRICT(core.null_tables_strict.groupTuple().join(core.blocks), caas_universe_ch, caas_lengths_bc)
+                    CAAS_CORE_MERGE_REDUCE_STRICT(merged_strict.block_out.filter { it[0] != 'b0' }.map { it[1] }.collect(), caas_universe_ch)
+                }
+                scoring_caas_perms_ch = caas_perm_out.perms
+                scoring_null_positions_ch = caas_perm_out.null_positions    // the scored positions of the null with nd: the universe of SCORING and CT_ACCUMULATION
+                scoring_null_blocks_ch = merged_blocks                      // the blocks' scored positions: SCORING counts them against the observed positions
+                scoring_null_counts_ch = caas_perm_out.counts
+                scoring_caas_pos_sample_ch = caas_perm_out.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))  // cycle-stratified sample for distribution plots
+                scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))  // per-cycle distribution shape
+                scoring_null_summary_ch = caas_perm_out.cycle_summary.combine(caas_perm_out.cycle_hist)   // per-cycle detections and score histogram: the report's null panels
+                scoring_caas_cycle_roster_ch = caas_perm_out.cycle_roster.ifEmpty(file('NO_CAAS_CYCLE_ROSTER'))  // every replayed cycle, the empty ones included
             }
-            scoring_caas_perms_ch = caas_perm_out.perms
-            scoring_caas_pos_cycle_caas_ch = caas_perm_out.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))  // per (gene,position,side,cycle) caas_score -> p.emp
-            scoring_caas_pos_sample_ch = caas_perm_out.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))  // cycle-stratified sample for distribution plots
-            scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))  // per-cycle distribution shape
-            scoring_caas_cycle_roster_ch = caas_perm_out.cycle_roster.ifEmpty(file('NO_CAAS_CYCLE_ROSTER'))  // every replayed cycle, the empty ones included
             ran_any = true
         }
 
@@ -525,13 +542,13 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     ? Channel.fromPath(params.posenrich_background_file)
                     : Channel.empty())
 
-            // The universe U reads the same filtered null SCORING uses (perm_pos_cycle_caas.tsv.gz); it
-            // falls back to --caas_pos_cycle_caas_file for reruns without a live permulation core
+            // The universe U reads the same filtered null SCORING uses (null_positions.parquet); it
+            // falls back to --caas_null_dir for reruns without a live permulation core
             // (resolved inside CT_ACCUMULATION).
-            def acc_null_cycle_caas_ch = scoring_caas_pos_cycle_caas_ch
+            def acc_null_positions_ch = scoring_null_positions_ch
 
             accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch,
-                                            acc_tested_pos_ch, acc_null_cycle_caas_ch)
+                                            acc_tested_pos_ch, acc_null_positions_ch)
             ran_any = true
 
         }
@@ -664,7 +681,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         println "DEBUG: params.traitname = '${params.traitname}'"
 
         // CAAS permulation-excess null → genes×N matrices (caas_perms.rds) + the
-        // per-cycle position-level null (perm_pos_cycle_caas.tsv.gz, feeds p.emp).
+        // positions the null scores, per block of cycles (feeds the counters of p.emp).
         // Runs whenever caas_permulation_enrichment is enabled. If live CT ran,
         // consumes ct_results channels; if CT is precomputed
         // (RUN_CAAS=false), resolves precomputed resample + alignment inputs to run
@@ -747,7 +764,10 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 pp_cleaned_bg,         // cleaned_background_main.txt — FCS universe
                 scoring_rer_perms_ch,  // RER permulation RDS → p.perm in centralized RER FCS
                 scoring_caas_perms_ch, // CAAS permulation RDS (asr+caas null) → FCS p.perm + report
-                scoring_caas_pos_cycle_caas_ch, // per (gene,position,side,cycle) caas_score → p.emp
+                scoring_null_positions_ch,     // null_positions.parquet: the positions the null scores, with nd
+                scoring_null_blocks_ch,        // the blocks' scored positions: counted against the observed positions
+                scoring_null_counts_ch,        // counts.json of the null
+                scoring_null_summary_ch,       // cycle_summary.tsv + cycle_hist.tsv: the report's null panels
                 scoring_caas_pos_sample_ch,  // cycle-stratified sample for report distribution plots
                 scoring_caas_pos_quantiles_ch, // per-cycle null distribution shape
                 scoring_hyp_pairs_ch,          // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
@@ -885,8 +905,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     scoring_rer_perms_ch,
                     caas_perms_for_enrich,
                     scoring_caas_pos_sample_ch,
-                    scoring_caas_pos_cycle_caas_ch,
-                    scoring_caas_cycle_roster_ch,
                     position_scores_ch,
                     position_lists_ch,
                     posenrich_background_ch,

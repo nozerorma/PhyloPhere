@@ -174,13 +174,13 @@ Voronoi domains, without altering the main data path. Emits gene lists consumed 
 Exact hypergeometric test for whether a gene holds more CAAS positions than its
 share of the position universe U predicts, run once per direction
 (top/bottom/all). U is the set of positions CAAStools tested that score in the
-filtered permulation null (`perm_pos_cycle_caas.tsv.gz`), plus the observed
+filtered permulation null (`null_positions.parquet`), plus the observed
 positions; a gene's length enters through its number of positions in U
 (`PoolPositions`), and a position detected on both sides counts once. It takes
 `filtered_discovery.tsv`, the cleaned background, the tested positions and the
 permulation null (no alignment needed); standalone via
 `--accumulation_caas_input`, `--accumulation_background_input`,
-`--posenrich_background_file` and `--caas_pos_cycle_caas_file`.
+`--posenrich_background_file` and `--caas_null_dir`.
 
 ### VEP — pathogenicity annotation
 Annotates filtered CAAS positions with PrimateAI-3D pathogenicity scores and
@@ -286,9 +286,10 @@ class that differs from the ancestral class, and `is_biochem` says whether there
 annotation reads them. The annotation does not enter the score; the position-level enrichment report tests whether
 agreement is enriched among the highest scores.
 
-The permulation null and the observed score use the same rule: scoring stops when the null
-(`perm_pos_cycle_caas.tsv.gz`, column `score_aggregation`) is missing or was built with another rule, and the null
-is then rebuilt (`CAAS_CORE_MERGE`, no ASR replay).
+The permulation null and the observed score use the same rule (`core.scores`). The null is merged per block of cycles
+(`CAAS_CORE_MERGE`, no ASR replay) into the genes x cycles matrices of the gene statistic (`gene_stat`) and the positions each
+cycle scores; the position p-values (`p.emp`, `p.emp_fact`) are built from counters summed over the blocks
+(`scoring_null_positions.nf`), never from a table of every detection.
 
 > The hypergeometric p-value (`pvalue`) is deliberately excluded from the core
 > score and instead acts as a significance gate (`gate_sig`: `pvalue < 0.05`).
@@ -415,6 +416,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 |---|---|---|
 | `publish_intermediates` | `false` | Publishes intermediate discovery and resampling files for debugging. |
 | `ct_bootstrap_batch_size` | `10` | Number of genes batched per bootstrap task. |
+| `gene_stat` | `size_adj_max` | Gene statistic of the permulation null and of the observed gene score: `size_adj_max` (F(max)^n), `fmax` (F(max)) or `max` (the largest position score of the gene); F is the ECDF of the position scores of the cycle in the direction. The null of a prior run must have been built with the same one. |
 | `caas_cycle_block_size` | `500` | Permulation cycles per block of the CAAS null: a replay task takes one batch of genes (`ct_core_batch_size`) and the labelings of one block, so its memory does not depend on `caas_full_perms`. |
 | `caas_config` | `""` | Path to custom CAAStools configuration file. |
 | `max_bg_gaps_fraction` / `max_fg_gaps_fraction` / `max_gaps_fraction` | `0.0` | Gap tolerance fractions allowed in background, foreground, or overall. |
@@ -449,7 +451,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `caas_evidence_top_n` | `0` | Number of best positions of `position_scores.tsv` whose evidence is written after SCORING to `scoring/evidence/` (`evidence_top<N>.tsv`, `top_positions.tsv`); `0` = off. Needs `--scoring`, the observed `discovery.tab` (the run's own, or `--discovery_from`) and `ct_disambig_asr_cache_dir`. |
 | `scoring_compare_fdr` / `scoring_compare_top_n` | `0.15` / `20` | Significance FDR and top-N gene count for cross-tool comparison reports. |
 | `scoring_window_size_bp` | `1000000` | Genomic window size (bp) for genomic overlap reporting. |
-| `scoring_postproc_input`, `scoring_fade_summary_top/bottom`, `scoring_rer_input`, `scoring_accum_dir`, `scoring_fade_site_top/bottom`, `scoring_background_input`, `caas_pos_cycle_caas_file`, `caas_cycle_roster_file` | `""` | Standalone input file/directory fallbacks when running SCORING independently. `caas_cycle_roster_file` (`cycle_roster.txt` of a prior CAAS_CORE_MERGE) gives N of the null, cycles with no detection included, to SCORING, POSENRICH and the accumulation permulation null; without it N is the number of cycles present in the null, with a log line. |
+| `scoring_postproc_input`, `scoring_fade_summary_top/bottom`, `scoring_rer_input`, `scoring_accum_dir`, `scoring_fade_site_top/bottom`, `scoring_background_input`, `caas_null_dir` | `""` | Standalone input file/directory fallbacks when running SCORING independently. `caas_null_dir` (the `caas_permulation/` directory of a prior run: `null_positions.parquet`, `blocks/`, `cycle_roster.txt`, `counts.json`, `cycle_summary.tsv`, `cycle_hist.tsv`) is the position-level null of SCORING and of the accumulation permulation null. |
 | `scoring_vep_primateai`, `scoring_vep_cosmic`, `scoring_vep_ensembl` | `""` | Precomputed PrimateAI-3D/COSMIC score TSVs and Ensembl VEP consequence TSV (one row per transcript, keyed by Gene, Position and side). Not read by SCORING itself; ENRICHMENT (POSENRICH) reuses these as its own precomputed-VEP fallback when `--vep` did not run live. |
 
 </details>

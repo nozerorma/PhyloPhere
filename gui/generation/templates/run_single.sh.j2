@@ -124,14 +124,11 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     # the background substitutions above are. Without them the CAAS FCS p.perm and the
     # position-level permulation section of the report come out empty, although the
     # permulation null was computed.
-    CAAS_POS_CYCLE_CAAS_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_cycle_caas.tsv.gz"
-    CAAS_POS_SAMPLE_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
-    CAAS_POS_QUANTILES_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
-    CAAS_CYCLE_ROSTER_FILE="${CAAS_REUSE_OUTDIR}/caas_permulation/cycle_roster.txt"
+    CAAS_NULL_DIR="${CAAS_REUSE_OUTDIR}/caas_permulation"
     CAAS_PERM_MANIFEST_FILE="${PASS_SOURCE_OUTDIR}/caastools/permulation_manifest.tsv"
     CAAS_PERM_HARVEST_FILE="${PASS_SOURCE_OUTDIR}/caastools/permulation_harvest.tsv"
-    for _f in "$CAAS_POS_CYCLE_CAAS_FILE" "$CAAS_POS_SAMPLE_FILE" "$CAAS_POS_QUANTILES_FILE"; do
-        [ -f "$_f" ] || echo "[WARN] expected permulation output missing, p.perm will be empty: $_f" >&2
+    for _f in "$CAAS_NULL_DIR/null_positions.parquet" "$CAAS_NULL_DIR/cycle_roster.txt" "$CAAS_NULL_DIR/cycle_summary.tsv"; do
+        [ -f "$_f" ] || echo "[WARN] expected permulation output missing, the position p-values will be empty: $_f" >&2
     done
     # The roster gives N of the null (cycles with no detection included); a null of an older run has none
     [ -f "$CAAS_CYCLE_ROSTER_FILE" ] || {
@@ -223,17 +220,14 @@ if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     META_CAAS_FROM="${PRECOMP_OUTDIR}/meta_caas/meta_caas/meta_caas.tsv"
     BACKGROUND_INPUT="${PRECOMP_OUTDIR}/caastools/background_genes.output"
     POSENRICH_BACKGROUND_FILE="${PRECOMP_OUTDIR}/caastools/background.output"
-    # These exist only if the source run had --caas_permulation_enrichment on. The
-    # perm_pos_cycle_caas.tsv.gz file carries the position-level p.emp null; the sample and
-    # quantile files feed the position-level null plots of the report. The reuse_exploratory
-    # branch above sets the same variables; keep the two lists in sync.
-    CAAS_POS_CYCLE_CAAS_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_cycle_caas.tsv.gz"
-    CAAS_POS_SAMPLE_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
-    CAAS_POS_QUANTILES_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
-    CAAS_CYCLE_ROSTER_FILE="${PRECOMP_OUTDIR}/caas_permulation/cycle_roster.txt"
-    [ -f "$CAAS_CYCLE_ROSTER_FILE" ] || {
-        echo "[WARN] cycle_roster.txt missing: N will be the number of cycles present in the null (understated when a cycle detected nothing)" >&2
-        CAAS_CYCLE_ROSTER_FILE=""
+    # These exist only if the source run had --caas_permulation_enrichment on. The caas_permulation/ directory
+    # (null_positions.parquet, blocks/, cycle_roster.txt, counts.json, cycle_summary.tsv, cycle_hist.tsv) is the
+    # position-level null of SCORING and CT_ACCUMULATION. The reuse_exploratory branch above sets the same
+    # variable; keep the two in sync.
+    CAAS_NULL_DIR="${PRECOMP_OUTDIR}/caas_permulation"
+    [ -f "$CAAS_NULL_DIR/cycle_roster.txt" ] || {
+        echo "[WARN] cycle_roster.txt missing in $CAAS_NULL_DIR: the position-level null cannot be used" >&2
+        CAAS_NULL_DIR=""
     }
     CAAS_PERM_MANIFEST_FILE="${PRECOMP_OUTDIR}/caastools/permulation_manifest.tsv"
     CAAS_PERM_HARVEST_FILE="${PRECOMP_OUTDIR}/caastools/permulation_harvest.tsv"
@@ -510,6 +504,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "publish_intermediates": {{ run_defaults.publish_intermediates }},
   "ct_core_batch_size": "${CT_CORE_BATCH_SIZE:-20}",
   "caas_cycle_block_size": "${CAAS_CYCLE_BLOCK_SIZE:-500}",
+  "gene_stat": "${GENE_STAT:-size_adj_max}",
   "min_divergent_fraction": "${MIN_DIVERGENT_FRACTION:-0.5}",
   "min_non_overlapping": "${MIN_NON_OVERLAPPING:-2}",
   "strict_conservation_output": {{ run_defaults.strict_conservation_output }},
@@ -625,12 +620,9 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring_fade_site_bottom": "${SCORING_FADE_SITE_BOTTOM:-}",
   "scoring_vep_cosmic": "${SCORING_VEP_COSMIC:-}",
   "scoring_vep_ensembl": "${SCORING_VEP_ENSEMBL:-}",
-  "caas_pos_cycle_caas_file": "${CAAS_POS_CYCLE_CAAS_FILE:-}",
-  "caas_pos_sample_file": "${CAAS_POS_SAMPLE_FILE:-}",
-  "caas_pos_quantiles_file": "${CAAS_POS_QUANTILES_FILE:-}",
+  "caas_null_dir": "${CAAS_NULL_DIR:-}",
   "caas_perm_manifest_file": "${CAAS_PERM_MANIFEST_FILE:-}",
   "caas_perm_harvest_file": "${CAAS_PERM_HARVEST_FILE:-}",
-  "caas_cycle_roster_file": "${CAAS_CYCLE_ROSTER_FILE:-}",
 
   "vep": $_RUN_VEP,
   "caas_map_dir": "${MAP_DIR:-}",

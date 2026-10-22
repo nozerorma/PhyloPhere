@@ -9,8 +9,8 @@
 #    - caas_channel            : filtered_discovery.tsv from CT_POSTPROC (gene_filtering)
 #    - background_channel      : cleaned_background_main.txt from CT_POSTPROC
 #    - tested_positions_channel: caastools background.output (required)
-#    - null_cycle_caas_channel : perm_pos_cycle_caas.tsv.gz from CAAS_CORE_MERGE (required, or the
-#                                --caas_pos_cycle_caas_file fallback)
+#    - null_positions_channel  : null_positions.parquet from CAAS_CORE_MERGE_REDUCE (required, or the
+#                                --caas_null_dir fallback)
 */
 
 include { CT_ACCUMULATION_TEST } from '../subworkflows/CT_ACCUMULATION/ctacc_run'
@@ -23,9 +23,9 @@ workflow CT_ACCUMULATION {
         background_channel       // cleaned_background_main.txt from CT_POSTPROC  (or Channel.empty())
         tested_positions_channel // caastools background.output — TESTED positions, the starting point of the
                                  // universe U (required: Channel.empty() makes the run stop with an error)
-        null_cycle_caas_channel  // perm_pos_cycle_caas.tsv.gz from CAAS_CORE_MERGE, the filtered null SCORING also
+        null_positions_channel   // null_positions.parquet from CAAS_CORE_MERGE_REDUCE, the filtered null SCORING also
                                  // uses; U keeps the tested positions it scores (required, or the
-                                 // --caas_pos_cycle_caas_file fallback)
+                                 // --caas_null_dir fallback)
 
     main:
         // ── Resolve CAAS source (filtered_discovery.tsv from postproc) ────────
@@ -100,8 +100,8 @@ workflow CT_ACCUMULATION {
             .map { it[0] }
         def bg_universe_val = background_val
             .ifEmpty { error "CT_ACCUMULATION requires the cleaned background (cleaned_background_main.txt): run CT post-processing or pass --accumulation_background_input." }
-        def null_cycle_caas_val = (null_cycle_caas_channel ?: Channel.empty())
-            .ifEmpty { params.caas_pos_cycle_caas_file ? file(params.caas_pos_cycle_caas_file) : error("CT_ACCUMULATION requires the filtered permulation null (perm_pos_cycle_caas.tsv.gz): run CAAS permulation or pass --caas_pos_cycle_caas_file.") }
+        def null_positions_val = (null_positions_channel ?: Channel.empty())
+            .ifEmpty { params.caas_null_dir ? file("${params.caas_null_dir}/null_positions.parquet") : error("CT_ACCUMULATION requires the positions the permulation null scores (null_positions.parquet): run CAAS permulation or pass --caas_null_dir.") }
             .collect()
             .map { it[0] }
 
@@ -109,13 +109,13 @@ workflow CT_ACCUMULATION {
             .combine(meta_caas_val)
             .combine(tested_pos_val)
             .combine(bg_universe_val)
-            .combine(null_cycle_caas_val)
-            .multiMap { dir, caas_csv, tested_pos, bg_universe, null_cycle_caas ->
+            .combine(null_positions_val)
+            .multiMap { dir, caas_csv, tested_pos, bg_universe, null_positions ->
                 direction:         dir
                 caas:              caas_csv
                 tested:            tested_pos
                 universe:          bg_universe
-                null_cycle_caas:   null_cycle_caas
+                null_positions:    null_positions
             }
 
         test_out = CT_ACCUMULATION_TEST(
@@ -123,7 +123,7 @@ workflow CT_ACCUMULATION {
             test_in.caas,
             test_in.tested,
             test_in.universe,
-            test_in.null_cycle_caas
+            test_in.null_positions
         )
 
         // ── Accumulation report (rendered after all directions complete) ──────

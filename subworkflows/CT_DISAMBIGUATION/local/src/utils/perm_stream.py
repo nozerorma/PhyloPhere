@@ -182,6 +182,11 @@ def _slim(records: List[Any]) -> List[SlimRecord]:
     return [SlimRecord(r.position, r.asr_path_score, r.side, r.n_hypotheses, r.n_species) for r in records]
 
 
+def _keep_records(cycle: str, records: List[Any]) -> List[SlimRecord]:
+    """The default reduction of a cycle: its records, slimmed."""
+    return _slim(records)
+
+
 # ── One gene ─────────────────────────────────────────────────────────────────
 
 
@@ -192,13 +197,15 @@ def stream_gene(
     load_ctx: Callable[[], Optional[Dict[str, Any]]],
     posterior_threshold: float,
     strict: bool = False,
-) -> Optional[Tuple[List[Tuple[str, List[SlimRecord]]], List[Tuple[str, List[SlimRecord]]]]]:
+    reduce: Callable[[str, List[Any]], Any] = _keep_records,
+) -> Optional[Tuple[List[Tuple[str, Any]], List[Tuple[str, Any]]]]:
     """Replay every labeling of `replay` over one alignment and score the cycles that have a detection.
 
-    Returns (pooled, strict_pooled): [(cycle or base cycle, per-position records)] in cycle-tag order, the second
-    list empty unless `strict`. ([], []) when no labeling detects anything, and None when the gene's ASR context
-    could not be loaded (`load_ctx` is called once, at the first cycle with a detection, so a gene without any does
-    not pay for it).
+    Returns (pooled, strict_pooled): [(cycle or base cycle, reduce(cycle, per-position records))] in cycle-tag order,
+    the second list empty unless `strict`. `reduce` turns the pooled records of a cycle into what the caller keeps (the
+    slimmed records by default); a cycle for which it returns None is dropped. ([], []) when no labeling detects
+    anything, and None when the gene's ASR context could not be loaded (`load_ctx` is called once, at the first cycle
+    with a detection, so a gene without any does not pay for it).
     """
     pr, s = replay.pr, replay.settings
     t_start = time.perf_counter()
@@ -212,8 +219,8 @@ def stream_gene(
     ctx: Optional[Dict[str, Any]] = None
     t_kernel = t_entries = t_score = t_ctx = 0.0
     n_hits = n_cycles = 0
-    pooled: List[Tuple[str, List[SlimRecord]]] = []
-    pooled_strict: List[Tuple[str, List[SlimRecord]]] = []
+    pooled: List[Tuple[str, Any]] = []
+    pooled_strict: List[Tuple[str, Any]] = []
 
     chunks = vb.count_chunks(
         positions, sliced.genename, s.max_fg_gaps, s.max_bg_gaps, s.max_gaps, s.max_fg_miss, s.max_bg_miss, s.max_miss,
@@ -260,10 +267,15 @@ def stream_gene(
             results = score_labelings(ctx, gene, sorted(entries_by_tag), replay.labelings, entries_by_tag, posterior_threshold)
             if results:
                 n_cycles += 1
-                pooled.extend((cyc, _slim(recs)) for cyc, recs in pool_labelings(results, replay.fop_pairs, replay.labelings))
+                for cyc, recs in pool_labelings(results, replay.fop_pairs, replay.labelings):
+                    kept = reduce(cyc, _slim(recs))
+                    if kept is not None:
+                        pooled.append((cyc, kept))
                 if strict:
-                    pooled_strict.extend(
-                        (cyc, _slim(recs)) for cyc, recs in pool_labelings(results, replay.fop_pairs, replay.labelings, strict=True))
+                    for cyc, recs in pool_labelings(results, replay.fop_pairs, replay.labelings, strict=True):
+                        kept = reduce(cyc, _slim(recs))
+                        if kept is not None:
+                            pooled_strict.append((cyc, kept))
             t_score += time.perf_counter() - t0
 
     pooled.sort(key=lambda item: item[0])

@@ -49,6 +49,7 @@ class CaasConfig(ModuleConfigBase):
     caas_full_perms: str = "1000"  # --caas_full_perms
     caas_permulation_enrichment: bool = True  # --caas_permulation_enrichment
     caas_perms_postproc: bool = True  # --caas_perms_postproc (apply the observed post-processing filters to the permulation null)
+    gene_stat: str = "size_adj_max"  # --gene_stat (size_adj_max|fmax|max: gene statistic of the permulation null and of the observed gene score)
 
     # Contrast-selection tuning (conf/common.config), used when --contrast_selection
     # runs upstream of CT.

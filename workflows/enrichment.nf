@@ -134,8 +134,6 @@ workflow ENRICHMENT {
         rer_perms_ch
         caas_perms_ch
         caas_pos_sample_ch
-        caas_pos_cycle_caas_ch  // perm_pos_cycle_caas.tsv.gz (Gene,Position,side,cycle,caas_score,score_aggregation) -> POSENRICH's p.perm
-        caas_cycle_roster_ch    // cycle_roster.txt of the same CAAS_CORE_MERGE run -> N of the null for POSENRICH (null/empty when absent)
         position_scores
         position_lists       // SCORING's published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv dir
         background_output_ch
@@ -374,150 +372,12 @@ workflow ENRICHMENT {
         }
 
         // ── Position-level FCS ──
+        // POSENRICH took its p.perm from the position-level null as a table of every (position, cycle). The null is kept as
+        // counters per block of cycles, with no such table, so the module is not run (docs/POSENRICH_PORTE_EVALUACION.md
+        // describes how to port it to the counters).
         def posenrich_out = null
-        // POSENRICH's p.perm needs the position-level permulation null: the live one of CAAS_CORE_MERGE, or
-        // --caas_pos_cycle_caas_file. Without it the module is skipped, with a warning, rather than run without its null.
-        def posenrich_null_available = (caas_pos_cycle_caas_ch != null) ||
-            (params.caas_pos_cycle_caas_file && file(params.caas_pos_cycle_caas_file).exists())
-        if (params.posenrich && !posenrich_null_available) {
-            log.warn "[POSENRICH] skipped: there is no position-level permulation null (perm_pos_cycle_caas.tsv.gz): CAAS_CORE_MERGE did not run in this invocation and --caas_pos_cycle_caas_file is not set. The position-level enrichment (report 14) is not produced."
-        }
-        if (params.posenrich && posenrich_null_available) {
-            def pos_gene_ensembl_ch = Channel.fromPath(params.gene_ensembl_file).ifEmpty { file('NO_FILE') }
-            def pos_domain_variability_ch
-            if (!params.posenrich_domains) {
-                pos_domain_variability_ch = file('NO_FILE')
-            } else if (params.domain_variability_file) {
-                pos_domain_variability_ch = Channel.fromPath(params.domain_variability_file).ifEmpty { file('NO_FILE') }
-            } else if (params.alignment) {
-                log.info "[ENRICHMENT] domain_variability_file not set — auto-generating via cached Pfam-A + hmmscan."
-                DOMAIN_VARIABILITY_GENERATION(Channel.value(file(params.alignment, type: 'dir')))
-                pos_domain_variability_ch = DOMAIN_VARIABILITY_GENERATION.out.domain_variability_file
-            } else {
-                log.warn "[ENRICHMENT] domain_variability_file not set and params.alignment unavailable — skipping."
-                pos_domain_variability_ch = file('NO_FILE')
-            }
-            def pos_ucr_positions_ch
-            if (!params.posenrich_ucr) {
-                pos_ucr_positions_ch = file('NO_FILE')
-            } else if (params.ucr_positions_file) {
-                pos_ucr_positions_ch = Channel.fromPath(params.ucr_positions_file).ifEmpty { file('NO_FILE') }
-            } else if (params.tax_id && params.alignment) {
-                log.info "[ENRICHMENT] ucr_positions_file not set — auto-generating from the alignment (Valdar variability + UCR detection)."
-                UCR_GENERATION(
-                    Channel.value(file(params.alignment, type: 'dir')),
-                    taxid_map_ch,
-                )
-                pos_ucr_positions_ch = UCR_GENERATION.out.ucr_positions_file
-            } else {
-                log.warn "[ENRICHMENT] ucr_positions_file not set and params.tax_id/params.alignment unavailable — skipping UCR auto-generation."
-                pos_ucr_positions_ch = file('NO_FILE')
-            }
-            def pos_fubar_sites_ch = Channel.fromPath(params.fubar_sites_file).ifEmpty { file('NO_FILE') }
-            // Each of these is independently optional, and several can be absent
-            // in the same run (e.g. no COSMIC/PrimateAI-3D DBs and no FADE run).
-            // They must NOT share one literal 'NO_FILE' sentinel: Nextflow stages
-            // path inputs by filename, so two absent inputs staged into the same
-            // POSENRICH process call under the identical name 'NO_FILE' collide
-            // ("input file name collision"). Every sentinel below is unique but
-            // keeps the 'NO_FILE' prefix so the `=~ /^NO_FILE/` checks in
-            // posenrich.nf still recognize it as absent.
-            def pos_egg_members_ch
-            def pos_egg_annotations_ch
-            if (!params.posenrich_eggnog) {
-                pos_egg_members_ch = file('NO_FILE_EGG_MEMBERS')
-                pos_egg_annotations_ch = file('NO_FILE_EGG_ANNOT')
-            } else if (params.egg_members_file && params.egg_annotations_file) {
-                pos_egg_members_ch = Channel.fromPath(params.egg_members_file).ifEmpty { file('NO_FILE_EGG_MEMBERS') }
-                pos_egg_annotations_ch = Channel.fromPath(params.egg_annotations_file).ifEmpty { file('NO_FILE_EGG_ANNOT') }
-            } else {
-                log.info "[ENRICHMENT] egg_members_file/egg_annotations_file not set — auto-fetching eggNOG5 orthogroups (bin/resolve_eggnog.py)."
-                EGGNOG_RESOLUTION()
-                pos_egg_members_ch = EGGNOG_RESOLUTION.out.egg_members_file
-                pos_egg_annotations_ch = EGGNOG_RESOLUTION.out.egg_annotations_file
-            }
-            def pos_map_dir_ch = params.caas_map_dir ? Channel.fromPath(params.caas_map_dir).ifEmpty { file('NO_FILE_MAP_DIR') } : file('NO_FILE_MAP_DIR')
-            def pos_cosmic_db_ch = params.cosmic_db ? Channel.fromPath(params.cosmic_db).ifEmpty { file('NO_FILE_COSMIC_DB') } : file('NO_FILE_COSMIC_DB')
-            def pos_pai3d_db_ch = params.vep_primateai_db ? Channel.fromPath(params.vep_primateai_db).ifEmpty { file('NO_FILE_PAI3D_DB') } : file('NO_FILE_PAI3D_DB')
-            def pos_cleaned_background_ch = (cleaned_background_ch ?: Channel.empty()).ifEmpty { file('NO_FILE_BACKGROUND') }
-
-            def pos_caas_file_ch = (position_scores ?: Channel.empty()).ifEmpty { file('NO_FILE_CAAS') }
-            // SCORING's own published position percentile slices -- posenrich's
-            // SOLE foreground source (no local re-ranking fallback: SCORING is a
-            // mandatory upstream dependency of posenrich, not optional). If
-            // position_lists is genuinely absent (e.g. --scoring off), this
-            // sentinel flows through and posenrich_enrich.py hard-fails with a
-            // clear message rather than silently degrading.
-            def pos_lists_ch = (position_lists ?: Channel.empty()).ifEmpty { file('NO_FILE_POSITION_LISTS') }
-            // Position background = caastools background.output (tested positions),
-            // restricted downstream to the cleaned_background genes. An optional
-            // param overrides the in-run channel for standalone re-runs.
-            def pos_background_ch = params.posenrich_background_file ?
-                Channel.fromPath(params.posenrich_background_file).ifEmpty { file('NO_FILE_POS_BG') } :
-                (background_output_ch ? background_output_ch : file('NO_FILE_POS_BG'))
-
-            // Position Characterisation (PrimateAI-3D + COSMIC validation, moved here
-            // from the Scoring report) reuses gene_scores (already a take: param) plus
-            // the same VEP outputs SCORING's own report renders with.
-            // vep_primateai_ch/vep_cosmic_ch are null whenever --vep didn't run
-            // this invocation (main.nf: `params.vep ? VEP.out.primateai_tsv :
-            // null`) -- fall back to the same --scoring_vep_primateai/
-            // --scoring_vep_cosmic precomputed-file params SCORING's own
-            // report already resolves (workflows/scoring.nf's
-            // resolved_vep_primateai/resolved_vep_cosmic), so a precomputed-
-            // VEP run (--scoring_vep_primateai set, no live --vep) still
-            // reaches Position Characterisation instead of silently going NULL.
-            def pos_gene_scores_ch = (gene_scores ?: Channel.empty()).ifEmpty { file('NO_FILE_GENE_SCORES') }
-            def pos_vep_primateai_ch = (vep_primateai_ch ?: Channel.empty())
-                .ifEmpty { (params.scoring_vep_primateai && file(params.scoring_vep_primateai).exists()) ? file(params.scoring_vep_primateai) : file('NO_FILE_VEP_PAI') }
-            def pos_vep_cosmic_ch   = (vep_cosmic_ch ?: Channel.empty())
-                .ifEmpty { precomputedOrSentinel('scoring_vep_cosmic', params.scoring_vep_cosmic, 'NO_FILE_VEP_COSMIC') }
-            def pos_vep_ensembl_ch  = (vep_ensembl_ch ?: Channel.empty())
-                .ifEmpty { precomputedOrSentinel('scoring_vep_ensembl', params.scoring_vep_ensembl, 'NO_FILE_VEP_ENSEMBL') }
-
-            // FADE_top_sig / FADE_bottom_sig position group (the classic BF>=100
-            // sites, written by FADE_REPORT as fade_sites_<direction>.csv when --fade runs).
-            def pos_fade_sites_top_ch    = (fade_sites_top_ch ?: Channel.empty()).ifEmpty { file('NO_FILE_FADE_TOP') }
-            def pos_fade_sites_bottom_ch = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FILE_FADE_BOTTOM') }
-
-            // CAAS permulation null (perm_pos_cycle_caas.tsv.gz), for POSENRICH's
-            // p.perm -- absent whenever CAAS_CORE_MERGE didn't run this
-            // invocation (--caas_permulation_enrichment off, or CT skipped).
-            def pos_caas_cycle_null_ch = (caas_pos_cycle_caas_ch ?: Channel.empty())
-                .ifEmpty { file(params.caas_pos_cycle_caas_file ?: 'NO_FILE_CAAS_CYCLE_NULL') }
-            // Roster of the replayed cycles: live from CAAS_CORE_MERGE, else --caas_cycle_roster_file.
-            // Without it POSENRICH takes N from the cycles present in the null and says so.
-            def pos_cycle_roster_ch = (caas_cycle_roster_ch ?: Channel.empty())
-                .ifEmpty { file(params.caas_cycle_roster_file ?: 'NO_FILE_CYCLE_ROSTER') }
-
-            posenrich_out = POSENRICH(
-                pos_gene_ensembl_ch,
-                pos_domain_variability_ch,
-                pos_ucr_positions_ch,
-                pos_fubar_sites_ch,
-                pos_egg_members_ch,
-                pos_egg_annotations_ch,
-                pos_map_dir_ch,
-                pos_cosmic_db_ch,
-                pos_pai3d_db_ch,
-                pos_cleaned_background_ch,
-                pos_caas_file_ch,
-                pos_lists_ch,
-                pos_background_ch,
-                annot_ch,
-                params.posenrich_min_size,
-                params.posenrich_max_size,
-                pos_gene_scores_ch,
-                pos_vep_primateai_ch,
-                pos_vep_cosmic_ch,
-                pos_vep_ensembl_ch,
-                pos_gene_ensembl_ch,
-                pos_fade_sites_top_ch,
-                pos_fade_sites_bottom_ch,
-                pos_caas_cycle_null_ch,
-                pos_cycle_roster_ch
-            )
-            final_reports = final_reports.mix(posenrich_out.report)
+        if (params.posenrich) {
+            log.warn "[POSENRICH] skipped: the position-level permulation null is no longer written as a table of every (position, cycle), which its p.perm needs. The position-level enrichment (report 14) is not produced."
         }
 
         // ── Comparison report — pulls in CAAS/RER FCS, plus (when available) AMI's

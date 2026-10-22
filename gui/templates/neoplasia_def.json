@@ -70,6 +70,7 @@
       "publish_intermediates": false,
       "ct_core_batch_size": "100",
       "caas_cycle_block_size": "500",
+      "gene_stat": "size_adj_max",
       "min_divergent_fraction": "0",
       "min_non_overlapping": "2",
       "strict_conservation_output": true,

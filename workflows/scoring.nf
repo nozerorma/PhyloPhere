@@ -13,6 +13,7 @@
  */
 
 include { SCORING_COMPUTE }                                                           from '../subworkflows/SCORING/scoring_compute.nf'
+include { SCORING_NULL_POSITIONS }                                                    from '../subworkflows/SCORING/scoring_null_positions.nf'
 include { SCORING_REPORT }                                                            from '../subworkflows/SCORING/scoring_report.nf'
 
 
@@ -30,7 +31,10 @@ workflow SCORING {
         cleaned_background_ch    // Channel<path> or null — cleaned_background_main.txt (FCS universe)
         rer_perms_ch             // Channel<path> or null — RER permulation RDS (corStat) for RER FCS p.perm
         caas_perms_ch            // Channel<path> or null — CAAS permulation RDS (asr + caas null) for FCS p.perm
-        caas_pos_cycle_caas_ch   // Channel<path> or null — perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator)
+        null_positions_ch        // Channel<path> or null, null_positions.parquet: the positions the null scores, with nd
+        null_blocks_ch           // Channel<List<path>> or null, the blocks' directories (scored positions of the permuted cycles)
+        null_counts_ch           // Channel<path> or null, counts.json of the null
+        null_summary_ch          // Channel<tuple(cycle_summary.tsv, cycle_hist.tsv)> or null, the report's null panels
         caas_pos_sample_ch       // Channel<path> or null — cycle-stratified sample for report distribution plots
         caas_pos_quantiles_ch    // Channel<path> or null — per-cycle null distribution shape
         hypotheses_pairs_ch      // Channel<path> or null — contrast_hypotheses_pairs.tsv (FOP domain-pool weights)
@@ -173,27 +177,44 @@ workflow SCORING {
             .collect()
             .map { it[0] }
 
-        // Position-level per-cycle CAAS numerator/denominator (perm_pos_cycle_caas.tsv.gz).
-        // Feeds scoring_compute.R §2f-ter's pooled p.emp, the sole position-level
-        // permulation p. Resolved ONCE here, with the same reasoning as caas_perms_resolved above.
-        def caas_pos_cycle_caas_resolved = (caas_pos_cycle_caas_ch ?: Channel.empty())
-            .ifEmpty { file(params.caas_pos_cycle_caas_file ?: 'NO_CAAS_POS_CYCLE_CAAS') }
-            .collect()
-            .map { it[0] }
-
-        // Positional universe and N of the null (see scoring_compute.R, section 2f-ter). The tested positions are
-        // the live background.output, else --posenrich_background_file (the same file POSENRICH and CT_ACCUMULATION
-        // read); the cleaned background (resolved_background) limits the null to the genes of the run. The roster is the
-        // live one of CAAS_CORE_MERGE, else --caas_cycle_roster_file. Each falls back to a NO_* sentinel: SCORING then
-        // takes the family of every null-positive position, and N from caas_perms.rds or the cycles present, and logs it.
+        // Positional universe and N of the null (see null_position_stats.py). The tested positions are the live
+        // background.output, else --posenrich_background_file (the same file CT_ACCUMULATION reads); the cleaned background
+        // (resolved_background) limits the null to the genes of the run. Each falls back to a NO_* sentinel: the universe is
+        // then every null-positive position, and the log says so.
         def resolved_tested_pos = (tested_positions_ch ?: Channel.empty())
             .ifEmpty { file(params.posenrich_background_file ?: 'NO_TESTED_POSITIONS') }
             .collect()
             .map { it[0] }
-        def resolved_cycle_roster = (cycle_roster_ch ?: Channel.empty())
-            .ifEmpty { file(params.caas_cycle_roster_file ?: 'NO_CYCLE_ROSTER') }
-            .collect()
-            .map { it[0] }
+
+        // The position-level null: the live one of CAAS_CORE_MERGE_REDUCE, else the null of an earlier run
+        // (--caas_null_dir: its caas_permulation/ directory). Without one every consumer receives the NO_* sentinels and
+        // the position p-values stay NA.
+        def null_dir = params.caas_null_dir ? file(params.caas_null_dir) : null
+        def prior_null = null_dir && file("${null_dir}/null_positions.parquet").exists()
+        def have_null = (null_positions_ch != null) || prior_null
+        def null_counters_v
+        def null_fit_v
+        def null_base_v
+        def resolved_cycle_roster
+        def null_summary_v
+        if (have_null) {
+            def null_positions_v = null_positions_ch != null ? null_positions_ch.collect().map { it[0] } : Channel.value(file("${null_dir}/null_positions.parquet"))
+            def null_blocks_v = null_blocks_ch != null ? null_blocks_ch : Channel.value(files("${null_dir}/blocks/*").sort())
+            def null_counts_v = null_counts_ch != null ? null_counts_ch.collect().map { it[0] } : Channel.value(file("${null_dir}/counts.json"))
+            resolved_cycle_roster = cycle_roster_ch != null ? cycle_roster_ch.collect().map { it[0] } : Channel.value(file("${null_dir}/cycle_roster.txt"))
+            null_summary_v = null_summary_ch != null ? null_summary_ch.collect().map { it[0] } : Channel.value([file("${null_dir}/cycle_summary.tsv"), file("${null_dir}/cycle_hist.tsv")])
+            def null_stats = SCORING_NULL_POSITIONS(null_positions_v, null_blocks_v, null_counts_v, resolved_postproc.collect().map { it[0] },
+                                                    resolved_tested_pos, resolved_background, resolved_cycle_roster)
+            null_counters_v = null_stats.counters
+            null_fit_v = null_stats.fit
+            null_base_v = null_stats.base
+        } else {
+            null_counters_v = Channel.value(file('NO_NULL_COUNTERS'))
+            null_fit_v = Channel.value(file('NO_NULL_FIT'))
+            null_base_v = Channel.value(file('NO_NULL_BASE'))
+            resolved_cycle_roster = Channel.value(file('NO_CYCLE_ROSTER'))
+            null_summary_v = Channel.value([file('NO_NULL_SUMMARY'), file('NO_NULL_HIST')])
+        }
 
         // ── Run scoring — single pass on full postproc pool ────────────────
         def compute_out = SCORING_COMPUTE(
@@ -205,11 +226,10 @@ workflow SCORING {
             resolved_rer,
             accum_all_ch,
             resolved_hyp_pairs,
-            caas_perms_resolved,
-            caas_pos_cycle_caas_resolved,
-            resolved_cycle_roster,
-            resolved_tested_pos,
-            resolved_background
+            null_counters_v,
+            null_fit_v,
+            null_base_v,
+            resolved_cycle_roster
         )
 
         // ── Render report ──────────────────────────────────────────────────
@@ -244,7 +264,8 @@ workflow SCORING {
             resolved_fade_site_top_ch,
             resolved_fade_site_bot_ch,
             resolved_genomic_info,
-            caas_pos_cycle_caas_resolved,
+            null_summary_v.map { it[0] },
+            null_summary_v.map { it[1] },
             caas_pos_sample_resolved,
             caas_pos_quantiles_resolved,
             resolved_postproc,

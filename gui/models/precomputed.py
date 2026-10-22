@@ -22,8 +22,8 @@ Path templates, relative to base_path/<TRAIT>, matched to the publishDir of each
   CT/CAAS       : caastools/{discovery,resample}.tab, caastools/background_genes.output,
                   caastools/background.output, meta_caas/meta_caas/meta_caas.tsv
                   (signification/meta_caas/ is also searched, for outdirs that use that name),
-                  caas_permulation/{cycle_roster.txt,perm_pos_cycle_caas.tsv.gz,
-                  perm_pos_sample.tsv,perm_pos_quantiles.tsv}
+                  caas_permulation/ (dir: null_positions.parquet, blocks/, cycle_roster.txt, counts.json,
+                  cycle_summary.tsv, cycle_hist.tsv)
   Disambiguation: ct_disambiguation/caas_convergence_master.csv, ct_disambiguation/ (dir)
   Post-processing: postproc/gene_filtering/filtered_discovery.tsv,
                   postproc/cleaned_backgrounds/cleaned_background_main.txt
@@ -111,15 +111,10 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         entries.append(("meta_caas_from", os.path.join(outdir, "meta_caas", "meta_caas", "meta_caas.tsv"), "file"))
         entries.append(("background_input", os.path.join(outdir, "caastools", "background_genes.output"), "file"))
         entries.append(("posenrich_background_file", os.path.join(outdir, "caastools", "background.output"), "file"))
-        # The position-level permulation outputs travel together: perm_pos_cycle_caas.tsv.gz
-        # feeds the position-level p.emp, and the sample and quantile files the
-        # position-level null plots of the report. Mirrors the
-        # PRECOMP_USE_DISCOVERY block of run_single.sh.j2.
-        perm_dir = os.path.join(outdir, "caas_permulation")
-        entries.append(("caas_pos_cycle_caas_file", os.path.join(perm_dir, "perm_pos_cycle_caas.tsv.gz"), "file"))
-        entries.append(("caas_pos_sample_file", os.path.join(perm_dir, "perm_pos_sample.tsv"), "file"))
-        entries.append(("caas_pos_quantiles_file", os.path.join(perm_dir, "perm_pos_quantiles.tsv"), "file"))
-        entries.append(("caas_cycle_roster_file", os.path.join(perm_dir, "cycle_roster.txt"), "file"))
+        # The position-level permulation null travels as one directory: the positions the null scores, its blocks of
+        # scored positions, the roster and the summaries behind the position p-values and the null panels of the
+        # report. Mirrors the PRECOMP_USE_DISCOVERY block of run_single.sh.j2.
+        entries.append(("caas_null_dir", os.path.join(outdir, "caas_permulation"), "dir"))
         entries.append(("caas_perm_manifest_file", os.path.join(outdir, "caastools", "permulation_manifest.tsv"), "file"))
         entries.append(("caas_perm_harvest_file", os.path.join(outdir, "caastools", "permulation_harvest.tsv"), "file"))
     if config.use_resample:

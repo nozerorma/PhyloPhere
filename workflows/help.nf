@@ -101,7 +101,8 @@ Usage:
 --max_miss_fraction         <FLOAT 0-1>                  0.0
 --miss_pair                 <true|false>                 true
 --ct_core_batch_size        <INTEGER>                    20    (permulation core: genes per replay + ASR replay task; 1 = one task per gene)
---caas_cycle_block_size    <INTEGER>                    500   (permulation core: cycles per block; a task replays its genes against one block, the observed labeling against none)
+--caas_cycle_block_size    <INTEGER>                    500   (permulation core: cycles per block; a task replays its genes against one block, the observed labeling against none; one merge task per block)
+--gene_stat                <size_adj_max|fmax|max>      size_adj_max   (gene statistic of the permulation null and of the observed gene score: F(max)^n, F(max) or the largest position score; F is the ECDF of the position scores of the cycle in the direction)
 --publish_intermediates     <true|false>                 false
 
 NOTE: fractions are resolved to floor(n_pairs * fraction) at runtime.
@@ -342,8 +343,7 @@ Standalone mode (provide inputs directly):
 --scoring_vep_primateai                            <"vep_primateai.tsv">              ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
 --scoring_vep_cosmic                                  <"vep_cosmic.tsv">                  ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
 --scoring_vep_ensembl                                <"ensembl_vep_mapped.tsv">          ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
---caas_pos_cycle_caas_file                               <"perm_pos_cycle_caas.tsv.gz">  ""    (filtered position-level null of a prior run: SCORING p.emp, POSENRICH and the accumulation permulation null)
---caas_cycle_roster_file                                 <"cycle_roster.txt">          ""    (every replayed cycle of a prior run, the empty ones included: N of the null everywhere; without it N is the number of cycles present in the null, with a log line)
+--caas_null_dir                                          <"caas_permulation/">          ""    (caas_permulation/ directory of a prior run: the position-level null of SCORING and the accumulation permulation null when the run has no permulation core of its own)
 
 Position-level components: ASR, convergence, parallel, [FADE]
 Gene-level scores: gene_caas, [gene_rer], [gene_fade], gene_composite

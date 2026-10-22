@@ -14,27 +14,28 @@
  *       observed design into its own directory (blocks/b0); it is never part of the null
  *       (its shards go to caas_permulation/b0/).
  *    2. CAAS_CORE_BATCHED (one task per tile: a batch of ct_core_batch_size genes against
- *       one block, or against b_0) runs the full-pool perm-replay with export of the
- *       perm-discovery tables, then the ASR replay of the same genes
- *       (disambiguation_perms_main.py --detail-only), which gives the per-gene
- *       perm_pos_detail shards of the block; the b_0 tile also scores the b_0 labeling as
- *       full records (observed_b0_main.py) into b0_observed/.
+ *       one block, or against b_0) replays the block's labelings over each gene's alignment and
+ *       its ASR in process (disambiguation_perms_main.py) and writes the tile tables of the
+ *       null: per (gene, cycle) a unit row and the scored positions of the cycle (null_tables/,
+ *       Parquet). The b_0 tile also replays b_0 through `ct perm-replay` and scores it as full
+ *       records (observed_b0_main.py) into b0_observed/.
  *    3. CAAS_CORE_OBSERVED writes the observed contract files (discovery.tab,
  *       background.output, background_genes.output, meta_caas/,
  *       ct_disambiguation/caas_convergence_master.csv) from the b_0 tiles' slices.
- *    4. CAAS_CORE_MERGE unions the tiles' shards (a gene's shards of the different blocks are
- *       joined into one, in the order of an unblocked replay) and derives the genome-wide
- *       tables and caas_perms.rds from them. It needs the gene universe, which the
- *       post-processing of the observed results provides, so it runs after
- *       CAAS_CORE_OBSERVED.
+ *    4. CAAS_CORE_MERGE merges the tiles of one block of cycles (all the genes of a cycle are in
+ *       the same block, which gene removal and the reference pools of the gene score need):
+ *       gene removal, the pools of the cycle, the gene statistics as genes x cycles matrices,
+ *       and the scored positions of the block. CAAS_CORE_MERGE_REDUCE joins the blocks into
+ *       caas_perms.rds, the roster and the small tables. A block merge needs the gene universe, which
+ *       the post-processing of the observed results provides, so it runs after CAAS_CORE_OBSERVED.
  *
  *  The aggregate RDS feeds the FCS p.perm path (fcs_enrich.R), which gives the CAAS
  *  scoring FCS report a permulation-corrected p.perm, as RER does.
  *
  *  Consumes:  resample directory (RESAMPLE), observed design (trait file or
  *             traitfile_H*.tab directory), alignments, species tree
- *  Produces:  caas_permulation/ (resample_perms.tab, caas_perms.rds,
- *             gene_cycle_scores.tsv, b0/, ...) and the observed contract files
+ *  Produces:  caas_permulation/ (resample_perms.tab, caas_perms.rds, cycle_roster.txt,
+ *             blocks/<block>/, b0/, ...) and the observed contract files
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -59,14 +60,22 @@ def strictOutputOn() {
     return (params.strict_conservation_output as boolean) && ((params.min_divergent_fraction ?: 0.5) as double) < 1.0
 }
 
-// CLI arguments that give disambiguation_perms_main.py the observed CT_POSTPROC filters (cluster trains and
-// gene removal) for the per-cycle null pool. Empty when the filters are off or the gene annotation file is a
-// NO_* sentinel. With params.caas_map_dir the trains measure their span in untrimmed columns, as the observed
-// CT_FILTER does.
-def caasPostprocArgs(gene_lengths) {
+// CLI arguments that give disambiguation_perms_main.py the observed CT_POSTPROC cluster filter for the per-cycle null:
+// the trains of every cycle are flagged (they count for the dubious-gene test) and, unless params.remove_caas_clusters is
+// off, left out of the scores. Empty when the filter is off or the gene annotation file is a NO_* sentinel. With
+// params.caas_map_dir the trains measure their span in untrimmed columns, as the observed CT_FILTER does.
+def caasTileArgs(gene_lengths) {
     if (!caasPostprocOn() || gene_lengths.name =~ /^NO_/) return ""
     def map_arg = params.caas_map_dir ? "--train-map-dir ${params.caas_map_dir}" : ""
-    return "--postproc-filter --gene-lengths ${gene_lengths} --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'} ${map_arg}"
+    return "--postproc-filter --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} ${params.remove_caas_clusters ? '' : '--keep-clusters'} ${map_arg}"
+}
+
+// CLI arguments that give merge_null_block.py the observed gene removal (dubious and extreme genes, each cycle against its
+// own units). Empty when the filters are off or the gene annotation file is a NO_* sentinel.
+def caasRemovalArgs(gene_lengths) {
+    if (!caasPostprocOn() || gene_lengths.name =~ /^NO_/) return ""
+    def map_arg = params.caas_map_dir ? "--map-dir '${params.caas_map_dir}'" : ""
+    return "--gene-lengths ${gene_lengths} ${map_arg} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold}"
 }
 
 // ── 1. First N permulated labelings in cycle order, plus b_0, split into cycle blocks ─────────
@@ -186,15 +195,16 @@ process SUBSET_RESAMPLE_PERMS {
 
 // ── 2. One task per (gene batch, cycle block): the replay of the block's labelings over the batch's genes ───
 // A tile is the replay of one batch of genes against the labelings of one cycle block (or of b_0, the tile
-// whose block directory is blocks/b0). disambiguation_perms_main.py --detail-only replays the block's labelings over
+// whose block directory is blocks/b0). disambiguation_perms_main.py replays the block's labelings over
 // each gene's alignment in process (the CAAS kernel of `ct perm-replay`, one base cycle at a time), scores each
-// cycle against the gene's ASR and writes the gene's detail shard; no discovery export is written, and a gene is
-// replayed in one worker, so its ASR context is loaded once per tile. Pass B scores each cycle against genome-wide
-// pools and runs once, in CAAS_CORE_MERGE, over the union of the tiles' shards.
+// cycle against the gene's ASR and reduces it to a (gene, cycle) unit row and the scored positions of the cycle; no
+// discovery export is written, and a gene is replayed in one worker, so its ASR context is loaded once per tile.
+// The tables of the batch's genes are one pair of Parquet files (src/utils/null_tables.py). What needs every gene of a
+// cycle (gene removal, the pools of the gene score) is done once per block, in CAAS_CORE_MERGE.
 // The b_0 tile also runs `ct perm-replay` for the b_0 slice of each gene (the discovery.tab rows of the real labeling
 // and the positions it tested); observed_b0_main.py then scores those rows as full records.
-// Output: perm_pos_detail/ (one gz shard per gene with a detection in the block; the b_0 shards under b0/) and, for the
-// b_0 tile, b0_observed/ (per gene with b_0 hits: its discovery rows, its tested positions and its master rows).
+// Output: null_tables/ (the tile's tables, with the name of its block) and, for the b_0 tile, b0_observed/ (per gene
+// with b_0 hits: its discovery rows, its tested positions and its master rows).
 process CAAS_CORE_BATCHED {
     tag "$batchID (${batchSize} genes) ${block.name}"
     label 'process_resample'
@@ -207,9 +217,9 @@ process CAAS_CORE_BATCHED {
     path taxid_map    // tax_id map of the species (curated by NAME_CURATION, or params.tax_id) or the NO_FILE sentinel
 
     output:
-    path "perm_pos_detail", emit: pos_detail
+    tuple val("${block.name}"), path("null_tables"), emit: null_tables                         // the tile tables of the block
+    tuple val("${block.name}"), path("null_tables_strict"), emit: null_tables_strict, optional: true   // strict pooling of the same replay (strictOutputOn)
     path "b0_observed", emit: b0_observed, optional: true                    // b_0 tile only
-    path "perm_pos_detail_strict", emit: pos_detail_strict, optional: true   // strict pooling of the same replay (strictOutputOn)
     path "b0_observed_strict", emit: b0_observed_strict, optional: true      // b_0 rows without conserved pairs, scored on their own (b_0 tile only)
 
     script:
@@ -222,10 +232,8 @@ process CAAS_CORE_BATCHED {
     def taxid_mapping = taxid_map.name != 'NO_FILE' ? taxid_map : ''
     def ensembl_file = params.gene_ensembl_file ?: ''
     def max_tasks_per_child = params.ct_disambig_max_tasks_per_child ?: 50
-    def postproc_args = caasPostprocArgs(gene_lengths)
-    // With remove_intermediates the shards are moved out of caas_perms_out instead of duplicated.
-    def shard_move = removeIntermediatesOn()
-    // The strict tables come from the same replay: the null shards pooled without the hypotheses that have conserved
+    def tile_args = caasTileArgs(gene_lengths)
+    // The strict tables come from the same replay: the null tables pooled without the hypotheses that have conserved
     // pairs, and the b_0 rows without conserved pairs scored again (the observed labeling is a single labeling).
     def strict_on = strictOutputOn()
     // The b_0 tile replays the real labeling alone; the block tiles hold permuted cycles only.
@@ -265,9 +273,7 @@ process CAAS_CORE_BATCHED {
         --export-b0 1 \\
         --extra-args-file .ct_perm_replay_batch_args
     find . -maxdepth 1 \\( -name '*.b0.discovery.tsv' -o -name '*.b0.background' \\) -exec mv {} b0_observed/ \\;"""
-    def strict_move = strict_on ? """
-    ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/perm_pos_detail_strict perm_pos_detail_strict
-    if [ -d caas_perms_out/b0/perm_pos_detail_strict ]; then ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/b0/perm_pos_detail_strict perm_pos_detail_strict/b0; fi""" : ''
+    def strict_move = strict_on ? "mv caas_perms_out/null_tables_strict null_tables_strict" : ''
     """
     # One worker pool runs the genes in parallel; BLAS and OpenMP stay at one thread each.
     export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
@@ -312,21 +318,18 @@ process CAAS_CORE_BATCHED {
         --ali-format ${params.ali_format} \\
         --resample-dir ${block} \\
         --output-dir caas_perms_out \\
-        --detail-only ${strict_flag} \\
-        \$FOP_PAIRS_ARG ${postproc_args} \\
+        ${strict_flag} \\
+        \$FOP_PAIRS_ARG ${tile_args} \\
         --asr-model ${params.ct_disambig_asr_model} \\
         --posterior-threshold ${params.ct_disambig_posterior_threshold} \\
         --workers ${task.cpus} \\
         --max-tasks-per-child ${max_tasks_per_child} \\
         --asr-cache-dir ${asr_cache_dir} \\
-        --seed ${params.seed ?: 1998} \\
         ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
         ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
-    ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/perm_pos_detail perm_pos_detail
-    # b_0 shards sit in a subdirectory the null readers never glob; CAAS_CORE_MERGE scores them as a one-labeling run.
-    if [ -d caas_perms_out/b0/perm_pos_detail ]; then ${shard_move ? 'mv' : 'cp -R'} caas_perms_out/b0/perm_pos_detail perm_pos_detail/b0; fi
+    mv caas_perms_out/null_tables null_tables
     ${strict_move}
-    ${shard_move ? 'rm -rf caas_perms_out' : ''}
+    rm -rf caas_perms_out
 
     ${observed_b0}
     """
@@ -373,9 +376,10 @@ workflow CAAS_CORE {
 
     emit:
         labelings      = subset_bc                 // the labelings file the tiles replayed (the null's cycle roster)
-        pos_detail     = core.pos_detail
+        null_tables    = core.null_tables          // tuple(block name, tile tables), one per tile
+        null_tables_strict = core.null_tables_strict   // empty unless the strict tables are on
+        blocks         = blocks.flatten().map { b -> tuple(b.name, b) }   // tuple(block name, block directory)
         b0_observed    = core.b0_observed
-        pos_detail_strict = core.pos_detail_strict   // empty unless the strict tables are on
         b0_observed_strict = core.b0_observed_strict
 }
 
@@ -418,99 +422,101 @@ process CAAS_CORE_OBSERVED {
     """
 }
 
-// ── 4. Merge the tiles' shards and derive the genome-wide null (no ASR replay) ───
-// The tiles' shard directories are united with hard links (copies where the filesystem
-// refuses them) into perm_pos_detail/, which CT_ACCUMULATION also reads; a gene replayed in
-// several cycle blocks has its shards joined into one, in the cycle order of an unblocked
-// replay. A single perm_pos_detail.tsv.gz instead of directories is read as it is.
+// ── 4. Merge the tiles of each block of cycles and join the blocks ───────────────
+// CAAS_CORE_MERGE runs once per block (the b_0 directory is a block of its own, with the cycle b_0): it merges the
+// tiles of all the gene batches of the block (merge_null_block.py, src/utils/null_merge.py). Gene removal and the pools
+// that calibrate each gene score are decided within a cycle over every gene of the cycle, and a cycle is in one block,
+// so the merge is exact and its memory follows the block, not the number of cycles of the run. A block gives the genes x
+// cycles matrices of the gene statistics (chosen with params.gene_stat, with the parts the other statistics are built
+// from), the scored positions of its cycles, the removed units, the per-cycle sample, quantiles and summary.
 //
-// Each gene's score is calibrated against the genome-wide pool of position scores of its
-// cycle, so pass B runs once over the union, through reaggregate_perm_scores.py (the
-// aggregation of gene_wrapper.py itself, not a second implementation: the gene statistic is
-// F(max)^n over heavily tied values, so a 1e-16 difference in how the per-position sum
-// accumulates can flip a tie and the power n amplifies it). Pass B costs minutes, against
-// the hours of the ASR replay, so caas_perms.rds is always rebuilt from the shards: the null
-// must hold the same gene statistic as the observed gene score, or the FCS p.perm would
-// compare two different quantities.
+// The gene statistic of a direction is F(max)^n by default (core.scores), the statistic of the observed gene score
+// (observed_core_scores.py), so the FCS p.perm of fcs_enrich.R compares the same quantity on both sides.
 process CAAS_CORE_MERGE {
-    tag "caas_core_merge"
+    tag "caas_core_merge|${block}"
     label 'process_medium'
     // ext.publish_prefix is "/strict" for the strict alias (CAAS_CORE_MERGE_STRICT)
-    publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}/caas_permulation" }, mode: 'copy', overwrite: true,
-               pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv,perm_pos_cycle_caas.tsv.gz,cycle_roster.txt,removed_units.tsv,b0}'
+    // the output directory is named after the block: caas_permulation/b0/ and caas_permulation/blocks/<block>/
+    publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}/caas_permulation${block == 'b0' ? '' : '/blocks'}" }, mode: 'copy', overwrite: true
 
     input:
-    path batchDetail, stageAs: 'batch_*'   // the tiles' shard directories, or one legacy perm_pos_detail.tsv.gz
-    path universe
+    tuple val(block), path(tiles, stageAs: 'tile_*'), path(block_dir, stageAs: 'block_input')   // the block's tile tables and its directory of SUBSET_RESAMPLE_PERMS (staged under a name other than the output's)
+    path universe       // gene universe (cleaned_background_main.txt) or NO_FILE
     path gene_lengths   // gene_ensembl_file (gene removal) or NO_FILE
-    path labelings      // the labelings file the cycles were replayed from, or NO_FILE: N is then read from the detail rows
 
     output:
-    path "perm_pos_detail",           emit: pos_detail, optional: true   // the union of the batches' shards (absent for a legacy file)
-    path "b0",                        emit: b0, optional: true   // the real labeling rebuilt like the null
-    path "caas_perms.rds",            emit: perms
-    path "gene_cycle_scores.tsv",     emit: gene_cycle_scores
-    path "removed_units.tsv",         emit: removed_units, optional: true   // null gene removal (only when a gene annotation was given)
-    path "cycle_roster.txt",          emit: cycle_roster,  optional: true   // every replayed cycle, the ones with no detection included: N of every consumer of the null (absent when the labelings file is NO_LABELINGS)
-    path "perm_pos_cycle_caas.tsv.gz", emit: pos_cycle_caas, optional: true
-    path "perm_pos_sample.tsv",       emit: pos_sample,    optional: true
-    path "perm_pos_quantiles.tsv",    emit: pos_quantiles, optional: true
+    tuple val(block), path("${block}"), emit: block_out
 
     script:
     def disambig_local = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
     def scoring_local  = "${baseDir}/subworkflows/SCORING/local"
-    // The sentinel convention is a NO_* basename (NO_FILE here, NO_BACKGROUND from SCORING's
-    // resolved_background), so the prefix is matched, not one literal.
+    // The sentinel convention is a NO_* basename (NO_FILE here, NO_BACKGROUND from SCORING's resolved_background), so
+    // the prefix is matched, not one literal.
     def universe_arg   = universe.name.startsWith('NO_') ? "" : "--universe ${universe}"
     def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript'  : 'Rscript'
-    // N = 0 (b_0 only): the null has no shard, and says so explicitly. Written without `?:`, because Groovy reads a numeric 0 as false.
-    def empty_null_arg = (params.caas_full_perms != null && (params.caas_full_perms as int) == 0) ? "--empty-null" : ""
-    // N is the number of cycles replayed, which the detail rows alone understate when a cycle left no row.
-    // Gene removal needs the annotation file, so it is on only when gene_lengths is not a NO_* sentinel.
-    def roster_arg = labelings.name.startsWith('NO_') ? "" : "--cycles-from ${labelings}"
-    def map_arg = params.caas_map_dir ? "--map-dir '${params.caas_map_dir}'" : ""
-    def removal_args = (caasPostprocOn() && !gene_lengths.name.startsWith('NO_')) ? "--gene-lengths ${gene_lengths} ${map_arg} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
+    def b0_arg = block == 'b0' ? '--include-b0' : ''
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
-    # reaggregate_perm_scores.py imports src.utils.gene_wrapper relative to its own location.
+    # merge_null_block.py imports its src package relative to its own location.
     cp -R ${disambig_local}/* .
     find . -name '*.pyc' -delete 2>/dev/null || true
 
-    entries=(batch_*)
-    if [ "\${#entries[@]}" -eq 1 ] && [ -f "\${entries[0]}" ]; then
-        DETAIL="\${entries[0]}"
-    else
-        # Hard links when the first shard can be linked from here, copies otherwise; the shards of a gene
-        # replayed in several cycle blocks are joined in the cycle order of an unblocked replay (union_shards.sh).
-        UNION_PYTHON="${py}" bash $baseDir/subworkflows/CT/local/scripts/union_shards.sh perm_pos_detail "\${entries[@]}"
-        DETAIL=perm_pos_detail
-    fi
+    ${py} ./merge_null_block.py \
+        --tiles tile_*/ \
+        --labelings ${block_dir}/resample_perms.tab \
+        --output-dir ${block} ${b0_arg} ${universe_arg} \
+        --gene-stat ${params.gene_stat ?: 'size_adj_max'} \
+        --seed ${params.seed ?: 1998} ${caasRemovalArgs(gene_lengths)}
 
-    ${py} ./reaggregate_perm_scores.py \\
-        --detail "\$DETAIL" \\
-        --output-dir . \\
-        --seed ${params.seed ?: 1998} ${empty_null_arg} ${roster_arg} ${removal_args}
+    # The matrices go to one RDS per block; the raw files are only the hand-over.
+    ${rs} ${scoring_local}/src/assemble_block_matrices.R --dir ${block}/matrices --output ${block}/matrices.rds
+    rm -rf ${block}/matrices
+    """
+}
 
-    # b_0 rebuilt from its merged shards as a one-labeling run: same code, own rank/size pools.
-    if [ -d "\$DETAIL/b0" ] && compgen -G "\$DETAIL/b0/*.tsv.gz" > /dev/null; then   # no shard: nothing was detected for the real labeling
-        mkdir -p b0
-        ${py} ./reaggregate_perm_scores.py \\
-            --detail "\$DETAIL/b0" \\
-            --output-dir b0 \\
-            --seed ${params.seed ?: 1998} ${removal_args}
-        # The b_0 per-gene shards stay next to its scores
-        cp -Rl "\$DETAIL/b0" b0/perm_pos_detail 2>/dev/null || cp -RL "\$DETAIL/b0" b0/perm_pos_detail
-    fi
+// The blocks joined: the roster (N of every consumer of the null), the small tables of the whole null, the positions the
+// null scores (nd per position, the universe of the accumulation test and of the position p) and caas_perms.rds, the
+// genes x cycles matrices of the gene statistic of all the blocks (until WP7 gives the FCS the blocks).
+process CAAS_CORE_MERGE_REDUCE {
+    tag "caas_core_merge_reduce"
+    label 'process_medium'
+    // ext.publish_prefix is "/strict" for the strict alias (CAAS_CORE_MERGE_REDUCE_STRICT)
+    publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}/caas_permulation" }, mode: 'copy', overwrite: true,
+               pattern: '{caas_perms.rds,perm_pos_sample.tsv,perm_pos_quantiles.tsv,cycle_roster.txt,removed_units.tsv,cycle_summary.tsv,cycle_hist.tsv,null_positions.parquet,counts.json}'
 
-    ROSTER_ARG=""
-    if [ -f cycle_roster.txt ]; then ROSTER_ARG="--cycles cycle_roster.txt"; fi
-    ${rs} ${scoring_local}/src/scoring_caas_perms.R \\
-        --gene-cycle-scores gene_cycle_scores.tsv \\
-        \$ROSTER_ARG \\
-        ${universe_arg} \\
+    input:
+    path blocks, stageAs: 'blk_*'    // the block directories of CAAS_CORE_MERGE (permuted cycles only)
+    path universe                    // gene universe (cleaned_background_main.txt) or NO_FILE
+
+    output:
+    path "caas_perms.rds",            emit: perms
+    path "removed_units.tsv",         emit: removed_units, optional: true   // null gene removal (only when a gene annotation was given)
+    path "cycle_roster.txt",          emit: cycle_roster
+    path "perm_pos_sample.tsv",       emit: pos_sample
+    path "perm_pos_quantiles.tsv",    emit: pos_quantiles
+    path "cycle_summary.tsv",         emit: cycle_summary
+    path "cycle_hist.tsv",            emit: cycle_hist
+    path "null_positions.parquet",    emit: null_positions
+    path "counts.json",               emit: counts
+
+    script:
+    def disambig_local = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
+    def scoring_local  = "${baseDir}/subworkflows/SCORING/local"
+    def universe_arg   = universe.name.startsWith('NO_') ? "" : "--universe ${universe}"
+    def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
+    def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript'  : 'Rscript'
+    """
+    export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+    cp -R ${disambig_local}/* .
+    find . -name '*.pyc' -delete 2>/dev/null || true
+
+    ${py} ./reduce_null_blocks.py --blocks blk_*/ --output-dir .
+    ${rs} ${scoring_local}/src/scoring_caas_perms.R \
+        --blocks blk_*/matrices.rds \
+        --cycles cycle_roster.txt \
+        ${universe_arg} \
         --output caas_perms.rds
-
     """
 }
 

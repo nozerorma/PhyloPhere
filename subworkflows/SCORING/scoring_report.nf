@@ -9,7 +9,7 @@
  *
  *  Consumes:  position_scores.tsv, gene_scores.tsv, gene_correlations.tsv; optional
  *             per-site FADE tables (top and bottom), gene coordinates, the CAAS
- *             position-level permulation null (perm_pos_cycle_caas.tsv.gz), the design of the
+ *             position-level permulation null (cycle_summary.tsv, cycle_hist.tsv), the design of the
  *             null cycles (permulation_manifest.tsv), the audit of the null harvest
  *             (permulation_harvest.tsv), the null-adequacy summary of the scoring
  *             (null_universe_summary.tsv) and the design of the observed pairs
@@ -44,7 +44,8 @@ process SCORING_REPORT {
     path fade_site_top_file  // optional: per-site FADE table, top direction (NO_FADE_SITE_TOP sentinel when absent)
     path fade_site_bot_file  // optional: per-site FADE table, bottom direction (NO_FADE_SITE_BOT sentinel when absent)
     path genomic_info        // optional: gene genomic coords TSV (NO_GENOMIC_INFO sentinel when absent)
-    path caas_pos_cycle_caas // optional: perm_pos_cycle_caas.tsv.gz, the position-level permulation null (NO_CAAS_POS_CYCLE_CAAS or NO_FILE sentinel when absent)
+    path null_summary        // optional: cycle_summary.tsv, scored entries and genes per null cycle and direction (NO_NULL_SUMMARY sentinel when absent)
+    path null_hist           // optional: cycle_hist.tsv, histogram of the scores of each null cycle and direction (NO_NULL_HIST sentinel when absent)
     path caas_pos_sample     // optional: null sample (NO_CAAS_POS_SAMPLE sentinel); passed to the report, which does not read it
     path caas_pos_quantiles  // optional: per-cycle null quantiles (NO_CAAS_POS_QUANTILES sentinel); passed to the report, which does not read it
     path filtered_discovery  // filtered_discovery.tsv: observed asr_path_score per (gene, position, side), read by the report for the convergence-type panels
@@ -68,7 +69,8 @@ process SCORING_REPORT {
     def fs_bot_arg = (fade_site_bot_file.name =~ /^NO_FADE_SITE_BOT/) ? 'NULL' : "'${fade_site_bot_file}'"
 
     def gi_arg  = (genomic_info.name  =~ /^NO_GENOMIC_INFO/)  ? 'NULL' : "'${genomic_info}'"
-    def pos_cycle_arg = (caas_pos_cycle_caas.name =~ /^NO_CAAS_POS_CYCLE_CAAS|^NO_FILE/) ? 'NULL' : "'${caas_pos_cycle_caas}'"
+    def null_summary_arg = (null_summary.name =~ /^NO_NULL_SUMMARY|^NO_FILE/) ? 'NULL' : "'${null_summary}'"
+    def null_hist_arg = (null_hist.name =~ /^NO_NULL_HIST|^NO_FILE/) ? 'NULL' : "'${null_hist}'"
     def pos_sample_arg = (caas_pos_sample.name =~ /^NO_CAAS_POS_SAMPLE|^NO_FILE/) ? 'NULL' : "'${caas_pos_sample}'"
     def pos_quantiles_arg = (caas_pos_quantiles.name =~ /^NO_CAAS_POS_QUANTILES|^NO_FILE/) ? 'NULL' : "'${caas_pos_quantiles}'"
     def filt_disc_arg = (filtered_discovery.name =~ /^NO_POSTPROC|^NO_FILE/) ? 'NULL' : "'${filtered_discovery}'"
@@ -97,7 +99,8 @@ process SCORING_REPORT {
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
                     genomic_info_file    = ${gi_arg},
-                    caas_pos_cycle_caas_file = ${pos_cycle_arg},
+                    null_summary_file    = ${null_summary_arg},
+                    null_hist_file       = ${null_hist_arg},
                     caas_pos_sample_file = ${pos_sample_arg},
                     caas_pos_quantiles_file = ${pos_quantiles_arg},
                     filtered_discovery_file = ${filt_disc_arg},
@@ -132,7 +135,8 @@ process SCORING_REPORT {
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
                     genomic_info_file    = ${gi_arg},
-                    caas_pos_cycle_caas_file = ${pos_cycle_arg},
+                    null_summary_file    = ${null_summary_arg},
+                    null_hist_file       = ${null_hist_arg},
                     caas_pos_sample_file = ${pos_sample_arg},
                     caas_pos_quantiles_file = ${pos_quantiles_arg},
                     filtered_discovery_file = ${filt_disc_arg},

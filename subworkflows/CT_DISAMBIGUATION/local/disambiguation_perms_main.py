@@ -20,32 +20,27 @@
 """
 CAAS_CORE_BATCHED: Replays permuted phenotype labelings over cached ASR posteriors (the CAAS permulation null).
 
-For each gene of a manifest it replays the labelings of a resample directory over the gene's alignment in process (the
-CAAS kernel of `ct perm-replay`, src/utils/perm_stream.py), loads the gene's precomputed ASR posteriors once and scores
-each labeling that has a detection through analyze_gene_disambiguation as the observed pipeline does
-(src/utils/gene_wrapper.py, process_all_genes_perms). No discovery export is written. The real labeling (b_0) is
-replayed on its own into <output-dir>/b0, so it never enters the null.
+For each gene of a manifest it replays the labelings of a resample directory (the cycles of one block, or the real
+labeling b_0) over the gene's alignment in process (the CAAS kernel of `ct perm-replay`, src/utils/perm_stream.py), loads
+the gene's precomputed ASR posteriors once and scores each labeling that has a detection through analyze_gene_disambiguation
+as the observed pipeline does. No discovery export is written. Each scored cycle is reduced as it is produced to a
+(gene, cycle) unit and the scored positions of the cycle (src/utils/null_tables.py, src/utils/gene_wrapper.py,
+process_all_genes_perms), and the tables of the genes of the batch are written to <output-dir>/null_tables/.
+With --strict-output the tables of the same replay pooled without the hypotheses whose discovery row has conserved pairs
+are also written to <output-dir>/null_tables_strict/, which is the null of an analysis that keeps only fully divergent
+hypotheses. Replay, ASR and scoring are shared; only the pooling is repeated.
 
-Pass A writes one per-(gene, cycle, position) detail shard per gene to
-<output-dir>/perm_pos_detail/. With --detail-only the run stops there, because pass B (scoring
-against genome-wide pools) runs once over the union of the batches (reaggregate_perm_scores.py).
-Without it the same process also writes gene_cycle_scores.tsv, perm_pos_cycle_caas.tsv.gz,
-perm_pos_quantiles.tsv and perm_pos_sample.tsv; scoring_caas_perms.R turns gene_cycle_scores.tsv
-into the genes x N null matrix behind the FCS p.perm.
-With --strict-output pass A also writes <output-dir>/perm_pos_detail_strict/ (and b0/perm_pos_detail_strict/): the
-same replay pooled without the hypotheses whose discovery row has conserved pairs, which is the null of an analysis that
-keeps only fully divergent hypotheses. Replay, ASR and scoring are shared; only the pooling is repeated.
+The statistics that need every gene of a cycle (gene removal, the reference pools of the gene score) are computed once
+per block of cycles from the tables of all the batches (merge_null_block.py).
 
-Called by:  CAAS_CORE_BATCHED (subworkflows/CT/caas_permulation.nf) → disambiguation_perms_main.py --detail-only
+Called by:  CAAS_CORE_BATCHED (subworkflows/CT/caas_permulation.nf)
 Usage:
     python3 disambiguation_perms_main.py --alignment-dir <dir> --tree <newick> --manifest <file> --design <path> \\
-        --ct-dir <dir> --replay-args-file <file> --resample-dir <dir> --output-dir <dir> --asr-cache-dir <dir> \\
-        [--detail-only] [OPTIONS]
+        --ct-dir <dir> --replay-args-file <file> --resample-dir <dir> --output-dir <dir> --asr-cache-dir <dir> [OPTIONS]
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
 import sys
-import csv
 import argparse
 import logging
 import time
@@ -57,7 +52,6 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from src.utils.gene_wrapper import process_all_genes_perms, _read_resample_labelings
 from src.utils.perm_stream import ReplaySettings
-from src.convergence.fop_pool import base_cycle
 from src.utils.logger import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -113,18 +107,14 @@ def parse_arguments():
     )
     # ── CT_POSTPROC filters applied to the null candidate pool ────────────────
     p.add_argument("--postproc-filter", action="store_true",
-                   help="Apply the observed CT_POSTPROC cluster + gene filters to "
-                        "the per-cycle null CAAS pool before scoring (distribution-"
-                        "matches caas_perms.rds to the observed filtered_discovery).")
-    p.add_argument("--gene-lengths", default=None,
-                   help="Gene annotation TSV (gene, length ...) for the extreme-gene "
-                        "density filter. Same file as CT_POSTPROC's gene_ensembl_file.")
+                   help="Flag the cluster trains of every cycle (CT_POSTPROC filter) so the null follows the same "
+                        "filter as the observed filtered_discovery.tsv.")
     p.add_argument("--clust-minlen", type=int, default=3,
                    help="CT_FILTER minlen (params.filter_minlen; default 3)")
     p.add_argument("--clust-maxcaas", type=float, default=0.7,
                    help="CT_FILTER maxcaas density (params.filter_maxcaas; default 0.7)")
     p.add_argument("--keep-clusters", action="store_true",
-                   help="Keep cluster-train positions in the scored pool (params.remove_caas_clusters "
+                   help="Keep cluster-train positions in the scores (params.remove_caas_clusters "
                         "false); they still count for the dubious-gene test.")
     p.add_argument("--train-map-dir", default=None,
                    help="Directory of the trimmer's per-gene MAP tables. Cluster trains then measure their span "
@@ -132,19 +122,9 @@ def parse_arguments():
                         "Needs --postproc-filter; the observed filter must use the same directory.")
     p.add_argument("--train-map-suffix", default=".map.tsv",
                    help="File-name tail of the MAP tables (default .map.tsv)")
-    p.add_argument("--gene-filter-mode", default="none",
-                   choices=["none", "extreme", "dubious", "both"],
-                   help="CAAS_FILTER_GENES mode (params.gene_filter_mode)")
-    p.add_argument("--iqr-multiplier", type=float, default=3.0)
-    p.add_argument("--extreme-percentile", type=float, default=0.99)
-    p.add_argument("--detail-only", action="store_true",
-                   help="Stop after pass A: write only perm_pos_detail/ (pass B scores against genome-wide pools, "
-                        "so it runs once over the union of the shards).")
     p.add_argument("--strict-output", action="store_true",
-                   help="Also write perm_pos_detail_strict/ (and b0/perm_pos_detail_strict/): the shards of the same replay "
-                        "pooled without the hypotheses whose discovery row has conserved pairs.")
-    p.add_argument("--seed", type=int, default=1998,
-                   help="Pipeline seed (params.seed): perm_pos_sample.tsv reservoir sampling")
+                   help="Also write null_tables_strict/: the tables of the same replay pooled without the hypotheses "
+                        "whose discovery row has conserved pairs.")
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--log-file", type=Path, default=None)
     return p.parse_args()
@@ -197,61 +177,35 @@ def main():
     if args.cycles:
         cycles = [c.strip() for c in args.cycles.split(",") if c.strip()]
 
-    # The real labeling (b_0) is replayed as its own single-labeling run into <output-dir>/b0: it goes
-    # through the identical code but must never enter the null (n_detected, percent-rank pools and gene
-    # removal are all computed over the cycles of one call). With no permuted labeling (N = 0) only b_0 is
-    # replayed, which --detail-only allows: the pass that scores the null has nothing to do.
-    all_tags = cycles if cycles else sorted(_read_resample_labelings(args.resample_dir))
-    b0_tags = [c for c in all_tags if base_cycle(c) == "b_0"]
-    null_tags = [c for c in all_tags if base_cycle(c) != "b_0"]
-
-    def run(run_cycles, run_dir):
-        return process_all_genes_perms(
-            genes=genes,
-            gene_alignments=gene_alignments,
-            alignment_dir=args.alignment_dir,
-            tree_file=args.tree,
-            resample_dir=args.resample_dir,
-            replay=replay,
-            taxid_mapping_path=args.taxid_mapping,
-            asr_model=args.asr_model,
-            asr_cache_dir=args.asr_cache_dir,
-            posterior_threshold=args.posterior_threshold,
-            workers=args.workers,
-            output_dir=run_dir,
-            ensembl_genes_file=args.ensembl_genes_file,
-            cycles=run_cycles,
-            max_tasks_per_child=args.max_tasks_per_child,
-            fop_pairs_file=args.fop_pairs,
-            gene_lengths_file=args.gene_lengths,
-            clust_minlen=args.clust_minlen,
-            clust_maxcaas=args.clust_maxcaas,
-            gene_filter_mode=args.gene_filter_mode,
-            iqr_multiplier=args.iqr_multiplier,
-            extreme_percentile=args.extreme_percentile,
-            postproc_filter=args.postproc_filter,
-            remove_clusters=not args.keep_clusters,
-            train_map_dir=args.train_map_dir,
-            train_map_suffix=args.train_map_suffix,
-            seed=args.seed,
-            detail_only=args.detail_only,
-            strict_output=args.strict_output,
-        )
-
     t0 = time.time()
-    if not null_tags and not (b0_tags and args.detail_only):
-        raise RuntimeError("[perms] no permuted labelings to replay (only b_0 or nothing was found)")
-    if null_tags:
-        out_path = run(null_tags, output_dir)
-    else:
-        logger.info("[perms] no permuted labelings (N = 0): the null has no shards")
-        (output_dir / "perm_pos_detail").mkdir(parents=True, exist_ok=True)
-        if args.strict_output:
-            (output_dir / "perm_pos_detail_strict").mkdir(parents=True, exist_ok=True)
-        out_path = output_dir
-    if b0_tags:
-        logger.info(f"b_0: replaying {len(b0_tags)} b_0 labeling(s) -> {output_dir / 'b0'}")
-        run(b0_tags, output_dir / "b0")
+    tags = cycles if cycles else sorted(_read_resample_labelings(args.resample_dir))
+    if not tags:
+        raise RuntimeError("[perms] no labelings to replay in the resample directory")
+    out_path = process_all_genes_perms(
+        genes=genes,
+        gene_alignments=gene_alignments,
+        alignment_dir=args.alignment_dir,
+        tree_file=args.tree,
+        resample_dir=args.resample_dir,
+        replay=replay,
+        taxid_mapping_path=args.taxid_mapping,
+        asr_model=args.asr_model,
+        asr_cache_dir=args.asr_cache_dir,
+        posterior_threshold=args.posterior_threshold,
+        workers=args.workers,
+        output_dir=output_dir,
+        ensembl_genes_file=args.ensembl_genes_file,
+        cycles=cycles,
+        max_tasks_per_child=args.max_tasks_per_child,
+        fop_pairs_file=args.fop_pairs,
+        clust_minlen=args.clust_minlen,
+        clust_maxcaas=args.clust_maxcaas,
+        postproc_filter=args.postproc_filter,
+        remove_clusters=not args.keep_clusters,
+        train_map_dir=args.train_map_dir,
+        train_map_suffix=args.train_map_suffix,
+        strict_output=args.strict_output,
+    )
     logger.info(f"Done in {time.time() - t0:.1f}s → {out_path}")
 
 

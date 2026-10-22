@@ -28,7 +28,8 @@ params:
   fade_site_top_file: NULL
   fade_site_bot_file: NULL
   genomic_info_file: NULL
-  caas_pos_cycle_caas_file: NULL
+  null_summary_file: NULL
+  null_hist_file: NULL
   perm_manifest_file: NULL
   hypotheses_pairs_file: NULL
   perm_harvest_file: NULL
@@ -195,9 +196,10 @@ has_rer  <- "rer_min_pval"    %in% names(gene_df) && any(!is.na(gene_df$rer_min_
 .file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
 
 has_genomic       <- .file_ok(params$genomic_info_file)
-# Position-level null of the permulation: one row per (Gene, Position, side, cycle) detected by a null labeling.
-has_pos_null      <- .file_ok(params$caas_pos_cycle_caas_file) &&
-                     length(readLines(params$caas_pos_cycle_caas_file, n = 2L)) >= 2L
+# Position-level null of the permulation: per null cycle and direction, the scored entries, the genes that have one and
+# the histogram of their scores (cycle_summary.tsv, cycle_hist.tsv of CAAS_CORE_MERGE_REDUCE).
+has_pos_null      <- .file_ok(params$null_summary_file) && .file_ok(params$null_hist_file) &&
+                     length(readLines(params$null_summary_file, n = 2L)) >= 2L
 has_filtered      <- .file_ok(params$filtered_discovery_file) # observed asr_path_score
 # FADE site (position-level) data: use top direction if available, otherwise try bottom
 has_fade_pos      <- .file_ok(params$fade_site_top_file) || .file_ok(params$fade_site_bot_file)
@@ -519,36 +521,24 @@ The formal per-pathway `p.perm` (ASR axis) is in the companion **FCS** report.
 ```{r pos-null-setup, eval=has_pos_null}
 .src_pal <- c(Observed = "#E15759", Null = "grey55")
 
-# Null detections: one row per (Gene, Position, side, cycle) a permulated labeling detects; observed rows are the scored
-# positions of the run. The null table has a row per detection of every cycle (tens of millions at 1000 cycles) and
-# most of them carry no score, which this section drops, so awk keeps only the top and bottom rows with a score
-# while the gz file streams (readr would inflate it whole).
-.null_awk <- r"---(BEGIN { FS = OFS = "\t" }
-NR == 1 { for (i = 1; i <= NF; i++) col[$i] = i; g = col["Gene"]; p = col["Position"]; sd = col["side"]; cy = col["cycle"]; v = col["caas_score"]
-          print "Gene", "Position", "side", "cycle", "caas_score"; next }
-($sd == "top" || $sd == "bottom") && $v != "" && $v != "NA" && $v != "NaN" && $v != "null" && $v != "NULL" { print $g, $p, $sd, $cy, $v })---"
-.null_pos <- readr::read_tsv(pipe(sprintf("gzip -dcf %s | awk %s", shQuote(params$caas_pos_cycle_caas_file), shQuote(.null_awk))),
-                             show_col_types = FALSE,
-                             col_types = readr::cols(caas_score = readr::col_character(), .default = readr::col_guess()),
-                             na = c("", "NA", "NaN", "null", "NULL")) %>%
-  filter(side %in% c("top", "bottom")) %>%
-  rename(score = caas_score) %>%
-  mutate(score = suppressWarnings(as.numeric(score))) %>%
-  filter(!is.na(score))
+# The null is read as its summaries, not as a table of every detection (tens of millions of rows at 1000 cycles):
+#   cycle_summary.tsv  cycle, direction (global = one entry per position, its best side; top, bottom: position-side
+#                      entries), n scored entries and n_genes that have one; every null cycle has a row, the ones that detect
+#                      nothing with n = 0
+#   cycle_hist.tsv     cycle, direction, bin, n: the scores in bins of 0.01 (bin = floor(100 * score)); empty bins are absent
+.null_sum  <- readr::read_tsv(params$null_summary_file, show_col_types = FALSE, col_types = "ccii")
+.null_hist <- readr::read_tsv(params$null_hist_file, show_col_types = FALSE, col_types = "ccii")
 
 .obs_pos <- pos_df %>%
   mutate(CAAS_score = suppressWarnings(as.numeric(CAAS_score))) %>%
   filter(!is.na(CAAS_score), side %in% c("top", "bottom")) %>%
   transmute(Gene, Position, side, score = CAAS_score)
 
-# Cycles with no detection leave no row, so the number of cycles is taken from the p.emp floor (1/(N + 1))
-# when the table reaches it, and otherwise from the cycles present.
-.null_cycles <- unique(.null_pos$cycle)
-.p_emp_num   <- suppressWarnings(as.numeric(pos_df$p.emp))
-.p_emp_fin   <- .p_emp_num[is.finite(.p_emp_num) & .p_emp_num > 0]
-.n_cyc_p     <- if (length(.p_emp_fin) > 0) round(1 / min(.p_emp_fin)) - 1 else 0
-.n_cyc       <- max(length(.null_cycles), .n_cyc_p, 1L)
-.n_pad       <- max(0L, .n_cyc - length(.null_cycles))
+# Every null cycle is in the summary, so the number of cycles is the number of its distinct cycles.
+.null_cycles <- unique(.null_sum$cycle)
+.n_cyc       <- max(length(.null_cycles), 1L)
+.n_pad       <- 0L
+.dirs        <- c("global", "top", "bottom")
 
 # global: one entry per position, its best side, as in the undirected gene score.
 .best_side <- function(d, by) {
@@ -557,46 +547,55 @@ NR == 1 { for (i = 1; i <= NF; i++) col[$i] = i; g = col["Gene"]; p = col["Posit
     summarise(score = if (any(is.finite(score))) max(score[is.finite(score)]) else NA_real_, .groups = "drop")
 }
 .sets <- list(
-  global = list(obs = .best_side(.obs_pos, c("Gene", "Position")),
-                null = .best_side(.null_pos, c("Gene", "Position", "cycle"))),
-  top    = list(obs = filter(.obs_pos, side == "top"),    null = filter(.null_pos, side == "top")),
-  bottom = list(obs = filter(.obs_pos, side == "bottom"), null = filter(.null_pos, side == "bottom")))
+  global = list(obs = .best_side(.obs_pos, c("Gene", "Position"))),
+  top    = list(obs = filter(.obs_pos, side == "top")),
+  bottom = list(obs = filter(.obs_pos, side == "bottom")))
 
-# Per-cycle count of a quantity, with the cycles that detect nothing as 0.
-.per_cycle <- function(d, f) {
-  if (length(.null_cycles) == 0) return(rep(0, .n_pad))
-  v <- vapply(split(d, factor(d$cycle, levels = .null_cycles)), f, numeric(1))
-  c(v, rep(0, .n_pad))
+# Per-cycle value of a summary column, in the order of the cycles (a cycle with no entry is 0).
+.null_per_cycle <- function(direction, column = "n") {
+  d <- .null_sum[.null_sum$direction == direction, ]
+  v <- d[[column]][match(.null_cycles, d$cycle)]
+  v[is.na(v)] <- 0
+  v
+}
+# Histogram counts of a direction: bins 0..100 by cycles.
+.null_bins <- function(direction) {
+  m <- matrix(0, nrow = 101, ncol = length(.null_cycles))
+  d <- .null_hist[.null_hist$direction == direction, ]
+  m[cbind(d$bin + 1L, match(d$cycle, .null_cycles))] <- d$n
+  m
 }
 ```
 
 ```{r pos-null-na, eval=!has_pos_null, results='asis'}
 cat("_No position-level permulation null available for this run",
-    " (`perm_pos_cycle_caas.tsv.gz` absent or empty)._\n\n")
+    " (`cycle_summary.tsv` absent or empty)._\n\n")
 ```
 
 ### Detected positions vs null
 
 ```{r pos-null-excedance, eval=has_pos_null, fig.height=4.8, fig.width=10}
-.valid_scores <- c(.null_pos$score[is.finite(.null_pos$score)], .obs_pos$score[is.finite(.obs_pos$score)])
-.max_s <- if (length(.valid_scores) > 0) max(.valid_scores) else 1.0
+# The null scores are binned at 0.01, so a score counts at the threshold of its own bin: the grid is the one of the observed
+# scores and of the highest null bin.
+.null_top_bin <- max(c(0L, .null_hist$bin[.null_hist$n > 0]))
+.max_s <- max(c(.obs_pos$score[is.finite(.obs_pos$score)], (.null_top_bin + 1) / 100))
 .grid  <- seq(0, max(0.01, ceiling(100 * .max_s) / 100), by = 0.01)
 .cnt   <- function(x) {
   x_fin <- x[is.finite(x)]
   rev(cumsum(rev(tabulate(findInterval(x_fin, .grid), length(.grid)))))  # N(score >= grid)
 }
-.exc <- dplyr::bind_rows(lapply(names(.sets), function(d) {
-  st <- .sets[[d]]
-  m  <- if (length(.null_cycles) > 0) {
-    vapply(split(st$null$score, factor(st$null$cycle, levels = .null_cycles)), .cnt, numeric(length(.grid)))
-  } else {
-    matrix(0, nrow = length(.grid), ncol = 0)
-  }
-  m  <- cbind(m, matrix(0, length(.grid), .n_pad))
-  tibble::tibble(direction = d, s = .grid, obs = .cnt(st$obs$score),
-                 med = if (ncol(m) > 0) apply(m, 1, median) else rep(0, length(.grid)),
-                 lo  = if (ncol(m) > 0) apply(m, 1, quantile, .025) else rep(0, length(.grid)),
-                 hi  = if (ncol(m) > 0) apply(m, 1, quantile, .975) else rep(0, length(.grid)))
+# N(score >= grid) of every null cycle from its histogram
+.cnt_hist <- function(bins) {
+  h <- bins[seq_len(min(nrow(bins), length(.grid))), , drop = FALSE]
+  h <- rbind(h, matrix(0, nrow = length(.grid) - nrow(h), ncol = ncol(h)))
+  apply(h, 2, function(col) rev(cumsum(rev(col))))
+}
+.exc <- dplyr::bind_rows(lapply(.dirs, function(d) {
+  m <- .cnt_hist(.null_bins(d))
+  tibble::tibble(direction = d, s = .grid, obs = .cnt(.sets[[d]]$obs$score),
+                 med = apply(m, 1, median),
+                 lo  = apply(m, 1, quantile, .025),
+                 hi  = apply(m, 1, quantile, .975))
 })) %>% mutate(direction = factor(direction, levels = c("global", "top", "bottom")))
 
 .fl <- 0.5   # log axis floor for counts of 0
@@ -626,9 +625,15 @@ null produces detections of the same kind as the run, so that a difference in th
 positions are detected and not from what a detection looks like.
 
 ```{r pos-null-comp-data, eval=has_pos_null}
-.comp <- dplyr::bind_rows(lapply(names(.sets), function(d)
-  dplyr::bind_rows(tibble::tibble(direction = d, source = "Observed", score = .sets[[d]]$obs$score),
-                   tibble::tibble(direction = d, source = "Null",     score = .sets[[d]]$null$score)))) %>%
+# The null detections, from the histogram of its scores pooled over the cycles: one point per bin (its centre) carrying the
+# number of detections of the bin as weight. The run's detections are its own scores.
+.null_pooled <- function(d) {
+  h <- .null_hist[.null_hist$direction == d, ] %>% group_by(bin) %>% summarise(n = sum(n), .groups = "drop")
+  tibble::tibble(score = (h$bin + 0.5) / 100, weight = as.numeric(h$n))
+}
+.comp <- dplyr::bind_rows(lapply(.dirs, function(d)
+  dplyr::bind_rows(tibble::tibble(direction = d, source = "Observed", score = .sets[[d]]$obs$score, weight = 1),
+                   dplyr::mutate(.null_pooled(d), direction = d, source = "Null")))) %>%
   mutate(direction = factor(direction, levels = c("global", "top", "bottom")),
          source    = factor(source, levels = c("Null", "Observed")))
 .theme_p <- theme_minimal(base_size = 11)
@@ -637,9 +642,9 @@ positions are detected and not from what a detection looks like.
 #### Score of the detected positions (score > 0)
 
 ```{r pos-null-score-density, eval=has_pos_null, fig.height=3.8, fig.width=10, results='asis'}
-.comp_pos <- .comp %>% filter(score > 0)
+.comp_pos <- .comp %>% filter(score > 0, weight > 0)
 if (nrow(.comp_pos) > 0) {
-  p_dens <- ggplot(.comp_pos, aes(score, colour = source, fill = source)) +
+  p_dens <- ggplot(.comp_pos, aes(score, weight = weight, colour = source, fill = source)) +
     geom_density(alpha = .25, adjust = 1.2) + facet_wrap(~direction, scales = "free_y") +
     scale_colour_manual(values = .src_pal) + scale_fill_manual(values = .src_pal) +
     labs(x = "CAAS Score", y = "density", colour = NULL, fill = NULL) +
@@ -653,7 +658,7 @@ if (nrow(.comp_pos) > 0) {
 #### Detections with score 0
 
 ```{r pos-null-zeros, eval=has_pos_null, fig.height=3.5, fig.width=6}
-.comp %>% group_by(direction, source) %>% summarise(zeros = mean(score == 0), .groups = "drop") %>%
+.comp %>% group_by(direction, source) %>% summarise(zeros = weighted.mean(score == 0, weight), .groups = "drop") %>%
   ggplot(aes(direction, zeros, fill = source)) +
   geom_col(position = position_dodge(width = .8), width = .7) +
   scale_fill_manual(values = .src_pal) + scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
@@ -663,8 +668,7 @@ if (nrow(.comp_pos) > 0) {
 ### Top and bottom balance
 
 ```{r pos-null-topbottom, eval=has_pos_null, fig.height=4.2, fig.width=10}
-.cnt_cyc <- function(d) .per_cycle(d, nrow)
-.rt <- .cnt_cyc(.sets$top$null); .rb <- .cnt_cyc(.sets$bottom$null)
+.rt <- .null_per_cycle("top"); .rb <- .null_per_cycle("bottom")
 .o_t <- nrow(.sets$top$obs); .o_b <- nrow(.sets$bottom$obs)
 .min_rows <- 20   # the ratio is unstable in cycles with a handful of detections
 .ok <- .rt >= .min_rows & .rb >= .min_rows
@@ -691,10 +695,10 @@ on the other; the run is in red.
 #### Volume per cycle
 
 ```{r pos-null-volume, eval=has_pos_null, fig.height=5.5, fig.width=10}
-.vol_n <- list(`rows, top`    = .cnt_cyc(.sets$top$null),
-               `rows, bottom` = .cnt_cyc(.sets$bottom$null),
-               `positions, global` = .cnt_cyc(.sets$global$null),
-               `genes with a detection` = .per_cycle(.null_pos, function(d) dplyr::n_distinct(d$Gene)))
+.vol_n <- list(`rows, top`    = .null_per_cycle("top"),
+               `rows, bottom` = .null_per_cycle("bottom"),
+               `positions, global` = .null_per_cycle("global"),
+               `genes with a detection` = .null_per_cycle("global", "n_genes"))
 .vol_o <- c(`rows, top` = .o_t, `rows, bottom` = .o_b, `positions, global` = nrow(.sets$global$obs),
             `genes with a detection` = dplyr::n_distinct(.obs_pos$Gene))
 .vol_long <- dplyr::bind_rows(lapply(names(.vol_n), function(m) tibble::tibble(metric = m, value = .vol_n[[m]]))) %>%
@@ -921,7 +925,7 @@ p_des <- ggplot(.des_long, aes(value)) +
 
 # Detections of each cycle against the distance of its pairs
 if ("mean_distance" %in% .des_cols) {
-  .pos_cyc <- .sets$global$null %>% count(cycle, name = "positions")
+  .pos_cyc <- tibble::tibble(cycle = .null_cycles, positions = as.integer(.null_per_cycle("global")))
   .sc <- .man %>% left_join(.pos_cyc, by = "cycle") %>% mutate(positions = dplyr::coalesce(positions, 0L))
   .rho <- suppressWarnings(cor(.sc$mean_distance, .sc$positions, method = "spearman", use = "complete.obs"))
   p_sc2 <- ggplot(.sc, aes(mean_distance, pmax(positions, 1))) +
@@ -1083,7 +1087,7 @@ cat("_No `permulation_manifest.tsv` available to evaluate null draw diversity._\
 # permulation p, pooled to (Gene, Position) over the max-over-sides axis, with
 # its BH adjustment (p.adj_bh). p.emp_fact is its factorized form, with p.adj_bh_fact.
 # scoring_compute.R writes them into position_scores.tsv
-# whenever --caas_pos_cycle_caas is set.
+# whenever the counters of the null (--null_counters) are given.
 .valid_p <- suppressWarnings(as.numeric(pos_df$p.emp))
 .valid_p <- .valid_p[is.finite(.valid_p) & .valid_p > 0]
 has_p_emp <- length(.valid_p) > 0
@@ -1151,7 +1155,7 @@ ggplot(pos_df %>% filter(!is.na(p.emp_fact)), aes(x = p.emp_fact)) +
 
 ```{r p-emp-missing, eval=!has_p_emp, results='asis'}
 cat("### p.emp\n\n")
-cat("_No `p.emp` column in `position_scores.tsv` (no `--caas_pos_cycle_caas` supplied to",
+cat("_No `p.emp` column in `position_scores.tsv` (no counters of the null supplied to",
     "SCORING_COMPUTE for this run)._\n\n")
 ```
 
