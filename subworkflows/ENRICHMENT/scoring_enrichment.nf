@@ -120,7 +120,7 @@ process SCORING_AMI_REPORT {
     def stage_cmd = """
         cp -R ${local_dir}/* .
 
-        # One gene list per slice: the Gene column of slice_<name>.tsv becomes <name>.txt
+        # One gene list per direction: the Gene column of active_<name>.tsv becomes <name>.txt
         for f in ${gene_lists}/active_*.tsv; do
             if [ -f "\$f" ]; then
                 basename=\$(basename "\$f" .tsv)
@@ -208,8 +208,8 @@ process SCORING_COMPARE_REPORT {
     // they enter as corroboration flags on the leading edge.
     path caas_fcs,  stageAs: 'caas_fcs_all.tsv'    // CAAS (composite) FCS results
     path rer_fcs,   stageAs: 'rer_fcs_all.tsv'     // RER FCS results
-    // Leading-edge tables feed the composite score (percentile concentration and
-    // cross-module corroboration) that orders the tables and plots of the Cross-module
+    // Leading-edge tables feed the attribute composition and cross-module
+    // corroboration that order the tables and plots of the Cross-module
     // convergence section. NO_LEADING_EDGE sentinel when the module's report did not run.
     path caas_le,   stageAs: 'caas_leading_edge.tsv'
     path rer_le,    stageAs: 'rer_leading_edge.tsv'
@@ -229,7 +229,7 @@ process SCORING_COMPARE_REPORT {
     // exported by 14.Position_enrichment_report.Rmd for the Leading edge sub-tab of the
     // Posenrich section.
     path posenrich_le_summary, stageAs: 'posenrich_leading_edge_summary.tsv'
-    // SCORING's gene-level table (percentile flags and FADE, RER and Accumulation
+    // SCORING's gene-level table (nominal/BH activity flags and FADE, RER and Accumulation
     // significance) for the Interesting Genes and Positions tables.
     path fcs_stats,           stageAs: 'fcs_stats.tsv'
     // Position-level CAAS scores with FADE-site and VEP annotations, for the
@@ -246,11 +246,6 @@ process SCORING_COMPARE_REPORT {
     // layers posenrich tests as GMTs, flattened for a Gene/Position join onto the
     // Interesting Positions table.
     path position_char,       stageAs: 'position_characterization.tsv'
-    // SCORING's percentile slices (scoring_compute.R): the gene and position
-    // membership of each cutoff, read by the report (gene_lists_dir and
-    // position_lists_dir) instead of recomputed.
-    path gene_lists,          stageAs: 'gene_lists'
-    path position_lists,      stageAs: 'position_lists'
 
     output:
     path "15.Comparison_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -276,8 +271,6 @@ process SCORING_COMPARE_REPORT {
     def fade_sites_top_arg    = (fade_sites_top.name =~ /^NO_/)    ? 'NULL' : "'${fade_sites_top}'"
     def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_/) ? 'NULL' : "'${fade_sites_bottom}'"
     def position_char_arg     = (position_char.name =~ /^NO_/)     ? 'NULL' : "'${position_char}'"
-    def gene_lists_arg     = (gene_lists.name =~ /^NO_/)     ? 'NULL' : "'${gene_lists}'"
-    def position_lists_arg = (position_lists.name =~ /^NO_/) ? 'NULL' : "'${position_lists}'"
 
     def render_cmd = """
         Rscript -e "
@@ -304,8 +297,6 @@ process SCORING_COMPARE_REPORT {
                     fade_sites_top_file      = ${fade_sites_top_arg},
                     fade_sites_bottom_file   = ${fade_sites_bottom_arg},
                     position_characterization_file = ${position_char_arg},
-                    gene_lists_dir     = ${gene_lists_arg},
-                    position_lists_dir = ${position_lists_arg},
                     seed               = '${params.seed ?: 1998}'
                 ),
                 output_file = '15.Comparison_report_${traitname}.html'

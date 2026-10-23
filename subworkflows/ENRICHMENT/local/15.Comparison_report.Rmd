@@ -36,7 +36,7 @@ params:
   # significant term, not per cutoff), 14.Position_enrichment_report.Rmd's
   # own Leading edge section export, posenrich_leading_edge_summary.tsv.
   posenrich_leading_edge_summary_file: NULL
-  # SCORING's own gene-level table (percentile flags + FADE/RER/Accumulation
+  # SCORING's own gene-level table (nominal/BH activity flags + FADE/RER/Accumulation
   # significance), same file 12.FCS_general_report.Rmd/14.Position_enrichment_report.Rmd
   # consume, reused here for the Interesting Genes/Positions tables.
   fcs_stats_file: NULL
@@ -54,9 +54,6 @@ params:
   # build_position_gmt.py's position_characterization.tsv - the same GMT-source
   # layers posenrich tests, flattened for a direct Gene/Position join here.
   position_characterization_file: NULL
-  # Published nominal activity lists; evidence values come from canonical tables.
-  gene_lists_dir:     NULL
-  position_lists_dir: NULL
   seed:               "1998"
 ---
 
@@ -181,9 +178,9 @@ if (has_multi) {
 
 # Per-module leading-edge tables (cmp_fcs_le/<module>_leading_edge.tsv) feed
 # the Interesting Genes/Positions criteria below: each module's own
-# directional percentile concentration + cross-module corroboration flags
+# directional nominal/BH activity flags + cross-module corroboration flags
 # (FADE/RER/Accumulation, and PrimateAI-3D/COSMIC once wired in from
-# posenrich). Percentile columns reflect CAAS's own ranking in every module's
+# posenrich). Activity flags reflect CAAS's own evidence in every module's
 # leading edge (per-module FCS
 # reports are annotated with CAAS's fcs_stats.tsv as their overlay) - that's
 # intentional, not a bug: it's the shared reference axis every module's
@@ -358,7 +355,7 @@ fade_sites_bottom_cmp_df <- if (has_fade_sites_bottom_cmp) {
 # posenrich's per-position PFAM domain/clan, UCR core/flank region + per-position
 # variability, and FUBAR selection call (build_position_gmt.py's
 # position_characterization.tsv) - characterization-only, like COSMIC/PAI3D
-# below, so joined straight in without any percentile/significance gating.
+# below, so joined straight in without any selection or significance gating.
 has_position_char_cmp <- .file_ok(params$position_characterization_file)
 position_char_cmp_df  <- if (has_position_char_cmp) {
   # A header-only file (no gene tested any position, plausible on a small
@@ -371,8 +368,8 @@ position_char_cmp_df  <- if (has_position_char_cmp) {
     dplyr::mutate(Position = suppressWarnings(as.integer(Position)))
 } else NULL
 
-# Per-gene attribute table: percentile flags (from fcs_stats' own score_top/
-# score_bottom, same derivation as 12.FCS_general_report.Rmd) + the gene-level
+# Per-gene attribute table: nominal/BH activity flags (from the canonical gene
+# evidence, same derivation as 12.FCS_general_report.Rmd) + the gene-level
 # flag_* columns fcs_stats.tsv already carries (gate/FADE/RER/Accumulation,
 # direction-aware: flag_accum_top/flag_accum_bottom are the direction-restricted
 # tests, not the non-directional flag_accum).
@@ -397,8 +394,8 @@ gene_attr_df <- if (has_fcs_stats_cmp) {
 # FCS and posenrich both carry a genuine "global" ranking (CAAS's undirected
 # composite; posenrich's own directions = ["global","top","bottom"]), so
 # fcs_genes/posenrich_genes have real direction=="Global" rows. AMI has no
-# equivalent, DOMINO only ever runs on Top/Bottom percentile gene lists
-# (.TOP_THRESHOLDS/.BOTTOM_THRESHOLDS in 13.AMI_analysis.Rmd, no undirected
+# equivalent, DOMINO only ever runs on Top/Bottom activity gene lists
+# (.TOP_LISTS/.BOTTOM_LISTS in 13.AMI_analysis.Rmd, no undirected
 # list), so ami_genes' direction column is only ever "Top"/"Bottom"; a
 # "Global" row for AMI never exists here. This means the Interesting Genes/Positions tables' Global
 # tab can never carry an AMI contribution, unlike .ami_desc_for(dir_filter = NULL), used by the
@@ -601,7 +598,7 @@ Leading-edge composition from each module's own FCS report
 ([12.FCS_general_report.Rmd](12.FCS_general_report.Rmd)), imported directly so the
 tables shown here match the per-module reports exactly. For each significantly-
 enriched set, the **percentage of its leading-edge genes** carrying each attribute:
-directional score percentiles and cross-module support. Rows follow the order of the source
+nominal/BH activity flags and cross-module support. Rows follow the order of the source
 FCS report (`q.perm` first, then `p.perm`, the size of the effect and description), already baked
 into the imported table, with the redundancy group of each set (`Group`, `Rep` for its
 representative). Faceted Global/Top/Bottom, each module in its own sub-tab, capped at `r params$top_n`

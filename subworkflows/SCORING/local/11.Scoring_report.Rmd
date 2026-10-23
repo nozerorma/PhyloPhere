@@ -371,8 +371,8 @@ independent evolutionary evidence.
 
 This scoring report is the hub of the downstream enrichment suite. The reports below
 are rendered as sibling HTML files in the same `html_reports/` directory and are
-auto-annotated with the cross-module scoring signals (CAAS gates, top/bottom
-percentiles, FADE, accumulation) produced here. A link is live only if the
+auto-annotated with the cross-module scoring signals (CAAS nominal/BH activity
+calls, FADE, accumulation) produced here. A link is live only if the
 corresponding module was part of this run. FADE and Accumulation do not run
 their own FCS ranking; they appear there as cross-module corroboration flags.
 Position Characterisation (PrimateAI-3D + COSMIC validation) is part of the

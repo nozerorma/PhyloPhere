@@ -116,8 +116,6 @@ def parse_args():
                    help="BH FDR gate of the Lachenbruch test (analytic p), as the FCS")
     p.add_argument("--pperm-thr", type=float, default=0.025,
                    help="permulation p gate of the Lachenbruch test (lach_p.perm), as the FCS")
-    p.add_argument("--position-lists-dir", required=False, default=None,
-                   help="Accepted for backward compatibility (unused in continuous permulation)")
     p.add_argument("--char-fracs", default=None, help="Accepted for backward compatibility (unused)")
     p.add_argument("--fold-thr", type=float, default=1.5, help="Accepted for backward compatibility (unused)")
     return p.parse_args()

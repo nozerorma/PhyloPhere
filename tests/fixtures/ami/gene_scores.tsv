@@ -1,0 +1,9 @@
+Gene	n_positions	n_positions_top	n_positions_bottom	gene_caas_score	gene_caas_score_top	gene_caas_score_bottom	rer_min_pval	rer_perm_padj	rer_significant	rer_significant_fdr	rer_rho	rer_acceleration	caas_p.gen	caas_p.gen.adj	caas_nominal	caas_adjusted	caas_p.gen_top	caas_p.gen.adj_top	caas_nominal_top	caas_adjusted_top	caas_p.gen_bottom	caas_p.gen.adj_bottom	caas_nominal_bottom	caas_adjusted_bottom
+g1	1	1	0	0.99	0.99	0	0.001	0.008	TRUE	TRUE	-0.4	decelerated	0.02	0.08	TRUE	TRUE	0.02	0.08	TRUE	TRUE	1	1	TRUE	TRUE
+g2	1	1	0	0.98	0.98	0	0.02	0.08	TRUE	FALSE	-0.3	decelerated	0.02	0.08	TRUE	TRUE	0.02	0.08	TRUE	TRUE	1	1	TRUE	TRUE
+g3	1	1	0	0.7	0.7	0	0.3	0.5	FALSE	FALSE	-0.2	decelerated	0.3	0.8	TRUE	FALSE	0.3	0.8	TRUE	FALSE	1	1	TRUE	FALSE
+g4	1	1	0	0.4	0.4	0	0.5	0.7	FALSE	FALSE	-0.1	decelerated	0.58	1	TRUE	FALSE	0.58	1	TRUE	FALSE	1	1	TRUE	FALSE
+g5	1	1	0	0.3	0.3	0	0.8	0.9	FALSE	FALSE	0	accelerated	0.65	1	TRUE	FALSE	0.65	1	TRUE	FALSE	1	1	TRUE	FALSE
+g6	1	1	0	0.2	0.2	0	0.1	0.3	FALSE	FALSE	0.1	accelerated	0.81	1	TRUE	FALSE	0.81	1	TRUE	FALSE	1	1	TRUE	FALSE
+g7	1	1	0	0.1	0.1	0	0.4	0.6	FALSE	FALSE	0.2	accelerated	0.92	1	FALSE	FALSE	0.92	1	FALSE	FALSE	1	1	FALSE	FALSE
+g8	1	1	0	0	0	0	0.7	0.9	FALSE	FALSE	0.3	accelerated	1	1	FALSE	FALSE	1	1	FALSE	FALSE	1	1	FALSE	FALSE

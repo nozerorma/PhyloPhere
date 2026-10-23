@@ -27,8 +27,6 @@ params:
   # + COSMIC validation and regional accumulation.
   # NULL/absent inputs degrade gracefully (has_pos_char is FALSE, section skipped).
   position_scores_file: NULL   # position_scores.tsv (per-position CAAS scores)
-  # Nominal activity lists from the canonical empirical position evidence.
-  position_lists_dir: NULL
   gene_scores_file:     NULL   # gene_scores.tsv (background gene fallback)
   vep_primateai_file:   NULL   # PrimateAI-3D score TSV
   vep_cosmic_file:      NULL   # COSMIC Mutant Census score TSV
@@ -822,17 +820,13 @@ if (length(.leading_edge_summary_rows) > 0) {
 
 Every significant term/pathway, pooled across the three direction lists
 (**GLOBAL**/**TOP**/**BOTTOM**) into one table - not one table per direction.
-Recurrence *within* a single direction's own nested percentile cutoffs
-(`top25` ⊃ `top10` ⊃ `top5` ⊃ `top1`) isn't an independent signal: a term is
-mechanically less likely to survive the tighter, smaller foreground, so
-"recovered at fewer cutoffs" mostly just restates the nesting rather than
-telling you anything new. Recurrence *across* the three direction lists is
+Recurrence *across* the three direction lists is
 the meaningful comparison - a term significant under both **Top** and
 **Bottom** (or all three) is corroborated by genuinely independent
 foreground constructions, not by a subset relationship.
 
 `N_lists`/`Lists` say how many of, and which of, GLOBAL/TOP/BOTTOM recovered
-the term (at any of its own percentile cutoffs) - no other column, since
+the term - no other column, since
 nothing else is comparable across three direction lists built from different
 score signs. Underneath, a **term x direction-list** heatmap makes the same
 recurrence pattern visually scannable.
@@ -844,10 +838,9 @@ recurrence pattern visually scannable.
 # descriptions identically.
 
 # Term x direction-list heatmap: one tile per (canonical Term, GLOBAL/TOP/BOTTOM) under
-# which the term is recovered. Recurrence across the cutoffs of one direction is not an
-# independent signal (top1 is a subset of top5, of top10 and of top25; see the section
-# introduction). It takes `rec_pairs` after clustering (canonical `Term`, one row per
-# database, pathway and list), so its merge is the one of the Recurrence Table.
+# which the term is recovered (see the section introduction). It takes `rec_pairs` after
+# clustering (canonical `Term`, one row per database, pathway and list), so its merge is
+# the one of the Recurrence Table.
 .render_posenrich_list_heatmap <- function(rec_pairs) {
   if (nrow(rec_pairs) == 0) { cat("_No terms to show._\n\n"); return(invisible(NULL)) }
   pres <- rec_pairs %>% dplyr::distinct(Term, list_name)
@@ -883,7 +876,7 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
   sig_res <- res %>% filter(sig)
 
   # One row per (database, pathway, direction list that recovers it), the unit before the
-  # similarity clustering, pooled over the percentile cutoffs of the list. The clustering
+  # similarity clustering, pooled over the lists of the direction. The clustering
   # below unions a term split across databases or near-duplicate GMT entries into one row.
   rec_pairs <- sig_res %>%
     dplyr::mutate(description = dplyr::coalesce(description, pathway),

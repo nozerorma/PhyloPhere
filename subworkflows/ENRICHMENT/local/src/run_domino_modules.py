@@ -41,7 +41,7 @@ def parse_args():
     p.add_argument("--network", required=True, help="network.sif (built by build_domino_network.py)")
     p.add_argument("--slices", required=True, help="slices.txt (output of the `slicer` CLI)")
     p.add_argument("--gene-lists-dir", required=True,
-                   help="directory of *.txt active-gene files, one per percentile-tier slice")
+                   help="directory of *.txt active-gene files, one per activity list")
     p.add_argument("--output-dir", required=True)
     p.add_argument("--slice-threshold", type=float, default=0.3,
                    help="DOMINO's own default (src/runner.py) for retaining a slice as relevant")

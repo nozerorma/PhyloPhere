@@ -27,6 +27,6 @@ workflow {
         Channel.value(file("${saved}/caastools/background.output")), reduced.cycle_roster
     )
     FCS_CAAS(SCORING.out.fcs_stats,universe,SCORING.out.caas_perms,validated)
-    SCORING_FCS_REPORT(SCORING.out.fcs_stats,universe,SCORING.out.gene_lists,FCS_CAAS.out.enrich_file)
+    SCORING_FCS_REPORT(SCORING.out.fcs_stats,universe,FCS_CAAS.out.enrich_file)
     FCS_CAAS.out.enrich_file.subscribe { f -> println "WP7_FCS=${f}" }
 }

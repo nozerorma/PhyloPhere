@@ -17,7 +17,7 @@ gene_scores <- data.frame(rer_P=r$P); .col <- function(x,n) x[[n]]
 eval(parse(text=trimws(grep('^  \\.rp <-',s,value=TRUE))))
 same(.rp,r$P)
 report <- readLines('subworkflows/RERCONVERGE/local/5.RERconverge_report.Rmd')
-stopifnot(any(grepl('rer_stat      = sign(Rho) * -log10(P),',report,fixed=TRUE)))
+stopifnot(any(grepl('rer_df$rer_stat <- sign(rer_df$Rho) * -log10(rer_df$P)',report,fixed=TRUE)))
 # Exact duplicates, including a missing score, must fail; suffixes remain distinct IDs.
 reject(fcs_build_vals(setNames(c(NA,2),c('g','g')), 'g',score_source='rer'))
 reject(fcs_build_vals(setNames(c(1,2),c('g','g')), 'g'))

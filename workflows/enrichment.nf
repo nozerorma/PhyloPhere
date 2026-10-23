@@ -134,7 +134,6 @@ workflow ENRICHMENT {
         gene_calibration
         caas_pos_sample_ch
         position_scores
-        position_lists       // SCORING's published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv dir
         scoring_postproc_ch        // filtered_discovery.tsv (evaluated positions; POSENRICH modular registry)
         scoring_null_universe_ch   // null_universe_summary.tsv (positional null universe; POSENRICH modular registry)
         background_output_ch
@@ -189,9 +188,8 @@ workflow ENRICHMENT {
             .collect()
             .map { it[0] }
 
-        // SCORING's own published gene_lists/ (scoring_compute.R) -- hoisted
-        // here (rather than only inside the run_ami block below) since
-        // SCORING_FCS_REPORT's gene_lists_dir param needs it too.
+        // SCORING's own published nominal active gene_lists/ (scoring_evidence.R),
+        // consumed by the DOMINO CAAS seed lists below.
         def gene_lists_ch = gene_lists.ifEmpty { file('NO_GENE_LISTS') }
 
         // FCS ranked-Wilcoxon enrichment (gated by params.fcs_enabled)
@@ -210,7 +208,7 @@ workflow ENRICHMENT {
 
         if (run_fcs) {
             def scoring_fcs_compute = FCS_COMPUTE_SCORING(fcs_universe_ch, gene_calibration)
-            def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch, gene_lists_ch,
+            def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch,
                                               scoring_fcs_compute.enrich_file)
             fcs_out_report = fcs_out.report
             caas_all = fcs_out.fcs_all_results.ifEmpty { file('NO_FCS_ALL') }
@@ -427,11 +425,6 @@ workflow ENRICHMENT {
         )
         def posenrich_position_char_ch = POSITION_ANNOTATIONS.out.position_char
 
-        // SCORING's published percentile slices -- gene_lists_ch already
-        // established above (hoisted for SCORING_FCS_REPORT); position_lists
-        // has no other consumer in this workflow yet, so it's resolved here.
-        def cmp_position_lists_ch = position_lists ? position_lists.ifEmpty { file('NO_POSITION_LISTS') } : file('NO_POSITION_LISTS')
-
         // ── POSENRICH modular (WP10) ──
         // Common registry + characterization + within-protein localization + global
         // association + proximity, gated by params.posenrich_modular. The historical
@@ -462,8 +455,7 @@ workflow ENRICHMENT {
                                               cmp_vep_pai_ch, cmp_vep_cosmic_ch,
                                               cmp_vep_ensembl_ch,
                                               cmp_fade_top_ch, cmp_fade_bot_ch,
-                                              posenrich_position_char_ch,
-                                              gene_lists_ch, cmp_position_lists_ch)
+                                              posenrich_position_char_ch)
         final_reports = final_reports.mix(cmp_out.report)
 
     emit:

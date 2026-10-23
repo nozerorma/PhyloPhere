@@ -17,7 +17,7 @@
  *  term is significant. A term is significant when lach_p.adj < fcs_fdr_lachenbruch
  *  and lach_p.perm < fcs_pperm_thr, the gates of the Lachenbruch vote of the FCS.
  *
- *  Consumes:  position scores, SCORING's position_lists/, tested-position background,
+ *  Consumes:  position scores, tested-position background,
  *             cleaned background, functional annotation inputs, CAAS permulation null
  *  Produces:  posenrich/ (posenrich_characterization.tsv, posenrich_leading_edge.tsv,
  *             HTML report), position_characterization.tsv
@@ -107,7 +107,6 @@ process POSENRICH_RUN {
     path pai3d_coverage
     val min_size
     val max_size
-    path position_lists_dir
     path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz, the null (NO_FILE* sentinel for none)
     path cycle_roster       // optional: cycle_roster.txt, N of the null (NO_* sentinel for none)
 
@@ -130,12 +129,10 @@ process POSENRICH_RUN {
     def pai3d_cov_arg  = !(pai3d_coverage.name =~ /^NO_FILE/) ? "--pai3d-coverage ${pai3d_coverage}" : ""
     def caas_null_arg  = !(caas_cycle_null.name =~ /^NO_FILE/) ? "--caas-cycle-null ${caas_cycle_null}" : ""
     def roster_arg     = !(cycle_roster.name =~ /^NO_/) ? "--cycle-roster ${cycle_roster}" : ""
-    // SCORING's published position_lists/ (slice_{top,bottom,global}{25,10,5,1}.tsv,
-    // from scoring_compute.R) is the only foreground source, so it is passed without
-    // a NO_FILE guard. --background (caastools background.output, the tested
-    // positions) is equally mandatory: without it the null background would collapse
-    // to the scored positions only. When the CT stage is skipped, the caller supplies
-    // it through params.posenrich_background_file.
+    // --background (caastools background.output, the tested positions) is mandatory:
+    // without it the null background would collapse to the scored positions only.
+    // When the CT stage is skipped, the caller supplies it through
+    // params.posenrich_background_file.
     """
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_enrich.py \
         --obs-scores ${caas_file} \
@@ -146,7 +143,6 @@ process POSENRICH_RUN {
         ${annot_arg} \
         ${cosmic_cov_arg} \
         ${pai3d_cov_arg} \
-        --position-lists-dir ${position_lists_dir} \
         --min-size ${min_size} \
         --max-size ${max_size} \
         ${caas_null_arg} \
@@ -206,7 +202,6 @@ process POSENRICH_RUN_BATCHED {
     path pai3d_coverage
     val min_size
     val max_size
-    path position_lists_dir
     path caas_null_prepped    // caas_null_prepped.pkl from POSENRICH_PREP_NULL (shared by all batches)
 
     output:
@@ -233,7 +228,6 @@ process POSENRICH_RUN_BATCHED {
         ${annot_arg} \
         ${cosmic_cov_arg} \
         ${pai3d_cov_arg} \
-        --position-lists-dir ${position_lists_dir} \
         --min-size ${min_size} \
         --max-size ${max_size} \
         ${caas_null_arg} \
@@ -308,9 +302,6 @@ process POSENRICH_REPORT {
     path genomic_info
     path fade_sites_top
     path fade_sites_bottom
-    // SCORING's position_lists/, the foreground source of the enrichment test. The
-    // report reads the same 10/5/1% cutoffs instead of recomputing quantiles.
-    path position_lists
     // SCORING's fcs_stats.tsv (gene + flag_* columns), the file POSENRICH_RUN takes as
     // --annot-file. It is passed to the report as fcs_stats_file.
     path fcs_stats
@@ -336,7 +327,6 @@ process POSENRICH_REPORT {
     def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_FILE/) ? 'NULL' : "'${fade_sites_bottom}'"
     def fcs_stats_arg = (fcs_stats.name =~ /^NO_FILE/) ? 'NULL' : "'${fcs_stats}'"
     def universe_arg  = (cleaned_background.name =~ /^NO_FILE/) ? 'NULL' : "'${cleaned_background}'"
-    def position_lists_arg = (position_lists.name =~ /^NO_/) ? 'NULL' : "'${position_lists}'"
     def render = """
         rmarkdown::render(
             '14.Position_enrichment_report.Rmd',
@@ -355,7 +345,6 @@ process POSENRICH_REPORT {
                 fade_sites_bottom_file = ${fade_sites_bottom_arg},
                 fcs_stats_file = ${fcs_stats_arg},
                 universe_file  = ${universe_arg},
-                position_lists_dir = ${position_lists_arg},
                 seed = '${params.seed ?: 1998}'
             ),
             output_file = '14.Position_enrichment_report_${traitname}.html'
@@ -390,7 +379,6 @@ workflow POSENRICH {
     pai3d_db
     cleaned_background
     caas_file
-    position_lists_file     // SCORING's position_lists/ dir, mandatory (sole foreground source)
     background_output
     annot_file
     min_size
@@ -454,7 +442,6 @@ workflow POSENRICH {
         def annot_file_bc          = annot_file.collect().map { it[0] }
         def cosmic_coverage_bc     = cosmic_coverage_ch.collect().map { it[0] }
         def pai3d_coverage_bc      = pai3d_coverage_ch.collect().map { it[0] }
-        def position_lists_file_bc = position_lists_file.collect().map { it[0] }
 
         // The null is parsed once for the whole run (POSENRICH_PREP_NULL).
         POSENRICH_PREP_NULL(caas_cycle_null_file, cycle_roster_file)
@@ -471,7 +458,6 @@ workflow POSENRICH {
             pai3d_coverage_bc,
             min_size,
             max_size,
-            position_lists_file_bc,
             caas_null_prepped_bc
         )
 
@@ -494,7 +480,6 @@ workflow POSENRICH {
             pai3d_coverage_ch,
             min_size,
             max_size,
-            position_lists_file,
             caas_cycle_null_file,
             cycle_roster_file
         )
@@ -514,7 +499,6 @@ workflow POSENRICH {
         genomic_info_file,
         fade_sites_top_file,
         fade_sites_bottom_file,
-        position_lists_file,
         annot_file,
         cleaned_background
     )

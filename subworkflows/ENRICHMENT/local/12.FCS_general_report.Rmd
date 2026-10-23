@@ -45,13 +45,8 @@ params:
                               # FCS_COMPUTE_BATCHED+FCS_CONCAT in fcs.nf). When NULL, falls back to running
                               # fcs_run_all() here directly (unbatched path, e.g. ad-hoc/manual rendering)
   annot_file:   "NO_FILE"     # optional cross-module annotation overlay (SCORING fcs_stats.tsv):
-                              # supplies flag_* + CAAS score_top/score_bottom for the leading edge.
+                              # supplies flag_* + CAAS nominal/BH evidence for the leading edge.
                               # When NO_FILE, annotation falls back to the stats file itself.
-  gene_lists_dir: NULL        # SCORING's published gene_lists/slice_<dir><pct>.tsv dir, when
-                              # supplied, gene percentile membership is read from there instead of
-                              # re-ranking score_top/score_bottom here. ONLY pass this for the CAAS
-                              # report (SCORING_FCS_REPORT), never for RER's (RER_FCS_REPORT),
-                              # whose score_top/score_bottom are RER's own ranking, not CAAS's.
 ---
 
 <style type="text/css">
@@ -175,7 +170,7 @@ ranking_names <- c(intersect(RANKING_ORDER, ranking_names_raw),
                    setdiff(ranking_names_raw, RANKING_ORDER))
 
 # Annotation overlay: the cross-module leading-edge flags (and the CAAS directional
-# scores behind the top/bottom percentiles) come from a separate file when one is given
+# scores behind the nominal/BH activity calls) come from a separate file when one is given
 # (the fcs_stats.tsv of the CAAS report). A report ranked by its own score, such as the
 # RER one, is then annotated with the CAAS, FADE and accumulation flags of each gene.
 # Rankings always come from `stats`, annotation from `annot`; without an overlay `annot`
@@ -304,8 +299,8 @@ enrich <- enrich %>%
   dplyr::left_join(desc_map, by = c("database", "pathway")) %>%
   dplyr::mutate(description = dplyr::coalesce(description, pathway))
 
-# Per-gene attribute table: the annotation flags plus the derived directional percentile
-# flags. They come from `annot`, so a per-module report inherits the CAAS, FADE and
+# Per-gene attribute table: the annotation flags plus the derived directional
+# nominal/BH evidence flags. They come from `annot`, so a per-module report inherits the CAAS, FADE and
 # accumulation annotation.
 source(if (file.exists("src/evidence_flags.R")) "src/evidence_flags.R" else "evidence_flags.R")
 evidence_flags <- fcs_evidence_flags(annot)
@@ -518,7 +513,7 @@ for (rk in ranking_names) {
 # Leading-edge composition {.tabset .tabset-fade}
 
 For each significant set (`q.perm` < `r params$fdr_thr`), the **percentage of its leading-edge
-genes** carrying each attribute: directional score percentiles and cross-module support. Sets are
+genes** carrying each attribute: nominal/BH activity flags and cross-module support. Sets are
 ordered as in the tables above (`q.perm` first) and capped at `r params$leading_edge_top_n %||% 100`
 rows; if a ranking has more significant sets than that, the table says so explicitly rather than
 silently dropping the low-ranked ones. `Group` and `Rep` give the redundancy group of the set and
@@ -537,8 +532,9 @@ disp_names <- c(
 # Attribute columns shown per ranking (direction-aware). flag_accum is the
 # non-directional accumulation test; flag_accum_top and flag_accum_bottom are its
 # direction-restricted versions, as flag_fade, flag_fade_top and flag_fade_bottom are
-# for FADE. The pct_* tiers are the top 25, 10, 5 and 1% of the genes with a score above 0
-# in the score_top (pct_top*) and score_bottom (pct_bottom*) rankings of `annot`.
+# for FADE. The caas_nominal*/caas_adjusted* pairs are the canonical empirical
+# activity flags of the shared gene-evidence table (nominal p.gen and its BH
+# adjustment) of `annot`.
 cols_by_rk <- list(
  global=c("caas_nominal","caas_adjusted","flag_fade","flag_rer_acc","flag_rer_decc","flag_rer_acc_adjusted","flag_rer_decc_adjusted","flag_accum"),
  top=c("caas_nominal_top","caas_adjusted_top","flag_fade_top","flag_rer_acc","flag_rer_acc_adjusted","flag_accum_top"),

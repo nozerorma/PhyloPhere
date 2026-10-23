@@ -24,9 +24,8 @@
  *             fcs_stats.tsv (plus fcs_stats_{rer,fade,accum}.tsv when that evidence
  *             exists), null_universe_summary.tsv (N, size of the positional universe,
  *             observed positions the null never scored, saturation curve of the
- *             null; written when a null is given), gene_lists/ and position_lists/ (12 slice TSVs each: top,
- *             bottom, global × 25, 10, 5, 1%; position slices keyed Gene, Position,
- *             CAAS_score), gene_threshold_enrichment.tsv, pos_threshold_enrichment.tsv
+ *             null; written when a null is given). The nominal activity lists
+ *             (gene_lists/, position_lists/) are produced by SCORING_EVIDENCE.
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -41,12 +40,6 @@ process SCORING_COMPUTE {
                mode: 'copy', overwrite: true,
                pattern: '*.tsv',
                saveAs: { name -> name in ['gene_scores.tsv','position_scores.tsv','fcs_stats.tsv'] ? null : name }
-    publishDir path: "${params.outdir}/scoring",
-               mode: 'copy', overwrite: true,
-               pattern: 'gene_lists'
-    publishDir path: "${params.outdir}/scoring",
-               mode: 'copy', overwrite: true,
-               pattern: 'position_lists'
 
     input:
     path postproc_file
@@ -70,11 +63,7 @@ process SCORING_COMPUTE {
     path "fcs_stats_fade.tsv",                         optional: true, emit: fcs_stats_fade
     path "fcs_stats_accum.tsv",                        optional: true, emit: fcs_stats_accum
     path "gene_correlations.tsv",                            emit: gene_correlations
-    path "gene_lists",                                 optional: true, emit: gene_lists
-    path "position_lists",                             optional: true, emit: position_lists
     path "null_universe_summary.tsv",                 optional: true, emit: null_universe_summary
-    path "gene_threshold_enrichment.tsv",             optional: true, emit: gene_threshold_enrichment
-    path "pos_threshold_enrichment.tsv",              optional: true, emit: pos_threshold_enrichment
 
     script:
     def local_dir       = "${baseDir}/subworkflows/SCORING/local/src"

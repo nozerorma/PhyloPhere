@@ -750,10 +750,9 @@ gene_list_files <- normalizePath(gene_list_files, mustWork = FALSE)
 gene_list_files <- gene_list_files[file.exists(gene_list_files)]
 if (length(gene_list_files) == 0) stop("Error: no valid gene list files found")
 
-# Tab order: direction (global, top, bottom), then descending percentile width (25, 10,
-# 5, 1: the broadest slice first). The alphabetical order of list.files() would
-# interleave directions and put "10" before "5". Names that do not match
-# <global|top|bottom><pct> come last, in alphabetical order.
+# Tab order: direction (global, top, bottom), alphabetical within a direction. The
+# alphabetical order of list.files() would interleave directions, so the names are
+# matched by their direction prefix; unrecognized names come last.
 .ami_list_order <- function(paths) {
   base <- tools::file_path_sans_ext(basename(paths))
   dir_rank <- dplyr::case_when(
@@ -906,9 +905,9 @@ build_tool_network <- function(sif_path, edge_scores_path = NULL) {
   igraph::graph_from_data_frame(.edge_sif, directed = FALSE)
 }
 
-# Per-gene flag table used by the module description tables (top10%, fade_top%, ...)
-# and by the shape overlay (compute_gene_shapes()). It holds membership flags only;
-# the node size comes from the builders below.
+# Per-gene flag table used by the module description tables (CAAS nominal/BH,
+# fade_top, ...) and by the shape overlay (compute_gene_shapes()). It holds membership
+# flags only; the node size comes from the builders below.
 .attr_df_global <- if (!is.null(gene_scores_df)) prepare_gene_attributes(gene_scores_df) else NULL
 
 # Node size builders. Each returns a named numeric vector (gene to size value) with the
@@ -943,13 +942,13 @@ fade_node_score <- function(dir_label) {
 }
 
 # Direction classifiers. A gene list name decides (a) the direction bucket under which
-# its modules are rolled up in the tabs, and (b) which CAAS percentile and flag columns
+# its modules are rolled up in the tabs, and (b) which CAAS nominal/BH and flag columns
 # annotate its modules and which direction the node score builders read. CAAS and FADE
 # share the top and bottom directions. RER has accelerating and decelerating, which do
-# not map onto the CAAS top and bottom percentiles, so RER always uses the "global"
+# not map onto the CAAS top and bottom directions, so RER always uses the "global"
 # annotation (both columns) and its own Acc, Decc and Global roll-up. The match is a
 # substring, so "fade_top_significant" matches "top".
-top_bottom_pct_classifier <- function(nm) {
+top_bottom_dir_classifier <- function(nm) {
   if (grepl("top", nm, ignore.case = TRUE)) "top"
   else if (grepl("bottom", nm, ignore.case = TRUE)) "bottom"
   else "global"
@@ -963,7 +962,7 @@ top_bottom_roll_classifier <- function(other_label = "Other") {
     else other_label
   }
 }
-always_global_pct_classifier <- function(nm) "global"
+always_global_dir_classifier <- function(nm) "global"
 rer_roll_classifier <- function(nm) {
   if (grepl("accelerat", nm, ignore.case = TRUE)) "Acc"
   else if (grepl("decelerat", nm, ignore.case = TRUE)) "Decc"
@@ -978,7 +977,7 @@ rer_roll_classifier <- function(nm) {
 # use_shape_overlay is TRUE only for CAAS (cross-tool FADE and RER shapes, see
 # compute_gene_shapes()); the FADE and RER sections use circles.
 compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
-                                      roll_dir_classifier, pct_dir_classifier,
+                                      roll_dir_classifier, dir_classifier,
                                       use_shape_overlay = FALSE, bg_string_ids = NULL,
                                       node_score_fn = NULL) {
   .list_name <- tools::file_path_sans_ext(basename(.gf))
@@ -1053,7 +1052,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     return(res)
   }
 
-  .pct_dir_label <- pct_dir_classifier(.list_name)
+  .dir_label <- dir_classifier(.list_name)
 
   if (!is.null(.clusters_df)) {
     # The DOMINO nodes are gene symbols already, so node and gene are equal.
@@ -1080,7 +1079,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     if (!is.null(gene_scores_df) && !is.null(attr_df) && nrow(.clust_desc) > 0) {
       .cl_pcts <- purrr::map_dfr(sort(unique(.clusters_df$cluster)), function(cl_id) {
         cl_genes <- .clusters_df$gene[.clusters_df$cluster == cl_id]
-        compute_term_overlap_percentages(paste(cl_genes, collapse = ","), attr_df, .pct_dir_label) %>%
+        compute_term_overlap_percentages(paste(cl_genes, collapse = ","), attr_df, .dir_label) %>%
           mutate(cluster = cl_id)
       })
       .clust_desc <- .clust_desc %>% dplyr::left_join(.cl_pcts, by = "cluster")
@@ -1101,7 +1100,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
 
     if (nrow(.clust_desc_display) > 0) {
       if (!is.null(gene_scores_df)) {
-        if (.pct_dir_label == "top") {
+        if (.dir_label == "top") {
           display_df <- .clust_desc_display %>%
             dplyr::select(
               Module = cluster, Genes = n_genes,
@@ -1110,7 +1109,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
               `fade_top (%)` = fade_top, `RER BH (%)` = rer_adjusted, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
               `accum_top (%)` = accum_top
             )
-        } else if (.pct_dir_label == "bottom") {
+        } else if (.dir_label == "bottom") {
           display_df <- .clust_desc_display %>%
             dplyr::select(
               Module = cluster, Genes = n_genes,
@@ -1175,9 +1174,9 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
 
   # Node signal: node_score_fn (caas_node_score, rer_node_score or fade_node_score)
   # evaluated for the direction of this gene list.
-  .node_signal <- if (!is.null(node_score_fn)) node_score_fn(.pct_dir_label) else NULL
+  .node_signal <- if (!is.null(node_score_fn)) node_score_fn(.dir_label) else NULL
 
-  .node_shape <- if (use_shape_overlay) compute_gene_shapes(.pct_dir_label, .attr_df_global) else NULL
+  .node_shape <- if (use_shape_overlay) compute_gene_shapes(.dir_label, .attr_df_global) else NULL
 
   .png_path <- file.path(ami_networks_dir, sprintf("%s_%s_domino_network.png", prefix, .list_name))
   png(.png_path, width = 1800, height = 1500, res = 160)
@@ -1189,7 +1188,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     active_genes   = .genes_sym,
     vertex_shape   = .node_shape,
     adjusted_genes = {
-      suffix <- if(.pct_dir_label == "top") "_top" else if(.pct_dir_label == "bottom") "_bottom" else ""
+      suffix <- if(.dir_label == "top") "_top" else if(.dir_label == "bottom") "_bottom" else ""
       flag <- if(prefix == "rer") "rer_adjusted" else if(prefix == "caas") paste0("caas_adjusted",suffix) else "__no_bh_for_fade__"
       if(is.null(.attr_df_global) || !flag %in% names(.attr_df_global)) character() else .attr_df_global$gene[.attr_df_global[[flag]] %in% TRUE]
     }
@@ -1398,13 +1397,13 @@ collapsible_table <- function(df) {
 # compute_gene_list_result() runs once per list; print_gene_list_result() re-emits the
 # cached result under each tab.
 render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, prefix,
-                                        roll_dir_classifier, pct_dir_classifier,
+                                        roll_dir_classifier, dir_classifier,
                                         direction_tabs, gene_list_orders,
                                         use_shape_overlay = FALSE, bg_string_ids = NULL,
                                         node_score_fn = NULL, write_all_lists_file = FALSE) {
   results <- lapply(gene_list_files, compute_gene_list_result,
                      net_full = net_full, modules_dir = modules_dir, prefix = prefix,
-                     roll_dir_classifier = roll_dir_classifier, pct_dir_classifier = pct_dir_classifier,
+                     roll_dir_classifier = roll_dir_classifier, dir_classifier = dir_classifier,
                      use_shape_overlay = use_shape_overlay, bg_string_ids = bg_string_ids,
                      node_score_fn = node_score_fn)
 
@@ -1453,7 +1452,7 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
       gf <- gene_list_files[tools::file_path_sans_ext(basename(gene_list_files))==r$list_name][1]
       ids <- read_gene_vector(gf)
       ev <- gene_scores_df[gene_scores_df$Gene %in% ids,,drop=FALSE]
-      direction <- pct_dir_classifier(r$list_name)
+      direction <- dir_classifier(r$list_name)
       suffix <- if(direction=="top")"_top" else if(direction=="bottom")"_bottom" else ""
       cols <- if(prefix=="caas")c("Gene",paste0("caas_",c("p.gen","p.gen.adj","nominal","adjusted"),suffix)) else if(prefix=="rer")c("Gene","rer_rho","rer_min_pval","rer_perm_padj","rer_significant","rer_significant_fdr") else c("Gene","fade_max_bf_top","fade_max_bf_bottom","fade_significant_top","fade_significant_bottom")
       ev <- ev[,intersect(cols,names(ev)),drop=FALSE]
@@ -1506,7 +1505,7 @@ Each direction below (**Global**/**Top**/**Bottom**) has four sub-tabs: **Module
 CAAS_clust_desc_all <- render_tool_section_nested(
   gene_list_files, .caas_net_full, params$domino_modules_dir, "caas",
   roll_dir_classifier = top_bottom_roll_classifier("Global"),
-  pct_dir_classifier  = top_bottom_pct_classifier,
+  dir_classifier  = top_bottom_dir_classifier,
   direction_tabs      = list(Global = "Global", Top = "Top", Bottom = "Bottom"),
   gene_list_orders    = list(Global = .GLOBAL_LISTS, Top = .TOP_LISTS, Bottom = .BOTTOM_LISTS),
   use_shape_overlay   = TRUE,
@@ -1540,7 +1539,7 @@ if (!is.null(params$rer_domino_network_sif) && !is.null(params$rer_gene_lists_di
     RER_clust_desc_all <- render_tool_section_nested(
       .rer_gene_list_files, .rer_net_full, params$rer_domino_modules_dir, "rer",
       roll_dir_classifier = rer_roll_classifier,
-      pct_dir_classifier  = always_global_pct_classifier,
+      dir_classifier  = always_global_dir_classifier,
       direction_tabs      = list(Global = "Global", Top = "Acc", Bottom = "Decc"),
       gene_list_orders    = list(
         Global = c("rer_significant", "rer_accelerating", "rer_decelerating"),
@@ -1583,7 +1582,7 @@ if (!is.null(params$fade_domino_network_sif) && !is.null(params$fade_gene_lists_
     FADE_clust_desc_all <- render_tool_section_nested(
       .fade_gene_list_files, .fade_net_full, params$fade_domino_modules_dir, "fade",
       roll_dir_classifier = top_bottom_roll_classifier("Global"),
-      pct_dir_classifier  = top_bottom_pct_classifier,
+      dir_classifier  = top_bottom_dir_classifier,
       direction_tabs      = list(Global = "Global", Top = "Top", Bottom = "Bottom"),
       gene_list_orders    = list(
         Global = c("fade_global_significant", "fade_top_significant", "fade_bottom_significant"),

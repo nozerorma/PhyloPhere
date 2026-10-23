@@ -10,8 +10,9 @@
 # The biochemical groupings (aa_grouping.R) do not enter either score: they annotate each position with the groupings
 # in which its derived residues share one class that differs from the ancestral one. This script adds the empirical permulation p-values of positions (p.emp, p.emp_fact and
 # their BH adjustments), joins the per-gene evidence of
-# FADE, RERConverge and accumulation, and writes the tables, the ranked slices and the enrichment
-# curves that the ENRICHMENT subworkflow and the reports read. It runs once on the full pool of
+# FADE, RERConverge and accumulation, and writes the tables that the ENRICHMENT
+# subworkflow and the reports read (the nominal activity lists are produced by
+# scoring_evidence.R). It runs once on the full pool of
 # filtered_discovery.tsv; direction is carried by the `side` column (top, bottom, none).
 #
 # Args (named flags, from task.script). An input whose file name starts with NO_ counts as absent.
@@ -27,7 +28,7 @@
 #   --null_fit            null_fit.tsv: the propensity classes of p.emp_fact (limits and sizes)
 #   --null_base           null_universe_base.tsv: what the null fixes of the universe summary (sizes, saturation curve)
 #   --cycle_roster        cycle_roster.txt of the CAAS_CORE_MERGE run: N of the null, the cycles with no detection included
-#   --hypotheses_pairs, --top_pct, --gene_top_pct   parsed but not used by the computation
+#   --hypotheses_pairs    contrast_hypotheses_pairs.tsv (FOP); parsed but not used by the computation
 #
 # Outputs (working directory):
 #   position_scores.tsv            one row per Gene, Position and side with a positive score; biochem_groupings and
@@ -39,10 +40,8 @@
 #   gene_correlations.tsv          pairwise correlations between gene scores (header only while one score exists)
 #   fcs_stats.tsv                  gene scores and flags for the FCS reports
 #   fcs_stats_{rer,fade,accum}.tsv per-module FCS rankings, written when that evidence exists
-#   gene_lists/slice_*.tsv         12 ranked gene slices (top, bottom, global x 25, 10, 5, 1%)
-#   position_lists/slice_*.tsv     12 ranked position slices, same layout
-#   gene_threshold_enrichment.tsv  odds ratio and Fisher p of FADE, RER and accumulation across CAAS thresholds
-#   pos_threshold_enrichment.tsv   the same curve for position-level FADE
+#                                  (the nominal activity lists gene_lists/ and position_lists/ are written by
+#                                  scoring_evidence.R, not by this script)
 # =============================================================================
 
 suppressPackageStartupMessages({

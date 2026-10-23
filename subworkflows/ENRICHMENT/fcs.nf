@@ -44,7 +44,6 @@ process SCORING_FCS_REPORT {
     input:
     path fcs_stats
     path universe
-    path gene_lists
     path enrich_file
 
     output:
@@ -63,10 +62,6 @@ process SCORING_FCS_REPORT {
     def fdr_thr   = params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
-    // Published gene_lists/ of the scoring module. This is the CAAS report, so the
-    // score_top/score_bottom columns are the CAAS rankings (see the gene_lists_dir
-    // parameter of 12.FCS_general_report.Rmd); a NO_* sentinel means none was given.
-    def gene_lists_arg = (gene_lists.name =~ /^NO_/) ? 'NULL' : "'${gene_lists}'"
     def enrich_file_arg = (enrich_file.name =~ /^NO_/) ? 'NULL' : "'${enrich_file}'"
     def render = """
         rmarkdown::render(
@@ -86,7 +81,6 @@ process SCORING_FCS_REPORT {
                 cluster_threshold  = ${params.fcs_cluster_threshold},
                 top_n         = ${top_n},
                 traitname     = '${traitname}',
-                gene_lists_dir = ${gene_lists_arg},
                 enrich_file   = ${enrich_file_arg}
             ),
             output_file = '12.FCS_scoring_${traitname}.html'
@@ -188,8 +182,8 @@ process RER_FCS_REPORT {
 // scoped per database, so the GMT set can be split across independent tasks and the
 // partial tables row-concatenated without any reconciliation: the result is exact.
 // fcs_compute.R (subworkflows/ENRICHMENT/local/src/) is the batchable entry point.
-// 12.FCS_general_report.Rmd only renders the merged table: the evidence_score
-// percentile ranking and the GMT description join need the full cross-database
+// 12.FCS_general_report.Rmd only renders the merged table: the significance
+// ranking and the GMT description join need the full cross-database
 // table, so they stay in the Rmd.
 process FCS_COMPUTE_BATCHED {
     tag "$batchID (${batchSize} GMTs)"

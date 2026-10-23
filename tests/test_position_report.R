@@ -20,7 +20,7 @@ rmarkdown::render(file.path(work,'15.Comparison_report.Rmd'),output_dir=work,qui
  params=list(traitname='annotation_fixture',fcs_dir=file.path(work,'absent_fcs'),fcs_le_dir=file.path(work,'absent_le'),
  position_scores_file=file.path(work,'scores.tsv'),vep_ensembl_file=file.path(work,'vep.tsv'),
  fade_sites_top_file=file.path(work,'fade.csv'),position_characterization_file=file.path(work,'char.tsv')))
-env$params <- list(top_n=100,position_lists_dir=NULL)
+env$params <- list(top_n=100)
 top <- env$build_interesting_positions('Top')
 bottom <- env$build_interesting_positions('Bottom')
 # Return value carries flags separately from its rendered table.

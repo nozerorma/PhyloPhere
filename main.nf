@@ -842,7 +842,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 def gene_lists_ch = params.scoring ? SCORING.out.gene_lists : Channel.empty()
                 def gene_scores_ch = params.scoring ? SCORING.out.gene_scores : Channel.empty()
                 def position_scores_ch = params.scoring ? SCORING.out.position_scores : Channel.empty()
-                def position_lists_ch = params.scoring ? SCORING.out.position_lists : Channel.empty()
                 // WP10 POSENRICH modular: evaluated positions and null-universe summary feed the registry.
                 def enrich_postproc_ch = params.scoring ? SCORING.out.postproc : Channel.empty()
                 def enrich_null_universe_ch = params.scoring ? SCORING.out.null_universe_summary : Channel.empty()
@@ -911,7 +910,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     (params.scoring ? SCORING.out.calibration : Channel.value(file('NO_CALIBRATION'))),
                     scoring_caas_pos_sample_ch,
                     position_scores_ch,
-                    position_lists_ch,
                     enrich_postproc_ch,
                     enrich_null_universe_ch,
                     posenrich_background_ch,

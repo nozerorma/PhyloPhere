@@ -10,6 +10,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _rscript_with_stringdb():
+    """The phylophere env R (has STRINGdb/igraph for the AMI render); system R as fallback."""
+    env = Path('/home/miguel/micromamba/envs/phylophere/bin/Rscript')
+    return str(env) if env.exists() else shutil.which('Rscript')
+
+
 def test_shared_evidence_oracles(tmp_path):
     r = shutil.which('Rscript')
     if not r:
@@ -19,6 +25,17 @@ def test_shared_evidence_oracles(tmp_path):
                             capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'strict boundary' in result.stdout and 'batch invariance' in result.stdout
+
+
+def test_ami_report_edge_cases(tmp_path):
+    r = _rscript_with_stringdb()
+    if not r:
+        pytest.skip('Rscript required')
+    result = subprocess.run([r, 'tests/test_ami_report.R', str(ROOT), str(tmp_path)],
+                            cwd=ROOT, env=dict(os.environ, TMPDIR=str(tmp_path)),
+                            capture_output=True, text=True, timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'empty list skips cleanly' in result.stdout
 
 
 def test_percentile_project_migration_never_reinterprets_fraction(caplog):

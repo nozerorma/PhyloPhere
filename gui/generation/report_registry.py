@@ -35,6 +35,7 @@ Outputs:    one bash script per report (regenerate_<report id>.sh) that renders 
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -266,16 +267,6 @@ def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
         _slot("position_scores", "Position scores TSV", True, _first_match(scoring, "position_scores.tsv")),
         _slot("gene_scores", "Gene scores TSV", True, _first_match(scoring, "gene_scores.tsv")),
         _slot("gene_correlations", "Gene correlations TSV", True, _first_match(scoring, "gene_correlations.tsv")),
-        _slot("stress_summary", "Stress summary TSV", False,
-              _first_match(scoring, "position_score_stress_summary.tsv")),
-        _slot("stress_correlations", "Stress correlations TSV", False,
-              _first_match(scoring, "position_score_stress_correlations.tsv")),
-        _slot("stress_rank", "Stress rank agreement TSV", False,
-              _first_match(scoring, "position_score_stress_rank_agreement.tsv")),
-        _slot("stress_overlap", "Stress top-overlap TSV", False,
-              _first_match(scoring, "position_score_stress_top_overlap.tsv")),
-        _slot("stress_variants", "Stress variants TSV", False,
-              _first_match(scoring, "position_score_stress_variants.tsv")),
         _slot("fade_site_top", "FADE per-site BF (top)", False,
               _first_match(fade_top, "fade_site_bf_top.tsv")),
         _slot("fade_site_bot", "FADE per-site BF (bottom)", False,
@@ -314,11 +305,6 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             "output_dir           = '.'",
             "evidence_p_threshold = 0.05",
             "evidence_fdr_threshold = 0.05",
-            f"stress_summary_file  = {_r_arg(s['stress_summary'])}",
-            f"stress_corr_file     = {_r_arg(s['stress_correlations'])}",
-            f"stress_rank_file     = {_r_arg(s['stress_rank'])}",
-            f"stress_overlap_file  = {_r_arg(s['stress_overlap'])}",
-            f"stress_variants_file = {_r_arg(s['stress_variants'])}",
             f"fade_site_top_file   = {_r_arg(s['fade_site_top'])}",
             f"fade_site_bot_file   = {_r_arg(s['fade_site_bot'])}",
             f"genomic_info_file    = {_r_arg(s['genomic_info'])}",
@@ -674,8 +660,6 @@ def _fcs_scoring_find_slots(outdir: Listing) -> list[InputSlot]:
         _slot("universe", "Background/universe gene list", True,
               _first_match(outdir, "**/cleaned_background*.txt")),
         _slot("enrich_file", "Saved calibrated FCS results (required for exact regeneration)", True, _first_match(outdir, "fcs/fcs_results/fcs_enrich_input.tsv", "**/fcs_results/fcs_enrich_input.tsv")),
-        _slot("gene_lists", "Nominal active gene lists directory", False,
-              (outdir / "scoring" / "gene_lists").path if (outdir / "scoring" / "gene_lists").is_dir() else None),
     ]
 
 
@@ -695,8 +679,6 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
             "top_n         = 25",
             f"traitname     = '{report.traitname}'",
             f"enrich_file   = {_r_arg(s['enrich_file'])}",
-            f"gene_lists_dir = {_r_arg(s['gene_lists'])}",
-            "seed           = '1998'",
         ],
         output_file,
     )
@@ -739,8 +721,6 @@ def _posenrich_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(outdir, "selection/fade/top/fade_sites_top.csv")),
         _slot("fade_sites_bottom", "FADE selected sites (bottom)", False,
               _first_match(outdir, "selection/fade/bottom/fade_sites_bottom.csv")),
-        _slot("position_lists", "Position percentile lists directory", False,
-              (outdir / "scoring" / "position_lists").path if (outdir / "scoring" / "position_lists").is_dir() else None),
         _slot("fcs_stats", "FCS stats TSV", False, _first_match(outdir, "**/fcs_stats.tsv")),
         _slot("cleaned_background", "Background/universe gene list", False,
               _first_match(outdir, "**/cleaned_background*.txt")),
@@ -767,7 +747,6 @@ def _posenrich_build_script(report: DetectedReport, repo_dir: Path, use_singular
             f"fade_sites_bottom_file = {_r_arg(s['fade_sites_bottom'])}",
             f"fcs_stats_file = {_r_arg(s['fcs_stats'])}",
             f"universe_file  = {_r_arg(s['cleaned_background'])}",
-            f"position_lists_dir = {_r_arg(s['position_lists'])}",
             "seed = '1998'",
         ],
         output_file,
@@ -842,7 +821,10 @@ def _ami_find_slots(outdir: Listing) -> list[InputSlot]:
     scoring = outdir / "scoring"
     ami = outdir / "ami"
     return [
-        _slot("gene_lists", "Gene percentile lists directory (scoring)", True,
+        # scoring_evidence.nf publishes the nominal active lists as
+        # gene_lists/active_{global,top,bottom}.tsv; the regeneration script
+        # extracts their Gene column into <ranking>.txt, as the AMI process does.
+        _slot("gene_lists", "Nominal active gene lists directory (scoring)", True,
               (scoring / "gene_lists").path if (scoring / "gene_lists").is_dir() else None),
         _slot("background", "Background/universe gene list", True,
               _first_match(outdir, "**/cleaned_background*.txt")),
@@ -859,10 +841,11 @@ def _ami_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
     s = {slot.key: slot.path for slot in report.slots}
     output_file = f"13.AMI_analysis_{report.traitname}.html"
     bg_name = s["background"].name if s["background"] else "background.txt"
+    string_cache = os.path.expanduser("~/.cache/phylophere/string")
     pre_lines = [
-        f'for f in "{s["gene_lists"]}"/slice_*.tsv; do',
+        f'for f in "{s["gene_lists"]}"/active_*.tsv; do',
         '    [ -f "$f" ] || continue',
-        '    b=$(basename "$f" .tsv); name="${b#slice_}"',
+        '    b=$(basename "$f" .tsv); name="${b#active_}"',
         '    tail -n +2 "$f" | cut -f1 | grep -v "^[[:space:]]*$" > "${name}.txt" || true',
         "done",
     ]
@@ -876,6 +859,7 @@ def _ami_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
             "domino_network_score_thr = 700",
             f"gene_scores_file    = {_r_arg(s['gene_scores'])}",
             "string_db_dir       = NULL",
+            f"string_cache_dir    = '{string_cache}'",
             f"domino_network_sif  = '{s['domino_network_sif']}'",
             f"domino_modules_dir  = '{s['domino_modules_dir']}'",
             f"domino_edge_scores_file = '{s['domino_edge_scores']}'",
@@ -947,10 +931,6 @@ def _compare_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(outdir, "selection/fade/bottom/fade_sites_bottom.csv")),
         _slot("position_characterization", "Position characterization TSV", False,
               _first_match(outdir, "posenrich/gmts/position_characterization.tsv")),
-        _slot("gene_lists", "Nominal active gene lists directory", False,
-              (outdir / "scoring" / "gene_lists").path if (outdir / "scoring" / "gene_lists").is_dir() else None),
-        _slot("position_lists", "Position percentile lists directory", False,
-              (outdir / "scoring" / "position_lists").path if (outdir / "scoring" / "position_lists").is_dir() else None),
     ]
 
 
@@ -994,8 +974,6 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"fade_sites_top_file      = {_r_arg(s['fade_sites_top'])}",
             f"fade_sites_bottom_file   = {_r_arg(s['fade_sites_bottom'])}",
             f"position_characterization_file = {_r_arg(s['position_characterization'])}",
-            f"gene_lists_dir     = {_r_arg(s['gene_lists'])}",
-            f"position_lists_dir = {_r_arg(s['position_lists'])}",
             "seed               = '1998'",
         ],
         output_file,

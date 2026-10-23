@@ -1501,22 +1501,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'File di mappatura Gene-Ensembl',
         'de': 'Gen-Ensembl-Zuordnungsdatei',
     },
-    'Top position percentile': {
-        'en': 'Top position percentile',
-        'es': 'Percentil superior de posición',
-        'ca': 'Percentil superior de posició',
-        'fr': 'Percentile supérieur de position',
-        'it': 'Percentile superiore di posizione',
-        'de': 'Oberes Positionsperzentil',
-    },
-    'Top gene percentile': {
-        'en': 'Top gene percentile',
-        'es': 'Percentil superior de gen',
-        'ca': 'Percentil superior de gen',
-        'fr': 'Percentile supérieur de gène',
-        'it': 'Percentile superiore di gene',
-        'de': 'Oberes Genperzentil',
-    },
 
     # VEP Tab
     'VEP': {
