@@ -3,7 +3,7 @@
 # fcs_rawmax_ranking_control.sbatch — Same control as fcs_calibrated_ranking_control.sbatch, with the raw position score as the gene statistic.
 #
 # The gene statistic is the maximum raw position score of the gene in that direction (global: best side; top, bottom: that side only), rebuilt
-# from perm_pos_cycle_caas.tsv.gz (null cycles) and b0/perm_pos_cycle_caas.tsv.gz (observed), instead of size_adj_max = F(max)^n. F(max)^n is a quantile
+# from canonical block parts$max and b0/matrices.rds, with position-table fallback for historical references. F(max)^n is a quantile
 # within its own labeling, so it cannot carry the overall strength of a labeling. The ranking is the gene permulation p against the other cycles,
 #     p_gk = (1 + #{null cycles l != k with max_gl >= max_gk}) / N   if the gene is scored in k, 1 otherwise,   ranking = -log10(p_gk),
 # and the null of the set tests is the same transformation of the other cycles. Cycle picks are those of the calibrated control (same seed, same detection).
@@ -24,7 +24,7 @@
 set -euo pipefail
 : "${TRAIT:?set TRAIT (malignant|neoplasia)}" "${MODE:?set MODE (strict|complete)}"
 export TRAIT MODE
-export OBS="${OBS:-0}" N_PER="${N_PER:-5}" SEED="${SEED:-1}" NUM_G="${NUM_G:-10}" MAX_G="${MAX_G:-1000}"
+export OBS="${OBS:-0}" N_PER="${N_PER:-5}" SEED="${SEED:-1}" NUM_G="${NUM_G:-10}" MAX_G="${MAX_G:-0}"
 export TMPDIR="$HOME/scratch/0.Phylophere/.tmp/fcs_rawmax_ctrl/tmp"
 mkdir -p "$TMPDIR"
 # Env R called directly: conda is not on the compute-node PATH
@@ -122,8 +122,7 @@ dummy <- sprintf("MEM_%s", tag); invisible(file.create(dummy))
 MEMOBJ <- list(caas_corStat_byrank = nulls, gene_stat = x$gene_stat)
 readRDS <- function(file, ...) if (identical(file, dummy)) MEMOBJ else base::readRDS(file, ...)
 r <- fcs_run_all(rankings, gmts, num_g = num_g, max_g = max_g, perms_file = dummy, fdr_thr = 0.15, p_perm_thr = 0.025)
-keep <- intersect(c("ranking", "database", "pathway", "stat", "pval", "p.adj", "p.perm", "num.genes", "lach_pval", "lach_p.adj",
-                    "lach_p.perm", "sig_wilcoxon", "sig_lachenbruch", "evidence_label"), names(r))
+keep <- intersect(c("ranking", "database", "pathway", "stat", "pval", "p.adj", "p.perm", "q.perm", "num.genes", "sig_perm", "redlich_level", "direction"), names(r))
 saveRDS(list(trait = trait, mode = mode, cycle = tag, stratum = stratum, level = if (obs_mode) obs_level else level[j], obs_level = obs_level,
              num_g = num_g, max_g = max_g, res = as.data.frame(r)[, keep]), out)
 cat(sprintf("%s (%s): %d rows, %.1f min total -> %s\n", tag, stratum, nrow(r), as.numeric(difftime(Sys.time(), t0, units = "mins")), out))

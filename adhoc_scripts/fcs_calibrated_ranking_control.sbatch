@@ -1,15 +1,17 @@
 #!/bin/bash
+# WP9: WP9_CONTROL=true uses wp9_gene_stat_control.R to compare every requested variant and every pseudo-observed cycle.
+# One job per trait/mode/ranking, no array required. STORE, UNIVERSE and WP9_OUT may override derived paths.
+# The WP9 path archives HEAD to a new stable snapshot. It deliberately uses whole-memory validation matrices.
+# At 10k, request memory separately (e.g. --mem=64G) and explicitly set MAX_CELLS=200000000 per ranking.
 # Whole-memory validation control: explicitly reconstructs a compatibility null from canonical blocks when available.
 # fcs_calibrated_ranking_control.sbatch — Does the CAAS FCS separate the observed run from null cycles when the gene ranking is calibrated per gene?
 #
-# The ranking of the FCS of CAAS is the gene score (size_adj_max = F(max) ** n, F the ECDF of the position scores of the same
-# labeling). Inside a labeling that score is nearly uniform among the scored genes, so what orders the sets is mostly which genes are
-# scored at all, a per-gene propensity shared by every labeling. This control replaces the score by the empirical permulation p of
-# the gene against its own null,
-#     p_gk = (1 + #{null cycles l != k with score_gl >= score_gk}) / N   if the gene is scored in k, 1 otherwise,
-#     ranking = -log10(p_gk)   (0 for the genes without a score),
-# the one-sided, zero-floored analogue of the gene score of the RER FCS (-log10 of the permulation p of the gene). The null of the set tests is the
-# same transformation of the other cycles. The rest is fcs_run_all of the checkout, unchanged.
+# Productive CAAS FCS ranks -log10 of the per-gene permulation p. The base statistic
+# (max, F(max), F(max)^n) is selected by gene_stat. The legacy per-cycle control below
+# calibrates the canonical statistic with the same inclusive-tie and leave-one-out rules.
+# WP9_CONTROL compares the base-statistic variants without changing the productive default.
+# It adds disjoint reference/evaluation folds because a marginal LOO p-rate alone is
+# largely determined by ranks and cannot validate biological calibration.
 #
 # Two modes, as in fcs_null_as_observed.sbatch:
 #   OBS=0 (default): a null cycle is the observed (its ranking against the other 999); one array task per picked cycle, picks stratified by level.
@@ -17,8 +19,8 @@
 # Submit per trait and mode:
 #   ssh correfoc "mkdir -p ~/scratch/0.Phylophere/.tmp/fcs_calib_ctrl && bash -lc 'sbatch --export=ALL,TRAIT=neoplasia,MODE=strict,OBS=1 --array=1-1'" < adhoc_scripts/fcs_calibrated_ranking_control.sbatch
 #   ssh correfoc "bash -lc 'sbatch --export=ALL,TRAIT=neoplasia,MODE=strict --array=1-20%8'" < adhoc_scripts/fcs_calibrated_ranking_control.sbatch
-# TRAIT: malignant | neoplasia. MODE: strict | complete. Optional: N_PER (default 5), SEED (default 1), NUM_G and MAX_G (defaults 10 and 1000).
-# Nothing is written to the cluster besides the outputs under ~/scratch/0.Phylophere/.tmp/fcs_calib_ctrl/<trait>_<mode>/.
+# TRAIT: malignant | neoplasia. MODE: strict | complete. Optional: N_PER (default 5), SEED (default 1), NUM_G and MAX_G (defaults 10 and 0 (no upper bound)).
+# Legacy outputs are under .tmp/fcs_calib_ctrl; WP9 outputs/snapshots default to .tmp/wp9/.
 #
 #SBATCH --job-name=fcs_calib_ctrl
 #SBATCH --partition=std-cpu
@@ -32,7 +34,33 @@
 set -euo pipefail
 : "${TRAIT:?set TRAIT (malignant|neoplasia)}" "${MODE:?set MODE (strict|complete)}"
 export TRAIT MODE
-export OBS="${OBS:-0}" N_PER="${N_PER:-5}" SEED="${SEED:-1}" NUM_G="${NUM_G:-10}" MAX_G="${MAX_G:-1000}"
+export OBS="${OBS:-0}" N_PER="${N_PER:-5}" SEED="${SEED:-1}" NUM_G="${NUM_G:-10}" MAX_G="${MAX_G:-0}"
+if [ "${WP9_CONTROL:-false}" = true ]; then
+    case "${SLURM_ARRAY_TASK_ID:-1}" in 1) ;; *) echo 'WP9_CONTROL computes every cycle in one job; do not use an array' >&2; exit 2;; esac
+    wp9_root="${PHYLOPHERE_ROOT:-$HOME/scratch/0.Phylophere}"
+    wp9_results="$HOME/scratch/2.Primates/2.Primates_results/CAAS_RESULTS"
+    wp9_complete="$wp9_results/${TRAIT}_def/${TRAIT}_prevalence_complete"
+    wp9_mode="$wp9_results/${TRAIT}_def/${TRAIT}_prevalence_${MODE}"
+    wp9_store="$wp9_complete/caas_permulation"
+    if [ "$MODE" = strict ]; then wp9_store="$wp9_complete/strict/caas_permulation"; fi
+    wp9_rankings="${RANKINGS:-global}"
+    wp9_out="${WP9_OUT:-$wp9_root/.tmp/wp9/${TRAIT}_${MODE}_${wp9_rankings//,/_}_${SLURM_JOB_ID:?}}"
+    [ ! -e "$wp9_out" ] && [ ! -e "${wp9_out}_code" ] || { echo 'WP9 output/snapshot already exists' >&2; exit 2; }
+    mkdir -p "${wp9_out}_code" "${wp9_out}_tmp"
+    git -C "$wp9_root" archive HEAD | tar -x -C "${wp9_out}_code"
+    git -C "$wp9_root" rev-parse HEAD > "${wp9_out}_code/commit.txt"
+    export TMPDIR="${wp9_out}_tmp"
+    export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-2}" OPENBLAS_NUM_THREADS="${SLURM_CPUS_PER_TASK:-2}" MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-2}"
+    wp9_args=( --store "${STORE:-$wp9_store}" --universe "${UNIVERSE:-$wp9_mode/universes/cleaned_background_main_${TRAIT}_prevalence.txt}"
+       --out "$wp9_out" --rankings "$wp9_rankings" --variants "${VARIANTS:-max,fmax,beta025,beta05,beta075,size_adj_max}"
+       --min-genes "$NUM_G" --max-genes "$MAX_G" --max-cells "${MAX_CELLS:-50000000}" )
+    if [ -n "${EXPECTED_CYCLES:-}" ]; then wp9_args+=( --expected-cycles "$EXPECTED_CYCLES" ); fi
+    if [ -n "${DATABASES:-}" ]; then wp9_args+=( --databases "$DATABASES" ); fi
+    /usr/bin/time -v "${RSCRIPT:-$HOME/micromamba/envs/phylophere/bin/Rscript}" \
+      "${wp9_out}_code/adhoc_scripts/wp9_gene_stat_control.R" "${wp9_args[@]}"
+    exit 0
+fi
+
 export TMPDIR="$HOME/scratch/0.Phylophere/.tmp/fcs_calib_ctrl/tmp"
 mkdir -p "$TMPDIR"
 # Env R called directly: conda is not on the compute-node PATH
@@ -89,8 +117,7 @@ dummy <- sprintf("MEM_%s", tag); invisible(file.create(dummy))
 MEMOBJ <- list(caas_corStat_byrank = nulls, gene_stat = x$gene_stat)
 readRDS <- function(file, ...) if (identical(file, dummy)) MEMOBJ else base::readRDS(file, ...)
 r <- fcs_run_all(rankings, gmts, num_g = num_g, max_g = max_g, perms_file = dummy, fdr_thr = 0.15, p_perm_thr = 0.025)
-keep <- intersect(c("ranking", "database", "pathway", "stat", "pval", "p.adj", "p.perm", "num.genes", "lach_pval", "lach_p.adj",
-                    "lach_p.perm", "sig_wilcoxon", "sig_lachenbruch", "evidence_label"), names(r))
+keep <- intersect(c("ranking", "database", "pathway", "stat", "pval", "p.adj", "p.perm", "q.perm", "num.genes", "sig_perm", "redlich_level", "direction"), names(r))
 saveRDS(list(trait = trait, mode = mode, cycle = tag, stratum = stratum, level = if (obs_mode) obs_level else level[j], obs_level = obs_level,
              num_g = num_g, max_g = max_g, res = as.data.frame(r)[, keep]), out)
 cat(sprintf("%s (%s): %d rows, %.1f min total -> %s\n", tag, stratum, nrow(r), as.numeric(difftime(Sys.time(), t0, units = "mins")), out))
