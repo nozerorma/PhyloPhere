@@ -217,7 +217,7 @@ wp9_main <- function(args=commandArgs(TRUE)) {
  get<-function(k,default=NULL){i<-match(k,args);if(is.na(i)) default else {if(i==length(args))stop(paste('Missing value',k));args[i+1]}}
  root<-wp9_root();src<-file.path(root,'subworkflows/ENRICHMENT/local/src')
  suppressPackageStartupMessages({library(dplyr);library(RERconverge);library(data.table)})
- source(file.path(src,'percentile_flags.R'));source(file.path(src,'fcs_enrich.R'));source(file.path(src,'gene_p.R'))
+ source(file.path(src,'evidence_flags.R'));source(file.path(src,'fcs_enrich.R'));source(file.path(src,'gene_p.R'))
  source(file.path(root,'subworkflows/SCORING/local/src/caas_block_contract.R'))
  output<-get('--out');if(is.null(output)||dir.exists(output))stop('--out must name a new directory')
  ufile<-get('--universe');universe<-trimws(readLines(ufile));universe<-universe[nzchar(universe)]

@@ -29,9 +29,9 @@ SPEC = ModuleTabSpec(
         "fallback) live on the Precomputed Run tab."
     ),
     essential_fields=(
-        Section("Ranking cutoffs"),
-        FieldSpec(name="scoring_gene_top_pct", label="Top gene percentile", importance="default"),
-        FieldSpec(name="scoring_position_top_pct", label="Top position percentile", importance="default"),
+        Section("Empirical evidence (CAAS and RER)"),
+        FieldSpec(name="evidence_p_threshold", label="Nominal empirical p-value for activity", importance="default", help="Selects active CAAS genes/positions and RER genes. FCS keeps the full continuous ranking."),
+        FieldSpec(name="evidence_fdr_threshold", label="BH threshold for highlighting", importance="default", help="Highlights the BH-adjusted empirical subset in the same tables and AMI networks; no additional module run."),
         FieldSpec(
             name="gene_ensembl_file",
             label="Gene-Ensembl mapping file",

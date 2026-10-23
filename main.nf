@@ -843,6 +843,9 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 def gene_scores_ch = params.scoring ? SCORING.out.gene_scores : Channel.empty()
                 def position_scores_ch = params.scoring ? SCORING.out.position_scores : Channel.empty()
                 def position_lists_ch = params.scoring ? SCORING.out.position_lists : Channel.empty()
+                // WP10 POSENRICH modular: evaluated positions and null-universe summary feed the registry.
+                def enrich_postproc_ch = params.scoring ? SCORING.out.postproc : Channel.empty()
+                def enrich_null_universe_ch = params.scoring ? SCORING.out.null_universe_summary : Channel.empty()
                 def scoring_vep_pai_ch     = params.vep ? VEP.out.primateai_tsv   : null
                 def scoring_vep_cosmic_ch  = params.vep ? VEP.out.cosmic_tsv      : null
                 def scoring_vep_ensembl_ch = params.vep ? VEP.out.ensembl_vep_tsv : null
@@ -905,9 +908,12 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     scoring_rer_perms_ch,
                     caas_perms_for_enrich,
                     (scoring_null_blocks_ch ?: (params.caas_null_dir ? Channel.value([file(params.caas_null_dir)]) : Channel.value([]))),
+                    (params.scoring ? SCORING.out.calibration : Channel.value(file('NO_CALIBRATION'))),
                     scoring_caas_pos_sample_ch,
                     position_scores_ch,
                     position_lists_ch,
+                    enrich_postproc_ch,
+                    enrich_null_universe_ch,
                     posenrich_background_ch,
                     scoring_vep_pai_ch,
                     scoring_vep_cosmic_ch,

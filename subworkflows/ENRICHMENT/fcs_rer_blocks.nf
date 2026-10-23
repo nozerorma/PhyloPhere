@@ -13,7 +13,7 @@ process FCS_RER_OBSERVED {
     script:
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
-        ['fcs_blocks.R','fcs_enrich.R','percentile_flags.R'].collect {
+        ['fcs_blocks.R','fcs_enrich.R'].collect {
             file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
         }.join('\n').getBytes('UTF-8')).encodeHex().toString()
     """
@@ -32,7 +32,7 @@ process FCS_RER_NULL_BLOCK {
     script:
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
-        ['fcs_blocks.R','fcs_enrich.R','percentile_flags.R'].collect {
+        ['fcs_blocks.R','fcs_enrich.R'].collect {
             file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
         }.join('\n').getBytes('UTF-8')).encodeHex().toString()
     """

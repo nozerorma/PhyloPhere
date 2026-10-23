@@ -18,6 +18,7 @@ output:
 params:
   continuous_rds:    "."
   traitname:         "unknown_trait"
+  fdr_threshold: 0.05
   pval_threshold:    0.05
   top_n_labels:      15
   output_dir:        "."
@@ -118,7 +119,7 @@ The analysis uses the following key statistics:
 > `p.perm < pval_threshold`, which is **not corrected for multiple testing**; the BH-adjusted `p.perm.adj` is
 > shown next to it. Saputra _et al._ correct the permulation p-values (Storey, or BH) and use up to ~1,000
 > permulations; with fewer than ~125 the permulation does not improve on the parametric p (their Fig. 5C).
-> Without permulations, significance falls back to `p.adj < pval_threshold`.
+> Without permulations, empirical calls are unavailable; parametric results are displayed separately.
 > Trait transformations (e.g. logit, arcsin, log10, or none) can be configured via the `rer_transform` parameter.
 
 ---
@@ -131,6 +132,12 @@ if (!file.exists(params$continuous_rds)) {
 }
 
 res <- readRDS(params$continuous_rds)
+.metadata <- file.path(dirname(dirname(dirname(params$continuous_rds))),"scoring","gene_evidence_metadata.json")
+if(file.exists(.metadata)) {
+ .m <- jsonlite::read_json(.metadata,simplifyVector=TRUE)
+ params$pval_threshold <- .m$nominal_threshold
+ params$fdr_threshold <- .m$fdr_threshold
+}
 
 if (is.null(res) || nrow(res) == 0) {
   message("RDS file loaded but contains no results. Cannot generate report.")
@@ -171,7 +178,7 @@ if (has_perm) {
       # Significance is defined directly by raw p.perm when permutations are available
       signif       = !is.na(p.perm) & p.perm < params$pval_threshold,
       # FDR-based call: BH-adjusted permulation p-value
-      signif_perm_fdr = !is.na(p.perm.adj) & p.perm.adj < params$pval_threshold,
+      signif_perm_fdr = !is.na(p.perm.adj) & p.perm.adj < params$fdr_threshold,
       pos_corr     = signif &  Rho >  0,
       neg_corr     = signif &  Rho <  0
     ) %>%
@@ -180,7 +187,8 @@ if (has_perm) {
   rer_df <- rer_df %>%
     mutate(
       signif_param = !is.na(p.adj) & p.adj < params$pval_threshold,
-      signif       = signif_param,
+      signif       = FALSE,
+      signif_perm_fdr = FALSE,
       pos_corr     = signif &  Rho >  0,
       neg_corr     = signif &  Rho <  0
     ) %>%
@@ -190,6 +198,7 @@ if (has_perm) {
 # Define the human-readable Call classification column
 rer_df <- rer_df %>%
   mutate(
+    `BH empirical` = signif_perm_fdr,
     Call = case_when(
       pos_corr ~ "Positively correlated",
       neg_corr ~ "Negatively correlated",
@@ -198,44 +207,12 @@ rer_df <- rer_df %>%
     )
   )
 
-# ── Prioritisation: top X% per direction by the signed RER statistic ──────────
-# Ranking uses the RER-standard signed statistic sign(Rho) * -log10(P) —
-# continuous and tie-free, the same quantity RERconverge ranks by for enrichment.
-.dir_top <- function(stat, frac, direction) {
-  flag <- rep(FALSE, length(stat))
-  pool <- if (direction == "acc") stat > 0 & is.finite(stat) else stat < 0 & is.finite(stat)
-  if (any(pool, na.rm = TRUE)) {
-    thr <- quantile(stat[pool], if (direction == "acc") 1 - frac else frac, na.rm = TRUE)
-    flag[pool] <- if (direction == "acc") stat[pool] >= thr else stat[pool] <= thr
-  }
-  flag
-}
-
-top_pct  <- 0.10
-top5_pct <- 0.05
-top1_pct <- 0.01
-
-rer_df <- rer_df %>%
-  mutate(
-    rer_stat      = sign(Rho) * -log10(P),
-    is_top_10_acc = .dir_top(rer_stat, top_pct,  "acc"),
-    is_top_5_acc  = .dir_top(rer_stat, top5_pct, "acc"),
-    is_top_1_acc  = .dir_top(rer_stat, top1_pct, "acc"),
-    is_top_10_dec = .dir_top(rer_stat, top_pct,  "dec"),
-    is_top_5_dec  = .dir_top(rer_stat, top5_pct, "dec"),
-    is_top_1_dec  = .dir_top(rer_stat, top1_pct, "dec")
-  )
+rer_df$rer_stat <- sign(rer_df$Rho) * -log10(rer_df$P)
 
 cat(sprintf(
   "Significant after BH-FDR (p.adj < %g): %d genes.\n",
   params$pval_threshold,
   sum(rer_df$signif_param, na.rm = TRUE)
-))
-cat(sprintf(
-  "Prioritised (top %.0f%%/%.0f%%/%.0f%% by signed stat): accelerated %d/%d/%d, decelerated %d/%d/%d.\n",
-  100 * top_pct, 100 * top5_pct, 100 * top1_pct,
-  sum(rer_df$is_top_10_acc), sum(rer_df$is_top_5_acc), sum(rer_df$is_top_1_acc),
-  sum(rer_df$is_top_10_dec), sum(rer_df$is_top_5_dec), sum(rer_df$is_top_1_dec)
 ))
 if (has_perm) {
   cat(sprintf(
@@ -245,7 +222,7 @@ if (has_perm) {
   ))
   cat(sprintf(
     "Significant by BH-adjusted permutation p-value (p.perm.adj < %g): %d genes.\n",
-    params$pval_threshold,
+    params$fdr_threshold,
     sum(rer_df$signif_perm_fdr, na.rm = TRUE)
   ))
 }
@@ -268,12 +245,12 @@ display_df <- rer_df %>%
 # Include p.perm column only when permutations were run
 if (has_perm) {
   display_df <- display_df %>%
-    select(gene, Rho, N, P, p.adj, p.perm, p.perm.adj, Call) %>%
+    select(gene, Rho, N, P, p.adj, p.perm, p.perm.adj, `BH empirical`, Call) %>%
     rename(Gene = gene, `Raw P (parametric)` = P, `p.adj (parametric BH)` = p.adj,
            `p.perm (permulation)` = p.perm, `p.perm.adj (permulation BH)` = p.perm.adj)
 } else {
   display_df <- display_df %>%
-    select(gene, Rho, N, P, p.adj, Call) %>%
+    select(gene, Rho, N, P, p.adj, `BH empirical`, Call) %>%
     rename(Gene = gene, `Raw P (parametric)` = P, `p.adj (parametric BH)` = p.adj)
 }
 
@@ -296,7 +273,7 @@ DT::datatable(
       c("Positively correlated", "Negatively correlated", "Significant", ""),
       c("#ffe0e0",               "#dff0ff",               "#fff0d0",      "white")
     )
-  )
+  ) %>% DT::formatStyle("BH empirical", fontWeight=DT::styleEqual(c(TRUE,FALSE),c("bold","normal")), backgroundColor=DT::styleEqual(c(TRUE,FALSE),c("#FFE5A0","white")))
 ```
 
 ```{r write-tsv}

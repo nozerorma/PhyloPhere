@@ -312,8 +312,8 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"gene_corr_file       = '{s['gene_correlations']}'",
             f"traitname            = '{report.traitname}'",
             "output_dir           = '.'",
-            "top_pct              = 0.10",
-            "gene_top_pct         = 0.10",
+            "evidence_p_threshold = 0.05",
+            "evidence_fdr_threshold = 0.05",
             f"stress_summary_file  = {_r_arg(s['stress_summary'])}",
             f"stress_corr_file     = {_r_arg(s['stress_correlations'])}",
             f"stress_rank_file     = {_r_arg(s['stress_rank'])}",
@@ -673,8 +673,8 @@ def _fcs_scoring_find_slots(outdir: Listing) -> list[InputSlot]:
         _slot("fcs_stats", "FCS stats TSV", True, _first_match(outdir, "**/fcs_stats.tsv")),
         _slot("universe", "Background/universe gene list", True,
               _first_match(outdir, "**/cleaned_background*.txt")),
-        _slot("perms_file", "Permulation null file", False, _first_match(outdir, "**/*perm*.rds", "**/*perm*.tsv")),
-        _slot("gene_lists", "Gene percentile lists directory", False,
+        _slot("enrich_file", "Saved calibrated FCS results (required for exact regeneration)", True, _first_match(outdir, "fcs/fcs_results/fcs_enrich_input.tsv", "**/fcs_results/fcs_enrich_input.tsv")),
+        _slot("gene_lists", "Nominal active gene lists directory", False,
               (outdir / "scoring" / "gene_lists").path if (outdir / "scoring" / "gene_lists").is_dir() else None),
     ]
 
@@ -694,7 +694,7 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
             "pperm_thr     = 0.025",
             "top_n         = 25",
             f"traitname     = '{report.traitname}'",
-            f"perms_file    = {_r_arg(s['perms_file'])}",
+            f"enrich_file   = {_r_arg(s['enrich_file'])}",
             f"gene_lists_dir = {_r_arg(s['gene_lists'])}",
             "seed           = '1998'",
         ],
@@ -732,13 +732,13 @@ def _posenrich_find_slots(outdir: Listing) -> list[InputSlot]:
         _slot("gene_scores", "Gene scores TSV", False, _first_match(outdir, "scoring/gene_scores.tsv")),
         _slot("vep_primateai", "VEP PrimateAI TSV", False, _first_match(outdir, "**/*primateai*.tsv")),
         _slot("vep_cosmic", "VEP COSMIC TSV", False, _first_match(outdir, "**/*cosmic*.tsv")),
-        _slot("vep_ensembl", "VEP Ensembl consequence TSV", False, _first_match(outdir, "**/*ensembl_vep*.tsv")),
+        _slot("vep_ensembl", "VEP Ensembl consequence TSV", False, _first_match(outdir, "vep/ensembl_vep_mapped.tsv", "**/*ensembl_vep*.tsv")),
         _slot("genomic_info", "Gene genomic coordinates TSV", False,
               _first_match(outdir, "postproc/postproc_inputs/*", "**/*genomic_info*.tsv")),
-        _slot("fade_sites_top", "FADE per-site BF (top)", False,
-              _first_match(outdir, "selection/fade/top/fade_site_bf_top.tsv")),
-        _slot("fade_sites_bottom", "FADE per-site BF (bottom)", False,
-              _first_match(outdir, "selection/fade/bottom/fade_site_bf_bottom.tsv")),
+        _slot("fade_sites_top", "FADE selected sites (top)", False,
+              _first_match(outdir, "selection/fade/top/fade_sites_top.csv")),
+        _slot("fade_sites_bottom", "FADE selected sites (bottom)", False,
+              _first_match(outdir, "selection/fade/bottom/fade_sites_bottom.csv")),
         _slot("position_lists", "Position percentile lists directory", False,
               (outdir / "scoring" / "position_lists").path if (outdir / "scoring" / "position_lists").is_dir() else None),
         _slot("fcs_stats", "FCS stats TSV", False, _first_match(outdir, "**/fcs_stats.tsv")),
@@ -774,6 +774,57 @@ def _posenrich_build_script(report: DetectedReport, repo_dir: Path, use_singular
     )
     return _wrap_script(
         header_comment="ENRICHMENT — 14.Position_enrichment_report.Rmd",
+        repo_dir=repo_dir,
+        local_dir="subworkflows/ENRICHMENT/local",
+        pre_lines=[],
+        render_block=render,
+        output_file=output_file,
+        publish_targets=[report.html_path.parent.parent / "posenrich", report.html_path.parent],
+        use_singularity=use_singularity,
+    )
+
+
+# ── ENRICHMENT: POSENRICH modular (WP10) ──────────────────────────────────────
+
+
+def _posenrich_modular_find_slots(outdir: Listing) -> list[InputSlot]:
+    posenrich = outdir / "posenrich"
+
+    def dir_slot(key, label, sub):
+        p = posenrich / sub
+        return _slot(key, label, True, p.path if p.is_dir() else None)
+
+    return [
+        dir_slot("registry", "POSENRICH modular registry directory", "registry"),
+        dir_slot("characterization", "Characterization directory", "characterization"),
+        dir_slot("localization", "Localization results directory", "localization"),
+        dir_slot("global", "Global association results directory", "global"),
+        dir_slot("proximity", "Proximity results directory", "proximity"),
+    ]
+
+
+def _posenrich_modular_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
+    s = {slot.key: slot.path for slot in report.slots}
+    output_file = f"POSENRICH_modular_report_{report.traitname}.html"
+    render = _render_call(
+        "posenrich_modular_report.Rmd",
+        [
+            f"registry_dir         = '{s['registry']}'",
+            f"characterization_dir = '{s['characterization']}'",
+            f"localization_dir     = '{s['localization']}'",
+            f"global_dir           = '{s['global']}'",
+            f"proximity_dir        = '{s['proximity']}'",
+            f"traitname            = '{report.traitname}'",
+            "ranking              = 'caas_score'",
+            "aggregation          = 'mean'",
+            "n_permutations       = 999",
+            "seed                 = 1",
+            "radios               = '0,5,10'",
+        ],
+        output_file,
+    )
+    return _wrap_script(
+        header_comment="ENRICHMENT — posenrich_modular_report.Rmd (WP10)",
         repo_dir=repo_dir,
         local_dir="subworkflows/ENRICHMENT/local",
         pre_lines=[],
@@ -889,12 +940,14 @@ def _compare_find_slots(outdir: Listing) -> list[InputSlot]:
         _slot("position_scores", "Position scores TSV", False, _first_match(outdir, "scoring/position_scores.tsv")),
         _slot("vep_primateai", "VEP PrimateAI TSV", False, _first_match(outdir, "**/*primateai*.tsv")),
         _slot("vep_cosmic", "VEP COSMIC TSV", False, _first_match(outdir, "**/*cosmic*.tsv")),
-        _slot("vep_ensembl", "VEP Ensembl consequence TSV", False, _first_match(outdir, "**/*ensembl_vep*.tsv")),
-        _slot("fade_sites_top", "FADE per-site BF (top)", False,
-              _first_match(outdir, "selection/fade/top/fade_site_bf_top.tsv")),
-        _slot("fade_sites_bottom", "FADE per-site BF (bottom)", False,
-              _first_match(outdir, "selection/fade/bottom/fade_site_bf_bottom.tsv")),
-        _slot("gene_lists", "Gene percentile lists directory", False,
+        _slot("vep_ensembl", "VEP Ensembl consequence TSV", False, _first_match(outdir, "vep/ensembl_vep_mapped.tsv", "**/*ensembl_vep*.tsv")),
+        _slot("fade_sites_top", "FADE selected sites (top)", False,
+              _first_match(outdir, "selection/fade/top/fade_sites_top.csv")),
+        _slot("fade_sites_bottom", "FADE selected sites (bottom)", False,
+              _first_match(outdir, "selection/fade/bottom/fade_sites_bottom.csv")),
+        _slot("position_characterization", "Position characterization TSV", False,
+              _first_match(outdir, "posenrich/gmts/position_characterization.tsv")),
+        _slot("gene_lists", "Nominal active gene lists directory", False,
               (outdir / "scoring" / "gene_lists").path if (outdir / "scoring" / "gene_lists").is_dir() else None),
         _slot("position_lists", "Position percentile lists directory", False,
               (outdir / "scoring" / "position_lists").path if (outdir / "scoring" / "position_lists").is_dir() else None),
@@ -940,6 +993,7 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"vep_ensembl_file         = {_r_arg(s['vep_ensembl'])}",
             f"fade_sites_top_file      = {_r_arg(s['fade_sites_top'])}",
             f"fade_sites_bottom_file   = {_r_arg(s['fade_sites_bottom'])}",
+            f"position_characterization_file = {_r_arg(s['position_characterization'])}",
             f"gene_lists_dir     = {_r_arg(s['gene_lists'])}",
             f"position_lists_dir = {_r_arg(s['position_lists'])}",
             "seed               = '1998'",
@@ -1261,6 +1315,14 @@ REPORTS: list[ReportSpec] = [
         find_slots=_posenrich_find_slots,
         build_script=_posenrich_build_script,
         guess_traitname=lambda name: _guess_trait_from_suffix(name, "14.Position_enrichment_report_"),
+    ),
+    ReportSpec(
+        id="posenrich_modular",
+        display_name="ENRICHMENT — POSENRICH modular report (WP10)",
+        html_regex=re.compile(r"^POSENRICH_modular_report_(?P<trait>.+)\.html$"),
+        find_slots=_posenrich_modular_find_slots,
+        build_script=_posenrich_modular_build_script,
+        guess_traitname=lambda name: _guess_trait_from_suffix(name, "POSENRICH_modular_report_"),
     ),
     ReportSpec(
         id="ami",

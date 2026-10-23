@@ -581,7 +581,7 @@ compute_gene_shapes <- function(dir_label, attr_df) {
 
 plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
                                   cluster_labels = NULL, node_signal = NULL,
-                                  active_genes = NULL, vertex_shape = NULL) {
+                                  active_genes = NULL, vertex_shape = NULL, adjusted_genes = character()) {
   n_clust <- if (!is.null(clusters_df)) length(unique(clusters_df$cluster)) else 1L
   pal     <- .safe_pal(max(n_clust, 2L))
 
@@ -638,7 +638,9 @@ plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
   vertex_colors        <- ifelse(is_active, vertex_colors, scales::alpha(vertex_colors, 0.35))
   vertex_frame_colors  <- ifelse(is_active, "black", "grey55")
 
-  vertex_frame_widths  <- ifelse(is_active, 1.4, 0.6)
+  is_adjusted <- is_active & igraph::V(net)$name %in% adjusted_genes
+  vertex_frame_colors[is_adjusted] <- "#D99A00"
+  vertex_frame_widths <- ifelse(is_adjusted, 3.5, ifelse(is_active,1.4,0.6))
 
   # Node shape: cross-tool corroboration (CAAS plots only, see compute_gene_shapes());
   # circle otherwise.
@@ -840,51 +842,13 @@ if (!is.null(params$gene_scores_file) && file.exists(params$gene_scores_file)) {
 prepare_gene_attributes <- function(df) {
   if (is.null(df) || nrow(df) == 0) return(NULL)
   
-  # Percentile rank among the genes with a score above 0: about 0 for the best gene and
-  # 1 for the worst. Two consequences for anything downstream:
-  #   - the value depends on how many genes score above 0 in this run, so percentiles
-  #     are not comparable across runs, traits or module subsets;
-  #   - zeros are excluded and not ranked last, so a gene without signal gets NA, not
-  #     1, and filtering on `pct < x` drops it.
-  # Ranks are used because the resampling statistics are floor-limited at 1/N, so raw
-  # values pile up at the floor and ranks recover resolution.
-  pct_of <- function(v) {
-    ok <- !is.na(v) & v > 0
-    p <- rep(NA_real_, length(v))
-    if (any(ok)) p[ok] <- 1 - (rank(v[ok], ties.method = "max") - 1) / sum(ok)
-    p
+  .col <- function(c, default=NA) if(c %in% names(df)) df[[c]] else rep(default,nrow(df))
+  .istrue <- function(x) !is.na(x) & x %in% c(TRUE,"TRUE","True","true",1,"1")
+  out <- tibble::tibble(gene=df$Gene)
+  for(suffix in c("","_top","_bottom"))for(kind in c("nominal","adjusted")) {
+    n <- paste0("caas_",kind,suffix);out[[n]] <- .istrue(.col(n,FALSE))
   }
-  
-  .col <- function(c, default = NA) if (c %in% names(df)) df[[c]] else rep(default, nrow(df))
-  .istrue <- function(x) !is.na(x) & x %in% c(TRUE, "TRUE", "True", "true", 1, "1")
-  
-  out <- tibble::tibble(gene = df$Gene)
-  
-  # CAAS directional scores behind the percentiles.
-  score_top <- suppressWarnings(as.numeric(.col("gene_caas_score_top")))
-  
-  score_bot <- suppressWarnings(as.numeric(.col("gene_caas_score_bottom")))
-  
-  # Cumulative top 10, 5 and 1% flags per direction.
-  breaks <- c(0.10, 0.05, 0.01)
-  if (!all(is.na(score_top))) {
-    pt <- pct_of(score_top)
-    out$pct_top10 <- !is.na(pt) & pt <= breaks[1]
-    out$pct_top5  <- !is.na(pt) & pt <= breaks[2]
-    out$pct_top1  <- !is.na(pt) & pt <= breaks[3]
-  } else {
-    out$pct_top10 <- FALSE; out$pct_top5 <- FALSE; out$pct_top1 <- FALSE
-  }
-  
-  if (!all(is.na(score_bot))) {
-    pb <- pct_of(score_bot)
-    out$pct_bottom10 <- !is.na(pb) & pb <= breaks[1]
-    out$pct_bottom5  <- !is.na(pb) & pb <= breaks[2]
-    out$pct_bottom1  <- !is.na(pb) & pb <= breaks[3]
-  } else {
-    out$pct_bottom10 <- FALSE; out$pct_bottom5 <- FALSE; out$pct_bottom1 <- FALSE
-  }
-
+  out$rer_adjusted <- .istrue(.col("rer_significant_fdr",FALSE))
   # FADE
   out$flag_fade_top    <- .istrue(.col("fade_significant_top"))
   out$flag_fade_bottom <- .istrue(.col("fade_significant_bottom"))
@@ -905,47 +869,14 @@ prepare_gene_attributes <- function(df) {
 }
 
 compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label) {
-  if (is.na(preferred_names) || preferred_names == "" || is.null(attr_df)) {
-    return(tibble::tibble(
-      top10 = NA_real_, top5 = NA_real_, top1 = NA_real_,
-      bot10 = NA_real_, bot5 = NA_real_, bot1 = NA_real_,
-      fade = NA_real_, fade_top = NA_real_, fade_bottom = NA_real_,
-      rer_acc = NA_real_, rer_decc = NA_real_,
-      accum = NA_real_, accum_top = NA_real_, accum_bottom = NA_real_
-    ))
-  }
-  genes <- strsplit(preferred_names, "[,;]")[[1]]
-  sub_attr <- attr_df %>% dplyr::filter(gene %in% genes)
-  if (nrow(sub_attr) == 0) {
-    return(tibble::tibble(
-      top10 = 0, top5 = 0, top1 = 0,
-      bot10 = 0, bot5 = 0, bot1 = 0,
-      fade = 0, fade_top = 0, fade_bottom = 0,
-      rer_acc = 0, rer_decc = 0,
-      accum = 0, accum_top = 0, accum_bottom = 0
-    ))
-  }
-
-  # Percentage of the genes carrying each flag.
-  round_pct <- function(x) round(100 * mean(x, na.rm = TRUE), 1)
-
-  tibble::tibble(
-    top10    = round_pct(sub_attr$pct_top10),
-    top5     = round_pct(sub_attr$pct_top5),
-    top1     = round_pct(sub_attr$pct_top1),
-    bot10    = round_pct(sub_attr$pct_bottom10),
-    bot5     = round_pct(sub_attr$pct_bottom5),
-    bot1     = round_pct(sub_attr$pct_bottom1),
-    fade     = round_pct(sub_attr$flag_fade),
-    fade_top = round_pct(sub_attr$flag_fade_top),
-    fade_bottom = round_pct(sub_attr$flag_fade_bottom),
-    rer_acc  = round_pct(sub_attr$flag_rer_acc),
-    rer_decc = round_pct(sub_attr$flag_rer_decc),
-    accum_top    = round_pct(sub_attr$flag_accum_top),
-    accum_bottom = round_pct(sub_attr$flag_accum_bottom),
-    accum    = round_pct(sub_attr$flag_accum)
-  )
+  cols <- c("caas_nominal","caas_adjusted","caas_nominal_top","caas_adjusted_top","caas_nominal_bottom","caas_adjusted_bottom","rer_adjusted","flag_fade","flag_fade_top","flag_fade_bottom","flag_rer_acc","flag_rer_decc","flag_accum","flag_accum_top","flag_accum_bottom")
+  labels <- c("caas_nominal","caas_adjusted","caas_nominal_top","caas_adjusted_top","caas_nominal_bottom","caas_adjusted_bottom","rer_adjusted","fade","fade_top","fade_bottom","rer_acc","rer_decc","accum","accum_top","accum_bottom")
+  genes <- if(length(preferred_names) && !is.na(preferred_names)) strsplit(preferred_names,"[,;]")[[1]] else character()
+  x <- if(!is.null(attr_df)) attr_df[attr_df$gene %in% trimws(genes),,drop=FALSE] else NULL
+  vals <- lapply(cols,function(n) if(is.null(x)||!nrow(x)||!n %in% names(x)) NA_real_ else round(100*mean(x[[n]] %in% TRUE),1))
+  tibble::as_tibble(setNames(vals,labels))
 }
+
 ```
 
 # Shared DOMINO helpers (CAAS/FADE/RER) {-}
@@ -991,9 +922,8 @@ build_tool_network <- function(sif_path, edge_scores_path = NULL) {
 
 caas_node_score <- function(dir_label) {
   if (is.null(gene_scores_df)) return(NULL)
-  col <- if (dir_label == "top") "gene_caas_score_top" else if (dir_label == "bottom") "gene_caas_score_bottom" else NA
-  if (is.na(col)) return(NULL)
-  setNames(.col_num(gene_scores_df, col), gene_scores_df$Gene)
+  col <- paste0("caas_p.gen",if(dir_label=="top")"_top" else if(dir_label=="bottom")"_bottom" else "")
+  setNames(-log10(pmax(.col_num(gene_scores_df,col),1e-300)),gene_scores_df$Gene)
 }
 
 rer_node_score <- function(dir_label) {
@@ -1176,8 +1106,8 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
             dplyr::select(
               Module = cluster, Genes = n_genes,
               `Representative genes` = genes, `Top enriched terms` = description,
-              `top10% (%)` = top10, `top5% (%)` = top5, `top1% (%)` = top1,
-              `fade_top (%)` = fade_top, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
+              `CAAS nominal (%)` = caas_nominal_top, `CAAS BH (%)` = caas_adjusted_top,
+              `fade_top (%)` = fade_top, `RER BH (%)` = rer_adjusted, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
               `accum_top (%)` = accum_top
             )
         } else if (.pct_dir_label == "bottom") {
@@ -1185,8 +1115,8 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
             dplyr::select(
               Module = cluster, Genes = n_genes,
               `Representative genes` = genes, `Top enriched terms` = description,
-              `bot10% (%)` = bot10, `bot5% (%)` = bot5, `bot1% (%)` = bot1,
-              `fade_bottom (%)` = fade_bottom, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
+              `CAAS bottom nominal (%)` = caas_nominal_bottom, `CAAS bottom BH (%)` = caas_adjusted_bottom,
+              `fade_bottom (%)` = fade_bottom, `RER BH (%)` = rer_adjusted, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
               `accum_bottom (%)` = accum_bottom
             )
         } else {
@@ -1194,9 +1124,10 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
             dplyr::select(
               Module = cluster, Genes = n_genes,
               `Representative genes` = genes, `Top enriched terms` = description,
-              `top10% (%)` = top10, `top5% (%)` = top5, `top1% (%)` = top1,
-              `bot10% (%)` = bot10, `bot5% (%)` = bot5, `bot1% (%)` = bot1,
-              `fade (%)` = fade, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
+              `CAAS global nominal (%)` = caas_nominal, `CAAS global BH (%)` = caas_adjusted,
+              `CAAS top nominal (%)` = caas_nominal_top, `CAAS top BH (%)` = caas_adjusted_top,
+              `CAAS bottom nominal (%)` = caas_nominal_bottom, `CAAS bottom BH (%)` = caas_adjusted_bottom,
+              `fade (%)` = fade, `RER BH (%)` = rer_adjusted, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
               `accum (%)` = accum
             )
         }
@@ -1256,7 +1187,12 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     cluster_labels = .cl_labels,
     node_signal    = .node_signal,
     active_genes   = .genes_sym,
-    vertex_shape   = .node_shape
+    vertex_shape   = .node_shape,
+    adjusted_genes = {
+      suffix <- if(.pct_dir_label == "top") "_top" else if(.pct_dir_label == "bottom") "_bottom" else ""
+      flag <- if(prefix == "rer") "rer_adjusted" else if(prefix == "caas") paste0("caas_adjusted",suffix) else "__no_bh_for_fade__"
+      if(is.null(.attr_df_global) || !flag %in% names(.attr_df_global)) character() else .attr_df_global$gene[.attr_df_global[[flag]] %in% TRUE]
+    }
   )
   dev.off()
   res$png_path <- .png_path
@@ -1513,6 +1449,18 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
           else if (!is.null(clust_desc_all)) dplyr::filter(clust_desc_all, direction == filter_val)
           else NULL
     .render_rollup(df, sprintf("%s gene lists", dir_label))
+    if(!is.null(gene_scores_df))for(r in sel) {
+      gf <- gene_list_files[tools::file_path_sans_ext(basename(gene_list_files))==r$list_name][1]
+      ids <- read_gene_vector(gf)
+      ev <- gene_scores_df[gene_scores_df$Gene %in% ids,,drop=FALSE]
+      direction <- pct_dir_classifier(r$list_name)
+      suffix <- if(direction=="top")"_top" else if(direction=="bottom")"_bottom" else ""
+      cols <- if(prefix=="caas")c("Gene",paste0("caas_",c("p.gen","p.gen.adj","nominal","adjusted"),suffix)) else if(prefix=="rer")c("Gene","rer_rho","rer_min_pval","rer_perm_padj","rer_significant","rer_significant_fdr") else c("Gene","fade_max_bf_top","fade_max_bf_bottom","fade_significant_top","fade_significant_bottom")
+      ev <- ev[,intersect(cols,names(ev)),drop=FALSE]
+      readr::write_tsv(ev,file.path(ami_networks_dir,paste0(prefix,"_",r$list_name,"_gene_evidence.tsv")))
+      cat("\n\nActive input evidence: **",r$list_name,"**\n\n",sep="")
+      print(knitr::kable(head(ev,200)))
+    }
   }
 
   if (!is.null(network_summary_all) && nrow(network_summary_all) > 0) {
@@ -1533,10 +1481,10 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
   invisible(clust_desc_all)
 }
 
-.GLOBAL_THRESHOLDS <- c("global25", "global10", "global5", "global1")
-.TOP_THRESHOLDS    <- c("top25", "top10", "top5", "top1")
-.BOTTOM_THRESHOLDS <- c("bottom25", "bottom10", "bottom5", "bottom1")
-.ALL_THRESHOLDS    <- c(.GLOBAL_THRESHOLDS, .TOP_THRESHOLDS, .BOTTOM_THRESHOLDS)
+.GLOBAL_LISTS <- "global"
+.TOP_LISTS <- "top"
+.BOTTOM_LISTS <- "bottom"
+.ALL_LISTS <- c(.GLOBAL_LISTS,.TOP_LISTS,.BOTTOM_LISTS)
 ```
 
 # Active Network Modules (AMI) {.tabset .tabset-fade}
@@ -1549,16 +1497,18 @@ Module finding + significance: **DOMINO** (Shamir-Lab) - Bonferroni-corrected hy
 
 Network plots additionally mark cross-tool corroboration by node **shape**: circle = none, square = FADE-significant, diamond = RER-accelerating, hexagon = RER-decelerating, star = FADE-significant overlapping either RER direction.
 
+Each direction uses nominal active genes. Gold borders mark active genes with BH-adjusted empirical significance; grey nodes are connectors. FADE uses its configured BF cutoff. Module significance is separate from individual-gene significance.
+
 Each direction below (**Global**/**Top**/**Bottom**) has four sub-tabs: **Modules**, **Recurrence Heatmap**, **Recurrence Table**, and **Gene lists**.
 
 ```{r caas_domino_networks, fig.width=10, fig.height=8, results='asis'}
 .caas_net_full <- build_tool_network(params$domino_network_sif, params$domino_edge_scores_file)
 CAAS_clust_desc_all <- render_tool_section_nested(
   gene_list_files, .caas_net_full, params$domino_modules_dir, "caas",
-  roll_dir_classifier = top_bottom_roll_classifier("Other"),
+  roll_dir_classifier = top_bottom_roll_classifier("Global"),
   pct_dir_classifier  = top_bottom_pct_classifier,
-  direction_tabs      = list(Global = NULL, Top = "Top", Bottom = "Bottom"),
-  gene_list_orders    = list(Global = .ALL_THRESHOLDS, Top = .TOP_THRESHOLDS, Bottom = .BOTTOM_THRESHOLDS),
+  direction_tabs      = list(Global = "Global", Top = "Top", Bottom = "Bottom"),
+  gene_list_orders    = list(Global = .GLOBAL_LISTS, Top = .TOP_LISTS, Bottom = .BOTTOM_LISTS),
   use_shape_overlay   = TRUE,
   bg_string_ids       = bg_string_ids,  # CAAS background, mapped in parse_background
   node_score_fn       = caas_node_score,
@@ -1591,7 +1541,7 @@ if (!is.null(params$rer_domino_network_sif) && !is.null(params$rer_gene_lists_di
       .rer_gene_list_files, .rer_net_full, params$rer_domino_modules_dir, "rer",
       roll_dir_classifier = rer_roll_classifier,
       pct_dir_classifier  = always_global_pct_classifier,
-      direction_tabs      = list(Global = NULL, Top = "Acc", Bottom = "Decc"),
+      direction_tabs      = list(Global = "Global", Top = "Acc", Bottom = "Decc"),
       gene_list_orders    = list(
         Global = c("rer_significant", "rer_accelerating", "rer_decelerating"),
         Top    = "rer_accelerating",
@@ -1634,7 +1584,7 @@ if (!is.null(params$fade_domino_network_sif) && !is.null(params$fade_gene_lists_
       .fade_gene_list_files, .fade_net_full, params$fade_domino_modules_dir, "fade",
       roll_dir_classifier = top_bottom_roll_classifier("Global"),
       pct_dir_classifier  = top_bottom_pct_classifier,
-      direction_tabs      = list(Global = NULL, Top = "Top", Bottom = "Bottom"),
+      direction_tabs      = list(Global = "Global", Top = "Top", Bottom = "Bottom"),
       gene_list_orders    = list(
         Global = c("fade_global_significant", "fade_top_significant", "fade_bottom_significant"),
         Top    = "fade_top_significant",

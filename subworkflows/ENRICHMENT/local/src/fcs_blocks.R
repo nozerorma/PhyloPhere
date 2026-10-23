@@ -23,7 +23,6 @@ get_arg <- function(flag, default = NULL) {
 step <- args[1]
 src_dir <- dirname(normalizePath(sub("--file=", "", grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)[1])))
 suppressPackageStartupMessages({ library(readr); library(dplyr) })
-if (!exists("fcs_percentile_flags", mode = "function")) source(file.path(src_dir, "percentile_flags.R"))
 source(file.path(src_dir, "fcs_enrich.R"))
 source(file.path(src_dir, "gene_p.R"))
 source(file.path(src_dir, "caas_blocks.R"))

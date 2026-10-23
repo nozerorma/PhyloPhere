@@ -62,8 +62,6 @@ process SCORING_REPORT {
     def local_dir      = "${baseDir}/subworkflows/SCORING/local"
     def outdir         = "${params.outdir}/scoring"
     def traitname      = params.traitname ?: 'unknown_trait'
-    def top_pct        = params.scoring_position_top_pct   ?: 0.10
-    def g_top_pct      = params.scoring_gene_top_pct       ?: 0.10
     // Optional inputs: a sentinel file becomes the R literal NULL, a real file its quoted name
     def fs_top_arg = (fade_site_top_file.name =~ /^NO_FADE_SITE_TOP/) ? 'NULL' : "'${fade_site_top_file}'"
     def fs_bot_arg = (fade_site_bot_file.name =~ /^NO_FADE_SITE_BOT/) ? 'NULL' : "'${fade_site_bot_file}'"
@@ -94,8 +92,8 @@ process SCORING_REPORT {
                     gene_corr_file       = '${gene_correlations}',
                     traitname            = '${traitname}',
                     output_dir           = '${outdir}',
-                    top_pct              = ${top_pct},
-                    gene_top_pct         = ${g_top_pct},
+                    evidence_p_threshold = ${params.evidence_p_threshold ?: 0.05},
+                    evidence_fdr_threshold = ${params.evidence_fdr_threshold ?: 0.05},
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
                     genomic_info_file    = ${gi_arg},
@@ -130,8 +128,8 @@ process SCORING_REPORT {
                     gene_corr_file       = '${gene_correlations}',
                     traitname            = '${traitname}',
                     output_dir           = '${outdir}',
-                    top_pct              = ${top_pct},
-                    gene_top_pct         = ${g_top_pct},
+                    evidence_p_threshold = ${params.evidence_p_threshold ?: 0.05},
+                    evidence_fdr_threshold = ${params.evidence_fdr_threshold ?: 0.05},
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
                     genomic_info_file    = ${gi_arg},

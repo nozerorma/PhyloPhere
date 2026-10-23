@@ -127,14 +127,9 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     CAAS_NULL_DIR="${CAAS_REUSE_OUTDIR}/caas_permulation"
     CAAS_PERM_MANIFEST_FILE="${PASS_SOURCE_OUTDIR}/caastools/permulation_manifest.tsv"
     CAAS_PERM_HARVEST_FILE="${PASS_SOURCE_OUTDIR}/caastools/permulation_harvest.tsv"
-    for _f in "$CAAS_NULL_DIR/null_positions.parquet" "$CAAS_NULL_DIR/cycle_roster.txt" "$CAAS_NULL_DIR/cycle_summary.tsv"; do
-        [ -f "$_f" ] || echo "[WARN] expected permulation output missing, the position p-values will be empty: $_f" >&2
+    for _f in "$CAAS_NULL_DIR/cycle_roster.txt" "$CAAS_NULL_DIR/cycle_summary.tsv"; do
+        [ -f "$_f" ] || echo "[WARN] expected canonical null output missing: $_f" >&2
     done
-    # The roster gives N of the null (cycles with no detection included); a null of an older run has none
-    [ -f "$CAAS_CYCLE_ROSTER_FILE" ] || {
-        echo "[WARN] cycle_roster.txt missing: position-level null unavailable; rebuild the canonical null" >&2
-        CAAS_CYCLE_ROSTER_FILE=""
-    }
 
     # REPORTING (dataset exploration, tree name curation and, for a row with a
     # PRUNE_FILE, pruning) ran identically in the exploratory pass, with the same
@@ -567,8 +562,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "rer_trait_mode": "${RER_TRAIT_MODE:-auto}",
   "rer_binary_clade": "${RER_BINARY_CLADE:-all}",
   "rer_min_pos": "${RER_MIN_POS:-2}",
-  "rer_pval_threshold": "${RER_PVAL_THRESHOLD:-0.05}",
-  "rer_pval_column": "${RER_PVAL_COLUMN:-p.perm}",
   "rer_top_n_labels": "${RER_TOP_N_LABELS:-20}",
   "rer_transform": "${RER_TRANSFORM:-ha_logit}",
   "trait_out": "${TRAIT_OUT:-}",
@@ -604,8 +597,8 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
 
   "scoring": $_RUN_SCORING,
   "scoring_window_size_bp": "${SCORING_WINDOW_SIZE_BP:-1000000}",
-  "scoring_position_top_pct": "${SCORING_POSITION_TOP_PCT:-0.10}",
-  "scoring_gene_top_pct": "${SCORING_GENE_TOP_PCT:-0.10}",
+  "evidence_p_threshold": "${EVIDENCE_P_THRESHOLD:-0.05}",
+  "evidence_fdr_threshold": "${EVIDENCE_FDR_THRESHOLD:-0.05}",
   "caas_evidence_top_n": "${CAAS_EVIDENCE_TOP_N:-0}",
   "scoring_hypotheses_pairs": "${SCORING_HYPOTHESES_PAIRS:-}",
   "ct_disambig_hypotheses_pairs": "${CT_DISAMBIG_HYPOTHESES_PAIRS:-}",
@@ -670,7 +663,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "domain_ref_species": "${DOMAIN_REF_SPECIES:-}",
   "posenrich_ucr": ${POSENRICH_UCR:-true},
   "ucr_positions_file": "${UCR_POSITIONS_FILE:-}",
-  "posenrich_eggnog": ${POSENRICH_EGGNOG:-false},
+  "posenrich_custom_file": "${POSENRICH_CUSTOM_FILE:-}",
   "eggnog_taxid": "${EGGNOG_TAXID:-}",
   "egg_members_file": "${EGG_MEMBERS_FILE:-}",
   "egg_annotations_file": "${EGG_ANNOTATIONS_FILE:-}",
@@ -678,7 +671,13 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "posenrich_min_size": "${POSENRICH_MIN_SIZE:-2}",
   "posenrich_max_size": "${POSENRICH_MAX_SIZE:-0}",
   "posenrich_batch_size": "${POSENRICH_BATCH_SIZE:-4}",
-  "posenrich_background_file": "${POSENRICH_BACKGROUND_FILE:-}"
+  "posenrich_background_file": "${POSENRICH_BACKGROUND_FILE:-}",
+  "posenrich_modular": ${POSENRICH_MODULAR:-false},
+  "posenrich_ranking": "${POSENRICH_RANKING:-caas_score}",
+  "posenrich_aggregation": "${POSENRICH_AGGREGATION:-mean}",
+  "posenrich_n_permutations": "${POSENRICH_N_PERMUTATIONS:-999}",
+  "posenrich_seed": "${POSENRICH_SEED:-1}",
+  "posenrich_radios": "${POSENRICH_RADIOS:-0,5,10}"
 }
 PARAMS_EOF
 

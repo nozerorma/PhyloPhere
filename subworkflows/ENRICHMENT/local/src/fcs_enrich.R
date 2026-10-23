@@ -39,19 +39,6 @@ suppressPackageStartupMessages({
   library(Matrix)        # sparse membership matrix + %*% for the vectorized null
 })
 
-# fcs_percentile_flags() lives in percentile_flags.R, which 15.Comparison_report.Rmd also
-# sources directly to avoid the library() calls above. It is sourced here unless a caller
-# already did. The lookup uses paths relative to the working directory, as the callers
-# stage this file (see src_candidates in 12.FCS_general_report.Rmd); sys.frame()$ofile is
-# not reliable when source() runs inside a chunk of rmarkdown::render().
-if (!exists("fcs_percentile_flags", mode = "function")) {
-  .pflags_candidates <- c("src/percentile_flags.R", "percentile_flags.R")
-  .pflags_path <- .pflags_candidates[file.exists(.pflags_candidates)][1]
-  if (is.na(.pflags_path)) stop("percentile_flags.R not found under src/ or next to fcs_enrich.R")
-  source(.pflags_path)
-}
-
-
 # ── GMT loading ───────────────────────────────────────────────────────────────
 
 # Database label of a GMT file, without extension or version:

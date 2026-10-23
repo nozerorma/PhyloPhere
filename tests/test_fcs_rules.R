@@ -1,7 +1,7 @@
 # Run from the repository root with the project's Rscript.
 repo <- normalizePath(".")
 src <- file.path(repo, "subworkflows/ENRICHMENT/local/src")
-source(file.path(src, "percentile_flags.R"))
+source(file.path(src, "evidence_flags.R"))
 source(file.path(src, "fcs_enrich.R"))
 
 same <- function(x, y) stopifnot(isTRUE(all.equal(x, y, tolerance = 1e-12, check.attributes = FALSE)))

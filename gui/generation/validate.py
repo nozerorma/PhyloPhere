@@ -32,6 +32,12 @@ def validate(project: ProjectConfig) -> list[str]:
     field that the pipeline can auto-generate is not an error.
     """
     errors: list[str] = []
+    for name in ("evidence_p_threshold", "evidence_fdr_threshold"):
+        try:
+            value = float(getattr(project.modules.scoring, name))
+            if not 0 < value <= 1: raise ValueError()
+        except (TypeError, ValueError):
+            errors.append(f"Scoring: {name} must be in (0, 1].")
 
     def require(value: str, message: str) -> None:
         if not value.strip():
@@ -134,10 +140,7 @@ def validate(project: ProjectConfig) -> list[str]:
 
     # ── Disambiguation (+ Post-processing) ────────────────────────────────────
     if disambig.enabled:
-        require(
-            disambig.ct_disambig_asr_cache_dir,
-            "Disambiguation: the ASR cache directory is required.",
-        )
+        # An empty ASR cache path uses the launcher's automatic writable cache.
         if not caas.enabled and not any([pc.use_discovery, pc.use_resample]):
             errors.append(
                 "Disambiguation is enabled but CAAS is disabled with no reuse box checked on "

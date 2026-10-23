@@ -3,7 +3,7 @@
 new_dir <- normalizePath('subworkflows/ENRICHMENT/local/src')
 old_file <- file.path(new_dir, 'fcs_enrich.R')
 suppressPackageStartupMessages({ library(RERconverge); library(readr) })
-source(file.path(new_dir, "percentile_flags.R"))
+source(file.path(new_dir, "evidence_flags.R"))
 env <- new.env(); sys.source(file.path(new_dir, "fcs_enrich.R"), envir = env)
 sys.source(file.path(new_dir, "gene_p.R"), envir = env); sys.source(file.path(new_dir, "caas_blocks.R"), envir = env)
 env_old <- new.env(); sys.source(old_file, envir = env_old)

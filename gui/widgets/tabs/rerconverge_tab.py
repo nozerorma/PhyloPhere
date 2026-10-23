@@ -59,15 +59,7 @@ SPEC = ModuleTabSpec(
             choices=("ha_logit", "auto", "logit", "arcsin", "log10", "none"),
             importance="default",
         ),
-        # p.perm (raw permutation p) or p.adj (BH-adjusted) changes what counts as
-        # "significant" downstream, like an FDR threshold choice.
-        FieldSpec(
-            name="rer_pval_column",
-            label="Report p-value column",
-            kind="choice",
-            choices=("p.perm", "p.adj"),
-            importance="default",
-        ),
+        # Empirical activity and BH highlighting use the shared Scoring thresholds.
         # Required: gui/generation/validate.py demands it whenever the module is
         # enabled, and the pipeline has no way to generate it.
         FieldSpec(
@@ -106,7 +98,6 @@ SPEC = ModuleTabSpec(
         ),
         FieldSpec(name="rer_min_pos", label="Min independent foreground lineages", importance="default"),
         Section("Reporting and visualization thresholds"),
-        FieldSpec(name="rer_pval_threshold", label="Report p-value threshold", importance="default"),
         FieldSpec(name="rer_top_n_labels", label="Top-N labels on correlation plot", importance="optional"),
         FieldSpec(name="rer_universe_file", label="RER tested-gene universe file", kind="path_file", importance="optional"),
         FieldSpec(name="rer_gene_scores", label="Cross-module gene scores (fcs_stats.tsv)", kind="path_file", importance="optional"),

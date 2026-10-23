@@ -1,5 +1,7 @@
 # WP10 propuesto: POSENRICH por posición
 
+> **Diseño sustituido el 23/10/2026:** el usuario acordó un módulo general de caracterización, enriquecimiento y proximidad, con prioridad para localización dentro de proteínas. Plan vigente: [WP10_posenrich_modular.md](WP10_posenrich_modular.md). Lo siguiente se conserva como propuesta histórica; sus decisiones pendientes no se consideran ya resueltas.
+
 Estado: PREPARADO, sin implementación ni aceptación. El usuario eligió preparar la opción A el 2026-10-23 en WP8. Posteriormente pidió investigar en un fork si un contraste de recuentos como acumulación sería preferible. Esa comparación sigue abierta; preparar A no autoriza activarla ni resolver por cuenta propia las elecciones científicas restantes.
 
 ## Entrada y pregunta científica
@@ -26,3 +28,7 @@ Comparar AUC con hipergeométrico sobre exactamente el mismo universo, anotacion
 - Toy marino/cáncer con posiciones anotadas, completo/strict; no usar PEPC de un solo gen como equivalencia positiva de rutas.
 - Medir RSS, tiempo y E/S en pequeño; las corridas 1000/4000/10000 se preparan para el cluster. Comparar métodos científicos antes de habilitar un default.
 - Decisión final del usuario sobre método, ranking y lateralidad; implementación, GUI, ayuda, informe 14 y aceptación se registran por separado.
+
+## Colecciones y PP2A: decisión posterior del fork (23/10/2026)
+
+Se autoriza depurar las colecciones y reparar FADE/VEP, sin elegir todavía el test. Implementación y contratos en [POSITION_COLLECTIONS.md](../POSITION_COLLECTIONS.md). Anotaciones conectadas al informe 15 por una tarea independiente del nulo; inferencia POSENRICH continúa omitida. Tres Excel PP2A normalizados con provenance y ambigüedades; proyección a la referencia productiva pendiente de sus secuencias/MAP, no sustituida por posiciones UniProt sin validar.

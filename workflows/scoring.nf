@@ -12,6 +12,8 @@
  * File: workflows/scoring.nf
  */
 
+include { SCORING_EVIDENCE } from '../subworkflows/SCORING/scoring_evidence.nf'
+
 include { SCORING_COMPUTE }                                                           from '../subworkflows/SCORING/scoring_compute.nf'
 include { SCORING_NULL_POSITIONS }                                                    from '../subworkflows/SCORING/scoring_null_positions.nf'
 include { SCORING_REPORT }                                                            from '../subworkflows/SCORING/scoring_report.nf'
@@ -229,6 +231,13 @@ workflow SCORING {
             resolved_cycle_roster
         )
 
+        // The same calibrated evidence feeds reporting, AMI and FCS, even with FCS disabled.
+        def calibration_blocks = (null_blocks_ch ?: Channel.empty()).flatten().collect().map { b ->
+            b ? b : (params.caas_null_dir ? [file(params.caas_null_dir)] : [])
+        }
+        def evidence_out = SCORING_EVIDENCE(compute_out.gene_scores, compute_out.position_scores,
+            compute_out.fcs_stats, resolved_background, calibration_blocks, caas_perms_resolved)
+
         // ── Render report ──────────────────────────────────────────────────
         // Helper: for optional compute outputs, emit a sentinel when absent.
         def _opt = { ch, sentinel ->
@@ -255,8 +264,8 @@ workflow SCORING {
         // per-(gene,position) asr_path_score overlaid on the null;
         // when scoring runs it is always present (same condition as position_scores).
         def report_out = SCORING_REPORT(
-            compute_out.position_scores,
-            compute_out.gene_scores,
+            evidence_out.position_scores,
+            evidence_out.gene_scores,
             compute_out.gene_correlations,
             resolved_fade_site_top_ch,
             resolved_fade_site_bot_ch,
@@ -276,15 +285,21 @@ workflow SCORING {
         def final_reports = report_out.report
 
     emit:
-        position_scores  = compute_out.position_scores
-        gene_scores      = compute_out.gene_scores
-        fcs_stats        = compute_out.fcs_stats
+        position_scores  = evidence_out.position_scores
+        gene_scores      = evidence_out.gene_scores
+        fcs_stats        = evidence_out.fcs_stats
         fcs_stats_rer    = compute_out.fcs_stats_rer
         fcs_stats_fade   = compute_out.fcs_stats_fade
         fcs_stats_accum  = compute_out.fcs_stats_accum
-        gene_lists       = compute_out.gene_lists
-        position_lists   = compute_out.position_lists
+        gene_lists       = evidence_out.gene_lists
+        position_lists   = evidence_out.position_lists
+        // WP10 POSENRICH modular: the registry consumes the evaluated positions and
+        // the positional-null universe summary next to position_scores.tsv.
+        postproc              = resolved_postproc
+        null_universe_summary = compute_out.null_universe_summary
         report           = final_reports
         // The CAAS null used here; ENRICHMENT consumes this one, so the FCS p.perm and the scoring report share it.
+        gene_evidence    = evidence_out.gene_evidence
+        calibration      = evidence_out.calibration
         caas_perms       = caas_perms_resolved
 }

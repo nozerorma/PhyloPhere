@@ -48,7 +48,7 @@ out_dir <- file.path(root, ".tmp/fcs_null_ctrl", paste0(trait, "_", mode))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE); setwd(out_dir)
 
 src <- file.path(root, "subworkflows/ENRICHMENT/local/src")
-source(file.path(src, "percentile_flags.R")); source(file.path(src, "fcs_enrich.R"))
+source(file.path(src, "evidence_flags.R")); source(file.path(src, "fcs_enrich.R"))
 gmts <- fcs_load_gmts(file.path(root, "subworkflows/ENRICHMENT/dat"))
 universe <- unique(trimws(readLines(universe_file))); universe <- universe[nzchar(universe)]
 

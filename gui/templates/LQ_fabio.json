@@ -138,8 +138,6 @@
       "rer_trait_mode": "continuous",
       "rer_binary_clade": "all",
       "rer_min_pos": "2",
-      "rer_pval_threshold": "0.05",
-      "rer_pval_column": "p.perm",
       "rer_top_n_labels": "20",
       "rer_transform": "none",
       "rer_universe_file": "",
@@ -183,14 +181,14 @@
     "scoring": {
       "enabled": false,
       "extra_flags": "",
-      "scoring_gene_top_pct": "0.10",
-      "scoring_position_top_pct": "0.10",
       "gene_ensembl_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output",
       "auto_generate_ensembl": false,
       "ensembl_dataset": "",
       "scoring_window_size_bp": "1000000",
       "caas_evidence_top_n": "0",
-      "scoring_hypotheses_pairs": ""
+      "scoring_hypotheses_pairs": "",
+      "evidence_p_threshold": "0.05",
+      "evidence_fdr_threshold": "0.05"
     },
     "enrichment": {
       "enabled": true,
@@ -224,7 +222,6 @@
       "domain_ref_species": "",
       "posenrich_ucr": true,
       "ucr_positions_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/variability/ucr_positions.tsv",
-      "posenrich_eggnog": false,
       "eggnog_taxid": "",
       "egg_members_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_members.tsv",
       "egg_annotations_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_annotations.tsv",

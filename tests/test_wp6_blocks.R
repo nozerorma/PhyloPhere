@@ -1,6 +1,6 @@
 # Independent native AUC oracle plus exhaustive per-gene calibration.
 suppressPackageStartupMessages({library(dplyr); library(RERconverge)})
-source('subworkflows/ENRICHMENT/local/src/percentile_flags.R')
+source('subworkflows/ENRICHMENT/local/src/evidence_flags.R')
 source('subworkflows/ENRICHMENT/local/src/fcs_enrich.R')
 source('subworkflows/ENRICHMENT/local/src/gene_p.R')
 source('subworkflows/ENRICHMENT/local/src/caas_blocks.R')

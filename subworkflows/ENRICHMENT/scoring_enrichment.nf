@@ -121,10 +121,10 @@ process SCORING_AMI_REPORT {
         cp -R ${local_dir}/* .
 
         # One gene list per slice: the Gene column of slice_<name>.tsv becomes <name>.txt
-        for f in ${gene_lists}/slice_*.tsv; do
+        for f in ${gene_lists}/active_*.tsv; do
             if [ -f "\$f" ]; then
                 basename=\$(basename "\$f" .tsv)
-                name=\${basename#slice_}
+                name=\${basename#active_}
                 # First column without the header line, blank lines dropped
                 tail -n +2 "\$f" | cut -f1 | { grep -v "^[[:space:]]*\$" || true; } > "\${name}.txt"
             fi

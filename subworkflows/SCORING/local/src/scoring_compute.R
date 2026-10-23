@@ -81,14 +81,9 @@ cycle_roster_file    <- parse_arg("--cycle_roster")      # cycle_roster.txt: eve
 score_aggregation <- "caas_pos_species_pss"
 # Rows reach this script already pooled over hypotheses by CT_DISAMBIGUATION (one row per Gene,
 # Position and side, hypothesis NA), so scoring never pools hypotheses itself.
-top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
-top25_pct         <- 0.25
-top5_pct          <- 0.05
-top1_pct          <- 0.01
-gene_top_pct      <- as.numeric(parse_arg("--gene_top_pct",  "0.10"))
-gene_top25_pct    <- 0.25
-gene_top5_pct     <- 0.05
-gene_top1_pct     <- 0.01
+nominal_threshold <- as.numeric(parse_arg("--nominal_threshold", "0.05"))
+fdr_threshold <- as.numeric(parse_arg("--fdr_threshold", "0.05"))
+fade_bf_threshold <- as.numeric(parse_arg("--fade_bf_threshold", "100"))
 # Direction is not a parameter: scoring runs on the full pool and the `side` column carries it.
 
 # TRUE for a real file; a sentinel (basename starting with NO_) or an empty name counts as absent.
@@ -358,7 +353,7 @@ if (has_null_counters) {
 # the same family) are computed with p.emp in null_position_p.R.
 
 # ── 2i. FADE (gene-level - see section 4d) ────────────────────────────────────
-# FADE is read at gene level here (max Bayes Factor per gene across sites); significance is BF >= 100.
+# FADE is read at gene level here (max Bayes Factor per gene across sites); significance is BF >= fade_bf_threshold.
 # fade_top and fade_bottom hold the FADE results of the top and the bottom direction.
 has_fade_top    <- file_exists(fade_top_file)
 has_fade_bottom <- file_exists(fade_bottom_file)
@@ -438,7 +433,7 @@ has_fade_site_bot <- file_exists(fade_site_bot_file)
   if (!is.na(bias_col)) {
     df$fade_biased <- as.logical(df[[bias_col]])
   } else {
-    df$fade_biased <- df$max_site_bf >= 100
+    df$fade_biased <- df$max_site_bf >= fade_bf_threshold
   }
   
   df %>%
@@ -596,7 +591,8 @@ if (has_rer) {
   }
 
   # Use p.perm if available, otherwise p.adj / p.value / pval
-  pval_col <- intersect(c("p.perm", "p.adj", "p.value", "pvalue", "pval", "p"), names(rer))[1]
+  if (!"p.perm" %in% names(rer)) rer$p.perm <- NA_real_
+  pval_col <- "p.perm"
   if (is.na(pval_col)) {
     pval_col <- names(rer)[grepl("^p", names(rer))][1]
     if (is.na(pval_col)) {
@@ -633,11 +629,10 @@ if (has_rer) {
   rer$rer_P <- if ("p" %in% names(rer)) as.numeric(rer[["p"]]) else NA_real_
 
   gene_rer <- rer %>%
-    filter(!is.na(.data[[pval_col]])) %>%
     mutate(
       rer_min_pval     = as.numeric(.data[[pval_col]]),
-      rer_significant  = rer_min_pval <= 0.05,
-      rer_significant_fdr = !is.na(rer_perm_padj) & rer_perm_padj <= 0.05,
+      rer_significant  = rer_min_pval < nominal_threshold,
+      rer_significant_fdr = !is.na(rer_perm_padj) & rer_perm_padj < fdr_threshold,
       rer_rho          = as.numeric(.data[[rho_col]]),
       rer_acceleration = case_when(
         is.na(rer_rho) ~ NA_character_,
@@ -661,15 +656,15 @@ if (has_rer) {
 }
 
 # ── 4d. Gene FADE Significance (optional) ─────────────────────────────────────
-# BF >= 100 per direction. fade_significant_top / _bottom used separately
+# BF >= fade_bf_threshold per direction. fade_significant_top / _bottom used separately
 # to characterise top-CAAS and bottom-CAAS gene sets respectively.
 gene_fade <- tibble(Gene = character())
 
 if (nrow(fade_top_df) > 0) {
   gene_fade <- gene_fade %>%
-    full_join(fade_top_df %>% mutate(fade_significant_top = fade_max_bf_top >= 100),
+    full_join(fade_top_df %>% mutate(fade_significant_top = fade_max_bf_top >= fade_bf_threshold),
               by = "Gene")
-  cat(sprintf("  FADE top: %d significant (BF >= 100)\n",
+  cat(sprintf("  FADE top: %d significant (BF >= fade_bf_threshold)\n",
               sum(gene_fade$fade_significant_top, na.rm = TRUE)))
 } else {
   gene_fade$fade_max_bf_top      <- NA_real_
@@ -678,9 +673,9 @@ if (nrow(fade_top_df) > 0) {
 
 if (nrow(fade_bottom_df) > 0) {
   gene_fade <- gene_fade %>%
-    full_join(fade_bottom_df %>% mutate(fade_significant_bottom = fade_max_bf_bottom >= 100),
+    full_join(fade_bottom_df %>% mutate(fade_significant_bottom = fade_max_bf_bottom >= fade_bf_threshold),
               by = "Gene")
-  cat(sprintf("  FADE bottom: %d significant (BF >= 100)\n",
+  cat(sprintf("  FADE bottom: %d significant (BF >= fade_bf_threshold)\n",
               sum(gene_fade$fade_significant_bottom, na.rm = TRUE)))
 } else {
   gene_fade$fade_max_bf_bottom      <- NA_real_
@@ -846,6 +841,8 @@ fcs_stats <- tibble(
   flag_fade_bottom = .istrue(.col(gene_scores, "fade_significant_bottom")),
   flag_rer_acc     = .istrue(.col(gene_scores, "rer_significant")) & grepl("acc", .rer_dir),
   flag_rer_decc    = .istrue(.col(gene_scores, "rer_significant")) & grepl("dec", .rer_dir),
+  flag_rer_acc_adjusted = .istrue(.col(gene_scores, "rer_significant_fdr")) & grepl("acc", .rer_dir),
+  flag_rer_decc_adjusted = .istrue(.col(gene_scores, "rer_significant_fdr")) & grepl("dec", .rer_dir),
   flag_accum        = .istrue(.col(gene_scores, "accum_significant")),
   flag_accum_top    = .istrue(.col(gene_scores, "accum_significant_top")),
   flag_accum_bottom = .istrue(.col(gene_scores, "accum_significant_bottom"))
@@ -898,324 +895,5 @@ if (.nonempty("accum_p")) {
 # Correlations
 write_tsv(corr_results, "gene_correlations.tsv")
 
-# ── 7. Ranked gene slices ─────────────────────────────────────────────────────
 
-dir.create("gene_lists", showWarnings = FALSE)
-
-# 12 percentile slices (top, bottom, global × 25, 10, 5, 1%). The genes with a defined score are
-# ranked in descending order and the top frac of that ranked set is kept (not of the full
-# background), the same selection axis as the position slices of section 7b. They are percentile
-# slices, not a significance gate: a foreground close to the whole gene universe is a poor input for
-# interaction-density tests. The global slices rank on gene_caas_score, the undirected size-adjusted
-# score. fade_sig is NA for them because FADE has no undirected flag, and is_fade in the export loop
-# treats a missing or NA fade_sig as FALSE.
-slices_def <- list(
-  list(name = "top25",    col = "gene_caas_score_top",    frac = 0.25, direction = "top",    fade_sig = "fade_significant_top"),
-  list(name = "top10",    col = "gene_caas_score_top",    frac = 0.10, direction = "top",    fade_sig = "fade_significant_top"),
-  list(name = "top5",     col = "gene_caas_score_top",    frac = 0.05, direction = "top",    fade_sig = "fade_significant_top"),
-  list(name = "top1",     col = "gene_caas_score_top",    frac = 0.01, direction = "top",    fade_sig = "fade_significant_top"),
-
-  list(name = "bottom25", col = "gene_caas_score_bottom", frac = 0.25, direction = "bottom", fade_sig = "fade_significant_bottom"),
-  list(name = "bottom10", col = "gene_caas_score_bottom", frac = 0.10, direction = "bottom", fade_sig = "fade_significant_bottom"),
-  list(name = "bottom5",  col = "gene_caas_score_bottom", frac = 0.05, direction = "bottom", fade_sig = "fade_significant_bottom"),
-  list(name = "bottom1",  col = "gene_caas_score_bottom", frac = 0.01, direction = "bottom", fade_sig = "fade_significant_bottom"),
-
-  list(name = "global25", col = "gene_caas_score", frac = 0.25, direction = "global", fade_sig = NA_character_),
-  list(name = "global10", col = "gene_caas_score", frac = 0.10, direction = "global", fade_sig = NA_character_),
-  list(name = "global5",  col = "gene_caas_score", frac = 0.05, direction = "global", fade_sig = NA_character_),
-  list(name = "global1",  col = "gene_caas_score", frac = 0.01, direction = "global", fade_sig = NA_character_)
-)
-
-cat("\n─── Exporting 12 STRING percentile ranked lists (top/bottom/global x 25/10/5/1%) ──\n")
-for (slice in slices_def) {
-  col_name <- slice$col
-  file_name <- sprintf("gene_lists/slice_%s.tsv", slice$name)
-
-  # Rank all non-NA genes by score (desc, stable Gene tiebreak for determinism).
-  ranked <- gene_out %>%
-    filter(!is.na(.data[[col_name]])) %>%
-    select(Gene, score = all_of(col_name)) %>%
-    arrange(desc(score), Gene)
-
-  n_total <- nrow(ranked)
-  if (n_total == 0) {
-    # Write an empty slice so that the process always finds its declared output
-    write_tsv(tibble(Gene = character(), score = numeric(), is_fade = logical(), is_rer = logical(), is_accum = logical()), file_name)
-    cat(sprintf("  %s: empty (0 genes) exported\n", file_name))
-    next
-  }
-
-  n_keep <- max(1, round(slice$frac * n_total))
-  slice_df <- ranked %>% slice_head(n = n_keep)
-
-  # Evidence columns: whether the other tools also call the gene significant, matched to the direction
-  f_col <- slice$fade_sig
-  slice_df <- slice_df %>%
-    mutate(
-      is_fade = if (!is.na(f_col) && f_col %in% names(gene_out)) {
-        gene_out[[f_col]][match(Gene, gene_out$Gene)] %in% TRUE
-      } else FALSE,
-      is_rer = if ("rer_significant" %in% names(gene_out)) {
-        is_sig <- gene_out$rer_significant[match(Gene, gene_out$Gene)] %in% TRUE
-        rho_val <- gene_out$rer_rho[match(Gene, gene_out$Gene)]
-        if (slice$direction == "top") {
-          is_sig & !is.na(rho_val) & rho_val > 0
-        } else if (slice$direction == "bottom") {
-          is_sig & !is.na(rho_val) & rho_val < 0
-        } else {
-          is_sig
-        }
-      } else FALSE,
-      # Direction-matched like is_fade: a "top" slice checks accum_significant_top (accumulation_top_*),
-      # a "bottom" slice accum_significant_bottom, a "global" slice accum_significant (accumulation_all_*).
-      is_accum = {
-        acc_col <- if (slice$direction == "top") "accum_significant_top"
-                   else if (slice$direction == "bottom") "accum_significant_bottom"
-                   else "accum_significant"
-        if (acc_col %in% names(gene_out)) {
-          gene_out[[acc_col]][match(Gene, gene_out$Gene)] %in% TRUE
-        } else FALSE
-      }
-    )
-  # slice_df inherits ranked's desc(score) order via slice_head -- already sorted.
-
-  write_tsv(slice_df, file_name)
-  cat(sprintf("  %s: %d/%d genes exported (top %.0f%%)\n", file_name, nrow(slice_df), n_total, 100 * slice$frac))
-}
-
-# ── 7b. Ranked position slices ────────────────────────────────────────────────
-# Position-level analog of the gene slices above. 14.Position_enrichment_report.Rmd and posenrich.nf read
-# them (position_lists_dir), so the position percentiles are defined in one place. The direction filters
-# on side (top: side == "top", bottom: side == "bottom", global: every row of position_scores.tsv); only
-# positions with CAAS_score > 0 are ranked; the cut is round(frac * n_scored) after a stable sort by
-# (desc score, Gene, Position).
-dir.create("position_lists", showWarnings = FALSE)
-
-pos_slices_def <- list(
-  list(name = "top25",    frac = 0.25, direction = "top"),
-  list(name = "top10",    frac = 0.10, direction = "top"),
-  list(name = "top5",     frac = 0.05, direction = "top"),
-  list(name = "top1",     frac = 0.01, direction = "top"),
-  list(name = "bottom25", frac = 0.25, direction = "bottom"),
-  list(name = "bottom10", frac = 0.10, direction = "bottom"),
-  list(name = "bottom5",  frac = 0.05, direction = "bottom"),
-  list(name = "bottom1",  frac = 0.01, direction = "bottom"),
-  list(name = "global25", frac = 0.25, direction = "global"),
-  list(name = "global10", frac = 0.10, direction = "global"),
-  list(name = "global5",  frac = 0.05, direction = "global"),
-  list(name = "global1",  frac = 0.01, direction = "global")
-)
-
-cat("\n─── Exporting 12 position-level percentile ranked lists (top/bottom/global x 25/10/5/1%) ──\n")
-for (slice in pos_slices_def) {
-  file_name <- sprintf("position_lists/slice_%s.tsv", slice$name)
-
-  sub <- if (slice$direction == "top") {
-    pos_out %>% dplyr::filter(side == "top")
-  } else if (slice$direction == "bottom") {
-    pos_out %>% dplyr::filter(side == "bottom")
-  } else {
-    pos_out
-  }
-  scored <- sub %>%
-    dplyr::filter(!is.na(CAAS_score) & CAAS_score > 0) %>%
-    dplyr::arrange(dplyr::desc(CAAS_score), Gene, Position)
-
-  n_scored <- nrow(scored)
-  if (n_scored == 0) {
-    write_tsv(tibble(Gene = character(), Position = integer(), CAAS_score = numeric()), file_name)
-    cat(sprintf("  %s: empty (0 scored positions) exported\n", file_name))
-    next
-  }
-
-  n_keep <- max(1, round(slice$frac * n_scored))
-  slice_df <- scored %>% dplyr::slice_head(n = n_keep) %>% dplyr::select(Gene, Position, CAAS_score)
-
-  write_tsv(slice_df, file_name)
-  cat(sprintf("  %s: %d/%d scored positions exported (top %.0f%%)\n", file_name, nrow(slice_df), n_scored, 100 * slice$frac))
-}
-
-# ── 8. Threshold enrichment ───────────────────────────────────────────────────
-# For each progressively tighter CAAS threshold, test whether the retained
-# set is enriched in independent convergent signals (RER, FADE, accumulation).
-# Produces enrichment curves: odds ratio + Fisher p per (direction × threshold × tool).
-
-.fisher_enrich <- function(n_both, n_caas, n_tool, n_total) {
-  a  <- n_both
-  b  <- n_caas  - n_both
-  c_ <- n_tool  - n_both
-  d  <- n_total - n_caas - n_tool + n_both
-  if (any(c(a, b, c_, d) < 0))
-    return(list(or = NA_real_, p = NA_real_, ci_lo = NA_real_, ci_hi = NA_real_))
-  ft <- tryCatch(
-    fisher.test(matrix(c(a, b, c_, d), nrow = 2)),
-    error = function(e) list(estimate = NA_real_, p.value = NA_real_,
-                              conf.int = c(NA_real_, NA_real_))
-  )
-  list(or = as.numeric(ft$estimate), p = ft$p.value,
-       ci_lo = ft$conf.int[1], ci_hi = ft$conf.int[2])
-}
-
-enrich_thresholds <- tibble(
-  label = c("top100", "top50", "top25", "top10", "top5", "top1"),
-  q     = c(0.00,     0.50,   0.75,    0.90,    0.95,   0.99)
-)
-
-# ── 8a. Gene-level enrichment ─────────────────────────────────────────────────
-cat("\n─── Gene-level threshold enrichment ──────────────────────────\n")
-n_total_genes    <- n_distinct(gene_out$Gene)
-gene_enrich_rows <- list()
-k_ge             <- 1
-
-for (dir in c("top", "bottom", "global")) {
-  score_col <- if (dir == "global") "gene_caas_score" else paste0("gene_caas_score_", dir)
-  vals  <- gene_out[[score_col]]
-  valid <- !is.na(vals)
-  if (sum(valid) < 2) next
-
-  tool_sigs <- list()
-  if (dir %in% c("top", "global") && has_fade_top &&
-      any(gene_out$fade_significant_top %in% TRUE))
-    tool_sigs[["fade_top"]] <- gene_out %>%
-      filter(fade_significant_top == TRUE) %>% pull(Gene)
-  if (dir %in% c("bottom", "global") && has_fade_bottom &&
-      any(gene_out$fade_significant_bottom %in% TRUE))
-    tool_sigs[["fade_bottom"]] <- gene_out %>%
-      filter(fade_significant_bottom == TRUE) %>% pull(Gene)
-  if (has_rer && any(gene_out$rer_significant %in% TRUE)) {
-    if (dir == "global")
-      tool_sigs[["rer_global"]] <- gene_out %>%
-        filter(rer_significant == TRUE) %>% pull(Gene)
-    if (dir == "top")
-      tool_sigs[["rer_accel"]] <- gene_out %>%
-        filter(rer_significant == TRUE, !is.na(rer_rho), rer_rho > 0) %>% pull(Gene)
-    if (dir == "bottom")
-      tool_sigs[["rer_decel"]] <- gene_out %>%
-        filter(rer_significant == TRUE, !is.na(rer_rho), rer_rho < 0) %>% pull(Gene)
-  }
-  # Direction-matched, mirroring fade_top/fade_bottom and rer_accel/rer_decel
-  # above -- "top"/"bottom" test against accumulation_top_*/accumulation_bottom_*
-  # (positions restricted to that direction), "global" against the
-  # accumulation_all_* pool (all non-none positions, non-directional).
-  if (dir == "top" && "accum_significant_top" %in% names(gene_out) &&
-      any(gene_out$accum_significant_top %in% TRUE))
-    tool_sigs[["accum_top"]] <- gene_out %>%
-      filter(accum_significant_top == TRUE) %>% pull(Gene)
-  if (dir == "bottom" && "accum_significant_bottom" %in% names(gene_out) &&
-      any(gene_out$accum_significant_bottom %in% TRUE))
-    tool_sigs[["accum_bottom"]] <- gene_out %>%
-      filter(accum_significant_bottom == TRUE) %>% pull(Gene)
-  if (dir == "global" && has_accum && any(gene_out$accum_significant %in% TRUE))
-    tool_sigs[["accum"]] <- gene_out %>%
-      filter(accum_significant == TRUE) %>% pull(Gene)
-
-  if (length(tool_sigs) == 0) next
-
-  for (i in seq_len(nrow(enrich_thresholds))) {
-    thr_label <- enrich_thresholds$label[i]
-    q         <- enrich_thresholds$q[i]
-    thr       <- quantile(vals[valid], q, na.rm = TRUE)
-    caas_set  <- gene_out %>%
-      filter(!is.na(.data[[score_col]]) & .data[[score_col]] >= thr) %>%
-      pull(Gene) %>% unique()
-    n_caas <- length(caas_set)
-
-    for (tool_name in names(tool_sigs)) {
-      tool_set  <- tool_sigs[[tool_name]]
-      n_tool    <- length(unique(tool_set))
-      n_overlap <- length(intersect(caas_set, tool_set))
-      fe        <- .fisher_enrich(n_overlap, n_caas, n_tool, n_total_genes)
-      gene_enrich_rows[[k_ge]] <- tibble(
-        direction   = dir,
-        threshold   = thr_label,
-        score_col   = score_col,
-        tool        = tool_name,
-        n_total     = n_total_genes,
-        n_caas_set  = n_caas,
-        n_tool_sig  = n_tool,
-        n_overlap   = n_overlap,
-        enrich_frac = if (n_caas > 0) n_overlap / n_caas else NA_real_,
-        odds_ratio  = fe$or,
-        or_ci_lo    = fe$ci_lo,
-        or_ci_hi    = fe$ci_hi,
-        fisher_p    = fe$p
-      )
-      k_ge <- k_ge + 1
-    }
-  }
-}
-
-if (length(gene_enrich_rows) > 0) {
-  gene_threshold_enrichment <- bind_rows(gene_enrich_rows)
-  write_tsv(gene_threshold_enrichment, "gene_threshold_enrichment.tsv")
-  cat(sprintf("  gene_threshold_enrichment.tsv: %d rows\n", nrow(gene_threshold_enrichment)))
-} else {
-  cat("  Gene-level enrichment: skipped (no tool data available)\n")
-}
-
-# ── 8b. Position-level FADE enrichment ────────────────────────────────────────
-has_fade_site_data <- (has_fade_site_top && nrow(fade_site_top_df) > 0) ||
-                      (has_fade_site_bot && nrow(fade_site_bot_df) > 0)
-
-if (has_fade_site_data) {
-  cat("\n─── Position-level FADE threshold enrichment ─────────────────\n")
-  pos_enrich_rows <- list()
-  k_pe            <- 1
-
-  for (dir in c("top", "bottom")) {
-    pos_subset <- pos_scores %>% filter(side == dir)
-    fade_site  <- if (dir == "top") fade_site_top_df else fade_site_bot_df
-    if (nrow(pos_subset) == 0 || nrow(fade_site) == 0) next
-
-    pos_fade <- pos_subset %>%
-      left_join(fade_site %>% select(Gene, Position, max_site_bf),
-                by = c("Gene", "Position")) %>%
-      mutate(fade_sig = !is.na(max_site_bf) & max_site_bf >= 100)
-
-    n_total_pos <- nrow(pos_fade)
-    n_fade_sig  <- sum(pos_fade$fade_sig, na.rm = TRUE)
-    if (n_fade_sig == 0) {
-      cat(sprintf("  FADE site %s: no significant positions (BF >= 100), skipping\n", dir))
-      next
-    }
-
-    vals  <- pos_fade$CAAS_score
-    valid <- !is.na(vals)
-
-    for (i in seq_len(nrow(enrich_thresholds))) {
-      thr_label <- enrich_thresholds$label[i]
-      q         <- enrich_thresholds$q[i]
-      thr       <- quantile(vals[valid], q, na.rm = TRUE)
-      caas_pos  <- pos_fade %>% filter(!is.na(CAAS_score) & CAAS_score >= thr)
-      n_caas    <- nrow(caas_pos)
-      n_overlap <- sum(caas_pos$fade_sig, na.rm = TRUE)
-      fe        <- .fisher_enrich(n_overlap, n_caas, n_fade_sig, n_total_pos)
-      pos_enrich_rows[[k_pe]] <- tibble(
-        direction   = dir,
-        threshold   = thr_label,
-        n_total     = n_total_pos,
-        n_caas_set  = n_caas,
-        n_fade_sig  = n_fade_sig,
-        n_overlap   = n_overlap,
-        enrich_frac = if (n_caas > 0) n_overlap / n_caas else NA_real_,
-        odds_ratio  = fe$or,
-        or_ci_lo    = fe$ci_lo,
-        or_ci_hi    = fe$ci_hi,
-        fisher_p    = fe$p
-      )
-      k_pe <- k_pe + 1
-    }
-  }
-
-  if (length(pos_enrich_rows) > 0) {
-    pos_threshold_enrichment <- bind_rows(pos_enrich_rows)
-    write_tsv(pos_threshold_enrichment, "pos_threshold_enrichment.tsv")
-    cat(sprintf("  pos_threshold_enrichment.tsv: %d rows\n", nrow(pos_threshold_enrichment)))
-  }
-} else {
-  cat("  Position-level FADE enrichment: skipped (no site-level FADE files)\n")
-}
-
-cat("\n═══════════════════════════════════════════════════════════════\n")
-cat("  CAAS Scoring - Complete\n")
-cat("═══════════════════════════════════════════════════════════════\n")
+cat("Base scoring complete; calibrated evidence and activity lists are materialized next.\n")

@@ -25,7 +25,7 @@ process FCS_BLOCK_TRANSPOSE {
     script:
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
-        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R','percentile_flags.R'].collect {
+        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R'].collect {
             file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
         }.join('\n').getBytes('UTF-8')).encodeHex().toString()
     """
@@ -50,7 +50,7 @@ process FCS_GENE_P {
     script:
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
-        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R','percentile_flags.R'].collect {
+        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R'].collect {
             file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
         }.join('\n').getBytes('UTF-8')).encodeHex().toString()
     """
@@ -76,7 +76,7 @@ process FCS_OBSERVED {
     script:
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
-        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R','percentile_flags.R'].collect {
+        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R'].collect {
             file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
         }.join('\n').getBytes('UTF-8')).encodeHex().toString()
     """
@@ -102,7 +102,7 @@ process FCS_NULL_BLOCK {
     script:
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
-        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R','percentile_flags.R'].collect {
+        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R'].collect {
             file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
         }.join('\n').getBytes('UTF-8')).encodeHex().toString()
     """
@@ -128,7 +128,7 @@ process FCS_CLOSE {
     script:
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
-        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R','percentile_flags.R'].collect {
+        ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R'].collect {
             file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
         }.join('\n').getBytes('UTF-8')).encodeHex().toString()
     """
@@ -187,4 +187,39 @@ workflow FCS_COMPUTE_BLOCKS {
     emit:
     enrich_file = FCS_CONCAT.out.enrich
     partials = FCS_CLOSE.out.partial.collect()   // concatenate with FCS_CONCAT (fcs.nf)
+}
+
+// Reuse the single calibration produced by SCORING; no second gene-p computation.
+workflow FCS_COMPUTE_CALIBRATED {
+    take:
+    universe_file
+    calibration
+    main:
+    def ready = calibration.filter { !file("${it}/empty.tsv").exists() }
+    def empty = calibration.filter { file("${it}/empty.tsv").exists() }.map { file("${it}/empty.tsv") }
+    def batchSize = (params.fcs_block_batch_genes ?: 1000) as int
+    def gmtDir = params.gmt_dir ?: "${baseDir}/subworkflows/ENRICHMENT/dat"
+    def counter = 0
+    def gmtBatchSize = (params.fcs_batch_size ?: 4) as int
+    def gmts = Channel.fromPath("${gmtDir}/*.gmt").collate(gmtBatchSize)
+        .map { batch -> tuple(String.format('fcs_batch_%03d', ++counter), batch.size(), batch) }
+    def obs = ready.map { files("${it}/obs_*.tsv").sort() }
+    def gp = ready.map { files("${it}/*_gp_*.rds").sort() }
+    def blockIds = ready.flatMap { dir ->
+        def meta = new groovy.json.JsonSlurper().parseText(file("${dir}/metadata.json").text)
+        meta.blocks instanceof List ? meta.blocks : [meta.blocks]
+    }
+    FCS_OBSERVED(gmts, obs, universe_file)
+    def batchObs = gmts.join(FCS_OBSERVED.out.observed.map { id, f -> tuple(id, f) }, by: 0)
+    def jobs = batchObs.combine(blockIds).combine(Channel.of('global','top','bottom'))
+        .combine(gp.map { [it] }).map { id, size, g, observed, block, rank, fs ->
+            tuple(id, size, g, observed, block, rank,
+                fs.findAll { it.name.startsWith("${rank}_gp_") && it.name.endsWith("_${block}.rds") })
+        }
+    FCS_NULL_BLOCK(jobs, universe_file, batchSize)
+    FCS_CLOSE(FCS_OBSERVED.out.observed.join(FCS_NULL_BLOCK.out.counts.groupTuple(by:0), by:0)
+        .map { id, observed, counts -> tuple(id, observed, counts) })
+    FCS_CONCAT(FCS_CLOSE.out.partial.collect().filter { it })
+    emit:
+    enrich_file = FCS_CONCAT.out.enrich.mix(empty)
 }

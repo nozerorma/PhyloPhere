@@ -26,6 +26,8 @@ Inputs:     --alignment-dir     directory of FASTA alignments, one per gene (gen
 Outputs:    <output-dir>/domain_variability.tsv  gene, pfam_id, target_name, description, clan_acc,
                                 clan_name, ali_start, ali_end; ali_start and ali_end are positions
                                 in the ungapped reference sequence, as reported by hmmscan.
+                                alignment_positions explicitly lists the zero-based columns of the supplied
+                                trimmed alignment, excluding reference gaps/X. Use the same alignment as CAAS.
                                 Hits without a Pfam-A.clans.tsv entry are dropped with a warning.
             <output-dir>/reference_seqs.fa, hmmscan.domtblout  intermediate files
 
@@ -102,7 +104,7 @@ def load_clan_metadata(clans_tsv: str) -> dict:
 
 
 def build_reference_fasta(alignment_dir: str, alignment_format: str, ref_species: str,
-                          out_fasta: str) -> list:
+                          out_fasta: str, query_columns=None) -> list:
     """Write the reference-species sequence of each gene, gaps removed, into one FASTA; returns the genes written.
 
     Only 'fasta' alignments are supported, because read_fasta() of map_domain_variability.py
@@ -126,6 +128,8 @@ def build_reference_fasta(alignment_dir: str, alignment_format: str, ref_species
                 continue
             _, seq = ref
             ungapped = seq.replace("-", "").replace("X", "")
+            if query_columns is not None:
+                query_columns[gene] = [i for i, aa in enumerate(seq) if aa not in ('-', 'X')]
             out.write(f">{gene}\n{ungapped}\n")
             genes.append(gene)
     return genes
@@ -147,8 +151,9 @@ def main():
     clan_meta = load_clan_metadata(clans_path)
 
     ref_fasta = os.path.join(args.output_dir, "reference_seqs.fa")
+    query_columns = {}
     genes = build_reference_fasta(args.alignment_dir, args.alignment_format,
-                                  args.ref_species, ref_fasta)
+                                  args.ref_species, ref_fasta, query_columns)
     if not genes:
         sys.exit(f"Error: no reference ('{args.ref_species}') sequences found in "
                   f"{args.alignment_dir}")
@@ -166,16 +171,18 @@ def main():
     out_tsv = os.path.join(args.output_dir, "domain_variability.tsv")
     n_written = 0
     with open(out_tsv, "w") as fh:
-        fh.write("gene\tpfam_id\ttarget_name\tdescription\tclan_acc\tclan_name\tali_start\tali_end\n")
+        fh.write("gene\tpfam_id\ttarget_name\tdescription\tclan_acc\tclan_name\tali_start\tali_end\talignment_positions\tcoordinate_space\n")
         for hit in hits:
             meta = clan_meta.get(hit["pfam_id"])
             if not meta:
                 print(f"WARN: no Pfam-A.clans.tsv entry for {hit['pfam_id']} "
                       f"(gene {hit['gene']}) — skipping", file=sys.stderr)
                 continue
+            columns = query_columns[hit['gene']][hit['ali_start']-1:hit['ali_end']]
+            positions = ','.join(map(str, columns))
             fh.write(f"{hit['gene']}\t{hit['pfam_id']}\t{meta['target_name']}\t"
                      f"{meta['description']}\t{meta['clan_acc']}\t{meta['clan_name']}\t"
-                     f"{hit['ali_start']}\t{hit['ali_end']}\n")
+                     f"{hit['ali_start']}\t{hit['ali_end']}\t{positions}\tCAAS_0based\n")
             n_written += 1
 
     print(f"Wrote {n_written} domain hits ({len(genes)} genes scanned) to {out_tsv}",

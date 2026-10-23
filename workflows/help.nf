@@ -303,7 +303,6 @@ Usage:
 --rer_batch_seed                        <INTEGER>                                            1998 (batch i: seed + i - 1; fixed boundaries required for reproducibility)
 --rer_binary_clade                        <"all|ancestral|terminal">                           "all"
 --rer_min_pos                               <INTEGER>                                            2
---rer_pval_threshold                          <FLOAT 0-1>                                          0.05
 --rer_transform                                 <"auto|ha_logit|logit|arcsin|log10|none">            "ha_logit"
 --rer_universe_file                               <"gene_list">                                        null  (else falls back to cleaned background)
 --rer_continuous_file                               <"trait.continuous.output">                          null  (render report from precomputed RDS)
@@ -327,8 +326,8 @@ Usage:
 --scoring_string             <true|false>            true    (legacy alias for --scoring_ami)
 --scoring_compare_fdr          <FLOAT 0-1>             0.15
 --scoring_compare_top_n           <INTEGER>               20
---scoring_position_top_pct                <FLOAT 0-1>             0.10
---scoring_gene_top_pct                       <FLOAT 0-1>             0.10
+--evidence_p_threshold <FLOAT 0-1> 0.05 (nominal empirical activity)
+--evidence_fdr_threshold <FLOAT 0-1> 0.05 (BH highlighting)
 --scoring_window_size_bp                       <INTEGER>               1000000
 --caas_evidence_top_n                          <INTEGER>               0      (evidence table of the N best positions of position_scores.tsv, written after SCORING to scoring/evidence/: MRCA, tip species and residues and the score of each domain of each hypothesis; 0 = off; needs --scoring, the observed discovery.tab and ct_disambig_asr_cache_dir)
 --caas_evidence_discovery                   <"discovery.tab">       ""     (discovery.tab for the evidence table when the observed tables are given and not recomputed; set by the generated reuse scripts)
@@ -390,12 +389,22 @@ POSENRICH (position-level; currently skipped with a warning, no report 14):
 --posenrich_min_size                 <INTEGER>                5
 --posenrich_max_size                   <INTEGER>                0    (0 = no cap)
 --posenrich_background_file                  <"background_file">      null
---domain_variability_file, --ucr_positions_file      (position-level annotation
-                                              sources; leave blank to auto-generate
-                                              from the alignment)
+--domain_variability_file, --ucr_positions_file      (optional precomputed annotation sources;
+                                              blank skips the layer; Pfam coordinate_space required)
 --egg_members_file, --egg_annotations_file   (blank uses the versioned human Primates pair; other clades need explicit files or download)
---fubar_sites_file                           (required; cannot be generated in-house
+--posenrich_custom_file                     (TSV: gene, zero-based CAAS position, term, description; no header)
+--fubar_sites_file                           (optional; cannot be generated in-house
                                               -- see github.com/nozerorma/ortholog_characterizator)
+
+POSENRICH modular (WP10; independent of the flag above, which stays skipped):
+--posenrich_modular                <true|false>          false  (registry + characterization +
+                                                            localization + global + proximity)
+--posenrich_ranking                <caas_score|minus_log10_pemp>  caas_score (minus_log10_pemp: explicit
+                                                            sensitivity over the shared p.emp)
+--posenrich_aggregation            <mean|pair_weighted>  mean (principal; pair_weighted: sensitivity)
+--posenrich_n_permutations         <INTEGER>                999 (within-protein conditional control)
+--posenrich_seed                   <INTEGER>                1
+--posenrich_radios                 <LIST>                   0,5,10 (descriptive protein-proximity radii)
 '''
 }
 

@@ -1,6 +1,6 @@
 # Run from repository root; optional argument: saved marine_complete directory.
 suppressPackageStartupMessages({ library(dplyr); library(Matrix) })
-source('subworkflows/ENRICHMENT/local/src/percentile_flags.R')
+source('subworkflows/ENRICHMENT/local/src/evidence_flags.R')
 source('subworkflows/ENRICHMENT/local/src/fcs_enrich.R')
 source('subworkflows/ENRICHMENT/local/src/gene_p.R')
 same <- function(a,b) stopifnot(isTRUE(all.equal(a,b,tolerance=1e-12,check.attributes=FALSE)))

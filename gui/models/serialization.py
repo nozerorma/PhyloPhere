@@ -49,7 +49,7 @@ _RETIRED_FIELDS = {
     "disambiguation": ("ct_disambig_asr_mode", "ct_disambig_batch_size"),
     "scoring": ("scoring_weight_caas", "scoring_weight_rer", "scoring_weight_fade", "scoring_rer_direction", "scoring_stress", "scoring_stress_top_n",
                 "scoring_stress_rank_metric", "scoring_ami", "scoring_string", "scoring_compare_fdr", "scoring_compare_top_n"),
-    "enrichment": ("cosmic_db", "fcs_fdr_wilcoxon", "fcs_fdr_lachenbruch"),
+    "enrichment": ("posenrich_eggnog", "cosmic_db", "fcs_fdr_wilcoxon", "fcs_fdr_lachenbruch"),
     "accumulation": ("accumulation_n_randomizations", "accumulation_randomization_type", "accumulation_entropy_dir"),
 }
 
@@ -91,6 +91,17 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
             f"Unsupported project schema_version={version!r}; "
             f"this build only supports version {SCHEMA_VERSION}."
         )
+    scoring = data.setdefault("modules", {}).setdefault("scoring", {})
+    rer = data.get("modules", {}).get("rer", {})
+    for name in ("scoring_gene_top_pct", "scoring_position_top_pct"):
+        if name in scoring:
+            scoring.pop(name)
+            logger.warning("Retired %s: percentiles are replaced by empirical p-values; its value is not a p-value threshold", name)
+    if "rer_pval_threshold" in rer:
+        scoring.setdefault("evidence_p_threshold", rer.pop("rer_pval_threshold"))
+    if "rer_pval_column" in rer:
+        rer.pop("rer_pval_column")
+        logger.warning("Retired rer_pval_column: reports show nominal and BH empirical evidence together")
     # Migrate cleanup policies while preserving the explicit work-removal setting.
     runtime = data.get("runtime")
     if isinstance(runtime, dict) and "cleanup_policy" in runtime:

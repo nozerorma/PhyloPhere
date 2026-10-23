@@ -26,6 +26,12 @@ LANGUAGES: Dict[str, str] = {
 }
 
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
+    "Empirical evidence (CAAS and RER)": {"en":"Empirical evidence (CAAS and RER)","es":"Evidencia empírica (CAAS y RER)","ca":"Evidència empírica (CAAS i RER)","fr":"Preuve empirique (CAAS et RER)","it":"Evidenza empirica (CAAS e RER)","de":"Empirische Evidenz (CAAS und RER)"},
+    "Nominal empirical p-value for activity": {"en":"Nominal empirical p-value for activity","es":"P-valor empírico nominal para actividad","ca":"P-valor empíric nominal per a activitat","fr":"P-valeur empirique nominale pour l'activité","it":"P-value empirico nominale per attività","de":"Nominaler empirischer p-Wert für Aktivität"},
+    "BH threshold for highlighting": {"en":"BH threshold for highlighting","es":"Umbral BH para resaltar significativos","ca":"Llindar BH per ressaltar significatius","fr":"Seuil BH pour la mise en évidence","it":"Soglia BH per evidenziare","de":"BH-Schwelle zur Hervorhebung"},
+    "Include precomputed Pfam annotations": {"en": "Include precomputed Pfam annotations", "es": "Incluir anotaciones Pfam precalculadas", "ca": "Inclou anotacions Pfam precalculades", "fr": "Inclure les annotations Pfam précalculées", "it": "Includi annotazioni Pfam precalcolate", "de": "Vorberechnete Pfam-Annotationen einbeziehen"},
+    "Include precomputed UCR annotations": {"en": "Include precomputed UCR annotations", "es": "Incluir anotaciones UCR precalculadas", "ca": "Inclou anotacions UCR precalculades", "fr": "Inclure les annotations UCR précalculées", "it": "Includi annotazioni UCR precalcolate", "de": "Vorberechnete UCR-Annotationen einbeziehen"},
+    "Custom position sets (CAAS coordinates)": {"en": "Custom position sets (CAAS coordinates)", "es": "Conjuntos de posiciones personalizados (coordenadas CAAS)", "ca": "Conjunts de posicions personalitzats (coordenades CAAS)", "fr": "Ensembles de positions personnalisés (coordonnées CAAS)", "it": "Insiemi di posizioni personalizzati (coordinate CAAS)", "de": "Eigene Positionsmengen (CAAS-Koordinaten)"},
     "Remove work/ after a successful run (--remove_work)": {"en": "Remove work/ after a successful run (--remove_work)", "es": "Eliminar work/ tras una ejecución correcta (--remove_work)", "ca": "Elimina work/ després d’una execució correcta (--remove_work)", "fr": "Supprimer work/ après une exécution réussie (--remove_work)", "it": "Elimina work/ dopo un’esecuzione riuscita (--remove_work)", "de": "work/ nach erfolgreichem Lauf entfernen (--remove_work)"},
     "Export single CAAS null RDS": {
         "en": "Export single CAAS null RDS", "es": "Exportar el nulo CAAS en un RDS único",
@@ -2224,6 +2230,62 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "fr": "TaxID du clade eggNOG (vide = TaxID du clade)",
         "it": "TaxID del clade eggNOG (vuoto = TaxID del clade)",
         "de": "eggNOG-Kladus-TaxID (leer = Kladus-TaxID)",
+    },
+    "POSENRICH modular (WP10): registro + caracterización + localización + global + proximidad": {
+        "en": "POSENRICH modular (WP10): registry + characterization + localization + global + proximity",
+        "es": "POSENRICH modular (WP10): registro + caracterización + localización + global + proximidad",
+        "ca": "POSENRICH modular (WP10): registre + caracterització + localització + global + proximitat",
+        "fr": "POSENRICH modulaire (WP10) : registre + caractérisation + localisation + global + proximité",
+        "it": "POSENRICH modulare (WP10): registro + caratterizzazione + localizzazione + globale + prossimità",
+        "de": "POSENRICH modular (WP10): Register + Charakterisierung + Lokalisierung + global + Nähe",
+    },
+    "Run POSENRICH modular (registry, characterization, localization, global, proximity)": {
+        "en": "Run POSENRICH modular (registry, characterization, localization, global, proximity)",
+        "es": "Ejecutar POSENRICH modular (registro, caracterización, localización, global, proximidad)",
+        "ca": "Executa POSENRICH modular (registre, caracterització, localització, global, proximitat)",
+        "fr": "Exécuter POSENRICH modulaire (registre, caractérisation, localisation, global, proximité)",
+        "it": "Esegui POSENRICH modulare (registro, caratterizzazione, localizzazione, globale, prossimità)",
+        "de": "POSENRICH modular ausführen (Register, Charakterisierung, Lokalisierung, global, Nähe)",
+    },
+    "Ranking (caas_score | minus_log10_pemp)": {
+        "en": "Ranking (caas_score | minus_log10_pemp)",
+        "es": "Ranking (caas_score | minus_log10_pemp)",
+        "ca": "Rànquing (caas_score | minus_log10_pemp)",
+        "fr": "Classement (caas_score | minus_log10_pemp)",
+        "it": "Ranking (caas_score | minus_log10_pemp)",
+        "de": "Ranking (caas_score | minus_log10_pemp)",
+    },
+    "Aggregation across genes (mean | pair_weighted)": {
+        "en": "Aggregation across genes (mean | pair_weighted)",
+        "es": "Agregación entre genes (mean | pair_weighted)",
+        "ca": "Agregació entre gens (mean | pair_weighted)",
+        "fr": "Agrégation entre gènes (mean | pair_weighted)",
+        "it": "Aggregazione tra geni (mean | pair_weighted)",
+        "de": "Aggregation über Gene (mean | pair_weighted)",
+    },
+    "Permutations (within-protein control)": {
+        "en": "Permutations (within-protein control)",
+        "es": "Permutaciones (control dentro de proteína)",
+        "ca": "Permutacions (control dins de proteïna)",
+        "fr": "Permutations (contrôle intra-protéine)",
+        "it": "Permutazioni (controllo entro proteina)",
+        "de": "Permutationen (Kontrolle innerhalb des Proteins)",
+    },
+    "Control seed": {
+        "en": "Control seed",
+        "es": "Semilla del control",
+        "ca": "Llavor del control",
+        "fr": "Graine du contrôle",
+        "it": "Seme del controllo",
+        "de": "Kontroll-Seed",
+    },
+    "Proximity radii (residues, descriptive)": {
+        "en": "Proximity radii (residues, descriptive)",
+        "es": "Radios de proximidad (residuos, descriptivos)",
+        "ca": "Radis de proximitat (residus, descriptius)",
+        "fr": "Rayons de proximité (résidus, descriptifs)",
+        "it": "Raggi di prossimità (residui, descrittivi)",
+        "de": "Nähe-Radien (Reste, deskriptiv)",
     },
 }
 

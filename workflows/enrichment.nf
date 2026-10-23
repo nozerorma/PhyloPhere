@@ -10,11 +10,10 @@ include { SCORING_AMI_REPORT; SCORING_COMPARE_REPORT } from '../subworkflows/ENR
 include { SCORING_FCS_REPORT }                            from '../subworkflows/ENRICHMENT/fcs.nf'
 include { RER_FCS_REPORT  as MODULE_FCS_RER }             from '../subworkflows/ENRICHMENT/fcs.nf'
 // CAAS calibrates per-gene rankings; both sources count pathway AUC by null block.
-include { FCS_CAAS as FCS_COMPUTE_SCORING } from '../subworkflows/ENRICHMENT/fcs_inputs.nf'
+include { FCS_COMPUTE_CALIBRATED as FCS_COMPUTE_SCORING } from '../subworkflows/ENRICHMENT/fcs_blocks.nf'
 include { FCS_RER as FCS_COMPUTE_RER } from '../subworkflows/ENRICHMENT/fcs_inputs.nf'
-include { POSENRICH }                                      from '../subworkflows/ENRICHMENT/posenrich.nf'
-include { UCR_GENERATION }                                  from '../subworkflows/ENRICHMENT/ucr_generation.nf'
-include { DOMAIN_VARIABILITY_GENERATION }                   from '../subworkflows/ENRICHMENT/domain_variability_generation.nf'
+include { POSITION_ANNOTATIONS } from '../subworkflows/ENRICHMENT/position_annotations.nf'
+include { POSENRICH_MODULAR } from '../subworkflows/ENRICHMENT/posenrich_modular.nf'
 include { EGGNOG_RESOLUTION }                                from '../subworkflows/ENRICHMENT/eggnog_resolution.nf'
 // Nextflow forbids invoking the same process/subworkflow more than once in one workflow
 // scope without a distinct alias per call site (DuplicateProcessInvocation) -- DOMINO_MODULES
@@ -132,9 +131,12 @@ workflow ENRICHMENT {
         rer_perms_ch
         caas_perms_ch
         caas_blocks_ch
+        gene_calibration
         caas_pos_sample_ch
         position_scores
         position_lists       // SCORING's published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv dir
+        scoring_postproc_ch        // filtered_discovery.tsv (evaluated positions; POSENRICH modular registry)
+        scoring_null_universe_ch   // null_universe_summary.tsv (positional null universe; POSENRICH modular registry)
         background_output_ch
         vep_primateai_ch     // optional: PrimateAI-3D score TSV (null when --vep not run)
         vep_cosmic_ch        // optional: COSMIC Mutant Census score TSV (null when --vep not run)
@@ -207,7 +209,7 @@ workflow ENRICHMENT {
         def trait_lbl = params.traitname ?: 'trait'
 
         if (run_fcs) {
-            def scoring_fcs_compute = FCS_COMPUTE_SCORING(fcs_stats, fcs_universe_ch, caas_perms_resolved, caas_blocks_ch.ifEmpty([]))
+            def scoring_fcs_compute = FCS_COMPUTE_SCORING(fcs_universe_ch, gene_calibration)
             def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch, gene_lists_ch,
                                               scoring_fcs_compute.enrich_file)
             fcs_out_report = fcs_out.report
@@ -393,8 +395,6 @@ workflow ENRICHMENT {
             .ifEmpty { file('NO_POSENRICH_LE') }
         def posenrich_le_summary_ch = (posenrich_out ? posenrich_out.leading_edge_summary : Channel.empty())
             .ifEmpty { file('NO_POSENRICH_LE_SUMMARY') }
-        def posenrich_position_char_ch = (posenrich_out ? posenrich_out.position_characterization : Channel.empty())
-            .ifEmpty { file('NO_POSENRICH_POSITION_CHAR') }
         // Interesting Genes/Positions tables reuse the SAME optional gene/position-
         // level inputs POSENRICH's own report already consumes (fcs_stats,
         // position_scores, VEP, FADE sites) -- all workflow-level take: params, so
@@ -413,10 +413,45 @@ workflow ENRICHMENT {
             .ifEmpty { precomputedOrSentinel('scoring_vep_ensembl', params.scoring_vep_ensembl, 'NO_VEP_ENSEMBL') }
         def cmp_fade_top_ch   = (fade_sites_top_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_TOP') }
         def cmp_fade_bot_ch   = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_BOTTOM') }
+        // Annotations do not require a positional permulation null. Use supplied
+        // Pfam/UCR tables only: this path never starts downloads or heavy fitting.
+        POSITION_ANNOTATIONS(
+            Channel.value(precomputedOrSentinel('gene_ensembl_file', params.gene_ensembl_file, 'NO_ANNOT_ENSEMBL')),
+            Channel.value(precomputedOrSentinel('domain_variability_file', params.posenrich_domains ? params.domain_variability_file : '', 'NO_ANNOT_DOMAIN')),
+            Channel.value(precomputedOrSentinel('ucr_positions_file', params.posenrich_ucr ? params.ucr_positions_file : '', 'NO_ANNOT_UCR')),
+            Channel.value(precomputedOrSentinel('fubar_sites_file', params.fubar_sites_file, 'NO_ANNOT_FUBAR')),
+            Channel.value(precomputedOrSentinel('caas_map_dir', params.caas_map_dir, 'NO_ANNOT_MAP')),
+            fcs_universe_ch.map { it[0] },
+            cmp_fade_top_ch, cmp_fade_bot_ch,
+            Channel.value(precomputedOrSentinel('posenrich_custom_file', params.posenrich_custom_file, 'NO_ANNOT_CUSTOM'))
+        )
+        def posenrich_position_char_ch = POSITION_ANNOTATIONS.out.position_char
+
         // SCORING's published percentile slices -- gene_lists_ch already
         // established above (hoisted for SCORING_FCS_REPORT); position_lists
         // has no other consumer in this workflow yet, so it's resolved here.
         def cmp_position_lists_ch = position_lists ? position_lists.ifEmpty { file('NO_POSITION_LISTS') } : file('NO_POSITION_LISTS')
+
+        // ── POSENRICH modular (WP10) ──
+        // Common registry + characterization + within-protein localization + global
+        // association + proximity, gated by params.posenrich_modular. The historical
+        // POSENRICH inference (Lachenbruch) stays omitted; no legacy null is reused.
+        if (params.posenrich_modular) {
+            def modular_out = POSENRICH_MODULAR(
+                cmp_pos_scores_ch,
+                (scoring_postproc_ch ?: Channel.empty()).ifEmpty { file('NO_POSTPROC') },
+                (scoring_null_universe_ch ?: Channel.empty()).ifEmpty { file('NO_NULL_UNIVERSE') },
+                Channel.value(precomputedOrSentinel('caas_map_dir', params.caas_map_dir, 'NO_ANNOT_MAP')),
+                fcs_universe_ch.map { it[0] },
+                Channel.value(precomputedOrSentinel('gene_ensembl_file', params.gene_ensembl_file, 'NO_ANNOT_ENSEMBL')),
+                Channel.value(precomputedOrSentinel('domain_variability_file', params.posenrich_domains ? params.domain_variability_file : '', 'NO_ANNOT_DOMAIN')),
+                Channel.value(precomputedOrSentinel('ucr_positions_file', params.posenrich_ucr ? params.ucr_positions_file : '', 'NO_ANNOT_UCR')),
+                Channel.value(precomputedOrSentinel('fubar_sites_file', params.fubar_sites_file, 'NO_ANNOT_FUBAR')),
+                cmp_fade_top_ch, cmp_fade_bot_ch,
+                Channel.value(precomputedOrSentinel('posenrich_custom_file', params.posenrich_custom_file, 'NO_ANNOT_CUSTOM'))
+            )
+            final_reports = final_reports.mix(modular_out.report)
+        }
 
         def cmp_out = SCORING_COMPARE_REPORT(caas_all, rer_all, caas_le, rer_le,
                                               caas_le_comp, rer_le_comp,

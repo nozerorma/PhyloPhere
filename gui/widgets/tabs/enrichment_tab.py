@@ -113,7 +113,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="scoring_compare_top_n", label="COMPARE report top-N", importance="optional"),
         Section("POSENRICH position-wise enrichment parameters"),
         FieldSpec(name="posenrich_enabled", label="Run POSENRICH", kind="bool", importance="optional"),
-        FieldSpec(name="posenrich_domains", label="Run Pfam domain variability analysis", kind="bool", importance="optional"),
+        FieldSpec(name="posenrich_domains", label="Include precomputed Pfam annotations", kind="bool", importance="optional"),
         FieldSpec(name="domain_variability_file", label="Domain variability file", kind="path_file", importance="optional"),
         FieldSpec(
             name="domain_ref_species",
@@ -126,9 +126,9 @@ SPEC = ModuleTabSpec(
                 "this when running non-human/non-primate alignments."
             ),
         ),
-        FieldSpec(name="posenrich_ucr", label="Run UCR analysis", kind="bool", importance="optional"),
+        FieldSpec(name="posenrich_ucr", label="Include precomputed UCR annotations", kind="bool", importance="optional"),
+        FieldSpec(name="posenrich_custom_file", label="Custom position sets (CAAS coordinates)", kind="path_file", importance="optional"),
         FieldSpec(name="ucr_positions_file", label="UCR positions file", kind="path_file", importance="optional"),
-        FieldSpec(name="posenrich_eggnog", label="Run eggNOG ortholog position mapping", kind="bool", importance="optional"),
         FieldSpec(
             name="eggnog_taxid",
             label="eggNOG clade TaxID (blank = clade TaxID)",
@@ -182,6 +182,34 @@ SPEC = ModuleTabSpec(
             label="POSENRICH GMTs per task (1 = no batching)",
             importance="optional",
         ),
+        Section("POSENRICH modular (WP10): registro + caracterización + localización + global + proximidad"),
+        FieldSpec(
+            name="posenrich_modular",
+            label="Run POSENRICH modular (registry, characterization, localization, global, proximity)",
+            kind="bool",
+            importance="optional",
+            help=(
+                "Módulo general de posiciones: registro común, caracterización, localización "
+                "dentro de proteínas (AUC por gen + control condicionado), asociación global "
+                "(descriptiva) y proximidad proteica/genómica. La inferencia histórica "
+                "(Lachenbruch) sigue omitida."
+            ),
+        ),
+        FieldSpec(
+            name="posenrich_ranking",
+            label="Ranking (caas_score | minus_log10_pemp)",
+            placeholder="caas_score",
+            importance="optional",
+        ),
+        FieldSpec(
+            name="posenrich_aggregation",
+            label="Aggregation across genes (mean | pair_weighted)",
+            placeholder="mean",
+            importance="optional",
+        ),
+        FieldSpec(name="posenrich_n_permutations", label="Permutations (within-protein control)", importance="optional"),
+        FieldSpec(name="posenrich_seed", label="Control seed", importance="optional"),
+        FieldSpec(name="posenrich_radios", label="Proximity radii (residues, descriptive)", placeholder="0,5,10", importance="optional"),
     ),
 )
 

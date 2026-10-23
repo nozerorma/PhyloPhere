@@ -42,7 +42,7 @@ process RER_REPORT {
     script:
     def local_dir        = "${baseDir}/subworkflows/RERCONVERGE/local"
     def outdir           = "${params.outdir}/rerconverge/rer_results"
-    def pval_thr         = params.rer_pval_threshold  ?: 0.05
+    def pval_thr         = params.evidence_p_threshold  ?: 0.05
     def top_n            = params.rer_top_n_labels    ?: 15
     def traitname        = params.traitname           ?: 'unknown_trait'
 
@@ -59,6 +59,7 @@ process RER_REPORT {
                     continuous_rds    = '${continuous_output}',
                     traitname         = '${traitname}',
                     pval_threshold    = ${pval_thr},
+                    fdr_threshold = ${params.evidence_fdr_threshold ?: 0.05},
                     top_n_labels      = ${top_n},
                     output_dir        = '${outdir}'
                 ),
@@ -85,6 +86,7 @@ process RER_REPORT {
                     continuous_rds    = '${continuous_output}',
                     traitname         = '${traitname}',
                     pval_threshold    = ${pval_thr},
+                    fdr_threshold = ${params.evidence_fdr_threshold ?: 0.05},
                     top_n_labels      = ${top_n},
                     output_dir        = '${outdir}'
                 ),

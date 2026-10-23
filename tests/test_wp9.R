@@ -1,7 +1,7 @@
 # Independent WP9 variant, inclusive-LOO and native AUC oracles; no scientific default selected.
 suppressPackageStartupMessages({library(dplyr);library(RERconverge)})
 source('adhoc_scripts/wp9_gene_stat_control.R')
-source('subworkflows/ENRICHMENT/local/src/percentile_flags.R')
+source('subworkflows/ENRICHMENT/local/src/evidence_flags.R')
 source('subworkflows/ENRICHMENT/local/src/fcs_enrich.R')
 source('subworkflows/ENRICHMENT/local/src/gene_p.R')
 source('subworkflows/SCORING/local/src/caas_block_contract.R')

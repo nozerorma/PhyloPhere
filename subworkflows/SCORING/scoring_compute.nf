@@ -39,7 +39,8 @@ process SCORING_COMPUTE {
 
     publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
-               pattern: '*.tsv'
+               pattern: '*.tsv',
+               saveAs: { name -> name in ['gene_scores.tsv','position_scores.tsv','fcs_stats.tsv'] ? null : name }
     publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
                pattern: 'gene_lists'
@@ -78,8 +79,6 @@ process SCORING_COMPUTE {
     script:
     def local_dir       = "${baseDir}/subworkflows/SCORING/local/src"
     def core_dir        = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/core"
-    def top_pct         = params.scoring_position_top_pct    ?: 0.10
-    def g_top_pct       = params.scoring_gene_top_pct        ?: 0.10
     def accum_arg         = (accum_files instanceof List
                               ? (accum_files.size() == 1 && accum_files[0].name.startsWith('NO_') ? 'NO_ACCUM' : '.')
                               : (accum_files.name.startsWith('NO_') ? 'NO_ACCUM' : '.'))
@@ -118,14 +117,9 @@ process SCORING_COMPUTE {
             --null_fit        '${fit_arg}' \
             --null_base       '${base_arg}' \
             --cycle_roster    '${roster_arg}' \
-            --top_pct              ${top_pct} \
-            --top25_pct            0.25 \
-            --top5_pct             0.05 \
-            --top1_pct             0.01 \
-            --gene_top_pct         ${g_top_pct} \
-            --gene_top25_pct       0.25 \
-            --gene_top5_pct        0.05 \
-            --gene_top1_pct        0.01
+            --nominal_threshold ${params.evidence_p_threshold ?: 0.05} \
+            --fdr_threshold ${params.evidence_fdr_threshold ?: 0.05} \
+            --fade_bf_threshold ${params.fade_bf_threshold ?: 100}
         """
     } else {
         """
@@ -153,14 +147,9 @@ process SCORING_COMPUTE {
             --null_fit        '${fit_arg}' \
             --null_base       '${base_arg}' \
             --cycle_roster    '${roster_arg}' \
-            --top_pct              ${top_pct} \
-            --top25_pct            0.25 \
-            --top5_pct             0.05 \
-            --top1_pct             0.01 \
-            --gene_top_pct         ${g_top_pct} \
-            --gene_top25_pct       0.25 \
-            --gene_top5_pct        0.05 \
-            --gene_top1_pct        0.01
+            --nominal_threshold ${params.evidence_p_threshold ?: 0.05} \
+            --fdr_threshold ${params.evidence_fdr_threshold ?: 0.05} \
+            --fade_bf_threshold ${params.fade_bf_threshold ?: 100}
         """
     }
 }

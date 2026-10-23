@@ -1,7 +1,7 @@
 # RER missingness is evaluated independently in every null cycle.
 suppressPackageStartupMessages({library(readr);library(dplyr)})
 src<-normalizePath('subworkflows/ENRICHMENT/local/src')
-source(file.path(src,'percentile_flags.R'));source(file.path(src,'fcs_enrich.R'))
+source(file.path(src,'evidence_flags.R'));source(file.path(src,'fcs_enrich.R'))
 wd<-tempfile('rer_fcs_cli_');dir.create(wd);dir.create(file.path(wd,'gmts'))
 genes<-paste0('g',1:40);set.seed(11)
 vals<-setNames(rnorm(40),genes);vals[1:10]<-NA

@@ -43,8 +43,8 @@ process RER_GENE_LISTS {
     path "fcs_stats.tsv",  emit: fcs_stats
 
     script:
-    def pval_thr = params.rer_pval_threshold != null ? params.rer_pval_threshold : 0.05
-    def pval_col_name = params.rer_pval_column != null ? params.rer_pval_column : 'p.perm'
+    def pval_thr = params.evidence_p_threshold != null ? params.evidence_p_threshold : 0.05
+    def pval_col_name = 'p.perm'
     """
     Rscript -e '
         df  <- read.delim("${summary_tsv}", stringsAsFactors = FALSE)
@@ -52,7 +52,8 @@ process RER_GENE_LISTS {
 
         pval_col_name <- "${pval_col_name}"
         if (pval_col_name == "p.perm" && (!"p.perm" %in% colnames(df) || all(is.na(df\$p.perm)))) {
-            pval_col_name <- "p.adj"
+            df\$p.perm <- NA_real_
+            pval_col_name <- "p.perm"
         }
         pval_col <- df[[pval_col_name]]
 

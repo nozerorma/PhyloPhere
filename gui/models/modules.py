@@ -171,8 +171,6 @@ class RerConfig(ModuleConfigBase):
     rer_min_pos: str = "2"  # --rer_min_pos
 
     # Report thresholds
-    rer_pval_threshold: str = "0.05"  # --rer_pval_threshold
-    rer_pval_column: str = "p.perm"  # --rer_pval_column
     rer_top_n_labels: str = "20"  # --rer_top_n_labels
     rer_transform: str = "ha_logit"  # --rer_transform (auto|ha_logit|logit|arcsin|log10|none)
 
@@ -258,8 +256,8 @@ class VepConfig(ModuleConfigBase):
 
 @dataclass(kw_only=True)
 class ScoringConfig(ModuleConfigBase):
-    scoring_gene_top_pct: str = "0.10"  # --scoring_gene_top_pct
-    scoring_position_top_pct: str = "0.10"  # --scoring_position_top_pct
+    evidence_p_threshold: str = "0.05"
+    evidence_fdr_threshold: str = "0.05"
     gene_ensembl_file: str = ""  # --gene_ensembl_file
     auto_generate_ensembl: bool = False  # Generate gene_ensembl_file via BioMart if unset
     ensembl_dataset: str = ""  # Ensembl BioMart dataset (e.g. hsapiens_gene_ensembl); blank -> derived from ref_species_name
@@ -326,14 +324,14 @@ class EnrichmentConfig(ModuleConfigBase):
     # report (a randomization null, not a joint permulation p).
 
     # POSENRICH component toggles & data files (conf/enrichment.config).
-    posenrich_domains: bool = True  # Run Pfam domain variability analysis
+    posenrich_domains: bool = True  # Include precomputed Pfam annotation table
     domain_variability_file: str = ""  # --domain_variability_file
     domain_ref_species: str = ""  # --domain_ref_species (blank -> fallback to RuntimeConfig.ref_species_name)
 
-    posenrich_ucr: bool = True  # Run ultraconserved regions (UCR) analysis
+    posenrich_ucr: bool = True  # Include precomputed UCR annotation table
     ucr_positions_file: str = ""  # --ucr_positions_file
+    posenrich_custom_file: str = ""  # TSV in zero-based CAAS coordinates
 
-    posenrich_eggnog: bool = False  # Run eggNOG ortholog position mapping
     eggnog_taxid: str = ""  # eggNOG taxon level (blank -> fallback to RuntimeConfig.clade_taxid)
     egg_members_file: str = ""  # --egg_members_file
     egg_annotations_file: str = ""  # --egg_annotations_file
@@ -344,6 +342,15 @@ class EnrichmentConfig(ModuleConfigBase):
     posenrich_min_size: str = "2"  # --posenrich_min_size
     posenrich_max_size: str = "0"  # --posenrich_max_size
     posenrich_batch_size: str = "4"  # --posenrich_batch_size (GMTs per POSENRICH_RUN_BATCHED task; 1 = no batching)
+
+    # POSENRICH modular (WP10): registro común + caracterización + localización dentro de
+    # proteínas + asociación global + proximidad. Independiente de --posenrich (omitido).
+    posenrich_modular: bool = False  # --posenrich_modular
+    posenrich_ranking: str = "caas_score"  # --posenrich_ranking (caas_score | minus_log10_pemp)
+    posenrich_aggregation: str = "mean"  # --posenrich_aggregation (mean | pair_weighted)
+    posenrich_n_permutations: str = "999"  # --posenrich_n_permutations
+    posenrich_seed: str = "1"  # --posenrich_seed
+    posenrich_radios: str = "0,5,10"  # --posenrich_radios (radios descriptivos de proximidad)
 
     # posenrich_background_file (CT's background.output, used when CT is off) is derived
     # from PrecomputedConfig.use_discovery.

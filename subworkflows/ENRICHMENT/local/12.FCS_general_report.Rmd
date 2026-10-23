@@ -297,6 +297,9 @@ if (!is.null(params$enrich_file) && nzchar(params$enrich_file) && file.exists(pa
 }
 enrich <- enrich %>% dplyr::select(-dplyr::any_of("sig_top"))
 # Gene-set descriptions need the full GMT directory, so they are joined after the merge.
+dir.create("fcs_results",showWarnings=FALSE)
+if(!is.null(params$enrich_file) && file.exists(params$enrich_file)) file.copy(params$enrich_file,"fcs_results/fcs_enrich_input.tsv",overwrite=TRUE)
+jsonlite::write_json(as.list(params[c("gene_stat","score_source","num_g","max_g","fdr_thr","pperm_thr","analytic_levels","cluster_similarity","cluster_threshold")]),"fcs_results/fcs_report_metadata.json",auto_unbox=TRUE,pretty=TRUE)
 enrich <- enrich %>%
   dplyr::left_join(desc_map, by = c("database", "pathway")) %>%
   dplyr::mutate(description = dplyr::coalesce(description, pathway))
@@ -304,9 +307,10 @@ enrich <- enrich %>%
 # Per-gene attribute table: the annotation flags plus the derived directional percentile
 # flags. They come from `annot`, so a per-module report inherits the CAAS, FADE and
 # accumulation annotation.
-pct_flags <- fcs_percentile_flags(annot, gene_lists_dir = params$gene_lists_dir)
-attr_df <- pct_flags
-if (length(flag_cols)) attr_df <- dplyr::left_join(pct_flags, annot[, c("gene", flag_cols)], by = "gene")
+source(if (file.exists("src/evidence_flags.R")) "src/evidence_flags.R" else "evidence_flags.R")
+evidence_flags <- fcs_evidence_flags(annot)
+attr_df <- evidence_flags
+if (length(flag_cols)) attr_df <- dplyr::left_join(evidence_flags, annot[, c("gene", flag_cols)], by = "gene")
 attr_cols_all <- setdiff(names(attr_df), "gene")
 
 # A ranking with negative scores is signed (tested two-sided).
@@ -523,8 +527,9 @@ whether it is the representative.
 ```{r leadingedge, results='asis'}
 # Display names of the attribute columns.
 disp_names <- c(
-  pct_top25 = "top25%", pct_top10 = "top10%", pct_top5 = "top5%", pct_top1 = "top1%",
-  pct_bottom25 = "bot25%", pct_bottom10 = "bot10%", pct_bottom5 = "bot5%", pct_bottom1 = "bot1%",
+  caas_nominal = "CAAS nominal", caas_adjusted = "CAAS BH",
+  caas_nominal_top = "CAAS top nominal", caas_adjusted_top = "CAAS top BH",
+  caas_nominal_bottom = "CAAS bottom nominal", caas_adjusted_bottom = "CAAS bottom BH",
   flag_fade = "fade", flag_fade_top = "fade_top", flag_fade_bottom = "fade_bottom",
   flag_rer_acc = "rer_acc", flag_rer_decc = "rer_decc",
   flag_accum = "accum", flag_accum_top = "accum_top", flag_accum_bottom = "accum_bottom"
@@ -535,13 +540,9 @@ disp_names <- c(
 # for FADE. The pct_* tiers are the top 25, 10, 5 and 1% of the genes with a score above 0
 # in the score_top (pct_top*) and score_bottom (pct_bottom*) rankings of `annot`.
 cols_by_rk <- list(
-  global = c("pct_top25","pct_top10","pct_top5","pct_top1",
-             "pct_bottom25","pct_bottom10","pct_bottom5","pct_bottom1",
-             "flag_fade","flag_rer_acc","flag_rer_decc","flag_accum"),
-  top    = c("pct_top25","pct_top10","pct_top5","pct_top1",
-             "flag_fade_top","flag_rer_acc","flag_rer_decc","flag_accum_top"),
-  bottom = c("pct_bottom25","pct_bottom10","pct_bottom5","pct_bottom1",
-             "flag_fade_bottom","flag_rer_acc","flag_rer_decc","flag_accum_bottom")
+ global=c("caas_nominal","caas_adjusted","flag_fade","flag_rer_acc","flag_rer_decc","flag_rer_acc_adjusted","flag_rer_decc_adjusted","flag_accum"),
+ top=c("caas_nominal_top","caas_adjusted_top","flag_fade_top","flag_rer_acc","flag_rer_acc_adjusted","flag_accum_top"),
+ bottom=c("caas_nominal_bottom","caas_adjusted_bottom","flag_fade_bottom","flag_rer_decc","flag_rer_decc_adjusted","flag_accum_bottom")
 )
 
 le_comp_all <- list()  # leading-edge composition tables, exported after the loop

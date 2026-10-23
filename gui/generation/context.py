@@ -119,7 +119,6 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "auto_fetch_eggnog": _bool_str(enrichment.auto_fetch_eggnog),
         "posenrich_domains": _bool_str(enrichment.posenrich_domains),
         "posenrich_ucr": _bool_str(enrichment.posenrich_ucr),
-        "posenrich_eggnog": _bool_str(enrichment.posenrich_eggnog),
         "miss_pair": _bool_str(caas.miss_pair),
         "resample_use_n": _bool_str(getattr(caas, 'resample_use_n', True)),
         "multi_hypothesis": _bool_str(getattr(caas, 'multi_hypothesis', True)),

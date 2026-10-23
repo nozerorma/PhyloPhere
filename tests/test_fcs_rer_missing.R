@@ -2,7 +2,7 @@
 # Optional first argument: saved marine_complete results directory.
 repo <- normalizePath(".")
 src <- file.path(repo, "subworkflows/ENRICHMENT/local/src")
-source(file.path(src, "percentile_flags.R"))
+source(file.path(src, "evidence_flags.R"))
 source(file.path(src, "fcs_enrich.R"))
 
 local({
@@ -43,7 +43,7 @@ local({
   saveRDS(list(corStat = null), "perms.rds")
   readr::write_tsv(data.frame(gene = genes, score_global = scores), "stats.tsv")
   writeLines(universe, "universe.txt")
-  file.copy(file.path(src, c("fcs_compute.R", "fcs_enrich.R", "percentile_flags.R")), ".")
+  file.copy(file.path(src, c("fcs_compute.R", "fcs_enrich.R", "evidence_flags.R")), ".")
   reference <- fcs_run_all(list(global = RERconverge::getStat(res)), gmts, perms_file = "perms.rds")
   stopifnot(nrow(reference) == 3, !anyNA(reference$p.perm))
   for (mode in c("rer", "caas")) {

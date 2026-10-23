@@ -104,16 +104,16 @@ process DOMINO_RUN_MODULES {
         exit 0
     fi
 
-    # The CAAS call site passes a directory of slice_*.tsv files (a header and the gene in column 1)
+    # The CAAS call site passes a directory of active_*.tsv files (a header and the gene in column 1)
     if [ -d "${gene_lists}" ]; then
-        for f in "${gene_lists}"/slice_*.tsv; do
+        for f in "${gene_lists}"/active_*.tsv; do
             [ -f "\$f" ] || continue
-            name=\$(basename "\$f" .tsv); name=\${name#slice_}
+            name=\$(basename "\$f" .tsv); name=\${name#active_}
             tail -n +2 "\$f" | cut -f1 | { grep -v '^[[:space:]]*\$' || true; } > "domino_gene_lists/\${name}.txt"
         done
     fi
     # The FADE and RER call sites pass plain .txt files of active genes, one gene per line
-    for f in *.txt; do
+    for f in rer_significant.txt rer_accelerating.txt rer_decelerating.txt fade_top_significant.txt fade_bottom_significant.txt fade_global_significant.txt; do
         [ -f "\$f" ] || continue
         cp "\$f" domino_gene_lists/ 2>/dev/null || true
     done

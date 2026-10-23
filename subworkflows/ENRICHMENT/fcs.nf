@@ -211,7 +211,7 @@ process FCS_COMPUTE_BATCHED {
 
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
-    def sources = ['fcs_enrich.R', 'fcs_compute.R', 'percentile_flags.R'].collect {
+    def sources = ['fcs_enrich.R', 'fcs_compute.R', 'evidence_flags.R'].collect {
         file("${local_dir}/src/${it}").text
     }.join('\n')
     def source_hash = java.security.MessageDigest.getInstance('SHA-256')
@@ -224,7 +224,7 @@ process FCS_COMPUTE_BATCHED {
         "/usr/local/bin/_entrypoint.sh Rscript" : "Rscript"
     """
     # FCS sources SHA256: ${source_hash}
-    cp ${local_dir}/src/fcs_enrich.R ${local_dir}/src/fcs_compute.R ${local_dir}/src/percentile_flags.R .
+    cp ${local_dir}/src/fcs_enrich.R ${local_dir}/src/fcs_compute.R ${local_dir}/src/evidence_flags.R .
     ${rscript_cmd} fcs_compute.R \
         --stats-file ${stats_file} \
         --universe-file ${universe_file} \
