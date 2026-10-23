@@ -117,7 +117,7 @@ Execution order as wired in `main.nf`:
 6. **CT_POSTPROC** (`--ct_postproc`) — cluster/gene filtering, background cleanup, characterization report; also fans out **ASR_DIAGNOSTICS** in parallel as an independent descriptive report of the observed scores and of the ancestral-state posteriors of the domains.
 7. **CT_ACCUMULATION** (`--ct_accumulation`), **VEP** (`--vep`), **FADE** (`--fade`), **RER_MAIN** (`--rer_tool`) — four largely independent evidence-generating stages that can run in any combination.
 8. **SCORING** (`--scoring`): integrates all of the above into composite position- and gene-level scores; optionally triggers the permulation core (**CAAS_CORE**, **CAAS_CORE_MERGE**) for a genome-wide permutation null (`--caas_permulation_enrichment`).
-9. **ENRICHMENT** (`--enrichment`, nested under `--scoring`) — FCS ranked gene-set enrichment, DOMINO active-module + STRING functional enrichment, and POSENRICH position-level enrichment.
+9. **ENRICHMENT** (`--enrichment`, nested under `--scoring`) — FCS ranked gene-set enrichment, DOMINO active-module + STRING functional enrichment; POSENRICH is currently skipped pending its position-AUC phase.
 
 On completion, `workflow.onComplete` (in `main.nf`, backed by `lib/WorkflowMap.groovy`) writes `workflow_map.html` into `--outdir` — a visual summary of which stages ran and links to every HTML report/output directory produced.
 
@@ -244,13 +244,12 @@ terms are read as one; the RER ranking is the signed statistic
 on every permulated phenotype), an
 orthogonal cross-module Comparison report, optional DOMINO active-module
 detection + STRING functional enrichment (`--scoring_ami`), and optional
-POSENRICH position-level Fisher-exact enrichment (`--posenrich`) integrating
-UCR/FUBAR/domain-variability/PrimateAI-3D/COSMIC evidence per position.
+POSENRICH position-level enrichment (`--posenrich`). POSENRICH is currently skipped with a warning because WP5 retired its position-by-cycle null; report 14 is not produced. A separate AUC-by-position phase is planned (see `docs/fases/WP10_posenrich_auc.md`). UCR/FUBAR/domain-variability/PrimateAI-3D/COSMIC annotations remain available to other consumers.
 Universe files are module-specific (`--rer_universe_file`,
 `--fade_universe_file`) rather than shared.
 
 ### Upstream Data Preparation: Ortholog Characterizator
-Position-level characterization layers integrated by VEP (`--vep_map_dir`) and POSENRICH (including MAP alignment-to-protein coordinate mappings, HyPhy FUBAR site selection, UCR ultraconserved regions, and amino-acid domain variability files) are generated using the dedicated [Ortholog Characterizator](https://github.com/nozerorma/ortholog_characterizator.git) workflow:
+Position-level characterization layers integrated by VEP (`--caas_map_dir`) and POSENRICH (including MAP alignment-to-protein coordinate mappings, HyPhy FUBAR site selection, UCR ultraconserved regions, and amino-acid domain variability files) are generated using the dedicated [Ortholog Characterizator](https://github.com/nozerorma/ortholog_characterizator.git) workflow:
 - **Repository:** https://github.com/nozerorma/ortholog_characterizator.git
 - **Generated Input Files:**
   - `vep_map_dir` — per-gene MAP files mapping alignment columns to canonical protein residue positions.
@@ -352,7 +351,7 @@ These parameters define the primary input data files, phenotype target, and modu
 | `scoring` | `false` | Main toggle to enable the Composite Scoring integration module (`--scoring`). |
 | `vep` | `true` | Enables VEP pathogenicity annotation (PrimateAI-3D and COSMIC scores). |
 | `enrichment` | `false` | Main toggle to enable the FCS ranked gene-set enrichment module (`--enrichment`). |
-| `posenrich` | `true` | Enables position-level Fisher-exact enrichment analysis (`--posenrich`). |
+| `posenrich` | `true` | Requests position-level enrichment; currently skipped with a warning after WP5, pending a separate method evaluation. |
 | `fade` | `false` | Main toggle to enable HyPhy FADE directional selection scanning (`--fade`). |
 | `rer_tool` | `""` | Enables RERconverge relative evolutionary rate analysis (`"continuous"` or `"build_trait"`). |
 | `contrast_selection` | `false` | Enables automatic independent-contrasts extreme selection for continuous phenotypes. |
@@ -370,7 +369,7 @@ These parameters define the primary input data files, phenotype target, and modu
 | `gene_ensembl_file` | `""` | Mapping file from Ensembl gene IDs to gene symbols. |
 | `seed` | `"1998"` | Random seed for reproducible permutations and sampling. |
 | `toy_mode` / `toy_n` | `false` / `1000` | Subsamples `N` random alignments for quick end-to-end smoke testing. The GUI-generated scripts also set the permulation cycles of a toy run (`caas_full_perms`, Runtime tab, default 100) with the draw budget `max_tries` at 200 per cycle. |
-| `remove_intermediates` / `remove_work` | `false` / `false` | Disk cleanup, two independent options. `remove_intermediates`: tasks delete, inside the task, the bulky intermediates no later process reads (the perm-discovery exports and the duplicated shard directories of the permulation core). `remove_work`: the generated run script removes the Nextflow `work/` directory after a successful run (`-resume` is then not available). |
+| `remove_work` | `false` | Generated launchers delete their Nextflow work directory, run directory and private `NXF_HOME` only after success. Published results and canonical null blocks are preserved; `-resume` is unavailable afterwards. Task hygiene is unconditional. Older projects drop the retired `remove_intermediates` flag. |
 | `n_trait` / `c_trait` | `""` | Total sample size (`n_trait`) and case count (`c_trait`) for prevalence/frequency phenotypes. |
 | `secondary_trait` / `branch_trait` | `""` | Optional secondary trait column for reports / trait column for branch coloring. |
 | `trait_type` | `""` | `""`/`auto` infers; `continuous` forces the Phylogenetic Shift Score (PSS, OU/BM) pair-selection path; `ordinal` treats the trait as a foreground/background code (highest level = foreground, lowest = background, any middle level = intermediate and excluded from contrasts) — use for binary presence/absence or ordinal category phenotypes. Auto-inference flags a trait as ordinal when it has 2–5 distinct integer values. The foreground/background partition is produced by `4.Independent_contrasts.Rmd` from the phylogenetically-independent selected pairs. |
@@ -452,7 +451,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `caas_evidence_top_n` | `0` | Number of best positions of `position_scores.tsv` whose evidence is written after SCORING to `scoring/evidence/` (`evidence_top<N>.tsv`, `top_positions.tsv`); `0` = off. Needs `--scoring`, the observed `discovery.tab` (the run's own, or `--discovery_from`) and `ct_disambig_asr_cache_dir`. |
 | `scoring_compare_fdr` / `scoring_compare_top_n` | `0.15` / `20` | Significance FDR and top-N gene count for cross-tool comparison reports. |
 | `scoring_window_size_bp` | `1000000` | Genomic window size (bp) for genomic overlap reporting. |
-| `scoring_postproc_input`, `scoring_fade_summary_top/bottom`, `scoring_rer_input`, `scoring_accum_dir`, `scoring_fade_site_top/bottom`, `scoring_background_input`, `caas_null_dir` | `""` | Standalone input file/directory fallbacks when running SCORING independently. `caas_null_dir` (the `caas_permulation/` directory of a prior run: `null_positions.parquet`, `blocks/`, `cycle_roster.txt`, `counts.json`, `cycle_summary.tsv`, `cycle_hist.tsv`) is the position-level null of SCORING and of the accumulation permulation null. |
+| `scoring_postproc_input`, `scoring_fade_summary_top/bottom`, `scoring_rer_input`, `scoring_accum_dir`, `scoring_fade_site_top/bottom`, `scoring_background_input`, `caas_null_dir` | `""` | Standalone input file/directory fallbacks when running SCORING independently. `caas_null_dir` (the `caas_permulation/` directory of a prior run: `null_positions.parquet`, `blocks/`, `cycle_roster.txt`, `counts.json`, `cycle_summary.tsv`, `cycle_hist.tsv`) is the canonical null store of SCORING; its positive-position keys define the accumulation universe. Preserve its metadata/index as well. |
 | `scoring_vep_primateai`, `scoring_vep_cosmic`, `scoring_vep_ensembl` | `""` | Precomputed PrimateAI-3D/COSMIC score TSVs and Ensembl VEP consequence TSV (one row per transcript, keyed by Gene, Position and side). Not read by SCORING itself; ENRICHMENT (POSENRICH) reuses these as its own precomputed-VEP fallback when `--vep` did not run live. |
 
 </details>

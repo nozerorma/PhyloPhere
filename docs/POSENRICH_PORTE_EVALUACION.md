@@ -1,9 +1,9 @@
 # POSENRICH sin Lachenbruch: evaluación del porte
 
-Estado: documento de trabajo. Implementado en WP2: POSENRICH se omite, con aviso, cuando no hay nulo por posición (el vivo de CAAS_CORE_MERGE o `--caas_pos_cycle_caas_file`). Mientras ese nulo exista, el módulo sigue ejecutándose en las corridas normales; dejará de hacerlo de forma efectiva cuando WP5 retire `perm_pos_cycle_caas.tsv.gz`. Qué portar sigue sin decidirse.
+Estado vigente WP8 (2026-10-23): tras WP5, `workflows/enrichment.nf` omite POSENRICH con aviso y no produce informe 14. El módulo histórico permanece en fuentes, pero no está conectado al camino productivo. El usuario ha elegido preparar una fase propia para AUC por posición (opción A), sin activarla en WP8: `docs/fases/WP10_posenrich_auc.md`.
 Contexto: `docs/PLAN_NULO_10K_PERMULACIONES.md` (decisión D1: Lachenbruch sale del FCS y de POSENRICH) y plan de implementación WP2.
 
-## 1. Qué hace hoy (verificado en el código)
+## 1. Qué hace el módulo histórico (verificado en el código, fuera del flujo productivo)
 
 - **Términos:** conjuntos de posiciones (`gen:posición`), construidos por `build_position_gmt.py` a partir de las bases de datos y de las capas de caracterización.
 - **Fondo:** posiciones probadas por CAAStools (`background.output`) en los genes del universo; con nulo, restringido a las posiciones con score > 0 en algún ciclo nulo más las observadas con score > 0.
@@ -14,7 +14,7 @@ Contexto: `docs/PLAN_NULO_10K_PERMULACIONES.md` (decisión D1: Lachenbruch sale 
 
 ## 2. Qué cambia con el plan
 
-- El fichero `perm_pos_cycle_caas.tsv.gz` (80,9 millones de filas a 1000 ciclos en cáncer; ~800 millones a 10.000) desaparece del nulo (WP5): SCORING pasa a contadores por bloque y la acumulación a un indicador por posición.
+- El fichero `perm_pos_cycle_caas.tsv.gz` (80,9 millones de filas medidos a 1000 ciclos en cáncer; ~800 millones extrapolados a 10.000) se retiró del nulo en WP5: SCORING pasa a contadores por bloque y la acumulación a un indicador por posición.
 - Lachenbruch sale del FCS. POSENRICH tiene su propia copia del test, de modo que podría conservarlo, pero ya no tendría el nulo por posición que lo alimenta.
 - Mientras tanto: módulo omitido con aviso explícito (informe 14 incluido) cuando falta el nulo por posición (implementado en WP2, `workflows/enrichment.nf`).
 
@@ -37,4 +37,12 @@ Contexto: `docs/PLAN_NULO_10K_PERMULACIONES.md` (decisión D1: Lachenbruch sale 
 
 - Cuántos términos distintos cambian de significación entre Lachenbruch y la opción A con los mismos datos (no se ha calculado).
 - Si el conteo de posiciones puntuadas del fondo coincide entre la opción A y la actual al sustituir el nulo por el almacén binario.
-- El motivo de las 5 de 12 fuentes probadas.
+- La cobertura real tras corregir el canal de charset: no se ha vuelto a ejecutar POSENRICH.
+
+## Auditoría WP8 de las 5/12 fuentes y decisión
+
+La memoria del 20/10 (`project_cancer_fcs_vs_posenrich_2026-10-20.md`) ya identifica una causa concreta que sigue en código: `POSENRICH_RUN_BATCHED` recibe `POSENRICH_BUILD_GMT.out.charset` como cola de un solo elemento. Las demás entradas compartidas usan `.collect().map { it[0] }`. El charset se consume con el primer lote y agota el proceso. Es una explicación de cableado verificada; no se ha repetido aquella corrida para medir de nuevo su cobertura. Las tablas locales `~/.cc/enr/{malignant,neoplasia}_{complete,strict}/pos.tsv` son históricas; solo maligno completo conserva `le.tsv` para FCS. No son un oráculo positivo de cobertura de las doce fuentes.
+
+Corregir el canal es necesario antes de cualquier comparación de métodos, pero no basta para validar un porte estadístico. El flujo productivo actual no llama a este módulo: no se activa ni se interpreta como resultado negativo su ausencia. La fase A elegida por el usuario debe contrastar el inventario de GMT producido con los lotes ejecutados, incluyendo entradas vacías justificadas. Se rechaza reconstruir el almacén masivo antiguo solo para habilitarlo.
+
+Se descarta elegir un umbral por maximizar significativos. La elección A es preparación de implementación, no aceptación científica ni de escala. Siguen abiertos el ranking exacto por posición, su nulo y la lateralidad, con propuesta y criterios en WP10.

@@ -15,8 +15,9 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 | WP5 | `WP5_tablas_y_merge_por_bloque.md` | Fase 3 | WP4 | REVISADO en local: guardas de ciclos corregidas; 68 controles dirigidos pasan; reconstrucciones PEPC/cáncer/marine completo y strict reproducen matrices y contadores; cableado 38 PASS y 7 fallos ya registrados. Pendientes adaptar esos tests y validar escala real en el cluster; scripts renderizados, sin lanzar en esta revisión |
 | WP6 | `WP6_fcs_por_bloques.md` | Fase 4 | WP1, WP5 | IMPLEMENTADO y validado dirigido: CAAS calibrado y RER por bloques conectados; RER genera lotes con semillas reproducibles. Equivalencia local con memoria completa y oráculos AUC aprobada; aceptación integrada y recursos reales a escala pendientes |
 | WP7 | `WP7_caas_perms_por_bloques.md` | Fase 5 | WP5 | IMPLEMENTADO y validado dirigido: bloques + roster + índice canónicos; RDS único opcional (false por defecto). Seis reconstrucciones y Nextflow con/sin exportación aprobados; SCORING y 399 resultados FCS conservados. Aceptación integrada y recursos reales a escala pendientes |
-| WP8 | `WP8_cierre.md` | | WP5 | pendiente |
+| WP8 | `WP8_cierre.md` | | WP5–WP7 | IMPLEMENTADO y validado dirigido: limpieza inerte retirada, remove_work mínimo real, GUI/plantillas y DOMINO sin aristas; aceptación integrada y escala pendientes |
 | WP9 | `WP9_estadistico_gen.md` | | A1 ya; A2 tras WP5 | A1 hecho, A2 pendiente |
+| WP10 | `WP10_posenrich_auc.md` | | WP8, evaluación recuentos/AUC | PREPARADO a petición del usuario; sin implementación ni activación |
 
 Actualiza esta tabla (estado y, en el fichero de la fase, el registro) al cerrar cada fase.
 Paralelismo posible: WP1 y WP2 son independientes (ficheros disjuntos); WP9-A1 ya está hecho; WP4 y WP5 son seriales porque comparten el formato de tabla de la tesela.
@@ -30,7 +31,7 @@ Un commit de implementación o de avance parcial no implica haber superado la ac
 ## Reglas de trabajo comunes
 
 - **Nada cambia un número sin comparación con lo actual.** Referencias congeladas en `/home/miguel/IBE-UPF/PhD/PhyloPhere_validation/golden_581b999/` (local) y, para el cluster, en las salidas de `~/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/{neoplasia,malignant}_def/*_prevalence_complete` con la huella de `~/scratch/0.Phylophere/.tmp/golden/*_manifest.sha256`. Código de referencia del FCS: `PhyloPhere_validation/unification/legacy_fcs/` (con `SHA256SUMS`).
-- **Commits:** los hace el usuario. No hacer commit ni push. El commit de partida de la línea base es `581b999` (rama `remove_caap`); el checkout del cluster está en `d246e82`, y entre ambos la cadena del nulo es idéntica (RESAMPLE solo añade `pair_center_gate`, sin efecto con `none`; la acumulación pasa a la prueba exacta).
+- **Commits:** el usuario autoriza commits temáticos y push de WP8; no incluir cambios ajenos. La prohibición histórica queda sustituida por esa autorización. El commit de partida de la línea base es `581b999` (rama `remove_caap`); el checkout del cluster está en `d246e82`, y entre ambos la cadena del nulo es idéntica (RESAMPLE solo añade `pair_center_gate`, sin efecto con `none`; la acumulación pasa a la prueba exacta).
 - **Cluster:** nada de cómputo en el nodo de entrada (`sbatch`, `salloc` o `srun --pty`); solo lecturas baratas. Sin lecturas pesadas (`wc -l` de una tabla de 1 GB colgó el nodo). Nunca editar código en el cluster: el usuario lo sincroniza por git. Directorio temporal: `~/scratch/0.Phylophere/.tmp`. Tras una caída de la VPN, `ssh correfoc` se cuelga con un socket obsoleto: usar `ssh -o ControlPath=none -o ControlMaster=no correfoc`.
 - **Local:** nunca `/tmp`. Temporales grandes en la partición IBE (`/home/miguel/IBE-UPF/PhD/PhyloPhere_validation/.tmp`, también como `TMPDIR` de R y pytest); `/home` está casi lleno. Entorno con pandas, R y RERconverge: `~/micromamba/envs/phylophere/bin/{python,Rscript}`.
 - **Código:** los comentarios describen solo el comportamiento actual (sin historia, fechas ni "antes era"). Todo parámetro nuevo lleva campo en la GUI y se sincroniza en `gui/templates/*.json` y `validation/tier*/templates`. El modo toy no fija parámetros. Cada desviación de RERconverge se justifica (referencia: commit 2bd328f y el walkthrough de Saputra).
@@ -40,7 +41,7 @@ Un commit de implementación o de avance parcial no implica haber superado la ac
 ## Cómo arrancar una fase
 
 1. Leer `docs/fases/README.md` (este fichero), el fichero de la fase y `docs/fases/PLAN_APROBADO_2026-10-21.md`.
-2. Comprobar `git log --oneline -5` y `git status`: la fase parte del commit anotado en el registro de la fase anterior (pedir al usuario que haga commit si el árbol tiene cambios de la fase previa).
+2. Comprobar `git log --oneline -5` y `git status`: la fase parte del commit anotado en el registro de la fase anterior (preservar los cambios ajenos y aislar los del WP; no exigir un árbol limpio).
 3. Confirmar que las dependencias están cerradas en la tabla de estado.
 4. Si hay duda sobre el estado del cluster o de la VPN, comprobarlo antes de planificar.
 
@@ -50,7 +51,7 @@ Un commit de implementación o de avance parcial no implica haber superado la ac
 2. Rellenar la sección "Registro de la fase" (plantilla abajo).
 3. Marcar el estado en la tabla de arriba y en la memoria del proyecto.
 4. Dejar lista la entrada de la fase siguiente: interfaz producida y qué debe comprobar la próxima conversación primero.
-5. Pedir al usuario el commit de cierre y anotar su hash en el registro.
+5. Con autorización vigente, hacer commits temáticos y push; anotar sus hashes en el registro.
 
 ## Plantilla del registro de fase
 
@@ -75,5 +76,6 @@ Un commit de implementación o de avance parcial no implica haber superado la ac
 
 ## Hallazgos pendientes de asignar a una fase
 
-- **DOMINO debe saltarse el paso (skip silencioso) si no hay aristas suficientes** (decisión del usuario, 2026-10-21). Hoy `DOMINO_BUILD_NETWORK` (`subworkflows/ENRICHMENT/local/src/build_domino_network.py:223`) lanza `RuntimeError("no edges survived filtering ...")` y, con la estrategia de error por defecto, aborta toda la corrida. Visto en el toy de cancer (45 genes, 31 de fondo, 0 aristas con puntuación >= 700 sobre 13.715.404 enlaces de STRING). Comportamiento deseado: sin aristas, escribir las salidas vacías (como ya hace la rama de fondo ausente, que crea `network.sif`, `network_edge_scores.tsv` y `slices.txt`), avisar en el log y dejar que los pasos siguientes tomen el centinela `NO_*`. Comprobar además que `run_domino_modules.py` y `13.AMI_analysis.Rmd` toleran redes vacías. Sin código cambiado todavía; candidato a WP2 (limpieza) o WP8.
+- **DOMINO sin aristas: resuelto en WP8.** Salidas vacías, slicer omitido, CLI/proceso de módulos toleran vacío y el informe 13 produce un grafo vacío. Prueba Nextflow mínima con dos procesos completados; ver `WP8_cierre.md`.
+
 - **Referencia del marine toy (2026-10-21/22).** La corrida murió con el reinicio del equipo (21:07); se completó el 2026-10-22 al montar `/media/miguel/external` (`golden_581b999/marine_toy`, 17 min). Validación de WP3 y WP4 en marine: registro de WP4. Referencia local con el código de WP4: `PhyloPhere_validation/golden_marine_wp4/`.

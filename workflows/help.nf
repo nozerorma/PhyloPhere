@@ -39,6 +39,8 @@ functional/network enrichment.
 General usage:            > nextflow run main.nf [options]
 Module-specific help:     > nextflow run main.nf --help --<module_flag>
 
+--remove_work                       <true|false>                   false  (the generated run script removes its work, run and private Nextflow home directories after a successful run; -resume is not available afterwards)
+
 Module flag              Description
 ------------------------  -------------------------------------------------
 --reporting               Preliminary dataset/phenotype exploration reports
@@ -53,7 +55,7 @@ Module flag              Description
                           See: --help --ct_tool <discovery|resample>
 --ct_disambiguation       Classify CAAS as convergent/parallel/divergent via ASR.
 --ct_postproc             Cluster/gene-level filtering + characterization report.
---ct_accumulation         Permutation test for CAAS accumulation per gene.
+--ct_accumulation         Exact hypergeometric test for CAAS accumulation per gene.
 --vep                     Annotate CAAS positions with PrimateAI-3D / COSMIC.
 --fade                    HyPhy FADE directional (top/bottom) selection scan.
 --rer_tool <steps>        RERconverge relative-evolutionary-rate analysis
@@ -61,7 +63,7 @@ Module flag              Description
 --scoring                 Composite position- and gene-level scoring across
                           CAAS, FADE, RER, accumulation and VEP signals.
 --enrichment              FCS ranked enrichment, DOMINO/STRING network
-                          analysis and position-level enrichment (POSENRICH).
+                          analysis (POSENRICH is currently skipped pending its position-null redesign).
 
 Each module can also run standalone from a precomputed input of an upstream
 module — see the module-specific help (or the README's Configuration
@@ -165,8 +167,6 @@ Usage:
 --prune_list_secondary                 <"species_list">               null
 --toy_mode                           <true|false>                    false  (smoke test on a random subset of alignments; species are never subsampled)
 --toy_n                               <INTEGER>                      1000   (alignments kept in --toy_mode: the first N of a shuffle seeded by --seed; an empty value or 0 falls back to 50)
---remove_intermediates              <true|false>                   false  (tasks delete, inside the task, the bulky intermediates no later process reads)
---remove_work                       <true|false>                   false  (the generated run script removes the work directory after a successful run; -resume is not available afterwards)
 '''
 }
 
@@ -345,7 +345,7 @@ Standalone mode (provide inputs directly):
 --scoring_vep_primateai                            <"vep_primateai.tsv">              ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
 --scoring_vep_cosmic                                  <"vep_cosmic.tsv">                  ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
 --scoring_vep_ensembl                                <"ensembl_vep_mapped.tsv">          ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
---caas_null_dir                                          <"caas_permulation/">          ""    (caas_permulation/ directory of a prior run: the position-level null of SCORING and the accumulation permulation null when the run has no permulation core of its own)
+--caas_null_dir                                          <"caas_permulation/">          ""    (caas_permulation/ directory of a prior run: canonical SCORING null; its positive-position keys define the accumulation universe when no live core is available)
 
 Position-level components: ASR, convergence, parallel, [FADE]
 Gene-level scores: gene_caas, [gene_rer], [gene_fade], gene_composite
@@ -361,14 +361,14 @@ Enrichment (FCS / DOMINO-STRING / POSENRICH) — Help
 Ranked gene-set enrichment (FCS, Wilcoxon-AUC on GMT gene sets) run
 separately for CAAS and RER rankings, an orthogonal cross-module Comparison
 report, optional DOMINO active-module detection + STRING functional
-enrichment, and optional position-level Fisher-exact enrichment (POSENRICH).
+enrichment, and position-level enrichment (POSENRICH, currently skipped after retirement of its position-by-cycle null).
 
 Usage:
 --enrichment                        <true|false>          false
 --gmt_dir                            <"gmt_dir">              null
 --fcs_min_genes                        <INTEGER>                10
 --fcs_max_genes                        <INTEGER>                0     (0 = no cap)
---fcs_fdr                                <FLOAT 0-1>              0.15   (BH on the permulation p of each set, per ranking and database: q.perm; also the FDR of POSENRICH)
+--fcs_fdr                                <FLOAT 0-1>              0.15   (BH on the permulation p of each set, per ranking and database: q.perm)
 --fcs_pperm_thr                            <FLOAT 0-1>              0.025  (raw permulation-p threshold of the Redlich rule)
 --fcs_analytic_levels                        <LIST>                   0.05,0.1,0.15  (analytic rule of Redlich et al. 2024, column redlich_level: BH of the analytic p below each level and p.perm below --fcs_pperm_thr)
 --fcs_cluster_similarity                    <jaccard|overlap>        jaccard (leading-edge similarity of the redundancy groups of significant sets)
@@ -385,7 +385,7 @@ DOMINO / STRING:
 --domino_slice_thr                             <FLOAT 0-1>              0.3
 --domino_module_thr                              <FLOAT 0-1>              0.05
 
-POSENRICH (position-level):
+POSENRICH (position-level; currently skipped with a warning, no report 14):
 --posenrich                        <true|false>          true
 --posenrich_min_size                 <INTEGER>                5
 --posenrich_max_size                   <INTEGER>                0    (0 = no cap)
@@ -393,7 +393,7 @@ POSENRICH (position-level):
 --domain_variability_file, --ucr_positions_file      (position-level annotation
                                               sources; leave blank to auto-generate
                                               from the alignment)
---egg_members_file, --egg_annotations_file   (leave blank to auto-fetch eggNOG5)
+--egg_members_file, --egg_annotations_file   (blank uses the versioned human Primates pair; other clades need explicit files or download)
 --fubar_sites_file                           (required; cannot be generated in-house
                                               -- see github.com/nozerorma/ortholog_characterizator)
 '''

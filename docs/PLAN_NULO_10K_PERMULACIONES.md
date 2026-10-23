@@ -1,6 +1,24 @@
 # Escalado del nulo de permulación a 10.000 ciclos y estado del FCS de CAAS
 
-Estado: documento de trabajo. No hay cambios de código ni de configuración aplicados; solo scripts ad hoc en `adhoc_scripts/`.
+## Contrato vigente tras WP8 (2026-10-23)
+
+Esta sección sustituye las propuestas y descripciones históricas de implementación de este documento. WP5, WP6 y WP7 están implementados y validados de forma dirigida; no quedan por construir sus bloques ni su FCS productivo. La aceptación integrada y las medidas reales a escala siguen pendientes.
+
+- Nulo CAAS canónico: `caas_permulation/blocks/blk_*/matrices.rds`, `cycle_roster.txt`, `null_metadata.json` y contadores/tablas WP5. Cada bloque conserva genes, ciclos, unidades, `gene_stat`, `stat` y `parts` (max/fmax/n). Completo y strict usan el mismo contrato. No hay tabla pública de cada posición × ciclo.
+- `caas_export_single=false`: el camino normal no ensambla `caas_perms.rds`. La exportación explícita reconstruye el objeto histórico con coste global deliberado. Se conserva la importación del RDS histórico; el almacén canónico completo permite reutilizar el nulo sin él.
+- Ranking CAAS productivo: −log10(p de permulación del gen), con observado y leave-one-out en `gene_p.R`. `gene_stat` sigue parametrizado; WP9 decide entre máximo, F(max) y F(max)^n. El ranking crudo es un control, no el fallback productivo.
+- Rutas: `stat = AUC − 0,5`, cola superior CAAS y bilateral RER; empates inclusivos, `(k+1)/(N_válidas+1)`. `sig_perm` es BH sobre `p.perm`, por ranking/base. `redlich_level` es independiente y `sig_top` está retirado. El observado interno usa RDS para conservar empates y recuentos; el TSV es público.
+- RER continuo/binario genera bloques con semillas por lote. La disponibilidad nula se evalúa por ciclo y no se restringe a genes disponibles en el observado. Cambiar tamaño de lote cambia las simulaciones; conservar ajustes, semilla y partición al comparar.
+- No se afirma memoria constante del pipeline: GENE_P retiene todos los ciclos de un lote de genes; el bosque RER y el universo de posiciones tienen costes separados. Las medidas sintéticas de WP6 no sustituyen recursos reales.
+- `remove_intermediates` retirado: era inerte tras WP5. La higiene de tareas es incondicional; ningún bloque, roster o índice público se poda. Los proyectos antiguos conservan solo su elección de `remove_work`. Este último pertenece al launcher: tras éxito elimina work, directorio de ejecución y NXF_HOME privado, con guardas de rutas; no actúa por invocar Nextflow directamente.
+- POSENRICH se omite con aviso en el flujo productivo tras WP5. Decisión del usuario en WP8: preparar una fase propia de AUC por posición (opción A), sin activarla aquí; `docs/fases/WP10_posenrich_auc.md`.
+
+Controles: máximo crudo frente a ranking calibrado, nulo como observado, tres estadísticos base y p/BH por gen se distinguen de las pruebas por posición (`p.emp`, `p.emp_fact`) y del AUC por conjunto. Los cuatro `adhoc_scripts/fcs*.sbatch` son oráculos de memoria completa; `tests/test_wp6_blocks.R`, `tests/test_fcs_auc_contract.R` y `tests/test_wp7.py` cubren contratos dirigidos. Los seis RDS PEPC/marine/cáncer completo/strict y los 399 resultados marinos de WP7 están registrados en su fase, no se han vuelto a ejecutar en WP8.
+
+La sensibilidad de agrupación de WP8 usa una tabla histórica con leading edges, no recalcula inferencia productiva ni calibra potencia: Jaccard 0,25/0,5/0,75 conserva los tres grupos BH de maligno completo; overlap da 2/2/3. Se conserva Jaccard 0,5 y la agrupación solo de presentación. Criterios y comandos para aceptación: `docs/fases/WP8_aceptacion_integrada.md`.
+
+
+Estado: diagnóstico y medidas históricas; implementación vigente y pendientes en el contrato anterior.
 Complementa a `docs/FCS_REVISION_RERCONVERGE.md` (puntos P1 a P15 de la revisión del FCS frente a RERconverge).
 
 Convención: **medido** es una cifra leída de una traza de Nextflow, de `sacct` o de una tabla de resultados; **leído en el código** es una
@@ -13,19 +31,19 @@ Objetivo: 10.000 permulaciones por corrida, en CAAS y en RER, con recursos conte
 | ID | Decisión | Estado |
 |---|---|---|
 | D1 | Lachenbruch se elimina del FCS y de POSENRICH. POSENRICH queda fuera de alcance por ahora | Decidido |
-| D2 | Criterio de significación del FCS de CAAS: Wilcoxon con BH sobre el p de permulación, por ranking y base de datos (q < 0,15) | Propuesto, regla unificada con RER por confirmar |
+| D2 | Criterio de significación del FCS de CAAS: Wilcoxon con BH sobre el p de permulación, por ranking y base de datos (q < 0,15) | Implementado: BH sobre p.perm; Redlich independiente |
 | D3 | La reutilización de exports de perm-discovery (`permDiscFiles`) se elimina | Decidido |
 | D4 | La acumulación usa el marco hipergeométrico; del nulo solo necesita el conjunto de posiciones con score positivo | Decidido |
 | D5 | El coste del FCS a 10.000 ciclos es asumible si también lo es el de RER | Decidido |
-| D6 | `remove_intermediates` y `remove_work` son opciones independientes (hoy un único `cleanup_policy`, donde `remove_work` implica la poda) | Decidido en principio; falta definir qué publica cada una |
-| D7 | Tamaño de bloque del replay: fijo (por ciclos) o calculado por memoria | Pendiente (propuesta: fijo, con valor a partir de las mediciones) |
+| D6 | `remove_intermediates` retirado en WP8; higiene incondicional y `remove_work` solo en launchers tras éxito | Implementado, prueba mínima real; escala pendiente |
+| D7 | Tamaño de bloque del replay: fijo (por ciclos) o calculado por memoria | Implementado fijo: 500 por defecto; evaluación integrada pendiente |
 
 ## 2. Qué dice el FCS de CAAS (resultados de los controles)
 
 Todos los controles usan "ciclo nulo como observado": un ciclo nulo hace de observado frente a los otros 999. Se comparan el observado y los ciclos
 nulos con nivel (genes puntuados) de al menos 0,8 veces el del observado. Conjuntos de al menos 10 genes.
 
-### 2.1 Regla vigente (BH analítico + puerta de p de permulación + dos votos)
+### 2.1 Regla histórica (BH analítico + puerta de p de permulación + dos votos)
 
 Número de conjuntos "Supported" por ciclo nulo de nivel parecido, frente al observado:
 

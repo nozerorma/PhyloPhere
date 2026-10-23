@@ -1,7 +1,25 @@
 # Revisión del FCS frente a RERconverge
 
+## Contrato vigente tras WP8 (2026-10-23)
+
+Esta sección sustituye las propuestas y descripciones históricas de implementación de este documento. WP5, WP6 y WP7 están implementados y validados de forma dirigida; no quedan por construir sus bloques ni su FCS productivo. La aceptación integrada y las medidas reales a escala siguen pendientes.
+
+- Nulo CAAS canónico: `caas_permulation/blocks/blk_*/matrices.rds`, `cycle_roster.txt`, `null_metadata.json` y contadores/tablas WP5. Cada bloque conserva genes, ciclos, unidades, `gene_stat`, `stat` y `parts` (max/fmax/n). Completo y strict usan el mismo contrato. No hay tabla pública de cada posición × ciclo.
+- `caas_export_single=false`: el camino normal no ensambla `caas_perms.rds`. La exportación explícita reconstruye el objeto histórico con coste global deliberado. Se conserva la importación del RDS histórico; el almacén canónico completo permite reutilizar el nulo sin él.
+- Ranking CAAS productivo: −log10(p de permulación del gen), con observado y leave-one-out en `gene_p.R`. `gene_stat` sigue parametrizado; WP9 decide entre máximo, F(max) y F(max)^n. El ranking crudo es un control, no el fallback productivo.
+- Rutas: `stat = AUC − 0,5`, cola superior CAAS y bilateral RER; empates inclusivos, `(k+1)/(N_válidas+1)`. `sig_perm` es BH sobre `p.perm`, por ranking/base. `redlich_level` es independiente y `sig_top` está retirado. El observado interno usa RDS para conservar empates y recuentos; el TSV es público.
+- RER continuo/binario genera bloques con semillas por lote. La disponibilidad nula se evalúa por ciclo y no se restringe a genes disponibles en el observado. Cambiar tamaño de lote cambia las simulaciones; conservar ajustes, semilla y partición al comparar.
+- No se afirma memoria constante del pipeline: GENE_P retiene todos los ciclos de un lote de genes; el bosque RER y el universo de posiciones tienen costes separados. Las medidas sintéticas de WP6 no sustituyen recursos reales.
+- `remove_intermediates` retirado: era inerte tras WP5. La higiene de tareas es incondicional; ningún bloque, roster o índice público se poda. Los proyectos antiguos conservan solo su elección de `remove_work`. Este último pertenece al launcher: tras éxito elimina work, directorio de ejecución y NXF_HOME privado, con guardas de rutas; no actúa por invocar Nextflow directamente.
+- POSENRICH se omite con aviso en el flujo productivo tras WP5. Decisión del usuario en WP8: preparar una fase propia de AUC por posición (opción A), sin activarla aquí; `docs/fases/WP10_posenrich_auc.md`.
+
+Controles: máximo crudo frente a ranking calibrado, nulo como observado, tres estadísticos base y p/BH por gen se distinguen de las pruebas por posición (`p.emp`, `p.emp_fact`) y del AUC por conjunto. Los cuatro `adhoc_scripts/fcs*.sbatch` son oráculos de memoria completa; `tests/test_wp6_blocks.R`, `tests/test_fcs_auc_contract.R` y `tests/test_wp7.py` cubren contratos dirigidos. Los seis RDS PEPC/marine/cáncer completo/strict y los 399 resultados marinos de WP7 están registrados en su fase, no se han vuelto a ejecutar en WP8.
+
+La sensibilidad de agrupación de WP8 usa una tabla histórica con leading edges, no recalcula inferencia productiva ni calibra potencia: Jaccard 0,25/0,5/0,75 conserva los tres grupos BH de maligno completo; overlap da 2/2/3. Se conserva Jaccard 0,5 y la agrupación solo de presentación. Criterios y comandos para aceptación: `docs/fases/WP8_aceptacion_integrada.md`.
+
+
 Fecha de la revisión: 20/10/2026.
-Estado: documento de trabajo. No hay ningún cambio de código ni de configuración aplicado.
+Estado: revisión histórica del 20/10; implementación vigente y pendientes en el contrato anterior.
 
 ## 1. Criterio de trabajo
 
@@ -349,7 +367,7 @@ Los datos y scripts de esta revisión están fuera del repositorio:
 
 ## 9. Implementación (WP1, 2026-10-21)
 
-Aplicado en `581b999` + commits de WP0 a WP2: significación por BH sobre el p de permulación (`q.perm`, `sig_perm`, `sig_top`), Lachenbruch fuera del FCS, RER solo con el ranking global firmado `sign(Rho) * -log10(P)` y su nulo `corStat`, reducción de redundancia a posteriori (`fcs_cluster.R`) e informes 12 y 15 reescritos. Registro completo, comprobaciones y diferencias abiertas: `docs/fases/WP1_fcs_rer.md`. Lo no aplicado: subir las permulaciones de RER por defecto (P10; falta medir `RER_CONT`).
+Aplicado en `581b999` + commits de WP0 a WP2: significación por BH sobre el p de permulación (`q.perm`, `sig_perm`; `sig_top` retirado después), Lachenbruch fuera del FCS, RER solo con el ranking global firmado `sign(Rho) * -log10(P)` y su nulo `corStat`, reducción de redundancia a posteriori (`fcs_cluster.R`) e informes 12 y 15 reescritos. Registro completo, comprobaciones y diferencias abiertas: `docs/fases/WP1_fcs_rer.md`. Lo no aplicado: subir las permulaciones de RER por defecto (P10; falta medir `RER_CONT`).
 
 Medido al aplicarlo: con la regla nueva, las cuatro tablas reales dan 0, 0, 6 y 3 conjuntos significativos (neoplasia estricto, maligno estricto, neoplasia completo, maligno completo), frente a 1, 0, 6 y 6 de la sección 5, que salieron del script de control; quitar copias y casi copias (Jaccard >= 0,9) retira el 10,5 a 10,8 % de las filas sin cambiar esos recuentos.
 
