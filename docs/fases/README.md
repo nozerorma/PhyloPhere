@@ -16,7 +16,7 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 | WP6 | `WP6_fcs_por_bloques.md` | Fase 4 | WP1, WP5 | IMPLEMENTADO y validado dirigido: CAAS calibrado y RER por bloques conectados; RER genera lotes con semillas reproducibles. Equivalencia local con memoria completa y oráculos AUC aprobada; aceptación integrada y recursos reales a escala pendientes |
 | WP7 | `WP7_caas_perms_por_bloques.md` | Fase 5 | WP5 | IMPLEMENTADO y validado dirigido: bloques + roster + índice canónicos; RDS único opcional (false por defecto). Seis reconstrucciones y Nextflow con/sin exportación aprobados; SCORING y 399 resultados FCS conservados. Aceptación integrada y recursos reales a escala pendientes |
 | WP8 | `WP8_cierre.md` | | WP5–WP7 | IMPLEMENTADO y validado dirigido: limpieza inerte retirada, remove_work mínimo real, GUI/plantillas y DOMINO sin aristas; aceptación integrada y escala pendientes |
-| WP9 | `WP9_estadistico_gen.md` | | A1 ya; A2 tras WP5 | A1 hecho, A2 pendiente |
+| WP9 | `WP9_estadistico_gen.md` | | A1, WP5–WP7 | A1 y control FCS dirigido hechos; recomendación provisional size_adj_max; A2 y elección definitiva pendientes |
 | WP10 | `WP10_posenrich_auc.md` | | WP8, evaluación recuentos/AUC | PREPARADO a petición del usuario; sin implementación ni activación |
 
 Actualiza esta tabla (estado y, en el fichero de la fase, el registro) al cerrar cada fase.

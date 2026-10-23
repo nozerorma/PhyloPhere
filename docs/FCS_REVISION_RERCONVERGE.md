@@ -373,3 +373,8 @@ Medido al aplicarlo: con la regla nueva, las cuatro tablas reales dan 0, 0, 6 y 
 
 Medición de RER_CONT (P10, 2026-10-21): el coste de las permulaciones de RER es lineal en N (unos 2,1 a 2,2 s por permulación con 16.109 genes; 4.000 genes con 10.000 permulaciones: 5.470 s y 2,8 a 3,3 GB según el tamaño de lote), la memoria crece con el objeto (24·G·N bytes) y el proceso usa un solo hilo; detalle y extrapolación señalada en `docs/fases/WP1_fcs_rer.md`.
 
+
+
+## WP9: control dirigido del estadístico base (2026-10-23)
+
+Se comparan las seis variantes en marino completo/strict (bloques, 100 ciclos, tres rankings) y neoplasia estricto histórico (1000, global, Hallmark+KEGG). El control usa gene_p productivo y AUC centrado con comparación exacta; añade mitades disjuntas porque la tasa marginal LOO es casi una identidad de rangos. F(max)^n reduce ρ(score,n) de 0,225 a −0,020 en neoplasia, con tasas holdout de rutas de nivel observado ~8,25 % para las seis variantes: cambiar exponente no elimina la asociación con nivel. No es una estimación de FDR. Se recomienda mantener provisionalmente el default, sin cerrarlo antes de A2. Resultados, universos, medidas y límites: `docs/fases/WP9_resultados_dirigidos_2026-10-23.md`; comandos y pendientes en `WP9_estadistico_gen.md`. Sin cambios del cálculo productivo ni corrida 10k ejecutada.

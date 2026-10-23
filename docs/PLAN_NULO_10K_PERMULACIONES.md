@@ -348,3 +348,8 @@ Cada fase se cierra con la comparación antiguo frente a nuevo de la sección 7.
 3. Qué publica cada opción de limpieza (D6).
 4. Si 10.000 ciclos se aplican a las cuatro corridas o solo a neoplasia estricto, donde está la pregunta científica.
 5. Si se conservan las filas sin score de US del nulo (necesarias solo para el informe de bioquímica).
+
+
+## WP9: control dirigido del estadístico base (2026-10-23)
+
+Se comparan las seis variantes en marino completo/strict (bloques, 100 ciclos, tres rankings) y neoplasia estricto histórico (1000, global, Hallmark+KEGG). El control usa gene_p productivo y AUC centrado con comparación exacta; añade mitades disjuntas porque la tasa marginal LOO es casi una identidad de rangos. F(max)^n reduce ρ(score,n) de 0,225 a −0,020 en neoplasia, con tasas holdout de rutas de nivel observado ~8,25 % para las seis variantes: cambiar exponente no elimina la asociación con nivel. No es una estimación de FDR. Se recomienda mantener provisionalmente el default, sin cerrarlo antes de A2. Resultados, universos, medidas y límites: `docs/fases/WP9_resultados_dirigidos_2026-10-23.md`; comandos y pendientes en `WP9_estadistico_gen.md`. Sin cambios del cálculo productivo ni corrida 10k ejecutada.
