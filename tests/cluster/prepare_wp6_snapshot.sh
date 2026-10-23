@@ -6,6 +6,7 @@ checkout=$(realpath "$1")
 output=$(realpath -m "$2")
 shift 2
 case "$output" in "$HOME"/scratch/*) ;; *) echo 'Output must be below $HOME/scratch' >&2; exit 2;; esac
+[ ! -e "$output/code" ] || { echo "Snapshot already exists: $output/code" >&2; exit 2; }
 mkdir -p "$output/code" "$output/tmp"
 export TMPDIR="$output/tmp"
 git -C "$checkout" archive HEAD | tar -x -C "$output/code"
@@ -27,4 +28,4 @@ NF
 cd "$output/code"
 git -C "$checkout" rev-parse HEAD > "$output/commit.txt"
 nextflow -log "$output/nextflow.log" run wp6_validation.nf -work-dir "$output/work" \
- -with-trace "$output/trace.tsv" -with-report "$output/execution.html" "$@"
+ -with-trace "$output/trace.tsv" -with-report "$output/execution.html" -with-timeline "$output/timeline.html" "$@"

@@ -220,7 +220,10 @@ def main():
 
     edge_scores = build_edges(links_path, id2sym, background, args.score_threshold)
     if len(edge_scores) == 0:
-        raise RuntimeError("no edges survived filtering — check score_threshold and cleaned_background overlap with STRING")
+        print("[build_domino_network] Skipping DOMINO: no edges survived filtering", file=sys.stderr)
+        for name in ("network.sif", "network_edge_scores.tsv", "slices.txt"):
+            open(os.path.join(args.output_dir, name), "w").close()
+        return
 
     nodes_covered = {g for pair in edge_scores for g in pair}
     print(f"[build_domino_network] network covers {len(nodes_covered)}/{len(background)} "

@@ -67,7 +67,12 @@ process DOMINO_BUILD_NETWORK {
             --cache-dir "${string_cache_dir}" \
             --output-dir .
 
-        slicer -n network.sif -o slices.txt
+        if [ -s network.sif ]; then
+            slicer -n network.sif -o slices.txt
+        else
+            echo "[DOMINO_BUILD_NETWORK] Skipping slicing: network has no edges"
+            touch slices.txt
+        fi
     fi
     """
 }

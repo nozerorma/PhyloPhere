@@ -336,7 +336,6 @@ _RUN_ENRICHMENT="${RUN_ENRICHMENT:-{{ run_defaults.enrichment }}}"
 _RUN_POSENRICH="${RUN_POSENRICH:-{{ run_defaults.posenrich }}}"
 _ASR_DIAGNOSTICS="${ASR_DIAGNOSTICS:-{{ run_defaults.asr_diagnostics }}}"
 _TOY_MODE="${TOY_MODE:-false}"
-_REMOVE_INTERMEDIATES="${REMOVE_INTERMEDIATES:-{{ 'true' if runtime.remove_intermediates else 'false' }}}"
 _REMOVE_WORK="${REMOVE_WORK:-{{ 'true' if runtime.remove_work else 'false' }}}"
 
 # CAAS: the tool string when enabled; when off, an empty ct_tool disables the CT()
@@ -484,7 +483,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "reporting": $_RUN_REPORTING,
   "toy_mode": $_TOY_MODE,
   "toy_n": "$TOY_N",
-  "remove_intermediates": $_REMOVE_INTERMEDIATES,
   "remove_work": $_REMOVE_WORK,
 
   "contrast_selection": $_CONTRAST_SELECTION,
@@ -770,6 +768,17 @@ nextflow run "${REPO_DIR}/main.nf" "${NF_ENGINE[@]}"
 # keeps work/ for debugging and -resume). Both passes of a two-pass run tag RUN_TAG, hence have their own
 # WORK_DIR, RUN_DIR and NXF_HOME, and the complete pass reads the exploratory pass from its published outdir.
 cleanup_work() {
+    # Validate every target before deleting any directory. Published results and source code must survive.
+    local base target results repo candidate
+    base=$(realpath -m -- "${WORK_BASE:?}")
+    results=$(realpath -m -- "${RESULTS_BASE:?}")
+    repo=$(realpath -m -- "${REPO_DIR:?}")
+    for candidate in "${WORK_DIR:?}" "${RUN_DIR:?}" "${NXF_HOME:?}"; do
+        target=$(realpath -m -- "$candidate")
+        case "$target" in "$base"/*) ;; *) echo "[cleanup] Refusing target outside work base: $target" >&2; return 1;; esac
+        case "$results/" in "$target/"*) echo "[cleanup] Refusing to remove published results: $target" >&2; return 1;; esac
+        case "$repo/" in "$target/"*) echo "[cleanup] Refusing to remove source code: $target" >&2; return 1;; esac
+    done
     echo "[cleanup] Removing the Nextflow work directories of '${TRAIT}${RUN_TAG}': $WORK_DIR"
     # The run directory is the cwd of this script; its Nextflow log is kept with the results before it goes.
     mkdir -p "${RESULTS_BASE}/pipeline_info"

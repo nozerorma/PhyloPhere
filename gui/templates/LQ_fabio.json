@@ -13,7 +13,6 @@
   "runtime": {
     "resume": false,
     "toy_mode": false,
-    "remove_intermediates": false,
     "remove_work": false,
     "toy_n": "1000",
     "toy_perms": "100",
@@ -461,18 +460,6 @@
         "selector": "CT_DISAMBIGUATION_RUN",
         "cpus": "12",
         "memory": "8.GB"
-      },
-      {
-        "selector_type": "withName",
-        "selector": "CAAS_PERMS_DISAMBIGUATE",
-        "cpus": "16",
-        "memory": "16.GB"
-      },
-      {
-        "selector_type": "withName",
-        "selector": "CAAS_PERMS_AGGREGATE",
-        "cpus": "1",
-        "memory": "16.GB"
       },
       {
         "selector_type": "withName",

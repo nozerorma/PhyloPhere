@@ -26,6 +26,7 @@ LANGUAGES: Dict[str, str] = {
 }
 
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
+    "Remove work/ after a successful run (--remove_work)": {"en": "Remove work/ after a successful run (--remove_work)", "es": "Eliminar work/ tras una ejecución correcta (--remove_work)", "ca": "Elimina work/ després d’una execució correcta (--remove_work)", "fr": "Supprimer work/ après une exécution réussie (--remove_work)", "it": "Elimina work/ dopo un’esecuzione riuscita (--remove_work)", "de": "work/ nach erfolgreichem Lauf entfernen (--remove_work)"},
     "Export single CAAS null RDS": {
         "en": "Export single CAAS null RDS", "es": "Exportar el nulo CAAS en un RDS único",
         "ca": "Exporta el nul CAAS en un RDS únic", "fr": "Exporter le nul CAAS dans un RDS unique",

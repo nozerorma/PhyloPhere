@@ -34,8 +34,13 @@ logger = logging.getLogger(__name__)
 # Batch-size parameters of the permulation null that ct_core_batch_size covers; the value of ct_core_batch_size is used instead.
 _RETIRED_CAAS_FIELDS = ("ct_perm_replay_batch_size", "ct_disambig_perms_batch_size")
 
-# cleanup_policy of older project files -> (remove_intermediates, remove_work)
+# cleanup_policy of older project files -> (retired intermediate flag, remove_work)
 _CLEANUP_POLICY_OPTIONS = {"none": (False, False), "prune_intermediates": (True, False), "remove_work": (True, True)}
+
+_RETIRED_PROCESS_SELECTORS = {
+    "process_perm_replay", "process_perm_replay_batched", "CAAS_PERMS_DISAMBIGUATE",
+    "CAAS_PERMS_DISAMBIGUATE_BATCHED", "CAAS_PERMS_AGGREGATE", "CAAS_PERMS_MERGE_DETAIL", "CAAS_PERMS_REBUILD",
+}
 
 # Parameters that no process reads: those of tasks the pipeline does not have (the per-gene discovery task, the chunking of
 # the observed disambiguation) and the ASR mode (a gene is read from the ASR cache when it is there and computed when not).
@@ -86,15 +91,23 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
             f"Unsupported project schema_version={version!r}; "
             f"this build only supports version {SCHEMA_VERSION}."
         )
-    # The single cleanup_policy of older project files became two independent options.
+    # Migrate cleanup policies while preserving the explicit work-removal setting.
     runtime = data.get("runtime")
     if isinstance(runtime, dict) and "cleanup_policy" in runtime:
         policy = runtime.pop("cleanup_policy")
         if policy not in _CLEANUP_POLICY_OPTIONS:
-            logger.warning("project parameter cleanup_policy=%r is not a known value; remove_intermediates and remove_work are left off", policy)
-        remove_intermediates, remove_work = _CLEANUP_POLICY_OPTIONS.get(policy, (False, False))
-        runtime.setdefault("remove_intermediates", remove_intermediates)
+            logger.warning("project parameter cleanup_policy=%r is not a known value; remove_work is left off", policy)
+        _retired_intermediates, remove_work = _CLEANUP_POLICY_OPTIONS.get(policy, (False, False))
         runtime.setdefault("remove_work", remove_work)
+    if isinstance(runtime, dict) and "remove_intermediates" in runtime:
+        runtime.pop("remove_intermediates")
+        logger.warning("project parameter remove_intermediates was retired: task hygiene is unconditional; published null blocks are preserved")
+    resources = data.get("resources")
+    if isinstance(resources, dict) and isinstance(resources.get("process_overrides"), list):
+        rows = resources["process_overrides"]
+        resources["process_overrides"] = [row for row in rows if row.get("selector") not in _RETIRED_PROCESS_SELECTORS]
+        if len(rows) != len(resources["process_overrides"]):
+            logger.warning("resource overrides for retired permulation processes were dropped")
     # Older project files hold the per-gene MAP directory as vep.vep_map_dir; it is
     # copied to disambiguation.caas_map_dir unless that is already set.
     modules = data.get("modules")

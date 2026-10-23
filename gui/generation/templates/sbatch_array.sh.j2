@@ -69,8 +69,6 @@ set -u
 # ── Global run configuration ──────────────────────────────────────────────────
 export RESUME="${RESUME:-{{ "1" if runtime.resume else "0" }}}"
 export RUN_TOWER={{ run_defaults.tower }}
-# read by run_single: remove_intermediates goes to params.json, remove_work is the post-run work/ removal
-export REMOVE_INTERMEDIATES="${REMOVE_INTERMEDIATES:-{{ 'true' if runtime.remove_intermediates else 'false' }}}"
 export REMOVE_WORK="${REMOVE_WORK:-{{ 'true' if runtime.remove_work else 'false' }}}"
 
 if [ "{{ run_defaults.toy_mode }}" = true ]; then

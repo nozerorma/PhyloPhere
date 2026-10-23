@@ -159,6 +159,10 @@ def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
 
+    if any(not os.path.isfile(path) or os.path.getsize(path) == 0 for path in (args.network, args.slices)):
+        print("[run_domino_modules] Skipping module identification: network or slices is empty/absent", file=sys.stderr)
+        return
+
     import src.constants as constants
     constants.USE_CACHE = True
     constants.N_OF_THREADS = max(1, args.threads)

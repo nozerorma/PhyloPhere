@@ -957,9 +957,13 @@ suppressPackageStartupMessages(library(igraph))
 # file (gene1, gene2, combined_score). Each tool (CAAS, FADE, RER) has its own network,
 # built against its own gene universe (see domino.nf).
 build_tool_network <- function(sif_path, edge_scores_path = NULL) {
+  if (is.null(sif_path) || is.na(sif_path) || !file.exists(sif_path) ||
+      is.na(file.info(sif_path)$size) || file.info(sif_path)$size == 0) {
+    return(igraph::make_empty_graph(directed = FALSE))
+  }
   .sif <- readr::read_tsv(sif_path, col_names = c("from", "interaction", "to"), col_types = "ccc")
   .edge_sif <- .sif[, c("from", "to")]
-  if (!is.null(edge_scores_path) && !is.na(edge_scores_path) && file.exists(edge_scores_path)) {
+  if (!is.null(edge_scores_path) && !is.na(edge_scores_path) && file.exists(edge_scores_path) && file.info(edge_scores_path)$size > 0) {
     .edge_scores <- readr::read_tsv(edge_scores_path, show_col_types = FALSE)
     .scores_fwd <- .edge_scores %>% dplyr::rename(from = gene1, to = gene2)
     .scores_rev <- .edge_scores %>% dplyr::rename(from = gene2, to = gene1) %>%

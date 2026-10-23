@@ -75,20 +75,11 @@ class RuntimeTab(QWidget):
         self.toy_mode.toggled.connect(self._on_toy_mode_changed)
         form.addRow(self.toy_mode)
 
-        self.remove_intermediates = QCheckBox("Remove intermediates during the run (--remove_intermediates)")
-        self.remove_intermediates.setChecked(self._config.remove_intermediates)
-        self.remove_intermediates.setToolTip(
-            "Each task deletes, inside the task, the bulky intermediates no later process reads "
-            "(the perm-discovery exports and the duplicated shard directories of the permulation core)."
-        )
-        self.remove_intermediates.toggled.connect(self._on_remove_intermediates_changed)
-        form.addRow(self.remove_intermediates)
-
         self.remove_work = QCheckBox("Remove work/ after a successful run (--remove_work)")
         self.remove_work.setChecked(self._config.remove_work)
         self.remove_work.setToolTip(
-            "The generated run script removes the phenotype's Nextflow work/ directory after a successful "
-            "completion (-resume is not available once work/ is deleted). Independent of the option above."
+            "The generated run script removes the phenotype's Nextflow work/, run directory and private home after successful "
+            "completion (-resume is not available once work/ is deleted). Published results are kept."
         )
         self.remove_work.toggled.connect(self._on_remove_work_changed)
         form.addRow(self.remove_work)
@@ -306,10 +297,6 @@ class RuntimeTab(QWidget):
 
     def _on_toy_mode_changed(self, value: bool) -> None:
         self._config.toy_mode = value
-        self.changed.emit()
-
-    def _on_remove_intermediates_changed(self, value: bool) -> None:
-        self._config.remove_intermediates = value
         self.changed.emit()
 
     def _on_remove_work_changed(self, value: bool) -> None:

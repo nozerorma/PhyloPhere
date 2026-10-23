@@ -13,7 +13,6 @@
   "runtime": {
     "resume": false,
     "toy_mode": false,
-    "remove_intermediates": true,
     "remove_work": true,
     "toy_n": "",
     "toy_perms": "100",

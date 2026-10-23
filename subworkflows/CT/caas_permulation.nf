@@ -29,12 +29,12 @@
  *       the validated block index, roster and small tables. A block merge needs the gene universe, which
  *       the post-processing of the observed results provides, so it runs after CAAS_CORE_OBSERVED.
  *
- *  The aggregate RDS feeds the FCS p.perm path (fcs_enrich.R), which gives the CAAS
+ *  The canonical blocks feed the FCS p.perm path, which gives the CAAS
  *  scoring FCS report a permulation-corrected p.perm, as RER does.
  *
  *  Consumes:  resample directory (RESAMPLE), observed design (trait file or
  *             traitfile_H*.tab directory), alignments, species tree
- *  Produces:  caas_permulation/ (resample_perms.tab, caas_perms.rds, cycle_roster.txt,
+ *  Produces:  caas_permulation/ (resample_perms.tab, optional caas_perms.rds, cycle_roster.txt,
  *             blocks/<block>/, b0/, ...) and the observed contract files
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
@@ -46,12 +46,6 @@
 def caasPostprocOn() {
     def raw = params.containsKey('caas_perms_postproc') ? params.caas_perms_postproc : true
     return (raw instanceof Boolean) ? raw : !(raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
-}
-
-// True when params.remove_intermediates is on: tasks delete the bulky intermediates that no later process reads.
-def removeIntermediatesOn() {
-    def raw = params.containsKey('remove_intermediates') ? params.remove_intermediates : false
-    return (raw instanceof Boolean) ? raw : (raw?.toString()?.toLowerCase() in ['true', '1', 'yes'])
 }
 
 // True when the core also writes the strict tables: params.strict_conservation_output, and a discovery that tolerates
