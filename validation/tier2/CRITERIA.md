@@ -107,3 +107,7 @@ naive convergence call on this species set.
 - The alignment is a 2014 projection of whole-genome alignments onto human exons; alignment errors can
   create spurious convergent substitutions, which the T1 tier and the terrestrial controls address
   only in part.
+
+## Toy run
+
+A 121-gene toy (81 genes of interest of the truth tiers and 40 random background genes, `input/marine/README.md`) runs the same readouts with 100 null cycles to check the pipeline before the full run. Its results are in `reports/marine_toy_results.md`. At 100 cycles the smallest `p.emp` is 0.0099 and no adjusted p-value is informative, so only the rank-based readouts, the marine against control comparison and the RER gene-level signal are read; the toy does not decide any **[decide]** item.

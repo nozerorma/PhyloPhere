@@ -14,7 +14,7 @@ python3 validation/tier2/input/marine/scripts/build.py \
 ```
 
 `--stage trees` rebuilds only the tree and gene-tree files, `--stage align` only the alignments and tables.
-The alignments (about 2.3 GB, one FASTA per gene) are not written into the repository.
+The alignments (17,816 FASTA, about 630 MB) are written to `validation/phylophere_tier2/marine/align`, which git ignores.
 
 | input | source |
 |---|---|
@@ -64,7 +64,22 @@ The template of the GUI project is `../../templates/tier2_marine.json`.
 - **Taxonomic column.** `order` is the column named by `taxon_of_interest`. Cetaceans are in Artiodactyla.
 - **Controls.** `control` marks aardvark, alpaca, Bactrian camel, little brown bat and David's myotis, the
   terrestrial control foreground of Chikina et al. 2016; the second trait row prunes the marine tips.
-- **Alignment location.** `alignment_dir` of the template points to the external drive. A run on a cluster needs the
-  alignment directory and the other fixture files copied there and the paths of the template changed.
+- **Alignment location.** `alignment_dir` of the template points to `validation/phylophere_tier2/marine/align`. A run on
+  a cluster needs the alignment directory and the other fixture files copied there and the paths of the template changed.
 - **Pinniped ancestral branch.** The template codes tips only. The marine or non-marine coding of the
   ancestral pinniped branch is not set in the template.
+
+## Toy
+
+`toy_genes.tsv` and `scripts/make_toy.py` define a 121-gene toy of the fixture for pipeline checks (`../../reports/marine_toy_results.md`). It is not the genome-wide case.
+
+- **Genes of interest (81)**: listed in `toy_genes.tsv` with the reason of each: the experimental T1 genes (RHO, APPL1, NEIL1), 46 genes reported in at least two of the four replication lists of the T2 tier (Zhou 2015, Yuan 2021, Xu 2025, Huang 2024), 15 genes of Table 1 of Foote et al. 2015, 12 T3 genes named by Chikina et al. 2016 and 7 genes whose alignments are in the supplement of that paper. The rule that chose them beyond the reason column is not recorded.
+- **Background genes (40)**: drawn from the alignments that are not genes of interest with a seeded shuffle (`--seed`, 1998 by default; `--n-background`, 40 by default).
+- **Outputs**: `toy/genes.tsv` (gene and role), `toy/gene_trees.nwk` and `toy/gene_ensembl.tsv`, restricted to the 121 genes, and the toy alignment directory (`--out-align`), which git ignores. Species, tree, traits and tax ids are those of the fixture.
+
+```bash
+python3 validation/tier2/input/marine/scripts/make_toy.py \
+    --align-dir validation/phylophere_tier2/marine/align --out-align validation/phylophere_tier2/toy/align
+```
+
+The template of the GUI project is `../../templates/tier2_marine_toy.json` (100 null cycles).

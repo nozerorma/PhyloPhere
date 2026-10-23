@@ -1,6 +1,6 @@
 # WP4. Fase 2: replay en flujo y fusión de descubrimiento y replay
 
-Estado: IMPLEMENTADO; VALIDACIÓN DE ESCALA ABIERTA (revisión 2026-10-22). Equivalencia CAAS validada en PEPC, cáncer y marine; RP1 con bloque 500 y criterio de independencia de memoria pendientes. Depende de WP3.
+Estado: IMPLEMENTADO Y VALIDADO CON PRUEBAS DIRIGIDAS (2026-10-23); RP1 B=500 medido y n_sp corregido en 6ae3a4f. Memoria constante respecto a las filas del gen no demostrada; aceptación integrada pendiente. Depende de WP3.
 Conversación independiente. Antes de empezar, leer `docs/fases/README.md`.
 
 ## Qué hay que comprobar primero (anotado al cerrar WP3)
@@ -126,12 +126,49 @@ La etiqueta HECHO del registro original describía la implementación. No acredi
 
 WP4 mantiene todos los SlimRecord reducidos del gen antes de escribir su detalle. Por tanto, reduce mucho la memoria pero **no cumple literalmente independencia respecto al número de filas del gen**. WP5 cambia el formato y reduce por ciclo, pero conserva posiciones puntuadas en listas/tablas del gen y resultados de genes en el padre; su mera presencia no demuestra memoria constante. No se considera resuelto ese criterio sin una medida o una modificación validada de la retención de salidas.
 
-El benchmark preparado en `PhyloPhere_validation/wp4_check/cluster/benchmark_rp1.py` compara WP3 (`8169f5c`) y WP4 (`90c06a4`) con una única alineación RP1, el mismo bloque de 500 ciclos y copias de la misma caché ASR. Requiere Slurm, checkouts limpios sincronizados por el usuario y rutas de entradas reales. Registra tiempo y GNU time MaxRSS por etapa y exige igualdad SHA-256 del detalle normal y strict tras descomprimir. Ese máximo no es la suma de RSS concurrente de toda una tesela. Un punto a B=500 cuantifica RP1, pero por sí solo no demuestra independencia asintótica de memoria.
+El benchmark preparado en `PhyloPhere_validation/wp4_check/cluster/benchmark_rp1.py` compara WP3 (`8169f5c`) y WP4 (`90c06a4`) con una única alineación RP1, el mismo bloque de 500 ciclos y copias de la misma caché ASR. Requiere Slurm, checkouts limpios sincronizados por el usuario y rutas de entradas reales. El lanzador actualizado registra tiempo y RSS por muestreo del proceso y sus descendientes cada 0,2 s; la suma RSS cuenta páginas compartidas varias veces. Los hashes del detalle conservan la detección del defecto histórico de n_sp, diagnosticado y corregido en el registro del 2026-10-23. Un punto a B=500 cuantifica RP1, pero por sí solo no demuestra independencia asintótica de memoria.
 
-**No ejecutado:** RP1 y cualquier cómputo en cluster. Con los permisos nuevos SSH conecta a correfoc-01. El checkout remoto está en `d246e82` y no contiene `90c06a4`; la caché ASR de RP1 existe y Slurm está disponible con shell de login. Solo se hicieron lecturas baratas; el usuario debe sincronizar el código por git antes de la medición. No se editaron ficheros remotos. Todos los temporales y salidas deben estar bajo `~/scratch`, nunca `/tmp`; el benchmark lo exige y fija TMPDIR dentro de su salida. El script está comprobado por sintaxis y generación del plan, no mediante una ejecución completa. Mantener abierto WP4 hasta incorporar la medida y resolver explícitamente el criterio de memoria.
+**Estado anterior al benchmark (2026-10-22; superado por el registro del 2026-10-23):** RP1 aún no se había ejecutado. Con los permisos nuevos SSH conecta a correfoc-01. El checkout remoto está en `d246e82` y no contiene `90c06a4`; la caché ASR de RP1 existe y Slurm está disponible con shell de login. Solo se hicieron lecturas baratas; el usuario debe sincronizar el código por git antes de la medición. No se editaron ficheros remotos. Todos los temporales y salidas deben estar bajo `~/scratch`, nunca `/tmp`; el benchmark lo exige y fija TMPDIR dentro de su salida. El script está comprobado por sintaxis y generación del plan, no mediante una ejecución completa. Mantener abierto WP4 hasta incorporar la medida y resolver explícitamente el criterio de memoria.
 
 ### Entrega temática de la revisión
 
 Se guarda en un commit de WP4 la selección determinista del trait de diseño: se prioriza un nombre con token H explícito frente al fichero FOP sin token y se ordenan los nombres para que la elección no dependa del directorio. La entrega conserva la evidencia local del registro. Por decisión del usuario (2026-10-22), RP1 y la aceptación de recursos se planifican con la validación integrada; no se exige una corrida completa por WP.
 
 Comprobación repetida antes de esta entrega: `test_kernel_fuzz.py` y `test_discovery_kernel.py`, entorno phylophere, TMPDIR en IBE: **64 passed**.
+
+## Medición de RP1 y corrección del soporte de especies (2026-10-23)
+
+| Medida | WP3 (`8169f5c`) | WP4 (`90c06a4`) |
+|---|---:|---:|
+| Tiempo total | 233.79 s | 310.40 s |
+| Pico RSS de un proceso, muestreado | 14.598 GiB | 2.481 GiB |
+| Pico de la suma RSS del árbol, muestreado | 14.925 GiB | 2.734 GiB |
+
+WP3: exportación 41.48 s y replay 192.30 s. En esta ejecución WP4 usa un 83.0 % menos de RSS pico de proceso y tarda un 32.8 % más. Es una ejecución por versión, con caché ASR existente; no es una distribución de rendimiento.
+
+RSS se muestreó cada 0,2 s sobre el proceso lanzado y sus descendientes. La suma RSS cuenta páginas compartidas varias veces y no equivale a PSS. Slurm registró 15.711.212 KiB de MaxRSS para el batch completo, que incluye las dos versiones secuenciales. Las cifras de wait4 se conservan en el JSON solo como contabilidad del lanzador: omitían workers y no se usan para concluir la reducción de memoria.
+
+
+Job de recursos **7602777**: un gen RP1, un worker por versión, 4 CPU asignadas al job, 32 GB solicitados. Misma alineación `RP1.Papio_hamadryas.fa`, árbol y taxid curados de neoplasia, diseño y umbral posterior 0,1. Bloque de **500 ciclos base y 50.000 hipótesis**, obtenido de los primeros 500 ciclos de `real_N1000` (corrida de remuestreo guardada 7567399); no se regeneró el nulo ni se cambió la caché compartida. Se crearon copias por versión de la misma caché de RP1. Se usaron copias limpias de los dos commits obtenidas por git desde el checkout sincronizado, sin modificar el checkout principal ni parchear código remoto.
+
+Salidas: **180.478 filas normales y 27.470 strict**, con 489 ciclos que dejan filas; los 500 ciclos están en la entrada. Las claves, su orden, scores, detecciones, flags de cluster y número de hipótesis coinciden exactamente entre WP3 y WP4. Solo difiere `n_sp`: 52.545 celdas normales y 4.672 strict, diferencia máxima 14 y 8 respectivamente. El job 7602777 tiene estado Slurm FAILED/exit 1 porque el chequeo de hashes detecta ese metadato; las tres etapas de cálculo terminan correctamente y el resumen de recursos queda guardado. El primer ensayo de cálculo, 7600650, reproduce los mismos hashes y se diagnosticó mediante el job 7602776.
+
+## Fallo y corrección
+
+La caché de `_position_axes` está indexada por sitio y estados ancestrales/derivados, pero su resultado también contenía `domain_der_species`. Dos hipótesis con estados iguales podían compartir el score y heredar las especies de soporte de la primera. La duración de la caché cambia entre replay completo y flujo por ciclos; por eso aparecía la diferencia de `n_sp` aun con scores idénticos.
+
+El commit **6ae3a4f15e9f82ffdbe9ad4b111514a78ddfec76**, solicitado por el usuario, conserva la caché de scores y reconstruye el mapa de especies para la hipótesis actual. No modifica la entrada cacheada ni los scores. La regresión nueva falla antes del cambio y pasa después, tanto con firma de dominio explícita como calculada. **31 pruebas dirigidas pasan**; se actualizaron además las cuatro pruebas de orden del pool al contrato actual de pares de diseño.
+
+El usuario sincronizó el commit y se validó en el job **7602778**, COMPLETED/exit 0 en high-cpu. Se usaron los ciclos reales `b_11`, `b_108` y `b_112` (300 hipótesis), comparando el flujo corregido con el mismo scorer escalar con la caché de ejes desactivada:
+
+- Normal: **1.825 registros**, todos los campos iguales al cálculo sin caché; 51 valores de n_sp corregidos frente al WP4 histórico; **0 scores diferentes**.
+- Strict: **730 registros**, todos los campos iguales al cálculo sin caché; 17 valores de n_sp corregidos; **0 scores diferentes**.
+
+## Estado de cierre
+
+La medida específica de RP1 a B=500 ya está hecha y el defecto de n_sp está corregido y validado con una regresión real dirigida. La comparación completa de 500 ciclos corresponde al WP4 histórico; no se declara repetida toda ella tras el arreglo de n_sp. Tampoco se ha ejecutado la aceptación integrada del pipeline.
+
+**No se demuestra memoria constante respecto a las filas del gen.** WP4 conserva registros reducidos; esta medida demuestra una reducción importante para un caso grande, no independencia asintótica. Mantener ese alcance explícito en el plan y en la aceptación integrada.
+
+
+Evidencia y lanzadores: `PhyloPhere_validation/wp4_check/cluster/README.md`, `rp1_resources.json`, `rp1_comparison_diagnosis.json` y `rp1_species_validation.json`. Los jobs de cálculo y diagnóstico se enviaron por sbatch/high-cpu. No se ha hecho una corrida completa ni se han cambiado las referencias congeladas.

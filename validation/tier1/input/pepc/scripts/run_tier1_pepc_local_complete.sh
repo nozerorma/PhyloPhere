@@ -39,7 +39,6 @@ if [ "false" = true ]; then
     # instead of grinding through 1M draws plus two escalations before failing,
     # which would defeat the point of a smoke test.
     export MAX_TRIES="20000"
-    export N_RANDOMIZATIONS="1000"
     export RER_PERM_BATCHES="10"
     export RER_PERMS_PER_BATCH="10"
 else
@@ -48,7 +47,6 @@ else
     export TOY_N=""
     export CAAS_FULL_PERMS="${CAAS_FULL_PERMS:-1000}"
     export MAX_TRIES="100000"
-    export N_RANDOMIZATIONS="1000000"
     export RER_PERM_BATCHES="10"
     export RER_PERMS_PER_BATCH="100"
 fi
@@ -141,8 +139,6 @@ export PRECOMP_USE_DISAMBIGUATION="false"
 export PRECOMP_USE_POSTPROC="false"
 
 # --- ACCUMULATION ---
-export ACCUMULATION_RANDOMIZATION_TYPE="cons_decile"
-export ENTROPY_DIR=""
 export ACCUMULATION_FDR="0.05"
 export PRECOMP_USE_ACCUMULATION="false"
 

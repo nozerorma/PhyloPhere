@@ -9,9 +9,11 @@ Two PhyloPhere runs on the same 970-column ppc-1 alignment and tree, differing i
 | definition | ppc-1 copy carries Ser780 (Besnard et al. 2009) | species-level anatomical/physiological call (Bruhl & Wilson 2007), assigned to every ppc-1 copy of that species (as in Morel et al. 2024) |
 | tips (in-group) | 77 (23 C4 / 54 C3) | 70 (20 C4 / 50 C3); 7 *E. baldwinii* / *E. vivipara* C3/C4-intermediate accessions pruned |
 | evolutionary model (AIC) | BM | BM |
-| candidate positions (unique) | 35 | 34 |
+| candidate positions (unique) | 35 lenient, 10 strict | 34 lenient, 17 strict |
 | hypotheses × pairs | 100 × 4 | 100 × 3 |
 | null cycles, hypotheses per cycle | 1000, 100 each | 1000, 100 each |
+
+Each trait is run in two CAAS discovery modes (`pepc_results.md`): **lenient** (`min_divergent_fraction` 0.5, up to 2 of 4 or 1 of 3 pairs may keep the ancestral state) and **strict** (every pair diverges). Both modes use the same hypotheses and null labelings. Tables are lenient unless a section says strict.
 
 Position numbers are maize PEPC1 (`position_scores.tsv` `Position` + 1). The four position p-values are informative and carry no threshold in the pipeline: `p.emp`, its BH adjustment over the null universe `p.adj_bh` (one test per position), the factorized `p.emp_fact` and its BH adjustment `p.adj_bh_fact` over the same family (§6c). This report marks values below 0.05 and counts positions below 0.05 and 0.1 to describe them. `CAAS_score` is the exact-identity (US) score of a side: each domain is scored by the species that represent it across the hypotheses (a species takes the mean of its domain score over the hypotheses in which it represents the domain, 0 where the hypothesis does not detect the position; species weighted by the PSS of their pairs), and the score is the mean over the K domains; it lies between 0 and 1 and does not include the grouping schemes. `pepc_pvalue_tables.py` prints the tables of this report from the results directory.
 
@@ -70,6 +72,35 @@ Position numbers are maize PEPC1 (`position_scores.tsv` `Position` + 1). The fou
 - **Specificity.** Most candidates pass: in the genotypic run 19 of the 28 non-truth candidates are below 0.05 under `p.adj_bh` and 11 of 25 in the phenotypic run, so a call is a statement about signal in the labelled data and not about membership of the truth set (§5).
 - **Limit.** The top-10 cutoff is post hoc and descriptive. With 1000 cycles the floor of `p.emp` is 0.001; the positions at the floor share one `p.adj_bh` value, so their order rests on `CAAS_score` and on the factorized p.
 
+## 2b. Lenient and strict: where the truth set falls
+
+Rank among the candidates of each run (rank / N, score); `no` = not a candidate.
+
+| position | change | tier | geno, lenient (N=35) | geno, strict (N=10) | pheno, lenient (N=34) | pheno, strict (N=17) |
+|---|---|---|---|---|---|---|
+| 780 | A→S | mutagenesis | 6 · 0.59 | 4 · 0.59 | 8 · 0.61 | 5 · 0.44 |
+| 665 | H→N | mutagenesis | 1 · 1.00 | 1 · 1.00 | 4 · 0.78 | 4 · 0.51 |
+| 540 | P→T | selection | 1 · 1.00 | 1 · 1.00 | 3 · 0.81 | 2 · 0.55 |
+| 572 | E→Q | selection | no (cluster filter) | 3 · 0.75 | 2 · 0.81 | 3 · 0.55 |
+| 733 | F→V | parallel | no | no | no | no |
+| 761 | S→A | parallel | 12 · 0.29 | no | 14 · 0.29 | no |
+| 749 | L→T | weak | 32 · 0.02 | no | 33 · 0.01 | no |
+| 505 | F→L | weak | 5 · 0.67 | no | 7 · 0.67 | 8 · 0.35 |
+| 573 | A→N | weak | no (cluster filter) | no | 11 · 0.36 | no |
+| 731 | I→V | weak | 7 · 0.56 | 5 · 0.56 | 5 · 0.69 | 5 · 0.44 |
+
+| | geno, lenient | geno, strict | pheno, lenient | pheno, strict |
+|---|---|---|---|---|
+| truth positions present | 7 | 5 | 9 | 6 |
+| ranks | 1, 1, 5, 6, 7, 12, 32 | 1, 1, 3, 4, 5 | 2, 3, 4, 5, 7, 8, 11, 14, 33 | 2, 3, 4, 5, 5, 8 |
+| median rank (percentile of N) | 6 (17 %) | 3 (30 %) | 7 (21 %) | 4.5 (26 %) |
+| in the top 5 / top 10 | 3 / 5 | 5 / 5 | 4 / 6 | 5 / 6 |
+| `p.adj_bh` below 0.05 | 7 | 5 | 8 | 6 |
+
+- **Why a truth position is missing.** 733 carries no C4-specific residue. 572 and 573 under the genotypic trait are discovered in lenient mode and removed by the cluster filter (`filter_minlen` 3, `filter_maxcaas` 0.7: they sit in a group of 6 CAAS in 8 columns); strict mode forms no cluster (0 positions discarded) and keeps 572. 505, 749 and 761 (genotypic) and 573, 749 and 761 (phenotypic) keep 1 to 2 conserved pairs in lenient mode and are not called in strict mode.
+- **Rank and percentile.** The strict runs have fewer candidates, so the rank improves without the positions moving up: 780 goes from the 17th to the 40th percentile in the genotypic run. The comparison of ranks across modes is not a comparison of support.
+- **Mutagenesis and selection tiers** are present in the four runs except 572 (genotypic, lenient). The weak tier is the one that loses members in strict mode: 505, 573 and 749 disappear and 731 stays.
+
 ## 3. The four discordant tips
 
 Residues at the truth positions, read from the alignment:
@@ -123,6 +154,8 @@ Under the genotypic trait, within-species paralog pairs are available and select
 
 518 ranks first in the phenotypic run (0.873, all 100 hypotheses, `p.emp` at the floor, `p.adj_bh` 0.0053, `p.adj_bh_fact` 0.0049, FADE BF 6.9 × 10⁴); under the genotypic trait its score is 0.117 in 24 hypotheses (0.032 and 0.049). The difference comes from pruning the five L-carrying *Eleocharis* accessions (`pepc_results.md`, Method 2). 611 ranks third in the genotypic run (0.826) and sixth in the phenotypic run (0.689), at the floor in both and with a FADE call in both (BF 7.6 × 10³ and 1.2 × 10³). 620 passes both adjustments in both runs and has a FADE call in the phenotypic run (BF 1.2 × 10³). 751 is at the floor in both runs and has no FADE call. 474 and 460 are detected in 1 and 2 hypotheses and have scores of 0.005 and 0.016 (474: `p.emp` 0.011, `p.adj_bh` 0.040, `p.adj_bh_fact` 0.129, FADE BF 428). A hypothesis that does not detect a position contributes zero to the species it represents, so positions detected in one or two hypotheses score near 0; a small `p.emp` still follows when the null rarely detects them.
 
+In strict mode the non-truth candidates are 5 (genotypic: 579, 584, 611, 620, 623) and 11 (phenotypic: 460, 509, 518, 579, 584, 588, 611, 620, 744, 813, 855), and 5 and 10 are below 0.05 under `p.adj_bh` (all but 813). FADE calls 579 and 611 (genotypic) and 518, 611 and 620 (phenotypic) among them. 518 ranks first in the phenotypic run in both modes (0.873 lenient, 0.584 strict; 65 hypotheses in strict mode against 100). The strict runs keep 620 and 611 in the genotypic top 7 with lower scores (0.535 and 0.324, against 0.690 and 0.826).
+
 ## 6. Multiple-testing family
 
 ### 6a. Why candidate-set p-values are sub-uniform
@@ -143,6 +176,18 @@ Counts of positions below 0.1, except the raw count (below 0.05). "Candidate set
 | **BH of `p.emp` (`p.adj_bh`, pipeline)** | **null universe** | **27** (min 0.0054) | **23** (min 0.0053) |
 | **BH of `p.emp_fact` (`p.adj_bh_fact`, pipeline)** | **null universe** | **27** (min 0.0044) | **19** (min 0.0049) |
 
+Strict mode (null universe 25 and 47 positions, 15 and 30 of them null-only):
+
+| procedure | family | genotypic | phenotypic |
+|---|---|---|---|
+| raw `p.emp` < 0.05 | none | 10 | 17 |
+| BH of `p.emp` | candidate set | 10 (min 0.001) | 17 (min 0.002) |
+| Storey, λ = 0.5 | candidate set | 10 of 10 (π̂₀ = 0.00) | 17 of 17 (π̂₀ = 0.00) |
+| **BH of `p.emp` (`p.adj_bh`, pipeline)** | **null universe** | **10** (min 0.0027) | **17** (min 0.0051) |
+| **BH of `p.emp_fact` (`p.adj_bh_fact`, pipeline)** | **null universe** | **10** (min 0.0027) | **17** (min 0.0051) |
+
+In strict mode the candidates are almost all at the floor and the families have a handful of positions, so the procedures coincide.
+
 - **Storey on the candidate set is invalid, not merely unstable.** π̂₀ = #{p > λ}/(m(1 − λ)) assumes null p-values fill [0, 1]; §6a caps them near d, so π̂₀ is biased low (0.00 in both runs: no candidate has p > 0.5, the largest `p.emp` being 0.23 and 0.48) and Storey calls every candidate (35 and 34) where BH over the null universe calls 27 and 23.
 - **Candidate-set BH** counts 31 and 30 against 27 and 23, with smaller adjusted values because m is 35 and 34 instead of 80 and 71.
 - **On the null universe**, restoring the p = 1 mass makes π̂₀ ≈ 1, and Storey reduces to BH.
@@ -154,6 +199,7 @@ Counts of positions below 0.1, except the raw count (below 0.05). "Candidate set
 Calibration: each of the 1000 null cycles in turn is treated as observed and scored against the remaining 999, with the `.fact_*` functions of `scoring_compute.R` (`pepc_null_calibration.R`). A position the cycle does not score has p = 1. Under exchangeability the share of (position, cycle) pairs with p ≤ α cannot exceed α. For `p.emp` the share divided by α is 1.00, 0.97 and 0.92 (genotypic) and 0.00, 0.88 and 0.89 (phenotypic) at α = 0.001, 0.01 and 0.05 (0 at 0.001 in the phenotypic run because the smallest p of a pseudo-observed cycle, 1/999, exceeds 0.001). For `p.emp_fact` the ratios are 1.13, 0.99 and 0.91 (genotypic) and 1.10, 1.07 and 0.94 (phenotypic). The share of null cycles, taken as observed, with at least one position below 0.05 and 0.1 after BH of `p.emp` is 0.006 and 0.077 (genotypic) and 0.015 and 0.064 (phenotypic); after BH of `p.emp_fact` it is 0.053 and 0.100 (genotypic) and 0.047 and 0.096 (phenotypic). `pepc_null_calibration.R` writes the share tables and the per-cycle rates.
 
 - **Both p-values are at or below nominal.** `p.emp` is at or under the nominal level at every α (ratio 0.88 to 1.00), as expected for a statistic that counts ties and detection at the same time, and BH of `p.emp` calls in 0.6 % and 1.5 % of the null cycles at 0.05. `p.emp_fact` is within 14 % of nominal at the three levels, and BH of `p.emp_fact` calls in 5.3 % and 4.7 % of the cycles at 0.05 and in 10.0 % and 9.6 % at 0.1, i.e. at the nominal levels.
+- **Strict mode** is conservative: `p.emp` is 1.00, 0.73 and 0.40 of nominal at α = 0.001, 0.01 and 0.05 (genotypic) and 1.00, 0.90 and 0.70 (phenotypic), and `p.emp_fact` 0.92, 0.66 and 0.40 and 0.94, 0.88 and 0.69. Taken as observed, a null cycle has at least one position with BH < 0.05 / < 0.1 in 2.7 % / 6.7 % (genotypic) and 4.4 % / 7.8 % (phenotypic) of the cycles under `p.emp`, and 3.6 % / 7.5 % and 4.1 % / 8.7 % under `p.emp_fact`. The null of strict mode holds 513 (genotypic) and 3 200 (phenotypic) position-cycle detections over 1000 cycles, so most cycles detect nothing and the p-value of a position rests on few cycles.
 - **Scope.** Null cycles are draws from one generator, so this checks the estimators under exchangeability, not whether the observed labelling is exchangeable with the null ones (§6d). Pairs of the same position or the same cycle are not independent, and no standard error is given for the shares. Behavior under partial nulls and at genome scale is not tested.
 
 ### 6d. Is the observed labelling exchangeable with the null?
@@ -162,33 +208,15 @@ Calibration: each of the 1000 null cycles in turn is treated as observed and sco
 |---|---|---|
 | observed detections vs null per-cycle detections | 35; null median 25, q95 35; P(null ≥ obs) = 0.065 | 34; null median 19, q95 35; P = 0.064 |
 | observed vs pooled-null `CAAS_score` quartiles | 0.056 / 0.117 / 0.421 vs 0.011 / 0.026 / 0.056 | 0.031 / 0.122 / 0.447 vs 0.013 / 0.029 / 0.065 |
+| strict: observed detections vs null per-cycle detections | 10; null median 0, q95 2; P(null ≥ obs) = 0.005 | 17; null median 1, q95 14; P = 0.020 |
+| strict: observed vs pooled-null `CAAS_score` quartiles | 0.266 / 0.548 / 0.711 vs 0.009 / 0.013 / 0.022 | 0.070 / 0.250 / 0.438 vs 0.009 / 0.015 / 0.030 |
 | null cycles with the observed design (100 hypotheses) | 1000/1000 | 1000/1000 |
 
-The observed data detect as many positions as the upper tail of the null cycles (P(null ≥ observed) 0.064 to 0.065), and score above their median; this is what signal would produce and is not by itself diagnostic. Because every null cycle carries the same 100-hypothesis design as the observed data, the null is conditioned on design size by construction. The real labelling, routed through the null path as cycle b_0, reproduces every position score of the observed run (maximum difference 0 over 36 and 34 position-side scores), so the scoring is shared between the two paths. Whether the full observed path is exchangeable with the null under no association is tested by the negative controls (§6e).
+The observed data detect as many positions as the upper tail of the null cycles (P(null ≥ observed) 0.064 to 0.065), and score above their median; this is what signal would produce and is not by itself diagnostic. Because every null cycle carries the same 100-hypothesis design as the observed data, the null is conditioned on design size by construction. The real labelling, routed through the null path as cycle b_0, reproduces every position score of the observed run (maximum difference 0 over 36 and 34 position-side scores in lenient mode and 0 and 1 × 10⁻¹⁶ over 10 and 17 in strict mode), so the scoring is shared between the two paths. Whether the full observed path is exchangeable with the null under no association is tested by the negative controls (§6e).
 
 ### 6e. Negative controls
 
-These controls were run with the pipeline before the unified CAAS core and have not been repeated with it (mean aggregation of the scheme scores, no factorized p); their inputs and outputs are in `previous_work/`. Twenty control traits (`previous_work/input/pepc_negctrl/my_traits.tsv`, columns nc01 to nc20) were drawn by `previous_work/input/pepc_negctrl/build_negctrl_traits.R` from the permulation null's own generator fitted on the genotypic trait (BM, 23 foreground tips, Tier-1 Dunn acceptance at 4 pairs, seed 2026). Each was run through the observed path with the genotypic run's settings (`previous_work/input/pepc_negctrl/run_negctrl_local.sh`; FADE, enrichment and reports off). Overlap with the real C4 set is low (Jaccard ≤ 0.10; φ from −0.43 to 0.38). Summary: `previous_work/output/pepc_negctrl/negctrl_summary.tsv`, from `previous_work/input/pepc_negctrl/analyze_negctrl.py`.
-
-| quantity | value |
-|---|---|
-| controls with zero observed discoveries (no candidate positions, hence no calls) | 6/20 |
-| controls with candidate positions | 14/20; 1 to 18 positions each (median 2.5) |
-| observed detections vs null per-cycle detections | above the null median in 8/14; median P(null ≥ obs) = 0.40 (real traits: 0.036, 0.018) |
-| family p-values (null universe), pooled: P(p ≤ 0.01 / 0.05 / 0.10) | 0.028 / 0.069 / 0.093 |
-| observed-detected p-values only, pooled: P(p ≤ 0.01 / 0.05 / 0.10) | 0.24 / 0.58 / 0.78 |
-| controls with ≥ 1 call, BH `p.adj_bh < 0.05` | 1/20 |
-| controls with ≥ 1 call, BH `p.adj_bh < 0.1` | 4/20 |
-
-- **Detection counts behave like null draws.** Control labellings detect about as many positions as their own null cycles (median P = 0.40), while both real traits sit in the upper tail of theirs. This is the most direct check that the observed and null paths are exchangeable, and it holds.
-- **Run-level false calls are near nominal.** Under a complete null, P(≥ 1 call) is the realised FDR. At 0.05 it is 1/20; at 0.1 it is 4/20 (binomial P(X ≥ 4 | n = 20, p = 0.1) = 0.13, so not distinguishable from nominal with 20 controls).
-- **Filtering on detection makes candidate-set p-values anti-conservative, as §6a predicts.** Restricted to observed-detected positions, 58 % of p-values fall below 0.05.
-- **The family p-values are anti-conservative in the extreme tail** (2.8 × nominal at 0.01, 1.4 × at 0.05, nominal at 0.10). The 19 control positions with p ≤ 0.01 are positions the null rarely detects (median 28 of 1000 cycles, against 195 for all observed control positions). For such positions the add-one p has little resolution, and a position the null never detects enters at p = 1/1001 while every other never-detected column stays outside the family. nc13 shows the case: its single observed position (maize 723) is detected in 0 of 1000 null cycles and its family has 17 positions, so BH gives 0.017.
-- **Small candidate sets and the coordinate guard.** `scoring_compute.R` sets `p.emp` to NA when fewer than half of the observed positions are re-detected by the null, a check for coordinate mismatches between the observed and null tables; it applies only when ≥ 10 positions are observed, and below that an unmatched position is scored at k = 0. `analyze_negctrl.py` applies the same rule, so nc13's position enters the counts above at p = 1/1001.
-- **The tail excess is not explained by rare positions or by the null model.** Restricting the family to positions detected in ≥ 10 null cycles removes nc13's call but does not restore calibration (P(p ≤ 0.01 / 0.05 / 0.10) = 0.029 / 0.079 / 0.108), and controls whose null selects OU and BM show the same excess (0.027 vs 0.030 at 0.01). The excess is spread across controls (11 of 14 have ≥ 1 position at p ≤ 0.01). Run-level calls stay near nominal because, with families of 17 to 65 positions, a BH call at 0.05 needs a `p.emp` at or near the 1/1001 floor.
-- **Generator mismatch.** Controls were drawn from the BM fit on the genotypic trait, but each control's own null refits the model on that control and selects OU in 7 of the 14 controls with candidate positions. Control and null generators therefore differ in those runs. Where OU is rejected despite a lower AIC (e.g. nc01), `select_model` has fallen back to BM because the OU α optimised to its upper bound.
-
-- **Limit.** The null universe is defined by this run's 1000 cycles; positions with very low detection rates may be missing from it, which understates *m*; nc13 in §6e is a case where this decides a call. Columns never detected in the null sample are excluded unless the observed data detect them.
+Negative controls (control traits drawn from the permutation generator and analyzed through the complete observed workflow) have not been run with the current pipeline. The check available in this report is the null-cycle calibration of §6c, which tests the estimators under exchangeability and not whether the observed labelling is exchangeable with the null ones.
 
 ## 7. Sanity checks on the phenotypic input
 
@@ -214,7 +242,9 @@ On the same sedge PEPC data, Morel et al. (2024, Table 2) report PCOC recovering
 - The truth set is not phenotype-independent: selection- and weak-tier sites come from Besnard et al. (2009) tests on branches defined by Ser780. Only the mutagenesis tier (780, 665) and the parallel tier (733, 761) carry independent evidence, and 733 is uninformative in this sample.
 - The phenotypic trait is not clean either: at gene level it mislabels non-C4 paralogs of C4 species. A gene-copy-aware phenotypic label would require copy assignment, which in this dataset is made by the Ser780 residue itself; the two concerns cannot be fully separated with this fixture.
 - n = 10 truth positions in one gene.
-- The negative controls (§6e) were not repeated with the current pipeline.
+- Negative controls with the current pipeline are pending (§6e).
+- The strict runs have 10 and 17 candidates and 5 and 6 reference positions; their percentiles and shares (50 % and 35 % of the candidates are reference positions) describe one gene and carry no interval.
+- The value of `min_divergent_fraction` of the strict runs is not recorded; the strict mode is identified by `n_conserved_pairs` = 0 in every position.
 - The positions at the floor of `p.emp` (14 and 13) share one adjusted value, so the order among them rests on `CAAS_score` and on the factorized p; with 1000 cycles `p.emp` cannot separate them.
 
 ## References

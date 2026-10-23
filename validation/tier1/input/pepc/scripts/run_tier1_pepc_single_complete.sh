@@ -336,13 +336,9 @@ process {
         cpus   = { 6 }
         memory = { 4.GB * task.attempt }
     }
-    withName: 'CT_ACCUMULATION_AGGREGATE' {
-        cpus   = { 6 }
-        memory = { 8.GB  * task.attempt }
-    }
-    withName: 'CT_ACCUMULATION_RANDOMIZE' {
-        cpus   = { 6 }
-        memory = { 12.GB * task.attempt }
+    withName: 'CT_ACCUMULATION_TEST' {
+        cpus   = { 1 }
+        memory = { 8.GB * task.attempt }
     }
     withName: 'ACCUMULATION_REPORT' {
         cpus   = { 6 }
@@ -723,9 +719,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "ensembl_dataset": "${ENSEMBL_DATASET:-}",
 
   "ct_accumulation": $_RUN_ACCUMULATION,
-  "accumulation_n_randomizations": "$N_RANDOMIZATIONS",
-  "accumulation_randomization_type": "${ACCUMULATION_RANDOMIZATION_TYPE:-cons_decile}",
-  "accumulation_entropy_dir": "$ENTROPY_DIR",
   "accumulation_fdr": "${ACCUMULATION_FDR:-0.1}",
   "accumulation_caas_input": "${ACCUMULATION_CAAS_INPUT:-}",
   "accumulation_background_input": "${ACCUMULATION_BACKGROUND_INPUT:-}",

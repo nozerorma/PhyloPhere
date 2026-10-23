@@ -54,3 +54,7 @@ tier2/input/**/*.txt
 tier2/input/**/prune/
 tier2/output/
 tier2/UCSC62mammaltrees.rds*
+
+# Tier 2 alignments written by tier2/input/marine/scripts/build.py (--align-out).
+phylophere_tier2/
+!tier2/input/marine/toy_genes.tsv

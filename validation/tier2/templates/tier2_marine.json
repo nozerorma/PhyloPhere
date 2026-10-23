@@ -25,7 +25,7 @@
     "sbatch_time": "",
     "sbatch_mail_user": "",
     "sbatch_array_concurrency": "",
-    "alignment_dir": "/media/miguel/external/phylophere_tier2/marine/align",
+    "alignment_dir": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/phylophere_tier2/marine/align",
     "ali_format": "fasta",
     "tree_file": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier2/input/marine/tree.nwk",
     "trait_file": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier2/input/marine/my_traits.tsv",
@@ -121,9 +121,6 @@
     "accumulation": {
       "enabled": false,
       "extra_flags": "",
-      "accumulation_n_randomizations": "1000000",
-      "accumulation_randomization_type": "cons_decile",
-      "accumulation_entropy_dir": "",
       "accumulation_fdr": "0.05"
     },
     "rer": {
