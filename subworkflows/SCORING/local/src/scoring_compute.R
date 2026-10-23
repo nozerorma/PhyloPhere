@@ -318,7 +318,8 @@ if (has_null_counters) {
 if (has_null_counters) {
   cat("Loading the counters of the position-level null (p.emp):", null_counters_file, "\n")
   # N = cycles replayed, not cycles with a detection: a cycle that re-detects no position counts in the denominator.
-  .roster <- trimws(readLines(cycle_roster_file, warn = FALSE)); .roster <- unique(.roster[nzchar(.roster)])
+  .roster <- trimws(readLines(cycle_roster_file, warn = FALSE)); .roster <- .roster[nzchar(.roster)]
+  if (anyDuplicated(.roster)) stop("Duplicate null cycle IDs in cycle_roster.txt")
   N_emp <- length(.roster)
   cat(sprintf("  N = %d cycles (source: cycle_roster.txt)\n", N_emp))
   .counters <- read_tsv(null_counters_file, show_col_types = FALSE, col_types = cols(Gene = col_character(), Position = col_integer(), .default = col_integer()))

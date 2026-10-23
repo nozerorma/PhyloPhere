@@ -96,6 +96,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "toy_mode": _bool_str(project.runtime.toy_mode),
         "caas": _bool_str(caas_enabled),
         "caas_permulation_enrichment": _bool_str(caas.caas_permulation_enrichment),
+        "caas_export_single": _bool_str(caas.caas_export_single),
         "caas_perms_postproc": _bool_str(caas.caas_perms_postproc),
         "strict_conservation_output": _bool_str(caas.strict_conservation_output),
         "disambiguation": _bool_str(disambiguation_enabled),

@@ -371,11 +371,15 @@ def main(argv=None) -> int:
     obs_genes, obs_pos, obs_score = observed_best(a.postproc)
     if a.cmd == "universe":
         roster = [x for x in a.roster.read_text().splitlines() if x.strip()]
+        if len(roster) != len(set(roster)):
+            raise ValueError("Duplicate null cycle IDs in roster")
         null = pq.read_table(a.null_positions)
         classes, breaks, sizes, metrics = build_universe(null, obs_genes, obs_pos, a.tested, a.universe, roster)
         present = len(roster)
         if a.counts_json is not None and a.counts_json.is_file():
             counts = json.loads(a.counts_json.read_text())
+            if counts["cycles"] != len(roster):
+                raise ValueError("Null cycle count differs from roster")
             present = int(counts["cycles_present"])
             if counts.get("score_rule") != SCORE_RULE:
                 print(f"the CAAS permulation null was scored with the rule '{counts.get('score_rule')}' and the observed scores with "

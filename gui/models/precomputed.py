@@ -22,7 +22,7 @@ Path templates, relative to base_path/<TRAIT>, matched to the publishDir of each
   CT/CAAS       : caastools/{discovery,resample}.tab, caastools/background_genes.output,
                   caastools/background.output, meta_caas/meta_caas/meta_caas.tsv
                   (signification/meta_caas/ is also searched, for outdirs that use that name),
-                  caas_permulation/ (dir: null_positions.parquet, blocks/, cycle_roster.txt, counts.json,
+                  caas_permulation/ (dir: null_positions.parquet, blocks/, cycle_roster.txt, null_metadata.json, counts.json,
                   cycle_summary.tsv, cycle_hist.tsv)
   Disambiguation: ct_disambiguation/caas_convergence_master.csv, ct_disambiguation/ (dir)
   Post-processing: postproc/gene_filtering/filtered_discovery.tsv,

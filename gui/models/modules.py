@@ -48,6 +48,7 @@ class CaasConfig(ModuleConfigBase):
     patterns: str = "1,2,3"  # --patterns
     caas_full_perms: str = "1000"  # --caas_full_perms
     caas_permulation_enrichment: bool = True  # --caas_permulation_enrichment
+    caas_export_single: bool = False  # --caas_export_single: reconstruct the global compatibility RDS
     caas_perms_postproc: bool = True  # --caas_perms_postproc (apply the observed post-processing filters to the permulation null)
     gene_stat: str = "size_adj_max"  # --gene_stat (size_adj_max|fmax|max: gene statistic of the permulation null and of the observed gene score)
 

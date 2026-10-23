@@ -417,6 +417,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `publish_intermediates` | `false` | Publishes intermediate discovery and resampling files for debugging. |
 | `ct_bootstrap_batch_size` | `10` | Number of genes batched per bootstrap task. |
 | `gene_stat` | `size_adj_max` | Gene statistic of the permulation null and of the observed gene score: `size_adj_max` (F(max)^n), `fmax` (F(max)) or `max` (the largest position score of the gene); F is the ECDF of the position scores of the cycle in the direction. The null of a prior run must have been built with the same one. |
+| `caas_export_single` | `false` | Reconstruct the global `caas_perms.rds` compatibility export from canonical `caas_permulation/blocks/blk_*/matrices.rds`. Normal SCORING and calibrated FCS use blocks, roster and metadata. Export memory grows with the complete null. |
 | `caas_cycle_block_size` | `500` | Permulation cycles per block of the CAAS null: a replay task takes one batch of genes (`ct_core_batch_size`) and the labelings of one block, so its memory does not depend on `caas_full_perms`. |
 | `caas_config` | `""` | Path to custom CAAStools configuration file. |
 | `max_bg_gaps_fraction` / `max_fg_gaps_fraction` / `max_gaps_fraction` | `0.0` | Gap tolerance fractions allowed in background, foreground, or overall. |
@@ -782,3 +783,18 @@ GNU General Public License v3.0 — see [LICENSE](LICENSE).
 - [CAAS permulation-excess null](docs/CAAS_PERMULATION_EXCESS.md)
 - [CAAS permulation runtime notes](docs/CAAS_PERMULATION_RUNTIME.md)
 - [Enrichment report orchestration](docs/ENRICHMENT_REPORT_ORCHESTRATION.md)
+
+### CAAS null blocks and compatibility export
+
+The canonical reusable null is the whole `caas_permulation/` directory: retain `blocks/blk_*/matrices.rds`, `cycle_roster.txt`, `null_metadata.json`, counts and positional tables together. Supply it with `--caas_null_dir` when reusing a saved null. Missing blocks or inconsistent cycles are errors; cycles without detections still count in N. Saved WP5 directories without the new index remain readable with their roster.
+
+Normal runs do not assemble `caas_perms.rds`. Use `--caas_export_single true` to publish that compatibility object (also under `strict/` when enabled). To export an existing store explicitly:
+
+```bash
+Rscript subworkflows/SCORING/local/src/scoring_caas_perms.R \
+  --blocks RESULTS/caas_permulation/blocks/blk_*/matrices.rds \
+  --cycles RESULTS/caas_permulation/cycle_roster.txt \
+  --output caas_perms.rds
+```
+
+The export allocates the complete null matrices. Productive calibrated CAAS FCS uses blocks; GENE_P still retains all cycles for a batch of genes. Integrated acceptance and real-scale resource measurements remain pending; see `docs/fases/WP7_caas_perms_por_bloques.md`.

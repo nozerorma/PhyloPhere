@@ -284,8 +284,6 @@ def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
         # there in scoring.nf), the same file as the gene Ensembl slot of CT_POSTPROC.
         _slot("genomic_info", "Gene genomic coordinates TSV", False,
               _first_match(outdir, "postproc/postproc_inputs/*", "**/*genomic_info*.tsv", "**/*genomic*coords*.tsv")),
-        _slot("caas_perms", "CAAS permulation RDS", False,
-              _first_match(outdir, "**/*caas*perm*.rds")),
         _slot("null_summary", "Null summary per cycle TSV", False,
               _first_match(outdir, "caas_permulation/cycle_summary.tsv", "**/cycle_summary.tsv")),
         _slot("null_hist", "Null score histogram per cycle TSV", False,
@@ -324,7 +322,6 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"fade_site_top_file   = {_r_arg(s['fade_site_top'])}",
             f"fade_site_bot_file   = {_r_arg(s['fade_site_bot'])}",
             f"genomic_info_file    = {_r_arg(s['genomic_info'])}",
-            f"caas_perms_file      = {_r_arg(s['caas_perms'])}",
             f"null_summary_file   = {_r_arg(s['null_summary'])}",
             f"null_hist_file      = {_r_arg(s['null_hist'])}",
             f"caas_pos_sample_file = {_r_arg(s['caas_pos_sample'])}",

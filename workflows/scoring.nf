@@ -30,7 +30,7 @@ workflow SCORING {
         fade_site_bot_ch         // Channel<path> or null — fade_site_bf_bottom.tsv  (optional)
         cleaned_background_ch    // Channel<path> or null — cleaned_background_main.txt (FCS universe)
         rer_perms_ch             // Channel<path> or null — RER permulation RDS (corStat) for RER FCS p.perm
-        caas_perms_ch            // Channel<path> or null — CAAS permulation RDS (asr + caas null) for FCS p.perm
+        caas_perms_ch            // Channel<path> or null — optional CAAS compatibility export; FCS prefers blocks
         null_positions_ch        // Channel<path> or null, null_positions.parquet: the positions the null scores, with nd
         null_blocks_ch           // Channel<List<path>> or null, the blocks' directories (scored positions of the permuted cycles)
         null_counts_ch           // Channel<path> or null, counts.json of the null
@@ -168,10 +168,7 @@ workflow SCORING {
             resolved_perm_harvest = Channel.value(file('NO_PERM_HARVEST'))
         }
 
-        // CAAS permulation null (caas_perms.rds) — resolved ONCE, before SCORING_COMPUTE, so both it (Tier 1A per-gene
-        // p.perm) and the scoring report / FCS report (p.perm) consume the SAME null. It is the one CAAS_CORE_MERGE
-        // built in this run; without it every consumer receives the NO_FILE sentinel. Value channel via
-        // collect()/map (NOT .first(), which warns on a value channel).
+        // Optional compatibility export: resolve absence to a value so ENRICHMENT always runs.
         def caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
             .ifEmpty { file('NO_FILE') }
             .collect()

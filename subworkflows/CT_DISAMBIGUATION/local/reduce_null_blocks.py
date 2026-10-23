@@ -5,7 +5,7 @@
 """
 CAAS_CORE_MERGE_REDUCE: joins what merge_null_block.py wrote for each block of cycles.
 
-Every file is small (a row per cycle or per removed unit), so the join reads them whole. The matrices are joined by
+Every file is small (a row per cycle or per removed unit), so the join reads them whole. The matrices are validated, and optionally exported, by
 scoring_caas_perms.R and the scored positions stay in their blocks (the position-level null is consumed block by block).
 
 Called by:  CAAS_CORE_MERGE_REDUCE (subworkflows/CT/caas_permulation.nf) → reduce_null_blocks.py
@@ -94,6 +94,7 @@ def join_detections(blocks, roster, out: Path):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--blocks", required=True, nargs="+", type=Path, help="merge_null_block.py output directories")
+    ap.add_argument("--labelings", type=Path, help="complete replay input; refuse missing whole blocks")
     ap.add_argument("--output-dir", required=True, type=Path)
     args = ap.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -111,6 +112,11 @@ def main() -> int:
         if meta["cycles"] != len(cycles):
             raise ValueError(f"cycle count in {b / 'counts.json'} differs from its roster")
         roster.update(cycles)
+    if args.labelings:
+        from merge_null_block import read_roster
+        expected = set(read_roster(args.labelings, any("~" in c for c in roster), False))
+        if roster != expected:
+            raise ValueError(f"missing or unexpected block cycles: missing={sorted(expected-roster)[:5]}, extra={sorted(roster-expected)[:5]}")
     (args.output_dir / "cycle_roster.txt").write_text("".join(f"{c}\n" for c in sorted(roster)))
 
     join_tables(blocks, "removed_units.tsv", args.output_dir, sort_rows=True)

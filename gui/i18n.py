@@ -26,6 +26,11 @@ LANGUAGES: Dict[str, str] = {
 }
 
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
+    "Export single CAAS null RDS": {
+        "en": "Export single CAAS null RDS", "es": "Exportar el nulo CAAS en un RDS único",
+        "ca": "Exporta el nul CAAS en un RDS únic", "fr": "Exporter le nul CAAS dans un RDS unique",
+        "it": "Esporta il nullo CAAS in un unico RDS", "de": "CAAS-Nullmodell als einzelne RDS exportieren",
+    },
     # ── Tab titles ────────────────────────────────────────────────────────────
     "Tab: General": {
         "en": "General",

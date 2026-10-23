@@ -31,6 +31,7 @@ process CAAS_NULL_UNIVERSE {
     path universe           // cleaned_background_main.txt or a NO_* sentinel
     path roster
     path counts
+    path blocks, stageAs: 'blk_*'
 
     output:
     path "universe/null_classes.parquet", emit: classes
@@ -44,6 +45,7 @@ process CAAS_NULL_UNIVERSE {
     def tested_arg   = tested_positions.name.startsWith('NO_') ? '' : "--tested ${tested_positions}"
     def universe_arg = universe.name.startsWith('NO_') ? '' : "--universe ${universe}"
     """
+    ${ (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript' } ${local_dir}/scoring_caas_perms.R --blocks blk_*/matrices.rds --cycles ${roster} --validate-only
     cp ${local_dir}/null_position_stats.py .
     mkdir -p src/core && cp ${core_dir}/scores.py src/core/ && touch src/__init__.py src/core/__init__.py
     ${py} null_position_stats.py universe \\
@@ -115,7 +117,7 @@ workflow SCORING_NULL_POSITIONS {
         roster           // value channel: cycle_roster.txt
 
     main:
-        def u = CAAS_NULL_UNIVERSE(null_positions, postproc, tested_positions, universe, roster, null_counts)
+        def u = CAAS_NULL_UNIVERSE(null_positions, postproc, tested_positions, universe, roster, null_counts, null_blocks)
         // The single-item outputs are queue channels: made value channels so that every block's task can read them.
         def classes_bc = u.classes.collect().map { items -> items[0] }
         def fit_bc     = u.fit.collect().map { items -> items[0] }

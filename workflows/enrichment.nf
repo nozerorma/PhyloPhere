@@ -208,7 +208,7 @@ workflow ENRICHMENT {
 
         if (run_fcs) {
             def scoring_fcs_compute = FCS_COMPUTE_SCORING(fcs_stats, fcs_universe_ch, caas_perms_resolved, caas_blocks_ch.ifEmpty([]))
-            def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch, caas_perms_resolved, gene_lists_ch,
+            def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch, gene_lists_ch,
                                               scoring_fcs_compute.enrich_file)
             fcs_out_report = fcs_out.report
             caas_all = fcs_out.fcs_all_results.ifEmpty { file('NO_FCS_ALL') }

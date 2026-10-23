@@ -63,6 +63,7 @@
       "patterns": "1,2,3",
       "caas_full_perms": "1000",
       "caas_permulation_enrichment": true,
+      "caas_export_single": false,
       "caas_perms_postproc": true,
       "pss_top_pct": "0.05",
       "max_contrasts": "3",

@@ -163,6 +163,7 @@ SPEC = ModuleTabSpec(
             importance="optional",
         ),
         Section("Permulation null"),
+        FieldSpec(name="caas_export_single", label="Export single CAAS null RDS", kind="bool", importance="optional"),
         FieldSpec(name="caas_perms_postproc", label="Apply post-processing filters to the permulation null", kind="bool", importance="default"),
         FieldSpec(
             name="gene_stat",

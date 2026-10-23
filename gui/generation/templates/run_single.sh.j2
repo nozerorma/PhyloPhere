@@ -132,7 +132,7 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     done
     # The roster gives N of the null (cycles with no detection included); a null of an older run has none
     [ -f "$CAAS_CYCLE_ROSTER_FILE" ] || {
-        echo "[WARN] cycle_roster.txt missing: N will be the number of cycles present in the null (understated when a cycle detected nothing)" >&2
+        echo "[WARN] cycle_roster.txt missing: position-level null unavailable; rebuild the canonical null" >&2
         CAAS_CYCLE_ROSTER_FILE=""
     }
 
@@ -495,6 +495,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
      in sbatch_array.sh.j2. The two must stay coupled: a large harvest target with a small draw budget triggers
      the target-aware escalation of permulations.R and defeats a smoke test. #}
   "caas_permulation_enrichment": {{ run_defaults.caas_permulation_enrichment }},
+  "caas_export_single": {{ run_defaults.caas_export_single }},
   "caas_perms_postproc": {{ run_defaults.caas_perms_postproc }},
   "caas_full_perms": "$CAAS_FULL_PERMS",
   "pss_top_pct": "${PSS_TOP_PCT:-0.01}",

@@ -26,7 +26,7 @@
  *       the same block, which gene removal and the reference pools of the gene score need):
  *       gene removal, the pools of the cycle, the gene statistics as genes x cycles matrices,
  *       and the scored positions of the block. CAAS_CORE_MERGE_REDUCE joins the blocks into
- *       caas_perms.rds, the roster and the small tables. A block merge needs the gene universe, which
+ *       the validated block index, roster and small tables. A block merge needs the gene universe, which
  *       the post-processing of the observed results provides, so it runs after CAAS_CORE_OBSERVED.
  *
  *  The aggregate RDS feeds the FCS p.perm path (fcs_enrich.R), which gives the CAAS
@@ -476,21 +476,23 @@ process CAAS_CORE_MERGE {
 }
 
 // The blocks joined: the roster (N of every consumer of the null), the small tables of the whole null, the positions the
-// null scores (nd per position, the universe of the accumulation test and of the position p) and caas_perms.rds, the
-// genes x cycles matrices of the gene statistic of all the blocks (until WP7 gives the FCS the blocks).
+// null scores (nd per position, the universe of the accumulation test and of the position p).
+// Canonical matrices stay in blocks; caas_export_single requests a compatibility export.
 process CAAS_CORE_MERGE_REDUCE {
     tag "caas_core_merge_reduce"
     label 'process_medium'
     // ext.publish_prefix is "/strict" for the strict alias (CAAS_CORE_MERGE_REDUCE_STRICT)
     publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}/caas_permulation" }, mode: 'copy', overwrite: true,
-               pattern: '{caas_perms.rds,perm_pos_sample.tsv,perm_pos_quantiles.tsv,cycle_roster.txt,removed_units.tsv,cycle_summary.tsv,cycle_hist.tsv,null_positions.parquet,counts.json}'
+               pattern: '{null_metadata.json,caas_perms.rds,perm_pos_sample.tsv,perm_pos_quantiles.tsv,cycle_roster.txt,removed_units.tsv,cycle_summary.tsv,cycle_hist.tsv,null_positions.parquet,counts.json}'
 
     input:
     path blocks, stageAs: 'blk_*'    // the block directories of CAAS_CORE_MERGE (permuted cycles only)
     path universe                    // gene universe (cleaned_background_main.txt) or NO_FILE
+    path labelings                   // complete replay input: detects missing whole blocks
 
     output:
-    path "caas_perms.rds",            emit: perms
+    path "caas_perms.rds",            emit: perms, optional: true
+    path "null_metadata.json",        emit: metadata
     path "removed_units.tsv",         emit: removed_units, optional: true   // null gene removal (only when a gene annotation was given)
     path "cycle_roster.txt",          emit: cycle_roster
     path "perm_pos_sample.tsv",       emit: pos_sample
@@ -511,12 +513,13 @@ process CAAS_CORE_MERGE_REDUCE {
     cp -R ${disambig_local}/* .
     find . -name '*.pyc' -delete 2>/dev/null || true
 
-    ${py} ./reduce_null_blocks.py --blocks blk_*/ --output-dir .
+    ${py} ./reduce_null_blocks.py --blocks blk_*/ --labelings ${labelings} --output-dir .
     ${rs} ${scoring_local}/src/scoring_caas_perms.R \
         --blocks blk_*/matrices.rds \
         --cycles cycle_roster.txt \
         ${universe_arg} \
-        --output caas_perms.rds
+        --metadata null_metadata.json \\
+        ${params.caas_export_single == true ? '--output caas_perms.rds' : '--validate-only'}
     """
 }
 

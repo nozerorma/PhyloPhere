@@ -44,7 +44,6 @@ process SCORING_FCS_REPORT {
     input:
     path fcs_stats
     path universe
-    path perms_file
     path gene_lists
     path enrich_file
 
@@ -87,7 +86,6 @@ process SCORING_FCS_REPORT {
                 cluster_threshold  = ${params.fcs_cluster_threshold},
                 top_n         = ${top_n},
                 traitname     = '${traitname}',
-                perms_file    = '${perms_file}',
                 gene_lists_dir = ${gene_lists_arg},
                 enrich_file   = ${enrich_file_arg}
             ),
