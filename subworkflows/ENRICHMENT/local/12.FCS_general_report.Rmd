@@ -546,6 +546,7 @@ disp_names <- c(
   caas_nominal_bottom = "CAAS bottom nominal", caas_adjusted_bottom = "CAAS bottom BH",
   flag_fade = "fade", flag_fade_top = "fade_top", flag_fade_bottom = "fade_bottom",
   flag_rer_acc = "rer_acc", flag_rer_decc = "rer_decc",
+  flag_rer_acc_adjusted = "rer_acc BH", flag_rer_decc_adjusted = "rer_decc BH",
   flag_accum = "accum", flag_accum_top = "accum_top", flag_accum_bottom = "accum_bottom"
 )
 # Attribute columns shown per ranking (direction-aware). flag_accum is the
@@ -604,7 +605,8 @@ for (rk in ranking_names) {
     select(database, pathway, Description, n_le, q.perm, Group, Rep,
            any_of(intersect(want, names(.))))
   # Rename the attribute columns to their display names.
-  present_attr <- intersect(want, names(summ))
+  # Unmapped attributes retain their source names rather than becoming NA.
+  present_attr <- intersect(intersect(want, names(summ)), names(disp_names))
   names(summ)[match(present_attr, names(summ))] <- disp_names[present_attr]
   print(kbl_html(summ, height = if (nrow(summ) > 15) "480px" else NULL))
 
