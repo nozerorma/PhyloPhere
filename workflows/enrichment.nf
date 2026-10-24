@@ -119,6 +119,87 @@ def unwrap1(ch) {
     return ch.map { it instanceof List ? it[0] : it }
 }
 
+// Validate supplied references before any expensive workflow tasks are submitted.
+def validatePositionReferences() {
+    def checkedAlignments = [] as Set
+    def checkedMaps = [] as Set
+    def hashFile = { path ->
+        def digest = java.security.MessageDigest.getInstance('SHA-256')
+        java.nio.file.Files.newInputStream(path).withCloseable { stream ->
+            byte[] buffer = new byte[1024 * 1024]
+            int count
+            while ((count = stream.read(buffer)) > 0) digest.update(buffer, 0, count)
+        }
+        digest.digest().encodeHex().toString()
+    }
+    def sources = [
+        [key: 'domain_variability_file', enabled: params.posenrich_domains, required: ['gene','pfam_id','target_name','description','clan_acc','clan_name','ali_start','ali_end','coordinate_space']],
+        [key: 'ucr_positions_file', enabled: params.posenrich_ucr, required: ['gene','position','region_type','method','variability']],
+        [key: 'fubar_sites_file', enabled: true, required: ['gene','is_pos_hit','is_neg_hit','hg38_aa_pos']],
+        [key: 'posenrich_custom_file', enabled: true, required: []]
+    ]
+    sources.each { spec ->
+        def source = params[spec.key]
+        if (spec.enabled && source && !source.toString().startsWith('NO_')) {
+            def input = file(source)
+            if (!input.exists() && !source.toString().endsWith('.gz')) input = file("${source}.gz")
+            if (!input.exists()) error "Supplied ${spec.key} does not exist: ${source}"
+            if (spec.required) {
+                def stream = java.nio.file.Files.newInputStream(input)
+                if (input.toString().endsWith('.gz')) stream = new java.util.zip.GZIPInputStream(stream)
+                def header = new BufferedReader(new InputStreamReader(stream, 'UTF-8')).withCloseable { it.readLine() }
+                def columns = header ? header.split('\t').toList() : []
+                def missing = spec.required.findAll { !columns.contains(it) }
+                if (missing) {
+                    if (spec.key == 'domain_variability_file' && missing.contains('coordinate_space'))
+                        error "Pfam table '${input}' has no coordinate_space. Regenerate on the productive CAAS alignments; do not relabel legacy endpoints without verification."
+                    error "${spec.key} '${input}' missing columns: ${missing}"
+                }
+            }
+            def manifest = file("${input}.manifest.json")
+            if (manifest.exists()) {
+                def meta = new groovy.json.JsonSlurper().parseText(manifest.text)
+                if (meta.table_sha256 && hashFile(input) != meta.table_sha256)
+                    error "Reference checksum mismatch: ${input}"
+                if (meta.alignment_dir && params.alignment) {
+                    def expected = file(meta.alignment_dir).toRealPath()
+                    def productive = file(params.alignment).toRealPath()
+                    if (expected != productive) error "${spec.key} belongs to alignment '${expected}', but this run uses '${productive}'"
+                    if (meta.alignments && !checkedAlignments.contains(productive.toString())) {
+                        def actualNames = java.nio.file.Files.list(productive).withCloseable { paths ->
+                            paths.filter { java.nio.file.Files.isRegularFile(it) && it.fileName.toString().toLowerCase() ==~ /.*\.(fa|fasta|faa|fas)/ }
+                                .map { it.fileName.toString() }.collect(java.util.stream.Collectors.toSet())
+                        }
+                        if (actualNames != meta.alignments.keySet()) error "Alignment inventory changed since reference generation: ${productive}"
+                        meta.alignments.each { name, expectedHash ->
+                            def alignment = productive.resolve(name)
+                            if (!java.nio.file.Files.exists(alignment) || hashFile(alignment) != expectedHash)
+                                error "Productive alignment changed since reference generation: ${alignment}"
+                        }
+                        checkedAlignments.add(productive.toString())
+                    }
+                }
+                if (meta.map_dir && params.caas_map_dir && file(meta.map_dir).toRealPath() != file(params.caas_map_dir).toRealPath())
+                    error "${spec.key} was validated with a different MAP directory: ${meta.map_dir}"
+                if (meta.map_dir && meta.maps && params.caas_map_dir && !checkedMaps.contains(meta.map_dir)) {
+                    def mapRoot = file(params.caas_map_dir)
+                    def actualMaps = java.nio.file.Files.list(mapRoot).withCloseable { paths ->
+                        paths.filter { java.nio.file.Files.isRegularFile(it) && it.fileName.toString().endsWith('.map.tsv') }
+                            .map { it.fileName.toString() }.collect(java.util.stream.Collectors.toSet())
+                    }
+                    if (actualMaps != meta.maps.keySet()) error "MAP inventory changed since reference generation: ${mapRoot}"
+                    meta.maps.each { name, expectedHash ->
+                        def mapPath = file(params.caas_map_dir).resolve(name)
+                        if (!java.nio.file.Files.exists(mapPath) || hashFile(mapPath) != expectedHash)
+                            error "Productive MAP changed since reference generation: ${mapPath}"
+                    }
+                    checkedMaps.add(meta.map_dir)
+                }
+            }
+        }
+    }
+}
+
 workflow ENRICHMENT {
     take:
         fcs_stats
@@ -151,6 +232,7 @@ workflow ENRICHMENT {
         taxid_map_ch                  // tax_id map (curated by NAME_CURATION) for the clade variability of UCR, or NO_FILE
 
     main:
+        validatePositionReferences()
         def fcs_universe_ch = (cleaned_background_ch ?: Channel.empty())
             .ifEmpty { file('NO_BACKGROUND') }
             .collect()
@@ -413,17 +495,20 @@ workflow ENRICHMENT {
         def cmp_fade_bot_ch   = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_BOTTOM') }
         // Annotations do not require a positional permulation null. Use supplied
         // Pfam/UCR tables only: this path never starts downloads or heavy fitting.
-        POSITION_ANNOTATIONS(
-            Channel.value(precomputedOrSentinel('gene_ensembl_file', params.gene_ensembl_file, 'NO_ANNOT_ENSEMBL')),
-            Channel.value(precomputedOrSentinel('domain_variability_file', params.posenrich_domains ? params.domain_variability_file : '', 'NO_ANNOT_DOMAIN')),
-            Channel.value(precomputedOrSentinel('ucr_positions_file', params.posenrich_ucr ? params.ucr_positions_file : '', 'NO_ANNOT_UCR')),
-            Channel.value(precomputedOrSentinel('fubar_sites_file', params.fubar_sites_file, 'NO_ANNOT_FUBAR')),
-            Channel.value(precomputedOrSentinel('caas_map_dir', params.caas_map_dir, 'NO_ANNOT_MAP')),
-            fcs_universe_ch.map { it[0] },
-            cmp_fade_top_ch, cmp_fade_bot_ch,
-            Channel.value(precomputedOrSentinel('posenrich_custom_file', params.posenrich_custom_file, 'NO_ANNOT_CUSTOM'))
-        )
-        def posenrich_position_char_ch = POSITION_ANNOTATIONS.out.position_char
+        def posenrich_position_char_ch = Channel.empty()
+        if (!params.posenrich_modular) {
+            POSITION_ANNOTATIONS(
+                Channel.value(precomputedOrSentinel('gene_ensembl_file', params.gene_ensembl_file, 'NO_ANNOT_ENSEMBL')),
+                Channel.value(precomputedOrSentinel('domain_variability_file', params.posenrich_domains ? params.domain_variability_file : '', 'NO_ANNOT_DOMAIN')),
+                Channel.value(precomputedOrSentinel('ucr_positions_file', params.posenrich_ucr ? params.ucr_positions_file : '', 'NO_ANNOT_UCR')),
+                Channel.value(precomputedOrSentinel('fubar_sites_file', params.fubar_sites_file, 'NO_ANNOT_FUBAR')),
+                Channel.value(precomputedOrSentinel('caas_map_dir', params.caas_map_dir, 'NO_ANNOT_MAP')),
+                fcs_universe_ch.map { it[0] },
+                cmp_fade_top_ch, cmp_fade_bot_ch,
+                Channel.value(precomputedOrSentinel('posenrich_custom_file', params.posenrich_custom_file, 'NO_ANNOT_CUSTOM'))
+            )
+            posenrich_position_char_ch = POSITION_ANNOTATIONS.out.position_char
+        }
 
         // ── POSENRICH modular (WP10) ──
         // Common registry + characterization + within-protein localization + global
@@ -443,6 +528,7 @@ workflow ENRICHMENT {
                 cmp_fade_top_ch, cmp_fade_bot_ch,
                 Channel.value(precomputedOrSentinel('posenrich_custom_file', params.posenrich_custom_file, 'NO_ANNOT_CUSTOM'))
             )
+            posenrich_position_char_ch = modular_out.position_char
             final_reports = final_reports.mix(modular_out.report)
         }
 

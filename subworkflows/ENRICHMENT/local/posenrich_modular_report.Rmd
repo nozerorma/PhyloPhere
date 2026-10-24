@@ -30,8 +30,8 @@ params:
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 suppressPackageStartupMessages({library(dplyr); library(readr); library(DT); library(jsonlite)})
 
-read_manifest <- function(path) {
-  f <- file.path(path, "manifest.json")
+read_manifest <- function(path, name = "manifest.json") {
+  f <- file.path(path, name)
   if (!file.exists(f)) return(NULL)
   fromJSON(f, simplifyVector = FALSE)
 }
@@ -45,15 +45,17 @@ asociación global, en contratos separados) y **proximidad** a sitios o regiones
 
 - **Unidad:** una posición biológica `(Gene, Position)`, Position 0-based en el alineamiento
   recortado de CAAS. El p.emp es el máximo entre lados: una prueba por posición, no dos.
-- **Ranking principal:** `r params$ranking` (`r params$aggregation` como agregación principal;
-  `r params$n_permutations` permutaciones, semilla `r params$seed`).
+- Los parámetros y el estado de cada componente se leen de sus manifiestos publicados.
+- Los efectos se condicionan a posiciones con score canónico positivo (o p canónico en la
+  sensibilidad). No representan el universo completo de posiciones evaluables. Un score
+  ausente o no positivo no se imputa como cero ni recibe un p=1.
 - AUC es el estadístico principal del ranking; recuentos y solapamientos son descriptivos.
 - UCR/FUBAR/FADE provienen de análisis evolutivos relacionados: no son validación externa
   independiente. COSMIC/PrimateAI/VEP son anotaciones descriptivas.
 
 ```{r overview}
 reg_manifest <- read_manifest(params$registry_dir)
-char_manifest <- read_manifest(params$characterization_dir)
+char_manifest <- read_manifest(params$characterization_dir, "characterization_manifest.json")
 loc_manifest <- if (dir.exists(params$localization_dir)) fromJSON(file.path(params$localization_dir, "localization_manifest.json"), simplifyVector = FALSE) else NULL
 glob_manifest <- if (dir.exists(params$global_dir)) fromJSON(file.path(params$global_dir, "global_manifest.json"), simplifyVector = FALSE) else NULL
 prox_manifest <- if (dir.exists(params$proximity_dir)) fromJSON(file.path(params$proximity_dir, "proximity_manifest.json"), simplifyVector = FALSE) else NULL
@@ -78,7 +80,7 @@ evaluación y coordenadas, evidencia por lado con el p compartido, colecciones, 
 cobertura con denominadores explícitos y mapeos pendientes (nunca negativos).
 
 ```{r registro}
-f <- file.path(params$registry_dir, "universe_summary.tsv")
+f <- file.path(params$characterization_dir, "universe_summary.tsv")
 universe <- if (file.exists(f)) read_tsv(f, show_col_types = FALSE) else NULL
 coverage_f <- file.path(params$registry_dir, "coverage.tsv")
 coverage <- if (file.exists(coverage_f)) read_tsv(coverage_f, show_col_types = FALSE) else NULL
@@ -134,11 +136,11 @@ if (!is.null(char_pos)) {
 
 **Estimando:** AUC de los miembros del término frente a los no miembros elegibles de la
 **misma proteína**, con medio crédito a empates; solo informan genes con ambos grupos.
-Agregación principal: `r params$aggregation` (media por gen con igual peso); la ponderación
-por pares se reporta como sensibilidad. **Control:** redistribución condicionada dentro de
-proteína (permutación de etiquetas de membresía dentro de cada proteína, preservando proteína,
-perfil de scores y cobertura); p Monte Carlo unilateral para mayor AUC, excedencias inclusivas,
-(k+1)/(B+1), semilla fija.
+La agregación y dirección del ranking constan en cada fila. Se informa el efecto
+**descriptivo condicionado a detecciones positivas**. El control de redistribución de etiquetas
+está pendiente de validar cobertura, detectabilidad y agrupación espacial. **Inferencia retenida:**
+p y q no disponibles, B válido = 0. Los parámetros de permutación se conservan como solicitud;
+no se ejecutan permutaciones productivas hasta superar la puerta científica.
 
 ```{r localizacion}
 loc_f <- file.path(params$localization_dir, "localization_results.tsv")
@@ -151,8 +153,7 @@ if (!is.null(loc) && nrow(loc)) {
                        "proteína completa o sin estratos alternativos): marcados como no ",
                        "informativos, sin p.\n\n"), n_not_id))
   }
-  cat("Una AUC de 0,5 no tiene por qué ser el centro del control condicionado: se reporta "
-      , "tanto AUC−0,5 como el exceso sobre la media del control.\n\n")
+  cat("AUC−0,5 es un efecto descriptivo; no se estima la media de un control no validado.\n\n")
   # Última expresión del bloque: knitr renderiza el widget solo como valor del chunk.
   datatable(loc, rownames = FALSE, options = list(pageLength = 25))
 } else {
@@ -182,7 +183,7 @@ if (!is.null(glob) && nrow(glob)) {
 Dos contratos separados: **proteica** (distancia en residuos de referencia, 0 dentro de
 región) y **genómica** (distancia en nt en el mismo cromosoma, 0 en coincidencia). Las
 proteínas sin referencia comparable se informan como falta de cobertura, nunca con distancia
-infinita. Los radios (`r params$radios`) son descriptivos, fijados antes de cualquier contraste.
+infinita. Los radios son descriptivos y se recuperan del manifiesto de proximidad.
 El control de distancias no está validado: no se infiere p.
 
 ```{r proximidad}
@@ -204,6 +205,16 @@ if (is.null(prox_p) && is.null(prox_g)) cat("Proximidad no ejecutada o sin resul
 # 6. Estados, procedencia y límites
 
 ```{r limites}
+provenance <- list(localization = loc_manifest$parameters, global = glob_manifest$parameters,
+                   proximity = prox_manifest$parameters)
+cat("**Parámetros efectivos publicados**\n\n")
+for (nm in names(provenance)) {
+  cat("- ", nm, ": ", toJSON(provenance[[nm]], auto_unbox = TRUE), "\n")
+}
+if (!is.null(loc_manifest) && !is.null(glob_manifest) &&
+    !identical(loc_manifest$parameters$ranking, glob_manifest$parameters$ranking)) {
+  stop("Inconsistent published rankings between localization and global components")
+}
 lims <- list()
 if (!is.null(char_manifest)) lims$characterization <- char_manifest$limits
 if (!is.null(loc_manifest)) lims$localization <- loc_manifest$limits
@@ -215,7 +226,7 @@ for (nm in names(lims)) {
   cat("\n")
 }
 cat("\n**Procedencia:** registro `posenrich/registry/`, componentes en sus subdirectorios; "
-    , "manifiestos con SHA-256 de fuentes en cada componente.\n")
+    , "manifiesto del registro con SHA-256 de fuentes; caracterización con huellas de sus entradas.\n")
 cat("\nDistinguir: implementado (código y pruebas dirigidas), validado de forma dirigida "
     , "(tests con oráculos y controles sintéticos) y aceptado a escala (requiere la corrida "
     , "integrada 1000/4000/10000 en cluster, no solicitada por este informe).\n")

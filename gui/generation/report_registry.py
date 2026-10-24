@@ -656,10 +656,11 @@ def _asr_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
 def _fcs_scoring_find_slots(outdir: Listing) -> list[InputSlot]:
     fcs = outdir / "fcs"
     return [
-        _slot("fcs_stats", "FCS stats TSV", True, _first_match(outdir, "**/fcs_stats.tsv")),
+        _slot("fcs_stats", "FCS stats TSV", True, _first_match(outdir, "scoring/fcs_stats.tsv", "**/fcs_stats.tsv")),
         _slot("universe", "Background/universe gene list", True,
               _first_match(outdir, "**/cleaned_background*.txt")),
         _slot("enrich_file", "Saved calibrated FCS results (required for exact regeneration)", True, _first_match(outdir, "fcs/fcs_results/fcs_enrich_input.tsv", "**/fcs_results/fcs_enrich_input.tsv")),
+        _slot("metadata", "Saved FCS settings (required for exact regeneration)", True, _first_match(outdir, "fcs/fcs_results/fcs_report_metadata.json", "**/fcs_results/fcs_report_metadata.json")),
     ]
 
 
@@ -794,11 +795,6 @@ def _posenrich_modular_build_script(report: DetectedReport, repo_dir: Path, use_
             f"global_dir           = '{s['global']}'",
             f"proximity_dir        = '{s['proximity']}'",
             f"traitname            = '{report.traitname}'",
-            "ranking              = 'caas_score'",
-            "aggregation          = 'mean'",
-            "n_permutations       = 999",
-            "seed                 = 1",
-            "radios               = '0,5,10'",
         ],
         output_file,
     )
@@ -930,7 +926,7 @@ def _compare_find_slots(outdir: Listing) -> list[InputSlot]:
         _slot("fade_sites_bottom", "FADE selected sites (bottom)", False,
               _first_match(outdir, "selection/fade/bottom/fade_sites_bottom.csv")),
         _slot("position_characterization", "Position characterization TSV", False,
-              _first_match(outdir, "posenrich/gmts/position_characterization.tsv")),
+              _first_match(outdir, "posenrich/characterization/position_characterization.tsv", "posenrich/gmts/position_characterization.tsv")),
     ]
 
 

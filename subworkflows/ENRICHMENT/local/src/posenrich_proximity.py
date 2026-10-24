@@ -12,8 +12,8 @@ nucleotides and never mixed into the protein result.
 Protein proximity: distance in reference residues from each evaluated position to
 the nearest member of the same protein of the term; 0 inside a region or on the
 site itself. Proteins without a comparable reference are reported as coverage
-lack, never as infinite distance. All evaluated positions are measured: no hit
-selection before the distance.
+lack, never as infinite distance. Query positions carry canonical positive
+scores; no p-value filtering is applied. This is not the full evaluable universe.
 
 Genomic proximity: distance in nucleotides on the same chromosome to the nearest
 member of the term; 0 on coincidence. Window membership (1 Mb bins) stays in the
@@ -37,6 +37,7 @@ import json
 import os
 
 import pandas as pd
+from posenrich_localization import position_ranking_scores
 
 REGISTRY_FILES = ['positions.tsv', 'position_evidence.tsv', 'members.tsv',
                   'collections.tsv', 'coverage.tsv', 'manifest.json']
@@ -109,7 +110,7 @@ def main():
         }
     evaluated = sorted({(r['Gene'], int(r['Position'])) for r in evidence.to_dict('records')
                         if r['CAAS_score'] not in ('NA', '')})
-    scores = {(r['Gene'], int(r['Position'])): r['CAAS_score'] for r in evidence.to_dict('records')}
+    scores = position_ranking_scores(evidence, 'caas_score')
 
     site_terms = collections[(collections['status'] == 'included') &
                              (collections['collection_id'].isin(PROTEIN_COLLECTIONS))]
@@ -244,6 +245,7 @@ def main():
 
     out_manifest = {
         'component': 'proximity',
+        'ranking_population': 'canonical_positive_detections_only',
         'contract_version': manifest.get('contract_version'),
         'parameters': {'collections': args.collections, 'radios': radios},
         'contracts': {'protein': 'distancia en residuos de referencia (hg38_aa_pos); 0 dentro de region',
@@ -258,7 +260,8 @@ def main():
         'limits': ['radios descriptivos fijados antes del contraste',
                    'proteinas sin referencia comparable se informan como falta de cobertura, no distancia infinita',
                    'proximidad genómica y proteica no se mezclan',
-                   'la distancia no se mide en columnas MSA con gaps'],
+                   'la distancia no se mide en columnas MSA con gaps',
+                   'consulta condicionada a detecciones positivas; no es el universo completo evaluado'],
     }
     with open(os.path.join(args.output_dir, 'proximity_manifest.json'), 'w') as f:
         json.dump(out_manifest, f, indent=2, sort_keys=True)

@@ -402,7 +402,7 @@ POSENRICH modular (WP10; independent of the flag above, which stays skipped):
 --posenrich_ranking                <caas_score|minus_log10_pemp>  caas_score (minus_log10_pemp: explicit
                                                             sensitivity over the shared p.emp)
 --posenrich_aggregation            <mean|pair_weighted>  mean (principal; pair_weighted: sensitivity)
---posenrich_n_permutations         <INTEGER>                999 (within-protein conditional control)
+--posenrich_n_permutations         <INTEGER>                999 (reserved; inference withheld pending control validation)
 --posenrich_seed                   <INTEGER>                1
 --posenrich_radios                 <LIST>                   0,5,10 (descriptive protein-proximity radii)
 '''

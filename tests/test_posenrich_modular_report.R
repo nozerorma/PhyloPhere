@@ -63,9 +63,15 @@ stopifnot(file.exists(out_html))
 html <- paste(readLines(out_html, warn = FALSE), collapse = '\n')
 for (needle in c('POSENRICH modular', 'Localización dentro de proteínas',
                  'Asociación global', 'Proximidad', 'registro', 'TERM_A',
-                 '0.625', 'not_identifiable', 'descriptive', 'not_validated')) {
+                 '0.625', 'not_identifiable', 'descriptive', 'not_validated',
+                 'descriptive_pending_control', 'Estados de evaluación del universo posicional',
+                 'Parámetros efectivos publicados')) {
   stopifnot(grepl(needle, html, fixed = TRUE))
 }
 # El informe distingue los estados de cada componente.
 stopifnot(grepl('ejecutado', html, fixed = TRUE))
 cat('PASS: render del informe POSENRICH modular con pipeline dirigido de fixture\n')
+
+stopifnot(!grepl('no ejecutado / no disponible', html, fixed = TRUE))
+loc <- read.delim(file.path(scratch, 'localization/localization_results.tsv'))
+stopifnot(all(is.na(loc$p_mc)), all(is.na(loc$q)), all(loc$B_valid == 0))

@@ -91,3 +91,40 @@ Pendiente: validación del piloto PP2A (el MAP productivo de la plantilla neopla
 accesible desde este entorno), aceptación integrada 1000/4000/10000 en cluster, y la
 familia BH de conjuntos (analysis × scope × ranking × collection) cuando se active la
 inferencia a escala.
+
+
+## Revisión del contrato modular
+
+Cuando `posenrich_modular=true`, el informe 15 recibe la tabla de
+`posenrich/characterization/position_characterization.tsv`; el constructor antiguo
+solo se ejecuta con el módulo apagado. La regeneración GUI prefiere esa tabla.
+El registro conserva discovery sin score en `position_evidence.tsv`, con
+`raw_asr_path_score`, `score_status` y CAAS_score=NA si el productor canónico no lo
+puntúa. Nunca convierte MAP sin evaluación, valores no positivos o faltantes en
+score cero ni en p=1. AUC y proximidad son descriptivos sobre scores disponibles.
+FUBAR restringe el fondo de AUC a `fubar_tested`; la cobertura experimental de otras
+fuentes se declara desconocida. La inferencia de localización permanece retenida.
+
+## Tablas Pfam antiguas sin sistema de coordenadas
+
+El lector rechaza una tabla con `ali_start/ali_end` pero sin `coordinate_space`.
+En particular, `map_domain_variability.py` del pipeline de alineamientos producía
+una tabla de variabilidad sobre proteínas crudas: sus extremos de hmmscan no se
+pueden renombrar automáticamente como residuos de referencia ni como columnas
+CAAS. Esa incompatibilidad puede aparecer al reutilizar referencias anteriores.
+
+`bin/migrate_pfam_coordinates.py` permite convertir una tabla antigua solo si se
+conservan el FASTA original de las queries y el domtblout original. Exige que cada
+hit aparezca en el domtblout y que la query coincida exactamente con la referencia
+productiva tras quitar gaps/X; rechaza diferencias, duplicados ambiguos y extremos
+fuera de rango. Escribe una tabla nueva y un manifiesto con huellas; nunca modifica
+ni sobrescribe entradas. No resuelve una correspondencia entre proteína cruda y
+recortada cuando esa igualdad no se cumple.
+
+Cuando faltan esas fuentes o la igualdad falla, se regenera Pfam con
+`bin/compute_domain_variability.py` sobre los mismos alineamientos recortados de
+CAAS, en un nodo de cálculo y con `--cpus` igual a la asignación. Se pueden limitar
+los inputs a enlaces de los genes de `cleaned_background_main.txt`. No hace falta
+recalcular el nulo por cambiar una anotación; después se cambia únicamente
+`domain_variability_file` por la tabla nueva y se reanuda la misma ejecución con
+su caché. El constructor valida entonces las columnas explícitas contra MAP.

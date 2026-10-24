@@ -91,7 +91,7 @@ def test_localization_effect_aggregation_and_control(tmp_path):
     term_a = rows[('custom', 'TERM_A')]
     # G1: members {0,1} hold the top scores -> AUC 1.0; G2: members {3,4} hold low
     # scores -> 2/8 = 0.25. Equal-weight mean = 0.625; pair weights tie -> same.
-    assert term_a['status'] == 'executed'
+    assert term_a['status'] == 'descriptive_pending_control'
     assert term_a['auc'] == repr(0.625)
     assert term_a['auc_mean'] == repr(0.625)
     assert term_a['auc_pair_weighted'] == repr(0.625)  # pair weights tie here
@@ -100,9 +100,10 @@ def test_localization_effect_aggregation_and_control(tmp_path):
     assert term_a['n_genes_evaluated'] == '2'
     assert term_a['n_members'] == '4'
     assert term_a['n_background_positions'] == '8'
-    assert term_a['B_valid'] == '199'
-    assert 0 < float(term_a['p_mc']) <= 1
-    assert float(term_a['auc_control_mean']) != float(term_a['auc'])
+    assert term_a['B_valid'] == '0'
+    assert term_a['p_mc'] == 'NA' and term_a['q'] == 'NA'
+    assert term_a['auc_control_mean'] == 'NA'
+    assert term_a['ranking_population'] == 'canonical_positive_detections_only'
 
     by_gene = {(r['term_id'], r['Gene']): r for r in read_tsv(out / 'localization_by_gene.tsv')}
     assert by_gene[('TERM_A', 'G1')]['auc'] == '1.0'
@@ -112,15 +113,15 @@ def test_localization_effect_aggregation_and_control(tmp_path):
     term_full = rows[('custom', 'TERM_FULL')]
     assert term_full['status'] == 'not_identifiable'
     assert term_full['coverage_status'] == 'no_within_protein_contrast'
-    # A single low-scoring member: informative gene, AUC 0, p_mc = 1 (minimum).
+    # A single low-scoring member: informative gene, AUC 0; production inference remains withheld.
     term_one = rows[('custom', 'TERM_ONE')]
     assert term_one['auc'] == '0.0'
-    assert term_one['p_mc'] == '1.0'
+    assert term_one['p_mc'] == 'NA'
     # Genomic windows are marked non-informative for this analysis and stay out.
     assert all(r['collection_id'] != 'genomic_windows_1mb' for r in rows.values())
 
 
-def test_localization_all_ties_gives_p_one(tmp_path):
+def test_localization_all_ties_is_descriptive(tmp_path):
     scores_rows = ['Gene\tPosition\tCAAS_score\tside\tp.emp\tp.adj_bh']
     for pos in range(6):
         scores_rows.append(f'G1\t{pos}\t0.5\ttop\t0.2\t0.5')
@@ -131,7 +132,7 @@ def test_localization_all_ties_gives_p_one(tmp_path):
     rows = {(r['collection_id'], r['term_id']): r for r in read_tsv(out / 'localization_results.tsv')}
     flat = rows[('custom', 'FLAT')]
     assert flat['auc'] == '0.5'
-    assert flat['p_mc'] == '1.0'  # every permutation ties the observed AUC
+    assert flat['p_mc'] == 'NA'  # production inference is withheld
 
 
 def test_localization_reproducible_and_order_inert(tmp_path):
@@ -207,4 +208,51 @@ def test_localization_no_hit_selection_before_auc(tmp_path):
     out = run_localization(registry_dir, tmp_path / 'loc')
     results = {(r['collection_id'], r['term_id']): r for r in read_tsv(out / 'localization_results.tsv')}
     assert results[('custom', 'LOW')]['auc'] == '0.0'
-    assert results[('custom', 'LOW')]['p_mc'] == '1.0'
+    assert results[('custom', 'LOW')]['p_mc'] == 'NA'
+
+
+def test_prototype_term_stream_independent_of_other_terms():
+    import numpy as np
+    data = {'genes': {'G': {'positions': {0: .9, 1: .8, 2: .3, 3: .1},
+                          'member_positions': {0, 2}}}}
+    def evaluate(term):
+        return loc.run_term(data, 'mean', 199, loc.term_rng(7, 'caas_score', 'top', 'custom', term))[0]
+    before = evaluate('TARGET')
+    evaluate('OTHER')
+    assert evaluate('TARGET') == before
+    assert before['B_valid'] == 199
+
+
+def test_directional_views_and_no_production_inference(tmp_path):
+    scores = ('Gene\tPosition\tCAAS_score\tside\tp.emp\tp.adj_bh\n'
+              'G1\t0\t0.9\ttop\t0.1\t0.5\nG1\t1\t0.1\ttop\t0.2\t0.5\n'
+              'G1\t0\t0.1\tbottom\t0.1\t0.5\nG1\t1\t0.9\tbottom\t0.2\t0.5\n')
+    reg = make_localization_fixture(tmp_path, custom_text='G1\t0\tTERM\tmember\n', scores_text=scores)
+    out = run_localization(reg, tmp_path / 'loc', extra=['--scope', 'all'])
+    rows = {r['rank_direction']: r for r in read_tsv(out / 'localization_results.tsv')}
+    assert {k: float(v['auc']) for k, v in rows.items()} == {'global': .5, 'top': 1., 'bottom': 0.}
+    assert all(r['p_mc'] == 'NA' and r['q'] == 'NA' and r['B_valid'] == '0' for r in rows.values())
+    manifest = json.loads((out / 'localization_manifest.json').read_text())
+    assert manifest['control']['inference'] == 'withheld'
+
+
+def test_fubar_uses_tested_coverage_not_unannotated_sites():
+    import pandas as pd
+    members = pd.DataFrame([
+        {'collection_id': 'fubar_tested', 'term_id': 'global', 'Gene': 'G', 'Position': '0'},
+        {'collection_id': 'fubar_tested', 'term_id': 'global', 'Gene': 'G', 'Position': '1'},
+        {'collection_id': 'fubar_positive', 'term_id': 'global', 'Gene': 'G', 'Position': '0'},
+    ])
+    collections = pd.DataFrame([{'collection_id': 'fubar_positive', 'term_id': 'global',
+        'informative_within_protein': '1', 'status': 'included', 'description': 'test'}])
+    scores = {('G', 0): .9, ('G', 1): .5, ('G', 2): 1.}
+    term = loc.build_gene_table(members, collections, scores, None)[('fubar_positive', 'global')]
+    effect, genes, _ = loc.run_term(term, 'mean', 0, loc.term_rng(1, 'caas_score', 'global', 'fubar_positive', 'global'))
+    assert effect['auc'] == 1. and genes[0]['n_background'] == 1
+    assert term['coverage_status'] == 'fubar_tested_positions'
+
+
+def test_prototype_all_ties_p_one():
+    data = {'genes': {'G': {'positions': dict.fromkeys(range(4), .5), 'member_positions': {0, 1}}}}
+    summary, _, _ = loc.run_term(data, 'mean', 99, loc.term_rng(7, 'caas_score', 'top', 'custom', 'flat'))
+    assert summary['auc'] == .5 and summary['p_mc'] == 1.

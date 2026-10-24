@@ -190,7 +190,7 @@ SPEC = ModuleTabSpec(
             importance="optional",
             help=(
                 "Módulo general de posiciones: registro común, caracterización, localización "
-                "dentro de proteínas (AUC por gen + control condicionado), asociación global "
+                "dentro de proteínas (AUC descriptiva; inferencia pendiente de validación), asociación global "
                 "(descriptiva) y proximidad proteica/genómica. La inferencia histórica "
                 "(Lachenbruch) sigue omitida."
             ),
@@ -207,8 +207,8 @@ SPEC = ModuleTabSpec(
             placeholder="mean",
             importance="optional",
         ),
-        FieldSpec(name="posenrich_n_permutations", label="Permutations (within-protein control)", importance="optional"),
-        FieldSpec(name="posenrich_seed", label="Control seed", importance="optional"),
+        FieldSpec(name="posenrich_n_permutations", label="Requested permutations (reserved; inference withheld)", importance="optional"),
+        FieldSpec(name="posenrich_seed", label="Reserved control seed", importance="optional"),
         FieldSpec(name="posenrich_radios", label="Proximity radii (residues, descriptive)", placeholder="0,5,10", importance="optional"),
     ),
 )

@@ -60,7 +60,7 @@ include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_META_CAAS/ctpp_meta_c
 include {CAAS_CORE; CAAS_CORE_OBSERVED; CAAS_CORE_MERGE; CAAS_CORE_MERGE_REDUCE; CAAS_PERMS_PREP; strictOutputOn} from './subworkflows/CT/caas_permulation.nf'
 include {CAAS_CORE_OBSERVED as CAAS_CORE_OBSERVED_STRICT; CAAS_CORE_MERGE as CAAS_CORE_MERGE_STRICT; CAAS_CORE_MERGE_REDUCE as CAAS_CORE_MERGE_REDUCE_STRICT} from './subworkflows/CT/caas_permulation.nf'
 include {CAAS_EVIDENCE}   from './subworkflows/CT_DISAMBIGUATION/ct_evidence.nf'
-include {ENRICHMENT}      from './workflows/enrichment.nf'
+include {ENRICHMENT; validatePositionReferences}      from './workflows/enrichment.nf'
 
 // Coerce a param that may arrive as Boolean, String ("false", "0", ...) or null into a Boolean.
 def toBool(val) {
@@ -86,6 +86,8 @@ def resolve_fg_species(tables_dir, filename) {
  */
 
 workflow {
+
+    if (params.enrichment && !params.help) validatePositionReferences()
 
     def version = "2.0.0"
 
@@ -907,7 +909,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     scoring_rer_perms_ch,
                     caas_perms_for_enrich,
                     (scoring_null_blocks_ch ?: (params.caas_null_dir ? Channel.value([file(params.caas_null_dir)]) : Channel.value([]))),
-                    (params.scoring ? SCORING.out.calibration : Channel.value(file('NO_CALIBRATION'))),
+                    (params.scoring ? SCORING.out.calibration : Channel.empty()),
                     scoring_caas_pos_sample_ch,
                     position_scores_ch,
                     enrich_postproc_ch,

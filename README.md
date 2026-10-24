@@ -244,7 +244,7 @@ terms are read as one; the RER ranking is the signed statistic
 on every permulated phenotype), an
 orthogonal cross-module Comparison report, optional DOMINO active-module
 detection + STRING functional enrichment (`--scoring_ami`), and optional
-POSENRICH position-level enrichment (`--posenrich`). POSENRICH is currently skipped with a warning because WP5 retired its position-by-cycle null; report 14 is not produced. The modular POSENRICH phase (WP10, `--posenrich_modular`) is implemented on a common position registry: characterization, within-protein localization (AUC + conditional control), global association (descriptive) and proximity, with its own report (`posenrich/POSENRICH_modular_report_<trait>.html`); see `docs/fases/WP10_posenrich_modular.md` and `docs/POSITION_COLLECTIONS.md`. UCR/FUBAR/domain-variability/PrimateAI-3D/COSMIC annotations remain available to other consumers.
+POSENRICH position-level enrichment (`--posenrich`). POSENRICH is currently skipped with a warning because WP5 retired its position-by-cycle null; report 14 is not produced. The modular POSENRICH phase (WP10, `--posenrich_modular`) is implemented on a common position registry: characterization, within-protein localization (descriptive AUC; inference withheld pending scientific validation), global association (descriptive) and proximity, with its own report (`posenrich/POSENRICH_modular_report_<trait>.html`); see `docs/fases/WP10_posenrich_modular.md` and `docs/POSITION_COLLECTIONS.md`. UCR/FUBAR/domain-variability/PrimateAI-3D/COSMIC annotations remain available to other consumers.
 Universe files are module-specific (`--rer_universe_file`,
 `--fade_universe_file`) rather than shared.
 
@@ -354,7 +354,7 @@ These parameters define the primary input data files, phenotype target, and modu
 | `posenrich` | `true` | Requests position-level enrichment; currently skipped with a warning after WP5, pending a separate method evaluation. |
 | `posenrich_modular` | `false` | WP10 modular POSENRICH: common registry + characterization + within-protein localization + global association + proximity (`posenrich/registry`, `posenrich/characterization`, `posenrich/localization`, `posenrich/global`, `posenrich/proximity`). Independent of `--posenrich`. |
 | `posenrich_ranking` / `posenrich_aggregation` | `caas_score` / `mean` | Ranking and across-gene aggregation of the localization contrast (`minus_log10_pemp` and `pair_weighted` are explicit sensitivities). |
-| `posenrich_n_permutations` / `posenrich_seed` | `999` / `1` | Within-protein conditional control: permutations and seed. |
+| `posenrich_n_permutations` / `posenrich_seed` | `999` / `1` | Reserved control settings; production inference is withheld (B_valid=0, p/q unavailable). |
 | `posenrich_radios` | `0,5,10` | Descriptive protein-proximity radii (reference residues), fixed before any contrast. |
 | `fade` | `false` | Main toggle to enable HyPhy FADE directional selection scanning (`--fade`). |
 | `rer_tool` | `""` | Enables RERconverge relative evolutionary rate analysis (`"continuous"` or `"build_trait"`). |

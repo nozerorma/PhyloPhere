@@ -134,9 +134,15 @@ if (!file.exists(params$continuous_rds)) {
 res <- readRDS(params$continuous_rds)
 .metadata <- file.path(dirname(dirname(dirname(params$continuous_rds))),"scoring","gene_evidence_metadata.json")
 if(file.exists(.metadata)) {
+ # rmarkdown locks the params binding; temporarily unlock it to restore
+ # the settings saved with these data, then retain the original lock state.
+ .params_env <- knitr::knit_global()
+ .params_locked <- bindingIsLocked("params", .params_env)
+ if (.params_locked) unlockBinding("params", .params_env)
  .m <- jsonlite::read_json(.metadata,simplifyVector=TRUE)
  params$pval_threshold <- .m$nominal_threshold
  params$fdr_threshold <- .m$fdr_threshold
+ if (.params_locked) lockBinding("params", .params_env)
 }
 
 if (is.null(res) || nrow(res) == 0) {

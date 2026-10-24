@@ -29,7 +29,8 @@ def test_characterization_layers_and_summaries(tmp_path):
 
     rows = {(r['Gene'], int(r['Position'])): r for r in read_tsv(out / 'position_characterization.tsv')}
     # Annotated or positively scored positions only.
-    assert set(rows) == {('G1', 0), ('G1', 2)}
+    assert set(rows) == {('G1', 0), ('G1', 2), ('G1', 3)}
+    assert rows[('G1', 3)]['CAAS_score'] == 'NA'
     g10, g12 = rows[('G1', 0)], rows[('G1', 2)]
     assert g10['pfam_domain'] == '' and g10['ucr_region'] == 'flank_up'
     assert g10['fubar_selection'] == 'positive' and g10['fade_top_sig'] == '1'
@@ -50,7 +51,7 @@ def test_characterization_layers_and_summaries(tmp_path):
     assert coll[('fubar_tested', 'global')]['n_members'] == '2'
 
     ranking = {r['ranking']: r for r in read_tsv(out / 'ranking_summary.tsv')}
-    assert ranking['global']['n_positions'] == '2'
+    assert ranking['global']['n_positions'] == '3'
     assert ranking['global']['n_scored'] == '2'
     assert ranking['global']['n_nominal'] == '1'
     assert ranking['global']['n_adjusted'] == '0'

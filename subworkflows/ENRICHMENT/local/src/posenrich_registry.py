@@ -223,26 +223,71 @@ def build_positions(active_genes, map_cache, discovery_keys, score_keys):
                                       'strand', 'map_file'])
 
 
-def build_evidence(position_scores_path, active_genes, n_cycles):
-    """position_evidence.tsv: one row per (Gene, Position, side) of position_scores.
+def build_evidence(position_scores_path, active_genes, n_cycles, postproc_path=None):
+    """Canonical positive scores plus audited discovery rows without a score.
 
-    p.emp is the pooled max-over-sides p: the side rows of one position share it
-    (p_shared=TRUE); it is not two directional tests. CAAS_score stays directional.
+    core.scores.position_score defines nonpositive values as unavailable, not zero.
+    Keep the raw path score separately; never impute a canonical score or a p-value.
     """
     cols = ['Gene', 'Position', 'side', 'CAAS_score', 'p.emp', 'p.adj_bh', 'p.emp_fact',
             'p.adj_bh_fact', 'nd', 'null_unseen', 'caas_nominal', 'caas_adjusted']
-    if not position_scores_path:
-        return pd.DataFrame(columns=cols + ['p_shared', 'N_cycles', 'evidence_status'])
-    df = read_tsv(position_scores_path)
-    keep = [c for c in cols if c in df.columns]
-    df = df[keep].reindex(columns=cols).copy()
-    df = df[df['Gene'].isin(active_genes)]
-    df = df.fillna('NA')
-    df['p_shared'] = 'TRUE'
-    df['N_cycles'] = 'NA' if n_cycles is None else str(int(n_cycles))
-    df['evidence_status'] = df['p.emp'].map(
-        lambda v: 'evaluated' if v not in ('NA', '') else 'p_unavailable')
-    return df[cols + ['p_shared', 'N_cycles', 'evidence_status']]
+    extra = ['p_shared', 'N_cycles', 'evidence_status', 'score_status', 'raw_asr_path_score']
+    df = read_tsv(position_scores_path) if position_scores_path else pd.DataFrame(columns=cols)
+    df = df.reindex(columns=cols).fillna('NA')
+    df = df[df['Gene'].isin(active_genes)].copy()
+    df['Position'] = df['Position'].astype(int)
+    if df.duplicated(['Gene', 'Position', 'side']).any():
+        raise ValueError('duplicate position score side; one row per Gene/Position/side required')
+    scores = pd.to_numeric(df['CAAS_score'], errors='coerce')
+    if ((scores <= 0) | ~scores.notna()).any():
+        raise ValueError('position_scores must contain canonical positive CAAS scores')
+    for key, sub in df.groupby(['Gene', 'Position']):
+        for col in ('p.emp', 'p.adj_bh'):
+            if sub[col].nunique() > 1:
+                raise ValueError(f'inconsistent shared {col} for {key}')
+    df['score_status'] = 'canonical_positive'
+    df['raw_asr_path_score'] = 'NA'
+    rows = df.to_dict('records')
+    by_key = {(row['Gene'], int(row['Position']), row['side']): row for row in rows}
+    if postproc_path:
+        discovery = read_tsv(postproc_path)
+        discovery = discovery[discovery['Gene'].isin(active_genes)]
+        if discovery.duplicated(['Gene', 'Position', 'side']).any():
+            raise ValueError('duplicate discovery side; cannot resolve canonical score')
+        for original in discovery.to_dict('records'):
+            key = (original['Gene'], int(original['Position']), original['side'])
+            raw = original.get('asr_path_score', 'NA')
+            number = pd.to_numeric(raw, errors='coerce')
+            if key in by_key:
+                row = by_key[key]
+                if pd.notna(number) and number > 0 and abs(float(row['CAAS_score']) - number) > 1e-12:
+                    raise ValueError(f'discovery and canonical score disagree for {key}')
+                row['raw_asr_path_score'] = raw
+                continue
+            row = {c: 'NA' for c in cols}
+            row.update(Gene=key[0], Position=key[1], side=key[2], raw_asr_path_score=raw)
+            if original['side'] not in ('top', 'bottom') or pd.isna(number):
+                row['score_status'] = 'not_evaluable'
+            elif number <= 0:
+                row['score_status'] = 'evaluated_no_canonical_score'
+            else:
+                # Same identity rule as core.scores.position_score, only for positive sides.
+                row['CAAS_score'] = repr(float(number))
+                row['score_status'] = 'canonical_positive_from_discovery'
+            rows.append(row)
+    for row in rows:
+        row['p_shared'] = 'TRUE'
+        row['N_cycles'] = 'NA' if n_cycles is None else str(int(n_cycles))
+        row['evidence_status'] = 'evaluated' if row['p.emp'] not in ('NA', '') else 'p_unavailable'
+    # A shared p is copied to any additional side of the same biological position.
+    shared = {(row['Gene'], int(row['Position'])): {c: row[c] for c in cols[4:]}
+              for row in rows if row['p.emp'] not in ('NA', '')}
+    for row in rows:
+        values = shared.get((row['Gene'], int(row['Position'])))
+        if values:
+            row.update(values)
+            row['evidence_status'] = 'evaluated'
+    return pd.DataFrame(rows, columns=cols + extra).sort_values(['Gene', 'Position', 'side'])
 
 
 def collect_all_members(args, map_cache, active_genes, pending):
@@ -467,7 +512,18 @@ def main():
     coll = collect_all_members(args, map_cache, active_genes, pending)
 
     positions = build_positions(active_genes, map_cache, discovery_keys, score_keys)
-    evidence = build_evidence(args.position_scores, active_genes, n_cycles)
+    evidence = build_evidence(args.position_scores, active_genes, n_cycles, args.postproc)
+    if not evidence.empty:
+        positive = evidence[evidence['CAAS_score'] != 'NA']
+        positive_keys = set(zip(positive['Gene'], positive['Position'].astype(int)))
+        for idx, row in positions.iterrows():
+            if (row['Gene'], row['Position']) in positive_keys:
+                positions.loc[idx, 'evaluation_status'] = 'detected_positive'
+        evaluable = evidence[evidence['score_status'] != 'not_evaluable']
+        known = set(zip(evaluable['Gene'], evaluable['Position'].astype(int)))
+        for idx, row in positions.iterrows():
+            if row['in_discovery'] and not row['in_scores_positive'] and (row['Gene'], row['Position']) not in known:
+                positions.loc[idx, 'evaluation_status'] = 'not_evaluable'
     members_df = build_members_df(coll['members'])
     collections_df = build_collections_df(coll, members_df, sources)
     coverage_df = build_coverage_df(positions, members_df, collections_df, null_universe,
@@ -514,6 +570,9 @@ def main():
                     for key in SOURCE_KEYS},
         'positions': {'total': int(len(positions)), 'by_status': {k: int(v) for k, v in status_counts.items()}},
         'evidence': {'rows': int(len(evidence)),
+                     'ranking_population': 'canonical_positive_detections_only',
+                     'complete_evaluable_universe': False,
+                     'nonpositive_rule': 'canonical score unavailable; never imputed as zero',
                      'null_cycles': 'NA' if n_cycles is None else int(n_cycles),
                      'p_available': int((evidence['evidence_status'] == 'evaluated').sum())
                      if not evidence.empty else 0},

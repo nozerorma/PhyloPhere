@@ -179,7 +179,8 @@ def build_collection_summary(collections, members, evidence, coverage):
         sub = members[(members['collection_id'] == crow.collection_id) &
                       (members['term_id'] == crow.term_id)]
         keys = [(r.Gene, int(r.Position)) for r in sub.itertuples(index=False)]
-        n_evaluated = sum(1 for k in keys if k in scores)
+        n_evaluated = sum(1 for k in keys if k in scores and scores[k]['score'] is not None)
+        n_no_score = sum(1 for k in keys if k in scores and scores[k]['score'] is None)
         n_positive = sum(1 for k in keys if k in scores and scores[k]['score'] is not None)
         n_nominal = sum(1 for k in keys if k in scores and scores[k]['caas_nominal'] == 'TRUE')
         n_adjusted = sum(1 for k in keys if k in scores and scores[k]['caas_adjusted'] == 'TRUE')
@@ -187,15 +188,16 @@ def build_collection_summary(collections, members, evidence, coverage):
         rows.append({'collection_id': crow.collection_id, 'term_id': crow.term_id,
                      'term_type': crow.term_type, 'n_members': len(keys),
                      'n_genes': len({g for g, _ in keys}),
-                     'n_members_evaluated': n_evaluated,
+                     'n_members_evaluated': n_evaluated, 'n_members_without_canonical_score': n_no_score,
                      'n_members_positive': n_positive,
                      'n_members_nominal': n_nominal,
                      'n_members_adjusted': n_adjusted,
                      'prop_positive_of_evaluated': prop,
                      'positions_annotable_universe': n_annotable,
-                     'denominator_definition': 'n_members_evaluated: miembros con fila de evidencia (score)'})
+                     'denominator_definition': 'n_members_evaluated: miembros con score canónico positivo; no es el universo completo evaluado'})
     return pd.DataFrame(rows, columns=['collection_id', 'term_id', 'term_type', 'n_members',
-                                       'n_genes', 'n_members_evaluated', 'n_members_positive',
+                                       'n_genes', 'n_members_evaluated', 'n_members_without_canonical_score',
+                                       'n_members_positive',
                                        'n_members_nominal', 'n_members_adjusted',
                                        'prop_positive_of_evaluated',
                                        'positions_annotable_universe', 'denominator_definition'])
@@ -232,7 +234,7 @@ def build_ranking_summary(evidence, n_cycles):
                      'n_nominal': nominal, 'n_adjusted': adjusted,
                      'n_p_unavailable': p_unavailable,
                      'N_cycles': 'NA' if n_cycles is None else str(int(n_cycles)),
-                     'note': 'distribucion sin cortes de seleccion; nominal/adjusted son vistas, no filtros'})
+                     'note': 'scores canónicos positivos disponibles; universo completo no disponible; nominal/adjusted son vistas'})
 
     # global: one unit per position (best side); top/bottom: directional rows.
     summarize('global', [max([v for v in (d['top'], d['bottom']) if v is not None], default=None)
@@ -310,6 +312,7 @@ def main():
             'proximity': 'not_executed',
         },
         'limits': ['sin inferencia de enriquecimiento',
+                   'distribuciones de scores condicionadas a detecciones positivas; no son el universo completo evaluable',
                    'anotacion no implica significacion',
                    'p.emp compartido entre lados: no son dos pruebas direccionales',
                    'UCR/FUBAR/FADE no son validacion externa independiente'],

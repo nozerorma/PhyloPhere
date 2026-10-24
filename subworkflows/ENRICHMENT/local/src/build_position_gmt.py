@@ -213,7 +213,7 @@ def build_map_cache(map_dir, universe_genes):
         try:
             selected_cols, col_to_genomic, residue_to_col, strand, raw_to_col = parse_map_file(path)
             map_cache[gene] = {
-                'selected_cols': selected_cols,
+                'selected_cols': set(selected_cols),
                 'col_to_genomic': col_to_genomic,
                 'residue_to_col': residue_to_col,
                 'strand': strand,
@@ -246,7 +246,13 @@ def write_gmt(output_path, terms):
 # export; the normalized tables are the canonical record.
 
 
-def collect_pfam_members(domain_file, map_cache, active_genes, pending=None):
+class _DiscardMembers(list):
+    """Annotation-only exports do not retain the normalized registry copy in RAM."""
+    def append(self, item):
+        pass
+
+
+def collect_pfam_members(domain_file, map_cache, active_genes, pending=None, include_members=True):
     """Pfam domain/clan terms, per-position characterization and normalized members.
 
     All overlapping domain and clan annotations are preserved. Returns
@@ -257,6 +263,7 @@ def collect_pfam_members(domain_file, map_cache, active_genes, pending=None):
     CAAS coordinates are appended to it instead of being dropped silently.
     """
     pfam_terms, pfam_clan_terms, pfam_char, members = {}, {}, {}, []
+    if not include_members: members = _DiscardMembers()
     if not domain_file:
         return pfam_terms, pfam_clan_terms, pfam_char, members
     dom_cols = ['gene', 'pfam_id', 'target_name', 'description',
@@ -266,7 +273,12 @@ def collect_pfam_members(domain_file, map_cache, active_genes, pending=None):
     if missing:
         raise ValueError(f'Pfam table missing columns: {sorted(missing)}')
     if 'coordinate_space' not in df_dom:
-        raise ValueError('Pfam coordinate_space required: regenerate with compute_domain_variability.py, or explicitly declare reference_protein_1based for verified reference endpoints')
+        raise ValueError(
+            f'Pfam table {domain_file!r} has no coordinate_space. '
+            'Regenerate with compute_domain_variability.py on the productive trimmed CAAS alignments, '
+            'or use migrate_pfam_coordinates.py with the original hmmscan query and domtblout '
+            'only when the query exactly matches that reference. '
+            'Do not label ungapped query endpoints as reference_protein_1based without verification.')
     for row in df_dom.itertuples(index=False):
         gene = str(row.gene).split('.')[0]
         if gene not in active_genes:
@@ -344,7 +356,7 @@ def collect_pfam_members(domain_file, map_cache, active_genes, pending=None):
     return pfam_terms, pfam_clan_terms, pfam_char, members
 
 
-def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None):
+def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None, include_members=True):
     """UCR core/flank column sets, per-position region/variability and members.
 
     ucr_positions.tsv aggregates three detection methods (absolute, relative,
@@ -360,12 +372,16 @@ def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None):
     """
     gene_ucr_core_cols, gene_ucr_flank_cols = {}, {}
     ucr_region_char, ucr_variability_char, members = {}, {}, []
+    if not include_members: members = _DiscardMembers()
     if not ucr_file:
         return gene_ucr_core_cols, gene_ucr_flank_cols, ucr_region_char, ucr_variability_char, members
     # ucr_positions.tsv can be very large: only the needed columns are read, in
     # chunks, and rows are iterated with itertuples (iterrows is far slower).
-    reader = pd.read_csv(ucr_file, sep='\t',
-                         usecols=['gene', 'position', 'region_type', 'method', 'variability'],
+    header = pd.read_csv(ucr_file, sep='\t', nrows=0).columns
+    cols = ['gene', 'position', 'region_type', 'method', 'variability']
+    if 'coordinate_space' in header:
+        cols.append('coordinate_space')
+    reader = pd.read_csv(ucr_file, sep='\t', usecols=cols,
                          dtype={'gene': str, 'region_type': str, 'method': str},
                          chunksize=500_000)
     for chunk in reader:
@@ -380,12 +396,20 @@ def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None):
                 continue
             map_entry = map_cache.get(gene)
             record_id = f"ucr:{gene}:{pos_residue}:{row.region_type}:{row.method}"
-            if not map_entry:
-                if pending is not None:
-                    pending.append({'source': 'ucr', 'record_id': record_id, 'gene': gene,
-                                    'raw_position': pos_residue, 'reason': 'no_map'})
-                continue
-            col = map_entry['raw_to_col'].get(pos_residue)
+            space = getattr(row, 'coordinate_space', 'raw_alignment_1based')
+            if space not in ('raw_alignment_1based', 'CAAS_0based'):
+                raise ValueError(f'Unknown UCR coordinate_space: {space}')
+            if space == 'CAAS_0based':
+                col = pos_residue
+                if col < 0 or (map_entry and col not in map_entry['selected_cols']):
+                    raise ValueError(f'UCR position outside MAP: {gene}:{col}')
+            else:
+                if not map_entry:
+                    if pending is not None:
+                        pending.append({'source': 'ucr', 'record_id': record_id, 'gene': gene,
+                                        'raw_position': pos_residue, 'reason': 'no_map'})
+                    continue
+                col = map_entry['raw_to_col'].get(pos_residue)
             if col is None:
                 if pending is not None:
                     pending.append({'source': 'ucr', 'record_id': record_id, 'gene': gene,
@@ -400,7 +424,7 @@ def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None):
                 members.append({'collection_id': 'ucr_core', 'term_id': 'global', 'gene': gene,
                                 'position': col,
                                 'source_record_id': record_id,
-                                'term_label': 'UCR_core', 'mapping_status': 'projected_via_map',
+                                'term_label': 'UCR_core', 'mapping_status': 'direct_caas' if space == 'CAAS_0based' else 'projected_via_map',
                                 'detail': f"region=core;raw_position={pos_residue};variability={row.variability}"})
             elif region in ('flank_up', 'flank_down'):
                 gene_ucr_flank_cols.setdefault(gene, set()).add(col)
@@ -410,12 +434,12 @@ def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None):
                 members.append({'collection_id': 'ucr_flank', 'term_id': 'global', 'gene': gene,
                                 'position': col,
                                 'source_record_id': record_id,
-                                'term_label': 'UCR_flank', 'mapping_status': 'projected_via_map',
+                                'term_label': 'UCR_flank', 'mapping_status': 'direct_caas' if space == 'CAAS_0based' else 'projected_via_map',
                                 'detail': f"region={region};raw_position={pos_residue};variability={row.variability}"})
     return gene_ucr_core_cols, gene_ucr_flank_cols, ucr_region_char, ucr_variability_char, members
 
 
-def collect_fubar_members(fubar_file, map_cache, active_genes, pending=None):
+def collect_fubar_members(fubar_file, map_cache, active_genes, pending=None, include_members=True):
     """FUBAR positive/purifying column sets, per-position calls and members.
 
     Unlike the two hit dicts, fubar_char records every position FUBAR tested, so
@@ -425,10 +449,16 @@ def collect_fubar_members(fubar_file, map_cache, active_genes, pending=None):
     list, rows that cannot be projected to CAAS coordinates are appended to it.
     """
     gene_pos_sel_cols, gene_neg_sel_cols, fubar_char, members = {}, {}, {}, []
+    if not include_members: members = _DiscardMembers()
     if not fubar_file:
         return gene_pos_sel_cols, gene_neg_sel_cols, fubar_char, members
-    reader = pd.read_csv(fubar_file, sep='\t',
-                         usecols=['gene', 'is_pos_hit', 'is_neg_hit', 'hg38_aa_pos'],
+    header = pd.read_csv(fubar_file, sep='\t', nrows=0).columns
+    cols = ['gene', 'is_pos_hit', 'is_neg_hit', 'hg38_aa_pos']
+    if 'coordinate_space' in header:
+        cols.append('coordinate_space')
+    if 'alignment_position' in header:
+        cols.append('alignment_position')
+    reader = pd.read_csv(fubar_file, sep='\t', usecols=cols,
                          dtype={'gene': str}, chunksize=500_000)
     for chunk in reader:
         for row in chunk.itertuples(index=False):
@@ -441,19 +471,30 @@ def collect_fubar_members(fubar_file, map_cache, active_genes, pending=None):
             except (ValueError, TypeError):
                 is_pos, is_neg = 0, 0
 
+            space = getattr(row, 'coordinate_space', 'reference_protein_1based')
             try:
                 pos_residue = int(row.hg38_aa_pos)
             except (ValueError, TypeError):
-                continue
+                if space != 'CAAS_0based':
+                    continue
+                pos_residue = 'NA'
 
             map_entry = map_cache.get(gene)
-            record_id = f"fubar:{gene}:{pos_residue}"
-            if not map_entry:
-                if pending is not None:
-                    pending.append({'source': 'fubar', 'record_id': record_id, 'gene': gene,
-                                    'raw_position': pos_residue, 'reason': 'no_map'})
-                continue
-            col = map_entry['residue_to_col'].get(pos_residue)
+            record_id = (f"fubar:{gene}:CAAS:{row.alignment_position}" if space == 'CAAS_0based'
+                         else f"fubar:{gene}:{pos_residue}")
+            if space not in ('reference_protein_1based', 'CAAS_0based'):
+                raise ValueError(f'Unknown FUBAR coordinate_space: {space}')
+            if space == 'CAAS_0based':
+                col = int(row.alignment_position)
+                if col < 0 or (map_entry and col not in map_entry['selected_cols']):
+                    raise ValueError(f'FUBAR position outside MAP: {gene}:{col}')
+            else:
+                if not map_entry:
+                    if pending is not None:
+                        pending.append({'source': 'fubar', 'record_id': record_id, 'gene': gene,
+                                        'raw_position': pos_residue, 'reason': 'no_map'})
+                    continue
+                col = map_entry['residue_to_col'].get(pos_residue)
             if col is None:
                 if pending is not None:
                     pending.append({'source': 'fubar', 'record_id': record_id, 'gene': gene,
@@ -464,14 +505,14 @@ def collect_fubar_members(fubar_file, map_cache, active_genes, pending=None):
                 fubar_char[(gene, col)] = 'positive'
                 members.append({'collection_id': 'fubar_positive', 'term_id': 'global', 'gene': gene,
                                 'position': col, 'source_record_id': record_id,
-                                'term_label': 'FUBAR_positive', 'mapping_status': 'projected_via_map',
+                                'term_label': 'FUBAR_positive', 'mapping_status': 'direct_caas' if space == 'CAAS_0based' else 'projected_via_map',
                                 'detail': f"hg38_aa_pos={pos_residue};call=positive"})
             elif is_neg == 1:
                 gene_neg_sel_cols.setdefault(gene, set()).add(col)
                 fubar_char[(gene, col)] = 'negative'
                 members.append({'collection_id': 'fubar_purifying', 'term_id': 'global', 'gene': gene,
                                 'position': col, 'source_record_id': record_id,
-                                'term_label': 'FUBAR_purifying', 'mapping_status': 'projected_via_map',
+                                'term_label': 'FUBAR_purifying', 'mapping_status': 'direct_caas' if space == 'CAAS_0based' else 'projected_via_map',
                                 'detail': f"hg38_aa_pos={pos_residue};call=negative"})
             else:
                 fubar_char[(gene, col)] = 'neutral'
@@ -479,12 +520,12 @@ def collect_fubar_members(fubar_file, map_cache, active_genes, pending=None):
             # significant) stays distinguishable from absent from fubar_sites.tsv.
             members.append({'collection_id': 'fubar_tested', 'term_id': 'global', 'gene': gene,
                             'position': col, 'source_record_id': record_id,
-                            'term_label': 'FUBAR_tested', 'mapping_status': 'projected_via_map',
+                            'term_label': 'FUBAR_tested', 'mapping_status': 'direct_caas' if space == 'CAAS_0based' else 'projected_via_map',
                             'detail': f"hg38_aa_pos={pos_residue};call={fubar_char[(gene, col)]}"})
     return gene_pos_sel_cols, gene_neg_sel_cols, fubar_char, members
 
 
-def collect_fade_sites(fade_file, map_cache, active_genes, collection_id, pending=None):
+def collect_fade_sites(fade_file, map_cache, active_genes, collection_id, pending=None, include_members=True):
     """FADE selected sites (positions already in CAAS space) as columns and members.
 
     FADE upstream already applies its configured BF threshold; no new cutoff here.
@@ -492,6 +533,7 @@ def collect_fade_sites(fade_file, map_cache, active_genes, collection_id, pendin
     appended to it.
     """
     result, members = {}, []
+    if not include_members: members = _DiscardMembers()
     if fade_file:
         frame = pd.read_csv(fade_file, usecols=['gene', 'position'])
         for row in frame.itertuples(index=False):
@@ -516,13 +558,14 @@ def collect_fade_sites(fade_file, map_cache, active_genes, collection_id, pendin
     return result, members
 
 
-def collect_genomic_windows(map_cache):
+def collect_genomic_windows(map_cache, include_members=True):
     """1 Mb genomic bins over the MAP genomic coordinates, and members.
 
     Bins are chromosome-separated with one-based inclusive ends. This is genomic
     proximity, distinct from protein proximity.
     """
     gen_terms, members = {}, []
+    if not include_members: members = _DiscardMembers()
     for gene, entry in map_cache.items():
         col_to_genomic = entry['col_to_genomic']
         for col, genomic in col_to_genomic.items():
@@ -592,7 +635,7 @@ def write_characterization_table(path, pfam_char, ucr_region_char, ucr_variabili
     return len(char_keys)
 
 
-def collect_custom_members(custom_file, map_cache, active_genes, strict=True, pending=None):
+def collect_custom_members(custom_file, map_cache, active_genes, strict=True, pending=None, include_members=True):
     """Custom marker terms: TSV without header, gene, position, term, optional
     description; '#' lines ignored. Positions must already be validated CAAS
     coordinates. With strict=True (default) an invalid row raises; otherwise it is
@@ -600,6 +643,7 @@ def collect_custom_members(custom_file, map_cache, active_genes, strict=True, pe
     aborting.
     """
     custom_terms, members = {}, []
+    if not include_members: members = _DiscardMembers()
     if not (custom_file and os.path.exists(custom_file)):
         return custom_terms, members
     with open_maybe_gz(custom_file, 'rt') as f:
@@ -673,7 +717,7 @@ def main():
     # 1. Pfam domains and clans (all overlapping domain and clan annotations kept)
     print("Compiling PFAM Domains & Clans...")
     pfam_terms, pfam_clan_terms, pfam_char, _ = collect_pfam_members(
-        args.domain_variability_file, map_cache, active_genes)
+        args.domain_variability_file, map_cache, active_genes, include_members=False)
     if args.domain_variability_file:
         write_gmt(os.path.join(args.output_dir, "pfam_domains.gmt"), pfam_terms)
         write_gmt(os.path.join(args.output_dir, "pfam_clans.gmt"), pfam_clan_terms)
@@ -681,24 +725,24 @@ def main():
     # 2. UCR positions per gene, split by region_type (core, flank_up, flank_down).
     print("Loading UCR positions...")
     gene_ucr_core_cols, gene_ucr_flank_cols, ucr_region_char, ucr_variability_char, _ = \
-        collect_ucr_members(args.ucr_positions_file, map_cache, active_genes)
+        collect_ucr_members(args.ucr_positions_file, map_cache, active_genes, include_members=False)
 
     # 3. FUBAR selection positions per gene, split by the sign of selection
     print("Loading FUBAR selection positions...")
     gene_pos_sel_cols, gene_neg_sel_cols, fubar_char, _ = collect_fubar_members(
-        args.fubar_sites_file, map_cache, active_genes)
+        args.fubar_sites_file, map_cache, active_genes, include_members=False)
 
     # FADE upstream already applies its configured BF threshold. No new cutoff here.
     gene_fade_top_cols, _ = collect_fade_sites(
-        args.fade_sites_top_file, map_cache, active_genes, 'fade_top_sig')
+        args.fade_sites_top_file, map_cache, active_genes, 'fade_top_sig', include_members=False)
     gene_fade_bottom_cols, _ = collect_fade_sites(
-        args.fade_sites_bottom_file, map_cache, active_genes, 'fade_bottom_sig')
+        args.fade_sites_bottom_file, map_cache, active_genes, 'fade_bottom_sig', include_members=False)
 
     # 5. Genomic locations (1 Mbp chromosome bins). Needs genomic coordinates, so it
     # writes nothing without a map_dir. It iterates map_cache and not active_genes,
     # which can hold genes without a MAP entry.
     print("Compiling Genomic Locations (1 Mbp bins)...")
-    gen_terms, _ = collect_genomic_windows(map_cache)
+    gen_terms, _ = collect_genomic_windows(map_cache, include_members=False)
     write_gmt(os.path.join(args.output_dir, "genomic_locations.gmt"), gen_terms)
 
     # Global characterization sets are written separately from the local GMTs.
@@ -723,7 +767,7 @@ def main():
     # 7. Custom features: tab-separated gene, position, term, optional description; "#" lines ignored
     if args.custom_marker_file and os.path.exists(args.custom_marker_file):
         print("Compiling Custom Features...")
-        custom_terms, _ = collect_custom_members(args.custom_marker_file, map_cache, active_genes)
+        custom_terms, _ = collect_custom_members(args.custom_marker_file, map_cache, active_genes, include_members=False)
         write_gmt(os.path.join(args.output_dir, "custom_features.gmt"), custom_terms)
 
 

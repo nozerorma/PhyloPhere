@@ -28,7 +28,7 @@ Outputs:    <output-dir>/domain_variability.tsv  gene, pfam_id, target_name, des
                                 in the ungapped reference sequence, as reported by hmmscan.
                                 alignment_positions explicitly lists the zero-based columns of the supplied
                                 trimmed alignment, excluding reference gaps/X. Use the same alignment as CAAS.
-                                Hits without a Pfam-A.clans.tsv entry are dropped with a warning.
+                                Hits without clan metadata retain the hmmscan name/description and no clan.
             <output-dir>/reference_seqs.fa, hmmscan.domtblout  intermediate files
 
 Usage:
@@ -39,6 +39,8 @@ Usage:
 
 import argparse
 import gzip
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -51,6 +53,14 @@ from map_domain_variability import get_ref_seq, parse_domtblout, read_fasta  # n
 
 _PFAM_HMM_URL = "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz"
 _PFAM_CLANS_URL = "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz"
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        for block in iter(lambda: handle.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def _download_gz(url: str, dest: str) -> None:
@@ -121,7 +131,13 @@ def build_reference_fasta(alignment_dir: str, alignment_format: str, ref_species
             if not os.path.isfile(path):
                 continue
             gene = os.path.splitext(fname)[0]
-            ref = get_ref_seq(path, ref_species)
+            if Path(fname).suffix.lower() not in ('.fa', '.fasta', '.faa', '.fas'):
+                continue
+            refs = [(header, sequence) for header, sequence in read_fasta(path)
+                    if ref_species.lower() in header.lower()]
+            if len(refs) > 1:
+                raise ValueError(f"Ambiguous reference '{ref_species}' in {fname}")
+            ref = refs[0] if refs else None
             if ref is None:
                 print(f"WARN: reference species '{ref_species}' not found in {fname}",
                       file=sys.stderr)
@@ -144,7 +160,13 @@ def main():
     parser.add_argument("--ref-species", default="Homo_sapiens")
     parser.add_argument("--evalue-threshold", type=float, default=0.01)
     parser.add_argument("--alignment-format", default="fasta")
+    parser.add_argument("--sequence-evalue-threshold", type=float, default=0.001,
+                        help="Maximum full-sequence E-value (legacy PPGA used 0.001)")
+    parser.add_argument("--cpus", type=int, default=1,
+                        help="hmmscan threads; set to the allocated CPUs on a compute node")
     args = parser.parse_args()
+    if args.cpus < 1:
+        parser.error('--cpus must be at least 1')
 
     os.makedirs(args.output_dir, exist_ok=True)
     hmm_path, clans_path = ensure_pfam_cache(args.cache_dir)
@@ -161,12 +183,32 @@ def main():
     domtblout = os.path.join(args.output_dir, "hmmscan.domtblout")
     print(f"Running hmmscan for {len(genes)} genes against {hmm_path}...", file=sys.stderr)
     subprocess.run(
-        ["hmmscan", "--domtblout", domtblout, "--cpu", str(os.cpu_count() or 1),
-         hmm_path, ref_fasta],
+        ["hmmscan", "--domtblout", domtblout, "--cpu", str(args.cpus),
+         "-E", str(args.sequence_evalue_threshold), hmm_path, ref_fasta],
         check=True, stdout=subprocess.DEVNULL,
     )
 
     hits = parse_domtblout(domtblout, args.evalue_threshold)
+    # A domain passing i-E can still fail the full-sequence cutoff.
+    accepted = set()
+    with open(domtblout) as handle:
+        for line in handle:
+            if line.startswith("#") or not line.strip(): continue
+            fields = line.split()
+            if len(fields) >= 22 and float(fields[6]) <= args.sequence_evalue_threshold:
+                accepted.add((fields[3], fields[1].split(".")[0], int(fields[17]), int(fields[18])))
+    hits = [h for h in hits if (h["gene"], h["pfam_id"], h["ali_start"], h["ali_end"]) in accepted]
+    scan_metadata = {}
+    with open(domtblout) as handle:
+        for line in handle:
+            if line.startswith('#') or not line.strip():
+                continue
+            parts = line.split()
+            if len(parts) >= 22:
+                scan_metadata.setdefault(parts[1].split('.')[0], {
+                    'target_name': parts[0], 'description': ' '.join(parts[22:]),
+                    'clan_acc': 'NA', 'clan_name': 'NA',
+                })
 
     out_tsv = os.path.join(args.output_dir, "domain_variability.tsv")
     n_written = 0
@@ -176,8 +218,10 @@ def main():
             meta = clan_meta.get(hit["pfam_id"])
             if not meta:
                 print(f"WARN: no Pfam-A.clans.tsv entry for {hit['pfam_id']} "
-                      f"(gene {hit['gene']}) — skipping", file=sys.stderr)
-                continue
+                      f"(gene {hit['gene']}) — retaining domain without clan", file=sys.stderr)
+                meta = scan_metadata[hit['pfam_id']]
+            if not 1 <= hit['ali_start'] <= hit['ali_end'] <= len(query_columns[hit['gene']]):
+                raise ValueError(f"Pfam endpoints outside scanned query: {hit}")
             columns = query_columns[hit['gene']][hit['ali_start']-1:hit['ali_end']]
             positions = ','.join(map(str, columns))
             fh.write(f"{hit['gene']}\t{hit['pfam_id']}\t{meta['target_name']}\t"
@@ -185,6 +229,19 @@ def main():
                      f"{hit['ali_start']}\t{hit['ali_end']}\t{positions}\tCAAS_0based\n")
             n_written += 1
 
+    manifest = {
+        "coordinate_space": "CAAS_0based", "ref_species": args.ref_species,
+        "sequence_evalue_max": args.sequence_evalue_threshold,
+        "domain_ievalue_max": args.evalue_threshold,
+        "alignment_dir": os.path.abspath(args.alignment_dir),
+        "alignments": {p.name: sha256_file(p)
+                       for p in sorted(Path(args.alignment_dir).iterdir()) if p.is_file()},
+        "genes_scanned": genes, "genes_with_hits": sorted({h["gene"] for h in hits}),
+        "pfam_hmm_sha256": sha256_file(hmm_path),
+        "pfam_clans_sha256": sha256_file(clans_path),
+        "table_sha256": sha256_file(out_tsv),
+    }
+    Path(out_tsv + '.manifest.json').write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"Wrote {n_written} domain hits ({len(genes)} genes scanned) to {out_tsv}",
           file=sys.stderr)
 

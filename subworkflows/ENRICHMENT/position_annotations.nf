@@ -2,6 +2,7 @@
 // Annotation-only path: no positional test, permulation input or report 14.
 process POSITION_ANNOTATIONS {
     label 'process_low'
+    memory { params.position_annotation_memory ?: '32 GB' }
     publishDir "${params.outdir}/posenrich/gmts", mode: 'copy', overwrite: true
 
     input:
@@ -21,8 +22,11 @@ process POSITION_ANNOTATIONS {
     path 'position_characterization.tsv', emit: position_char
 
     script:
+    def source_hash = java.security.MessageDigest.getInstance('SHA-256')
+        .digest(file("${baseDir}/subworkflows/ENRICHMENT/local/src/build_position_gmt.py").bytes).encodeHex().toString()
     def optional = { flag, source -> source.name.startsWith('NO_') ? '' : "--${flag} '${source}'" }
     """
+    # Annotation source SHA256: ${source_hash}
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/build_position_gmt.py \\
         ${optional('gene_ensembl_file', gene_ensembl_file)} \\
         ${optional('domain_variability_file', domain_file)} \\

@@ -1,5 +1,13 @@
 # POSENRICH modular — contrato de entrada, inventario de productores y especificación del estimando
 
+> Estado vigente tras revisión: ver `POSENRICH_MODULAR_REVISION.md`.
+> `core.scores.position_score` define los scores no positivos como ausentes; el registro
+> conserva el valor crudo y distingue no evaluable de evaluada sin score canónico.
+> El AUC disponible está condicionado a detecciones positivas (o posiciones con p
+> canónico para la sensibilidad), no al universo completo evaluable. No se publican
+> p/q de localización ni se ejecuta el control prototipo en producción.
+
+
 Documento de trabajo WP10 (P0). Fecha: 23/10/2026. Estado del árbol: rama `remove_caap`, HEAD `6e13ba23`, con cambios concurrentes sin commit (migración percentiles → evidencia nominal/BH y anotaciones posicionales). Este contrato fija las entradas que el módulo consume; no modifica productores ajenos.
 
 ## 1. Inventario de productores vigentes (auditado 23/10/2026)

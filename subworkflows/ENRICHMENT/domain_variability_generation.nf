@@ -40,6 +40,7 @@ process COMPUTE_DOMAIN_VARIABILITY {
     python3 ${baseDir}/bin/compute_domain_variability.py \\
         --alignment-dir "${alignment_dir}" \\
         --output-dir . \\
+        --cpus ${task.cpus} \\
         --cache-dir "${cache_dir}" \\
         --ref-species "${ref_species}"
     """
@@ -49,7 +50,7 @@ process COMPUTE_DOMAIN_VARIABILITY {
     // run must not trigger; without a stub block Nextflow runs the real script even under
     // -stub-run. This stub writes the header of the table only.
     """
-    printf 'gene\tpfam_id\ttarget_name\tdescription\tclan_acc\tclan_name\tali_start\tali_end\n' > domain_variability.tsv
+    printf 'gene\tpfam_id\ttarget_name\tdescription\tclan_acc\tclan_name\tali_start\tali_end\talignment_positions\tcoordinate_space\n' > domain_variability.tsv
     """
 }
 

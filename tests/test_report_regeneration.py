@@ -50,6 +50,7 @@ def _make_outdir(base: Path) -> Path:
     _touch(out / "cleaned_background.txt")
     _touch(out / "rerconverge" / "rer_results" / "trait.continuous.output")
     _touch(out / "fcs" / "fcs_results" / "fcs_enrich_input.tsv")
+    _touch(out / "fcs" / "fcs_results" / "fcs_report_metadata.json")
     _touch(out / "fcs_stats.tsv")
     _touch(out / "posenrich" / "posenrich_characterization.tsv")
     _touch(out / "posenrich" / "posenrich_leading_edge.tsv")
@@ -110,3 +111,13 @@ def test_regeneration_scripts_match_rmd_contracts(tmp_path):
         script = build_script(found[spec_id], ROOT, use_singularity=False)
         assert "position_lists_dir" not in script and "gene_lists_dir" not in script
     assert "gene_lists_dir" not in build_script(found["fcs_scoring"], ROOT, use_singularity=False)
+
+
+def test_fcs_regeneration_requires_original_settings(tmp_path):
+    from gui.generation.report_registry import detect_reports
+
+    out = _make_outdir(tmp_path)
+    (out / "fcs" / "fcs_results" / "fcs_report_metadata.json").unlink()
+    found = {r.id: r for r in detect_reports(str(out), ROOT)}
+    assert not found["fcs_scoring"].runnable
+    assert any("Saved FCS settings" in label for label in found["fcs_scoring"].missing_required)

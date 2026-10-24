@@ -121,14 +121,18 @@ def test_registry_states_members_coverage_manifest(tmp_path):
     assert positions[('G1', 2)]['hg38_nt_coord'] == 'chr1:1000005'
 
     evidence = read_tsv(out / 'position_evidence.tsv')
-    assert len(evidence) == 3  # the OUT row is outside the universe
+    assert len(evidence) == 4  # OUT excluded; discovery without a canonical score retained
     g10 = [r for r in evidence if r['Position'] == '0']
     assert {r['side'] for r in g10} == {'top', 'bottom'}
     # p.emp is the pooled max-over-sides p: one shared test, not two directional ones.
     assert len({r['p.emp'] for r in g10}) == 1
     assert all(r['p_shared'] == 'TRUE' for r in evidence)
     assert all(r['N_cycles'] == '100' for r in evidence)
-    assert all(r['evidence_status'] == 'evaluated' for r in evidence)
+    assert sum(r['evidence_status'] == 'evaluated' for r in evidence) == 3
+    no_score = next(r for r in evidence if r['Position'] == '3')
+    assert no_score['CAAS_score'] == 'NA' and no_score['p.emp'] == 'NA'
+    assert no_score['raw_asr_path_score'] == '0.0'
+    assert no_score['score_status'] == 'evaluated_no_canonical_score'
     # Directional scores stay separate from the shared p.
     assert {r['CAAS_score'] for r in g10} == {'0.9', '0.8'}
 
@@ -267,3 +271,27 @@ def test_registry_sentinels_and_empty_inputs(tmp_path):
     manifest = json.loads((out / 'manifest.json').read_text())
     assert manifest['universe']['n_genes'] == 0
     assert manifest['positions']['total'] == 0
+
+
+def test_discovery_missing_and_zero_keep_distinct_states(tmp_path):
+    files, maps = make_fixture(tmp_path)
+    with open(files['postproc'], 'a') as f:
+        f.write('G1\t1\tF/L\tconvergent\tCAAS_x:1\tFFF/FLL:1\tH1\t1\t2.0\ttop\tNA\n')
+    out, _ = run_registry(tmp_path, files, maps)
+    positions = {r['Position']: r for r in read_tsv(out / 'positions.tsv')}
+    assert positions['1']['evaluation_status'] == 'not_evaluable'
+    assert positions['3']['evaluation_status'] == 'evaluated_no_detection'
+    evidence = {r['Position']: r for r in read_tsv(out / 'position_evidence.tsv')}
+    assert evidence['1']['CAAS_score'] == evidence['3']['CAAS_score'] == 'NA'
+    assert evidence['3']['p.emp'] == 'NA'
+    manifest = json.loads((out / 'manifest.json').read_text())
+    assert manifest['evidence']['complete_evaluable_universe'] is False
+
+
+def test_registry_rejects_inconsistent_shared_p(tmp_path):
+    files, maps = make_fixture(tmp_path)
+    p = Path(files['scores'])
+    p.write_text(p.read_text().replace('0.8\tbottom\t0.01', '0.8\tbottom\t0.02'))
+    import pytest
+    with pytest.raises(AssertionError, match='inconsistent shared p.emp'):
+        run_registry(tmp_path, files, maps)

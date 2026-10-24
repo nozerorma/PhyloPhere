@@ -17,7 +17,7 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 | WP7 | `WP7_caas_perms_por_bloques.md` | Fase 5 | WP5 | IMPLEMENTADO y validado dirigido: bloques + roster + índice canónicos; RDS único opcional (false por defecto). Seis reconstrucciones y Nextflow con/sin exportación aprobados; SCORING y 399 resultados FCS conservados. Aceptación integrada y recursos reales a escala pendientes |
 | WP8 | `WP8_cierre.md` | | WP5–WP7 | IMPLEMENTADO y validado dirigido: limpieza inerte retirada, remove_work mínimo real, GUI/plantillas y DOMINO sin aristas; aceptación integrada y escala pendientes |
 | WP9 | `WP9_estadistico_gen.md` | | A1, WP5–WP7 | A1 y control FCS dirigido hechos; recomendación provisional size_adj_max; A2 y elección definitiva pendientes |
-| WP10 | `WP10_posenrich_modular.md` | | WP8, contrato de evidencia y colecciones | IMPLEMENTADO y validado dirigido (P0–P6 + registro en `WP10_posenrich_modular_entrega.md`); la migración percentiles→p.emp está cerrada (casos límite, regeneración independiente y limpieza en `cierre_migracion_cortes_a_p_emp.md`); aceptación a escala y PP2A piloto pendientes |
+| WP10 | `WP10_posenrich_modular.md` | | WP8, contrato de evidencia y colecciones | REVISADO: componentes descriptivos y correcciones dirigidas en `../POSENRICH_MODULAR_REVISION.md`; inferencia P3 retenida hasta validar universo/cobertura/control. P6 inferencial, PP2A y aceptación a escala pendientes |
 
 Actualiza esta tabla (estado y, en el fichero de la fase, el registro) al cerrar cada fase.
 Paralelismo posible: WP1 y WP2 son independientes (ficheros disjuntos); WP9-A1 ya está hecho; WP4 y WP5 son seriales porque comparten el formato de tabla de la tesela.

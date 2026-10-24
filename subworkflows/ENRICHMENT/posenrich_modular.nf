@@ -3,8 +3,15 @@
 // within-protein localization + global association + proximity.
 // Gated by params.posenrich_modular; the historical POSENRICH inference stays omitted.
 
+def modularSourceHash(List names) {
+    def sources = names.collect { file("${baseDir}/subworkflows/ENRICHMENT/local/${it}").text }.join('\n')
+    return java.security.MessageDigest.getInstance('SHA-256')
+        .digest(sources.getBytes('UTF-8')).encodeHex().toString()
+}
+
 process POSITION_REGISTRY {
     label 'process_low'
+    memory { params.position_registry_memory ?: '64 GB' }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'registry'
 
     input:
@@ -25,10 +32,12 @@ process POSITION_REGISTRY {
     path 'registry', emit: registry
 
     script:
+    def source_hash = modularSourceHash(['src/posenrich_registry.py', 'src/build_position_gmt.py'])
     // Same optional-input contract as POSITION_ANNOTATIONS: NO_* sentinels and
     // dangling paths mean absent; the registry tolerates every absent source.
     def optional = { flag, source -> source.name.startsWith('NO_') ? '' : "--${flag} '${source}'" }
     """
+    # POSENRICH sources SHA256: ${source_hash}
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_registry.py \\
         ${optional('position_scores', position_scores)} \\
         ${optional('postproc', postproc)} \\
@@ -48,6 +57,7 @@ process POSITION_REGISTRY {
 
 process POSENRICH_CHARACTERIZE {
     label 'process_low'
+    memory { params.position_module_memory ?: '32 GB' }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'characterization'
 
     input:
@@ -55,9 +65,12 @@ process POSENRICH_CHARACTERIZE {
 
     output:
     path 'characterization', emit: characterization
+    path 'characterization/position_characterization.tsv', emit: position_char
 
     script:
+    def source_hash = modularSourceHash(['src/posenrich_characterize.py'])
     """
+    # POSENRICH sources SHA256: ${source_hash}
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_characterize.py \\
         --registry_dir registry --output_dir characterization
     """
@@ -65,6 +78,7 @@ process POSENRICH_CHARACTERIZE {
 
 process POSENRICH_LOCALIZATION {
     label 'process_low'
+    memory { params.position_module_memory ?: '32 GB' }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'localization'
 
     input:
@@ -74,10 +88,12 @@ process POSENRICH_LOCALIZATION {
     path 'localization', emit: localization
 
     script:
+    def source_hash = modularSourceHash(['src/posenrich_localization.py'])
     """
+    # POSENRICH sources SHA256: ${source_hash}
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_localization.py \\
         --registry_dir registry --output_dir localization \\
-        --ranking '${params.posenrich_ranking ?: 'caas_score'}' \\
+        --scope all --ranking '${params.posenrich_ranking ?: 'caas_score'}' \\
         --aggregation '${params.posenrich_aggregation ?: 'mean'}' \\
         --n_permutations ${params.posenrich_n_permutations ?: 999} \\
         --seed ${params.posenrich_seed ?: 1}
@@ -86,6 +102,7 @@ process POSENRICH_LOCALIZATION {
 
 process POSENRICH_GLOBAL {
     label 'process_low'
+    memory { params.position_module_memory ?: '32 GB' }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'global'
 
     input:
@@ -95,15 +112,18 @@ process POSENRICH_GLOBAL {
     path 'global', emit: global
 
     script:
+    def source_hash = modularSourceHash(['src/posenrich_global.py', 'src/posenrich_localization.py'])
     """
+    # POSENRICH sources SHA256: ${source_hash}
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_global.py \\
         --registry_dir registry --output_dir global \\
-        --ranking '${params.posenrich_ranking ?: 'caas_score'}'
+        --scope all --ranking '${params.posenrich_ranking ?: 'caas_score'}'
     """
 }
 
 process POSENRICH_PROXIMITY {
     label 'process_low'
+    memory { params.position_module_memory ?: '32 GB' }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'proximity'
 
     input:
@@ -113,7 +133,9 @@ process POSENRICH_PROXIMITY {
     path 'proximity', emit: proximity
 
     script:
+    def source_hash = modularSourceHash(['src/posenrich_proximity.py', 'src/posenrich_localization.py'])
     """
+    # POSENRICH sources SHA256: ${source_hash}
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_proximity.py \\
         --registry_dir registry --output_dir proximity \\
         --radios '${params.posenrich_radios ?: '0,5,10'}'
@@ -137,9 +159,11 @@ process POSENRICH_MODULAR_REPORT {
     path "POSENRICH_modular_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
 
     script:
+    def source_hash = modularSourceHash(['posenrich_modular_report.Rmd'])
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
     def traitname = params.traitname ?: 'unknown_trait'
     """
+    # POSENRICH sources SHA256: ${source_hash}
     cp -R ${local_dir}/* .
     Rscript -e "
         rmarkdown::render(
@@ -193,6 +217,7 @@ workflow POSENRICH_MODULAR {
     emit:
     registry         = registry_out.registry
     characterization = characterization_out.characterization
+    position_char    = characterization_out.position_char
     localization     = localization_out.localization
     global           = global_out.global
     proximity        = proximity_out.proximity

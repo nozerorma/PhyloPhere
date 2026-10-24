@@ -19,6 +19,8 @@ nextflow.enable.dsl=2
 // repo para que baseDir de los procesos apunte a la raíz. No es un archivo versionado.
 include { POSENRICH_MODULAR } from './subworkflows/ENRICHMENT/posenrich_modular.nf'
 
+params.position_registry_memory = '500 MB'
+params.position_module_memory = '500 MB'
 params.fixture_dir = null
 params.outdir = 'results'
 params.traitname = 'smoke'
@@ -95,3 +97,90 @@ def test_posenrich_modular_nextflow_smoke(tmp_path):
     assert html, 'informe modular no publicado'
     # El GMT export del registro es compatible con build_position_gmt.py.
     assert (pos / 'registry/gmts/pfam_domains.gmt').exists()
+
+
+@pytest.mark.skipif(NEXTFLOW is None, reason='nextflow no disponible en PATH')
+@pytest.mark.parametrize('modular, legacy', [(True, None), (False, None), (False, 'plain'), (False, 'gzip'), (False, 'bad_checksum'), (False, 'wrong_alignment')])
+def test_enrichment_routes_canonical_characterization(tmp_path, modular, legacy):
+    files, maps = make_fixture(tmp_path)
+    main = ROOT / '.smoke_posenrich_enrichment.nf'
+    out = tmp_path / 'out'
+    work = tmp_path / 'work'
+    script = """
+nextflow.enable.dsl=2
+include { ENRICHMENT } from './workflows/enrichment.nf'
+params.traitname = 'route'
+params.fcs_enabled = false
+params.scoring_ami = false
+params.scoring_string = false
+params.posenrich = false
+workflow {
+    def missing_id = 0
+    def absent = { missing_id++; Channel.value(file("NO_FILE_${missing_id}")) }
+    ENRICHMENT(
+        absent(), absent(), absent(), absent(), absent(), absent(),
+        Channel.value(file(params.fixture_background)),
+        absent(), absent(), absent(), absent(), absent(),
+        Channel.value(file(params.fixture_scores)),
+        Channel.value(file(params.fixture_discovery)),
+        Channel.value(file(params.fixture_null)),
+        absent(), absent(), absent(), absent(), absent(), absent(),
+        absent(), absent(), absent(), absent(), absent(), absent(), absent()
+    )
+}
+"""
+    main.write_text(script)
+    try:
+        cmd = [NEXTFLOW, 'run', str(main), '--outdir', str(out), '-w', str(work),
+               '--position_annotation_memory', '500 MB', '--position_registry_memory', '500 MB', '--position_module_memory', '500 MB', '--fcs_enabled', 'false', '--scoring_ami', 'false', '--scoring_string', 'false',
+               '--posenrich', 'false', '--posenrich_modular', str(modular).lower(),
+               '--fixture_background', files['background'], '--fixture_scores', files['scores'],
+               '--fixture_discovery', files['postproc'], '--fixture_null', files['null_universe'],
+               '--caas_map_dir', maps, '--posenrich_custom_file', files['custom'],
+               '-ansi-log', 'false']
+        if legacy:
+            legacy_path = tmp_path / ('legacy.tsv.gz' if legacy == 'gzip' else 'legacy.tsv')
+            text = 'gene\tpfam_id\ttarget_name\tdescription\tclan_acc\tclan_name\tali_start\tali_end\n'
+            if legacy in ('bad_checksum', 'wrong_alignment'):
+                import json
+                text = text.rstrip('\n')+'\tcoordinate_space\n'
+                legacy_path.write_text(text)
+                meta = {'table_sha256': '0'*64} if legacy == 'bad_checksum' else {}
+                if legacy == 'wrong_alignment':
+                    original = tmp_path/'original_alignments';original.mkdir()
+                    actual = tmp_path/'actual_alignments';actual.mkdir()
+                    meta['alignment_dir'] = str(original)
+                    cmd += ['--alignment', str(actual)]
+                Path(str(legacy_path)+'.manifest.json').write_text(json.dumps(meta))
+            elif legacy == 'gzip':
+                import gzip
+                with gzip.open(legacy_path, 'wt') as handle:
+                    handle.write(text)
+            else:
+                legacy_path.write_text(text)
+            cmd += ['--posenrich_domains', 'true', '--domain_variability_file', str(legacy_path)]
+        result = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, timeout=280)
+    finally:
+        main.unlink(missing_ok=True)
+    log = result.stdout + result.stderr
+    if legacy:
+        assert result.returncode != 0
+        expected = 'checksum mismatch' if legacy == 'bad_checksum' else 'belongs to alignment' if legacy == 'wrong_alignment' else 'has no coordinate_space'
+        assert expected in log
+        assert 'Submitted process' not in log
+        return
+    assert result.returncode == 0, log[-5000:]
+    assert ('POSITION_ANNOTATIONS' in log) is (not modular)
+    assert list((out / 'html_reports').glob('15.Comparison_report_*.html'))
+    compare_tasks = [p.parent for p in work.rglob('.command.sh') if '15.Comparison_report.Rmd' in p.read_text()]
+    assert len(compare_tasks) == 1
+    staged = compare_tasks[0] / 'position_characterization.tsv'
+    assert staged.is_file()
+    if modular:
+        assert staged.resolve().parent.name == 'characterization'
+        assert staged.read_bytes() == (out / 'posenrich/characterization/position_characterization.tsv').read_bytes()
+        import csv
+        with (out / 'posenrich/localization/localization_results.tsv').open() as f:
+            rows = list(csv.DictReader(f, delimiter='\t'))
+        assert {r['rank_direction'] for r in rows} == {'global', 'top', 'bottom'}
+        assert all(r['p_mc'] == 'NA' and r['B_valid'] == '0' for r in rows)

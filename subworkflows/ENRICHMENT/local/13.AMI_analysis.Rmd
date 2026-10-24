@@ -537,13 +537,27 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, to
   function(coords, v = NULL, params) {
     vertex.color <- params("vertex", "color")
     if (length(vertex.color) != 1 && !is.null(v)) vertex.color <- vertex.color[v]
-    vertex.size <- (1 / 150) * params("vertex", "size")
+    # igraph has already converted vertex sizes to plot coordinates before
+    # dispatching the shape callback (as for its built-in square/circle).
+    vertex.size <- params("vertex", "size")
     if (length(vertex.size) != 1 && !is.null(v)) vertex.size <- vertex.size[v]
-    graphics::symbols(
-      x = coords[, 1], y = coords[, 2], bg = vertex.color,
-      stars = outer(vertex.size, radii),
-      add = TRUE, inches = FALSE
-    )
+    frame.color <- params("vertex", "frame.color")
+    frame.width <- params("vertex", "frame.width")
+    if (length(frame.color) != 1 && !is.null(v)) frame.color <- frame.color[v]
+    if (length(frame.width) != 1 && !is.null(v)) frame.width <- frame.width[v]
+    vertex.size <- rep(vertex.size, length.out = nrow(coords))
+    vertex.color <- rep(vertex.color, length.out = nrow(coords))
+    frame.color <- rep(frame.color, length.out = nrow(coords))
+    frame.width <- rep(frame.width, length.out = nrow(coords))
+    for (i in seq_len(nrow(coords))) {
+      graphics::symbols(
+        x = coords[i, 1], y = coords[i, 2], bg = vertex.color[i],
+        fg = if (frame.width[i] > 0) frame.color[i] else NA,
+        lwd = max(1, frame.width[i]),
+        stars = matrix(vertex.size[i] * radii, nrow = 1),
+        add = TRUE, inches = FALSE
+      )
+    }
   }
 }
 if (!"diamond" %in% names(igraph::shapes())) {
@@ -688,8 +702,9 @@ plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
 
   # Text legend for the encodings without a discrete swatch (size, edge width and
   # opacity, border, shape), always in the same place.
-  encoding_lines <- c("Node size = this tool's own gene score (CAAS score / RER -log10(p) / FADE log10(max BF))",
-                      "Solid + black border = active input gene",
+  encoding_lines <- c("Node size = CAAS -log10(p.gen) / RER -log10(p) / FADE log10(max BF)",
+                      "Solid + black border = nominal active input gene",
+                      "Gold border = active gene also passing empirical BH",
                       "Faded + grey border = DOMINO connector gene (not in input list)")
   if (!is.null(igraph::E(net)$combined_score)) {
     encoding_lines <- c(encoding_lines, "Edge width/opacity = STRING interaction confidence")

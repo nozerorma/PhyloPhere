@@ -142,9 +142,15 @@ pos_df  <- read_tsv(params$position_scores_file, show_col_types = FALSE)
 gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 .metadata <- file.path(dirname(params$gene_scores_file),"gene_evidence_metadata.json")
 if(file.exists(.metadata)) {
+ # rmarkdown locks the params binding; temporarily unlock it to restore
+ # the settings saved with these data, then retain the original lock state.
+ .params_env <- knitr::knit_global()
+ .params_locked <- bindingIsLocked("params", .params_env)
+ if (.params_locked) unlockBinding("params", .params_env)
  .m <- jsonlite::read_json(.metadata,simplifyVector=TRUE)
  params$evidence_p_threshold <- .m$nominal_threshold
  params$evidence_fdr_threshold <- .m$fdr_threshold
+ if (.params_locked) lockBinding("params", .params_env)
 }
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 

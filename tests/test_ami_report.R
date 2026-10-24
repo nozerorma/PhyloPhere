@@ -29,6 +29,11 @@ render_ami(file.path(work,'nominal'),c('g1','g2','g3','g4','g5','g6'))
 ev <- read.delim(file.path(work,'nominal','ami_networks','caas_global_gene_evidence.tsv'))
 stopifnot(nrow(ev)==6L, all(ev$caas_nominal), sum(ev$caas_adjusted)==2L,
           !any(c('g7','g8') %in% ev$Gene), all(c('g1','g2') %in% ev$Gene[ev$caas_adjusted]))
+# g1/g2 use custom corroboration shapes. Their BH borders must be visible in
+# the rendered image, rather than merely present in the exported evidence table.
+img <- png::readPNG(file.path(work,'nominal','ami_networks','caas_global_domino_network.png'))
+gold <- abs(img[,,1] - 217/255) < .04 & abs(img[,,2] - 154/255) < .04 & img[,,3] < .08
+stopifnot(sum(gold) > 500L)
 desc <- read.delim(file.path(work,'nominal','ami_networks','module_descriptions_all_lists.tsv'))
 stopifnot(nrow(desc)==1L, desc$n_genes==6L, !any(grepl('g7|g8',desc$genes)),
           file.exists(file.path(work,'nominal','13.AMI_analysis_fixture.html')))

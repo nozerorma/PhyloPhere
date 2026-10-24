@@ -93,14 +93,16 @@ def test_pfam_producer_preserves_columns_through_gaps_and_unknown_residues(tmp_p
     align=tmp_path/'align';align.mkdir()
     write(align/'G1.fa','>Homo_sapiens\nAX-S\n')
     clans=tmp_path/'clans';write(clans,'PF00001\tCL1\tClan\tDomain\tDescription\n')
-    monkeypatch.setattr(producer,'ensure_pfam_cache',lambda _:('unused_hmm',str(clans)))
+    hmm=tmp_path/'hmm';write(hmm,'test HMM')
+    monkeypatch.setattr(producer,'ensure_pfam_cache',lambda _:(str(hmm),str(clans)))
     def hmmscan(argv,**kwargs):
+        assert argv[argv.index('--cpu')+1] == '3'
         fields=['x']*22
-        for index,value in {1:'PF00001.1',3:'G1',11:'1e-10',17:'1',18:'2'}.items():fields[index]=value
+        for index,value in {1:'PF00001.1',3:'G1',6:'1e-8',11:'1e-10',17:'1',18:'2'}.items():fields[index]=value
         Path(argv[argv.index('--domtblout')+1]).write_text(' '.join(fields)+'\n')
     monkeypatch.setattr(producer.subprocess,'run',hmmscan)
     out=tmp_path/'domains'
-    monkeypatch.setattr(sys,'argv',['compute_domain_variability.py','--alignment-dir',str(align),'--output-dir',str(out)])
+    monkeypatch.setattr(sys,'argv',['compute_domain_variability.py','--alignment-dir',str(align),'--output-dir',str(out),'--cpus','3'])
     producer.main()
     rows=list(csv.DictReader((out/'domain_variability.tsv').open(),delimiter='\t'))
     assert rows[0]['alignment_positions']=='0,3' and rows[0]['coordinate_space']=='CAAS_0based'
@@ -113,3 +115,14 @@ def test_retired_toggle_migrates_and_custom_sets_render():
     # Existing project schema nests module configurations under modules.
     assert 'posenrich_eggnog' not in to_dict(config)['modules']['enrichment']
     assert 'export POSENRICH_CUSTOM_FILE="/data/positions.tsv"' in render_batch(config)
+
+
+def test_regeneration_prefers_modular_characterization(tmp_path):
+    from gui.generation.report_registry import Listing, _compare_find_slots
+    for rel in ('posenrich/gmts/position_characterization.tsv',
+                'posenrich/characterization/position_characterization.tsv'):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    slots = {slot.key: slot.path for slot in _compare_find_slots(Listing(str(tmp_path)))}
+    assert str(slots['position_characterization']).endswith('posenrich/characterization/position_characterization.tsv')

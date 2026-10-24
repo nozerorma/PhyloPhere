@@ -95,6 +95,25 @@ suppressPackageStartupMessages({
   library(patchwork)
 })
 
+# Reuse the settings saved with the exact calibrated input on independent renders.
+# The GUI supplies defaults; these must not relabel an existing run's statistic,
+# significance rules, set-size filters or redundancy groups.
+if (!is.null(params$enrich_file) && file.exists(params$enrich_file)) {
+  saved_metadata <- file.path(dirname(params$enrich_file), "fcs_report_metadata.json")
+  if (file.exists(saved_metadata)) {
+    # rmarkdown locks the params binding; temporarily unlock it to restore
+    # the settings saved with these data, then retain the original lock state.
+    .params_env <- knitr::knit_global()
+    .params_locked <- bindingIsLocked("params", .params_env)
+    if (.params_locked) unlockBinding("params", .params_env)
+    saved_params <- jsonlite::read_json(saved_metadata, simplifyVector = TRUE)
+    keys <- intersect(names(saved_params), c("gene_stat", "score_source", "num_g", "max_g",
+      "fdr_thr", "pperm_thr", "analytic_levels", "cluster_similarity", "cluster_threshold"))
+    for (key in keys) params[[key]] <- saved_params[[key]]
+    if (.params_locked) lockBinding("params", .params_env)
+  }
+}
+
 # ── Theme and helpers ─────────────────────────────────────────────────────────
 theme_set(
   theme_minimal(base_size = 11) +

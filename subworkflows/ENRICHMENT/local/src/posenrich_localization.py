@@ -13,7 +13,7 @@ Estimand (fixed before the engine, see docs/POSENRICH_MODULAR_CONTRATO.md):
   * Unit: one biological position (Gene, CAAS 0-based Position); never multiplied
     by side, hypothesis or evidence rows. The pooled p.emp is shared between sides.
   * Ranking: --ranking caas_score (default; best-side continuous CAAS score over
-    evaluable positions, no hit selection before the AUC) or minus_log10_pemp
+    canonical positive detections; the complete evaluable universe is unavailable) or minus_log10_pemp
     (explicit sensitivity over the shared p.emp). top/bottom select the
     directional score.
   * Within-gene effect: AUC of members vs eligible non-members of the same
@@ -21,7 +21,9 @@ Estimand (fixed before the engine, see docs/POSENRICH_MODULAR_CONTRATO.md):
     inform.
   * Aggregation: --aggregation mean (default principal; equal weight per gene)
     or pair_weighted (sensitivity). Both columns are always reported.
-  * Control: within-protein label redistribution. Membership labels are permuted
+  * Production publishes descriptive effects only (p/q withheld, B_valid=0).
+    run_term is an experimental prototype, not a validated inferential API.
+  * Prototype control: within-protein label redistribution. Membership labels are permuted
     inside each protein, preserving protein, score profile and coverage; no
     uniform shuffle across proteins, no circular shifts. p Monte Carlo unilateral
     for greater AUC: inclusive exceedances, (k+1)/(B_valid+1), fixed seed.
@@ -32,6 +34,7 @@ Outputs (in --output_dir):
   localization_manifest.json parameters, seed, B, states and limits
 """
 
+import hashlib
 import argparse
 import csv
 import json
@@ -62,6 +65,7 @@ def parse_args():
                         'pair_weighted: sensitivity by n_members*n_background pairs')
     p.add_argument('--n_permutations', type=int, default=999)
     p.add_argument('--seed', type=int, default=1)
+    p.add_argument('--scope', choices=(*SCORE_SCOPES, 'all'), default='global')
     p.add_argument('--collections', default=None,
                    help='Optional comma-separated collection_id filter')
     return p.parse_args()
@@ -109,6 +113,8 @@ def position_ranking_scores(evidence, ranking, scope='global'):
     out = {}
     for row in evidence.to_dict('records'):
         key = (row['Gene'], int(row['Position']))
+        if scope in ('top', 'bottom') and row['side'] != scope:
+            continue
         if ranking == 'minus_log10_pemp':
             p = row['p.emp']
             if p in ('NA', '') or float(p) <= 0:
@@ -127,6 +133,22 @@ def position_ranking_scores(evidence, ranking, scope='global'):
     return out
 
 
+def compatible_scores(scores, members, collection_id):
+    """Restrict known experimental coverage; unknown coverage stays explicit."""
+    if collection_id in ('fubar_positive', 'fubar_purifying'):
+        tested = members[members['collection_id'] == 'fubar_tested']
+        keys = set(zip(tested['Gene'], tested['Position'].astype(int)))
+        return {k: v for k, v in scores.items() if k in keys}, 'fubar_tested_positions'
+    return scores, 'experimental_coverage_unknown'
+
+
+def term_rng(seed, ranking, direction, collection_id, term_id):
+    """Independent reproducible stream for a term, invariant to collection batches."""
+    identity = json.dumps([seed, ranking, direction, collection_id, term_id], ensure_ascii=True)
+    digest = hashlib.sha256(identity.encode()).digest()
+    return np.random.default_rng(int.from_bytes(digest[:16], 'big'))
+
+
 def build_gene_table(members, collections, scores, collection_filter):
     """(collection_id, term_id) -> list of per-gene (scores array, member mask, n_members_total)."""
     eligible = collections[(collections['informative_within_protein'] == '1') &
@@ -134,8 +156,8 @@ def build_gene_table(members, collections, scores, collection_filter):
     if collection_filter:
         wanted = set(collection_filter.split(','))
         eligible = eligible[eligible['collection_id'].isin(wanted)]
+    all_members = members
     members = members[members['collection_id'].isin(set(eligible['collection_id']))]
-    member_keys = set(zip(members['Gene'], members['Position'].astype(int)))
     # evaluable positions per gene: those with a score in this ranking
     by_gene = {}
     for (gene, pos), score in scores.items():
@@ -149,14 +171,16 @@ def build_gene_table(members, collections, scores, collection_filter):
         for r in sub.to_dict('records'):
             member_by_gene.setdefault(r['Gene'], set()).add(int(r['Position']))
         n_members_total = sum(len(v) for v in member_by_gene.values())
-        for gene, positions in by_gene.items():
+        term_scores, coverage_status = compatible_scores(scores, all_members, cid)
+        for gene, positions_all in by_gene.items():
+            positions = {p: v for p, v in positions_all.items() if (gene, p) in term_scores}
             member_positions = member_by_gene.get(gene, set())
             # Members outside the evaluable set are audited, not dropped silently.
             n_members_evaluable = sum(1 for p in member_positions if p in positions)
             genes[gene] = {'positions': positions, 'member_positions': member_positions,
                            'n_members_evaluable': n_members_evaluable}
         terms[(cid, term)] = {'genes': genes, 'n_members_total': n_members_total,
-                              'description': row['description']}
+                              'description': row['description'], 'coverage_status': coverage_status}
     return terms
 
 
@@ -212,8 +236,8 @@ def run_term(term_data, aggregation, n_permutations, rng):
     k = int((perm_aucs >= auc_obs - 1e-12).sum())
     p_mc = (k + 1) / (b_valid + 1)
     return {'auc': auc_obs, 'auc_mean': auc_mean, 'auc_pair_weighted': auc_pair,
-            'auc_control_mean': float(perm_aucs.mean()),
-            'p_mc': p_mc, 'k_exceedances': k, 'B_valid': b_valid}, per_gene, len(prepared)
+            'auc_control_mean': float(perm_aucs.mean()) if b_valid else 'NA',
+            'p_mc': p_mc if b_valid else 'NA', 'k_exceedances': k, 'B_valid': b_valid}, per_gene, len(prepared)
 
 
 def main():
@@ -233,86 +257,81 @@ def main():
         manifest = json.load(f)
     n_cycles = manifest.get('evidence', {}).get('null_cycles')
 
-    scores = position_ranking_scores(evidence, args.ranking)
-    terms = build_gene_table(members, collections, scores, args.collections)
-    rng = np.random.default_rng(args.seed)
-
-    result_rows = []
-    gene_rows = []
+    result_rows, gene_rows = [], []
     n_not_identifiable = 0
-    for (cid, term) in sorted(terms):
-        term_data = terms[(cid, term)]
-        summary, per_gene, n_informative = run_term(term_data, args.aggregation,
-                                                    args.n_permutations, rng)
-        n_genes_evaluated = len(term_data['genes'])
-        if summary is None:
-            n_not_identifiable += 1
-            result_rows.append({
+    directions = SCORE_SCOPES if args.scope == 'all' else (args.scope,)
+    for direction in directions:
+        scores = position_ranking_scores(evidence, args.ranking, direction)
+        terms = build_gene_table(members, collections, scores, args.collections)
+        for (cid, term), term_data in sorted(terms.items()):
+            # Effects are available; the unvalidated null is never run in production.
+            summary, per_gene, n_informative = run_term(
+                term_data, args.aggregation, 0,
+                term_rng(args.seed, args.ranking, direction, cid, term))
+            identifiable = summary is not None
+            n_not_identifiable += int(not identifiable)
+            row = {
                 'analysis': 'localization', 'scope': 'within_protein', 'ranking': args.ranking,
-                'collection_id': cid, 'term_id': term, 'effect_statistic': 'AUC',
-                'auc': 'NA', 'auc_minus_half': 'NA', 'auc_control_mean': 'NA',
-                'auc_excess_vs_control': 'NA', 'p_mc': 'NA',
-                'n_genes_informative': 0, 'n_genes_evaluated': n_genes_evaluated,
-                'n_members': term_data['n_members_total'], 'n_background_positions': 'NA',
-                'n_permutations': args.n_permutations, 'B_valid': 0, 'seed': args.seed,
-                'aggregation': args.aggregation, 'coverage_status': 'no_within_protein_contrast',
-                'status': 'not_identifiable',
-                'reason': 'ningun gen tiene miembros y fondo evaluables con contraste',
-            })
-            continue
-        n_background = sum(g['n_background'] for g in per_gene)
-        result_rows.append({
-            'analysis': 'localization', 'scope': 'within_protein', 'ranking': args.ranking,
-            'collection_id': cid, 'term_id': term, 'effect_statistic': 'AUC',
-            'auc': repr(summary['auc']), 'auc_mean': repr(summary['auc_mean']),
-            'auc_pair_weighted': repr(summary['auc_pair_weighted']),
-            'auc_minus_half': repr(summary['auc'] - 0.5),
-            'auc_control_mean': repr(summary['auc_control_mean']),
-            'auc_excess_vs_control': repr(summary['auc'] - summary['auc_control_mean']),
-            'p_mc': repr(summary['p_mc']),
-            'n_genes_informative': n_informative, 'n_genes_evaluated': n_genes_evaluated,
-            'n_members': term_data['n_members_total'], 'n_background_positions': n_background,
-            'n_permutations': args.n_permutations, 'B_valid': summary['B_valid'],
-            'seed': args.seed, 'aggregation': args.aggregation,
-            'coverage_status': 'evaluated',
-            'status': 'executed',
-            'reason': '',
-        })
-        for g in per_gene:
-            gene_rows.append({'collection_id': cid, 'term_id': term, 'ranking': args.ranking,
-                              'Gene': g['Gene'], 'auc': repr(g['auc']),
-                              'n_members': g['n_members'], 'n_background': g['n_background'],
-                              'n_positions_evaluable': g['n_positions_evaluable']})
-
-    results = pd.DataFrame(result_rows)
-    write_tsv(results, os.path.join(args.output_dir, 'localization_results.tsv'))
-    write_tsv(pd.DataFrame(gene_rows), os.path.join(args.output_dir, 'localization_by_gene.tsv'))
+                'rank_direction': direction, 'collection_id': cid, 'term_id': term,
+                'effect_statistic': 'AUC', 'auc': summary['auc'] if identifiable else 'NA',
+                'auc_mean': summary['auc_mean'] if identifiable else 'NA',
+                'auc_pair_weighted': summary['auc_pair_weighted'] if identifiable else 'NA',
+                'auc_minus_half': summary['auc'] - .5 if identifiable else 'NA',
+                'auc_control_mean': 'NA', 'auc_excess_vs_control': 'NA', 'p_mc': 'NA',
+                'q': 'NA', 'B_valid': 0, 'seed': args.seed, 'aggregation': args.aggregation,
+                'n_permutations': args.n_permutations,
+                'n_genes_informative': n_informative, 'n_genes_evaluated': len(term_data['genes']),
+                'n_members': term_data['n_members_total'],
+                'n_background_positions': sum(g['n_background'] for g in per_gene),
+                'coverage_status': term_data['coverage_status'] if identifiable else 'no_within_protein_contrast',
+                'ranking_population': 'canonical_positive_detections_only' if args.ranking == 'caas_score' else 'positions_with_canonical_p',
+                'control_status': 'not_validated',
+                'status': 'descriptive_pending_control' if identifiable else 'not_identifiable',
+                'reason': 'complete eligible universe and exchangeability control not validated; inference withheld',
+            }
+            result_rows.append(row)
+            for g in per_gene:
+                gene_rows.append(dict(collection_id=cid, term_id=term, ranking=args.ranking,
+                                      rank_direction=direction, **g))
+    result_cols = ['analysis', 'scope', 'ranking', 'rank_direction', 'collection_id', 'term_id',
+                   'effect_statistic', 'auc', 'auc_mean', 'auc_pair_weighted', 'auc_minus_half',
+                   'auc_control_mean', 'auc_excess_vs_control', 'p_mc', 'q', 'B_valid', 'seed',
+                   'aggregation', 'n_permutations', 'n_genes_informative', 'n_genes_evaluated',
+                   'n_members', 'n_background_positions', 'coverage_status', 'ranking_population',
+                   'control_status', 'status', 'reason']
+    write_tsv(pd.DataFrame(result_rows, columns=result_cols),
+              os.path.join(args.output_dir, 'localization_results.tsv'))
+    write_tsv(pd.DataFrame(gene_rows, columns=['collection_id', 'term_id', 'ranking', 'rank_direction',
+              'Gene', 'auc', 'n_members', 'n_background', 'n_positions_evaluable']),
+              os.path.join(args.output_dir, 'localization_by_gene.tsv'))
 
     out_manifest = {
         'component': 'localization',
+        'ranking_population': 'canonical_positive_detections_only' if args.ranking == 'caas_score' else 'positions_with_canonical_p',
         'scope': 'within_protein',
         'contract_version': manifest.get('contract_version'),
         'parameters': {'ranking': args.ranking, 'aggregation': args.aggregation,
                        'n_permutations': args.n_permutations, 'seed': args.seed,
-                       'collections': args.collections},
-        'control': {'type': 'within_protein_label_redistribution',
+                       'collections': args.collections, 'scope': args.scope},
+        'control': {'status': 'not_validated', 'inference': 'withheld', 'type': 'within_protein_label_redistribution',
                     'p_mc': 'unilateral greater AUC, inclusive exceedances, (k+1)/(B_valid+1)',
                     'preserves': ['protein', 'score profile', 'coverage', 'members per gene']},
-        'states': {'localization': 'executed' if len(result_rows) else 'no_terms',
+        'states': {'localization': 'executed_descriptive_pending_control' if len(result_rows) else 'no_terms',
                     'characterization': 'not_executed (separate component)',
                     'global_association': 'not_executed (separate component)',
                     'proximity': 'not_executed (separate component)'},
         'terms_not_identifiable': n_not_identifiable,
         'limits': ['el control condicionado no valida la asociacion global',
                    'AUC 0.5 no es necesariamente el centro del control condicionado',
-                   'no selecciona hits antes del AUC',
+                   'ranking condicionado a detecciones positivas; universo completo evaluable no disponible',
+                   'p/q retenidos: cobertura e intercambiabilidad del control no validadas',
                    'p.emp compartido entre lados; el score direccional es aparte'],
     }
     with open(os.path.join(args.output_dir, 'localization_manifest.json'), 'w') as f:
         json.dump(out_manifest, f, indent=2, sort_keys=True)
         f.write('\n')
     print(f"localization: {len(result_rows)} terms ({n_not_identifiable} not identifiable), "
-          f"ranking={args.ranking}, B={args.n_permutations}, seed={args.seed} -> {args.output_dir}")
+          f"ranking={args.ranking}, B_valid=0 (inference withheld), seed={args.seed} -> {args.output_dir}")
 
 
 if __name__ == '__main__':
