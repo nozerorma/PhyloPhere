@@ -2,7 +2,7 @@
 // Annotation-only path: no positional test, permulation input or report 14.
 process POSITION_ANNOTATIONS {
     label 'process_low'
-    memory { params.position_annotation_memory ?: '32 GB' }
+    memory { params.position_annotation_memory ?: (background.size() < 20000 ? '4 GB' : '32 GB') }
     publishDir "${params.outdir}/posenrich/gmts", mode: 'copy', overwrite: true
 
     input:

@@ -166,6 +166,7 @@ def validatePositionReferences() {
                     def productive = file(params.alignment).toRealPath()
                     if (expected != productive) error "${spec.key} belongs to alignment '${expected}', but this run uses '${productive}'"
                     if (meta.alignments && !checkedAlignments.contains(productive.toString())) {
+                        log.info "Validating ${meta.alignments.size()} productive alignments for positional references: ${productive}"
                         def actualNames = java.nio.file.Files.list(productive).withCloseable { paths ->
                             paths.filter { java.nio.file.Files.isRegularFile(it) && it.fileName.toString().toLowerCase() ==~ /.*\.(fa|fasta|faa|fas)/ }
                                 .map { it.fileName.toString() }.collect(java.util.stream.Collectors.toSet())
@@ -182,6 +183,7 @@ def validatePositionReferences() {
                 if (meta.map_dir && params.caas_map_dir && file(meta.map_dir).toRealPath() != file(params.caas_map_dir).toRealPath())
                     error "${spec.key} was validated with a different MAP directory: ${meta.map_dir}"
                 if (meta.map_dir && meta.maps && params.caas_map_dir && !checkedMaps.contains(meta.map_dir)) {
+                    log.info "Validating ${meta.maps.size()} productive MAP files for positional references"
                     def mapRoot = file(params.caas_map_dir)
                     def actualMaps = java.nio.file.Files.list(mapRoot).withCloseable { paths ->
                         paths.filter { java.nio.file.Files.isRegularFile(it) && it.fileName.toString().endsWith('.map.tsv') }

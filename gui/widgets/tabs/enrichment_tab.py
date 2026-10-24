@@ -51,6 +51,20 @@ SPEC = ModuleTabSpec(
                 "enabled)."
             ),
         ),
+        Section("Position annotations — PP2A"),
+        FieldSpec(
+            name="posenrich_custom_file",
+            label="PP2A / custom position sets",
+            kind="path_file",
+            importance="optional",
+            help=(
+                "Validated position sets, including PP2A phosphosites. Select the "
+                "pp2a_custom.tsv for the alignment reference used by this run "
+                "(PPGA or marine). The neoplasia and marine templates supply the "
+                "corresponding cluster path. Reload the template to load it into "
+                "an existing form."
+            ),
+        ),
         Section("STRING DB Resources"),
         FieldSpec(
             name="string_db_dir",
@@ -127,7 +141,6 @@ SPEC = ModuleTabSpec(
             ),
         ),
         FieldSpec(name="posenrich_ucr", label="Include precomputed UCR annotations", kind="bool", importance="optional"),
-        FieldSpec(name="posenrich_custom_file", label="Custom position sets (CAAS coordinates)", kind="path_file", importance="optional"),
         FieldSpec(name="ucr_positions_file", label="UCR positions file", kind="path_file", importance="optional"),
         FieldSpec(
             name="eggnog_taxid",

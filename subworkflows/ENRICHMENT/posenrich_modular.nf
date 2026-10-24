@@ -11,7 +11,7 @@ def modularSourceHash(List names) {
 
 process POSITION_REGISTRY {
     label 'process_low'
-    memory { params.position_registry_memory ?: '64 GB' }
+    memory { params.position_registry_memory ?: (background.size() < 20000 ? '8 GB' : '64 GB') }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'registry'
 
     input:
@@ -57,7 +57,7 @@ process POSITION_REGISTRY {
 
 process POSENRICH_CHARACTERIZE {
     label 'process_low'
-    memory { params.position_module_memory ?: '32 GB' }
+    memory { params.position_module_memory ?: (registry.toRealPath().resolve('positions.tsv').size() < 200000000 ? '4 GB' : '32 GB') }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'characterization'
 
     input:
@@ -78,7 +78,7 @@ process POSENRICH_CHARACTERIZE {
 
 process POSENRICH_LOCALIZATION {
     label 'process_low'
-    memory { params.position_module_memory ?: '32 GB' }
+    memory { params.position_module_memory ?: (registry.toRealPath().resolve('positions.tsv').size() < 200000000 ? '4 GB' : '32 GB') }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'localization'
 
     input:
@@ -102,7 +102,7 @@ process POSENRICH_LOCALIZATION {
 
 process POSENRICH_GLOBAL {
     label 'process_low'
-    memory { params.position_module_memory ?: '32 GB' }
+    memory { params.position_module_memory ?: (registry.toRealPath().resolve('positions.tsv').size() < 200000000 ? '4 GB' : '32 GB') }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'global'
 
     input:
@@ -123,7 +123,7 @@ process POSENRICH_GLOBAL {
 
 process POSENRICH_PROXIMITY {
     label 'process_low'
-    memory { params.position_module_memory ?: '32 GB' }
+    memory { params.position_module_memory ?: (registry.toRealPath().resolve('positions.tsv').size() < 200000000 ? '4 GB' : '32 GB') }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'proximity'
 
     input:
