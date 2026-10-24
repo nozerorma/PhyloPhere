@@ -1313,6 +1313,13 @@ chr_label_positions <- chr_offsets %>%
   left_join(gene_genomic %>% group_by(chr_order) %>%
               summarise(mid_x = mean(manhattan_x, na.rm = TRUE), .groups = "drop"),
             by = "chr_order")
+
+# Position scores carry alignment positions, not genomic base coordinates.
+# Assign each scored row to its gene midpoint, using the same chromosome
+# metadata and offsets as the gene plots.
+pos_genomic <- pos_df %>%
+  inner_join(gene_genomic %>% select(Gene, gene_mid, chr_order, chr_label),
+             by = "Gene")
 ```
 
 ```{r window-helper, eval=has_genomic}
@@ -1436,8 +1443,7 @@ print(p_gene_man)
 
 ```{r pos-window-accum, eval=has_genomic, fig.height=5, fig.width=14, results='asis'}
 # Tile position-level CAAS scores into genomic windows.
-# pos_genomic is built in the pos-caas-manhattan-setup chunk above.
-# We use the same pos_chr_offsets to align x-coordinates with the gene-level plots.
+# pos_genomic and the shared chromosome axis are built in genomic-setup.
 win_size_label <- if (params$window_size_bp >= 1e6) {
   sprintf("%g Mb", params$window_size_bp / 1e6)
 } else {
@@ -1445,17 +1451,14 @@ win_size_label <- if (params$window_size_bp >= 1e6) {
 }
 
 pos_wins <- pos_genomic %>%
-  rename(Gene = Gene) %>%
   make_window_accum("CAAS_score", win_size = params$window_size_bp)
 
 if (nrow(pos_wins) == 0) {
   cat("_No scored positions mapped to genomic windows._\n\n")
 } else {
   pos_wins <- pos_wins %>%
-    left_join(pos_chr_offsets %>% select(chr_order, offset), by = "chr_order") %>%
+    stitch_windows() %>%
     mutate(n_positions = n_genes,
-           win_x       = win_mid + offset,
-           chr_even    = chr_order %% 2 == 0,
            mean_log    = -log10(1 - pmin(replace_na(mean_score, 0), 0.9999)),   # position score in [0, 1]
            max_log     = -log10(1 - pmin(replace_na(max_score, 0),  0.9999)))
 
@@ -1491,8 +1494,8 @@ if (nrow(pos_wins) == 0) {
       guide = "none"
     ) +
     scale_x_continuous(
-      breaks = pos_chr_label_positions$mid_x,
-      labels = pos_chr_label_positions$chr_label,
+      breaks = chr_label_positions$mid_x,
+      labels = chr_label_positions$chr_label,
       expand = expansion(mult = 0.01)
     ) +
     labs(

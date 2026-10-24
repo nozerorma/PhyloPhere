@@ -38,6 +38,19 @@ def test_ami_report_edge_cases(tmp_path):
     assert 'empty list skips cleanly' in result.stdout
 
 
+def test_scoring_report_genomic_windows(tmp_path):
+    r = shutil.which('Rscript')
+    if not r:
+        pytest.skip('Rscript required')
+    result = subprocess.run([r, 'tests/test_scoring_report.R', str(ROOT), str(tmp_path)],
+                            cwd=ROOT, env=dict(os.environ, TMPDIR=str(tmp_path)),
+                            capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'PASS scoring report: mapped' in result.stdout
+    assert 'PASS scoring report: unmapped_positions' in result.stdout
+    assert 'PASS scoring report: no_coordinates' in result.stdout
+
+
 def test_percentile_project_migration_never_reinterprets_fraction(caplog):
     from gui.models.serialization import from_dict, to_dict
     data = {'modules': {'scoring': {'scoring_gene_top_pct': '0.25', 'scoring_position_top_pct': '0.10'}}}
