@@ -201,7 +201,9 @@ workflow SCORING {
             def null_blocks_v = null_blocks_ch != null ? null_blocks_ch : Channel.value(files("${null_dir}/blocks/*").sort())
             def null_counts_v = null_counts_ch != null ? null_counts_ch.collect().map { it[0] } : Channel.value(file("${null_dir}/counts.json"))
             resolved_cycle_roster = cycle_roster_ch != null ? cycle_roster_ch.collect().map { it[0] } : Channel.value(file("${null_dir}/cycle_roster.txt"))
-            null_summary_v = null_summary_ch != null ? null_summary_ch.collect().map { it[0] } : Channel.value([file("${null_dir}/cycle_summary.tsv"), file("${null_dir}/cycle_hist.tsv")])
+            // Preserve each summary/histogram pair; collect() otherwise flattens it
+            // and the report's [0]/[1] indexing selects components of one Path.
+            null_summary_v = null_summary_ch != null ? null_summary_ch.collect(flat: false).map { it[0] } : Channel.value([file("${null_dir}/cycle_summary.tsv"), file("${null_dir}/cycle_hist.tsv")])
             def null_stats = SCORING_NULL_POSITIONS(null_positions_v, null_blocks_v, null_counts_v, resolved_postproc.collect().map { it[0] },
                                                     resolved_tested_pos, resolved_background, resolved_cycle_roster)
             null_counters_v = null_stats.counters

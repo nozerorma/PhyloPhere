@@ -273,12 +273,10 @@ def collect_pfam_members(domain_file, map_cache, active_genes, pending=None, inc
     if missing:
         raise ValueError(f'Pfam table missing columns: {sorted(missing)}')
     if 'coordinate_space' not in df_dom:
-        raise ValueError(
-            f'Pfam table {domain_file!r} has no coordinate_space. '
-            'Regenerate with compute_domain_variability.py on the productive trimmed CAAS alignments, '
-            'or use migrate_pfam_coordinates.py with the original hmmscan query and domtblout '
-            'only when the query exactly matches that reference. '
-            'Do not label ungapped query endpoints as reference_protein_1based without verification.')
+        # Original PPGA format: hmmscan endpoints in the ungapped reference.
+        # Keep its historical endpoint-to-MAP interval projection; the explicit
+        # formats below remain available for newly generated annotations.
+        df_dom['coordinate_space'] = 'legacy_reference_protein_1based'
     for row in df_dom.itertuples(index=False):
         gene = str(row.gene).split('.')[0]
         if gene not in active_genes:
@@ -309,6 +307,18 @@ def collect_pfam_members(domain_file, map_cache, active_genes, pending=None, inc
                 pending.append({'source': 'pfam', 'record_id': f"pfam:{gene}:{pfam_id}:{ali_start}-{ali_end}",
                                 'gene': gene, 'raw_position': f"{ali_start}-{ali_end}",
                                 'reason': 'unvalidated_no_map'})
+        elif row.coordinate_space == 'legacy_reference_protein_1based':
+            surviving = [c for residue, c in residue_to_col.items()
+                         if ali_start <= residue <= ali_end]
+            # Preserve the old alignment interval (including reference gaps),
+            # even when trimming removed one of the original endpoints.
+            columns = sorted(c for c in map_entry['selected_cols']
+                             if min(surviving) <= c <= max(surviving)) if surviving else []
+            mapping_status = 'legacy_projected_via_map'
+            if pending is not None and not columns:
+                pending.append({'source': 'pfam', 'record_id': f"pfam:{gene}:{pfam_id}:{ali_start}-{ali_end}",
+                                'gene': gene, 'raw_position': f"{ali_start}-{ali_end}",
+                                'reason': 'legacy_endpoints_not_in_map'})
         elif row.coordinate_space == 'reference_protein_1based':
             # A trimmed endpoint must not discard surviving interior residues.
             columns = sorted(c for residue, c in residue_to_col.items()

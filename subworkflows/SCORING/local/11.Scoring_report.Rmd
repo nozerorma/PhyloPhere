@@ -1278,9 +1278,10 @@ fade_bot_df <- .load_fade_sites(params$fade_site_bot_file)
 `r if (!has_genomic) "> **Note:** Genomic coordinates (gene_ensembl_file) are not available for this run - genomic accumulation skipped."`
 
 ```{r genomic-setup, eval=has_genomic}
+# Preserve the empirical p-value used by the CAAS Manhattan plot below.
 # Join gene_df with genomic coordinates.
 gene_genomic <- gene_df %>%
-  select(Gene, gene_caas_score, gene_caas_top, gene_caas_bot, n_positions) %>%
+  select(Gene, gene_caas_score, gene_caas_top, gene_caas_bot, n_positions, caas_p.gen) %>%
   inner_join(genomic_raw, by = "Gene") %>%
   # Standardise chromosome labels (remove "chr" prefix if present)
   mutate(

@@ -127,8 +127,8 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="scoring_compare_top_n", label="COMPARE report top-N", importance="optional"),
         Section("POSENRICH position-wise enrichment parameters"),
         FieldSpec(name="posenrich_enabled", label="Run POSENRICH", kind="bool", importance="optional"),
-        FieldSpec(name="posenrich_domains", label="Include precomputed Pfam annotations", kind="bool", importance="optional"),
-        FieldSpec(name="domain_variability_file", label="Domain variability file", kind="path_file", importance="optional"),
+        FieldSpec(name="posenrich_domains", label="Include Pfam annotations (blank file = automatic)", kind="bool", importance="optional"),
+        FieldSpec(name="domain_variability_file", label="Domain variability file (optional; blank = automatic)", kind="path_file", importance="optional"),
         FieldSpec(
             name="domain_ref_species",
             label="Domain reference species (blank = reference species name)",
@@ -140,8 +140,8 @@ SPEC = ModuleTabSpec(
                 "this when running non-human/non-primate alignments."
             ),
         ),
-        FieldSpec(name="posenrich_ucr", label="Include precomputed UCR annotations", kind="bool", importance="optional"),
-        FieldSpec(name="ucr_positions_file", label="UCR positions file", kind="path_file", importance="optional"),
+        FieldSpec(name="posenrich_ucr", label="Include UCR annotations (blank file = automatic)", kind="bool", importance="optional"),
+        FieldSpec(name="ucr_positions_file", label="UCR positions file (optional; blank = automatic sliding UCR)", kind="path_file", importance="optional"),
         FieldSpec(
             name="eggnog_taxid",
             label="eggNOG clade TaxID (blank = clade TaxID)",

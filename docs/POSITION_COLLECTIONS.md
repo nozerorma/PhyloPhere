@@ -2,7 +2,7 @@
 
 Decisión del usuario, 23/10/2026: conservar Pfam dominios/clanes, UCR core/flancos globales, FUBAR positiva/purificadora globales, FADE top/bottom globales, ventanas genómicas de 1 Mb y conjuntos personalizados. Retirar colecciones basadas en ortogrupos, también sus intersecciones con UCR, FUBAR, COSMIC y PrimateAI. Los eggNOG de **FCS por gen** se conservan. COSMIC, PrimateAI y Ensembl VEP siguen como anotaciones descriptivas del informe.
 
-`POSITION_ANNOTATIONS` construye estas colecciones y `position_characterization.tsv` en `posenrich/gmts/`, sin nulo, contraste ni informe 14. El informe 15 recibe esta tabla aunque POSENRICH esté omitido. Se usan tablas Pfam/UCR precomputadas; dejar sus rutas vacías omite esas capas, sin descargar Pfam ni lanzar ajustes pesados. La selección de prueba y nulo posicional sigue pendiente de WP10. No se reconstruye el TSV antiguo del nulo ni se altera acumulación/FCS.
+`POSITION_ANNOTATIONS` construye estas colecciones y `position_characterization.tsv` en `posenrich/gmts/`, sin nulo, contraste ni informe 14. El informe 15 recibe esta tabla aunque POSENRICH esté omitido. Las tablas Pfam/UCR indicadas se reutilizan. Con la casilla de la capa activada y la ruta vacía, se genera automáticamente sobre `--alignment`; desactivar la casilla omite la capa. Pfam usa hmmscan y descarga/cachea Pfam-A si falta; UCR calcula Valdar y las ventanas globales sliding. Las salidas y manifiestos se publican en `core_inputs/`. La selección de prueba y nulo posicional sigue pendiente de WP10. No se reconstruye el TSV antiguo del nulo ni se altera acumulación/FCS.
 
 ## Coordenadas y contratos
 
@@ -11,8 +11,8 @@ El identificador final es `Gene:Position`, con `Position` **cero-based en el ali
 | Fuente | Entrada y proyección |
 |---|---|
 | Pfam generado por `bin/compute_domain_variability.py` | El nuevo productor añade `alignment_positions` (lista separada por comas) y `coordinate_space=CAAS_0based`. Conserva las columnas exactas del alineamiento suministrado al productor, excluyendo gaps y X del query hmmscan. **Ese alineamiento debe ser el mismo alineamiento recortado de CAAS.** |
-| Pfam externo | También admite `coordinate_space=reference_protein_1based`: ali_start/ali_end deben corresponder a la misma proteína de referencia del MAP. Se recuperan los residuos interiores conservados aunque se hayan eliminado los extremos. No se adivina la numeración de tablas antiguas sin coordinate_space: regenerarlas o declarar explícitamente un sistema ya verificado. |
-| UCR | `position` es columna del alineamiento crudo, uno-based, como en aggregate_ucr.py. Se proyecta con ori_codon_col → prot_ali_col − 1. Solo método sliding; no se remapea como residuo humano. |
+| Pfam externo | También admite `coordinate_space=reference_protein_1based`: ali_start/ali_end deben corresponder a la misma proteína de referencia del MAP. Se recuperan los residuos interiores conservados aunque se hayan eliminado los extremos. Las tablas originales PPGA sin coordinate_space conservan el contrato histórico: ali_start/ali_end son extremos hmmscan de la referencia sin gaps. Se proyecta su intervalo mediante hg38_aa_pos; los extremos eliminados por trimming no descartan los residuos interiores supervivientes. |
+| UCR | `position` es columna del alineamiento crudo, uno-based, como en aggregate_ucr.py. Se proyecta con ori_codon_col → prot_ali_col − 1. Solo método sliding; no se remapea como residuo humano. La generación automática escribe directamente coordinate_space=CAAS_0based y no vuelve a proyectarse como alineamiento crudo. |
 | FUBAR | `hg38_aa_pos` se busca en el número explícito de residuo del MAP; no se cuenta la sucesión de filas selected. |
 | FADE | CSV `gene,position,max_bf,target_aa`, producido por FADE_TABLES. position ya es CAAS. Se respeta la selección upstream, sin otro umbral de BF. |
 | Ventanas | Coordenada genómica del MAP; bins de 1.000.000 nt, separados por cromosoma, con extremos uno-based inclusivos (1–1.000.000, 1.000.001–2.000.000, etc.). Es proximidad genómica, distinta de proximidad en proteína. |
@@ -107,24 +107,19 @@ fuentes se declara desconocida. La inferencia de localización permanece retenid
 
 ## Tablas Pfam antiguas sin sistema de coordenadas
 
-El lector rechaza una tabla con `ali_start/ali_end` pero sin `coordinate_space`.
-En particular, `map_domain_variability.py` del pipeline de alineamientos producía
-una tabla de variabilidad sobre proteínas crudas: sus extremos de hmmscan no se
-pueden renombrar automáticamente como residuos de referencia ni como columnas
-CAAS. Esa incompatibilidad puede aparecer al reutilizar referencias anteriores.
+El lector vuelve a aceptar el formato original de PPGA sin modificar la tabla ni
+exigir una columna nueva. Se recupera la proyección histórica del intervalo de
+residuos de referencia mediante MAP, manteniendo la lectura por nombres de columna
+y la numeración explícita de residuos (no se cuentan las filas después del trimming).
+Se conservan los dominios solapantes y los dominios sin clan.
 
-`bin/migrate_pfam_coordinates.py` permite convertir una tabla antigua solo si se
-conservan el FASTA original de las queries y el domtblout original. Exige que cada
-hit aparezca en el domtblout y que la query coincida exactamente con la referencia
-productiva tras quitar gaps/X; rechaza diferencias, duplicados ambiguos y extremos
-fuera de rango. Escribe una tabla nueva y un manifiesto con huellas; nunca modifica
-ni sobrescribe entradas. No resuelve una correspondencia entre proteína cruda y
-recortada cuando esa igualdad no se cumple.
+Los formatos explícitos nuevos siguen admitidos. `bin/migrate_pfam_coordinates.py`
+sigue disponible como conversión opcional para queries verificables; no es un
+requisito para leer las tablas originales.
 
-Cuando faltan esas fuentes o la igualdad falla, se regenera Pfam con
-`bin/compute_domain_variability.py` sobre los mismos alineamientos recortados de
-CAAS, en un nodo de cálculo y con `--cpus` igual a la asignación. Se pueden limitar
-los inputs a enlaces de los genes de `cleaned_background_main.txt`. No hace falta
-recalcular el nulo por cambiar una anotación; después se cambia únicamente
-`domain_variability_file` por la tabla nueva y se reanuda la misma ejecución con
-su caché. El constructor valida entonces las columnas explícitas contra MAP.
+Con `posenrich_domains=true` / `posenrich_ucr=true`, un archivo vacío activa la
+generación; un archivo indicado se reutiliza y se valida su encabezado. FUBAR
+permanece precomputado y no se vuelve a ajustar. La generación UCR automática usa
+solo las ventanas globales sliding consumidas por las colecciones, sin estadísticas
+por clado. Las tablas externas deben corresponder a su referencia/MAP: aceptar un
+formato antiguo no establece equivalencia entre los alineamientos PPGA y marine.

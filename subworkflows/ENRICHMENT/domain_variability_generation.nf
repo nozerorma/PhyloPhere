@@ -25,13 +25,14 @@ process COMPUTE_DOMAIN_VARIABILITY {
     label 'process_medium'
 
     publishDir "${params.outdir}/core_inputs", mode: 'copy', overwrite: true,
-               pattern: 'domain_variability.tsv'
+               pattern: 'domain_variability.tsv*'
 
     input:
     path alignment_dir
 
     output:
     path "domain_variability.tsv", emit: domain_variability_file
+    path "domain_variability.tsv.manifest.json", emit: manifest, optional: true
 
     script:
     def cache_dir = params.pfam_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/pfam"

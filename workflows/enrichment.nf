@@ -12,6 +12,8 @@ include { RER_FCS_REPORT  as MODULE_FCS_RER }             from '../subworkflows/
 // CAAS calibrates per-gene rankings; both sources count pathway AUC by null block.
 include { FCS_COMPUTE_CALIBRATED as FCS_COMPUTE_SCORING } from '../subworkflows/ENRICHMENT/fcs_blocks.nf'
 include { FCS_RER as FCS_COMPUTE_RER } from '../subworkflows/ENRICHMENT/fcs_inputs.nf'
+include { DOMAIN_VARIABILITY_GENERATION } from '../subworkflows/ENRICHMENT/domain_variability_generation.nf'
+include { UCR_GENERATION } from '../subworkflows/ENRICHMENT/ucr_generation.nf'
 include { POSITION_ANNOTATIONS } from '../subworkflows/ENRICHMENT/position_annotations.nf'
 include { POSENRICH_MODULAR } from '../subworkflows/ENRICHMENT/posenrich_modular.nf'
 include { EGGNOG_RESOLUTION }                                from '../subworkflows/ENRICHMENT/eggnog_resolution.nf'
@@ -111,6 +113,7 @@ process PUBLISH_UNIVERSES {
 def precomputedOrSentinel(String param_name, String param_value, String sentinel) {
     if (!param_value) return file(sentinel)
     if (file(param_value).exists()) return file(param_value)
+    if (!param_value.endsWith('.gz') && file("${param_value}.gz").exists()) return file("${param_value}.gz")
     log.warn "${param_name} is set to '${param_value}', which does not exist: the table is treated as absent"
     return file(sentinel)
 }
@@ -121,6 +124,11 @@ def unwrap1(ch) {
 
 // Validate supplied references before any expensive workflow tasks are submitted.
 def validatePositionReferences() {
+    if ((params.posenrich_domains && !params.domain_variability_file) ||
+        (params.posenrich_ucr && !params.ucr_positions_file)) {
+        if (!params.alignment || !java.nio.file.Files.isDirectory(file(params.alignment)))
+            error "Automatic Pfam/UCR annotations require --alignment pointing to the productive protein FASTA directory"
+    }
     def checkedAlignments = [] as Set
     def checkedMaps = [] as Set
     def hashFile = { path ->
@@ -133,7 +141,7 @@ def validatePositionReferences() {
         digest.digest().encodeHex().toString()
     }
     def sources = [
-        [key: 'domain_variability_file', enabled: params.posenrich_domains, required: ['gene','pfam_id','target_name','description','clan_acc','clan_name','ali_start','ali_end','coordinate_space']],
+        [key: 'domain_variability_file', enabled: params.posenrich_domains, required: ['gene','pfam_id','target_name','description','clan_acc','clan_name','ali_start','ali_end']],
         [key: 'ucr_positions_file', enabled: params.posenrich_ucr, required: ['gene','position','region_type','method','variability']],
         [key: 'fubar_sites_file', enabled: true, required: ['gene','is_pos_hit','is_neg_hit','hg38_aa_pos']],
         [key: 'posenrich_custom_file', enabled: true, required: []]
@@ -151,8 +159,6 @@ def validatePositionReferences() {
                 def columns = header ? header.split('\t').toList() : []
                 def missing = spec.required.findAll { !columns.contains(it) }
                 if (missing) {
-                    if (spec.key == 'domain_variability_file' && missing.contains('coordinate_space'))
-                        error "Pfam table '${input}' has no coordinate_space. Regenerate on the productive CAAS alignments; do not relabel legacy endpoints without verification."
                     error "${spec.key} '${input}' missing columns: ${missing}"
                 }
             }
@@ -495,14 +501,32 @@ workflow ENRICHMENT {
             .ifEmpty { precomputedOrSentinel('scoring_vep_ensembl', params.scoring_vep_ensembl, 'NO_VEP_ENSEMBL') }
         def cmp_fade_top_ch   = (fade_sites_top_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_TOP') }
         def cmp_fade_bot_ch   = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_BOTTOM') }
-        // Annotations do not require a positional permulation null. Use supplied
-        // Pfam/UCR tables only: this path never starts downloads or heavy fitting.
+        // Supplied tables take priority. Enabled layers with blank files are
+        // generated once on the productive alignment columns and shared by both paths.
+        def domain_annotations_ch = Channel.value(file('NO_ANNOT_DOMAIN'))
+        if (params.posenrich_domains) {
+            if (params.domain_variability_file) {
+                domain_annotations_ch = Channel.value(precomputedOrSentinel('domain_variability_file', params.domain_variability_file, 'NO_ANNOT_DOMAIN'))
+            } else {
+                DOMAIN_VARIABILITY_GENERATION(Channel.value(file(params.alignment)))
+                domain_annotations_ch = DOMAIN_VARIABILITY_GENERATION.out.domain_variability_file
+            }
+        }
+        def ucr_annotations_ch = Channel.value(file('NO_ANNOT_UCR'))
+        if (params.posenrich_ucr) {
+            if (params.ucr_positions_file) {
+                ucr_annotations_ch = Channel.value(precomputedOrSentinel('ucr_positions_file', params.ucr_positions_file, 'NO_ANNOT_UCR'))
+            } else {
+                UCR_GENERATION(Channel.value(file(params.alignment)))
+                ucr_annotations_ch = UCR_GENERATION.out.ucr_positions_file
+            }
+        }
         def posenrich_position_char_ch = Channel.empty()
         if (!params.posenrich_modular) {
             POSITION_ANNOTATIONS(
                 Channel.value(precomputedOrSentinel('gene_ensembl_file', params.gene_ensembl_file, 'NO_ANNOT_ENSEMBL')),
-                Channel.value(precomputedOrSentinel('domain_variability_file', params.posenrich_domains ? params.domain_variability_file : '', 'NO_ANNOT_DOMAIN')),
-                Channel.value(precomputedOrSentinel('ucr_positions_file', params.posenrich_ucr ? params.ucr_positions_file : '', 'NO_ANNOT_UCR')),
+                domain_annotations_ch,
+                ucr_annotations_ch,
                 Channel.value(precomputedOrSentinel('fubar_sites_file', params.fubar_sites_file, 'NO_ANNOT_FUBAR')),
                 Channel.value(precomputedOrSentinel('caas_map_dir', params.caas_map_dir, 'NO_ANNOT_MAP')),
                 fcs_universe_ch.map { it[0] },
@@ -524,8 +548,8 @@ workflow ENRICHMENT {
                 Channel.value(precomputedOrSentinel('caas_map_dir', params.caas_map_dir, 'NO_ANNOT_MAP')),
                 fcs_universe_ch.map { it[0] },
                 Channel.value(precomputedOrSentinel('gene_ensembl_file', params.gene_ensembl_file, 'NO_ANNOT_ENSEMBL')),
-                Channel.value(precomputedOrSentinel('domain_variability_file', params.posenrich_domains ? params.domain_variability_file : '', 'NO_ANNOT_DOMAIN')),
-                Channel.value(precomputedOrSentinel('ucr_positions_file', params.posenrich_ucr ? params.ucr_positions_file : '', 'NO_ANNOT_UCR')),
+                domain_annotations_ch,
+                ucr_annotations_ch,
                 Channel.value(precomputedOrSentinel('fubar_sites_file', params.fubar_sites_file, 'NO_ANNOT_FUBAR')),
                 cmp_fade_top_ch, cmp_fade_bot_ch,
                 Channel.value(precomputedOrSentinel('posenrich_custom_file', params.posenrich_custom_file, 'NO_ANNOT_CUSTOM'))

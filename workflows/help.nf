@@ -390,7 +390,7 @@ POSENRICH (position-level; currently skipped with a warning, no report 14):
 --posenrich_max_size                   <INTEGER>                0    (0 = no cap)
 --posenrich_background_file                  <"background_file">      null
 --domain_variability_file, --ucr_positions_file      (optional precomputed annotation sources;
-                                              blank skips the layer; Pfam coordinate_space required)
+                                              blank generates enabled Pfam/UCR layers; original PPGA tables accepted)
 --egg_members_file, --egg_annotations_file   (blank uses the versioned human Primates pair; other clades need explicit files or download)
 --posenrich_custom_file                     (TSV: gene, zero-based CAAS position, term, description; no header)
 --fubar_sites_file                           (optional; cannot be generated in-house

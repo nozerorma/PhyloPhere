@@ -108,14 +108,14 @@ def marine_ucr(alignment_dir,output,chunk,chunks,cpus):
         for records,path,digest in pool.map(ucr_gene,files,chunksize=8):
             writer.writerows(records);fingerprints[Path(path).name]=digest
             counts['genes_scanned']+=1;counts['positions']=counts['positions']+len(records)
-    write_manifest(output,[],counts,alignment_dir=str(alignment_dir),alignments=fingerprints,
+    write_manifest(output,[],counts,alignment_dir=str(alignment_dir.resolve()),alignments=fingerprints,
                    method='sliding',window_size=10,window_threshold=.85,window_max_pos_gap=.3,flank_size=5,
                    valdar_exponents=[1.,1.,1.])
     print(dict(counts),flush=True)
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('mode',choices=['project-ppga','marine-ucr'])
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('mode',choices=['project-ppga','marine-ucr','alignment-ucr'])
     p.add_argument('--base',type=Path);p.add_argument('--alignment-dir',type=Path)
     p.add_argument('--output',type=Path,required=True);p.add_argument('--chunk',type=int,default=0)
     p.add_argument('--chunks',type=int,default=1);p.add_argument('--cpus',type=int,default=1);a=p.parse_args()

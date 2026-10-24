@@ -233,9 +233,10 @@ def main():
         "coordinate_space": "CAAS_0based", "ref_species": args.ref_species,
         "sequence_evalue_max": args.sequence_evalue_threshold,
         "domain_ievalue_max": args.evalue_threshold,
-        "alignment_dir": os.path.abspath(args.alignment_dir),
+        "alignment_dir": str(Path(args.alignment_dir).resolve()),
         "alignments": {p.name: sha256_file(p)
-                       for p in sorted(Path(args.alignment_dir).iterdir()) if p.is_file()},
+                       for p in sorted(Path(args.alignment_dir).iterdir())
+                       if p.is_file() and p.suffix.lower() in ('.fa', '.fasta', '.faa', '.fas')},
         "genes_scanned": genes, "genes_with_hits": sorted({h["gene"] for h in hits}),
         "pfam_hmm_sha256": sha256_file(hmm_path),
         "pfam_clans_sha256": sha256_file(clans_path),

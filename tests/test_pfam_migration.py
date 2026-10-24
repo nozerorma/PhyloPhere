@@ -33,8 +33,8 @@ def fixture(tmp_path):
 def test_verified_migration_preserves_gaps_and_original(tmp_path):
     args = fixture(tmp_path)
     before = args[0].read_bytes()
-    with pytest.raises(ValueError, match='has no coordinate_space'):
-        collect_pfam_members(str(args[0]), {}, {'G1'})
+    # Legacy input remains readable; without a MAP it has no projected members.
+    assert collect_pfam_members(str(args[0]), {}, {'G1'})[0] == {}
     manifest = migrate(*args)
     row = next(csv.DictReader(args[-1].open(), delimiter='\t'))
     assert row['alignment_positions'] == '0,3'
