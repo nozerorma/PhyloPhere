@@ -256,3 +256,59 @@ def test_prototype_all_ties_p_one():
     data = {'genes': {'G': {'positions': dict.fromkeys(range(4), .5), 'member_positions': {0, 1}}}}
     summary, _, _ = loc.run_term(data, 'mean', 99, loc.term_rng(7, 'caas_score', 'top', 'custom', 'flat'))
     assert summary['auc'] == .5 and summary['p_mc'] == 1.
+
+
+def test_streamed_terms_preserve_aggregation_and_outside_member_audits():
+    import pandas as pd
+    members = [
+        dict(collection_id='custom', term_id='T', Gene='G1', Position='0'),
+        dict(collection_id='custom', term_id='T', Gene='G2', Position='0'),
+        dict(collection_id='custom', term_id='T', Gene='G2', Position='1'),
+        dict(collection_id='custom', term_id='T', Gene='outside', Position='99'),
+        dict(collection_id='fubar_positive', term_id='F', Gene='G1', Position='0'),
+        dict(collection_id='fubar_positive', term_id='F', Gene='G2', Position='0'),
+    ] + [dict(collection_id='fubar_tested', term_id='tested', Gene=g, Position=str(p))
+         for g in ('G1', 'G2') for p in (0, 1)]
+    collections = pd.DataFrame([
+        dict(collection_id=cid, term_id=term, informative_within_protein='1',
+             status='included', description='test')
+        for cid, term in [('custom', 'T'), ('fubar_positive', 'F')]])
+    scores = {('G1', 0): .9, ('G1', 1): .1, ('G1', 2): .5,
+              ('G2', 0): .2, ('G2', 1): .3, ('G2', 2): .9, ('G2', 3): .8,
+              ('G3', 0): .4, ('G3', 1): .2}
+    terms = dict(loc.iter_gene_tables(iter(members), collections, scores, None))
+    custom = terms[('custom', 'T')]
+    assert custom['n_members_total'] == 4 and len(custom['genes']) == 3
+    for aggregation, expected in [('mean', .5), ('pair_weighted', 1 / 3)]:
+        result, genes, n = loc.run_term(custom, aggregation, 0, None)
+        assert result['auc'] == expected and n == 2
+        assert [g['n_background'] for g in genes] == [2, 2]
+    fubar = terms[('fubar_positive', 'F')]
+    result, genes, n = loc.run_term(fubar, 'mean', 0, None)
+    assert result['auc'] == .5 and n == 2
+    assert all(g['n_positions_evaluable'] == 2 for g in genes)
+    assert fubar['coverage_status'] == 'fubar_tested_positions'
+
+
+def test_many_terms_do_not_retain_per_term_score_copies():
+    import pandas as pd
+    import tracemalloc
+    # The input is fixed; adding terms must not multiply resident score tables.
+    scores = {(f'G{g:02}', p): float(400 - p) for g in range(20) for p in range(400)}
+    collections = pd.DataFrame([
+        dict(collection_id='custom', term_id=f'T{t:03}', informative_within_protein='1',
+             status='included', description='test') for t in range(250)])
+    members = [dict(collection_id='custom', term_id=f'T{t:03}', Gene='G00', Position='0')
+               for t in range(250)]
+    tracemalloc.start()
+    try:
+        count = 0
+        for _, term in loc.iter_gene_tables(iter(members), collections, scores, None):
+            result, _, n = loc.run_term(term, 'mean', 0, None)
+            assert result['auc'] == 1. and n == 1
+            count += 1
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert count == 250
+    assert peak < 8 * 1024 * 1024, f'term iteration allocated {peak} bytes'

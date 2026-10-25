@@ -79,6 +79,20 @@ def write_tsv(df, path):
     df.to_csv(path, sep='\t', index=False, na_rep='NA', quoting=csv.QUOTE_MINIMAL, lineterminator='\n')
 
 
+def tsv_records(path):
+    """Read large registry tables without a dataframe plus a full record copy."""
+    with open(path, newline='') as stream:
+        yield from csv.DictReader(stream, delimiter='\t')
+
+
+def records(table):
+    if isinstance(table, pd.DataFrame):
+        # Preserve the public dataframe API without to_dict('records')'s copy.
+        columns = list(table.columns)
+        return (dict(zip(columns, row)) for row in table.itertuples(index=False, name=None))
+    return iter(table)
+
+
 def average_ranks(scores):
     """Average ranks (1-based) with half credit to ties."""
     order = np.argsort(scores, kind='mergesort')
@@ -111,7 +125,7 @@ def position_ranking_scores(evidence, ranking, scope='global'):
     max-over-sides p.emp; positions without p.emp are not evaluable for it.
     """
     out = {}
-    for row in evidence.to_dict('records'):
+    for row in records(evidence):
         key = (row['Gene'], int(row['Position']))
         if scope in ('top', 'bottom') and row['side'] != scope:
             continue
@@ -150,38 +164,55 @@ def term_rng(seed, ranking, direction, collection_id, term_id):
 
 
 def build_gene_table(members, collections, scores, collection_filter):
-    """(collection_id, term_id) -> list of per-gene (scores array, member mask, n_members_total)."""
+    """Compatibility API; production consumes iter_gene_tables one term at a time."""
+    return dict(iter_gene_tables(members, collections, scores, collection_filter))
+
+
+def iter_gene_tables(members, collections, scores, collection_filter):
+    """Yield terms sharing one score profile per gene, without per-term score copies."""
     eligible = collections[(collections['informative_within_protein'] == '1') &
                            (collections['status'] == 'included')]
     if collection_filter:
         wanted = set(collection_filter.split(','))
         eligible = eligible[eligible['collection_id'].isin(wanted)]
-    all_members = members
-    members = members[members['collection_id'].isin(set(eligible['collection_id']))]
     # evaluable positions per gene: those with a score in this ranking
     by_gene = {}
     for (gene, pos), score in scores.items():
         by_gene.setdefault(gene, {})[pos] = score
-    terms = {}
-    for row in eligible.to_dict('records'):
+    del scores
+    member_index = {}
+    tested_by_gene = {}
+    selected = set(zip(eligible['collection_id'], eligible['term_id']))
+    for row in records(members):
+        cid, term, gene, pos = row['collection_id'], row['term_id'], row['Gene'], int(row['Position'])
+        if cid == 'fubar_tested':
+            tested_by_gene.setdefault(gene, set()).add(pos)
+        if (cid, term) in selected:
+            member_index.setdefault((cid, term), {}).setdefault(gene, set()).add(pos)
+    covered_by_gene = None
+    for row in records(eligible.sort_values(['collection_id', 'term_id'])):
         cid, term = row['collection_id'], row['term_id']
         genes = {}
-        sub = members[(members['collection_id'] == cid) & (members['term_id'] == term)]
-        member_by_gene = {}
-        for r in sub.to_dict('records'):
-            member_by_gene.setdefault(r['Gene'], set()).add(int(r['Position']))
+        member_by_gene = member_index.get((cid, term), {})
         n_members_total = sum(len(v) for v in member_by_gene.values())
-        term_scores, coverage_status = compatible_scores(scores, all_members, cid)
-        for gene, positions_all in by_gene.items():
-            positions = {p: v for p, v in positions_all.items() if (gene, p) in term_scores}
+        if cid in ('fubar_positive', 'fubar_purifying'):
+            if covered_by_gene is None:
+                covered_by_gene = {gene: {p: v for p, v in values.items()
+                                         if p in tested_by_gene.get(gene, set())}
+                                   for gene, values in by_gene.items()}
+            profiles = covered_by_gene
+            coverage_status = 'fubar_tested_positions'
+        else:
+            profiles = by_gene
+            coverage_status = 'experimental_coverage_unknown'
+        for gene, positions in profiles.items():
             member_positions = member_by_gene.get(gene, set())
             # Members outside the evaluable set are audited, not dropped silently.
             n_members_evaluable = sum(1 for p in member_positions if p in positions)
             genes[gene] = {'positions': positions, 'member_positions': member_positions,
                            'n_members_evaluable': n_members_evaluable}
-        terms[(cid, term)] = {'genes': genes, 'n_members_total': n_members_total,
-                              'description': row['description'], 'coverage_status': coverage_status}
-    return terms
+        yield (cid, term), {'genes': genes, 'n_members_total': n_members_total,
+                            'description': row['description'], 'coverage_status': coverage_status}
 
 
 def run_term(term_data, aggregation, n_permutations, rng):
@@ -192,23 +223,28 @@ def run_term(term_data, aggregation, n_permutations, rng):
         info = term_data['genes'][gene]
         positions = info['positions']
         member_positions = info['member_positions']
+        # Non-member genes and whole-protein sets cannot contribute an AUC.
+        n1 = sum(p in positions for p in member_positions)
+        if n1 == 0 or n1 == len(positions):
+            continue
         pos_list = sorted(positions)
         score_arr = np.array([positions[p] for p in pos_list], dtype=float)
         mask = np.array([1 if p in member_positions else 0 for p in pos_list], dtype=float)
-        auc = auc_from_ranks(average_ranks(score_arr), mask)
+        ranks = average_ranks(score_arr)
+        auc = auc_from_ranks(ranks, mask)
         if auc is None:
             continue  # gene without both groups: not informative
-        ranks = average_ranks(score_arr)
         n1 = int(mask.sum())
-        prepared.append((gene, score_arr, mask, ranks, n1, auc))
+        if n_permutations:
+            prepared.append((gene, score_arr, mask, ranks, n1, auc))
         per_gene.append({'Gene': gene, 'auc': auc, 'n_members': n1,
                          'n_background': len(pos_list) - n1,
                          'n_positions_evaluable': len(pos_list)})
-    if not prepared:
+    if not per_gene:
         return None, per_gene, 0
 
-    aucs = np.array([p[5] for p in prepared])
-    weights = np.array([p[4] * (len(p[1]) - p[4]) for p in prepared], dtype=float)
+    aucs = np.array([p['auc'] for p in per_gene])
+    weights = np.array([p['n_members'] * p['n_background'] for p in per_gene], dtype=float)
 
     def aggregate(values):
         if aggregation == 'pair_weighted':
@@ -237,7 +273,7 @@ def run_term(term_data, aggregation, n_permutations, rng):
     p_mc = (k + 1) / (b_valid + 1)
     return {'auc': auc_obs, 'auc_mean': auc_mean, 'auc_pair_weighted': auc_pair,
             'auc_control_mean': float(perm_aucs.mean()) if b_valid else 'NA',
-            'p_mc': p_mc if b_valid else 'NA', 'k_exceedances': k, 'B_valid': b_valid}, per_gene, len(prepared)
+            'p_mc': p_mc if b_valid else 'NA', 'k_exceedances': k, 'B_valid': b_valid}, per_gene, len(per_gene)
 
 
 def main():
@@ -250,49 +286,55 @@ def main():
     if args.n_permutations < 1:
         raise SystemExit('--n_permutations must be >= 1')
 
-    evidence = read_tsv(os.path.join(args.registry_dir, 'position_evidence.tsv'))
-    members = read_tsv(os.path.join(args.registry_dir, 'members.tsv'))
     collections = read_tsv(os.path.join(args.registry_dir, 'collections.tsv'))
     with open(os.path.join(args.registry_dir, 'manifest.json')) as f:
         manifest = json.load(f)
     n_cycles = manifest.get('evidence', {}).get('null_cycles')
 
-    result_rows, gene_rows = [], []
+    result_rows = []
     n_not_identifiable = 0
     directions = SCORE_SCOPES if args.scope == 'all' else (args.scope,)
-    for direction in directions:
-        scores = position_ranking_scores(evidence, args.ranking, direction)
-        terms = build_gene_table(members, collections, scores, args.collections)
-        for (cid, term), term_data in sorted(terms.items()):
-            # Effects are available; the unvalidated null is never run in production.
-            summary, per_gene, n_informative = run_term(
-                term_data, args.aggregation, 0,
-                term_rng(args.seed, args.ranking, direction, cid, term))
-            identifiable = summary is not None
-            n_not_identifiable += int(not identifiable)
-            row = {
-                'analysis': 'localization', 'scope': 'within_protein', 'ranking': args.ranking,
-                'rank_direction': direction, 'collection_id': cid, 'term_id': term,
-                'effect_statistic': 'AUC', 'auc': summary['auc'] if identifiable else 'NA',
-                'auc_mean': summary['auc_mean'] if identifiable else 'NA',
-                'auc_pair_weighted': summary['auc_pair_weighted'] if identifiable else 'NA',
-                'auc_minus_half': summary['auc'] - .5 if identifiable else 'NA',
-                'auc_control_mean': 'NA', 'auc_excess_vs_control': 'NA', 'p_mc': 'NA',
-                'q': 'NA', 'B_valid': 0, 'seed': args.seed, 'aggregation': args.aggregation,
-                'n_permutations': args.n_permutations,
-                'n_genes_informative': n_informative, 'n_genes_evaluated': len(term_data['genes']),
-                'n_members': term_data['n_members_total'],
-                'n_background_positions': sum(g['n_background'] for g in per_gene),
-                'coverage_status': term_data['coverage_status'] if identifiable else 'no_within_protein_contrast',
-                'ranking_population': 'canonical_positive_detections_only' if args.ranking == 'caas_score' else 'positions_with_canonical_p',
-                'control_status': 'not_validated',
-                'status': 'descriptive_pending_control' if identifiable else 'not_identifiable',
-                'reason': 'complete eligible universe and exchangeability control not validated; inference withheld',
-            }
-            result_rows.append(row)
-            for g in per_gene:
-                gene_rows.append(dict(collection_id=cid, term_id=term, ranking=args.ranking,
-                                      rank_direction=direction, **g))
+    gene_columns = ['collection_id', 'term_id', 'ranking', 'rank_direction',
+                    'Gene', 'auc', 'n_members', 'n_background', 'n_positions_evaluable']
+    with open(os.path.join(args.output_dir, 'localization_by_gene.tsv'), 'w', newline='') as stream:
+        gene_writer = csv.DictWriter(stream, fieldnames=gene_columns, delimiter='\t', lineterminator='\n')
+        gene_writer.writeheader()
+        for direction in directions:
+            terms = iter_gene_tables(
+                tsv_records(os.path.join(args.registry_dir, 'members.tsv')), collections,
+                position_ranking_scores(tsv_records(os.path.join(args.registry_dir, 'position_evidence.tsv')),
+                                        args.ranking, direction), args.collections)
+            for (cid, term), term_data in terms:
+                # Effects are available; the unvalidated null is never run in production.
+                summary, per_gene, n_informative = run_term(
+                    term_data, args.aggregation, 0,
+                    term_rng(args.seed, args.ranking, direction, cid, term))
+                identifiable = summary is not None
+                n_not_identifiable += int(not identifiable)
+                row = {
+                    'analysis': 'localization', 'scope': 'within_protein', 'ranking': args.ranking,
+                    'rank_direction': direction, 'collection_id': cid, 'term_id': term,
+                    'effect_statistic': 'AUC', 'auc': summary['auc'] if identifiable else 'NA',
+                    'auc_mean': summary['auc_mean'] if identifiable else 'NA',
+                    'auc_pair_weighted': summary['auc_pair_weighted'] if identifiable else 'NA',
+                    'auc_minus_half': summary['auc'] - .5 if identifiable else 'NA',
+                    'auc_control_mean': 'NA', 'auc_excess_vs_control': 'NA', 'p_mc': 'NA',
+                    'q': 'NA', 'B_valid': 0, 'seed': args.seed, 'aggregation': args.aggregation,
+                    'n_permutations': args.n_permutations,
+                    'n_genes_informative': n_informative, 'n_genes_evaluated': len(term_data['genes']),
+                    'n_members': term_data['n_members_total'],
+                    'n_background_positions': sum(g['n_background'] for g in per_gene),
+                    'coverage_status': term_data['coverage_status'] if identifiable else 'no_within_protein_contrast',
+                    'ranking_population': 'canonical_positive_detections_only' if args.ranking == 'caas_score' else 'positions_with_canonical_p',
+                    'control_status': 'not_validated',
+                    'status': 'descriptive_pending_control' if identifiable else 'not_identifiable',
+                    'reason': 'complete eligible universe and exchangeability control not validated; inference withheld',
+                }
+                result_rows.append(row)
+                for g in per_gene:
+                    gene_writer.writerow(dict(collection_id=cid, term_id=term, ranking=args.ranking,
+                                          rank_direction=direction, **g))
+
     result_cols = ['analysis', 'scope', 'ranking', 'rank_direction', 'collection_id', 'term_id',
                    'effect_statistic', 'auc', 'auc_mean', 'auc_pair_weighted', 'auc_minus_half',
                    'auc_control_mean', 'auc_excess_vs_control', 'p_mc', 'q', 'B_valid', 'seed',
@@ -301,10 +343,6 @@ def main():
                    'control_status', 'status', 'reason']
     write_tsv(pd.DataFrame(result_rows, columns=result_cols),
               os.path.join(args.output_dir, 'localization_results.tsv'))
-    write_tsv(pd.DataFrame(gene_rows, columns=['collection_id', 'term_id', 'ranking', 'rank_direction',
-              'Gene', 'auc', 'n_members', 'n_background', 'n_positions_evaluable']),
-              os.path.join(args.output_dir, 'localization_by_gene.tsv'))
-
     out_manifest = {
         'component': 'localization',
         'ranking_population': 'canonical_positive_detections_only' if args.ranking == 'caas_score' else 'positions_with_canonical_p',
