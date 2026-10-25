@@ -6,14 +6,14 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *  RER_GENE_LISTS: extracts from rerconverge_summary_<trait>.tsv (RER_REPORT) the gene
  *  lists used by the FCS and AMI stages, and the fcs_stats.tsv with the RER scores and
- *  flags. The significance column is params.rer_pval_column (default p.perm, replaced
- *  by p.adj when p.perm is absent or all NA) at params.rer_pval_threshold.
+ *  flags. Nominal calls use p.perm < params.evidence_p_threshold. Missing empirical
+ *  evidence yields no empirical calls; there is no analytic fallback. BH is separate.
  *
  *  Consumes:  summary TSV, optional SCORING gene-scores table (NO_* sentinel when absent)
  *  Produces:  background.txt (every gene tested by RERconverge),
  *             rer_significant.txt (p below the threshold),
- *             rer_accelerating.txt (significant, Rho > 0),
- *             rer_decelerating.txt (significant, Rho < 0),
+ *             rer_accelerating.txt (legacy filename: nominal, Rho > 0),
+ *             rer_decelerating.txt (legacy filename: nominal, Rho < 0),
  *             fcs_stats.tsv (gene, score_global, flag_rer_acc, flag_rer_decc, plus the
  *             cross-module columns found in the gene-scores table). score_global is
  *             sign(Rho) * -log10(P) with the parametric P of the correlation, the gene statistic
@@ -57,6 +57,8 @@ process RER_GENE_LISTS {
         }
         pval_col <- df[[pval_col_name]]
 
+        # Legacy filenames encode the sign of rho, not CAAS top/bottom. In continuous
+        # diff mode this associates relative rates with descendant-minus-ancestor changes.
         sig <- df[!is.na(pval_col) & pval_col < ${pval_thr}, ]
         writeLines(sig\$gene,                 "rer_significant.txt")
         writeLines(sig\$gene[sig\$Rho > 0], "rer_accelerating.txt")

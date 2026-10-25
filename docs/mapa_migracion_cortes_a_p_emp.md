@@ -94,7 +94,7 @@ La calibración se ejecutará independientemente de GMT, fcs_enabled o ami_enabl
 
 Tabla pública nueva de genes: una fila por gene/ranking, statistic, gene_stat, p.gen, p.gen.adj, nominal, adjusted, N_roster, N_valid, family_id y versión del contrato. Publicar también metadatos de universo, umbrales, inputs y estado del nulo para regenerar informes con work eliminado. Las tablas de anotaciones de otros métodos se unen por ID, sin exigir CAAS positivo.
 
-Tabla posicional: una prueba por (Gene, Position). El p.emp actual es del máximo entre lados y se copia a las filas de lado; sus duplicados no deben volver a contar en BH ni en conteos globales. Los cortes por lado no justifican inventar un p direccional. Mantener p.emp_fact como diagnóstico distinto.
+Tabla posicional: una prueba por (Gene, Position). El p.emp actual es del máximo entre lados y se copia a las filas de lado; sus duplicados no deben volver a contar en BH ni en conteos globales. Los cortes por lado no justifican inventar un p direccional. Por decisión del usuario (25/10/2026), retirar p.emp_fact y su BH de la evidencia y los informes activos; conservar solo su auditoría histórica.
 
 ## Hallazgos que condicionan la implementación
 

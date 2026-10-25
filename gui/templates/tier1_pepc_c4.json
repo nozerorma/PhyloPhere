@@ -79,7 +79,7 @@
       "publish_intermediates": false,
       "ct_core_batch_size": "20",
       "caas_cycle_block_size": "500",
-      "gene_stat": "size_adj_max",
+      "gene_stat": "max",
       "min_divergent_fraction": "0.5",
       "max_bg_gaps_fraction": "0.0",
       "max_fg_gaps_fraction": "0.0",

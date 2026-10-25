@@ -18,7 +18,7 @@
 #
 # Output RDS: list(caas_corStat_byrank = list(global, top, bottom), gene_stat); each matrix has genes in rows and cycles
 # in columns, and 0 where a gene has no signal in a cycle. gene_stat names the gene statistic of the matrices
-# (size_adj_max, fmax or max): fcs_enrich.R compares it with the statistic of the observed gene score.
+# (max only): fcs_enrich.R compares it with the statistic of the observed gene score.
 # =============================================================================
 
 args <- commandArgs(trailingOnly = TRUE)

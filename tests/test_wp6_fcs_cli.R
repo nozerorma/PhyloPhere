@@ -30,10 +30,10 @@ for (b in names(cycles_by_block)) full_ref[, cycles_by_block[[b]]] <- block_mats
 ref_gp <- env$gene_p(full_ref, obs_stat)
 rankings <- list(global = env$fcs_build_vals(setNames(ref_gp$nlog10_obs, universe), universe))
 perms_file <- file.path(root, "perms.rds")
-saveRDS(list(caas_corStat_byrank = list(global = ref_gp$nlog10_null), gene_stat = "size_adj_max"), perms_file)
+saveRDS(list(caas_corStat_byrank = list(global = ref_gp$nlog10_null), gene_stat = "max"), perms_file)
 gmts_ref <- env_old$fcs_load_gmts(gmt_dir)
 ref <- env_old$fcs_run_all(rankings, gmts_ref, num_g = 10, max_g = 0, perms_file = perms_file, fdr_thr = 0.15,
-                           p_perm_thr = 0.025, gene_stat = "size_adj_max")
+                           p_perm_thr = 0.025, gene_stat = "max")
 
 ok <- TRUE
 for (G in c(200)) {
@@ -41,7 +41,7 @@ for (G in c(200)) {
   uni <- file.path(root, "universe.txt")
   for (b in names(block_mats)) {
     mf <- file.path(wd, paste0(b, "_matrices.rds"))
-    saveRDS(list(genes = universe, cycles = cycles_by_block[[b]], gene_stat = "size_adj_max",
+    saveRDS(list(genes = universe, cycles = cycles_by_block[[b]], gene_stat = "max",
                  stat = list(global = block_mats[[b]])), mf)
     run_step("transpose", "--matrices", mf, "--universe", uni, "--batch", G, "--rank", "global", "--block", b, "--out", slices)
   }

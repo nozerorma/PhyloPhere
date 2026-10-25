@@ -12,8 +12,8 @@ caas_block_index <- function(files, roster = NULL, universe = character(), gene_
     if (!length(cy) || any(!grepl("^b_[1-9][0-9]*(~H[0-9]+)?$", cy))) stop("Invalid null cycle IDs")
     if (any(cy %in% seen)) stop("cycles occur more than once within or across blocks")
     if (is.null(gene_stat)) gene_stat <- b$gene_stat
-    if (length(gene_stat) != 1 || !gene_stat %in% c("max", "fmax", "size_adj_max") ||
-        !identical(b$gene_stat, gene_stat)) stop("the blocks hold different gene statistics (gene_stat mismatch)")
+    if (length(gene_stat) != 1 || !identical(gene_stat, "max") ||
+        !identical(b$gene_stat, gene_stat)) stop("CAAS gene_stat mismatch: only max is supported; rebuild legacy gene matrices")
     check_matrix <- function(m) {
       if (!is.matrix(m) || !is.numeric(m) || !identical(rownames(m), if(length(g)) g else NULL) ||
           !identical(colnames(m), cy) || any(!is.finite(m))) stop(paste("Invalid matrix dimensions, IDs, order or values in", f))
@@ -22,12 +22,12 @@ caas_block_index <- function(files, roster = NULL, universe = character(), gene_
     if (!identical(names(b$stat), dirs)) stop("Missing CAAS rankings")
     for (d in dirs) check_matrix(b$stat[[d]])
     if (!is.null(b$parts)) {
-      if (!all(c("max", "fmax", "n") %in% names(b$parts))) stop("Missing CAAS parts")
+      if (!all(c("max", "n") %in% names(b$parts))) stop("Missing CAAS parts")
       for (part in b$parts) for (d in dirs) check_matrix(part[[d]])
       for (d in dirs) {
-        n <- b$parts$n[[d]]; fm <- b$parts$fmax[[d]]
-        if (any(n < 0 | n != floor(n)) || any(fm < 0 | fm > 1)) stop("Invalid CAAS parts")
-        expected <- switch(gene_stat, max=b$parts$max[[d]], fmax=fm, size_adj_max=ifelse(n > 0, fm^n, 0))
+        n <- b$parts$n[[d]]
+        if (any(n < 0 | n != floor(n))) stop("Invalid CAAS parts")
+        expected <- b$parts$max[[d]]
         if (!isTRUE(all.equal(as.numeric(b$stat[[d]]), as.numeric(expected), tolerance=1e-12))) stop("CAAS stat disagrees with parts/gene_stat")
       }
     }

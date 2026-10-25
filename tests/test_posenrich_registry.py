@@ -40,11 +40,11 @@ DOMAINS_TSV = ('gene\tpfam_id\ttarget_name\tdescription\tclan_acc\tclan_name\tal
                'G1\tPF1\tD1\tdesc\tCL1\tC1\t11\t12\treference_protein_1based\n'
                'G1\tPF2\tD2\tdesc\tNA\tNA\t12\t12\treference_protein_1based\n')
 
-UCR_TSV = ('gene\tposition\tregion_type\tmethod\tvariability\n'
-           'G1\t4\tcore\tsliding\t0.1\n'
-           'G1\t1\tflank_up\tsliding\t0.2\n'
-           'G1\t99\tcore\tsliding\t0.3\n'
-           'G1\t4\tcore\tabsolute\t0.1\n')
+UCR_TSV = ('gene\tposition\tregion_type\tmethod\tvariability\tcoordinate_space\n'
+           'G1\t4\tcore\tsliding\t0.1\traw_alignment_1based\n'
+           'G1\t1\tflank_up\tsliding\t0.2\traw_alignment_1based\n'
+           'G1\t99\tcore\tsliding\t0.3\traw_alignment_1based\n'
+           'G1\t4\tcore\tabsolute\t0.1\traw_alignment_1based\n')
 
 FUBAR_TSV = ('gene\thg38_aa_pos\tis_pos_hit\tis_neg_hit\n'
              'G1\t10\t1\t0\n'

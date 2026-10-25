@@ -460,7 +460,7 @@ process CAAS_CORE_MERGE {
         --tiles tile_*/ \
         --labelings ${block_dir}/resample_perms.tab \
         --output-dir ${block} ${b0_arg} ${universe_arg} \
-        --gene-stat ${params.gene_stat ?: 'size_adj_max'} \
+        --gene-stat ${params.gene_stat ?: 'max'} \
         --seed ${params.seed ?: 1998} ${caasRemovalArgs(gene_lengths)}
 
     # The matrices go to one RDS per block; the raw files are only the hand-over.

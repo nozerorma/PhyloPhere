@@ -6,9 +6,9 @@
 # Called by:  SCORING_COMPUTE Nextflow process (scoring_compute.nf → Rscript scoring_compute.R ...),
 #             after observed_core_scores.py, whose two tables it reads
 #
-# The position score (CAAS_score) and the gene score (size_adj_max) come from core.scores via observed_core_scores.py.
+# The position score (CAAS_score) and the gene score (raw maximum) come from core.scores via observed_core_scores.py.
 # The biochemical groupings (aa_grouping.R) do not enter either score: they annotate each position with the groupings
-# in which its derived residues share one class that differs from the ancestral one. This script adds the empirical permulation p-values of positions (p.emp, p.emp_fact and
+# in which its derived residues share one class that differs from the ancestral one. This script adds the empirical permulation p-values of positions (p.emp and
 # their BH adjustments), joins the per-gene evidence of
 # FADE, RERConverge and accumulation, and writes the tables that the ENRICHMENT
 # subworkflow and the reports read (the nominal activity lists are produced by
@@ -24,8 +24,8 @@
 #   --rer                 rerconverge_summary_<trait>.tsv
 #   --accum_dir           directory with accumulation_<direction>_results.csv
 #   --null_counters       null_counters.tsv (null_position_stats.py reduce): per observed position the counters of the
-#                         position-level null that p.emp and p.emp_fact are built from
-#   --null_fit            null_fit.tsv: the propensity classes of p.emp_fact (limits and sizes)
+#                         position-level null used by p.emp
+#   --null_fit            null_fit.tsv: legacy staging metadata (unused)
 #   --null_base           null_universe_base.tsv: what the null fixes of the universe summary (sizes, saturation curve)
 #   --cycle_roster        cycle_roster.txt of the CAAS_CORE_MERGE run: N of the null, the cycles with no detection included
 #   --hypotheses_pairs    contrast_hypotheses_pairs.tsv (FOP); parsed but not used by the computation
@@ -72,7 +72,7 @@ hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_p
 core_positions_file  <- parse_arg("--core_positions")  # observed_core_scores.py: CAAS_score per (Gene, Position, side)
 core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: size-adjusted gene CAAS scores
 null_counters_file   <- parse_arg("--null_counters")     # null_counters.tsv (counters of the position-level null); NO_FILE otherwise
-null_fit_file        <- parse_arg("--null_fit")          # null_fit.tsv (propensity classes of p.emp_fact); NO_FILE otherwise
+null_fit_file        <- parse_arg("--null_fit")          # legacy staging metadata (unused); NO_FILE otherwise
 null_base_file       <- parse_arg("--null_base")         # null_universe_base.tsv (sizes and saturation curve of the null); NO_FILE otherwise
 cycle_roster_file    <- parse_arg("--cycle_roster")      # cycle_roster.txt: every replayed cycle (N of the null); NO_FILE otherwise
 # Rule of the position score: the CAAS score (mean over the domains of the PSS-weighted mean over their species), defined only when positive (core.scores.SCORE_RULE). The observed scores (observed_core_scores.py)
@@ -82,7 +82,11 @@ score_aggregation <- "caas_pos_species_pss"
 # Position and side, hypothesis NA), so scoring never pools hypotheses itself.
 nominal_threshold <- as.numeric(parse_arg("--nominal_threshold", "0.05"))
 fdr_threshold <- as.numeric(parse_arg("--fdr_threshold", "0.05"))
+accumulation_fdr_threshold <- as.numeric(parse_arg("--accumulation_fdr_threshold", "0.1"))
 fade_bf_threshold <- as.numeric(parse_arg("--fade_bf_threshold", "100"))
+if (!is.finite(accumulation_fdr_threshold) || accumulation_fdr_threshold < 0 || accumulation_fdr_threshold > 1) {
+  stop("--accumulation_fdr_threshold must be a finite number in [0, 1]")
+}
 # Direction is not a parameter: scoring runs on the full pool and the `side` column carries it.
 
 # TRUE for a real file; a sentinel (basename starting with NO_) or an empty name counts as absent.
@@ -100,7 +104,7 @@ file_exists <- function(f) {
 # TIE_TOL as ties (same constant as core.scores.TIE_TOL).
 TIE_TOL <- 1e-12
 
-# The position-level permulation p (p.emp, p.emp_fact, their BH families and the universe summary) is computed from the
+# The position-level permulation p (p.emp, its BH family and the universe summary) is computed from the
 # counters of the null by null_position_p.R.
 
 # Correlation over the complete pairs; NA when fewer than 3 remain.
@@ -289,15 +293,13 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
 # The pooled statistic is the max-over-sides "all" axis -- identical to .pos_undirected (§4a) on the observed side and
 # to the position score of the null. Values within TIE_TOL of the observed score count as ties (>=). The null is not read
 # as a table of every (position, cycle): null_position_stats.py sums, over the blocks of cycles of the null, the integers
-# that p.emp and p.emp_fact are made of (nd, k_emp and the per-class counts); null_position_p.R turns them into the p and
+# used by p.emp (nd and k_emp); null_position_p.R turns them into the p and
 # the BH families (see its header).
 pos_scores$p.emp <- NA_real_
-pos_scores$p.emp_fact <- NA_real_
-pos_scores$p.adj_bh_fact <- NA_real_
 pos_scores$nd <- NA_integer_          # cycles of the null that score the position (informational)
 pos_scores$null_unseen <- NA          # nd == 0: the null never produced the position (informational, no demotion)
 pos_scores$p.adj_bh  <- NA_real_
-has_null_counters <- file_exists(null_counters_file) && file_exists(null_fit_file) && file_exists(null_base_file) &&
+has_null_counters <- file_exists(null_counters_file) && file_exists(null_base_file) &&
   file_exists(cycle_roster_file)
 # A null in which no cycle has a row (N = 0, or no permuted cycle re-detected any position) has no cycle to count:
 # (k + 1) / (N + 1) would read 1 for every position, a value rather than the absence of one. p.emp and p.adj_bh stay NA,
@@ -317,7 +319,7 @@ if (has_null_counters) {
   N_emp <- length(.roster)
   cat(sprintf("  N = %d cycles (source: cycle_roster.txt)\n", N_emp))
   .counters <- read_tsv(null_counters_file, show_col_types = FALSE, col_types = cols(Gene = col_character(), Position = col_integer(), .default = col_integer()))
-  .fit <- read_tsv(null_fit_file, show_col_types = FALSE, col_types = "idi")
+  .fit <- NULL  # legacy staging input is no longer used
 
   # observed pooled statistic = best side per (Gene, Position) (== .pos_undirected)
   obs_max <- pos_scores %>%
@@ -331,7 +333,7 @@ if (has_null_counters) {
   .res <- null_position_p(obs_max, .counters, .fit, .n_u, N_emp)
 
   pos_scores <- pos_scores %>%
-    select(-p.emp, -p.emp_fact, -p.adj_bh_fact, -nd, -null_unseen, -p.adj_bh) %>%
+    select(-p.emp, -nd, -null_unseen, -p.adj_bh) %>%
     left_join(.res$pos, by = c("Gene", "Position"))
   cat(sprintf("  null adequacy: %d of %d observed positive positions never scored by the null (%.1f%%); kept at p = 1/(N+1)\n",
               .res$n_unseen, .res$n_obs, if (.res$n_obs > 0) 100 * .res$n_unseen / .res$n_obs else 0))
@@ -348,8 +350,7 @@ if (has_null_counters) {
 # at p = 1/(N+1)). p.emp's statistic is "max-side CAAS_score if detected, -Inf otherwise", so a null-detectable position
 # the observed data did not detect is a tested position with p = 1; restricting BH to observed-detected positions would
 # select on the statistic itself. Positions detected neither by the null nor by the observed data are left out, so m
-# counts only columns the finite null sample happened to reach. p.adj_bh and p.adj_bh_fact (BH of the factorized p over
-# the same family) are computed with p.emp in null_position_p.R.
+# counts only columns the finite null sample happened to reach. p.adj_bh is computed with p.emp in null_position_p.R.
 
 # ── 2i. FADE (gene-level - see section 4d) ────────────────────────────────────
 # FADE is read at gene level here (max Bayes Factor per gene across sites); significance is BF >= fade_bf_threshold.
@@ -465,7 +466,7 @@ cat("\n─── Gene-level scoring ──────────────�
 #   gene_caas_score_top - positions with side == "top"
 #   gene_caas_score_bottom - positions with side == "bottom"
 #
-# The scores (size_adj_max, direction-matched reference pools, a "both" position counted
+# The scores (raw maximum, a "both" position counted
 # once in the undirected score) come from core.scores via observed_core_scores.py; NA when
 # the gene has no scored position in the direction. n_positions* are descriptors.
 core_gene <- read_tsv(core_genes_file, show_col_types = FALSE,
@@ -475,7 +476,7 @@ core_gene <- read_tsv(core_genes_file, show_col_types = FALSE,
   filter(!is.na(CAAS_score)) %>%
   group_by(Gene, Position) %>%
   summarise(CAAS_score = max(CAAS_score), .groups = "drop")
-cat(sprintf("  size-adjust reference pools: all=%d, top=%d, bottom=%d positions\n",
+cat(sprintf("  scored position counts: all=%d, top=%d, bottom=%d positions\n",
             nrow(.pos_undirected),
             sum(pos_scores$side == "top"    & !is.na(pos_scores$CAAS_score)),
             sum(pos_scores$side == "bottom" & !is.na(pos_scores$CAAS_score))))
@@ -558,10 +559,10 @@ compute_accum_significance <- function(accum_dir, direction, suffix) {
   fdr_q  <- rep(NA_real_, nrow(out))
   if (any(tested)) fdr_q[tested] <- p.adjust(out[[fp_col]][tested], method = "BH")
   out[[paste0("accum_fdr", suffix)]] <- fdr_q
-  out[[paste0("accum_significant", suffix)]] <- !is.na(fdr_q) & fdr_q < 0.05
+  out[[paste0("accum_significant", suffix)]] <- !is.na(fdr_q) & fdr_q < accumulation_fdr_threshold
 
-  cat(sprintf("  Accumulation (%s): %d genes, %d significant (exact hypergeometric p, BH FDR < 0.05)\n",
-              direction, nrow(out), sum(out[[paste0("accum_significant", suffix)]], na.rm = TRUE)))
+  cat(sprintf("  Accumulation (%s): %d genes, %d significant (exact hypergeometric p, BH FDR < %g)\n",
+              direction, nrow(out), sum(out[[paste0("accum_significant", suffix)]], na.rm = TRUE), accumulation_fdr_threshold))
   list(df = out, ok = TRUE)
 }
 
@@ -792,9 +793,8 @@ pos_out <- pos_scores %>%
                   "n_top_species", "n_bottom_species", "n_conserved_pairs")), CAAS_score,
          side,
          any_of("caas"), any_of(c("ancestral_aa", "derived_aa")),
-         # p.emp: the pooled "detects AND exceeds" position p; p.adj_bh: its BH adjustment (§2h); p.emp_fact and
-         # p.adj_bh_fact: the factorized p of the position and its BH adjustment.
-         any_of(c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact")),
+         # p.emp: the pooled "detects AND exceeds" position p; p.adj_bh: its BH adjustment (§2h).
+         any_of(c("p.emp", "p.adj_bh")),
          # nd: cycles of the null that score the position; null_unseen: nd == 0. Null-adequacy diagnostics, no demotion.
          any_of(c("nd", "null_unseen"))) %>%
   arrange(desc(CAAS_score))

@@ -60,7 +60,7 @@ params:
 <!--
 Rendered by CAAS_SIGNIFICANCE_REPORT (ctpp_meta_caas.nf), after SCORING. The per-position CAAS table
 (meta_caas_input: meta_caas.tsv, or the post-processed discovery table SCORING evaluated; one row per
-Gene, Position and, when present, pattern) is joined with position_scores.tsv (p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact)
+Gene, Position and, when present, pattern) is joined with position_scores.tsv (p.emp, p.adj_bh)
 of the same run. It cannot be merged into 7.CAAS_pattern_annotation.Rmd, which runs before SCORING, when that
 table does not exist yet.
 Outputs: significance/meta_caas_significance.tsv and significance/pattern_significance_summary.tsv.
@@ -113,8 +113,10 @@ if (is.null(params$position_scores_input) || !file.exists(params$position_scores
   stop("position_scores_input (position_scores.tsv) not found: ", params$position_scores_input)
 }
 
-meta_caas <- read_tsv(params$meta_caas_input, show_col_types = FALSE)
-position_scores <- read_tsv(params$position_scores_input, show_col_types = FALSE)
+meta_caas <- read_tsv(params$meta_caas_input, show_col_types = FALSE) %>%
+  select(-matches("^p[.](emp|adj_bh)_fact$"))
+position_scores <- read_tsv(params$position_scores_input, show_col_types = FALSE) %>%
+  select(-matches("^p[.](emp|adj_bh)_fact$"))
 
 cat(sprintf("Loaded meta_caas: %d rows from %s\n", nrow(meta_caas), basename(params$meta_caas_input)))
 cat(sprintf("Loaded position_scores: %d rows from %s\n", nrow(position_scores), basename(params$position_scores_input)))
@@ -140,11 +142,8 @@ The p-values are informative: no threshold or significance call is applied to th
 
 - `p.emp` is the empirical permulation p of the position: the proportion of the N permuted-labeling cycles that
   detect the position (on either phenotype side) and give it a CAAS score at least as high as the observed one,
-  counting the observed run as one more cycle, (k + 1)/(N + 1). Its minimum is 1/(N + 1), shown as `< 1/N`.
+  counting the observed run as one more cycle, (k + 1)/(N + 1). Its minimum is 1/(N + 1), retained numerically.
   A position with an observed score of 0 has `p.emp` = 1. `p.adj_bh` is its Benjamini-Hochberg adjustment.
-- `p.emp_fact` is the same quantity factorized: the proportion of cycles that detect the position times the
-  proportion of the detections of positions of a similar propensity to be detected that reach its score. It is not
-  limited by the 1/(N + 1) floor. `p.adj_bh_fact` is its Benjamini-Hochberg adjustment.
 
 ### Position p-values
 
@@ -158,7 +157,7 @@ silently duplicate every meta_caas row once per side.
 
 ```{r position_join}
 # Ensure p-value columns are strictly numeric
-for (.c in c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact")) {
+for (.c in c("p.emp", "p.adj_bh")) {
   if (.c %in% names(position_scores)) {
     position_scores[[.c]] <- suppressWarnings(as.numeric(position_scores[[.c]]))
   }
@@ -166,31 +165,23 @@ for (.c in c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact")) {
 
 has_p_emp_cols <- all(c("p.emp", "p.adj_bh") %in% names(position_scores)) &&
                   any(!is.na(position_scores$p.emp) & is.finite(position_scores$p.emp))
-if (all(c("p.emp", "p.adj_bh") %in% names(position_scores))) {
-  for (.c in c("p.emp_fact", "p.adj_bh_fact")) if (!.c %in% names(position_scores)) position_scores[[.c]] <- NA_real_
-}
 
-# p.emp is add-one smoothed: its minimum is 1/(N + 1). A value at that floor is displayed as "< 1/N" (Saputra et al.
-# 2021: with 1000 permulations the lowest reportable p is 0.001 and a p of 0 is written "<0.001"); the TSV keeps the number.
-.valid_p <- if (has_p_emp_cols) position_scores$p.emp[!is.na(position_scores$p.emp) & is.finite(position_scores$p.emp)] else numeric(0)
+# Report numerical p-values; an observed minimum does not establish the theoretical floor.
+.valid_p <- if (has_p_emp_cols) position_scores$p.emp[is.finite(position_scores$p.emp) & position_scores$p.emp > 0] else numeric(0)
 .p_floor <- if (length(.valid_p) > 0) min(.valid_p) else NA_real_
-.n_perm  <- if (!is.na(.p_floor) && is.finite(.p_floor) && .p_floor > 0) round(1 / .p_floor) - 1 else NA_real_
 .fmt_p <- function(p) vapply(p, function(x) {
-  if (is.na(x) || !is.numeric(x) || !is.finite(x)) return(NA_character_)
-  if (!is.na(.p_floor) && is.finite(.p_floor) && is.finite(.n_perm) && x <= .p_floor * (1 + 1e-9)) {
-    return(sprintf("<%s", format(1 / .n_perm, digits = 3)))
-  }
+  if (is.na(x) || !is.finite(x)) return(NA_character_)
   format(signif(x, 3), scientific = FALSE, trim = TRUE)
 }, character(1))
 if (!all(c("p.emp", "p.adj_bh") %in% names(position_scores))) {
   warning("position_scores.tsv has no p.emp/p.adj_bh columns -- was it produced by ",
           "a stale scoring_compute.R build? The p-value columns will be all-NA.")
   pos_dedup <- tibble(Gene = character(), Position = integer(),
-                       p.emp = numeric(), p.adj_bh = numeric(), p.emp_fact = numeric(), p.adj_bh_fact = numeric())
+                       p.emp = numeric(), p.adj_bh = numeric())
 } else {
   pos_dedup <- position_scores %>%
     mutate(Position = as.integer(Position)) %>%
-    distinct(Gene, Position, p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact)
+    distinct(Gene, Position, p.emp, p.adj_bh)
   # Check the pooling assumption of the text above: a (Gene, Position) with more than one
   # distinct p.emp value would duplicate meta_caas rows in the join, so warn and keep one.
   n_dupe_keys <- pos_dedup %>% count(Gene, Position) %>% filter(n > 1) %>% nrow()
@@ -205,7 +196,7 @@ if (!all(c("p.emp", "p.adj_bh") %in% names(position_scores))) {
 
 meta_caas <- meta_caas %>%
   mutate(Position = as.integer(Position)) %>%
-  select(-any_of(c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact"))) %>%
+  select(-any_of(c("p.emp", "p.adj_bh"))) %>%
   left_join(pos_dedup, by = c("Gene", "Position"))
 
 .n_meta_rows <- nrow(meta_caas)
@@ -226,7 +217,7 @@ if (.pos_rate < 0.5 && !("convergence_type" %in% names(meta_caas))) {
 ## 3. Position p-values by `r type_label`
 
 Descriptive summary per `r tolower(type_label)`: number of positions, how many
-have a p-value, how many sit at the `p.emp` floor, the smallest p-values and the median of `p.emp_fact`. These are
+have a p-value, how many share the observed minimum `p.emp`, the smallest and median empirical p-values. These are
 not tests and no group-level statistic is combined from them.
 
 ```{r pattern_summary_table, results='asis'}
@@ -248,17 +239,16 @@ pattern_summary <- meta_caas %>%
   summarize(
     n_positions = n(),
     n_positions_with_p = sum(!is.na(p.emp) & is.finite(p.emp)),
-    n_at_p_emp_floor = if (!is.na(.p_floor) && is.finite(.p_floor)) sum(!is.na(p.emp) & is.finite(p.emp) & p.emp <= .p_floor * (1 + 1e-9)) else 0L,
+    n_at_min_observed_p_emp = if (!is.na(.p_floor) && is.finite(.p_floor)) sum(!is.na(p.emp) & is.finite(p.emp) & p.emp <= .p_floor * (1 + 1e-9)) else 0L,
     min_p_emp = .min_na(p.emp),               median_p_emp = .med_na(p.emp),
     min_p_adj_bh = .min_na(p.adj_bh),         median_p_adj_bh = .med_na(p.adj_bh),
-    min_p_emp_fact = .min_na(p.emp_fact),     median_p_emp_fact = .med_na(p.emp_fact),
-    min_p_adj_bh_fact = .min_na(p.adj_bh_fact), median_p_adj_bh_fact = .med_na(p.adj_bh_fact),
     n_genes = n_distinct(Gene),
     .groups = "drop"
   ) %>%
   arrange(across(all_of(group_vars)))
 
 kable(pattern_summary %>% mutate(min_p_emp = .fmt_p(min_p_emp), median_p_emp = .fmt_p(median_p_emp)),
+      col.names = c(type_label, "Positions", "With p", "At minimum", "Min p", "Median p", "Min BH q", "Median BH q", "Genes"),
       digits = 4, format.args = list(big.mark = ",")) %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
 ```
@@ -267,13 +257,13 @@ kable(pattern_summary %>% mutate(min_p_emp = .fmt_p(min_p_emp), median_p_emp = .
 x_col <- if (!is.null(type_col)) type_col else "Gene"
 
 plot_df <- meta_caas %>%
-  select(all_of(x_col), p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact) %>%
-  mutate(across(c(p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact), ~ suppressWarnings(as.numeric(.x)))) %>%
-  pivot_longer(c(p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact), names_to = "p_value", values_to = "p") %>%
+  select(all_of(x_col), p.emp, p.adj_bh) %>%
+  mutate(across(c(p.emp, p.adj_bh), ~ suppressWarnings(as.numeric(.x)))) %>%
+  pivot_longer(c(p.emp, p.adj_bh), names_to = "p_value", values_to = "p") %>%
   filter(!is.na(p) & is.finite(p)) %>%
   mutate(
     neg_log10_p = -log10(pmax(p, 1e-300)),
-    p_value = factor(p_value, levels = c("p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact"))
+    p_value = factor(p_value, levels = c("p.emp", "p.adj_bh"))
   )
 
 if (nrow(plot_df) > 0) {
@@ -282,7 +272,7 @@ if (nrow(plot_df) > 0) {
     theme_minimal() +
     labs(
       title = sprintf("Position p-values by %s", type_label),
-      subtitle = "Empirical p (p.emp), factorized p (p.emp_fact) and their Benjamini-Hochberg adjustments (p.adj_bh, p.adj_bh_fact)",
+      subtitle = "Empirical p (p.emp) and its Benjamini-Hochberg adjustment (p.adj_bh)",
       x = type_label,
       y = "-log10(p)"
     ) +
@@ -305,7 +295,7 @@ if (nrow(plot_df) > 0) {
 ```{r rowlevel_table}
 key_cols <- intersect(
   c("Gene", "Position", "convergence_type", "pattern", "side",
-    "p.emp", "p.adj_bh", "p.emp_fact", "p.adj_bh_fact"),
+    "p.emp", "p.adj_bh"),
   names(meta_caas)
 )
 other_cols <- setdiff(names(meta_caas), key_cols)
@@ -352,8 +342,8 @@ cat(sprintf("Wrote %s (%d rows)\n", file.path(sig_dir, "pattern_significance_sum
 
 ## Summary
 
-This report annotates the CAAS positions evaluated by SCORING with their empirical position p-values (`p.emp`,
-`p.emp_fact`) and the Benjamini-Hochberg adjustments of both (`p.adj_bh`, `p.adj_bh_fact`). The p-values are
+This report annotates the CAAS positions evaluated by SCORING with their empirical position p-values (`p.emp`)
+and their Benjamini-Hochberg adjustment (`p.adj_bh`). The p-values are
 informative and no threshold is applied. Group-level numbers are descriptive.
 
 ---

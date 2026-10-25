@@ -100,7 +100,7 @@ def test_posenrich_modular_nextflow_smoke(tmp_path):
 
 
 @pytest.mark.skipif(NEXTFLOW is None, reason='nextflow no disponible en PATH')
-@pytest.mark.parametrize('modular, legacy', [(True, None), (False, None), (False, 'plain'), (False, 'gzip'), (False, 'bad_checksum'), (False, 'wrong_alignment')])
+@pytest.mark.parametrize('modular, legacy', [(True, None), (False, None), (False, 'plain'), (False, 'gzip'), (False, 'bad_checksum'), (False, 'wrong_alignment'), (False, 'ucr_plain'), (False, 'ucr_gzip')])
 def test_enrichment_routes_canonical_characterization(tmp_path, modular, legacy):
     files, maps = make_fixture(tmp_path)
     main = ROOT / '.smoke_posenrich_enrichment.nf'
@@ -132,6 +132,7 @@ workflow {
     main.write_text(script)
     try:
         cmd = [NEXTFLOW, 'run', str(main), '--outdir', str(out), '-w', str(work),
+               '--posenrich_domains', 'false', '--posenrich_ucr', 'false',
                '--position_annotation_memory', '500 MB', '--position_registry_memory', '500 MB', '--position_module_memory', '500 MB', '--fcs_enabled', 'false', '--scoring_ami', 'false', '--scoring_string', 'false',
                '--posenrich', 'false', '--posenrich_modular', str(modular).lower(),
                '--fixture_background', files['background'], '--fixture_scores', files['scores'],
@@ -139,8 +140,10 @@ workflow {
                '--caas_map_dir', maps, '--posenrich_custom_file', files['custom'],
                '-ansi-log', 'false']
         if legacy:
-            legacy_path = tmp_path / ('legacy.tsv.gz' if legacy == 'gzip' else 'legacy.tsv')
+            legacy_path = tmp_path / ('legacy.tsv.gz' if legacy in ('gzip', 'ucr_gzip') else 'legacy.tsv')
             text = 'gene\tpfam_id\ttarget_name\tdescription\tclan_acc\tclan_name\tali_start\tali_end\n'
+            if legacy.startswith('ucr_'):
+                text = 'gene\tposition\tregion_type\tmethod\tvariability\n'
             if legacy in ('bad_checksum', 'wrong_alignment'):
                 import json
                 text = text.rstrip('\n')+'\tcoordinate_space\n'
@@ -152,13 +155,16 @@ workflow {
                     meta['alignment_dir'] = str(original)
                     cmd += ['--alignment', str(actual)]
                 Path(str(legacy_path)+'.manifest.json').write_text(json.dumps(meta))
-            elif legacy == 'gzip':
+            elif legacy in ('gzip', 'ucr_gzip'):
                 import gzip
                 with gzip.open(legacy_path, 'wt') as handle:
                     handle.write(text)
             else:
                 legacy_path.write_text(text)
-            cmd += ['--posenrich_domains', 'true', '--domain_variability_file', str(legacy_path)]
+            if legacy.startswith('ucr_'):
+                cmd += ['--posenrich_ucr', 'true', '--ucr_positions_file', str(legacy_path)]
+            else:
+                cmd += ['--posenrich_domains', 'true', '--domain_variability_file', str(legacy_path)]
         result = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, timeout=280)
     finally:
         main.unlink(missing_ok=True)

@@ -58,6 +58,8 @@ process RER_REPORT {
                 params = list(
                     continuous_rds    = '${continuous_output}',
                     traitname         = '${traitname}',
+                    trait_transform   = '${params.rer_transform ?: "unknown"}',
+                    analysis_mode     = '${continuous_output.name.contains(".binary.") ? "binary" : "continuous"}',
                     pval_threshold    = ${pval_thr},
                     fdr_threshold = ${params.evidence_fdr_threshold ?: 0.05},
                     top_n_labels      = ${top_n},
@@ -85,6 +87,8 @@ process RER_REPORT {
                 params = list(
                     continuous_rds    = '${continuous_output}',
                     traitname         = '${traitname}',
+                    trait_transform   = '${params.rer_transform ?: "unknown"}',
+                    analysis_mode     = '${continuous_output.name.contains(".binary.") ? "binary" : "continuous"}',
                     pval_threshold    = ${pval_thr},
                     fdr_threshold = ${params.evidence_fdr_threshold ?: 0.05},
                     top_n_labels      = ${top_n},

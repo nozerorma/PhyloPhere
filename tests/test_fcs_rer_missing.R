@@ -65,7 +65,7 @@ local({
   stats <- readr::read_tsv("stats.tsv", show_col_types = FALSE)
   score_cols <- "score_global"
   params <- list(enrich_file = NULL, score_source = "rer", num_g = 10, max_g = 0,
-                 perms_file = "perms.rds", fdr_thr = .15, pperm_thr = .025, analytic_levels = "0.05,0.1,0.15", gene_stat = "size_adj_max")
+                 perms_file = "perms.rds", fdr_thr = .15, pperm_thr = .025, analytic_levels = "0.05,0.1,0.15", gene_stat = "max")
   eval(fallback)
   compare(enrich, reference)
   # A signed test remains bilateral when this sample happens to have only positive scores.

@@ -165,20 +165,6 @@ SPEC = ModuleTabSpec(
         Section("Permulation null"),
         FieldSpec(name="caas_export_single", label="Export single CAAS null RDS", kind="bool", importance="optional"),
         FieldSpec(name="caas_perms_postproc", label="Apply post-processing filters to the permulation null", kind="bool", importance="default"),
-        FieldSpec(
-            name="gene_stat",
-            label="Gene statistic (permulation null and observed gene score)",
-            kind="choice",
-            choices=("size_adj_max", "fmax", "max"),
-            importance="default",
-            help=(
-                "CAAS gene statistic, applied identically to observed and null data. "
-                "max: largest position score in the gene. fmax: percentile F(max) "
-                "in the cycle's position-score distribution. size_adj_max: F(max)^n, "
-                "adjusted for the number n of scored positions in the gene. "
-                "Gene permulation p-values are computed from the chosen statistic."
-            ),
-        ),
         FieldSpec(name="caas_permulation_enrichment", label="Use CAAS permulations for the FCS Wilcoxon null", kind="bool", importance="default"),
         Section("Publishing norms (debug)"),
         FieldSpec(name="publish_intermediates", label="Publish intermediate files", kind="bool", importance="optional"),

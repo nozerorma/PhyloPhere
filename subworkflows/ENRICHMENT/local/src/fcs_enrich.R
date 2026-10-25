@@ -522,13 +522,14 @@ fcs_classify_significance <- function(enrich_df, fdr_thr, p_perm_thr, analytic_l
 #   (corStat, genes x N, the sign(Rho) * -log10(P) of every null phenotype; one matrix for its
 #   "global" ranking) and CAAS (caas_corStat_byrank, one genes x N matrix per ranking global,
 #   top and bottom).
-# gene_stat: the gene statistic of the observed gene scores (size_adj_max, fmax or max); the CAAS null is used only when
+# gene_stat: the gene statistic of the observed gene scores (max only); the CAAS null is used only when
 #   it was built with the same one.
 # score_source: "rer" fixes a two-sided test; "auto"/"caas" infer it from the scores.
 # Returns one row per (ranking, database, pathway): the columns of fcs_enrich_col_types.
 fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_FILE",
                         fdr_thr = 0.15, p_perm_thr = 0.025, analytic_levels = c(0.05, 0.10, 0.15),
-                        gene_stat = "size_adj_max", null_block_cols = NULL, score_source = "auto") {
+                        gene_stat = "max", null_block_cols = NULL, score_source = "auto") {
+  if (!identical(gene_stat, "max")) stop("Only CAAS gene_stat=max is supported")
   corStat_byrank <- NULL; base_corStat <- NULL
   observed <- fcs_observed(rankings, gmts, num_g = num_g, max_g = max_g, score_source = score_source)
   alts <- observed$alts
@@ -558,12 +559,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_
     if (!is.null(corperms[["caas_corStat_byrank"]])) {
       .stat_have <- corperms[["gene_stat"]]
       if (is.null(.stat_have)) {
-        # An RDS without a gene_stat stamp is taken as built with size_adj_max, the
-        # aggregator of the default; it is reported and kept when that is the observed one.
-        fcs_progress(paste0(
-          "CAAS permulation null carries no gene_stat stamp (pre-stamp build); ",
-          "assuming 'size_adj_max' (the only historical aggregator) and using it."))
-        .stat_have <- "size_adj_max"
+        .stat_have <- "unknown_legacy_statistic"
       }
       if (!identical(as.character(.stat_have), as.character(gene_stat))) {
         warning(sprintf(paste0(

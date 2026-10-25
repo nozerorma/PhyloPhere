@@ -32,6 +32,8 @@ def validate(project: ProjectConfig) -> list[str]:
     field that the pipeline can auto-generate is not an error.
     """
     errors: list[str] = []
+    if project.modules.caas.gene_stat != "max":
+        errors.append("CAAS: only gene_stat=max is supported; rebuild legacy gene scores/null matrices.")
     for name in ("evidence_p_threshold", "evidence_fdr_threshold"):
         try:
             value = float(getattr(project.modules.scoring, name))

@@ -1,36 +1,10 @@
 #!/usr/bin/env python3
-# null_position_stats.py — Counters of the position-level permulation null: the inputs of p.emp and p.emp_fact.
-# PhyloPhere | subworkflows/SCORING/local/src/
+"""Blockwise counters for direct position p: nd and inclusive k_emp.
 
-"""
-The position-level permulation p of scoring_compute.R without the table of every (position, cycle) of the null.
-
-For an observed position with score s the null contributes three integers, each a sum over the cycles (and so over the
-blocks of cycles they were merged in):
-
-    nd      cycles of the null that score the position on either side (``null_positions.parquet``)
-    k_emp   cycles whose best-side score is >= s - TIE_TOL                       p.emp = (k_emp + 1) / (N + 1)
-    c_k     detections (position, cycle) of the positions of propensity class k with score >= s - TIE_TOL
-
-p.emp_fact = min(1, (nd + 1) / (N + 1) * S), S = (1 + c_k) / (1 + n_k), with k the class of nd + 1 and n_k the number of
-detections of the class. The classes are percentiles of the detections of the null by the nd of their position, so they
-need the nd of every position (the sum over all blocks) before any c_k can be counted: the computation has two stages,
-`universe` (nd -> universe U -> classes) and `count` (per block, with the classes known), and a final `reduce`.
-
-Steps
------
-  universe  null_positions.parquet + tested positions + gene universe + observed positions -> the positions of U with
-            their class (null_classes.parquet), the class limits and sizes (null_fit.tsv) and the null's own metrics
-            (null_universe_base.tsv: the saturation curve and the sizes of the null and of U)
-  count     one block's positions.parquet -> k_emp and c_k per observed position (counts_<block>.parquet)
-  reduce    the sums over the blocks -> null_counters.tsv, one row per observed position (Gene, Position, k_emp, nd, c1..cK);
-            the observed scores are not repeated there: the reader has them
-
-U is the null-positive positions inside the tested set (and the cleaned-background genes), plus every observed position;
-without a usable tested set it is every null-positive position (the rule of scoring_compute.R: the tested set is used
-when at least half of the null-positive positions of the genes it covers lie in it).
-
-Called by:  CAAS_NULL_UNIVERSE, CAAS_NULL_COUNT and CAAS_NULL_COUNTERS (subworkflows/SCORING/scoring_null_positions.nf)
+U is the null-positive positional universe plus observed positions, as before.
+The legacy null_classes.parquet/null_fit.tsv staging names and CLI arguments are
+retained for Nextflow compatibility; a single inert class is written. No class
+pool, conditional tail or factored p is computed. Historical c_k columns are ignored.
 """
 
 import argparse
@@ -53,7 +27,6 @@ for _cand in (_here.parent, _here.parents[3] / "CT_DISAMBIGUATION" / "local"):
         break
 from src.core.scores import SCORE_RULE, TIE_TOL, cycle_order_key, position_score  # noqa: E402
 
-FACT_PROP_CLASSES = 20          # propensity classes: percentiles of the detections of the null
 RATE_MIN = 0.5                  # share of null-positive positions that must lie in the tested set to restrict the null to it
 POS_BITS = 32                   # position keys: gene id << 32 | position
 
@@ -107,40 +80,6 @@ class GeneCodes:
     def keys(self, genes, positions) -> np.ndarray:
         g = self.codes(pa.array(list(genes), pa.string()) if not isinstance(genes, (pa.Array, pa.ChunkedArray)) else genes)
         return (g << POS_BITS) + np.asarray(positions, dtype=np.int64)
-
-
-# ── Propensity classes ────────────────────────────────────────────────────────
-
-
-def fact_breaks_from_counts(values: np.ndarray, counts: np.ndarray, k: int = FACT_PROP_CLASSES) -> np.ndarray:
-    """Upper limits of the classes (without the last one) for sorted distinct `values` held by `counts` detections each.
-
-    The classes are percentiles of the detections: a value goes to class ceiling(k * cumulative share of detections), so
-    each class holds about 1/k of them. Positions with the same value are never split, so a class can hold more.
-    """
-    cls = np.minimum(k, np.ceil(k * np.cumsum(np.asarray(counts, dtype=np.float64)) / np.sum(counts) - 1e-9))
-    last = np.flatnonzero(np.r_[cls[1:] != cls[:-1], True])      # the largest value of each class present
-    return np.asarray(values)[last][:-1].astype(np.float64)
-
-
-def fact_breaks(x: np.ndarray, k: int = FACT_PROP_CLASSES) -> np.ndarray:
-    """Class limits for `x`, the value of the position of every detection (one entry per detection)."""
-    values, counts = np.unique(np.asarray(x), return_counts=True)
-    return fact_breaks_from_counts(values, counts, k)
-
-
-def fact_breaks_by_position(nd: np.ndarray, k: int = FACT_PROP_CLASSES) -> np.ndarray:
-    """Class limits when `nd` holds one value per position: a position with nd = v carries v detections."""
-    values, positions = np.unique(np.asarray(nd), return_counts=True)
-    return fact_breaks_from_counts(values, values * positions, k)
-
-
-def fact_class(breaks: np.ndarray, nd) -> np.ndarray:
-    """Class (1-based) of a position by its nd: 1 + the number of class limits below it (nd of at least 1)."""
-    return np.searchsorted(breaks, np.maximum(np.asarray(nd), 1), side="left") + 1
-
-
-# ── Universe ──────────────────────────────────────────────────────────────────
 
 
 def tested_membership(background_file: Path, gene_idx: np.ndarray, gene_names: List[str], positions: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -216,8 +155,8 @@ def build_universe(null: pa.Table, obs_genes: List[str], obs_pos: np.ndarray, te
     curve = [(k, int((first_u <= k).sum())) for k in ks]
 
     nd_u = nd[keep]
-    breaks = fact_breaks_by_position(nd_u, FACT_PROP_CLASSES) if len(nd_u) else np.empty(0)
-    cls = fact_class(breaks, nd_u) if len(nd_u) else np.empty(0, dtype=np.int64)
+    breaks = np.empty(0)  # inert legacy fit; not a statistical model
+    cls = np.ones(len(nd_u), dtype=np.int64)
     sizes = {int(k): int(nd_u[cls == k].sum()) for k in np.unique(cls)}
     classes = pa.table({"gene": null["gene"].filter(pa.array(keep)), "position": pa.array(positions[keep].astype(np.int32)),
                         "nd": pa.array(nd_u.astype(np.int32)), "cls": pa.array(cls.astype(np.int32))})
@@ -249,8 +188,7 @@ def write_universe(out: Path, classes, breaks, sizes, metrics, n_cycles: int, n_
 
 def count_block(positions_file: Path, classes: pa.Table, breaks: np.ndarray, obs_genes: List[str], obs_pos: np.ndarray,
                 obs_score: np.ndarray) -> pa.Table:
-    """k_emp and c_k per observed position from one block's scored positions (gene, cycle, position, all)."""
-    n_cls = len(breaks) + 1
+    """Direct exceedance counts from one block; legacy class arguments are ignored."""
     table = pq.read_table(positions_file, columns=["gene", "position", "all"])
     vocab = GeneCodes(set(pc.unique(table["gene"]).to_pylist()) | set(pc.unique(classes["gene"]).to_pylist()) | set(obs_genes))
     keys = vocab.keys(table["gene"], table["position"].to_numpy(zero_copy_only=False))
@@ -269,25 +207,8 @@ def count_block(positions_file: Path, classes: pa.Table, breaks: np.ndarray, obs
         for i in np.flatnonzero(hi > lo).tolist():
             k_emp[i] = int((sv[lo[i]:hi[i]] >= thr[i]).sum())
 
-    # c_k: the detections of the positions of class k (those of U) with a score reaching the observed one
-    counts = np.zeros((len(obs_keys), n_cls), dtype=np.int64)
-    if len(keys) and len(obs_keys) and classes.num_rows:
-        ckeys = vocab.keys(classes["gene"], classes["position"].to_numpy(zero_copy_only=False))
-        cls = classes["cls"].to_numpy(zero_copy_only=False).astype(np.int64)
-        corder = np.argsort(ckeys)
-        ckeys, cls = ckeys[corder], cls[corder]
-        at = np.searchsorted(ckeys, keys)
-        at[at >= len(ckeys)] = 0
-        hit = ckeys[at] == keys
-        row_cls = np.where(hit, cls[at], 0)
-        for k in range(1, n_cls + 1):
-            v = np.sort(value[row_cls == k])
-            if len(v):
-                counts[:, k - 1] = len(v) - np.searchsorted(v, thr, side="left")
     cols = {"gene": pa.array(obs_genes, pa.string()), "position": pa.array(obs_pos.astype(np.int32)),
             "k_emp": pa.array(k_emp)}
-    for k in range(1, n_cls + 1):
-        cols[f"c{k}"] = pa.array(counts[:, k - 1])
     return pa.table(cols)
 
 
@@ -299,14 +220,11 @@ def reduce_counts(count_files: List[Path], classes: pa.Table, obs_genes: List[st
     """Sum the per-block counts and attach the nd of each observed position: the row of null_counters.tsv."""
     n = len(obs_genes)
     k_emp = np.zeros(n, dtype=np.int64)
-    c = np.zeros((n, n_cls), dtype=np.int64)
     for f in count_files:
         t = pq.read_table(f)
         if t.num_rows != n:
             raise ValueError(f"{f} counts {t.num_rows} positions, {n} observed")
         k_emp += t["k_emp"].to_numpy(zero_copy_only=False)
-        for k in range(1, n_cls + 1):
-            c[:, k - 1] += t[f"c{k}"].to_numpy(zero_copy_only=False)
     vocab = GeneCodes(set(pc.unique(classes["gene"]).to_pylist()) | set(obs_genes))
     nd = np.zeros(n, dtype=np.int64)
     if classes.num_rows and n:
@@ -319,15 +237,15 @@ def reduce_counts(count_files: List[Path], classes: pa.Table, obs_genes: List[st
         at[at >= len(ckeys)] = 0
         hit = ckeys[at] == okeys
         nd = np.where(hit, cnd[at], 0)
-    return {"k_emp": k_emp, "nd": nd, "c": c}
+    return {"k_emp": k_emp, "nd": nd}
 
 
 def write_counters(path: Path, obs_genes, obs_pos, red, n_cls: int) -> None:
     with open(path, "w") as fh:
-        fh.write("Gene\tPosition\tk_emp\tnd\t" + "\t".join(f"c{k}" for k in range(1, n_cls + 1)) + "\n")
+        fh.write("Gene\tPosition\tk_emp\tnd\n")
         for i, (g, p) in enumerate(zip(obs_genes, obs_pos.tolist())):
-            fh.write(f"{g}\t{p}\t{int(red['k_emp'][i])}\t{int(red['nd'][i])}\t"
-                     + "\t".join(str(int(x)) for x in red["c"][i]) + "\n")
+            fh.write(f"{g}\t{p}\t{int(red['k_emp'][i])}\t{int(red['nd'][i])}\n")
+
 
 
 def read_fit(path: Path) -> Tuple[np.ndarray, Dict[int, int]]:
@@ -354,7 +272,7 @@ def main(argv=None) -> int:
     u.add_argument("--roster", required=True, type=Path, help="cycle_roster.txt")
     u.add_argument("--counts-json", default=None, type=Path, help="counts.json of reduce_null_blocks.py (cycles with a row)")
     u.add_argument("--output-dir", required=True, type=Path)
-    c = sub.add_parser("count", help="k_emp and c_k of one block")
+    c = sub.add_parser("count", help="direct k_emp of one block")
     c.add_argument("--positions", required=True, type=Path)
     c.add_argument("--classes", required=True, type=Path)
     c.add_argument("--fit", required=True, type=Path)

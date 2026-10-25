@@ -76,7 +76,7 @@ process SCORING_FCS_REPORT {
                 fdr_thr       = ${fdr_thr},
                 pperm_thr     = ${pperm_thr},
                 analytic_levels = '${params.fcs_analytic_levels}',
-                gene_stat = '${params.gene_stat ?: "size_adj_max"}',
+                gene_stat = '${params.gene_stat ?: "max"}',
                 cluster_similarity = '${params.fcs_cluster_similarity}',
                 cluster_threshold  = ${params.fcs_cluster_threshold},
                 top_n         = ${top_n},
@@ -150,7 +150,7 @@ process RER_FCS_REPORT {
                 fdr_thr       = ${fdr_thr},
                 pperm_thr     = ${pperm_thr},
                 analytic_levels = '${params.fcs_analytic_levels}',
-                gene_stat = '${params.gene_stat ?: "size_adj_max"}',
+                gene_stat = '${params.gene_stat ?: "max"}',
                 cluster_similarity = '${params.fcs_cluster_similarity}',
                 cluster_threshold  = ${params.fcs_cluster_threshold},
                 top_n         = ${top_n},
@@ -229,7 +229,7 @@ process FCS_COMPUTE_BATCHED {
         --fdr-thr ${fdr_thr} \
         --pperm-thr ${pperm_thr} \
         --analytic-levels ${params.fcs_analytic_levels} \
-        --gene-stat ${params.gene_stat ?: 'size_adj_max'} \
+        --gene-stat ${params.gene_stat ?: 'max'} \
         --score-source ${score_source} \
         --output fcs_enrich_partial.tsv
     """

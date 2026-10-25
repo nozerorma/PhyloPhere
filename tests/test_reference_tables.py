@@ -49,7 +49,9 @@ def test_ppga_projection_detects_fubar_map_disagreement(tmp_path):
  base=tmp_path/'base';(base/'MAP').mkdir(parents=True)
  (base/'reports/variability').mkdir(parents=True);(base/'reports/positive_selection').mkdir()
  (base/'MAP/G.map.tsv').write_text('ori_codon_col\tstatus\tprot_ali_col\thg38_aa_pos\thg38_nt_coord\n5\tselected\t1\t9\tchr1:42\n')
- (base/'reports/variability/ucr_positions.tsv').write_text('gene\tmethod\tposition\nG\tsliding\t5\nG\tsliding\t4\n')
+ (base/'PROT/bmge').mkdir(parents=True);(base/'PROT/bmge/G.fa').write_text('>Homo_sapiens\nS\n')
+ (base/'PROT_VAR_RAW').mkdir();(base/'PROT_VAR_RAW/G.entropy.tsv').write_text('gene\tposition\tvariability\tg\nG\t1\t0.1\t0\n')
+ (base/'reports/variability/ucr_positions.tsv').write_text('gene\tmethod\tposition\nG\tsliding\t1\n')
  source=base/'reports/positive_selection/fubar_sites.tsv'
  source.write_text('gene\tsite\tori_codon_col\thg38_aa_pos\thg38_nt_coord\nG\t1\t5\t9\tchr1:42\n')
  project_ppga(base,tmp_path/'out')

@@ -14,8 +14,7 @@ Outputs:    --positions-out  TSV [Gene, Position, side, CAAS_score]; one row per
                              CAAS_score being its asr_path_score (core.scores)
             --genes-out      TSV [Gene, gene_caas_score, gene_caas_score_top,
                              gene_caas_score_bottom]; the gene statistic chosen with --gene-stat
-                             (size_adj_max by default) against the pool of the same direction
-                             (all positions of the run), NA when the gene has no scored position
+                             (max only), NA when the gene has no scored position
                              in that direction
 
 Needs only the standard library plus src/core/scores.py, which the process stages next to it.
@@ -35,7 +34,7 @@ for _cand in (_here.parent, _here.parents[3] / "CT_DISAMBIGUATION" / "local"):
     if (_cand / "src" / "core" / "scores.py").exists():
         sys.path.insert(0, str(_cand))
         break
-from src.core.scores import GENE_STATS, direction_values, gene_scores, position_score  # noqa: E402
+from src.core.scores import GENE_STATS, gene_scores, position_score  # noqa: E402
 
 
 def _num(x):
@@ -73,7 +72,7 @@ def main():
     ap.add_argument("--input", required=True, help="filtered_discovery.tsv")
     ap.add_argument("--positions-out", required=True)
     ap.add_argument("--genes-out", required=True)
-    ap.add_argument("--gene-stat", default="size_adj_max", choices=GENE_STATS,
+    ap.add_argument("--gene-stat", default="max", choices=GENE_STATS,
                     help="gene statistic of the gene scores; the permulation null must hold the same one")
     a = ap.parse_args()
 
@@ -90,11 +89,11 @@ def main():
         for (g, p, side), v in sorted(scores.items()):
             w.writerow([g, p, side, _fmt(v)])
 
-    # Reference pools: every scored position of the run, per direction (sorted ascending, as the gene statistic requires).
+    # Group positions by gene; global takes the best side of each position.
     by_pos = {}
     for (g, p, side), v in scores.items():
         by_pos.setdefault((g, p), {})[side] = v
-    pools = {d: sorted(v) for d, v in direction_values(by_pos.values()).items()}
+    pools = {d: () for d in ("all", "top", "bottom")}  # ignored by the raw maximum
     per_gene = {}
     for (g, _p), sides in by_pos.items():
         per_gene.setdefault(g, []).append(sides)
@@ -105,7 +104,7 @@ def main():
             s = gene_scores(per_gene[g], pools, a.gene_stat)
             w.writerow([g, _fmt(s["all"]), _fmt(s["top"]), _fmt(s["bottom"])])
     print(f"observed core scores: {len(scores)} position rows, {len(per_gene)} genes; "
-          f"pools all={len(pools['all'])} top={len(pools['top'])} bottom={len(pools['bottom'])}", file=sys.stderr)
+          "gene_stat=max", file=sys.stderr)
     return 0
 
 

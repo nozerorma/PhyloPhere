@@ -18,6 +18,8 @@ output:
 params:
   continuous_rds:    "."
   traitname:         "unknown_trait"
+  trait_transform:   "unknown"
+  analysis_mode:     "continuous"
   fdr_threshold: 0.05
   pval_threshold:    0.05
   top_n_labels:      15
@@ -25,6 +27,7 @@ params:
 ---
 
 <style type="text/css">
+  caption { color: #4b5563; }
   body {
     font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   }
@@ -94,33 +97,42 @@ theme_set(
 ## Overview
 
 This report summarises the results of **RERconverge** (relative evolutionary rate convergence;
-Clark _et al._, 2012–2019) applied to the continuous phenotype **`r params$traitname`**.
+Kowalczyk _et al._, 2019) applied in **`r params$analysis_mode`** mode to **`r params$traitname`**.
 
-RERconverge tests whether genes show correlated **relative evolutionary rates (RERs)** across
-species with differences in a continuous trait. A positive correlation (Rho > 0) means that
-lineages with higher trait values tend to show **faster** evolution in that gene; a negative
-correlation (Rho < 0) means **slower** evolution.
+RERconverge tests associations between **relative evolutionary rates (RERs)** and
+phenotype paths. In continuous mode, `char2Paths(metric="diff")` reconstructs ancestral
+values and uses descendant minus ancestor changes, mapped onto the master-tree paths.
+**Positive rho** associates higher RER with more positive phenotype changes;
+**negative rho** associates higher RER with more negative changes. These are relative
+rate associations, not absolute rates, temporal acceleration, or evidence of positive selection.
+For a binary phenotype, the direction instead refers to the encoded foreground (1) versus background (0).
 
 The analysis uses the following key statistics:
 
 | Statistic | Meaning |
 |-----------|---------|
-| **Rho**     | Pearson correlation between trait path values and gene RER path values |
-| **N**       | Number of branches (species) with data for the gene |
-| **P**       | Raw **parametric** p-value of the Pearson correlation test (it treats the branches as independent observations) |
-| **p.adj**   | Benjamini–Hochberg FDR-adjusted **parametric** p-value over all genes (computed internally by `correlateWithContinuousPhenotype()`, Kowalczyk _et al._ 2019) |
-| **p.perm**  | Empirical **permulation** p-value (if run): per gene, the null correlations of Brownian-Motion null phenotypes are compared with the observed Rho, centred on the median of the gene's own null (`permpvalcor()`, Saputra _et al._ 2021). Its minimum is about 1/(N/2 + 1) for N permulations, not 1/(N + 1) (the observed minimum is shown below). |
-| **p.perm.adj** | Benjamini–Hochberg adjustment of `p.perm` over all genes |
+| **Rho** | Signed association: Pearson in continuous mode; the binary association depends on its configured test |
+| **N** | Number of matched, non-missing path observations used for the gene; not necessarily the number of species |
+| **P** | Raw analytic p-value of the association test |
+| **p.adj** | BH-adjusted analytic P from the RER producer |
+| **p.perm** | Native `permpvalcor()` empirical p: choose the side of the gene-specific null median containing observed rho; count equally or more extreme null rho on that side, then (k+1)/(d+1), where d counts null rho on that side including median ties. NA null values are removed per gene. This evaluates either direction; it is not the absolute-value tail used by FCS. |
+| **p.perm.adj** | BH adjustment of available gene p.perm values in the original RER family, before any directional or cross-method subset |
 
-> **Note:** The parametric `P` and `p.adj` can be miscalibrated in either direction depending on the phenotype
-> (Saputra _et al._ 2021, Fig. 1A): anti-conservative for a binary marine phenotype and conservative for a
-> continuous long-lived large-bodied one. They rank genes, but they are not a calibrated FDR.
-> Genes called **significant** here (the `Call` column and the gene lists) are those with a raw permulation p-value
-> `p.perm < pval_threshold`, which is **not corrected for multiple testing**; the BH-adjusted `p.perm.adj` is
-> shown next to it. Saputra _et al._ correct the permulation p-values (Storey, or BH) and use up to ~1,000
-> permulations; with fewer than ~125 the permulation does not improve on the parametric p (their Fig. 5C).
-> Without permulations, empirical calls are unavailable; parametric results are displayed separately.
-> Trait transformations (e.g. logit, arcsin, log10, or none) can be configured via the `rer_transform` parameter.
+> **Calls are nominal:** `Call` and the directional lists use `p.perm < pval_threshold`,
+> without multiple-testing correction. **BH empirical** separately marks
+> `p.perm.adj < fdr_threshold`. Unavailable empirical evidence remains NA and is not
+> a measured negative result. Analytic P supplies the signed global FCS ranking
+> `sign(Rho) × −log10(P)`; gene p.perm and pathway p.perm are different tests.
+> FCS retains one global signed ranking and a bilateral contrast. Its direction is
+> the sign of the set statistic (AUC − 0.5), not the sign of every member gene.
+> RER positive/negative must not be relabelled CAAS top/bottom.
+> Gene direction uses sign(Rho); native `permpvalcor$permstats` instead uses
+> sign(Rho − median(null)). These need not agree near zero.
+
+Analytic and empirical inference can disagree in either direction (Saputra et al. 2021).
+The minimum observed p below is descriptive; a theoretical floor requires the valid
+null counts and median ties of each gene. The binary marine example in Saputra Fig. 5C
+is not a universal minimum number of permulations for continuous phenotypes.
 
 ---
 
@@ -180,7 +192,7 @@ if (has_perm) {
   rer_df <- rer_df %>%
     mutate(
       # Parametric significance (always available)
-      signif_param = !is.na(p.adj) & p.adj < params$pval_threshold,
+      signif_param = !is.na(p.adj) & p.adj < params$fdr_threshold,
       # Significance is defined directly by raw p.perm when permutations are available
       signif       = !is.na(p.perm) & p.perm < params$pval_threshold,
       # FDR-based call: BH-adjusted permulation p-value
@@ -192,7 +204,7 @@ if (has_perm) {
 } else {
   rer_df <- rer_df %>%
     mutate(
-      signif_param = !is.na(p.adj) & p.adj < params$pval_threshold,
+      signif_param = !is.na(p.adj) & p.adj < params$fdr_threshold,
       signif       = FALSE,
       signif_perm_fdr = FALSE,
       pos_corr     = signif &  Rho >  0,
@@ -204,7 +216,8 @@ if (has_perm) {
 # Define the human-readable Call classification column
 rer_df <- rer_df %>%
   mutate(
-    `BH empirical` = signif_perm_fdr,
+    `Empirical available` = !is.na(p.perm),
+    `BH empirical` = if (has_perm) ifelse(is.na(p.perm), NA, signif_perm_fdr) else NA,
     Call = case_when(
       pos_corr ~ "Positively correlated",
       neg_corr ~ "Negatively correlated",
@@ -217,7 +230,7 @@ rer_df$rer_stat <- sign(rer_df$Rho) * -log10(rer_df$P)
 
 cat(sprintf(
   "Significant after BH-FDR (p.adj < %g): %d genes.\n",
-  params$pval_threshold,
+  params$fdr_threshold,
   sum(rer_df$signif_param, na.rm = TRUE)
 ))
 if (has_perm) {
@@ -251,12 +264,12 @@ display_df <- rer_df %>%
 # Include p.perm column only when permutations were run
 if (has_perm) {
   display_df <- display_df %>%
-    select(gene, Rho, N, P, p.adj, p.perm, p.perm.adj, `BH empirical`, Call) %>%
+    select(gene, Rho, N, P, p.adj, p.perm, p.perm.adj, `Empirical available`, `BH empirical`, Call) %>%
     rename(Gene = gene, `Raw P (parametric)` = P, `p.adj (parametric BH)` = p.adj,
            `p.perm (permulation)` = p.perm, `p.perm.adj (permulation BH)` = p.perm.adj)
 } else {
   display_df <- display_df %>%
-    select(gene, Rho, N, P, p.adj, `BH empirical`, Call) %>%
+    select(gene, Rho, N, P, p.adj, `Empirical available`, `BH empirical`, Call) %>%
     rename(Gene = gene, `Raw P (parametric)` = P, `p.adj (parametric BH)` = p.adj)
 }
 
@@ -268,7 +281,7 @@ DT::datatable(
   caption  = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
     sprintf(
-      "RERconverge gene-level results | Trait: %s",
+      "RERconverge gene-level results (Call = nominal empirical; BH empirical = adjusted) | Trait: %s",
       params$traitname
     )
   )
@@ -401,10 +414,10 @@ ggplot(rer_df, aes(x = N, y = Rho)) +
     name = NULL
   ) +
   labs(
-    title    = "Number of species (N) vs correlation strength (Rho)",
+    title    = "Number of matched paths (N) vs association strength (Rho)",
     subtitle = paste0("Trait: ", params$traitname,
                      " | Dashed line = zero correlation"),
-    x = "N (branches with data)",
+    x = "N (matched paths)",
     y = expression(rho ~ "(Pearson correlation)")
   ) +
   theme_bw(base_size = 13) +
@@ -421,12 +434,10 @@ perm_label_df <- rer_df %>%
   arrange(p.perm) %>%
   slice_head(n = params$top_n_labels)
 
-# Permutation floor: permpvalcor() centres each gene's null on its median and divides by the null values on the
-# observed side, about N/2, so the smallest p.perm is about 1 / (N/2 + 1), not 1 / (N + 1). The floor drawn is the
-# smallest p.perm of the table, which does not depend on that rule.
-perm_floor_val <- if (has_perm) min(rer_df$p.perm, na.rm = TRUE) else NA_real_
-perm_floor_log10 <- if (!is.na(perm_floor_val)) -log10(perm_floor_val) else NA_real_
-n_floor_genes <- if (!is.na(perm_floor_val)) sum(!is.na(rer_df$p.perm) & rer_df$p.perm <= perm_floor_val * 1.01) else 0
+# Descriptive minimum only: do not infer a theoretical floor from this table.
+perm_min_val <- if (has_perm) min(rer_df$p.perm, na.rm = TRUE) else NA_real_
+perm_min_log10 <- if (!is.na(perm_min_val)) -log10(perm_min_val) else NA_real_
+n_min_genes <- if (!is.na(perm_min_val)) sum(!is.na(rer_df$p.perm) & rer_df$p.perm == perm_min_val) else 0
 
 p1 <- ggplot(rer_df, aes(x = -log10(P + 1e-300), y = -log10(p.perm))) +
   geom_point(aes(colour = case_when(
@@ -440,14 +451,14 @@ p1 <- ggplot(rer_df, aes(x = -log10(P + 1e-300), y = -log10(p.perm))) +
   # Permutation significance threshold line
   geom_hline(yintercept = -log10(params$pval_threshold),
              linetype = "dotted", colour = "grey50", linewidth = 0.5) +
-  # Floor line: p.perm floor is shown
-  {if (!is.na(perm_floor_log10))
-     geom_hline(yintercept = perm_floor_log10,
+  # Line at the observed minimum (not a theoretical bound)
+  {if (!is.na(perm_min_log10))
+     geom_hline(yintercept = perm_min_log10,
                 linetype = "solid", colour = "#d62728", linewidth = 0.5, alpha = 0.6)
    else list()} +
-  {if (!is.na(perm_floor_log10) && n_floor_genes > 0)
-     annotate("text", x = Inf, y = perm_floor_log10,
-              label = sprintf(" floor: p = %.4f  (%d genes)", perm_floor_val, n_floor_genes),
+  {if (!is.na(perm_min_log10) && n_min_genes > 0)
+     annotate("text", x = Inf, y = perm_min_log10,
+              label = sprintf(" observed minimum: p = %.4f  (%d genes)", perm_min_val, n_min_genes),
               hjust = 1.05, vjust = -0.4, size = 3, colour = "#d62728")
    else list()} +
   geom_text_repel(data = perm_label_df, aes(label = gene),
@@ -470,24 +481,23 @@ p1 <- ggplot(rer_df, aes(x = -log10(P + 1e-300), y = -log10(p.perm))) +
   theme_bw(base_size = 13) +
   theme(legend.position = "top")
 
-# Histogram: separate the floor bin in a distinct colour so that
-# genes at the permutation resolution limit are clearly visible.
+# Histogram: highlight genes exactly at the observed minimum.
 perm_df_hist <- rer_df %>%
   filter(!is.na(p.perm)) %>%
-  mutate(at_floor = !is.na(perm_floor_val) & p.perm <= perm_floor_val * 1.01)
+  mutate(at_minimum = !is.na(perm_min_val) & p.perm == perm_min_val)
 
-p2 <- ggplot(perm_df_hist, aes(x = p.perm, fill = at_floor)) +
+p2 <- ggplot(perm_df_hist, aes(x = p.perm, fill = at_minimum)) +
   geom_histogram(bins = 50, colour = "white", alpha = 0.85) +
   geom_vline(xintercept = params$pval_threshold,
              linetype = "dashed", colour = "grey40", linewidth = 0.7) +
   scale_fill_manual(
     values = c(`FALSE` = .tableau10[5], `TRUE` = "#d62728"),
-    labels = c(`FALSE` = "Observed p.perm", `TRUE` = sprintf("Floor (p = %.4f)", if (!is.na(perm_floor_val)) perm_floor_val else 0)),
+    labels = c(`FALSE` = "Observed p.perm", `TRUE` = sprintf("Observed minimum (p = %.4f)", if (!is.na(perm_min_val)) perm_min_val else 0)),
     name   = NULL
   ) +
   labs(
     title    = "Distribution of permutation p-values",
-    subtitle = if (n_floor_genes > 0) sprintf("%d genes at the permutation floor (p.perm = %.4f)", n_floor_genes, perm_floor_val) else NULL,
+    subtitle = if (n_min_genes > 0) sprintf("%d genes at the observed minimum (p.perm = %.4f)", n_min_genes, perm_min_val) else NULL,
     x = "p.perm",
     y = "Number of genes"
   ) +
@@ -503,12 +513,33 @@ cat("> **Permutation p-values not available.** Re-run with `rer_perm_batches > 0
 
 ---
 
+## Empirical BH evidence
+
+```{r empirical-bh, results="asis"}
+if (!has_perm) {
+  cat("Empirical evidence unavailable; neither nominal nor BH calls can be made.\n")
+} else {
+  pv <- sort(rer_df$p.perm[!is.na(rer_df$p.perm)])
+  m <- length(pv)
+  bh_candidates <- m * pv / seq_along(pv)
+  j <- which.min(bh_candidates)
+  cat(sprintf("BH family: **%d available genes**; **%d unavailable**. Nominal calls: **%d** (positive **%d**, negative **%d**). BH calls at %g: **%d**.\n\n",
+              m, sum(is.na(rer_df$p.perm)), sum(rer_df$signif),
+              sum(rer_df$pos_corr, na.rm=TRUE), sum(rer_df$neg_corr, na.rm=TRUE),
+              params$fdr_threshold, sum(rer_df$signif_perm_fdr)))
+  cat(sprintf("Minimum adjusted empirical p: **%.10g**. The smallest BH candidate m × p / rank is %.10g at rank %d (p = %.10g). BH uses the cumulative minimum from larger ranks; this depends on the full p distribution, not just its minimum.\n\n",
+              min(rer_df$p.perm.adj, na.rm=TRUE), bh_candidates[j], j, pv[j]))
+  cat("No BH calls means insufficient evidence at the selected family-wide cutoff; it does not prove no biological association.\n")
+}
+```
+
+
 ## Parametric adjusted p-value (BH p.adj) distribution
 
 ```{r padj-dist, fig.height=5}
 ggplot(rer_df %>% filter(!is.na(p.adj)), aes(x = p.adj)) +
   geom_histogram(bins = 50, colour = "white", fill = .tableau10[2], alpha = 0.85) +
-  geom_vline(xintercept = params$pval_threshold, linetype = "dashed", colour = "grey40", linewidth = 0.7) +
+  geom_vline(xintercept = params$fdr_threshold, linetype = "dashed", colour = "grey40", linewidth = 0.7) +
   labs(
     title    = "Distribution of parametric adjusted p-values (BH p.adj)",
     subtitle = paste0("Trait: ", params$traitname),
@@ -520,9 +551,15 @@ ggplot(rer_df %>% filter(!is.na(p.adj)), aes(x = p.adj)) +
 
 ---
 
-## Positively Correlated Genes (top `r params$top_n_labels`)
+## Directional nominal calls {.tabset}
 
-```{r top-positive}
+Both tabs use **p.perm < `r params$pval_threshold`**, before BH. Each shows at most
+`r params$top_n_labels` genes; the full calls are in the gene-level table and TSV.
+BH status is displayed separately. No empirical p-values means no nominal calls.
+
+### Positively correlated genes
+
+```{r top-positive, results="asis"}
 sort_col <- if (has_perm) "p.perm" else "p.adj"
 
 top_pos <- rer_df %>%
@@ -534,27 +571,28 @@ top_pos <- rer_df %>%
 if (has_perm) {
   top_pos <- top_pos %>%
     mutate(p.perm = fmt_pperm(p.perm), p.perm.adj = signif(p.perm.adj, 3)) %>%
-    select(gene, Rho, N, p.adj, p.perm, p.perm.adj)
-  col_names <- c("Gene", "Rho", "N", "p.adj (parametric BH)", "p.perm", "p.perm.adj")
+    select(gene, Rho, N, p.adj, p.perm, p.perm.adj, `BH empirical`)
+  col_names <- c("Gene", "Rho", "N", "p.adj (parametric BH)", "p.perm (nominal)", "p.perm.adj (BH)", "BH empirical")
 } else {
   top_pos <- top_pos %>% select(gene, Rho, N, p.adj)
   col_names <- c("Gene", "Rho", "N", "p.adj (parametric BH)")
 }
 
 if (nrow(top_pos) == 0) {
-  cat("No positively correlated genes at the given thresholds.\n")
+  cat("No positive nominal empirical calls (evidence unavailable or no genes below the nominal threshold).\n")
 } else {
   knitr::kable(
     top_pos,
     col.names = col_names,
-    caption   = "Top positively correlated genes (faster evolution with higher trait value)"
+    row.names = FALSE,
+    caption   = "Positive nominal calls: higher RER associated with more positive phenotype changes (continuous mode)"
   )
 }
 ```
 
-## Negatively Correlated Genes (top `r params$top_n_labels`)
+### Negatively correlated genes
 
-```{r top-negative}
+```{r top-negative, results="asis"}
 top_neg <- rer_df %>%
   filter(neg_corr) %>%
   arrange(.data[[sort_col]], Rho) %>%
@@ -564,18 +602,19 @@ top_neg <- rer_df %>%
 if (has_perm) {
   top_neg <- top_neg %>%
     mutate(p.perm = fmt_pperm(p.perm), p.perm.adj = signif(p.perm.adj, 3)) %>%
-    select(gene, Rho, N, p.adj, p.perm, p.perm.adj)
+    select(gene, Rho, N, p.adj, p.perm, p.perm.adj, `BH empirical`)
 } else {
   top_neg <- top_neg %>% select(gene, Rho, N, p.adj)
 }
 
 if (nrow(top_neg) == 0) {
-  cat("No negatively correlated genes at the given thresholds.\n")
+  cat("No negative nominal empirical calls (evidence unavailable or no genes below the nominal threshold).\n")
 } else {
   knitr::kable(
     top_neg,
     col.names = col_names,
-    caption   = "Top negatively correlated genes (slower evolution with higher trait value)"
+    row.names = FALSE,
+    caption   = "Negative nominal calls: higher RER associated with more negative phenotype changes (continuous mode)"
   )
 }
 ```
@@ -593,24 +632,38 @@ function. Permulations: Saputra _et al._ 2021, _Mol. Biol. Evol._ 38:3004, doi:1
 **Trait:** `r params$traitname`
 
 **RER computation:** Relative evolutionary rates were calculated with `getAllResiduals()` using
-a square-root branch-length transform, weighted calculation, and scaling (`transform="sqrt"`,
-`weighted=TRUE`, `scale=TRUE`). Genes with insufficient species were excluded (`min.sp` parameter).
+a square-root branch-length transform and scaling (`transform="sqrt"`, `norm="scale"`).
+The matrix producer requests `use.weights=TRUE` and can retry with FALSE on failure;
+verify its task log for the effective weighting. Association statistics are unavailable when the gene has fewer matched non-missing paths than `min.sp`; rows are retained as NA.
 
 **Winsorization:** RER and trait values were optionally winsorized to reduce the influence of extreme values
 (via `winsorizeRER` and `winsorizetrait` parameters).
 
-**Trait normalisation:** Prior to correlation, trait values were tested for normality with
-Shapiro-Wilk. If the null hypothesis of normality was rejected (p < 0.05), a log10 transform
-was applied (log10(x + ε), ε = min non-zero value / 10), following Valenzuela _et al._ (2024).
+**Trait transformation requested for these data:** `r params$trait_transform`.
+`r if (params$trait_transform == "ha_logit") "Haldane–Anscombe corrected logit: log((c + 0.5)/(n − c + 0.5)), where c is the case count and n the sample count. The raw prevalence is replaced by this count-based quantity before ancestral reconstruction. Correction depends on n as well as prevalence and can change the ordering of species." else if (params$trait_transform == "unknown") "Transformation was not supplied; verify the producing command before interpreting the phenotype scale." else "Consult the producing command and transformation settings; auto is a requested mode, not a recorded transformation outcome."`
 
-**Statistical inference:** Pearson correlation between trait paths and RER paths per gene.
-The parametric p-values are Benjamini–Hochberg corrected within `correlateWithContinuousPhenotype()`
-and reported as `p.adj` (Kowalczyk _et al._ 2019); they treat the branches as independent and can be miscalibrated
-in either direction (Saputra _et al._ 2021). Significance is assessed against `pval_threshold`, on the raw permulation
-p-value `p.perm` when permulations were run, and on `p.adj` otherwise. A gene is called **positively correlated** if
-it is significant and Rho > 0, and **negatively correlated** if it is significant and Rho < 0.
+**Statistical inference:** In continuous mode, Pearson correlation of gene RER and phenotype
+paths after the configured winsorization. Native winsorization clips the specified number of
+observations at each end; it is not a standard-deviation rule.
+Nominal calls use **p.perm < `r params$pval_threshold`**; BH empirical calls use
+**p.perm.adj < `r params$fdr_threshold`**. With no empirical evidence both are unavailable;
+analytic results are displayed without substituting analytic calls into empirical lists.
 
-**Permutation statistics:** `r if (has_perm) { n_str <- if (!is.null(n_perms_total) && !is.na(n_perms_total)) paste0(n_perms_total, " total permulations; the smallest p.perm is ", signif(perm_floor_val, 3), " (permpvalcor() divides by the null values on the observed side of the median, about N/2, so the floor is about 1/(N/2 + 1))") else "N permulations (count not stored in this RDS)"; paste0("Empirical p-values (p.perm) were computed by generating null phenotypes under a Brownian Motion model of evolution using getPermsContinuous() (permulations, Saputra et al. 2021). Per gene, permpvalcor() compares the observed correlation with the gene's own null correlations, centred on their median, with a pseudo-count (num + 1) / (denom + 1). ", n_str, ". Batches combined with combinePermData(). p.perm.adj is the Benjamini-Hochberg adjustment of p.perm over all genes. Saputra et al. typically use 1,000 permulations and correct the permulation p-values (Storey, or BH) before calling genes; with fewer than about 125 permulations the permulation does not improve on the parametric p (their Fig. 5C).") } else "Not run (rer_perm_batches = 0). Re-run with rer_perm_batches > 0 to enable (Saputra et al. 2021 typically use 1,000 permulations, here 10 batches × 100)."`
+**Permutation statistics:** `r if (has_perm) paste0("Available gene empirical p-values: ", sum(!is.na(rer_df$p.perm)), "; unavailable: ", sum(is.na(rer_df$p.perm)), ". Recorded total cycles: ", if (length(n_perms_total)) n_perms_total else "not stored", ".") else "Empirical p-values unavailable."`
+The continuous producer uses Brownian-motion simulations to assign the observed transformed
+values by simulated ranks (`simpermvec`), preserving their distribution. The local generator
+uses identical correlation settings for observed and null paths. Null rho batches are concatenated
+for each gene before native `permpvalcor()`; p-values are not averaged between batches and
+`combinePermData()` is not used by this producer. NA observed rho or an empty valid null gives
+NA empirical p. With d observations on the selected side, the smallest possible value is
+1/(d+1) when k=0; d need not equal half the configured cycles if there are NA or median ties.
+
+**References:** [RERconverge source and documentation](https://github.com/nclark-lab/RERconverge),
+[Saputra et al. 2021](https://doi.org/10.1093/molbev/msab068), and
+[Redlich et al. 2024](https://doi.org/10.1093/molbev/msae210).
+Redlich's categorical omnibus test is unsigned and uses an upper tail; its signed post hoc
+tests and this continuous association have distinct estimands. The supplement's pathway
+filters (analytic adjusted p < 0.15 plus empirical p < 0.025) do not redefine the gene BH cutoff.
 
 ---
 

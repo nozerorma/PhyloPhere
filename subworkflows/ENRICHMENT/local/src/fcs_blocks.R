@@ -93,7 +93,7 @@ switch(step,
     rk <- get_arg("--rank", "global")
     universe <- read_universe(get_arg("--universe"))
     batches <- caas_batches(universe, as.integer(get_arg("--batch")))
-    if (!identical(as.character(m$gene_stat), get_arg('--gene-stat', 'size_adj_max')))
+    if (!identical(as.character(m$gene_stat), get_arg('--gene-stat', 'max')))
       stop('CAAS gene_stat mismatch; rebuild the null before calibrating rankings')
     ranks <- if (rk == 'all') c('global','top','bottom') else rk
     for (rank in ranks) caas_transpose_block(m$stat[[rank]], batches, rank, get_arg('--block'), get_arg('--out'))

@@ -20,7 +20,7 @@ def run_r(tmp_path, *args):
 
 @pytest.mark.parametrize('source', ['caas', 'rer'])
 def test_no_null_has_explicit_output(tmp_path, source):
-    got = run_r(tmp_path, PREPARE, source, 'size_adj_max', 7, 'enabled')
+    got = run_r(tmp_path, PREPARE, source, 'max', 7, 'enabled')
     assert got.returncode == 0, got.stderr
     if source == 'caas':
         assert (tmp_path / 'empty.tsv').read_text().startswith('ranking\tdatabase\tpathway')

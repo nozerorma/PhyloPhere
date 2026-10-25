@@ -138,7 +138,8 @@ safe_cor <- function(x, y, method = "pearson") {
 ```
 
 ```{r load-data}
-pos_df  <- read_tsv(params$position_scores_file, show_col_types = FALSE)
+pos_df  <- read_tsv(params$position_scores_file, show_col_types = FALSE) %>%
+  select(-matches("^p[.](emp|adj_bh)_fact$"))
 gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 .metadata <- file.path(dirname(params$gene_scores_file),"gene_evidence_metadata.json")
 if(file.exists(.metadata)) {
@@ -148,16 +149,19 @@ if(file.exists(.metadata)) {
  .params_locked <- bindingIsLocked("params", .params_env)
  if (.params_locked) unlockBinding("params", .params_env)
  .m <- jsonlite::read_json(.metadata,simplifyVector=TRUE)
+ if (!identical(.m$gene_stat, "max")) stop("Legacy CAAS gene scores: rebuild with gene_stat=max before rendering")
  params$evidence_p_threshold <- .m$nominal_threshold
  params$evidence_fdr_threshold <- .m$fdr_threshold
  if (.params_locked) lockBinding("params", .params_env)
+} else {
+ stop("Missing gene_evidence_metadata.json: cannot verify gene_stat=max; regenerate gene evidence before rendering")
 }
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
 # Force numeric types for columns that may be guessed as character due to leading NAs or empty tables
 .num_cols_pos <- c(
   "CAAS_score", "asr_score", "asr_path_score", "p.emp", "p.adj_bh",
-  "p.emp_fact", "p.adj_bh_fact", "q_emp", "fubar_prob", "pos_var_mean",
+  "q_emp", "fubar_prob", "pos_var_mean",
   "fade_site_bf", "max_site_bf", "alpha", "beta", "omega",
   "fold_change", "delta_loglik"
 )
@@ -367,8 +371,9 @@ independent evolutionary evidence.
    position-level enrichment report.
 
 2. **Gene score (`gene_caas_score_top` / `_bottom`)**: the gene's strongest
-   position, adjusted for how many positions the gene has, so genes are not
-   rewarded simply for having more of them. Compared against:
+   positive position score in that direction. No ECDF transform or adjustment
+   for the number of positions is applied. Gene p.gen is calibrated against the
+   raw maximum of the same gene in each null cycle. Compared against:
    `r if (has_rand) "- **accum_p**: Exact hypergeometric p-value of CAAS accumulation (+ BH FDR accum_fdr)."`
    `r if (has_rer) "- RERConverge p-value and direction (accelerating / decelerating)."`
    - FADE: gene is significant per direction if any position has BF >= 100.
@@ -445,17 +450,18 @@ enrichment report analyses them.
 
 #### gene_caas_top / gene_caas_bot
 
-The gene's strongest position (`max(CAAS_score)`), calibrated against how many
-positions the gene has: `F` is the genome-wide ECDF of `CAAS_score`
-(direction-matched pool for the top/bottom variants) and `n` the gene's
-position count.
+For each direction, the gene score is the largest positive `CAAS_score` among
+that gene's positions. Global uses the best side of each position; top and
+bottom use their respective sides. There is no ECDF transform or exponent.
 
-$$\text{gene\_caas\_top} = F_{\text{top}}\big(\max(\text{CAAS\_score} \mid \text{change\_side} \in \{\text{top, both}\})\big)^{\,n_{\text{top}}}$$
-$$\text{gene\_caas\_bot} = F_{\text{bottom}}\big(\max(\text{CAAS\_score} \mid \text{change\_side} \in \{\text{bottom, both}\})\big)^{\,n_{\text{bottom}}}$$
+`gene_caas_score = max(positive position scores)`
 
-Without the exponent, a gene with more positions would score higher purely
-from having more chances at a high maximum; raising the pool percentile to the
-`n`th power removes that.
+A direction with no scored position is unavailable in the observed score table;
+the canonical gene null uses zero for an absent/removed/unscored gene-cycle.
+The maximum itself is a score, not a p-value. `p.gen` compares it with the same
+gene's null maxima, using the inclusive upper tail and add-one smoothing.
+Genes with more positions can have more opportunities for a large maximum;
+the per-gene empirical null preserves that gene's null opportunities.
 
 #### gene_accum_score (`accum_p`) *(optional)*
 
@@ -730,8 +736,7 @@ cat("_No null-universe summary for this run (`null_universe_summary.tsv` absent:
 
 cat(paste0(
   "The position p-values compare each observed position with a null that can only produce the positions the ",
-  "permulation labelings reach. The universe U of the position family (`p.adj_bh`, `p.adj_bh_fact`, and the pool of ",
-  "the classes of `p.emp_fact`) is the null-positive positions inside the tested set plus every observed positive ",
+  "permulation labelings reach. The universe U of the position family (`p.adj_bh`) is the null-positive positions inside the tested set plus every observed positive ",
   "position, the same set the position enrichment uses as background.\n\n",
   "- **N**: ", .nu_n(.nu_val("N_cycles")), " cycles (", .nu_note("N_cycles"), "; ",
   .nu_n(.nu_val("N_cycles_present_in_null")), " leave a row in the null file)\n",
@@ -1062,21 +1067,16 @@ cat("_No `permulation_manifest.tsv` available to evaluate null draw diversity._\
 ```{r pos-perm-p-setup}
 # p.emp is the position-level permulation p: the "detects AND exceeds score"
 # permulation p, pooled to (Gene, Position) over the max-over-sides axis, with
-# its BH adjustment (p.adj_bh). p.emp_fact is its factorized form, with p.adj_bh_fact.
+# its BH adjustment (p.adj_bh).
 # scoring_compute.R writes them into position_scores.tsv
 # whenever the counters of the null (--null_counters) are given.
 .valid_p <- suppressWarnings(as.numeric(pos_df$p.emp))
 .valid_p <- .valid_p[is.finite(.valid_p) & .valid_p > 0]
 has_p_emp <- length(.valid_p) > 0
-# p.emp is add-one smoothed, so its minimum is 1/(N + 1). A value at that floor is reported as "< 1/N" (with 1000
-# permulations "<0.001"), the convention of Saputra et al. 2021; the TSV keeps the number. N is read from the floor.
+# Report numerical p-values; an observed minimum does not establish the theoretical floor.
 .p_floor <- if (has_p_emp) min(.valid_p) else NA_real_
-.n_perm  <- if (!is.na(.p_floor) && is.finite(.p_floor) && .p_floor > 0) round(1 / .p_floor) - 1 else NA_real_
 .fmt_p <- function(p) vapply(p, function(x) {
   if (is.na(x) || !is.finite(x)) return(NA_character_)
-  if (is.finite(.n_perm) && !is.na(.p_floor) && is.finite(.p_floor) && x <= .p_floor * (1 + 1e-9)) {
-    return(sprintf("<%s", format(1 / .n_perm, digits = 3)))
-  }
   format(signif(x, 3), scientific = FALSE, trim = TRUE)
 }, character(1))
 ```
@@ -1090,28 +1090,20 @@ n_floor <- if (!is.na(.p_floor) && is.finite(.p_floor)) {
 } else {
   0L
 }
-has_fact <- all(c("p.emp_fact", "p.adj_bh_fact") %in% names(pos_df))
-min_fact <- if (has_fact) suppressWarnings(min(pos_df$p.emp_fact[is.finite(pos_df$p.emp_fact)], na.rm = TRUE)) else NA_real_
 
 cat(sprintf(paste0(
   "The position p-values are informative: no threshold or significance call is applied to them.\n\n",
   "`p.emp` is the empirical permulation p of the position: the proportion of the N permuted-labeling cycles ",
   "that detect the position (on either phenotype side) and give it a `CAAS_score` at least as high as the ",
   "observed one, counting the observed run as one more cycle, (k + 1)/(N + 1). Its minimum is 1/(N + 1), ",
-  "reported as `< 1/N`. A position with an observed score of 0 has p.emp = 1. `p.adj_bh` is its Benjamini-Hochberg ",
+  "retained numerically in this report. A position with an observed score of 0 has p.emp = 1. `p.adj_bh` is its Benjamini-Hochberg ",
   "adjustment over one test per position of the universe U of the null-universe tab (the null-positive positions ",
   "inside the tested set plus every observed positive position; positions the null detects and the observed data ",
   "do not enter at p = 1).\n\n",
-  "`p.emp_fact` is the same quantity factorized: the proportion of cycles that detect the position times the ",
-  "proportion of the detections of positions of a similar propensity to be detected (the cycles that detect ",
-  "them) that reach its score. It is not limited by the 1/(N + 1) floor, so it orders positions that `p.emp` ",
-  "ties. `p.adj_bh_fact` is its BH adjustment over the same family.\n\n",
   "- **Scored positions with p.emp**: %d/%d (%.1f%%)\n",
-  "- **At the permulation floor (p.emp %s)**: %d positions\n",
-  "- **Smallest p.emp_fact**: %s\n\n"),
+  "- **At the observed minimum (p.emp %s)**: %d positions\n\n"),
   n_val, n_tot, 100 * n_val / max(1, n_tot),
-  .fmt_p(.p_floor), n_floor,
-  if (has_fact && is.finite(min_fact)) format(min_fact, digits = 3) else "NA"))
+  .fmt_p(.p_floor), n_floor))
 ```
 
 ```{r p-emp-dist, eval=has_p_emp, fig.height=4.5, fig.width=9}
@@ -1122,13 +1114,7 @@ ggplot(pos_df %>% filter(!is.na(p.emp)), aes(x = p.emp)) +
   theme_minimal(base_size = 12)
 ```
 
-```{r p-emp-fact-dist, eval=has_p_emp && "p.emp_fact" %in% names(pos_df) && any(!is.na(pos_df$p.emp_fact)), fig.height=4.5, fig.width=9}
-ggplot(pos_df %>% filter(!is.na(p.emp_fact)), aes(x = p.emp_fact)) +
-  geom_histogram(bins = 40, fill = "grey60", colour = "grey30") +
-  labs(title = "p.emp_fact distribution across scored positions",
-       x = "p.emp_fact", y = "positions") +
-  theme_minimal(base_size = 12)
-```
+
 
 ```{r p-emp-missing, eval=!has_p_emp, results='asis'}
 cat("### p.emp\n\n")

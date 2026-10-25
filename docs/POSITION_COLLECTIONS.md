@@ -11,8 +11,8 @@ El identificador final es `Gene:Position`, con `Position` **cero-based en el ali
 | Fuente | Entrada y proyección |
 |---|---|
 | Pfam generado por `bin/compute_domain_variability.py` | El nuevo productor añade `alignment_positions` (lista separada por comas) y `coordinate_space=CAAS_0based`. Conserva las columnas exactas del alineamiento suministrado al productor, excluyendo gaps y X del query hmmscan. **Ese alineamiento debe ser el mismo alineamiento recortado de CAAS.** |
-| Pfam externo | También admite `coordinate_space=reference_protein_1based`: ali_start/ali_end deben corresponder a la misma proteína de referencia del MAP. Se recuperan los residuos interiores conservados aunque se hayan eliminado los extremos. Las tablas originales PPGA sin coordinate_space conservan el contrato histórico: ali_start/ali_end son extremos hmmscan de la referencia sin gaps. Se proyecta su intervalo mediante hg38_aa_pos; los extremos eliminados por trimming no descartan los residuos interiores supervivientes. |
-| UCR | `position` es columna del alineamiento crudo, uno-based, como en aggregate_ucr.py. Se proyecta con ori_codon_col → prot_ali_col − 1. Solo método sliding; no se remapea como residuo humano. La generación automática escribe directamente coordinate_space=CAAS_0based y no vuelve a proyectarse como alineamiento crudo. |
+| Pfam externo | También admite `coordinate_space=reference_protein_1based`: ali_start/ali_end deben corresponder a la misma proteína de referencia del MAP. Se recuperan los residuos interiores conservados aunque se hayan eliminado los extremos. Las tablas sin coordinate_space se rechazan. En el PPGA verificado de 20260615_200027, los extremos hmmscan corresponden a la consulta humana recortada sin gaps; no equivalen a hg38_aa_pos original. Se convierten primero mediante el FASTA productivo a alignment_positions explícitas. |
+| UCR | Requiere coordinate_space explícito. CAAS_0based se conserva; trimmed_alignment_1based se convierte únicamente restando uno; raw_alignment_1based solo se proyecta con ori_codon_col si su procedencia cruda está verificada. En el PPGA 20260615_200027, position indexa el MSA ya recortado, uno-based: se convierte a position − 1 y se declara CAAS_0based. Solo método sliding. La generación automática ya emite CAAS_0based. |
 | FUBAR | `hg38_aa_pos` se busca en el número explícito de residuo del MAP; no se cuenta la sucesión de filas selected. |
 | FADE | CSV `gene,position,max_bf,target_aa`, producido por FADE_TABLES. position ya es CAAS. Se respeta la selección upstream, sin otro umbral de BF. |
 | Ventanas | Coordenada genómica del MAP; bins de 1.000.000 nt, separados por cromosoma, con extremos uno-based inclusivos (1–1.000.000, 1.000.001–2.000.000, etc.). Es proximidad genómica, distinta de proximidad en proteína. |
@@ -21,6 +21,18 @@ El identificador final es `Gene:Position`, con `Position` **cero-based en el ali
 La anotación Pfam conserva todos los dominios/clanes solapantes, separados por `;`. Ausencia de una anotación no demuestra ausencia biológica. El universo de genes limita todas las fuentes. Sin MAP no se pueden proyectar UCR/FUBAR ni producir ventanas; sí se pueden conservar anotaciones que ya llevan coordenadas CAAS verificadas.
 
 No se borran resultados históricos publicados. Una carpeta antigua puede contener GMT retirados: no debe usarse su inventario como salida nueva. El flujo nuevo solo emite sus archivos declarados, y permanece separado del motor estadístico histórico.
+
+## Recuperación histórica de las referencias PPGA (25/10/2026)
+
+La solución productiva es que el generador de alineamientos exporte `alignment_positions`/`coordinate_space` para Pfam y `trimmed_alignment_1based` para UCR; PhyloPhere consume esas tablas directamente. La utilidad siguiente es una recuperación histórica, no un paso requerido del flujo productivo.
+
+`python bin/build_reference_tables.py project-ppga --base <results_ppga/20260615_200027> --output <nueva_version>` selecciona explícitamente el contrato del productor PPGA verificado. No es un detector genérico del sistema de coordenadas. Conserva los originales y rechaza sobrescribir una versión existente.
+
+Valida que cada columna del MSA tenga MAP y entropía, convierte UCR sin segunda proyección, y contrasta cada extremo/query length Pfam con el domtblout preservado y la secuencia humana del MSA. En ese productor hmmscan eliminaba solo `-`: X consume posición. La máscara Pfam conserva residuos de consulta, excluye gaps de referencia y recalcula sus resúmenes de variabilidad. FUBAR conserva su sitio productivo y se contrasta con las coordenadas originales del MAP. Las tablas `.tsv.gz` y sus manifiestos vinculan fuentes, hashes e inventarios completos de alineamientos y MAP; solo `reference_bundle_manifest.json` con status complete acredita que terminó el paquete.
+
+La tabla `ucr_positions.tsv.gz` exporta el método sliding, el mismo que consume POSENRICH. En una fuente externa de otro origen se debe declarar y verificar su contrato o regenerar sobre el alineamiento productivo; nunca asumir el contrato PPGA por el nombre del archivo.
+
+Decisión del usuario, 25/10/2026: la pregunta principal de localización es si la señal se concentra en los sitios anotados **dentro de cada proteína**, más allá de su carga general de señal. Los controles inferenciales siguen pendientes. Orden: corregir coordenadas y reconstruir resultados dependientes; validar fondos y controles; optimizar eficiencia al final. Esta reparación no activa inferencia ni recalcula nulos CAAS.
 
 ## FADE y VEP en informes
 
@@ -123,3 +135,5 @@ permanece precomputado y no se vuelve a ajustar. La generación UCR automática 
 solo las ventanas globales sliding consumidas por las colecciones, sin estadísticas
 por clado. Las tablas externas deben corresponder a su referencia/MAP: aceptar un
 formato antiguo no establece equivalencia entre los alineamientos PPGA y marine.
+
+La especificación de la pregunta principal está en [POSENRICH_WITHIN_PROTEIN.md](POSENRICH_WITHIN_PROTEIN.md).

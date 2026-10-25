@@ -84,6 +84,8 @@ process CT_POSTPROC_REPORT {
                     iqr_multiplier = ${iqr_mult},
                     gene_filter_mode = '${gene_filter}',
                     remove_caas_clusters = ${remove_clusters},
+                    selected_filter_minlen = ${params.filter_minlen},
+                    selected_filter_maxcaas = ${params.filter_maxcaas},
                     seed = '${params.seed ?: 1998}'
                 ),
                 output_file = '8.Characterization_report.html'
@@ -114,6 +116,8 @@ process CT_POSTPROC_REPORT {
                     iqr_multiplier = ${iqr_mult},
                     gene_filter_mode = '${gene_filter}',
                     remove_caas_clusters = ${remove_clusters},
+                    selected_filter_minlen = ${params.filter_minlen},
+                    selected_filter_maxcaas = ${params.filter_maxcaas},
                     seed = '${params.seed ?: 1998}'
                 ),
                 output_file = '8.Characterization_report.html'

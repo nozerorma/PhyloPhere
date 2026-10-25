@@ -1,35 +1,11 @@
 # null_merge.py — Merge of the tile tables of one block of cycles into the gene x cycle statistics of the null.
 # PhyloPhere | subworkflows/CT_DISAMBIGUATION/local/src/utils/
 
-"""
-Block merge of the permutation null.
+"""Merge a block's gene/cycle units after the same post-processing as observed.
 
-Imported by: merge_null_block.py (CAAS_CORE_MERGE, one task per block of cycles)
-Inputs: the ``units`` and ``scores`` tables of every tile of one block (src/utils/null_tables.py), the cycles of the
-        block, the gene lengths and the gene-removal settings
-Outputs: per block, the genes x cycles matrices of the gene statistics, the removed units, the roster, the per-cycle
-         sample and quantiles of the scores, the per-cycle summary, the table of scored positions and the number of
-         cycles that detect each position (``detections``)
-
-Why a block and not a gene batch: gene removal and the reference pools are decided within a cycle, over every gene of
-that cycle (core.postproc.gene_removal calibrates each cycle against its own units, and the gene score is calibrated
-against the pool of the positions of its cycle), so a cycle must be merged with all its genes together. A cycle belongs
-to one block, so blocks are independent and the memory of a merge follows the block, not the number of cycles of the run.
-
-Gene statistic, per (gene, cycle, direction) with n scored positions and largest score ``max``:
-    max           the largest position score of the gene in the direction
-    fmax          F(max), F the ECDF of the position scores of the cycle in the direction: the count of pool values up to
-                  ``max + TIE_TOL`` over the pool size (core.scores.TIE_TOL)
-    size_adj_max  F(max) ** n
-The pool of a cycle holds the scored positions of the units that gene removal keeps; the ``all`` pool holds one entry per
-position (its best side). A unit that is removed, or has no scored position in a direction, has no value there (0 in the
-matrices). F(max) ** n is computed with Python floats, the same expression as core.scores.size_adj_max, so its bits do
-not depend on a vectorised power.
-
-The sample and the quantiles describe the rows of the null (scored or not) that remain after removal: a uniform sample
-without replacement of ``sample_per_cycle`` rows per cycle, drawn with a generator seeded by the pipeline seed and the
-cycle. The rows without a score are not stored in the tables, so a sampled row of that kind carries its gene and a
-score of 0 and no position (``NA``).
+The sole gene statistic is the raw maximum positive position score. Matrices
+contain max and n only; absent or removed units are zero-filled. Position-level
+null products and their diagnostics retain their previous definitions.
 """
 
 from __future__ import annotations
@@ -52,7 +28,7 @@ from src.utils.null_tables import SCORES_SCHEMA, UNITS_SCHEMA, read_scores, read
 logger = logging.getLogger(__name__)
 
 DIRECTIONS = {"global": "all", "top": "top", "bottom": "bottom"}   # matrix name -> direction of core.scores
-GENE_STATS = ("size_adj_max", "fmax", "max")
+GENE_STATS = ("max",)
 QUANT_LEVELS = [5, 10, 25, 50, 75, 90, 95]
 HIST_BINS = 101   # score bins of width 0.01: floor(100 * score), the score 1.0 in the last one
 
@@ -124,50 +100,22 @@ def kept_scores(t: BlockTables, removed: np.ndarray) -> np.ndarray:
     return ~np.isin(t.s_cycle * len(t.genes) + t.s_gene, keys)
 
 
-def reference_pools(t: BlockTables, keep: np.ndarray) -> Dict[int, Dict[str, np.ndarray]]:
-    """Per cycle code and direction, the ascending position scores of the kept units (``all``: best side per position)."""
-    cyc, top, bottom = t.s_cycle[keep], t.s_top[keep], t.s_bottom[keep]
-    best = np.fmax(top, bottom)
-    order = np.argsort(cyc, kind="stable")
-    cyc, top, bottom, best = cyc[order], top[order], bottom[order], best[order]
-    bounds = np.searchsorted(cyc, np.arange(len(t.cycles) + 1), side="left")
-    pools: Dict[int, Dict[str, np.ndarray]] = {}
-    for c in range(len(t.cycles)):
-        lo, hi = bounds[c], bounds[c + 1]
-        if lo == hi:
-            continue
-        tp, bt = top[lo:hi], bottom[lo:hi]
-        pools[c] = {"all": np.sort(best[lo:hi]), "top": np.sort(tp[~np.isnan(tp)]), "bottom": np.sort(bt[~np.isnan(bt)])}
-    return pools
+def gene_statistics(t: BlockTables, removed: np.ndarray):
+    """Raw maximum and positive-position counts by gene, cycle and direction.
 
-
-def gene_statistics(t: BlockTables, removed: np.ndarray, pools: Dict[int, Dict[str, np.ndarray]]):
-    """The matrices of one block: {part: {matrix name: genes x cycles array}} for part in max, fmax, size_adj_max, n.
-
-    A cell is 0 where the unit has no value (removed, absent, or no scored position in the direction).
+    Removed/absent/unscored units are zero-filled. No score pool is computed.
     """
     n_genes, n_cycles = len(t.genes), len(t.cycles)
-    out: Dict[str, Dict[str, np.ndarray]] = {p: {} for p in ("max", "fmax", "size_adj_max", "n")}
-    keep_unit = ~removed
+    out = {p: {} for p in ("max", "n")}
     for name, direction in DIRECTIONS.items():
         n_d, max_d = t.units[f"n_{direction}"], t.units[f"max_{direction}"]
         m_max = np.zeros((n_genes, n_cycles))
-        m_fmax = np.zeros((n_genes, n_cycles))
-        m_sam = np.zeros((n_genes, n_cycles))
         m_n = np.zeros((n_genes, n_cycles), dtype=np.int32)
-        sel = np.flatnonzero(keep_unit & (n_d > 0))
-        for c in np.unique(t.u_cycle[sel]).tolist():
-            idx = sel[t.u_cycle[sel] == c]
-            pool = pools[c][direction]
-            mx = max_d[idx].astype(np.float64)
-            f = np.searchsorted(pool, mx + TIE_TOL, side="right") / len(pool)
-            n = n_d[idx].astype(np.int64)
-            g = t.u_gene[idx]
-            m_max[g, c] = mx
-            m_fmax[g, c] = f
-            m_n[g, c] = n
-            m_sam[g, c] = [x ** k for x, k in zip(f.tolist(), n.tolist())]
-        out["max"][name], out["fmax"][name], out["size_adj_max"][name], out["n"][name] = m_max, m_fmax, m_sam, m_n
+        sel = np.flatnonzero(~removed & (n_d > 0))
+        g, c = t.u_gene[sel], t.u_cycle[sel]
+        m_max[g, c] = max_d[sel]
+        m_n[g, c] = n_d[sel]
+        out["max"][name], out["n"][name] = m_max, m_n
     return out
 
 
@@ -309,7 +257,7 @@ def _write_tsv(path: Path, header: Sequence[str], rows: Iterable[Sequence]) -> N
 
 def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str], *, universe: Optional[Iterable[str]] = None,
                 lengths: Optional[Dict[str, float]] = None, gene_filter_mode: str = "none", iqr_multiplier: float = 3.0,
-                extreme_percentile: float = 0.99, gene_stat: str = "size_adj_max", seed: int = 1998,
+                extreme_percentile: float = 0.99, gene_stat: str = "max", seed: int = 1998,
                 sample_per_cycle: int = 200) -> dict:
     """Merge the tiles of one block into `out_dir`; returns counts (units, removed units, scored positions, cycles present)."""
     if gene_stat not in GENE_STATS:
@@ -321,8 +269,7 @@ def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str],
     t = BlockTables(tile_dirs, cycles, universe)
     removed = removal_units(t, lengths or {}, gene_filter_mode, iqr_multiplier, extreme_percentile)
     keep = kept_scores(t, removed)
-    pools = reference_pools(t, keep)
-    parts = gene_statistics(t, removed, pools)
+    parts = gene_statistics(t, removed)
 
     write_matrices(out_dir / "matrices", t.genes, t.cycles, parts, gene_stat)
     # the matrices of the chosen statistic, named for the consumers

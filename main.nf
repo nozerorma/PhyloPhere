@@ -86,6 +86,7 @@ def resolve_fg_species(tables_dir, filename) {
  */
 
 workflow {
+    if (params.gene_stat != "max") error "Only --gene_stat max is supported; rebuild legacy gene scores/null matrices."
 
     if (params.enrichment && !params.help) validatePositionReferences()
 
@@ -809,7 +810,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             // CAAS_SIGNIFICANCE_REPORT: a DISTINCT, LATER stage than
             // CAAS_META_CAAS_REPORT (run above inside the run_meta_caas
             // block). It must run after SCORING because it joins
-            // position_scores.tsv (p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact) onto the postproc-filtered
+            // position_scores.tsv (p.emp, p.adj_bh) onto the postproc-filtered
             // discovery table (the exact pooled dataset evaluated by SCORING),
             // with fallback to CT_META_CAAS's meta_caas.tsv when standalone.
             if (params.scoring) {

@@ -235,7 +235,7 @@ class WorkflowMap {
             // CAAS_SIGNIFICANCE_REPORT (16.CAAS_significance_report.Rmd) — a
             // DISTINCT, LATER stage than ct_signif above: it runs after scoring,
             // joining ct_signif's already-published meta_caas table against
-            // scoring's position_scores.tsv (p.emp, p.adj_bh, p.emp_fact, p.adj_bh_fact). See ctpp_meta_caas.nf's
+            // scoring's position_scores.tsv (p.emp, p.adj_bh). See ctpp_meta_caas.nf's
             // CAAS_SIGNIFICANCE_REPORT process and main.nf's post-SCORING call.
             [ id: 'ct_signif_sig', name: 'CT significance (post-scoring)', type: 'reporting', ran: ctx.ctSignifSig,
               filesDirs: ["${outdir}/meta_caas/significance"],

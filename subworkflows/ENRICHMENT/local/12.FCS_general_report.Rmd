@@ -26,7 +26,7 @@ params:
   max_g:        0             # max genes per set (0 / Inf = no limit)
   fdr_thr:      0.15          # BH threshold on the permulation p of each set (q.perm), per ranking and database
   pperm_thr:    0.025         # raw permulation-p threshold of the Redlich rule
-  gene_stat: "size_adj_max"      # gene statistic of the observed gene scores; the CAAS null must hold the same one
+  gene_stat: "max"      # gene statistic of the observed gene scores; the CAAS null must hold the same one
   score_source: "caas"       # pipeline source: caas (zero floor) or rer (exclude missing statistics)
   analytic_levels: "0.05,0.1,0.15" # analytic rule (Redlich et al. 2024): BH levels of the analytic p, with p.perm < pperm_thr
   cluster_similarity: "jaccard" # redundancy reduction: leading-edge similarity, jaccard or overlap

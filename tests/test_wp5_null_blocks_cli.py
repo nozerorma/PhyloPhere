@@ -114,7 +114,7 @@ def test_the_rds_has_a_column_for_every_cycle_of_the_roster_and_the_gene_statist
     r, rds = _caas_perms(tmp_path, [_rds(blk1), _rds(blk2)], "--cycles", str(roster), "--universe", str(universe))
     assert r.returncode == 0, r.stderr[-800:]
     out = _r(f'x <- readRDS("{rds}"); cat(x$gene_stat, names(x$caas_corStat_byrank), colnames(x$caas_corStat_byrank$global), rownames(x$caas_corStat_byrank$global), sum(x$caas_corStat_byrank$global > 0))')
-    assert out.split() == ["size_adj_max", "global", "top", "bottom", "b_1", "b_2", "b_3", "b_4", "G1", "G2", "G3", "3"]
+    assert out.split() == ["max", "global", "top", "bottom", "b_1", "b_2", "b_3", "b_4", "G1", "G2", "G3", "3"]
 
 
 def test_a_roster_that_misses_a_cycle_with_units_stops_the_build(tmp_path):
@@ -127,26 +127,20 @@ def test_a_roster_that_misses_a_cycle_with_units_stops_the_build(tmp_path):
     assert r.returncode != 0 and "not in" in r.stderr
 
 
-def test_the_blocks_must_hold_the_same_gene_statistic(tmp_path):
-    t1 = _tile(tmp_path / "t1", {("G1", "b_1"): [(3, 0.5, "top")]})
-    t2 = _tile(tmp_path / "t2", {("G1", "b_2"): [(3, 0.5, "top")]})
-    _, a = _merge(tmp_path, [t1], _labelings(tmp_path / "l1.tab", ["b_1"]), "a", "--gene-stat", "fmax")
-    _, b = _merge(tmp_path, [t2], _labelings(tmp_path / "l2.tab", ["b_2"]), "b")
-    r, _ = _caas_perms(tmp_path, [_rds(a), _rds(b)])
-    assert r.returncode != 0 and "different gene statistics" in r.stderr
+@pytest.mark.parametrize("stat", ["size_adj_max", "fmax"])
+def test_retired_statistics_are_rejected_before_merging(tmp_path, stat):
+    tile = _tile(tmp_path / "t", {("G1", "b_1"): [(3, 0.5, "top")]})
+    result, _ = _merge(tmp_path, [tile], _labelings(tmp_path / "l.tab", ["b_1"]), "blk", "--gene-stat", stat)
+    assert result.returncode != 0 and "invalid choice" in result.stderr
 
 
-@pytest.mark.parametrize("stat", ["size_adj_max", "fmax", "max"])
-def test_the_stat_matrices_are_the_chosen_statistic_and_the_parts_hold_the_others(tmp_path, stat):
+def test_stat_is_raw_max_and_transformed_parts_are_not_written(tmp_path):
     tile = _tile(tmp_path / "t", {("G1", "b_1"): [(3, 0.5, "top"), (4, 0.25, "top")], ("G2", "b_1"): [(3, 0.5, "top")]})
-    r, blk = _merge(tmp_path, [tile], _labelings(tmp_path / "l.tab", ["b_1"]), "blk", "--gene-stat", stat)
-    assert r.returncode == 0, r.stderr[-800:]
+    result, blk = _merge(tmp_path, [tile], _labelings(tmp_path / "l.tab", ["b_1"]), "blk")
+    assert result.returncode == 0, result.stderr[-800:]
     rds = _rds(blk) / "matrices.rds"
-    out = _r(f'x <- readRDS("{rds}"); s <- x$stat$top["G1", "b_1"]; p <- x$parts; '
-             f'cat(s, p$max$top["G1", "b_1"], p$fmax$top["G1", "b_1"], p$n$top["G1", "b_1"])')
-    s, mx, fmax, n = map(float, out.split())
-    assert (mx, n) == (0.5, 2) and fmax == 1.0                  # the pool of the cycle: 0.25, 0.5, 0.5; F(0.5) = 3/3
-    assert s == {"size_adj_max": 1.0, "fmax": 1.0, "max": 0.5}[stat]
+    out = _r(f'x <- readRDS("{rds}"); cat(x$stat$top["G1", "b_1"], x$parts$n$top["G1", "b_1"], names(x$parts))')
+    assert out.split() == ["0.5", "2", "max", "n"]
 
 
 def test_an_null_with_no_unit_gives_an_empty_rds(tmp_path):
@@ -155,7 +149,7 @@ def test_an_null_with_no_unit_gives_an_empty_rds(tmp_path):
     assert r.returncode == 0, r.stderr[-800:]
     r, rds = _caas_perms(tmp_path, [_rds(blk)])
     assert r.returncode == 0 and "no scored rows" in (r.stdout + r.stderr)
-    assert _r(f'x <- readRDS("{rds}"); cat(length(x$caas_corStat_byrank), x$gene_stat)').split() == ["0", "size_adj_max"]
+    assert _r(f'x <- readRDS("{rds}"); cat(length(x$caas_corStat_byrank), x$gene_stat)').split() == ["0", "max"]
 
 
 def _reduce(tmp_path, blocks):

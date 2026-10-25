@@ -82,13 +82,13 @@ writeLines(cycles,file.path(dir,'cycle_roster.txt'))
 for(k in 1:2) {
  sel<-if(k==1)1:6 else 7:11
  dest<-file.path(dir,'blocks',sprintf('blk_%04d',k));dir.create(dest)
- b<-list(genes=genes,cycles=cycles[sel],gene_stat='size_adj_max',n_units=1,
+ b<-list(genes=genes,cycles=cycles[sel],gene_stat='max',n_units=1,
    parts=lapply(parts,function(p)setNames(rep(list(p[,sel,drop=FALSE]),3),c('global','top','bottom'))))
- b$stat<-setNames(rep(list(wp9_stat(lapply(parts,function(p)p[,sel,drop=FALSE]),'size_adj_max')),3),c('global','top','bottom'))
+ b$stat<-setNames(rep(list(wp9_stat(lapply(parts,function(p)p[,sel,drop=FALSE]),'max')),3),c('global','top','bottom'))
  saveRDS(b,file.path(dest,'matrices.rds'));writeLines(cycles[sel],file.path(dest,'cycles.txt'))
 }
 b0<-b;b0$cycles<-'b_0';b0$parts<-lapply(parts,function(p){v<-p[,1,drop=FALSE];colnames(v)<-'b_0';setNames(rep(list(v),3),c('global','top','bottom'))})
-b0$stat<-setNames(lapply(c('global','top','bottom'),function(rk)wp9_stat(lapply(b0$parts,function(p)p[[rk]]),'size_adj_max')),c('global','top','bottom'))
+b0$stat<-setNames(lapply(c('global','top','bottom'),function(rk)wp9_stat(lapply(b0$parts,function(p)p[[rk]]),'max')),c('global','top','bottom'))
 saveRDS(b0,file.path(dir,'b0/matrices.rds'))
 data<-wp9_store(dir,genes,'global');same(data$parts$global$fmax,f[sort(genes),])
 subset<-wp9_store(dir,genes[-1],'global');stopifnot(genes[1]%in%subset$excluded_store_genes);same(subset$parts$global$fmax,f[sort(genes[-1]),])

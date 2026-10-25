@@ -13,11 +13,10 @@
 #
 # Output RDS: list(genes, cycles, gene_stat, n_units,
 #                  stat  = list(global, top, bottom),                 # the gene statistic chosen with gene_stat
-#                  parts = list(max = list(...), fmax = list(...), n = list(...)))
+#                  parts = list(max = list(...), n = list(...)))
 # Every matrix has the genes in rows and the cycles of the block in columns, and 0 where a gene has no value in a cycle
 # (it is absent, removed, or has no scored position in the direction). `parts` holds what any gene statistic is built
-# from: the largest position score of the gene, F(max) (the ECDF of the cycle's position scores at that score) and the
-# number n of scored positions; F(max)^n is the default `stat`.
+# from: the largest position score and positive-position count. max is the only `stat`.
 # =============================================================================
 
 suppressPackageStartupMessages(library(jsonlite))
@@ -50,7 +49,8 @@ dirs <- c("global", "top", "bottom")
 named <- function(part) setNames(lapply(dirs, function(d) read_matrix(man$files[[paste0(part, ".", d)]])), dirs)
 
 stat <- setNames(lapply(dirs, function(d) read_matrix(man$files[[man$stat[[d]]]])), dirs)
-parts <- list(max = named("max"), fmax = named("fmax"), n = named("n"))
+if (!identical(man$gene_stat, "max")) stop("Only gene_stat=max is supported; rebuild legacy blocks")
+parts <- list(max = named("max"), n = named("n"))
 
 saveRDS(list(genes = genes, cycles = cycles, gene_stat = man$gene_stat, n_units = man$n_units,
              stat = stat, parts = parts), out_file)

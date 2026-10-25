@@ -69,7 +69,7 @@ def main() -> int:
     ap.add_argument("--output-dir", required=True, type=Path)
     ap.add_argument("--include-b0", action="store_true", help="the block of the real labeling b_0")
     ap.add_argument("--universe", type=Path, default=None, help="gene universe, one gene per line (a 'Gene' header is ignored)")
-    ap.add_argument("--gene-stat", default="size_adj_max", choices=GENE_STATS,
+    ap.add_argument("--gene-stat", default="max", choices=GENE_STATS,
                     help="gene statistic of the matrices named `stat` (the others stay in the parts)")
     ap.add_argument("--seed", type=int, default=1998, help="pipeline seed (params.seed): the per-cycle sample")
     ap.add_argument("--gene-lengths", default=None, help="gene annotation TSV (gene, length ...); enables the dubious/extreme removal")

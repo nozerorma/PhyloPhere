@@ -28,6 +28,8 @@ params:
   gene_filter_mode: "both"
   remove_caas_clusters: true
   seed: "1998"
+  selected_filter_minlen: NULL
+  selected_filter_maxcaas: NULL
 ---
 
 <style type="text/css">
@@ -419,9 +421,15 @@ if (!is.null(gene_stats_file) && !is.na(gene_stats_file) && file.exists(gene_sta
       gene_summary_annotated$n_CAAS_per_length <- NA_real_
     }
   }
-  if (!"Extreme" %in% names(gene_summary_annotated))          gene_summary_annotated$Extreme          <- FALSE
-  if (!"Dubious" %in% names(gene_summary_annotated))          gene_summary_annotated$Dubious          <- FALSE
   if (!"category" %in% names(gene_summary_annotated))         gene_summary_annotated$category         <- "Normal"
+  # Current CAAS_FILTER_GENES writes category (Normal/Extreme/Dubious/Both),
+  # not separate flags. Derive the flags from that durable producer output.
+  if (!"Extreme" %in% names(gene_summary_annotated)) {
+    gene_summary_annotated$Extreme <- gene_summary_annotated$category %in% c("Extreme", "Both")
+  }
+  if (!"Dubious" %in% names(gene_summary_annotated)) {
+    gene_summary_annotated$Dubious <- gene_summary_annotated$category %in% c("Dubious", "Both")
+  }
   if (!"threshold_extreme" %in% names(gene_summary_annotated)) gene_summary_annotated$threshold_extreme <- NA_real_
   if (!"threshold_dubious" %in% names(gene_summary_annotated)) gene_summary_annotated$threshold_dubious <- NA_real_
   
@@ -429,8 +437,9 @@ if (!is.null(gene_stats_file) && !is.na(gene_stats_file) && file.exists(gene_sta
   cat("Gene statistics file not found or not provided\n")
 }
 
-if (nrow(gene_summary_annotated) == 0) {
+if (is.null(gene_summary_annotated) || nrow(gene_summary_annotated) == 0) {
   cat("WARNING: gene_summary_annotated is empty — skipping outlier distribution plots.\n")
+  cat("Gene-level removal lists are unavailable because the producer did not save gene_stats.tsv.\n")
 } else {
 
 # Threshold lines; NA thresholds (genes without a length) are left out
@@ -601,6 +610,132 @@ cat(kable(outlier_counts, caption = "Gene counts by outlier category") %>%
 
 write_tsv(gene_summary_annotated, file.path(outliers_dir, "gene_summary_annotated.tsv"))
 
+cat("\n### 1.2.1 Genes removed by each gene-level filter\n\n")
+saved_extreme_threshold <- suppressWarnings(mean(gene_summary_annotated$threshold_extreme, na.rm = TRUE))
+extreme_threshold_text <- if (is.finite(saved_extreme_threshold)) sprintf("%.4f", saved_extreme_threshold) else "not available"
+cat(sprintf("Extreme genes exceed the effective density percentile threshold (%s in the saved stats). Dubious genes exceed the Q3 + %.1f×IQR count threshold and have at least one cluster-train position. Genes tagged Both appear in both filter lists but are removed once; list counts must not be added.\n\n",
+            extreme_threshold_text, iqr_multiplier))
+gene_filter_rows <- gene_summary_annotated %>%
+  mutate(
+    Extreme = as.logical(Extreme),
+    Dubious = as.logical(Dubious),
+    category = as.character(category)
+  ) %>%
+  distinct(Gene, .keep_all = TRUE)
+
+render_filter_gene_table <- function(df, label) {
+  selected <- df %>% filter(.data[[label]] %in% TRUE) %>%
+    transmute(
+      Gene,
+      Category = category,
+      `CAAS count` = n_CAAS,
+      `CAAS per length` = n_CAAS_per_length,
+      `Effective threshold` = if (label == "Extreme") threshold_extreme else threshold_dubious
+    ) %>% arrange(Gene)
+  if (nrow(selected) == 0) {
+    cat(sprintf("**%s:** no genes were removed by this filter (or no gene statistics were saved).\n\n", label))
+  } else {
+    cat(sprintf("**%s:** %d genes. A gene can appear in both tables; counts are not additive.\n\n", label, nrow(selected)))
+    print(DT::datatable(
+      selected, rownames = FALSE, filter = "top",
+      options = list(pageLength = 25, lengthMenu = c(10, 25, 50, 100),
+                     order = list(list(0, "asc")), scrollX = TRUE),
+      caption = htmltools::tags$caption(
+        style = "caption-side: top; text-align: left;", paste(label, "gene removals")
+      )
+    ))
+    cat("\n\n")
+  }
+}
+
+if (gene_filter_mode %in% c("extreme", "both")) {
+  render_filter_gene_table(gene_filter_rows, "Extreme")
+} else {
+  cat("Extreme filter was not enabled for this run.\n\n")
+}
+if (gene_filter_mode %in% c("dubious", "both")) {
+  render_filter_gene_table(gene_filter_rows, "Dubious")
+} else {
+  cat("Dubious filter was not enabled for this run.\n\n")
+}
+
+cat("Gene-level filter rows represent complete gene removal. Cluster filtering is position-level and may remove only part of a gene; it is reported separately below when the selected cluster artifact is available.\n\n")
+
+selected_minlen <- params$selected_filter_minlen
+selected_maxcaas <- params$selected_filter_maxcaas
+if (!is.null(selected_minlen) && !is.null(selected_maxcaas) && length(filter_root) == 1 &&
+    !is.na(filter_root) && nzchar(filter_root) && dir.exists(filter_root)) {
+  selected_cluster_path <- resolve_filtered_cluster_file(
+    selected_minlen, round(as.numeric(selected_maxcaas) * 100), filter_root, postproc_root
+  )
+  cat(sprintf("### 1.2.2 Cluster-filtered positions at effective settings (minlen=%s, maxcaas=%s)\n\n",
+              selected_minlen, selected_maxcaas))
+  if (!is.na(selected_cluster_path$path) && file.exists(selected_cluster_path$path)) {
+    selected_cluster_data <- read_tsv(selected_cluster_path$path, show_col_types = FALSE) %>%
+      normalize_disambig_schema()
+    if ("clustering_flag" %in% names(selected_cluster_data)) {
+      discarded_positions <- selected_cluster_data %>%
+        filter(clustering_flag == "Discarded") %>%
+        transmute(Gene = gene, Position = position) %>% distinct() %>% arrange(Gene, Position)
+      cluster_gene_counts <- selected_cluster_data %>%
+        transmute(Gene = as.character(gene), Position = as.integer(position),
+                  is_discarded = clustering_flag == "Discarded") %>%
+        distinct(Gene, Position, .keep_all = TRUE) %>%
+        group_by(Gene) %>%
+        summarise(
+          `CAAS positions before gene filtering` = n(),
+          `Positions flagged` = sum(is_discarded),
+          `Cluster coordinates (0-based trimmed MSA)` = paste(Position[is_discarded], collapse = ", "),
+          .groups = "drop"
+        )
+      full_gene_removals <- gene_filter_rows %>%
+        transmute(Gene, gene_removed =
+                    (Extreme & gene_filter_mode %in% c("extreme", "both")) |
+                    (Dubious & gene_filter_mode %in% c("dubious", "both")))
+      by_cluster_gene <- discarded_positions %>%
+        group_by(Gene) %>%
+        summarise(`Distinct cluster positions` = n(), .groups = "drop") %>%
+        left_join(cluster_gene_counts, by = "Gene") %>%
+        left_join(full_gene_removals, by = "Gene") %>%
+        mutate(
+          gene_removed = coalesce(gene_removed, FALSE),
+          `Downstream effect` = case_when(
+            gene_removed ~ "Complete gene removal by gene-level filter",
+            !remove_caas_clusters ~ "Flagged only; retained downstream",
+            `Positions flagged` == `CAAS positions before gene filtering` ~ "All positions removed by cluster filter",
+            TRUE ~ "Partial position removal by cluster filter"
+          )
+        ) %>%
+        select(Gene, `Downstream effect`, `CAAS positions before gene filtering`,
+               `Distinct cluster positions`, `Cluster coordinates (0-based trimmed MSA)`) %>%
+        arrange(Gene)
+      if (nrow(by_cluster_gene) == 0) {
+        cat("No positions were flagged as Discarded for this parameter pair.\n\n")
+      } else {
+        cluster_rows_flagged <- sum(selected_cluster_data$clustering_flag == "Discarded", na.rm = TRUE)
+        cat(sprintf("%d genes have %d distinct Gene/Position keys flagged across %d Discarded artifact rows (%d repeated-key rows). The parameter-sweep DiscardedCount counts output rows. Cluster/window identifiers are not written by the producer, so per-window membership cannot be reconstructed; these are per-gene position lists. Position coordinates are zero-based columns of the trimmed MSA.\n\n",
+                    nrow(by_cluster_gene), nrow(discarded_positions), cluster_rows_flagged,
+                    cluster_rows_flagged - nrow(discarded_positions)))
+        print(DT::datatable(
+          by_cluster_gene, rownames = FALSE, filter = "top",
+          options = list(pageLength = 25, lengthMenu = c(10, 25, 50, 100),
+                         order = list(list(0, "asc")), scrollX = TRUE),
+          caption = htmltools::tags$caption(
+            style = "caption-side: top; text-align: left;", "Cluster-filtered positions by gene"
+          )
+        ))
+        cat("\n\n")
+      }
+    } else {
+      cat("Selected cluster artifact has no clustering_flag column; position removal details are unavailable.\n\n")
+    }
+  } else {
+    cat("Selected cluster artifact is unavailable; gene/position removal details cannot be reconstructed.\n\n")
+  }
+} else {
+  cat("Selected cluster minlen/maxcaas were not passed to the report, so the effective pair cannot be labelled safely; see the parameter sweep and cluster artifacts.\n\n")
+}
+
 } # end if (nrow(gene_summary_annotated) > 0)
 ```
 
@@ -612,6 +747,8 @@ Clustering evaluation is performed as follows:
 - **Algorithm**: For every sliding interval `[start, end]` of CAAS positions within a gene with span `span = end - start + 1 >= minlen`, the local density `density = count_positions / span` is calculated.
 - **Discard criteria**: If `density >= maxcaas`, all positions within that window are flagged as `Discarded`.
 - **Decoupled removal**: When cluster removal is enabled (`--remove_caas_clusters`), flagged positions are filtered out from the downstream discovery dataset, regardless of whether gene-level outlier filtering (`--gene_filter_mode`) is set to `none`, `extreme`, `dubious`, or `both`.
+
+**MAP and coordinate interpretation.** The cluster producer consults a per-gene MAP only when `--map-dir` resolves to a directory and a gene has an unambiguous map. It maps each zero-based trimmed `Position` to the MAP's one-based `prot_ali_col` and uses the corresponding untrimmed one-based alignment column to measure interval span; columns removed by trimming can therefore contribute to span without adding a CAAS. The `Position` written to the cluster artifact remains the original zero-based trimmed-MSA position. If no MAP is found for a gene, span is measured directly in the trimmed positions; the producer logs the number of genes without MAP. The gene-length filter also prefers untrimmed MAP length and falls back to the Ensembl TSV for genes without a usable MAP. A configured `map-dir` alone does not establish per-gene coverage; consult the producer log. Cluster artifacts do not preserve MAP coverage or cluster-window IDs, so those details cannot be reconstructed from the report inputs alone.
 
 ```{r cluster_analysis_load}
 filter_summary <- read_tsv(filter_summary_file, show_col_types = FALSE)

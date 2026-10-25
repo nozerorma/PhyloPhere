@@ -312,3 +312,23 @@ def test_many_terms_do_not_retain_per_term_score_copies():
         tracemalloc.stop()
     assert count == 250
     assert peak < 8 * 1024 * 1024, f'term iteration allocated {peak} bytes'
+
+
+def test_protein_composition_is_not_within_protein_localization(tmp_path):
+    """The user's primary question must not inherit a global protein-composition effect."""
+    import math
+    scores = ['Gene\tPosition\tCAAS_score\tside\tp.emp\tp.adj_bh']
+    for gene, value in [('G1', .9), ('G2', .1)]:
+        scores.extend(f'{gene}\t{pos}\t{value}\ttop\t.2\t.5' for pos in range(6))
+    custom = ''.join(f'G1\t{pos}\tCOMPOSITION\tsites\n' for pos in range(5)) + 'G2\t0\tCOMPOSITION\tsites\n'
+    registry = make_localization_fixture(tmp_path, custom_text=custom, scores_text='\n'.join(scores)+'\n')
+    local_out = run_localization(registry, tmp_path/'local')
+    local = read_tsv(local_out/'localization_results.tsv')[0]
+    assert local['n_genes_informative'] == '2' and float(local['auc']) == .5
+    global_out = tmp_path/'global'
+    result = subprocess.run([sys.executable, str(SRC/'posenrich_global.py'), '--registry_dir', str(registry),
+                             '--output_dir', str(global_out)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    global_row = read_tsv(global_out/'global_results.tsv')[0]
+    assert math.isclose(float(global_row['auc']), 5/6)
+    assert global_row['p'] == local['p_mc'] == 'NA'

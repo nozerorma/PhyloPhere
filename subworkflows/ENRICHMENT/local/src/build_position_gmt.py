@@ -7,7 +7,7 @@
 Output IDs are Gene:Position, with zero-based CAAS trimmed-alignment positions.
 MAP prot_ali_col and ori_codon_col are one-based; hg38_aa_pos is the explicit
 reference protein residue. Pfam requires explicit coordinate_space: CAAS_0based
-with alignment_positions, or reference_protein_1based with verified endpoints. UCR position indexes the raw alignment (one-based). FUBAR hg38_aa_pos
+with alignment_positions, or reference_protein_1based with verified endpoints. UCR requires explicit CAAS_0based or verified raw_alignment_1based coordinates. FUBAR hg38_aa_pos
 indexes the reference protein; FADE and custom positions already use CAAS space.
 
 Retained collections: Pfam domains/clans, genomic 1 Mb windows, custom features,
@@ -273,10 +273,9 @@ def collect_pfam_members(domain_file, map_cache, active_genes, pending=None, inc
     if missing:
         raise ValueError(f'Pfam table missing columns: {sorted(missing)}')
     if 'coordinate_space' not in df_dom:
-        # Original PPGA format: hmmscan endpoints in the ungapped reference.
-        # Keep its historical endpoint-to-MAP interval projection; the explicit
-        # formats below remain available for newly generated annotations.
-        df_dom['coordinate_space'] = 'legacy_reference_protein_1based'
+        raise ValueError(f'Pfam table {domain_file} has no coordinate_space; '
+                         'convert verified source coordinates with build_reference_tables.py '
+                         'project-ppga or regenerate the annotation')
     for row in df_dom.itertuples(index=False):
         gene = str(row.gene).split('.')[0]
         if gene not in active_genes:
@@ -307,18 +306,6 @@ def collect_pfam_members(domain_file, map_cache, active_genes, pending=None, inc
                 pending.append({'source': 'pfam', 'record_id': f"pfam:{gene}:{pfam_id}:{ali_start}-{ali_end}",
                                 'gene': gene, 'raw_position': f"{ali_start}-{ali_end}",
                                 'reason': 'unvalidated_no_map'})
-        elif row.coordinate_space == 'legacy_reference_protein_1based':
-            surviving = [c for residue, c in residue_to_col.items()
-                         if ali_start <= residue <= ali_end]
-            # Preserve the old alignment interval (including reference gaps),
-            # even when trimming removed one of the original endpoints.
-            columns = sorted(c for c in map_entry['selected_cols']
-                             if min(surviving) <= c <= max(surviving)) if surviving else []
-            mapping_status = 'legacy_projected_via_map'
-            if pending is not None and not columns:
-                pending.append({'source': 'pfam', 'record_id': f"pfam:{gene}:{pfam_id}:{ali_start}-{ali_end}",
-                                'gene': gene, 'raw_position': f"{ali_start}-{ali_end}",
-                                'reason': 'legacy_endpoints_not_in_map'})
         elif row.coordinate_space == 'reference_protein_1based':
             # A trimmed endpoint must not discard surviving interior residues.
             columns = sorted(c for residue, c in residue_to_col.items()
@@ -388,6 +375,10 @@ def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None, include
     # ucr_positions.tsv can be very large: only the needed columns are read, in
     # chunks, and rows are iterated with itertuples (iterrows is far slower).
     header = pd.read_csv(ucr_file, sep='\t', nrows=0).columns
+    if 'coordinate_space' not in header:
+        raise ValueError(f'UCR table {ucr_file} has no coordinate_space; '
+                         'declare verified coordinates or convert the PPGA source with '
+                         'build_reference_tables.py project-ppga')
     cols = ['gene', 'position', 'region_type', 'method', 'variability']
     if 'coordinate_space' in header:
         cols.append('coordinate_space')
@@ -406,11 +397,11 @@ def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None, include
                 continue
             map_entry = map_cache.get(gene)
             record_id = f"ucr:{gene}:{pos_residue}:{row.region_type}:{row.method}"
-            space = getattr(row, 'coordinate_space', 'raw_alignment_1based')
-            if space not in ('raw_alignment_1based', 'CAAS_0based'):
+            space = row.coordinate_space
+            if space not in ('raw_alignment_1based', 'trimmed_alignment_1based', 'CAAS_0based'):
                 raise ValueError(f'Unknown UCR coordinate_space: {space}')
-            if space == 'CAAS_0based':
-                col = pos_residue
+            if space in ('CAAS_0based', 'trimmed_alignment_1based'):
+                col = pos_residue - (space == 'trimmed_alignment_1based')
                 if col < 0 or (map_entry and col not in map_entry['selected_cols']):
                     raise ValueError(f'UCR position outside MAP: {gene}:{col}')
             else:
@@ -434,7 +425,7 @@ def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None, include
                 members.append({'collection_id': 'ucr_core', 'term_id': 'global', 'gene': gene,
                                 'position': col,
                                 'source_record_id': record_id,
-                                'term_label': 'UCR_core', 'mapping_status': 'direct_caas' if space == 'CAAS_0based' else 'projected_via_map',
+                                'term_label': 'UCR_core', 'mapping_status': 'projected_via_map' if space == 'raw_alignment_1based' else 'direct_caas',
                                 'detail': f"region=core;raw_position={pos_residue};variability={row.variability}"})
             elif region in ('flank_up', 'flank_down'):
                 gene_ucr_flank_cols.setdefault(gene, set()).add(col)
@@ -444,7 +435,7 @@ def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None, include
                 members.append({'collection_id': 'ucr_flank', 'term_id': 'global', 'gene': gene,
                                 'position': col,
                                 'source_record_id': record_id,
-                                'term_label': 'UCR_flank', 'mapping_status': 'direct_caas' if space == 'CAAS_0based' else 'projected_via_map',
+                                'term_label': 'UCR_flank', 'mapping_status': 'projected_via_map' if space == 'raw_alignment_1based' else 'direct_caas',
                                 'detail': f"region={region};raw_position={pos_residue};variability={row.variability}"})
     return gene_ucr_core_cols, gene_ucr_flank_cols, ucr_region_char, ucr_variability_char, members
 

@@ -51,7 +51,7 @@ process SCORING_COMPUTE {
     path accum_files
     path hypotheses_pairs   // optional: contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS sentinel otherwise
     path null_counters      // optional: null_counters.tsv, the counters of the position-level null (SCORING_NULL_POSITIONS); NO_* sentinel otherwise
-    path null_fit           // optional: null_fit.tsv, the propensity classes of p.emp_fact; NO_* sentinel otherwise
+    path null_fit           // optional: null_fit.tsv, legacy staging metadata (unused); NO_* sentinel otherwise
     path null_base          // optional: null_universe_base.tsv, what the null fixes of the universe summary; NO_* sentinel otherwise
     path cycle_roster       // optional: cycle_roster.txt, N of the null (cycles with no detection included); NO_* sentinel otherwise
 
@@ -78,7 +78,7 @@ process SCORING_COMPUTE {
     def fit_arg           = null_fit.name =~ /^NO_/ ? 'NO_FILE' : "${null_fit}"
     def base_arg          = null_base.name =~ /^NO_/ ? 'NO_FILE' : "${null_base}"
     def roster_arg        = cycle_roster.name =~ /^NO_/ ? 'NO_FILE' : "${cycle_roster}"
-    def gene_stat         = params.gene_stat ?: 'size_adj_max'
+    def gene_stat         = params.gene_stat ?: 'max'
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -108,6 +108,7 @@ process SCORING_COMPUTE {
             --cycle_roster    '${roster_arg}' \
             --nominal_threshold ${params.evidence_p_threshold ?: 0.05} \
             --fdr_threshold ${params.evidence_fdr_threshold ?: 0.05} \
+            --accumulation_fdr_threshold ${params.accumulation_fdr ?: 0.1} \
             --fade_bf_threshold ${params.fade_bf_threshold ?: 100}
         """
     } else {
@@ -138,6 +139,7 @@ process SCORING_COMPUTE {
             --cycle_roster    '${roster_arg}' \
             --nominal_threshold ${params.evidence_p_threshold ?: 0.05} \
             --fdr_threshold ${params.evidence_fdr_threshold ?: 0.05} \
+            --accumulation_fdr_threshold ${params.accumulation_fdr ?: 0.1} \
             --fade_bf_threshold ${params.fade_bf_threshold ?: 100}
         """
     }

@@ -115,6 +115,8 @@ def test_proximity_without_map_reports_coverage_not_infinite(tmp_path):
     assert genomic[0]['status'] == 'no_genomic_coordinate'
     manifest = json.loads((out / 'proximity_manifest.json').read_text())
     assert manifest['control']['status'] == 'not_validated'
+    assert 'misma proteina' in manifest['contracts']['protein']
+    assert 'mismo gen y cromosoma' in manifest['contracts']['genomic']
     assert 'proximidad genómica y proteica no se mezclan' in manifest['limits']
 
 

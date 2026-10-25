@@ -8,7 +8,7 @@ Plan solicitado el 23 de octubre de 2026. Inventario sobre el checkout actual; e
 - CAAS: genes activos con p.gen < 0,05; resaltar p.gen.adj < 0,05. RER: activos con p.perm < 0,05; resaltar p.perm.adj < 0,05. FADE: BF >= 100, conservando el umbral configurado.
 - Una ejecución por método/dirección definida. No generar otra ejecución solo por el ajuste BH. Las tablas deben permitir identificar/filtrar ambos subconjuntos. Filtrar una tabla por BH no equivale a recalcular módulos con semillas BH: la segunda ejecución queda fuera de este contrato.
 - Cada nodo distingue: semilla nominal; semilla que también cumple BH; nodo incorporado por la red. Un nodo incorporado no adquiere significación individual por pertenecer al módulo. Conservar la significación del módulo como resultado distinto.
-- Posiciones: sustituir TODOS los cortes por p.emp < 0,05 y mostrar p.adj_bh < 0,05 como evidencia ajustada. p.emp_fact y p.adj_bh_fact continúan como anotaciones diagnósticas; no sustituyen silenciosamente al p.emp solicitado.
+- Posiciones: sustituir TODOS los cortes por p.emp < 0,05 y mostrar p.adj_bh < 0,05 como evidencia ajustada. Por decisión del usuario (25/10/2026), se retiran p.emp_fact y p.adj_bh_fact de productores, tablas e informes activos. Las auditorías históricas se conservan.
 - FCS CAAS sigue usando el ranking continuo -log10(p.gen), con todos los genes del universo y sus nulos calibrados. No filtrar el ranking ni sustituirlo por BH. Mantener AUC, reglas de colas, empates, pseudocuentas, LOO y significación de pathways.
 - Los valores continuos CAAS_score y gene_stat siguen disponibles como estadísticos de origen. Se eliminan las selecciones/anotaciones por percentiles, no el cálculo del estadístico.
 

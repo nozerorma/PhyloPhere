@@ -10,33 +10,27 @@ Outputs: position scores, per-direction values and gene scores (in memory)
 
 * The score of a row (``caas_row``) is its ``asr_path_score`` (identity). A position's score, per side,
   is the score of its row, in (0, 1]. A position that is not detected, or detected with a score of 0, has no
-  score; a side without a score does not enter the direction values nor the ``size_adj_max`` count of the gene.
+  score; a side without a score does not enter the direction values nor the positive-position count of the gene.
 * Directions: ``top`` and ``bottom`` use only that side's rows; ``all`` keeps one entry per
   position, its best side, so a position detected on both sides is not counted twice.
-* Gene score, from the n scored positions of the gene in a direction and their largest score ``max`` (``GENE_STATS``):
-  ``max``, ``fmax = F(max)`` or ``size_adj_max = F(max) ** n``, with F the ECDF of the reference pool of the same
-  direction (and, in the null, of the same labeling). It is None when the gene has no scored position in that direction
-  or the pool is empty: no positions, no score. ``size_adj_max`` is the default.
-  F counts pool values up to ``max + TIE_TOL``: position scores are weighted means of per-domain
-  values in [0, 1], so scores that are equal in exact arithmetic can differ by rounding noise
-  (~1e-16), and the pool is heavily tied. The tolerance makes those ties deterministic.
+* Gene score: the largest positive position score in each direction. No ECDF
+  or adjustment for the number of positions is applied. None means no score.
 
 Pure Python. The same inputs give the same bits wherever the functions are called.
 """
 
 from __future__ import annotations
 
-import bisect
 import math
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
 __all__ = ["DIRECTIONS", "GENE_STATS", "TIE_TOL", "SCORE_RULE", "position_score", "collapse_sides", "direction_values",
-           "gene_stat_value", "size_adj_max", "gene_scores", "cycle_order_key"]
+           "gene_stat_value", "gene_scores", "cycle_order_key"]
 
 DIRECTIONS = ("all", "top", "bottom")
 
-# Gene statistics: the largest position score of the gene, F(max), and F(max) ** n (the default).
-GENE_STATS = ("size_adj_max", "fmax", "max")
+# Only the raw maximum is supported.
+GENE_STATS = ("max",)
 
 # Rule of the position score. It is stamped on the null (counts.json, score_rule) so that
 # null_position_stats.py refuses a null scored with another rule. "caas_pos_species_pss": the CAAS score (mean over the domains of the PSS-weighted mean, over the species of the domain, of their hypothesis scores), defined only when positive.
@@ -87,33 +81,22 @@ def direction_values(positions: Iterable[Mapping[str, float]]) -> Dict[str, List
     return out
 
 
-def gene_stat_value(values: Sequence[float], pool_sorted: Sequence[float], stat: str = "size_adj_max") -> Optional[float]:
-    """The gene statistic ``stat`` of the scored `values` of a gene against the ascending reference pool.
+def gene_stat_value(values: Sequence[float], pool_sorted: Sequence[float], stat: str = "max") -> Optional[float]:
+    """Largest positive position score. pool_sorted is ignored for legacy callers.
 
-    ``max`` is the largest value, ``fmax`` is ``#{pool <= max} / len(pool)`` and ``size_adj_max`` is ``fmax ** len(values)``.
-    Pool values within ``TIE_TOL`` above the maximum are ties and count as below-or-equal. None if either input is empty.
+    None means no scored position; it is distinct from the zero used to fill a
+    canonical null matrix when a gene has no detection in a cycle.
     """
-    if stat not in GENE_STATS:
-        raise ValueError(f"gene statistic must be one of {GENE_STATS}, not {stat!r}")
+    if stat != "max":
+        raise ValueError("Only gene_stat='max' is supported; rebuild legacy gene statistics")
     xs = [v for v in values if _is_value(v) and v > 0.0]
-    if not xs or len(pool_sorted) == 0:
-        return None
-    top = max(xs)
-    if stat == "max":
-        return top
-    f = bisect.bisect_right(pool_sorted, top + TIE_TOL) / len(pool_sorted)
-    return f if stat == "fmax" else f ** len(xs)
-
-
-def size_adj_max(values: Sequence[float], pool_sorted: Sequence[float]) -> Optional[float]:
-    """``(#{pool <= max(values)} / len(pool)) ** len(values)``; None if either input is empty."""
-    return gene_stat_value(values, pool_sorted, "size_adj_max")
+    return max(xs) if xs else None
 
 
 def gene_scores(
     positions: Iterable[Mapping[str, float]],
     pools: Mapping[str, Sequence[float]],
-    stat: str = "size_adj_max",
+    stat: str = "max",
 ) -> Dict[str, Optional[float]]:
     """The gene statistic ``stat`` per direction for one gene, from its positions (``{side: score}`` each)."""
     vals = direction_values(positions)

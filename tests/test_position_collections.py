@@ -27,7 +27,7 @@ def test_coordinate_mapping_layers_and_retired_collections(tmp_path):
     domain=write(tmp_path/'domains','gene\tpfam_id\ttarget_name\tdescription\tclan_acc\tclan_name\tali_start\tali_end\tcoordinate_space\n'
           'G1\tPF1\tD1\tdesc\tCL1\tC1\t11\t12\treference_protein_1based\n'
           'G1\tPF2\tD2\tdesc\tNA\tNA\t12\t12\treference_protein_1based\n')
-    ucr=write(tmp_path/'ucr','gene\tposition\tregion_type\tmethod\tvariability\nG1\t4\tcore\tsliding\t0.1\nG1\t2\tcore\tsliding\t0.2\n')
+    ucr=write(tmp_path/'ucr','gene\tposition\tregion_type\tmethod\tvariability\tcoordinate_space\nG1\t4\tcore\tsliding\t0.1\traw_alignment_1based\nG1\t2\tcore\tsliding\t0.2\traw_alignment_1based\n')
     fubar=write(tmp_path/'fubar','gene\thg38_aa_pos\tis_pos_hit\tis_neg_hit\nG1\t10\t1\t0\nG1\t12\t0\t1\n')
     fade=write(tmp_path/'fade.csv','gene,position,max_bf,target_aa\nG1,0,100,S\nOUT,1,100,T\n')
     custom=write(tmp_path/'custom','G1\t0\tPP2A\tvalidated mapping fixture\n')

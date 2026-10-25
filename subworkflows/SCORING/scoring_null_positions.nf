@@ -4,13 +4,13 @@
 
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  SCORING_NULL_POSITIONS: the integers that p.emp and p.emp_fact are made of, summed over the blocks of cycles of the
+ *  SCORING_NULL_POSITIONS: the integers that p.emp are made of, summed over the blocks of cycles of the
  *  null (null_position_stats.py documents what each counter is). The null is never held as a table of every
  *  (position, cycle); each block's table of scored positions is read once per stage.
  *
  *    1. CAAS_NULL_UNIVERSE   the positions the null scores (nd summed over the blocks) -> the universe U (tested set,
- *                            cleaned-background genes, observed positions) -> the propensity classes of p.emp_fact
- *    2. CAAS_NULL_COUNT      per block: k_emp and the per-class counts of each observed position
+ *                            cleaned-background genes, observed positions) -> legacy staging metadata (unused)
+ *    2. CAAS_NULL_COUNT      per block: k_emp of each observed position
  *    3. CAAS_NULL_COUNTERS   the sums over the blocks: one row per observed position
  *
  *  Consumes:  null_positions.parquet and counts.json (CAAS_CORE_MERGE_REDUCE), the blocks of CAAS_CORE_MERGE, the roster,

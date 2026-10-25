@@ -61,6 +61,8 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
     as plain dicts and adds run_defaults, ct_tool_string, rer_tool_string, profile,
     array_size and array_spec.
     """
+    if project.modules.caas.gene_stat != "max":
+        raise ValueError("Only CAAS gene_stat=max is supported")
     ctx = dataclasses.asdict(project)
 
     caas = project.modules.caas

@@ -161,6 +161,9 @@ def validatePositionReferences() {
                 if (missing) {
                     error "${spec.key} '${input}' missing columns: ${missing}"
                 }
+                if (spec.key in ['domain_variability_file', 'ucr_positions_file'] && !columns.contains('coordinate_space')) {
+                    error "${spec.key} '${input}' has no coordinate_space: convert the verified source with bin/build_reference_tables.py project-ppga or regenerate it before running"
+                }
             }
             def manifest = file("${input}.manifest.json")
             if (manifest.exists()) {

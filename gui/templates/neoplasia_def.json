@@ -64,7 +64,7 @@
       "caas_permulation_enrichment": true,
       "caas_export_single": false,
       "caas_perms_postproc": true,
-      "gene_stat": "size_adj_max",
+      "gene_stat": "max",
       "pss_top_pct": "1",
       "pair_center_gate": "none",
       "max_contrasts": "3",

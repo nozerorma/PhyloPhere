@@ -129,6 +129,10 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
             disambiguation["caas_map_dir"] = old
         caas = modules.get("caas")
         if isinstance(caas, dict):
+            old_stat = caas.get("gene_stat", "max")
+            if old_stat != "max":
+                logger.warning("Retired CAAS gene_stat=%s: max is now the only statistic; legacy gene scores/null matrices must be rebuilt", old_stat)
+                caas["gene_stat"] = "max"
             if caas.pop("caas_b0_diagnostic", None) is not None:
                 logger.warning("project parameter caas_b0_diagnostic was retired: the real labeling (b_0) is always replayed with the null")
             dropped = [k for k in _RETIRED_CAAS_FIELDS if caas.pop(k, None) is not None]

@@ -8,6 +8,7 @@ source(file.path(src,'../../../ENRICHMENT/local/src/gene_p.R'))
 source(file.path(src,'../../../ENRICHMENT/local/src/caas_blocks.R'))
 read <- function(p) read.delim(p,check.names=FALSE,stringsAsFactors=FALSE)
 write <- function(x,p) write.table(x,p,sep='\t',row.names=FALSE,quote=FALSE,na='NA')
+if (!identical(arg('--gene-stat','max'), 'max')) stop('Only gene_stat=max is supported')
 nom <- as.numeric(arg('--nominal','0.05')); fdr <- as.numeric(arg('--fdr','0.05'))
 stopifnot(is.finite(nom), nom>0,nom<=1,is.finite(fdr),fdr>0,fdr<=1)
 genes <- read(arg('--genes')); positions <- read(arg('--positions')); stats <- read(arg('--stats'))
@@ -22,7 +23,7 @@ cycles<-character();block_ids<-sprintf('blk_%06d',seq_along(files))
 for(f in files) {
  b<-readRDS(f);cy<-colnames(b$stat$global)
  if(is.null(cy)||anyNA(cy)||anyDuplicated(cy)||any(cy%in%cycles))stop('Invalid/overlapping null cycles')
- if(!identical(b$gene_stat,arg('--gene-stat','size_adj_max')))stop('Gene statistic mismatch')
+ if(!identical(b$gene_stat,arg('--gene-stat','max')))stop('Gene statistic mismatch')
  for(r in ranks)if(!identical(colnames(b$stat[[r]]),cy))stop('Ranking cycles differ')
  cycles<-c(cycles,cy)
 }
@@ -65,7 +66,7 @@ for(rk in ranks) {
    cy<-block_cycles[[i]];saveRDS(list(rows=rows,cols=cy,values=g$nlog10_null[,cy,drop=FALSE]),caas_slice_path('calibration',paste0(rk,'_gp'),k,block_ids[i]))
   }
  }
- q<-p.adjust(p,'BH');tab<-data.frame(gene=u,ranking=rep(rk,length(u)),statistic=unname(obs),gene_stat=rep(arg('--gene-stat','size_adj_max'),length(u)),p.gen=unname(p),p.gen.adj=unname(q),nominal=!is.na(p)&p<nom,adjusted=!is.na(q)&q<fdr,N_roster=rep(N,length(u)),N_valid=unname(valid),family_id=rep(paste0('CAAS:',rk),length(u)),contract_version=rep(1L,length(u)))
+ q<-p.adjust(p,'BH');tab<-data.frame(gene=u,ranking=rep(rk,length(u)),statistic=unname(obs),gene_stat=rep(arg('--gene-stat','max'),length(u)),p.gen=unname(p),p.gen.adj=unname(q),nominal=!is.na(p)&p<nom,adjusted=!is.na(q)&q<fdr,N_roster=rep(N,length(u)),N_valid=unname(valid),family_id=rep(paste0('CAAS:',rk),length(u)),contract_version=rep(1L,length(u)))
  all_evidence[[rk]]<-tab
  suffix<-if(rk=='global')'' else paste0('_',rk)
  for(nm in c('p.gen','p.gen.adj','nominal','adjusted'))genes[[paste0('caas_',nm,suffix)]]<-tab[[nm]][match(genes$Gene,u)]
@@ -83,6 +84,6 @@ for(rk in ranks) {
 }
 for(n in c("rer_min_pval","rer_perm_padj")) if(n %in% names(genes)) stats[[if(n=="rer_min_pval")"rer_p.emp" else "rer_p.adj"]] <- genes[[n]][match(stats$gene,genes$Gene)]
 write(genes,'gene_scores.tsv');write(positions,'position_scores.tsv');write(stats,'fcs_stats.tsv')
-jsonlite::write_json(list(contract_version=1L,available=available,N=N,genes=length(u),blocks=block_ids,nominal_threshold=nom,fdr_threshold=fdr,gene_stat=arg('--gene-stat','size_adj_max')), 'calibration/metadata.json',auto_unbox=TRUE,pretty=TRUE)
+jsonlite::write_json(list(contract_version=1L,available=available,N=N,genes=length(u),blocks=block_ids,nominal_threshold=nom,fdr_threshold=fdr,gene_stat=arg('--gene-stat','max')), 'calibration/metadata.json',auto_unbox=TRUE,pretty=TRUE)
 file.copy('calibration/metadata.json','gene_evidence_metadata.json',overwrite=TRUE)
 if(!available)write(data.frame(ranking=character(),database=character(),pathway=character(),stat=numeric(),pval=numeric(),p.adj=numeric(),p.perm=numeric(),q.perm=numeric(),num.genes=integer(),gene.vals=character(),sig_perm=logical(),direction=character(),redlich_level=character()),'calibration/empty.tsv')

@@ -15,7 +15,11 @@ gene_p <- function(S, obs, tie_tol = TIE_TOL_GENE_P) {
   N <- ncol(S)
   stopifnot(N >= 2, length(obs) == nrow(S))
   obs_m <- rowSums(S >= (obs - tie_tol), na.rm = TRUE)            # NA scores count as no comparison
-  p_obs <- (1 + obs_m) / (rowSums(!is.na(S)) + 1)
+  n_valid <- rowSums(!is.na(S))
+  p_obs <- (1 + obs_m) / (n_valid + 1)
+  # Missing observed evidence or an empty valid null is not a measured p=1
+  # (nor a floor p when obs is NA). Measured zero scores remain evaluable.
+  p_obs[is.na(obs) | n_valid == 0L] <- NA_real_
   p_null <- matrix(NA_real_, nrow(S), N, dimnames = dimnames(S))
   for (g in seq_len(nrow(S))) {
     x <- S[g, ]

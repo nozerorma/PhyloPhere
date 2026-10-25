@@ -15,8 +15,8 @@ site itself. Proteins without a comparable reference are reported as coverage
 lack, never as infinite distance. Query positions carry canonical positive
 scores; no p-value filtering is applied. This is not the full evaluable universe.
 
-Genomic proximity: distance in nucleotides on the same chromosome to the nearest
-member of the term; 0 on coincidence. Window membership (1 Mb bins) stays in the
+Genomic proximity: distance in nucleotides to the nearest member of the term
+within the same gene and chromosome; 0 on coincidence. Window membership (1 Mb bins) stays in the
 registry members and is not re-measured here.
 
 The distance control is not assumed to be the AUC control: the first
@@ -26,7 +26,7 @@ contrast and reported as descriptive.
 Outputs (in --output_dir):
   proximity_protein_distances.tsv   one row per evaluated position x term (genes with sites)
   proximity_protein_summary.tsv     per collection/term: distribution summary + fixed radii
-  proximity_genomic_distances.tsv   one row per evaluated position x site term (same chromosome)
+  proximity_genomic_distances.tsv   one row per evaluated position x site term (same gene/chromosome)
   proximity_genomic_summary.tsv     per collection/term summary
   proximity_manifest.json           parameters, states and limits
 """
@@ -289,8 +289,8 @@ def main():
         'ranking_population': 'canonical_positive_detections_only',
         'contract_version': manifest.get('contract_version'),
         'parameters': {'collections': args.collections, 'radios': radios},
-        'contracts': {'protein': 'distancia en residuos de referencia (hg38_aa_pos); 0 dentro de region',
-                      'genomic': 'distancia en nt en el mismo cromosoma; 0 en coincidencia'},
+        'contracts': {'protein': 'distancia en residuos de referencia (hg38_aa_pos) dentro de la misma proteina; 0 dentro de region',
+                      'genomic': 'distancia en nt dentro del mismo gen y cromosoma; 0 en coincidencia'},
         'states': {'proximity': 'executed_descriptive' if protein_rows.rows_written else 'no_terms',
                    'characterization': 'not_executed (componente separado)',
                    'localization': 'not_executed (componente separado)',

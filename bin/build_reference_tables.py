@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build explicit positional references without changing the source annotations.
 
-project-ppga validates UCR raw columns and FUBAR sites against the original MAP.
+project-ppga projects the verified PPGA productive UCR/Pfam coordinates and
+validates FUBAR sites against the original MAP; legacy tables are never guessed.
 marine-ucr recomputes sliding UCR on the supplied CAAS alignments with the existing
 Valdar/sliding implementation and defaults. No taxonomic clade statistics are used.
 """
@@ -44,36 +45,8 @@ def map_gene(map_dir,gene):
 
 
 def project_ppga(base, output):
-    output.mkdir(parents=True,exist_ok=True)
-    for kind,source in [('ucr',base/'reports/variability/ucr_positions.tsv'),
-                        ('fubar',base/'reports/positive_selection/fubar_sites.tsv')]:
-        counts=Counter();dest=output/f'{kind}_positions.tsv.gz'
-        if kind=='fubar':dest=output/'fubar_sites.tsv.gz'
-        with source.open() as f,gzip.open(dest,'wt',newline='') as out:
-            reader=csv.DictReader(f,delimiter='\t');fields=reader.fieldnames+['coordinate_space']
-            if kind=='fubar':fields+=['alignment_position']
-            else:fields+=['source_position']
-            writer=csv.DictWriter(out,fieldnames=fields,delimiter='\t');writer.writeheader()
-            for r in reader:
-                counts['source_rows']+=1;gene=r['gene'].split('.')[0]
-                if kind=='ucr' and r['method']!='sliding':
-                    counts['other_methods_not_used_by_collections']+=1;continue
-                raw,sites=map_gene(str(base/'MAP'),gene)
-                if kind=='ucr':
-                    col=raw.get(int(r['position']))
-                    if col is None:counts['trimmed_out']+=1;continue
-                    r['source_position']=r['position'];r['position']=str(col)
-                else:
-                    col=int(r['site'])-1
-                    if col not in sites:raise ValueError(f'{gene}: FUBAR site outside MAP {col}')
-                    mr=sites[col]
-                    for key in ('ori_codon_col','hg38_aa_pos','hg38_nt_coord'):
-                        if r.get(key,'NA')!=mr[key]:raise ValueError(f'{gene}: FUBAR {key} mismatch at {col}')
-                    r['alignment_position']=str(col)
-                r['coordinate_space']='CAAS_0based';writer.writerow(r);counts['written']+=1
-        write_manifest(dest,[source],counts,alignment_dir=str(base/'PROT/bmge'),map_dir=str(base/'MAP'),
-                       interpretation='Original PPGA annotation; only coordinate projection, no new statistical fit')
-        print(kind,dict(counts),flush=True)
+    from ppga_position_references import project_ppga as project_verified_ppga
+    return project_verified_ppga(base, output)
 
 
 def ucr_gene(path):

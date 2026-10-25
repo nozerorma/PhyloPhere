@@ -1,6 +1,7 @@
 # Normalize null inputs without loading the live block matrices.
 a <- commandArgs(TRUE)
 source_type <- a[1]; gene_stat <- a[2]; block_size <- as.integer(a[3])
+if (!identical(gene_stat, 'max')) stop('CAAS gene_stat mismatch: only max is supported')
 dir.create('blocks')
 script <- sub("^--file=", "", grep("^--file=", commandArgs(), value=TRUE)[1])
 contract <- file.path(dirname(normalizePath(script)), '../../../SCORING/local/src/caas_block_contract.R')
@@ -35,7 +36,7 @@ if (a[4] == 'disabled') { paths <- character() } else if (!length(paths) && dir.
 if (a[4] != 'disabled' && !length(paths) && file.exists('null_input') && !dir.exists('null_input')) {
   obj <- readRDS('null_input')
   if (source_type == 'caas') {
-    if (is.null(obj$gene_stat)) obj$gene_stat <- 'size_adj_max'
+    if (is.null(obj$gene_stat)) stop('CAAS null lacks gene_stat stamp; rebuild gene matrices with max')
     if (!identical(obj$gene_stat, gene_stat)) stop('CAAS gene_stat mismatch; rebuild the null')
     mats <- obj$caas_corStat_byrank
     if (is.null(mats)) stop('CAAS null lacks caas_corStat_byrank')

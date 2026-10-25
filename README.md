@@ -287,7 +287,7 @@ agreement is enriched among the highest scores.
 
 The permulation null and the observed score use the same rule (`core.scores`). The null is merged per block of cycles
 (`CAAS_CORE_MERGE`, no ASR replay) into the genes x cycles matrices of the gene statistic (`gene_stat`) and the positions each
-cycle scores; the position p-values (`p.emp`, `p.emp_fact`) are built from counters summed over the blocks
+cycle scores; the position p-values (`p.emp`, adjusted as `p.adj_bh`) are built from counters summed over the blocks
 (`scoring_null_positions.nf`), never from a table of every detection.
 
 > The hypergeometric p-value (`pvalue`) is deliberately excluded from the core

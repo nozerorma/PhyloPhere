@@ -108,3 +108,41 @@ def test_characterization_does_not_invent_flags(tmp_path):
     assert rows[0]['caas_nominal'] == 'NA' and rows[0]['caas_adjusted'] == 'NA'
     ranking = {r['ranking']: r for r in read_tsv(out / 'ranking_summary.tsv')}
     assert ranking['global']['n_nominal'] == '0' and ranking['global']['n_adjusted'] == '0'
+
+
+def test_summary_preserves_membership_counts_and_collection_order():
+    """Empty/excluded terms, repeated memberships, shared IDs and missing scores."""
+    import importlib.util
+    import pandas as pd
+    spec = importlib.util.spec_from_file_location('characterize', CHARACTERIZE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    collections = pd.DataFrame([
+        ['B', 'same', 'site', 'included'],
+        ['A', 'same', 'site', 'included'],
+        ['A', 'empty', 'site', 'included'],
+        ['A', 'excluded', 'site', 'excluded'],
+    ], columns=['collection_id', 'term_id', 'term_type', 'status'])
+    members = pd.DataFrame([
+        ['A', 'same', 'G1', '0'], ['A', 'same', 'G1', '0'],
+        ['A', 'same', 'G1', '1'], ['A', 'same', 'G2', '2'],
+        ['B', 'same', 'G2', '2'], ['A', 'excluded', 'G1', '0'],
+    ], columns=['collection_id', 'term_id', 'Gene', 'Position'])
+    evidence = pd.DataFrame([
+        ['G1', '0', '0.8', 'top', '.01', '.1', 'TRUE', 'FALSE', 'scored'],
+        ['G1', '0', '0.9', 'bottom', '.01', '.1', 'TRUE', 'FALSE', 'scored'],
+        ['G1', '1', 'NA', 'top', 'NA', 'NA', 'NA', 'NA', 'unavailable'],
+    ], columns=['Gene', 'Position', 'CAAS_score', 'side', 'p.emp', 'p.adj_bh',
+                'caas_nominal', 'caas_adjusted', 'evidence_status'])
+    coverage = pd.DataFrame([['universe', 'n_positions_annotable', '9']],
+                            columns=['scope', 'metric', 'value'])
+    result = module.build_collection_summary(collections, members, evidence, coverage)
+    assert list(zip(result.collection_id, result.term_id)) == [
+        ('B', 'same'), ('A', 'same'), ('A', 'empty')]
+    assert result.n_members.tolist() == [1, 4, 0]
+    assert result.n_genes.tolist() == [1, 2, 0]
+    assert result.n_members_evaluated.tolist() == [0, 2, 0]
+    assert result.n_members_without_canonical_score.tolist() == [0, 1, 0]
+    assert result.n_members_nominal.tolist() == [0, 2, 0]
+    assert result.n_members_adjusted.tolist() == [0, 0, 0]
+    assert result.prop_positive_of_evaluated.tolist() == ['NA', 1.0, 'NA']

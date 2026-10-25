@@ -18,7 +18,7 @@ process FCS_PREPARE_BLOCKS {
     def hash = java.security.MessageDigest.getInstance('SHA-256').digest(code.getBytes('UTF-8')).encodeHex().toString()
     """
     # resolver: ${hash}
-    ${rs} ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_prepare_blocks.R ${source} ${params.gene_stat ?: 'size_adj_max'} ${source == 'caas' ? (params.caas_cycle_block_size ?: 500) : (params.rer_perms_per_batch ?: 100)} ${source == 'caas' && params.caas_permulation_enrichment == false ? 'disabled' : 'enabled'}
+    ${rs} ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_prepare_blocks.R ${source} ${params.gene_stat ?: 'max'} ${source == 'caas' ? (params.caas_cycle_block_size ?: 500) : (params.rer_perms_per_batch ?: 100)} ${source == 'caas' && params.caas_permulation_enrichment == false ? 'disabled' : 'enabled'}
     """
 }
 

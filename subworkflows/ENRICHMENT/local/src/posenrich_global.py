@@ -205,7 +205,7 @@ def main():
                 for gene, loo_auc in loo:
                     gene_row = {**metadata, 'collection_id': cid, 'term_id': term, 'ranking': args.ranking,
                                 'Gene': gene, 'n_members': gene_counts[gene],
-                                'auc_without_gene': repr(loo_auc), 'delta_auc': repr(auc_obs - loo_auc)}
+                                'auc_without_gene': repr(float(loo_auc)), 'delta_auc': repr(float(auc_obs - loo_auc))}
                     if gene_writer is None:
                         gene_writer = csv.DictWriter(gene_stream, fieldnames=list(gene_row),
                                                      delimiter='\t', lineterminator='\n')
@@ -217,8 +217,8 @@ def main():
                     **metadata, 'collection_id': cid, 'term_id': term, 'effect_statistic': 'AUC',
                     'auc': repr(auc_obs), 'n_members': n_members, 'n_members_total': n_members_total,
                     'n_background': n_background, 'n_genes': n_genes,
-                    'loo_auc_min': repr(min(loo_values)) if loo_values else 'NA',
-                    'loo_auc_max': repr(max(loo_values)) if loo_values else 'NA',
+                    'loo_auc_min': repr(float(min(loo_values))) if loo_values else 'NA',
+                    'loo_auc_max': repr(float(max(loo_values))) if loo_values else 'NA',
                     'calibration_status': 'not_available',
                     'p': 'NA',
                     'status': 'descriptive',

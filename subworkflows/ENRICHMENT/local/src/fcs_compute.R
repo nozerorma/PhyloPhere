@@ -23,7 +23,7 @@
 #   --fdr-thr           BH threshold on the permulation p (q.perm)
 #   --pperm-thr         raw permulation-p threshold of the Redlich rule
 #   --analytic-levels   comma-separated BH levels of the analytic-p rule (Redlich et al. 2024), default 0.05,0.1,0.15
-#   --gene-stat         gene statistic of the observed gene scores (size_adj_max, fmax or max); the CAAS null must hold the same one
+#   --gene-stat         gene statistic of the observed gene scores (max only); the CAAS null must hold the same one
 #   --score-source      caas (zero floor, default) or rer (exclude missing statistics)
 #   --output            output TSV
 # =============================================================================
@@ -53,7 +53,8 @@ max_g         <- as.numeric(get_arg("--max-g", "0"))
 fdr_thr       <- as.numeric(get_arg("--fdr-thr", "0.15"))
 pperm_thr     <- as.numeric(get_arg("--pperm-thr", "0.025"))
 analytic_levels <- as.numeric(strsplit(get_arg("--analytic-levels", "0.05,0.1,0.15"), ",")[[1]])
-gene_stat     <- get_arg("--gene-stat", "size_adj_max")
+gene_stat     <- get_arg("--gene-stat", "max")
+if (!identical(gene_stat, "max")) stop("Only gene_stat=max is supported")
 score_source  <- match.arg(get_arg("--score-source", "caas"), c("caas", "rer"))
 out_file      <- get_arg("--output", "fcs_enrich_partial.tsv")
 
