@@ -35,9 +35,11 @@ import argparse
 import csv
 import json
 import os
+from array import array
+from bisect import bisect_left
+from contextlib import ExitStack
 
-import pandas as pd
-from posenrich_localization import position_ranking_scores
+import numpy as np
 
 REGISTRY_FILES = ['positions.tsv', 'position_evidence.tsv', 'members.tsv',
                   'collections.tsv', 'coverage.tsv', 'manifest.json']
@@ -62,11 +64,80 @@ def parse_args():
 
 
 def read_tsv(path):
-    return pd.read_csv(path, sep='\t', dtype=str, keep_default_na=False)
+    with open(path, newline='') as stream:
+        yield from csv.DictReader(stream, delimiter='\t')
 
 
-def write_tsv(df, path):
-    df.to_csv(path, sep='\t', index=False, na_rep='NA', quoting=csv.QUOTE_MINIMAL, lineterminator='\n')
+def nearest_distance(value, sorted_sites):
+    """Nearest site in logarithmic time, including gaps and disjoint regions."""
+    index = bisect_left(sorted_sites, value)
+    return min(abs(value - sorted_sites[i]) for i in (index - 1, index)
+               if 0 <= i < len(sorted_sites))
+
+
+class DistanceOutput:
+    """Stream detail rows; retain compact distances for one term's exact median."""
+
+    def __init__(self, stack, output_dir, kind, coord_col, dist_col, radios):
+        self.dist_col = dist_col
+        self.radios = radios
+        columns = ['collection_id', 'term_id', 'Gene', 'Position', coord_col, dist_col]
+        if kind == 'protein':
+            columns.append('in_region')
+        columns += ['CAAS_score', 'status']
+        summary_columns = ['collection_id', 'term_id', 'n_positions_evaluated',
+                           'n_positions_measured', 'coverage_proportion',
+                           'median_distance', 'mean_distance', 'n_genes_with_sites']
+        summary_columns += [f'prop_within_{r}' for r in radios] + ['control_status', 'status']
+        self.detail = self.writer(stack, output_dir, kind, 'distances', columns)
+        self.summary = self.writer(stack, output_dir, kind, 'summary', summary_columns)
+        self.rows_written = 0
+        self.reset()
+
+    @staticmethod
+    def writer(stack, output_dir, kind, suffix, columns):
+        path = os.path.join(output_dir, f'proximity_{kind}_{suffix}.tsv')
+        stream = stack.enter_context(open(path, 'w', newline=''))
+        writer = csv.DictWriter(stream, fieldnames=columns, delimiter='\t', lineterminator='\n')
+        writer.writeheader()
+        return writer
+
+    def reset(self):
+        self.distances = array('d')
+        self.total = 0
+        self.distance_sum = 0
+        self.within = [0] * len(self.radios)
+        self.genes = set()
+
+    def append(self, row):
+        self.detail.writerow(row)
+        self.rows_written += 1
+        self.total += 1
+        self.genes.add(row['Gene'])
+        if row['status'] == 'measured':
+            distance = row[self.dist_col]
+            self.distances.append(distance)
+            self.distance_sum += distance
+            for index, radius in enumerate(self.radios):
+                self.within[index] += distance <= radius
+
+    def finish_term(self, cid, term):
+        if self.total:
+            measured = len(self.distances)
+            # Partition the compact buffer in place: no detail dataframe or sort copy.
+            median = float(np.median(np.frombuffer(self.distances, dtype=np.float64),
+                                     overwrite_input=True)) if measured else None
+            row = dict(collection_id=cid, term_id=term, n_positions_evaluated=self.total,
+                       n_positions_measured=measured,
+                       coverage_proportion=repr(measured / self.total),
+                       median_distance=repr(median) if measured else 'NA',
+                       mean_distance=repr(self.distance_sum / measured) if measured else 'NA',
+                       n_genes_with_sites=len(self.genes),
+                       control_status='not_validated', status='descriptive')
+            for radius, count in zip(self.radios, self.within):
+                row[f'prop_within_{radius}'] = repr(count / measured) if measured else repr('NA')
+            self.summary.writerow(row)
+        self.reset()
 
 
 def parse_coord(coord):
@@ -93,155 +164,125 @@ def main():
     if any(r < 0 for r in radios):
         raise SystemExit('--radios must be >= 0')
 
-    positions = read_tsv(os.path.join(args.registry_dir, 'positions.tsv'))
-    evidence = read_tsv(os.path.join(args.registry_dir, 'position_evidence.tsv'))
-    members = read_tsv(os.path.join(args.registry_dir, 'members.tsv'))
-    collections = read_tsv(os.path.join(args.registry_dir, 'collections.tsv'))
+    collections = list(read_tsv(os.path.join(args.registry_dir, 'collections.tsv')))
     with open(os.path.join(args.registry_dir, 'manifest.json')) as f:
         manifest = json.load(f)
+    wanted = set(args.collections.split(',')) if args.collections else set(PROTEIN_COLLECTIONS)
+    selected_collections = {r['collection_id'] for r in collections
+                            if r['status'] == 'included' and r['collection_id'] in wanted
+                            and r['collection_id'] in PROTEIN_COLLECTIONS}
+    region_type = {(r['collection_id'], r['term_id']): r['term_type'] for r in collections}
 
-    # Coordinates by (gene, pos); evaluated positions carry their score.
-    coords = {}
-    for row in positions.to_dict('records'):
-        coords[(row['Gene'], int(row['Position']))] = {
-            'residue': None if row['hg38_aa_pos'] in ('NA', '') else int(row['hg38_aa_pos']),
-            'nt': parse_coord(row['hg38_nt_coord']),
-            'in_map': row['in_map'] == '1',
-        }
-    evaluated = sorted({(r['Gene'], int(r['Position'])) for r in evidence.to_dict('records')
-                        if r['CAAS_score'] not in ('NA', '')})
-    scores = position_ranking_scores(evidence, 'caas_score')
-
-    site_terms = collections[(collections['status'] == 'included') &
-                             (collections['collection_id'].isin(PROTEIN_COLLECTIONS))]
-    if args.collections:
-        wanted = set(args.collections.split(','))
-        site_terms = site_terms[site_terms['collection_id'].isin(wanted)]
-    region_type = dict(zip(collections['collection_id'] + '|' + collections['term_id'],
-                           collections['term_type']))
-
-    # term -> gene -> member positions
+    # Stream registry inputs instead of materializing dataframes and record copies.
     term_members = {}
-    for row in members.to_dict('records'):
-        cid = row['collection_id']
-        if cid not in PROTEIN_COLLECTIONS:
+    needed = {}
+    for row in read_tsv(os.path.join(args.registry_dir, 'members.tsv')):
+        key = (row['collection_id'], row['term_id'])
+        if row['collection_id'] not in selected_collections:
             continue
-        if cid not in set(site_terms['collection_id']):
-            continue
-        term_members.setdefault((cid, row['term_id']), {}).setdefault(
-            row['Gene'], set()).add(int(row['Position']))
+        gene, pos = row['Gene'], int(row['Position'])
+        term_members.setdefault(key, {}).setdefault(gene, set()).add(pos)
+        needed.setdefault(gene, set()).add(pos)
 
-    protein_rows = []
-    genomic_rows = []
-    for (cid, term), by_gene in sorted(term_members.items()):
-        is_region = region_type.get(f'{cid}|{term}') == 'region'
-        for gene in sorted(by_gene):
-            site_positions = by_gene[gene]
-            site_residues = [coords[(gene, p)]['residue'] for p in sorted(site_positions)
-                             if (gene, p) in coords]
-            site_residues = [r for r in site_residues if r is not None]
-            site_nt = [coords[(gene, p)]['nt'] for p in sorted(site_positions)
-                       if (gene, p) in coords]
-            site_nt = [c for c in site_nt if c is not None]
-            for (g, pos) in evaluated:
-                if g != gene:
-                    continue
-                info = coords.get((g, pos))
-                if info is None:
-                    continue
-                score = scores.get((g, pos), 'NA')
-                # protein distance
-                if info['residue'] is None:
-                    protein_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
-                                         'Position': pos, 'hg38_aa_pos': 'NA',
-                                         'distance_residues': 'NA', 'in_region': 'NA',
-                                         'CAAS_score': score,
-                                         'status': 'no_reference_residue'})
-                elif not site_residues:
-                    protein_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
-                                         'Position': pos, 'hg38_aa_pos': info['residue'],
-                                         'distance_residues': 'NA', 'in_region': 'NA',
-                                         'CAAS_score': score,
-                                         'status': 'no_sites_with_reference'})
-                else:
-                    in_region = 1 if (is_region and pos in site_positions) else 0
-                    if pos in site_positions:
-                        distance = 0
+    # One best-side score per position, with queries indexed by gene.
+    scores = {gene: {} for gene in needed}
+    for row in read_tsv(os.path.join(args.registry_dir, 'position_evidence.tsv')):
+        gene = row['Gene']
+        if gene not in scores or row['CAAS_score'] in ('NA', ''):
+            continue
+        pos, score = int(row['Position']), float(row['CAAS_score'])
+        current = scores[gene].get(pos)
+        if current is None or score > current:
+            scores[gene][pos] = score
+        needed[gene].add(pos)
+
+    coords = {}
+    for row in read_tsv(os.path.join(args.registry_dir, 'positions.tsv')):
+        gene, pos = row['Gene'], int(row['Position'])
+        if gene in needed and pos in needed[gene]:
+            coords[(gene, pos)] = {
+                'residue': None if row['hg38_aa_pos'] in ('NA', '') else int(row['hg38_aa_pos']),
+                'nt': parse_coord(row['hg38_nt_coord']),
+            }
+    del needed
+
+    with ExitStack() as stack:
+        protein_rows = DistanceOutput(stack, args.output_dir, 'protein', 'hg38_aa_pos',
+                                      'distance_residues', radios)
+        genomic_rows = DistanceOutput(stack, args.output_dir, 'genomic', 'hg38_nt_coord',
+                                      'distance_nt', radios)
+        for (cid, term), by_gene in sorted(term_members.items()):
+            is_region = region_type.get((cid, term)) == 'region'
+            for gene in sorted(by_gene):
+                site_positions = by_gene[gene]
+                site_residues = [coords[(gene, p)]['residue'] for p in sorted(site_positions)
+                                 if (gene, p) in coords]
+                site_residues = sorted(r for r in site_residues if r is not None)
+                site_nt = [coords[(gene, p)]['nt'] for p in sorted(site_positions)
+                           if (gene, p) in coords]
+                site_nt = [c for c in site_nt if c is not None]
+                sites_by_chrom = {}
+                for chrom, nt in site_nt:
+                    sites_by_chrom.setdefault(chrom, []).append(nt)
+                sites_by_chrom = {chrom: sorted(values) for chrom, values in sites_by_chrom.items()}
+                for pos, score in sorted(scores[gene].items()):
+                    g = gene
+                    info = coords.get((g, pos))
+                    if info is None:
+                        continue
+                    # protein distance
+                    if info['residue'] is None:
+                        protein_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
+                                             'Position': pos, 'hg38_aa_pos': 'NA',
+                                             'distance_residues': 'NA', 'in_region': 'NA',
+                                             'CAAS_score': score,
+                                             'status': 'no_reference_residue'})
+                    elif not site_residues:
+                        protein_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
+                                             'Position': pos, 'hg38_aa_pos': info['residue'],
+                                             'distance_residues': 'NA', 'in_region': 'NA',
+                                             'CAAS_score': score,
+                                             'status': 'no_sites_with_reference'})
                     else:
-                        distance = min(abs(info['residue'] - r) for r in site_residues)
-                    protein_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
-                                         'Position': pos, 'hg38_aa_pos': info['residue'],
-                                         'distance_residues': distance,
-                                         'in_region': in_region,
-                                         'CAAS_score': score, 'status': 'measured'})
-                # genomic distance (separate contract)
-                if info['nt'] is None:
-                    genomic_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
-                                         'Position': pos, 'hg38_nt_coord': 'NA',
-                                         'distance_nt': 'NA', 'CAAS_score': score,
-                                         'status': 'no_genomic_coordinate'})
-                elif not site_nt:
-                    genomic_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
-                                         'Position': pos, 'hg38_nt_coord': f'{info["nt"][0]}:{info["nt"][1]}',
-                                         'distance_nt': 'NA', 'CAAS_score': score,
-                                         'status': 'no_sites_with_genomic_coordinate'})
-                else:
-                    same_chrom = [c for c in site_nt if c[0] == info['nt'][0]]
-                    if not same_chrom:
-                        genomic_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
-                                             'Position': pos,
-                                             'hg38_nt_coord': f'{info["nt"][0]}:{info["nt"][1]}',
-                                             'distance_nt': 'NA', 'CAAS_score': score,
-                                             'status': 'no_sites_same_chromosome'})
-                    else:
-                        distance = 0 if pos in site_positions else min(
-                            abs(info['nt'][1] - c[1]) for c in same_chrom)
-                        genomic_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
-                                             'Position': pos,
-                                             'hg38_nt_coord': f'{info["nt"][0]}:{info["nt"][1]}',
-                                             'distance_nt': distance,
+                        in_region = 1 if (is_region and pos in site_positions) else 0
+                        if pos in site_positions:
+                            distance = 0
+                        else:
+                            distance = nearest_distance(info['residue'], site_residues)
+                        protein_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
+                                             'Position': pos, 'hg38_aa_pos': info['residue'],
+                                             'distance_residues': distance,
+                                             'in_region': in_region,
                                              'CAAS_score': score, 'status': 'measured'})
+                    # genomic distance (separate contract)
+                    if info['nt'] is None:
+                        genomic_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
+                                             'Position': pos, 'hg38_nt_coord': 'NA',
+                                             'distance_nt': 'NA', 'CAAS_score': score,
+                                             'status': 'no_genomic_coordinate'})
+                    elif not site_nt:
+                        genomic_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
+                                             'Position': pos, 'hg38_nt_coord': f'{info["nt"][0]}:{info["nt"][1]}',
+                                             'distance_nt': 'NA', 'CAAS_score': score,
+                                             'status': 'no_sites_with_genomic_coordinate'})
+                    else:
+                        same_chrom = sites_by_chrom.get(info['nt'][0], [])
+                        if not same_chrom:
+                            genomic_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
+                                                 'Position': pos,
+                                                 'hg38_nt_coord': f'{info["nt"][0]}:{info["nt"][1]}',
+                                                 'distance_nt': 'NA', 'CAAS_score': score,
+                                                 'status': 'no_sites_same_chromosome'})
+                        else:
+                            distance = 0 if pos in site_positions else nearest_distance(info['nt'][1], same_chrom)
+                            genomic_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
+                                                 'Position': pos,
+                                                 'hg38_nt_coord': f'{info["nt"][0]}:{info["nt"][1]}',
+                                                 'distance_nt': distance,
+                                                 'CAAS_score': score, 'status': 'measured'})
 
-    protein_df = pd.DataFrame(protein_rows, columns=[
-        'collection_id', 'term_id', 'Gene', 'Position', 'hg38_aa_pos', 'distance_residues',
-        'in_region', 'CAAS_score', 'status'])
-    genomic_df = pd.DataFrame(genomic_rows, columns=[
-        'collection_id', 'term_id', 'Gene', 'Position', 'hg38_nt_coord', 'distance_nt',
-        'CAAS_score', 'status'])
-
-    def summarize(df, dist_col, summary_path):
-        rows = []
-        for (cid, term), sub in df.groupby(['collection_id', 'term_id']):
-            measured = sub[sub['status'] == 'measured']
-            n_measured = len(measured)
-            n_evaluated = int((sub['status'] != 'measured').sum()) + n_measured
-            distances = pd.to_numeric(measured[dist_col], errors='coerce')
-            row = {'collection_id': cid, 'term_id': term,
-                   'n_positions_evaluated': n_evaluated,
-                   'n_positions_measured': n_measured,
-                   'coverage_proportion': repr(n_measured / n_evaluated) if n_evaluated else 'NA',
-                   'median_distance': repr(float(distances.median())) if n_measured else 'NA',
-                   'mean_distance': repr(float(distances.mean())) if n_measured else 'NA',
-                   'n_genes_with_sites': int(sub['Gene'].nunique()),
-                   'control_status': 'not_validated',
-                   'status': 'descriptive'}
-            for radius in radios:
-                prop = float((distances <= radius).mean()) if n_measured else 'NA'
-                row[f'prop_within_{radius}'] = repr(prop)
-            rows.append(row)
-        cols = ['collection_id', 'term_id', 'n_positions_evaluated', 'n_positions_measured',
-                'coverage_proportion', 'median_distance', 'mean_distance', 'n_genes_with_sites'] \
-            + [f'prop_within_{r}' for r in radios] + ['control_status', 'status']
-        out = pd.DataFrame(rows, columns=cols)
-        write_tsv(out, summary_path)
-        return out
-
-    summarize(protein_df, 'distance_residues',
-              os.path.join(args.output_dir, 'proximity_protein_summary.tsv'))
-    summarize(genomic_df, 'distance_nt',
-              os.path.join(args.output_dir, 'proximity_genomic_summary.tsv'))
-    write_tsv(protein_df, os.path.join(args.output_dir, 'proximity_protein_distances.tsv'))
-    write_tsv(genomic_df, os.path.join(args.output_dir, 'proximity_genomic_distances.tsv'))
+            protein_rows.finish_term(cid, term)
+            genomic_rows.finish_term(cid, term)
 
     out_manifest = {
         'component': 'proximity',
@@ -250,7 +291,7 @@ def main():
         'parameters': {'collections': args.collections, 'radios': radios},
         'contracts': {'protein': 'distancia en residuos de referencia (hg38_aa_pos); 0 dentro de region',
                       'genomic': 'distancia en nt en el mismo cromosoma; 0 en coincidencia'},
-        'states': {'proximity': 'executed_descriptive' if len(protein_df) else 'no_terms',
+        'states': {'proximity': 'executed_descriptive' if protein_rows.rows_written else 'no_terms',
                    'characterization': 'not_executed (componente separado)',
                    'localization': 'not_executed (componente separado)',
                    'global_association': 'not_executed (componente separado)'},
@@ -266,7 +307,7 @@ def main():
     with open(os.path.join(args.output_dir, 'proximity_manifest.json'), 'w') as f:
         json.dump(out_manifest, f, indent=2, sort_keys=True)
         f.write('\n')
-    print(f"proximity: {len(protein_df)} protein distance rows, {len(genomic_df)} genomic rows "
+    print(f"proximity: {protein_rows.rows_written} protein distance rows, {genomic_rows.rows_written} genomic rows "
           f"-> {args.output_dir}")
 
 

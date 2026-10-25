@@ -61,6 +61,7 @@ rmarkdown::render(file.path(root, 'subworkflows/ENRICHMENT/local/posenrich_modul
                   output_file = out_html, quiet = TRUE)
 stopifnot(file.exists(out_html))
 html <- paste(readLines(out_html, warn = FALSE), collapse = '\n')
+stopifnot(!grepl('mathjax.rstudio.com', html, fixed = TRUE))
 for (needle in c('POSENRICH modular', 'Localización dentro de proteínas',
                  'Asociación global', 'Proximidad', 'registro', 'TERM_A',
                  '0.625', 'not_identifiable', 'descriptive', 'not_validated',
@@ -75,3 +76,18 @@ cat('PASS: render del informe POSENRICH modular con pipeline dirigido de fixture
 stopifnot(!grepl('no ejecutado / no disponible', html, fixed = TRUE))
 loc <- read.delim(file.path(scratch, 'localization/localization_results.tsv'))
 stopifnot(all(is.na(loc$p_mc)), all(is.na(loc$q)), all(loc$B_valid == 0))
+
+# The HTML preview is bounded without truncating its complete source TSV.
+preview_env <- new.env(parent = globalenv())
+rmarkdown::render(file.path(root, 'subworkflows/ENRICHMENT/local/posenrich_modular_report.Rmd'),
+  params = list(registry_dir = file.path(scratch, 'registry'),
+    characterization_dir = file.path(scratch, 'characterization'),
+    localization_dir = file.path(scratch, 'localization'), global_dir = file.path(scratch, 'global'),
+    proximity_dir = file.path(scratch, 'proximity'), table_preview_rows = 2),
+  envir = preview_env, output_file = file.path(scratch, 'preview.html'), quiet = TRUE)
+stopifnot(nrow(preview_env$char_pos) == 2L,
+          isTRUE(attr(preview_env$char_pos, 'preview_truncated')),
+          nrow(read.delim(file.path(scratch, 'characterization/position_characterization.tsv'))) == 12L)
+preview_html <- paste(readLines(file.path(scratch, 'preview.html'), warn = FALSE), collapse = '\n')
+stopifnot(grepl('Vista previa: primeras 2 filas.', preview_html, fixed = TRUE))
+cat('PASS: bounded position preview; complete TSV retained\n')

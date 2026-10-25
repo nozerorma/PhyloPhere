@@ -12,6 +12,8 @@ output:
     code_folding: hide
     df_print: paged
     self_contained: true
+    mathjax: null
+    md_extensions: "-tex_math_dollars"
 params:
   registry_dir: NULL
   characterization_dir: NULL
@@ -24,6 +26,7 @@ params:
   n_permutations: 999
   seed: 1
   radios: "0,5,10"
+  table_preview_rows: 1000
 ---
 
 ```{r setup, include=FALSE}
@@ -34,6 +37,27 @@ read_manifest <- function(path, name = "manifest.json") {
   f <- file.path(path, name)
   if (!file.exists(f)) return(NULL)
   fromJSON(f, simplifyVector = FALSE)
+}
+
+# Row-level registries can contain millions of positions. Keep them in the
+# published TSVs and read only a bounded preview for the self-contained HTML.
+preview_rows <- as.integer(params$table_preview_rows)
+stopifnot(length(preview_rows) == 1L, !is.na(preview_rows), preview_rows > 0L)
+read_preview <- function(path) {
+  if (!file.exists(path)) return(NULL)
+  data <- read_tsv(path, n_max = preview_rows + 1L, show_col_types = FALSE,
+                   col_types = cols(.default = col_character()))
+  truncated <- nrow(data) > preview_rows
+  data <- head(data, preview_rows)
+  attr(data, "preview_truncated") <- truncated
+  data
+}
+preview_datatable <- function(data, source, ...) {
+  note <- if (isTRUE(attr(data, "preview_truncated"))) {
+    htmltools::tags$p(sprintf("Vista previa: primeras %d filas. Tabla completa en %s.",
+                             preview_rows, source))
+  } else NULL
+  htmltools::tagList(note, datatable(data, rownames = FALSE, ...))
 }
 ```
 
@@ -85,7 +109,7 @@ universe <- if (file.exists(f)) read_tsv(f, show_col_types = FALSE) else NULL
 coverage_f <- file.path(params$registry_dir, "coverage.tsv")
 coverage <- if (file.exists(coverage_f)) read_tsv(coverage_f, show_col_types = FALSE) else NULL
 pending_f <- file.path(params$registry_dir, "pending_mappings.tsv")
-pending <- if (file.exists(pending_f)) read_tsv(pending_f, show_col_types = FALSE) else NULL
+pending <- read_preview(pending_f)
 
 if (!is.null(universe)) {
   cat("**Estados de evaluación del universo posicional** (denominador: posiciones del registro)\n\n")
@@ -97,7 +121,7 @@ if (!is.null(coverage)) {
 }
 if (!is.null(pending) && nrow(pending)) {
   cat("**Mapeos pendientes** (registros originales sin proyectar a CAAS; no son negativos)\n\n")
-  datatable(pending, rownames = FALSE)
+  preview_datatable(pending, "posenrich/registry/pending_mappings.tsv")
 } else {
   cat("**Mapeos pendientes:** ninguno.\n")
 }
@@ -112,7 +136,7 @@ Ninguna anotación recibe significación de enriquecimiento por el mero hecho de
 char_pos_f <- file.path(params$characterization_dir, "position_characterization.tsv")
 coll_f <- file.path(params$characterization_dir, "collection_summary.tsv")
 rank_f <- file.path(params$characterization_dir, "ranking_summary.tsv")
-char_pos <- if (file.exists(char_pos_f)) read_tsv(char_pos_f, show_col_types = FALSE) else NULL
+char_pos <- read_preview(char_pos_f)
 coll_sum <- if (file.exists(coll_f)) read_tsv(coll_f, show_col_types = FALSE) else NULL
 rank_sum <- if (file.exists(rank_f)) read_tsv(rank_f, show_col_types = FALSE) else NULL
 
@@ -126,7 +150,8 @@ if (!is.null(coll_sum)) {
 }
 if (!is.null(char_pos)) {
   cat("**Posiciones caracterizadas** (anotadas o con score positivo)\n\n")
-  datatable(char_pos, rownames = FALSE, options = list(pageLength = 25))
+  preview_datatable(char_pos, "posenrich/characterization/position_characterization.tsv",
+                    options = list(pageLength = 25))
 } else {
   cat("Caracterización no ejecutada o sin tabla disponible.\n")
 }

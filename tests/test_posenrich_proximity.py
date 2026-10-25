@@ -116,3 +116,55 @@ def test_proximity_without_map_reports_coverage_not_infinite(tmp_path):
     manifest = json.loads((out / 'proximity_manifest.json').read_text())
     assert manifest['control']['status'] == 'not_validated'
     assert 'proximidad genómica y proteica no se mezclan' in manifest['limits']
+
+
+def test_best_side_scores_and_empty_collection_filter(tmp_path):
+    registry_dir = make_proximity_fixture(tmp_path)
+    evidence = registry_dir / 'position_evidence.tsv'
+    lines = evidence.read_text().splitlines()
+    columns = lines[0].split('\t')
+    duplicate = lines[1].split('\t')
+    duplicate[columns.index('side')] = 'bottom'
+    duplicate[columns.index('CAAS_score')] = '0.99'
+    evidence.write_text('\n'.join(lines + ['\t'.join(duplicate)]) + '\n')
+    out = run_proximity(registry_dir, tmp_path / 'prox')
+    rows = read_tsv(out / 'proximity_protein_distances.tsv')
+    queries = [r for r in rows if r['collection_id'] == 'custom' and r['Position'] == '0']
+    assert len(queries) == 1 and queries[0]['CAAS_score'] == '0.99'
+    empty = run_proximity(registry_dir, tmp_path / 'empty', ['--collections', 'not_present'])
+    assert read_tsv(empty / 'proximity_protein_distances.tsv') == []
+    assert read_tsv(empty / 'proximity_genomic_summary.tsv') == []
+    assert json.loads((empty / 'proximity_manifest.json').read_text())['states']['proximity'] == 'no_terms'
+
+
+def test_streamed_summaries_match_exact_distance_statistics(tmp_path):
+    import csv
+    import importlib.util
+    from contextlib import ExitStack
+
+    spec = importlib.util.spec_from_file_location('proximity', PROXIMITY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # Unsorted distances, mixed missingness, odd/even medians, and term reset.
+    with ExitStack() as stack:
+        sink = module.DistanceOutput(stack, str(tmp_path), 'protein', 'hg38_aa_pos',
+                                     'distance_residues', [0, 5, 10])
+        for term, distances in [('a', [9, 0, 2, None]), ('b', [10, 2]), ('c', [None])]:
+            for pos, distance in enumerate(distances):
+                sink.append(dict(collection_id='custom', term_id=term, Gene='G1', Position=pos,
+                                 hg38_aa_pos=pos, distance_residues='NA' if distance is None else distance,
+                                 in_region=0, CAAS_score=.9,
+                                 status='measured' if distance is not None else 'no_reference_residue'))
+            sink.finish_term('custom', term)
+            assert len(sink.distances) == 0
+    with (tmp_path / 'proximity_protein_summary.tsv').open() as stream:
+        rows = list(csv.DictReader(stream, delimiter='\t'))
+    assert [r['median_distance'] for r in rows] == ['2.0', '6.0', 'NA']
+    assert rows[0]['mean_distance'] == repr(11 / 3)
+    assert rows[0]['coverage_proportion'] == '0.75'
+    assert rows[0]['prop_within_5'] == repr(2 / 3)
+    assert rows[1]['n_positions_evaluated'] == '2'
+    # Nearest-site lookup must respect separated intervals, not fill their gap.
+    for value in range(31):
+        assert module.nearest_distance(value, [3, 4, 20, 21]) == min(
+            abs(value - site) for site in [3, 4, 20, 21])
