@@ -83,3 +83,77 @@ def test_global_minus_log10_pemp_sensitivity(tmp_path):
     # positions (8 background + G2 members {3,4}). Average ranks: 2.0 -> 11.5,
     # 0.699 -> 5.5. Member rank sum = 2*11.5 + 2*5.5 = 34; AUC = (34 - 10) / 32 = 0.75.
     assert float(term_a['auc']) == 0.75
+
+
+def test_cached_global_and_loo_match_pairwise_oracle(monkeypatch):
+    import importlib.util
+    import numpy as np
+    monkeypatch.syspath_prepend(str(SRC))
+    spec = importlib.util.spec_from_file_location('global_engine', GLOBAL)
+    engine = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(engine)
+    rng = np.random.default_rng(7)
+
+    def oracle(scores, members):
+        inside = [v for k, v in scores.items() if k in members]
+        outside = [v for k, v in scores.items() if k not in members]
+        if not inside or not outside:
+            return None
+        return sum(float(m > b) + .5 * float(m == b) for m in inside for b in outside) / (len(inside) * len(outside))
+
+    for rep in range(100):
+        # Ties, signed values, unequal protein sizes, absent member genes.
+        scores = {(f'G{g}', p): float(rng.integers(-2, 3))
+                  for g in range(5) for p in range(g + 1)}
+        if rep == 0:
+            scores = {}
+        keys = list(scores)
+        members = {k for k in keys if rng.random() < .4}
+        if rep == 1:
+            members = set(keys)
+        members.add(('outside', 99))
+        background = engine.GlobalBackground(scores)
+        observed, n1, n0, loo = background.evaluate(list(members))
+        assert observed == oracle(scores, members)
+        assert n1 == len(set(scores) & members) and n0 == len(scores) - n1
+        expected = {}
+        if observed is not None:
+            for gene in sorted({g for g, _ in members}):
+                value = oracle({k: v for k, v in scores.items() if k[0] != gene}, members)
+                if value is not None:
+                    expected[gene] = value
+        assert dict(loo) == expected
+
+
+def test_global_all_directions_and_fubar_tested_background(tmp_path):
+    registry = make_localization_fixture(tmp_path)
+    # Append one explicitly covered FUBAR term plus tested sites; the high-score
+    # non-tested positions must not become its background.
+    import csv
+    with (registry / 'collections.tsv').open() as stream:
+        rows = list(csv.DictReader(stream, delimiter='\t'))
+    columns = list(rows[0])
+    template = dict(rows[0])
+    template.update(collection_id='fubar_positive', term_id='F', status='included', analyses='global')
+    with (registry / 'collections.tsv').open('w') as stream:
+        writer = csv.DictWriter(stream, fieldnames=columns, delimiter='\t', lineterminator='\n')
+        writer.writeheader(); writer.writerows(rows + [template])
+    with (registry / 'members.tsv').open() as stream:
+        member_rows = list(csv.DictReader(stream, delimiter='\t'))
+    member_columns = list(member_rows[0])
+    for cid, gene, pos in [('fubar_tested', 'G1', 0), ('fubar_tested', 'G1', 1),
+                           ('fubar_positive', 'G1', 0)]:
+        row = dict.fromkeys(member_columns, 'NA')
+        row.update(collection_id=cid, term_id='F', Gene=gene, Position=str(pos))
+        member_rows.append(row)
+    with (registry / 'members.tsv').open('w') as stream:
+        writer = csv.DictWriter(stream, fieldnames=member_columns, delimiter='\t', lineterminator='\n')
+        writer.writeheader(); writer.writerows(member_rows)
+    out = run_global(registry, tmp_path / 'global', ['--scope', 'all'])
+    results = read_tsv(out / 'global_results.tsv')
+    fubar = {r['rank_direction']: r for r in results if r['collection_id'] == 'fubar_positive'}
+    assert set(fubar) == {'global', 'top', 'bottom'}
+    assert fubar['global']['auc'] == '1.0' and fubar['top']['auc'] == '1.0'
+    assert fubar['global']['n_background'] == '1'
+    assert fubar['bottom']['status'] == 'not_identifiable'
+    assert all(r['coverage_status'] == 'fubar_tested_positions' for r in fubar.values())

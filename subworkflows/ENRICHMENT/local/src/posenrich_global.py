@@ -30,10 +30,11 @@ import argparse
 import csv
 import json
 import os
+from collections import Counter
 
 import numpy as np
 import pandas as pd
-from posenrich_localization import position_ranking_scores, compatible_scores, SCORE_SCOPES
+from posenrich_localization import position_ranking_scores, tsv_records, SCORE_SCOPES
 
 REGISTRY_FILES = ['positions.tsv', 'position_evidence.tsv', 'members.tsv',
                   'collections.tsv', 'coverage.tsv', 'manifest.json']
@@ -84,6 +85,61 @@ def auc(scores, member_mask):
     return (float(ranks[member_mask == 1].sum()) - n1 * (n1 + 1) / 2.0) / (n1 * n0)
 
 
+def pair_wins(member_values, sorted_background):
+    """Exact member/background wins, giving half credit to equal scores."""
+    lower = np.searchsorted(sorted_background, member_values, side='left')
+    upper = np.searchsorted(sorted_background, member_values, side='right')
+    return float(lower.sum()) + .5 * float((upper - lower).sum())
+
+
+class GlobalBackground:
+    """One rank table per direction/coverage, reused across all terms and LOO."""
+
+    def __init__(self, scores):
+        keys = sorted(scores)
+        self.index = {key: i for i, key in enumerate(keys)}
+        self.values = np.array([scores[key] for key in keys], dtype=float)
+        self.ranks = average_ranks(self.values)
+        by_gene = {}
+        for i, (gene, _) in enumerate(keys):
+            by_gene.setdefault(gene, []).append(i)
+        self.by_gene = {gene: np.array(indices, dtype=np.intp) for gene, indices in by_gene.items()}
+
+    def evaluate(self, term_keys):
+        indices = np.array(sorted({self.index[k] for k in term_keys if k in self.index}), dtype=np.intp)
+        n1, n0 = len(indices), len(self.values) - len(indices)
+        if n1 == 0 or n0 == 0:
+            return None, n1, n0, []
+        u = float(self.ranks[indices].sum()) - n1 * (n1 + 1) / 2.0
+        observed = u / (n1 * n0)
+        mask = np.zeros(len(self.values), dtype=bool)
+        mask[indices] = True
+        member_values = np.sort(self.values[indices])
+        # For a member with rank r among all scores, subtract its rank among
+        # members to obtain its wins against the background (ties included).
+        member_wins = (self.ranks[indices] -
+                       (.5 * (np.searchsorted(member_values, self.values[indices], 'left') +
+                               np.searchsorted(member_values, self.values[indices], 'right')) + .5))
+        wins_by_index = dict(zip(indices, member_wins))
+        loo = []
+        for gene in sorted({g for g, _ in term_keys}):
+            gene_indices = self.by_gene.get(gene, np.array([], dtype=np.intp))
+            gene_members = gene_indices[mask[gene_indices]]
+            gene_background = self.values[gene_indices[~mask[gene_indices]]]
+            remaining_members, remaining_background = n1 - len(gene_members), n0 - len(gene_background)
+            if remaining_members == 0 or remaining_background == 0:
+                continue
+            # Remove pairs touching this gene; add back pairs removed twice.
+            loss_members = sum(wins_by_index[i] for i in gene_members)
+            lower = np.searchsorted(member_values, gene_background, 'left')
+            upper = np.searchsorted(member_values, gene_background, 'right')
+            loss_background = float((n1 - upper).sum()) + .5 * float((upper - lower).sum())
+            overlap = pair_wins(self.values[gene_members], np.sort(gene_background))
+            value = (u - loss_members - loss_background + overlap) / (remaining_members * remaining_background)
+            loo.append((gene, value))
+        return observed, n1, n0, loo
+
+
 def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -94,8 +150,6 @@ def main():
     if args.ranking not in ('caas_score', 'minus_log10_pemp'):
         raise SystemExit(f'unknown ranking: {args.ranking}')
 
-    evidence = read_tsv(os.path.join(args.registry_dir, 'position_evidence.tsv'))
-    members = read_tsv(os.path.join(args.registry_dir, 'members.tsv'))
     collections = read_tsv(os.path.join(args.registry_dir, 'collections.tsv'))
     with open(os.path.join(args.registry_dir, 'manifest.json')) as f:
         manifest = json.load(f)
@@ -106,68 +160,77 @@ def main():
         wanted = set(args.collections.split(','))
         eligible = eligible[eligible['collection_id'].isin(wanted)]
 
+    selected = set(zip(eligible['collection_id'], eligible['term_id']))
+    member_index, tested = {}, set()
+    for row in tsv_records(os.path.join(args.registry_dir, 'members.tsv')):
+        cid, term = row['collection_id'], row['term_id']
+        key = (row['Gene'], int(row['Position']))
+        if cid == 'fubar_tested':
+            tested.add(key)
+        if (cid, term) in selected:
+            member_index.setdefault((cid, term), []).append(key)
     result_rows = []
-    gene_rows = []
-    for direction in (SCORE_SCOPES if args.scope == 'all' else (args.scope,)):
-        scores = position_ranking_scores(evidence, args.ranking, direction)
-        for row in eligible.to_dict('records'):
-            cid, term = row['collection_id'], row['term_id']
-            term_scores, coverage_status = compatible_scores(scores, members, cid)
-            metadata = {'rank_direction': direction, 'coverage_status': coverage_status,
-                        'ranking_population': 'canonical_positive_detections_only'
-                        if args.ranking == 'caas_score' else 'positions_with_canonical_p'}
-            keys = sorted(term_scores)
-            score_arr = np.array([term_scores[k] for k in keys], dtype=float)
-            sub = members[(members['collection_id'] == cid) & (members['term_id'] == term)]
-            term_keys = [(r['Gene'], int(r['Position'])) for r in sub.to_dict('records')]
-            # Members outside the evaluable background are audited, not dropped silently.
-            n_members_total = len(term_keys)
-            member_set = set(term_keys)
-            mask = np.array([1 if k in member_set else 0 for k in keys], dtype=float)
-            n_members = int(mask.sum())
-            auc_obs = auc(score_arr, mask)
-            genes = sorted({g for g, _ in term_keys})
-            n_genes = len(genes)
-            if auc_obs is None:
+    gene_writer = None
+    with open(os.path.join(args.output_dir, 'global_by_gene.tsv'), 'w', newline='') as gene_stream:
+        for direction in (SCORE_SCOPES if args.scope == 'all' else (args.scope,)):
+            scores = position_ranking_scores(
+                tsv_records(os.path.join(args.registry_dir, 'position_evidence.tsv')), args.ranking, direction)
+            backgrounds = {'experimental_coverage_unknown': GlobalBackground(scores)}
+            if any(cid in ('fubar_positive', 'fubar_purifying') for cid in eligible['collection_id']):
+                backgrounds['fubar_tested_positions'] = GlobalBackground({k: v for k, v in scores.items() if k in tested})
+            del scores
+            for row in eligible.to_dict('records'):
+                cid, term = row['collection_id'], row['term_id']
+                coverage_status = 'fubar_tested_positions' if cid in ('fubar_positive', 'fubar_purifying') else 'experimental_coverage_unknown'
+                metadata = {'rank_direction': direction, 'coverage_status': coverage_status,
+                            'ranking_population': 'canonical_positive_detections_only'
+                            if args.ranking == 'caas_score' else 'positions_with_canonical_p'}
+                term_keys = member_index.get((cid, term), [])
+                n_members_total = len(term_keys)
+                gene_counts = Counter(g for g, _ in term_keys)
+                n_genes = len(gene_counts)
+                auc_obs, n_members, n_background, loo = backgrounds[coverage_status].evaluate(term_keys)
+                if auc_obs is None:
+                    result_rows.append({
+                        'analysis': 'global_association', 'scope': 'global', 'ranking': args.ranking,
+                        **metadata, 'collection_id': cid, 'term_id': term, 'effect_statistic': 'AUC',
+                        'auc': 'NA', 'n_members': n_members, 'n_members_total': n_members_total,
+                        'n_background': n_background, 'n_genes': n_genes,
+                        'loo_auc_min': 'NA', 'loo_auc_max': 'NA',
+                        'calibration_status': 'not_available', 'p': 'NA', 'status': 'not_identifiable',
+                        'reason': 'el conjunto no tiene miembros evaluables o no tiene fondo',
+                    })
+                    continue
+                # Stream per-gene influence instead of retaining every term/gene row.
+                for gene, loo_auc in loo:
+                    gene_row = {**metadata, 'collection_id': cid, 'term_id': term, 'ranking': args.ranking,
+                                'Gene': gene, 'n_members': gene_counts[gene],
+                                'auc_without_gene': repr(loo_auc), 'delta_auc': repr(auc_obs - loo_auc)}
+                    if gene_writer is None:
+                        gene_writer = csv.DictWriter(gene_stream, fieldnames=list(gene_row),
+                                                     delimiter='\t', lineterminator='\n')
+                        gene_writer.writeheader()
+                    gene_writer.writerow(gene_row)
+                loo_values = [v for _, v in loo]
                 result_rows.append({
                     'analysis': 'global_association', 'scope': 'global', 'ranking': args.ranking,
                     **metadata, 'collection_id': cid, 'term_id': term, 'effect_statistic': 'AUC',
-                    'auc': 'NA', 'n_members': n_members, 'n_members_total': n_members_total,
-                    'n_background': len(keys) - n_members, 'n_genes': n_genes,
-                    'loo_auc_min': 'NA', 'loo_auc_max': 'NA',
-                    'calibration_status': 'not_available', 'p': 'NA', 'status': 'not_identifiable',
-                    'reason': 'el conjunto no tiene miembros evaluables o no tiene fondo',
+                    'auc': repr(auc_obs), 'n_members': n_members, 'n_members_total': n_members_total,
+                    'n_background': n_background, 'n_genes': n_genes,
+                    'loo_auc_min': repr(min(loo_values)) if loo_values else 'NA',
+                    'loo_auc_max': repr(max(loo_values)) if loo_values else 'NA',
+                    'calibration_status': 'not_available',
+                    'p': 'NA',
+                    'status': 'descriptive',
+                    'reason': 'sin calibracion global reproducible por ciclo; los contadores marginales '
+                              'no reconstruyen scores ni coocurrencias; no se sustituye por el p de localizacion',
                 })
-                continue
-            # Leave-one-gene-out sensitivity: composition and influence of each protein.
-            loo = []
-            for gene in genes:
-                keep = [i for i, k in enumerate(keys) if k[0] != gene]
-                if not keep:
-                    continue
-                loo_auc = auc(score_arr[keep], mask[keep])
-                if loo_auc is not None:
-                    loo.append((gene, loo_auc))
-                    gene_rows.append({**metadata, 'collection_id': cid, 'term_id': term, 'ranking': args.ranking,
-                                      'Gene': gene, 'n_members': int(sum(1 for g, _ in term_keys if g == gene)),
-                                      'auc_without_gene': repr(loo_auc),
-                                      'delta_auc': repr(auc_obs - loo_auc)})
-            loo_values = [v for _, v in loo]
-            result_rows.append({
-                'analysis': 'global_association', 'scope': 'global', 'ranking': args.ranking,
-                **metadata, 'collection_id': cid, 'term_id': term, 'effect_statistic': 'AUC',
-                'auc': repr(auc_obs), 'n_members': n_members, 'n_members_total': n_members_total,
-                'n_background': len(keys) - n_members, 'n_genes': n_genes,
-                'loo_auc_min': repr(min(loo_values)) if loo_values else 'NA',
-                'loo_auc_max': repr(max(loo_values)) if loo_values else 'NA',
-                'calibration_status': 'not_available',
-                'p': 'NA',
-                'status': 'descriptive',
-                'reason': 'sin calibracion global reproducible por ciclo; los contadores marginales '
-                          'no reconstruyen scores ni coocurrencias; no se sustituye por el p de localizacion',
-            })
+
+        if gene_writer is None:
+            csv.writer(gene_stream, delimiter='\t', lineterminator='\n').writerow(
+                ['collection_id', 'term_id', 'ranking', 'rank_direction', 'Gene', 'n_members',
+                 'auc_without_gene', 'delta_auc'])
     write_tsv(pd.DataFrame(result_rows, columns=list(result_rows[0]) if result_rows else ['analysis', 'scope', 'ranking', 'rank_direction', 'collection_id', 'term_id', 'auc', 'p', 'status']), os.path.join(args.output_dir, 'global_results.tsv'))
-    write_tsv(pd.DataFrame(gene_rows, columns=list(gene_rows[0]) if gene_rows else ['collection_id', 'term_id', 'ranking', 'rank_direction', 'Gene', 'n_members', 'auc_without_gene', 'delta_auc']), os.path.join(args.output_dir, 'global_by_gene.tsv'))
 
     out_manifest = {
         'component': 'global_association',
