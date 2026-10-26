@@ -7,7 +7,8 @@
  *  SCORING_REPORT: renders 11.Scoring_report.Rmd for one trait from the tables of
  *  SCORING_COMPUTE and the optional evidence files.
  *
- *  Consumes:  position_scores.tsv, gene_scores.tsv, gene_correlations.tsv; optional
+ *  Consumes:  position_scores.tsv, gene_scores.tsv, gene_correlations.tsv,
+ *             gene_evidence_metadata.json (staged beside gene_scores.tsv); optional
  *             per-site FADE tables (top and bottom), gene coordinates, the CAAS
  *             position-level permulation null (cycle_summary.tsv, cycle_hist.tsv), the design of the
  *             null cycles (permulation_manifest.tsv), the audit of the null harvest
@@ -41,6 +42,7 @@ process SCORING_REPORT {
     path position_scores
     path gene_scores
     path gene_correlations
+    path evidence_metadata   // gene_evidence_metadata.json from SCORING_EVIDENCE; must sit next to gene_scores.tsv because the report looks it up by dirname(gene_scores_file) (gene_stat check, nominal/FDR thresholds)
     path fade_site_top_file  // optional: per-site FADE table, top direction (NO_FADE_SITE_TOP sentinel when absent)
     path fade_site_bot_file  // optional: per-site FADE table, bottom direction (NO_FADE_SITE_BOT sentinel when absent)
     path genomic_info        // optional: gene genomic coords TSV (NO_GENOMIC_INFO sentinel when absent)

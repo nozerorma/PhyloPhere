@@ -269,6 +269,7 @@ workflow SCORING {
             evidence_out.position_scores,
             evidence_out.gene_scores,
             compute_out.gene_correlations,
+            evidence_out.metadata,
             resolved_fade_site_top_ch,
             resolved_fade_site_bot_ch,
             resolved_genomic_info,
