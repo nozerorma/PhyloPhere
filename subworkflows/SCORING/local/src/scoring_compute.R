@@ -70,7 +70,7 @@ rer_file             <- parse_arg("--rer")
 accum_dir            <- parse_arg("--accum_dir")
 hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS otherwise
 core_positions_file  <- parse_arg("--core_positions")  # observed_core_scores.py: CAAS_score per (Gene, Position, side)
-core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: size-adjusted gene CAAS scores
+core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: raw maximum gene CAAS scores
 null_counters_file   <- parse_arg("--null_counters")     # null_counters.tsv (counters of the position-level null); NO_FILE otherwise
 null_fit_file        <- parse_arg("--null_fit")          # legacy staging metadata (unused); NO_FILE otherwise
 null_base_file       <- parse_arg("--null_base")         # null_universe_base.tsv (sizes and saturation curve of the null); NO_FILE otherwise
@@ -590,16 +590,9 @@ if (has_rer) {
     names(rer)[1] <- "gene"
   }
 
-  # Use p.perm if available, otherwise p.adj / p.value / pval
+  # Empirical evidence only; missing p.perm stays unavailable.
   if (!"p.perm" %in% names(rer)) rer$p.perm <- NA_real_
   pval_col <- "p.perm"
-  if (is.na(pval_col)) {
-    pval_col <- names(rer)[grepl("^p", names(rer))][1]
-    if (is.na(pval_col)) {
-      rer$p.adj <- 1.0
-      pval_col <- "p.adj"
-    }
-  }
   cat(sprintf("  Using %s for rer_min_pval\n", pval_col))
 
   # Find Rho case-insensitively
@@ -831,20 +824,30 @@ cat(sprintf("  gene_scores.tsv: %d rows\n", nrow(gene_out)))
 .rer_dir <- tolower(as.character(.col(gene_scores, "rer_acceleration")))
 
 # The CAAS rankings are the gene scores: gene_caas_score, gene_caas_score_top and gene_caas_score_bottom.
+nullable_flag <- function(x) ifelse(is.na(x),NA,.istrue(x))
+.rer_rho_fcs <- suppressWarnings(as.numeric(.col(gene_scores,"rer_rho")))
+.rer_nom_fcs <- suppressWarnings(as.numeric(.col(gene_scores,"rer_min_pval")))
+.rer_q_fcs <- suppressWarnings(as.numeric(.col(gene_scores,"rer_perm_padj")))
 fcs_stats <- tibble(
   gene             = gene_scores$Gene,
   score_global     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score"))),
   score_top        = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_top"))),
   score_bottom     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_bottom"))),
-  flag_fade_top    = .istrue(.col(gene_scores, "fade_significant_top")),
-  flag_fade_bottom = .istrue(.col(gene_scores, "fade_significant_bottom")),
-  flag_rer_acc     = .istrue(.col(gene_scores, "rer_significant")) & grepl("acc", .rer_dir),
-  flag_rer_decc    = .istrue(.col(gene_scores, "rer_significant")) & grepl("dec", .rer_dir),
-  flag_rer_acc_adjusted = .istrue(.col(gene_scores, "rer_significant_fdr")) & grepl("acc", .rer_dir),
-  flag_rer_decc_adjusted = .istrue(.col(gene_scores, "rer_significant_fdr")) & grepl("dec", .rer_dir),
-  flag_accum        = .istrue(.col(gene_scores, "accum_significant")),
-  flag_accum_top    = .istrue(.col(gene_scores, "accum_significant_top")),
-  flag_accum_bottom = .istrue(.col(gene_scores, "accum_significant_bottom"))
+  flag_fade_top    = nullable_flag(.col(gene_scores, "fade_significant_top")),
+  flag_fade_bottom = nullable_flag(.col(gene_scores, "fade_significant_bottom")),
+  flag_rer_acc = ifelse(is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs),.rer_nom_fcs<.05 & .rer_rho_fcs>0,NA),
+  flag_rer_decc = ifelse(is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs),.rer_nom_fcs<.05 & .rer_rho_fcs<0,NA),
+  flag_rer_acc_adjusted = ifelse(is.finite(.rer_q_fcs) & is.finite(.rer_rho_fcs),.rer_q_fcs<.05 & .rer_rho_fcs>0,NA),
+  flag_rer_decc_adjusted = ifelse(is.finite(.rer_q_fcs) & is.finite(.rer_rho_fcs),.rer_q_fcs<.05 & .rer_rho_fcs<0,NA),
+  fade_available_top = is.finite(.col(gene_scores,"fade_max_bf_top")),
+  fade_available_bottom = is.finite(.col(gene_scores,"fade_max_bf_bottom")),
+  rer_available = is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs),
+  accum_available = is.finite(.col(gene_scores,"accum_fdr")),
+  accum_available_top = is.finite(.col(gene_scores,"accum_fdr_top")),
+  accum_available_bottom = is.finite(.col(gene_scores,"accum_fdr_bottom")),
+  flag_accum        = nullable_flag(.col(gene_scores, "accum_significant")),
+  flag_accum_top    = nullable_flag(.col(gene_scores, "accum_significant_top")),
+  flag_accum_bottom = nullable_flag(.col(gene_scores, "accum_significant_bottom"))
 ) %>%
   mutate(flag_fade = flag_fade_top | flag_fade_bottom)
 write_tsv(fcs_stats, "fcs_stats.tsv")

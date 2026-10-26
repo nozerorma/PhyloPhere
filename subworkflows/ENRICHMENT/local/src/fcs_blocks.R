@@ -20,6 +20,7 @@ get_arg <- function(flag, default = NULL) {
   i <- which(args == flag)
   if (length(i) == 0 || i[length(i)] == length(args)) default else args[i[length(i)] + 1]
 }
+if (!identical(get_arg("--gene-stat", "max"), "max")) stop("Only CAAS gene_stat=max is supported")
 step <- args[1]
 src_dir <- dirname(normalizePath(sub("--file=", "", grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)[1])))
 suppressPackageStartupMessages({ library(readr); library(dplyr) })

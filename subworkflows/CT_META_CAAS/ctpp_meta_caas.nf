@@ -83,6 +83,8 @@ process CAAS_SIGNIFICANCE_REPORT {
     input:
     path meta_caas
     path position_scores
+    path gene_scores
+    path gene_metadata
 
     output:
     path "*.html", emit: report
@@ -105,6 +107,8 @@ process CAAS_SIGNIFICANCE_REPORT {
                 params = list(
                     meta_caas_input = '${meta_caas}',
                     position_scores_input = '${position_scores}',
+                    gene_scores_input = '${gene_scores}',
+                    gene_metadata_input = '${gene_metadata}',
                     output_dir = '${outdir}',
                     seed = '${params.seed ?: 1998}'
                 ),
@@ -123,6 +127,8 @@ process CAAS_SIGNIFICANCE_REPORT {
                 params = list(
                     meta_caas_input = '${meta_caas}',
                     position_scores_input = '${position_scores}',
+                    gene_scores_input = '${gene_scores}',
+                    gene_metadata_input = '${gene_metadata}',
                     output_dir = '${outdir}',
                     seed = '${params.seed ?: 1998}'
                 ),

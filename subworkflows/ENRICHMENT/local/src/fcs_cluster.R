@@ -51,9 +51,10 @@ fcs_cluster_sets <- function(sets, threshold = 0.5, method = "jaccard") {
 # Adds cluster_id and is_representative to the results table of fcs_run_all().
 # enrich: the table (columns ranking, database, pathway, q.perm, p.perm, stat, sig_perm).
 # leading: long table of leading-edge genes (ranking, database, pathway, gene).
-# The groups are formed per ranking over its significant sets (sig_perm); the other rows get NA.
+# Groups are formed per ranking over selection_col; callers may supply a shared presentation order.
+# Other rows get NA; p/q and selection calls are never changed.
 # cluster_id is "<ranking>_C<k>", k following the significance of the representative.
-fcs_add_clusters <- function(enrich, leading, threshold = 0.5, method = "jaccard") {
+fcs_add_clusters <- function(enrich, leading, threshold = 0.5, method = "jaccard", selection_col = "sig_perm", order_fun = NULL) {
   enrich$cluster_id <- NA_character_
   enrich$is_representative <- NA
   key <- function(d) paste(d$ranking, d$database, d$pathway, sep = "\r")
@@ -61,10 +62,12 @@ fcs_add_clusters <- function(enrich, leading, threshold = 0.5, method = "jaccard
   le_key <- key(leading)
   genes_by_key <- split(as.character(leading$gene), le_key)
   for (rk in unique(enrich$ranking)) {
-    idx <- which(enrich$ranking == rk & enrich$sig_perm %in% TRUE)
+    idx <- which(enrich$ranking == rk & enrich[[selection_col]] %in% TRUE)
     if (length(idx) == 0) next
     d <- enrich[idx, , drop = FALSE]
-    o <- order(d$q.perm, d$p.perm, -abs(d$stat), d$database, d$pathway)
+    o <- if (is.null(order_fun)) order(d$q.perm, d$p.perm, -abs(d$stat), d$database, d$pathway) else {
+      d$.source_index <- seq_len(nrow(d)); order_fun(d)$.source_index
+    }
     idx <- idx[o]
     sets <- lapply(keys[idx], function(k) { g <- genes_by_key[[k]]; if (is.null(g)) character(0) else unique(g) })
     names(sets) <- keys[idx]

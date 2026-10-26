@@ -31,7 +31,7 @@
 # =============================================================================
 
 suppressPackageStartupMessages({
-  library(RERconverge)   # fastwilcoxGMT, read.gmt
+  # RERconverge is resolved by namespace only when scientific computation/GMT parsing is requested.
   library(dplyr)
   library(tidyr)
   library(stringr)
@@ -490,8 +490,8 @@ fcs_enrich_col_types <- function() {
 # ── Significance classification ───────────────────────────────────────────────
 
 # BH over p.perm within each (ranking, database) gives q.perm. A set is significant (sig_perm) when q.perm < fdr_thr.
-# direction is the sign of stat for a
-# significant set (a signed ranking is tested two-sided, so a set can be significant on either side). Rows without p.perm
+# direction describes the sign of stat for every set, independently of selection.
+# A signed ranking is tested two-sided. Rows without p.perm
 # (no null for the ranking, or a set the null could not evaluate) have q.perm NA and are not significant.
 # redlich_level: the smallest of analytic_levels with p.adj below it, among the sets with p.perm below p_perm_thr;
 # NA otherwise. Neither classification adds a sign filter.
@@ -504,7 +504,7 @@ fcs_classify_significance <- function(enrich_df, fdr_thr, p_perm_thr, analytic_l
     dplyr::ungroup() %>%
     dplyr::mutate(
       sig_perm  = !is.na(q.perm) & q.perm < fdr_thr,
-      direction = dplyr::case_when(!sig_perm ~ NA_character_, stat > 0 ~ "positive", stat < 0 ~ "negative", TRUE ~ NA_character_)
+      direction = dplyr::case_when(!is.finite(stat) ~ NA_character_, stat > 0 ~ "positive", stat < 0 ~ "negative", TRUE ~ "zero")
     )
   eligible <- !is.na(out$p.adj) & !is.na(out$p.perm) & out$p.perm < p_perm_thr
   out$redlich_level <- NA_real_
@@ -672,7 +672,7 @@ fcs_leading_edge_summary <- function(le, attr_cols) {
     res_df <- res_df %>%
       dplyr::summarise(
         n_le = dplyr::n(),
-        dplyr::across(dplyr::all_of(present), ~ round(100 * mean(.x, na.rm = TRUE), 1)),
+        dplyr::across(dplyr::all_of(present), ~ if(all(is.na(.x))) NA_real_ else round(100 * mean(.x, na.rm = TRUE), 1)),
         .groups = "drop"
       )
   } else {

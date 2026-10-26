@@ -301,6 +301,7 @@ workflow SCORING {
         null_universe_summary = compute_out.null_universe_summary
         report           = final_reports
         // The CAAS null used here; ENRICHMENT consumes this one, so the FCS p.perm and the scoring report share it.
+        gene_evidence_metadata = evidence_out.metadata
         gene_evidence    = evidence_out.gene_evidence
         calibration      = evidence_out.calibration
         caas_perms       = caas_perms_resolved

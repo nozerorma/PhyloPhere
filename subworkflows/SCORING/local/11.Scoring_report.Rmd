@@ -265,7 +265,7 @@ gene_df$gene_caas_bot <- .num_col("gene_caas_score_bottom")
 
 # ── Gene-level accumulation significance ──────────────────────────────────────
 # Accumulation is represented by its exact hypergeometric p-value (accum_p),
-# with BH FDR (accum_fdr) and accum_significant (accum_fdr < 0.05).
+# with BH FDR (accum_fdr) and accum_significant (accum_fdr below the configured accumulation_fdr).
 has_accum_score <- "accum_p" %in% names(gene_df) && any(!is.na(gene_df$accum_p))
 has_rand <- has_accum_score
 
@@ -375,7 +375,7 @@ independent evolutionary evidence.
    for the number of positions is applied. Gene p.gen is calibrated against the
    raw maximum of the same gene in each null cycle. Compared against:
    `r if (has_rand) "- **accum_p**: Exact hypergeometric p-value of CAAS accumulation (+ BH FDR accum_fdr)."`
-   `r if (has_rer) "- RERConverge p-value and direction (accelerating / decelerating)."`
+   `r if (has_rer) "- RERConverge empirical p-value and sign of Rho (positive / negative)."`
    - FADE: gene is significant per direction if any position has BF >= 100.
 
 ## Companion reports
@@ -411,8 +411,9 @@ This section documents the exact weighting and combination logic used to
 produce every score in this report, so results can be interpreted and
 reproduced independently of the pipeline code.
 
-<details>
-<summary><strong>Click to expand full methodology</strong></summary>
+::: {.scoring-methodology}
+
+
 
 ---
 
@@ -436,7 +437,7 @@ Voronoi domain, built from the per-node ASR posteriors (full definitions in
 
 #### 2. Position score and biochemical groupings
 
-$$\text{caas\_row} = \text{asr\_path\_score}, \qquad \text{CAAS\_score} = \text{caas\_row}$$
+`caas_row = asr_path_score`; `CAAS_score = caas_row`.
 
 (`caas_row` carries no permutation-rank phenotype factor, on the observed or the null side.) `biochem_groupings` lists the
 groupings GS1-GS4 in which the derived residues of the position share one class that differs from the ancestral class,
@@ -466,13 +467,11 @@ the per-gene empirical null preserves that gene's null opportunities.
 #### gene_accum_score (`accum_p`) *(optional)*
 
 Exact hypergeometric p-value of CAAS accumulation.
-Reported with BH FDR (`accum_fdr`); `accum_significant` is `accum_fdr < 0.05`.
+Reported with BH FDR (`accum_fdr`); `accum_significant` uses the effective `params.accumulation_fdr` supplied to the producer, separately for all/top/bottom.
 
 #### RERConverge characterisation *(optional)*
 
-`p.perm` when present, falling back to `p.adj` / `p.value` / `pvalue` / `pval`.
-Direction from the sign of `Rho`: positive is accelerating, negative is
-decelerating. Significance threshold `p.perm <= 0.05`.
+`p.perm` supplies empirical gene evidence; missing values stay unavailable, with no analytic fallback. Direction describes the sign of `Rho` (positive / negative). Nominal `p.perm < 0.05`; BH `p.perm.adj < 0.05` in its original RER family. Both signs remain in every CAAS view.
 
 #### FADE gene-level characterisation *(optional)*
 
@@ -485,7 +484,7 @@ with `max_site_bf >= 100`.
 
 Genes use the empirical p.gen obtained from their own permulation null. Positions use p.emp (detects and exceeds, pooled over sides). Activity lists use the configured nominal threshold; the same tables and AMI networks highlight BH-adjusted significance. All tested genes remain in the continuous FCS ranking. No fraction of the score distribution is selected.
 
-</details>
+:::
 
 ---
 
@@ -638,15 +637,9 @@ if (nrow(.comp_pos) > 0) {
 }
 ```
 
-#### Detections with score 0
-
-```{r pos-null-zeros, eval=has_pos_null, fig.height=3.5, fig.width=6}
-.comp %>% group_by(direction, source) %>% summarise(zeros = weighted.mean(score == 0, weight), .groups = "drop") %>%
-  ggplot(aes(direction, zeros, fill = source)) +
-  geom_col(position = position_dodge(width = .8), width = .7) +
-  scale_fill_manual(values = .src_pal) + scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
-  labs(x = NULL, y = "share of detections", fill = NULL) + .theme_p
-```
+Detections require a strictly positive score. Zero entries in gene null matrices
+represent no detected signal in that cycle; missing empirical evidence is unavailable.
+Histogram bin 0 contains positive scores below 0.01 and does not identify exact zeros.
 
 ### Top and bottom balance
 
@@ -1092,7 +1085,7 @@ n_floor <- if (!is.na(.p_floor) && is.finite(.p_floor)) {
 }
 
 cat(sprintf(paste0(
-  "The position p-values are informative: no threshold or significance call is applied to them.\n\n",
+  "Position p-values retain their numeric values. The evidence tables below apply nominal p.emp < 0.05 and pooled BH q < 0.05.\n\n",
   "`p.emp` is the empirical permulation p of the position: the proportion of the N permuted-labeling cycles ",
   "that detect the position (on either phenotype side) and give it a `CAAS_score` at least as high as the ",
   "observed one, counting the observed run as one more cycle, (k + 1)/(N + 1). Its minimum is 1/(N + 1), ",
@@ -1126,7 +1119,7 @@ cat("_No `p.emp` column in `position_scores.tsv` (no counters of the null suppli
 
 ## Empirical evidence {.tabset}
 
-Nominal activity and BH-adjusted significance refer to the same tested universe. A position appearing on both sides has one pooled p.emp and is counted once globally. Missing empirical evidence remains unavailable.
+Gene nominal: p.gen < 0.05; genes_BH: p.gen.adj < 0.05, each original full gene family per ranking. Position nominal: p.emp < 0.05; positions_BH: p.adj_bh < 0.05 in the original pooled unique-position family (including null-only positions at p=1). Genes carrying a BH position are not gene BH hits. Counts below cover available observed rows, not the size of the position BH family. A position appearing on both sides has one pooled p.emp and is counted once globally. Missing empirical evidence remains unavailable.
 
 ### Counts
 
@@ -1136,15 +1129,15 @@ Nominal activity and BH-adjusted significance refer to the same tested universe.
 for(rk in c("global","top","bottom")) {
   suffix <- if(rk=="global") "" else paste0("_",rk)
   gp <- .evidence_col(gene_df,paste0("caas_p.gen",suffix))
-  gn <- .evidence_col(gene_df,paste0("caas_nominal",suffix),FALSE) %in% TRUE
-  ga <- .evidence_col(gene_df,paste0("caas_adjusted",suffix),FALSE) %in% TRUE
-  pp <- if(rk=="global") pos_df[!duplicated(paste(pos_df$Gene,pos_df$Position)),] else pos_df[pos_df$side==rk,]
-  .counts[[rk]] <- tibble::tibble(ranking=rk,genes_with_p=sum(!is.na(gp)),genes_nominal=sum(gn),genes_BH=sum(ga),positions_with_p=sum(!is.na(pp$p.emp)),positions_nominal=sum(pp$caas_nominal %in% TRUE),positions_BH=sum(pp$caas_adjusted %in% TRUE))
+  gn <- is.finite(gp) & gp < params$evidence_p_threshold
+  gq <- .evidence_col(gene_df,paste0("caas_p.gen.adj",suffix)); ga <- is.finite(gq) & gq < params$evidence_fdr_threshold
+  pp <- if(rk=="global") pos_df[!duplicated(paste(pos_df$Gene,pos_df$Position,sep="\t")),] else pos_df[pos_df$side==rk,]
+  .counts[[rk]] <- tibble::tibble(ranking=rk,genes_with_p=sum(is.finite(gp)),genes_with_q=sum(is.finite(gq)),genes_nominal=sum(gn),genes_BH=sum(ga),positions_with_p=sum(is.finite(pp$p.emp)),positions_with_q=sum(is.finite(pp$p.adj_bh)),positions_nominal=sum(is.finite(pp$p.emp) & pp$p.emp < params$evidence_p_threshold),positions_BH=sum(is.finite(pp$p.adj_bh) & pp$p.adj_bh < params$evidence_fdr_threshold))
 }
-knitr::kable(dplyr::bind_rows(.counts))
+DT::datatable(dplyr::bind_rows(.counts),rownames=FALSE,options=list(pageLength=3,scrollX=TRUE,dom="t",order=list()))
 ```
 
-### Gene evidence
+### Gene evidence {.tabset}
 
 ```{r calibrated-gene-tables, results='asis'}
 for(rk in c("global","top","bottom")) {
@@ -1152,52 +1145,39 @@ for(rk in c("global","top","bottom")) {
   x <- gene_df
   x$`p.gen` <- .evidence_col(x,paste0("caas_p.gen",suffix))
   x$`p.gen.adj` <- .evidence_col(x,paste0("caas_p.gen.adj",suffix))
-  x$nominal <- .evidence_col(x,paste0("caas_nominal",suffix),FALSE) %in% TRUE
-  x$adjusted <- .evidence_col(x,paste0("caas_adjusted",suffix),FALSE) %in% TRUE
+  x$nominal <- ifelse(is.finite(x$p.gen),x$p.gen < params$evidence_p_threshold,NA)
+  x$adjusted <- ifelse(is.finite(x$p.gen.adj),x$p.gen.adj < params$evidence_fdr_threshold,NA)
   x <- x[order(x$p.gen,x$p.gen.adj,na.last=TRUE),]
-  cols <- intersect(c("Gene","p.gen","p.gen.adj","nominal","adjusted","rer_min_pval","rer_perm_padj","rer_significant","rer_significant_fdr","fade_max_bf_top","fade_max_bf_bottom","accum_p","accum_fdr"),names(x))
+  cols <- intersect(c("Gene","p.gen","p.gen.adj","nominal","adjusted","rer_min_pval","rer_perm_padj","rer_rho","rer_significant","rer_significant_fdr","fade_max_bf_top","fade_max_bf_bottom","accum_p","accum_fdr"),names(x))
   cat("\n#### ",rk,"\n\n",sep="")
-  print(knitr::kable(head(x[,cols,drop=FALSE],200),caption="First 200 rows for display; complete evidence is published as TSV. BH hits are marked adjusted."))
+  cat(knitr::knit_print(DT::datatable(x[,cols,drop=FALSE], rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list()))))
 }
 ```
 
-### Position evidence
+### Position evidence {.tabset}
 
 ```{r empirical-position-tables, results='asis'}
 for(rk in c("global","top","bottom")) {
- x <- if(rk=="global") pos_df[!duplicated(paste(pos_df$Gene,pos_df$Position)),] else pos_df[pos_df$side==rk,]
+ x <- if(rk=="global") pos_df[!duplicated(paste(pos_df$Gene,pos_df$Position,sep="\t")),] else pos_df[pos_df$side==rk,]
  x <- x[order(x$p.emp,x$p.adj_bh,na.last=TRUE),]
  cat("\n#### ",rk,"\n\n",sep="")
  cols <- intersect(c("Gene","Position","side","CAAS_score","p.emp","p.adj_bh","caas_nominal","caas_adjusted","nd","null_unseen"),names(x))
- print(knitr::kable(head(x[,cols,drop=FALSE],200)))
+ cat(knitr::knit_print(DT::datatable(x[,cols,drop=FALSE], rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list()))))
 }
 ```
 
-### Cross-method gene overlap
+### Cross-method gene overlap {.tabset}
 
-```{r empirical-overlap}
-.rows <- list()
-for(rk in c("global","top","bottom")) {
- suffix <- if(rk=="global") "" else paste0("_",rk)
- cp <- .evidence_col(gene_df,paste0("caas_p.gen",suffix))
- for(tool in c("RER","FADE","Accumulation")) {
-  measured <- switch(tool,RER=!is.na(.evidence_col(gene_df,"rer_min_pval")),FADE=!is.na(.evidence_col(gene_df,"fade_max_bf_top"))|!is.na(.evidence_col(gene_df,"fade_max_bf_bottom")),Accumulation=!is.na(.evidence_col(gene_df,"accum_p")))
-  for(level in c("nominal","adjusted")) {
-   ca <- .evidence_col(gene_df,paste0("caas_",level,suffix),FALSE) %in% TRUE
-   other <- switch(tool,RER=.evidence_col(gene_df,if(level=="nominal")"rer_significant" else "rer_significant_fdr",FALSE) %in% TRUE,FADE=(.evidence_col(gene_df,"fade_significant_top",FALSE) %in% TRUE)|(.evidence_col(gene_df,"fade_significant_bottom",FALSE) %in% TRUE),Accumulation=.evidence_col(gene_df,"accum_significant",FALSE) %in% TRUE)
-   if(tool=="RER" && rk!="global")other<-other & (.evidence_col(gene_df,"rer_rho") * if(rk=="top")1 else -1)>0
-   if(tool=="FADE" && rk!="global")other<-.evidence_col(gene_df,paste0("fade_significant_",rk),FALSE) %in% TRUE
-   ok <- !is.na(cp)&measured; ca<-ca[ok];other<-other[ok]
-   m <- matrix(c(sum(ca&other),sum(ca&!other),sum(!ca&other),sum(!ca&!other)),2)
-   pv <- if(length(ca)&&all(rowSums(m)>0)&&all(colSums(m)>0)) fisher.test(m)$p.value else NA_real_
-   .rows[[length(.rows)+1L]] <- tibble::tibble(ranking=rk,tool=tool,call=level,shared_tested_universe=length(ca),CAAS=sum(ca),other=sum(other),overlap=sum(ca&other),fisher_p=pv)
-  }
- }
-}
-.overlap <- dplyr::bind_rows(.rows)
-.overlap$fisher_BH <- p.adjust(.overlap$fisher_p,"BH")
+CAAS and other are calls within their shared evaluable gene universe; overlap is their intersection. RER includes both signs in every CAAS view: intersection is not biological concordance. Missing p/q is excluded at the corresponding level. FADE uses its BF criterion; accumulation uses its own configured BH criterion, separately for all/top/bottom. Original gene BH values are preserved. Fisher is two-sided; its BH family comprises the 18 planned ranking × method × call comparisons, including unavailable comparisons in the family size. Degenerate measured tables have Fisher p=1; empty universes are unavailable.
+
+```{r empirical-overlap, results='asis'}
+source("src/report_evidence.R")
+.overlap <- scoring_overlap(gene_df, params$evidence_p_threshold, params$evidence_fdr_threshold)
 readr::write_tsv(.overlap,file.path(params$output_dir,"gene_evidence_overlap.tsv"))
-knitr::kable(.overlap)
+for(rk in c("global","top","bottom")) {
+ cat("\n#### ",rk,"\n\n",sep="")
+ cat(knitr::knit_print(DT::datatable(.overlap[.overlap$ranking==rk,],rownames=FALSE,filter="top",options=list(pageLength=15,scrollX=TRUE,order=list()))))
+}
 ```
 
 ### Score distributions
@@ -1259,15 +1239,14 @@ fade_bot_df <- .load_fade_sites(params$fade_site_bot_file)
 
 ```
 
-## Genomic Accumulation {.tabset}
+## Genomic Accumulation
 
 `r if (!has_genomic) "> **Note:** Genomic coordinates (gene_ensembl_file) are not available for this run - genomic accumulation skipped."`
 
 ```{r genomic-setup, eval=has_genomic}
-# Preserve the empirical p-value used by the CAAS Manhattan plot below.
 # Join gene_df with genomic coordinates.
 gene_genomic <- gene_df %>%
-  select(Gene, gene_caas_score, gene_caas_top, gene_caas_bot, n_positions, caas_p.gen) %>%
+  select(Gene, gene_caas_score, gene_caas_top, gene_caas_bot, n_positions) %>%
   inner_join(genomic_raw, by = "Gene") %>%
   # Standardise chromosome labels (remove "chr" prefix if present)
   mutate(
@@ -1366,172 +1345,14 @@ stitch_windows <- function(win_df) {
 }
 ```
 
-### CAAS Score Manhattan
+### CAAS gene score
 
-```{r genomic-manhattan-caas, eval=has_genomic, fig.height=5, fig.width=14}
-gene_genomic <- gene_genomic %>%
-  mutate(
-    chr_even      = chr_order %% 2 == 0,
-    caas_log      = -log10(pmax(caas_p.gen,1e-300)),
-    caas_top_log  = -log10(1 - pmin(replace_na(gene_caas_top, 0), 0.9999)),
-    caas_bot_log  = -log10(1 - pmin(replace_na(gene_caas_bot, 0), 0.9999))
-  )
-caas_log_thr <- -log10(params$evidence_p_threshold)
-
-p_gene_man <- ggplot(gene_genomic,
-       aes(x = manhattan_x, y = caas_log,
-           colour = chr_even, size = n_positions)) +
-  geom_point(alpha = 0.65, show.legend = FALSE)
-
-if (is.finite(caas_log_thr)) {
-  p_gene_man <- p_gene_man +
-    geom_hline(yintercept = caas_log_thr, linetype = "dashed",
-               colour = "grey40", linewidth = 0.6)
-}
-
-top_gene_labels <- gene_genomic %>%
-  filter(!is.na(caas_log) & is.finite(caas_log) & caas_log > 0 & is.finite(manhattan_x)) %>%
-  slice_max(caas_log, n = 20, with_ties = FALSE)
-
-if (nrow(top_gene_labels) > 0) {
-  p_gene_man <- p_gene_man +
-    ggrepel::geom_text_repel(
-      data = top_gene_labels,
-      aes(label = Gene), size = 2.2, max.overlaps = 15,
-      show.legend = FALSE, colour = "black"
-    )
-}
-
-p_gene_man <- p_gene_man +
-  scale_colour_manual(values = c("FALSE"=.tableau10[1], "TRUE"=.tableau10[2]), guide="none") +
-  scale_size_continuous(name = "N positions", range = c(0.5, 5)) +
-  scale_x_continuous(
-    breaks = chr_label_positions$mid_x,
-    labels = chr_label_positions$chr_label,
-    expand = expansion(mult = 0.01)
-  ) +
-  labs(
-    title    = "Gene CAAS Score - Manhattan View",
-    subtitle = sprintf("%d genes | dashed = nominal empirical threshold", nrow(gene_genomic)),
-    x = "Chromosome", y = "-log10(p.gen)"
-  ) +
-  theme(plot.title=element_text(face="bold"),
-        axis.text.x=element_text(size=14), axis.text.y=element_text(size=14),
-        axis.title=element_text(size=14), legend.text=element_text(size=12),
-        panel.grid.major.x=element_blank())
-
-print(p_gene_man)
-```
-
-### CAAS Window Accumulation (Positions)
-
-`r if (!has_genomic) "> **Note:** Genomic coordinates not available - position window accumulation skipped."`
-
-```{r pos-window-accum, eval=has_genomic, fig.height=5, fig.width=14, results='asis'}
-# Tile position-level CAAS scores into genomic windows.
-# pos_genomic and the shared chromosome axis are built in genomic-setup.
-win_size_label <- if (params$window_size_bp >= 1e6) {
-  sprintf("%g Mb", params$window_size_bp / 1e6)
-} else {
-  sprintf("%g kb", params$window_size_bp / 1e3)
-}
-
-pos_wins <- pos_genomic %>%
-  make_window_accum("CAAS_score", win_size = params$window_size_bp)
-
-if (nrow(pos_wins) == 0) {
-  cat("_No scored positions mapped to genomic windows._\n\n")
-} else {
-  pos_wins <- pos_wins %>%
-    stitch_windows() %>%
-    mutate(n_positions = n_genes,
-           mean_log    = -log10(1 - pmin(replace_na(mean_score, 0), 0.9999)),   # position score in [0, 1]
-           max_log     = -log10(1 - pmin(replace_na(max_score, 0),  0.9999)))
-
-  # Label the top windows as genomic regions, not gene names.
-  # Ranked by n_positions (window density) rather than mean_log, to surface the
-  # regions with the most positions rather than the highest mean score.
-  top_pos_wins <- pos_wins %>%
-    filter(!is.na(max_log) & is.finite(max_log) & max_log > 0 & is.finite(win_x)) %>%
-    slice_max(n_positions, n = 5, with_ties = FALSE) %>%
-    mutate(region_label = sprintf("chr%s:%0.1f-%0.1f Mb", chr_label, win_start / 1e6, win_end / 1e6))
-
-  p_pos_accum <- ggplot(pos_wins, aes(x = win_x, y = mean_log, fill = chr_even)) +
-    geom_col(width = params$window_size_bp * 0.9, alpha = 0.75) +
-    geom_point(aes(y = max_log, colour = chr_even), size = 1.2, alpha = 0.85, show.legend = FALSE)
-
-  if (nrow(top_pos_wins) > 0) {
-    p_pos_accum <- p_pos_accum +
-      ggrepel::geom_text_repel(
-        data = top_pos_wins,
-        aes(y = max_log, label = sprintf("%s\n(%d positions)", region_label, n_positions)),
-        size = 2.2, max.overlaps = 10, colour = "black",
-        show.legend = FALSE
-      )
-  }
-
-  p_pos_accum <- p_pos_accum +
-    scale_fill_manual(
-      values = c("FALSE" = .tableau10[1], "TRUE" = .tableau10[2]),
-      guide = "none"
-    ) +
-    scale_colour_manual(
-      values = c("FALSE" = .tableau10[3], "TRUE" = .tableau10[4]),
-      guide = "none"
-    ) +
-    scale_x_continuous(
-      breaks = chr_label_positions$mid_x,
-      labels = chr_label_positions$chr_label,
-      expand = expansion(mult = 0.01)
-    ) +
-    labs(
-      title    = sprintf("Position-Level CAAS Score - %s Window Accumulation", win_size_label),
-      subtitle = sprintf("Bars = mean | Points = max | %d windows across %d chromosomes",
-                         nrow(pos_wins), length(unique(pos_wins$chr_order))),
-      x = "Chromosome", y = "-log10(1 - mean CAAS score)"
-    ) +
-    theme(
-      plot.title         = element_text(face = "bold"),
-      axis.text.x        = element_text(size = 14),
-      axis.text.y        = element_text(size = 14),
-      axis.title         = element_text(size = 14),
-      legend.text        = element_text(size = 12),
-      panel.grid.major.x = element_blank()
-    )
-
-  print(p_pos_accum)
-}
-```
-
-```{r pos-window-accum-table, eval=has_genomic && exists("pos_wins") && nrow(pos_wins) > 0}
-DT::datatable(
-  pos_wins %>%
-    select(chr_label, win_start, win_end, n_positions, mean_score, max_score, mean_log) %>%
-    mutate(
-      win_start  = format(win_start, big.mark = ",", scientific = FALSE),
-      win_end    = format(win_end,   big.mark = ",", scientific = FALSE),
-      mean_score = round(mean_score, 4),
-      max_score  = round(max_score,  4),
-      mean_log   = round(mean_log,   4)
-    ) %>%
-    arrange(desc(n_positions)) %>%
-    rename(chr = chr_label, start = win_start, end = win_end,
-           n_pos = n_positions, mean_CAAS = mean_score, max_CAAS = max_score,
-           `-log10(1-mean)` = mean_log),
-  rownames = FALSE,
-  options = list(pageLength = 15, scrollX = TRUE),
-  caption = htmltools::tags$caption(
-    style = "caption-side: top; text-align: left; font-weight: bold;",
-    sprintf("Top genomic windows by position-level CAAS accumulation (%s windows)", win_size_label)
-  )
-)
-```
-
-### CAAS Window Accumulation (Genes)
+Each bar is the mean of individual raw gene maxima in a genomic window; each point is their maximum. Genes are assigned by genomic midpoint. These are descriptive window aggregates, not accumulation p-values or individual gene p.gen.
 
 `r if (!has_genomic) "> **Note:** Genomic coordinates not available - gene-level CAAS window accumulation skipped."`
 
 ```{r gene-caas-window-accum, eval=has_genomic, fig.height=5, fig.width=14, results='asis'}
+win_size_label <- sprintf("%g Mb", params$window_size_bp / 1e6)
 gene_caas_wins <- gene_genomic %>%
   make_window_accum("gene_caas_score", win_size = params$window_size_bp)
 
@@ -1540,25 +1361,24 @@ if (nrow(gene_caas_wins) == 0) {
 } else {
   gene_caas_wins <- gene_caas_wins %>%
     stitch_windows() %>%
-    mutate(mean_log = -log10(1 - pmin(replace_na(mean_score, 0), 0.9999)),
-           max_log  = -log10(1 - pmin(replace_na(max_score, 0),  0.9999)))
+    mutate(window_mean = mean_score, window_max = max_score)
 
-  # Ranked by n_genes (window density) rather than mean_log, to surface the
+  # Ranked by n_genes (window density) rather than window_mean, to surface the
   # regions with the most genes rather than the highest mean score.
   top_caas_wins <- gene_caas_wins %>%
-    filter(!is.na(max_log) & is.finite(max_log) & max_log > 0 & is.finite(win_x)) %>%
+    filter(!is.na(window_max) & is.finite(window_max) & window_max > 0 & is.finite(win_x)) %>%
     slice_max(n_genes, n = 5, with_ties = FALSE) %>%
     mutate(region_label = sprintf("chr%s:%0.1f-%0.1f Mb", chr_label, win_start / 1e6, win_end / 1e6))
 
-  p_gene_accum <- ggplot(gene_caas_wins, aes(x = win_x, y = mean_log, fill = chr_even)) +
+  p_gene_accum <- ggplot(gene_caas_wins, aes(x = win_x, y = window_mean, fill = chr_even)) +
     geom_col(width = params$window_size_bp * 0.9, alpha = 0.75) +
-    geom_point(aes(y = max_log, colour = chr_even), size = 1.5, alpha = 0.85, show.legend = FALSE)
+    geom_point(aes(y = window_max, colour = chr_even), size = 1.5, alpha = 0.85, show.legend = FALSE)
 
   if (nrow(top_caas_wins) > 0) {
     p_gene_accum <- p_gene_accum +
       ggrepel::geom_text_repel(
         data = top_caas_wins,
-        aes(y = max_log, label = sprintf("%s\n(%d genes)", region_label, n_genes)),
+        aes(y = window_max, label = sprintf("%s\n(%d genes)", region_label, n_genes)),
         size = 2.2, max.overlaps = 10, colour = "black",
         show.legend = FALSE
       )
@@ -1579,9 +1399,9 @@ if (nrow(gene_caas_wins) == 0) {
       expand = expansion(mult = 0.01)
     ) +
     labs(
-      title    = sprintf("Gene CAAS Score - %s Window Accumulation", win_size_label),
+      title    = sprintf("CAAS gene score - %s windows", win_size_label),
       subtitle = sprintf("Bars = mean | Points = max | %d windows", nrow(gene_caas_wins)),
-      x = "Chromosome", y = "-log10(1 - mean gene_caas_score)"
+      x = "Chromosome", y = "Raw gene maximum (window mean / maximum)"
     ) +
     theme(
       plot.title         = element_text(face = "bold"),
@@ -1599,36 +1419,29 @@ if (nrow(gene_caas_wins) == 0) {
 ```{r gene-caas-window-accum-table, eval=has_genomic && exists("gene_caas_wins") && nrow(gene_caas_wins) > 0}
 DT::datatable(
   gene_caas_wins %>%
-    select(chr_label, win_start, win_end, n_genes, mean_score, max_score, mean_log) %>%
+    select(chr_label, win_start, win_end, n_genes, mean_score, max_score) %>%
     mutate(
       win_start  = format(win_start, big.mark = ",", scientific = FALSE),
       win_end    = format(win_end,   big.mark = ",", scientific = FALSE),
       mean_score = round(mean_score, 4),
-      max_score  = round(max_score,  4),
-      mean_log   = round(mean_log,   4)
+      max_score  = round(max_score,  4)
     ) %>%
     arrange(desc(n_genes)) %>%
     rename(chr = chr_label, start = win_start, end = win_end,
-           n_genes = n_genes, mean_CAAS = mean_score, max_CAAS = max_score,
-           `-log10(1-mean)` = mean_log),
+           n_genes = n_genes, mean_CAAS = mean_score, max_CAAS = max_score),
   rownames = FALSE,
   options = list(pageLength = 15, scrollX = TRUE),
   caption = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
-    sprintf("Top genomic windows by gene CAAS score accumulation (%s windows)", win_size_label)
+    sprintf("Genomic windows: raw gene maxima (%s windows)", win_size_label)
   )
 )
 ```
 
 ```{r genomic-window-tsv-export, eval=has_genomic}
-if (exists("pos_wins") && nrow(pos_wins) > 0) {
-  readr::write_tsv(
-    pos_wins %>% select(-chr_even, -mean_log, -max_log),
-    file.path(params$output_dir, "genomic_window_accum_positions.tsv"))
-}
 if (exists("gene_caas_wins") && nrow(gene_caas_wins) > 0) {
   readr::write_tsv(
-    gene_caas_wins %>% select(-chr_even, -mean_log, -max_log),
+    gene_caas_wins %>% select(-chr_even, -window_mean, -window_max),
     file.path(params$output_dir, "genomic_window_accum_gene_caas.tsv"))
 }
 cat("Exported genomic window accumulation TSVs\n")

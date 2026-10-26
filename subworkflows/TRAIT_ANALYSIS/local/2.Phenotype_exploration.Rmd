@@ -28,6 +28,8 @@ params:
   c_trait: ""
   secondary_trait: ""
   branch_trait: ""
+  branch_node_values_file: NULL
+  taxon_node_mapping_file: NULL
   pss_top_pct: "0.05"
   perm_strategy: "best_model"
   trait_type: ""
@@ -946,11 +948,16 @@ tree_trait_data <- tree_plot_trait_df %>%
 # (plotting_fun.R), which tolerates duplicated species rows and partial coverage. When it
 # returns NULL the branches are drawn plain.
 if (isTRUE(has.branch)) {
-  combined_br_data <- branch_trait_node_values(
-    circular_tree,
-    tree_trait_data$species,
-    tree_trait_data[[branch_trait]]
-  )
+  if(!is.null(params$branch_node_values_file) && file.exists(params$branch_node_values_file)) {
+    cached <- read.csv(params$branch_node_values_file,stringsAsFactors=FALSE)
+    tips <- cached[cached$node<=length(circular_tree$tip.label),]
+    if(!all(c("node","BR","species") %in% names(cached)) ||
+       !identical(as.character(tips$species[match(seq_along(circular_tree$tip.label),tips$node)]),circular_tree$tip.label))
+      stop("Cached branch values do not match this tree's tips/node coordinates")
+    combined_br_data <- cached %>% select(node,BR) %>% distinct()
+    if(anyDuplicated(combined_br_data$node))stop("Conflicting cached branch values")
+  } else combined_br_data <- branch_trait_node_values(
+    circular_tree, tree_trait_data$species, tree_trait_data[[branch_trait]])
   if (is.null(combined_br_data)) {
     debug_log("visual_distribution: branch trait '%s' unusable for ASR; drawing plain branches", branch_trait)
     has.branch <- FALSE
@@ -1143,10 +1150,23 @@ tree_plot_step2 <- tree_plot_step2 +
         plot.subtitle = element_text(size = 15, margin = margin(t = 0, r = 0, b = -1.5, l = 0, unit = "cm"))
   )
 
+# Sample size labels stay inside the family ring, with a gap measured in tree units.
+# The taxon bar is the last geom_col layer added after the trait rings.
+.trait_layers <- length(ggplot2::ggplot_build(tree_plot_step1)$data)
+.taxa_built <- ggplot2::ggplot_build(tree_plot_step2)$data
+.new_layers <- .taxa_built[seq.int(.trait_layers+1L,length(.taxa_built))]
+.taxa_inner <- suppressWarnings(min(unlist(lapply(.new_layers,function(d) d$xmin)),na.rm=TRUE))
+.n_label_nudge <- tree_profile$n_label_nudge
+if(is.finite(.taxa_inner)) {
+  .n_label_low <- trait_ring_measure$outer_radius-trait_ring_measure$tip_radius+.03*trait_ring_measure$tip_radius
+  .n_label_high <- .taxa_inner-trait_ring_measure$tip_radius-.03*trait_ring_measure$tip_radius
+  if(.n_label_high>.n_label_low) .n_label_nudge <- max(.n_label_low,min(.n_label_nudge,mean(c(.n_label_low,.n_label_high))))
+  else .n_label_nudge <- max(0,min(.n_label_nudge,.n_label_high))
+}
 # Sample size (N) labels, when available.
 if(isTRUE(has.n)){
   tree_plot_step3 <- tree_plot_step2 +
-    geom_text(aes(label = n_sum), nudge_x = tree_profile$n_label_nudge, fontface = "bold", size = tree_profile$n_label_size, vjust = 0.5)
+    geom_text(aes(label = n_sum), nudge_x = .n_label_nudge, fontface = "bold", size = tree_profile$n_label_size, vjust = 0.5)
 } else {
   tree_plot_step3 <- tree_plot_step2
 }
@@ -1163,9 +1183,12 @@ dyn_width <- tree_profile$width
 tip_df <- find_taxon_mrca(circular_tree, tree_with_traits)
 
 # One phylopic silhouette (rphylopic UUID) per taxon name.
-tip_df <- tip_df %>%
-  rowwise() %>%
-  mutate(phylopic_UUID = rphylopic::get_uuid(name = taxa, n = 1))
+if(!is.null(params$taxon_node_mapping_file) && file.exists(params$taxon_node_mapping_file)) {
+  cache_taxa <- read.csv(params$taxon_node_mapping_file,stringsAsFactors=FALSE)
+  cache_taxa <- cache_taxa %>% select(taxa,phylopic_UUID) %>% distinct()
+  if(anyDuplicated(cache_taxa$taxa))stop("Conflicting cached taxon silhouettes")
+  tip_df <- tip_df %>% left_join(cache_taxa,by="taxa")
+} else tip_df <- tip_df %>% rowwise() %>% mutate(phylopic_UUID=rphylopic::get_uuid(name=taxa,n=1))
 
 # Debug export.
 write.csv(tip_df, file.path(phylo_distribution_dir, "taxon_node_mapping.csv"), row.names = FALSE)

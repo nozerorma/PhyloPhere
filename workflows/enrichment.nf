@@ -133,10 +133,8 @@ def validatePositionReferences() {
     def checkedMaps = [] as Set
     def hashFile = { path ->
         def digest = java.security.MessageDigest.getInstance('SHA-256')
-        java.nio.file.Files.newInputStream(path).withCloseable { stream ->
-            byte[] buffer = new byte[1024 * 1024]
-            int count
-            while ((count = stream.read(buffer)) > 0) digest.update(buffer, 0, count)
+        new java.security.DigestInputStream(java.nio.file.Files.newInputStream(path), digest).withCloseable { stream ->
+            stream.transferTo(java.io.OutputStream.nullOutputStream())
         }
         digest.digest().encodeHex().toString()
     }
@@ -168,7 +166,7 @@ def validatePositionReferences() {
             def manifest = file("${input}.manifest.json")
             if (manifest.exists()) {
                 def meta = new groovy.json.JsonSlurper().parseText(manifest.text)
-                if (meta.table_sha256 && hashFile(input) != meta.table_sha256)
+                if (meta.table_sha256 && hashFile.call(input) != meta.table_sha256)
                     error "Reference checksum mismatch: ${input}"
                 if (meta.alignment_dir && params.alignment) {
                     def expected = file(meta.alignment_dir).toRealPath()
@@ -183,7 +181,7 @@ def validatePositionReferences() {
                         if (actualNames != meta.alignments.keySet()) error "Alignment inventory changed since reference generation: ${productive}"
                         meta.alignments.each { name, expectedHash ->
                             def alignment = productive.resolve(name)
-                            if (!java.nio.file.Files.exists(alignment) || hashFile(alignment) != expectedHash)
+                            if (!java.nio.file.Files.exists(alignment) || hashFile.call(alignment) != expectedHash)
                                 error "Productive alignment changed since reference generation: ${alignment}"
                         }
                         checkedAlignments.add(productive.toString())
@@ -201,7 +199,7 @@ def validatePositionReferences() {
                     if (actualMaps != meta.maps.keySet()) error "MAP inventory changed since reference generation: ${mapRoot}"
                     meta.maps.each { name, expectedHash ->
                         def mapPath = file(params.caas_map_dir).resolve(name)
-                        if (!java.nio.file.Files.exists(mapPath) || hashFile(mapPath) != expectedHash)
+                        if (!java.nio.file.Files.exists(mapPath) || hashFile.call(mapPath) != expectedHash)
                             error "Productive MAP changed since reference generation: ${mapPath}"
                     }
                     checkedMaps.add(meta.map_dir)
@@ -449,6 +447,7 @@ workflow ENRICHMENT {
 
             ami_out = SCORING_AMI_REPORT(
                 gene_lists_ch, fcs_universe_ch, gene_scores,
+                gene_calibration.map { it.resolve("metadata.json") }.ifEmpty { file("NO_GENE_METADATA") },
                 domino_out.network_sif, domino_out.modules_dir, domino_out.edge_scores,
                 fade_gene_list_files_arg, fade_background_arg,
                 fade_domino_sif_arg, fade_domino_modules_arg, fade_domino_edges_arg,

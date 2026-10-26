@@ -143,6 +143,7 @@ kbl_html <- function(df, height = NULL, escape = TRUE, caption = NULL, ...) {
 
 ```{r load, include=FALSE}
 `%||%` <- function(a, b) if (!is.null(a)) a else b
+source("src/fcs_selection.R")
 REQ <- c("ranking", "database", "pathway", "stat", "p.adj", "q.perm", "sig_perm", "cluster_id")
 
 # Per-module FCS results: cmp_fcs/<module>_fcs_all.tsv (caas/rer).
@@ -152,6 +153,11 @@ for (f in mod_files) {
   mod <- sub("_fcs_all\\.tsv$", "", basename(f))
   d <- tryCatch(readr::read_tsv(f, show_col_types = FALSE), error = function(e) NULL)
   if (!is.null(d) && nrow(d) > 0 && all(REQ %in% names(d))) {
+    if(mod=="caas" && (!"gene_stat" %in% names(d) || anyNA(d$gene_stat) || any(d$gene_stat!="max"))) {
+      warning("CAAS FCS unavailable: max provenance missing/retired; regenerate calibrated results")
+      next
+    }
+    d <- fcs_selection(d,params$fdr_thr,params$pperm_thr)
     fcs_by_mod[[mod]] <- dplyr::mutate(d, module = mod)
   }
 }
@@ -165,7 +171,7 @@ has_multi <- length(fcs_by_mod) >= 1
 # can never share a (module, direction, database, pathway) group key with a "top" or "bottom" row.
 if (has_multi) {
   fcs_dir_mod <- fcs_all_mod %>%
-    mutate(direction = dplyr::case_when(
+    mutate(effect_direction=direction, direction = dplyr::case_when(
       tolower(ranking) == "top"    ~ "top",
       tolower(ranking) == "bottom" ~ "bottom",
       tolower(ranking) == "global" ~ "global",
@@ -388,19 +394,10 @@ gene_attr_df <- if (has_fcs_stats_cmp) {
 # read the same per-gene FCS/posenrich corroboration, one shared definition,
 # not three drifting copies.
 #
-# Each angle uses ITS OWN module's significance definition (not "any
-# leading-edge/described membership"), FCS/RER's sig_perm (BH on p.perm),
-# posenrich's own p_adj gate, DOMINO's own module-significance cutoff.
-# FCS and posenrich both carry a genuine "global" ranking (CAAS's undirected
-# composite; posenrich's own directions = ["global","top","bottom"]), so
-# fcs_genes/posenrich_genes have real direction=="Global" rows. AMI has no
-# equivalent, DOMINO only ever runs on Top/Bottom activity gene lists
-# (.TOP_LISTS/.BOTTOM_LISTS in 13.AMI_analysis.Rmd, no undirected
-# list), so ami_genes' direction column is only ever "Top"/"Bottom"; a
-# "Global" row for AMI never exists here. This means the Interesting Genes/Positions tables' Global
-# tab can never carry an AMI contribution, unlike .ami_desc_for(dir_filter = NULL), used by the
-# Interesting Genes/Positions AMI cells, which pools Top+Bottom explicitly
-# for its own "Global" view instead of relying on a literal direction match.
+# Each method retains its own significance criterion. Gene BH, FCS selection C,
+# formal FCS BH, and DOMINO module Bonferroni are separate levels.
+# AMI Global is an actual global list, not a pool of side-specific module analyses.
+# RER Positive/Negative are signs, never CAAS Top/Bottom.
 
 # FCS/RER own significance: the sig_perm of each module's FCS table (q.perm below the BH
 # threshold on the permulation p), computed once here off fcs_dir_mod.
@@ -477,16 +474,16 @@ ami_disp <- if (has_ami && !is.null(ami_df) && nrow(ami_df) > 0) {
     dplyr::mutate(
       .tool = if ("tool" %in% names(.)) as.character(tool) else .ami_tool_classifier(gene_list),
       direction = if ("direction" %in% names(.)) dplyr::case_when(
-        direction %in% c("Acc", "accelerating", "Accelerating") ~ "Top",
-        direction %in% c("Decc", "decelerating", "Decelerating") ~ "Bottom",
+        direction %in% c("Acc", "accelerating", "Accelerating", "Positive") ~ "Positive",
+        direction %in% c("Decc", "decelerating", "Decelerating", "Negative") ~ "Negative",
         TRUE ~ as.character(direction)
       ) else NA_character_
     )
   if ("description" %in% names(d)) {
-    d <- d %>% dplyr::filter(!description %in% c("Too small", "No enrichment"))
+    d <- d %>% dplyr::filter(!description %in% c("Too small", "No enrichment", "Enrichment unavailable"))
   }
   if ("domino_p_adj" %in% names(d)) {
-    d <- d %>% dplyr::filter(!is.na(domino_p_adj), domino_p_adj < (params$domino_module_thr %||% 0.05))
+    d <- d %>% dplyr::filter(!is.na(domino_p_adj), domino_p_adj <= (params$domino_module_thr %||% 0.05))
   }
   if (nrow(d) > 0 && "description" %in% names(d)) {
     d$term <- .cluster_terms(d$description)
@@ -507,19 +504,19 @@ ami_genes <- if (has_ami && !is.null(ami_df) && nrow(ami_df) > 0) {
       dplyr::mutate(
         .tool = if ("tool" %in% names(.)) as.character(tool) else .ami_tool_classifier(gene_list),
         direction = if ("direction" %in% names(.)) dplyr::case_when(
-          direction %in% c("Acc", "accelerating", "Accelerating") ~ "Top",
-          direction %in% c("Decc", "decelerating", "Decelerating") ~ "Bottom",
+          direction %in% c("Acc", "accelerating", "Accelerating", "Positive") ~ "Positive",
+          direction %in% c("Decc", "decelerating", "Decelerating", "Negative") ~ "Negative",
           TRUE ~ as.character(direction)
         ) else NA_character_
       )
     if ("description" %in% names(d)) {
-      d <- d %>% dplyr::filter(!description %in% c("Too small", "No enrichment"))
+      d <- d %>% dplyr::filter(!description %in% c("Too small", "No enrichment", "Enrichment unavailable"))
     }
     if ("direction" %in% names(d)) {
-      d <- d %>% dplyr::filter(direction %in% c("Top", "Bottom"))
+      d <- d %>% dplyr::filter(direction %in% c("Global","Top", "Bottom","Positive","Negative"))
     }
     if ("domino_p_adj" %in% names(d)) {
-      d <- d %>% dplyr::filter(!is.na(domino_p_adj), domino_p_adj < (params$domino_module_thr %||% 0.05))
+      d <- d %>% dplyr::filter(!is.na(domino_p_adj), domino_p_adj <= (params$domino_module_thr %||% 0.05))
     }
     if (nrow(d) > 0) {
       d %>%
@@ -599,7 +596,7 @@ Leading-edge composition from each module's own FCS report
 tables shown here match the per-module reports exactly. For each significantly-
 enriched set, the **percentage of its leading-edge genes** carrying each attribute:
 nominal/BH activity flags and cross-module support. Rows follow the order of the source
-FCS report (`q.perm` first, then `p.perm`, the size of the effect and description), already baked
+FCS report (C descending, checks descending, then q.perm/p.perm), already baked
 into the imported table, with the redundancy group of each set (`Group`, `Rep` for its
 representative). Faceted Global/Top/Bottom, each module in its own sub-tab, capped at `r params$top_n`
 rows.
@@ -615,7 +612,7 @@ dir.create("compare_results", showWarnings = FALSE)
 .le_comp_dir_map <- c(top = "Top", bottom = "Bottom", global = "Global")
 
 le_comp_all_mod <- le_comp_all_mod %>%
-  dplyr::mutate(direction = dplyr::coalesce(.le_comp_dir_map[tolower(ranking)], "Global"))
+  dplyr::mutate(effect_direction=if("direction"%in%names(.))direction else NA_character_,direction = dplyr::coalesce(.le_comp_dir_map[tolower(ranking)], "Global"))
 
 for (dr in c("Global", "Top", "Bottom")) {
   cat(sprintf("\n## %s {.tabset}\n\n", dr))
@@ -639,22 +636,22 @@ for (dr in c("Global", "Top", "Bottom")) {
 ```{r permod_tabs_fallback, eval=has_multi && !has_le_comp, results='asis'}
 # Fallback: list the significant sets of each module when the imported leading-edge
 # composition tables are not available. Same order as 12.FCS_general_report.Rmd:
-# q.perm, p.perm, size of the effect, description.
+# C descending, checks descending, q.perm, p.perm; separate from formal BH significance.
 thr <- params$fdr_thr
 for (dr in c("global", "top", "bottom")) {
   cat(sprintf("\n## %s {.tabset}\n\n", tools::toTitleCase(dr)))
   for (m in modules_present) {
     cat(sprintf("\n### %s\n\n", toupper(m)))
     d <- fcs_dir_mod %>%
-      filter(module == m, direction == dr, sig_perm %in% TRUE) %>%
-      arrange(q.perm, p.perm, dplyr::desc(abs(stat)), description) %>%
+      filter(module == m, direction == dr, selected_C %in% TRUE) %>%
+      fcs_selection_order() %>%
       mutate(Description = stringr::str_trunc(dplyr::coalesce(description, pathway), 60),
              AUC = round(stat + 0.5, 3), p.adj = signif(p.adj, 3), q.perm = signif(q.perm, 3),
              Group = cluster_id, Rep = ifelse(dplyr::coalesce(is_representative, FALSE), "X", "")) %>%
-      select(database, pathway, Description, AUC, p.adj, q.perm, Group, Rep) %>%
+      select(database, pathway, Description, C, checks, sig_RER, R05, R10, R15, effect_direction, AUC, p.adj, q.perm, Group, Rep) %>%
       head(params$top_n)
     if (nrow(d) == 0) {
-      cat(sprintf("_No gene set is significant in %s (%s) at q.perm < %.2g._\n\n", toupper(m), dr, thr))
+      cat(sprintf("_No gene set is selected by C>0 in %s (%s); BH cutoff %.2g remains separate._\n\n", toupper(m), dr, thr))
     } else {
       print(kbl_html(d, height = if (nrow(d) > 15) "420px" else NULL))
     }
@@ -680,8 +677,10 @@ directly from the AMI report so the table shown here matches that report exactly
 .ami_tm_direction <- function(gl) {
   dplyr::case_when(
     grepl("global|significant$", gl, ignore.case = TRUE) & !grepl("top|bottom|accelerating|decelerating", gl, ignore.case = TRUE) ~ "Global",
-    grepl("top|accelerating", gl, ignore.case = TRUE) ~ "Top",
-    grepl("bottom|decelerating", gl, ignore.case = TRUE) ~ "Bottom",
+    grepl("accelerating", gl, ignore.case=TRUE) ~ "Positive",
+    grepl("top",gl,ignore.case=TRUE) ~ "Top",
+    grepl("decelerating", gl, ignore.case=TRUE) ~ "Negative",
+    grepl("bottom",gl,ignore.case=TRUE) ~ "Bottom",
     TRUE ~ "Global"
   )
 }
@@ -690,9 +689,9 @@ ami_tm <- ami_term_membership_df %>%
   dplyr::mutate(
     .tool      = if ("tool" %in% names(.)) as.character(tool) else .ami_tool_classifier(gene_list),
     .direction = dplyr::case_when(
-      "direction" %in% names(.) & direction %in% c("Acc", "accelerating", "Accelerating") ~ "Top",
-      "direction" %in% names(.) & direction %in% c("Decc", "decelerating", "Decelerating") ~ "Bottom",
-      "direction" %in% names(.) & direction %in% c("Top", "Bottom", "Global") ~ as.character(direction),
+      "direction" %in% names(.) & direction %in% c("Acc", "accelerating", "Accelerating", "Positive") ~ "Positive",
+      "direction" %in% names(.) & direction %in% c("Decc", "decelerating", "Decelerating", "Negative") ~ "Negative",
+      "direction" %in% names(.) & direction %in% c("Top", "Bottom", "Global", "Positive", "Negative") ~ as.character(direction),
       TRUE ~ .ami_tm_direction(gene_list)
     )
   )
@@ -705,9 +704,9 @@ for (tl in c("CAAS", "RER", "FADE")) {
     next
   }
 
-  for (dr in c("Global", "Top", "Bottom")) {
+  for (dr in if(tl=="RER")c("Global","Positive","Negative") else c("Global","Top","Bottom")) {
     cat(sprintf("\n### %s\n\n", dr))
-    sub <- if (dr == "Global") tl_df else tl_df %>% dplyr::filter(.direction == dr)
+    sub <- tl_df %>% dplyr::filter(.direction == dr)
     if (nrow(sub) == 0) {
       cat(sprintf("_No described terms for %s (%s)._\n\n", tl, dr))
       next
@@ -756,9 +755,9 @@ for (tl in c("CAAS", "RER", "FADE")) {
     cat(sprintf("_No described modules for %s._\n\n", tl))
     next
   }
-  for (dr in c("Global", "Top", "Bottom")) {
+  for (dr in if(tl=="RER")c("Global","Positive","Negative") else c("Global","Top","Bottom")) {
     cat(sprintf("\n### %s\n\n", dr))
-    sub <- if (dr == "Global") tl_disp else if ("direction" %in% names(tl_disp)) tl_disp %>% dplyr::filter(direction == dr) else tl_disp
+    sub <- tl_disp %>% dplyr::filter(direction == dr)
     if (nrow(sub) == 0) { cat(sprintf("_No described modules for %s (%s)._\n\n", tl, dr)); next }
     disp <- .build_ami_rollup(sub) %>% head(params$top_n)
     print(kbl_html(disp, height = if (nrow(disp) > 15) "420px" else NULL))
@@ -957,7 +956,7 @@ Empirical nominal and BH-adjusted evidence is shown together. CAAS uses its cali
                           evidence_score_caas = numeric(), evidence_score_rer = numeric())
   if (!has_le || !has_multi) return(empty)
   res <- le %>%
-    dplyr::filter(is.null(rk_set) | ranking %in% rk_set) %>%
+    dplyr::filter((module=="rer" & ranking=="global") | (module!="rer" & ranking %in% rk_set)) %>%
     dplyr::mutate(direction = dplyr::case_when(
       tolower(ranking) == "top"    ~ "top",
       tolower(ranking) == "bottom" ~ "bottom",
@@ -972,7 +971,7 @@ Empirical nominal and BH-adjusted evidence is shown together. CAAS uses its cali
       dplyr::group_by(gene) %>%
       dplyr::summarise(terms = paste(sort(unique(stringr::str_trunc(description, 50))), collapse = "; "),
                        n_clusters = dplyr::n_distinct(cluster_id),
-                       evidence_score = -log10(pmax(min(q.perm, na.rm = TRUE), 1e-300)),
+                       evidence_score = if(any(is.finite(q.perm))) -log10(max(min(q.perm[is.finite(q.perm)]),1e-300)) else NA_real_,
                        .groups = "drop")
     names(out) <- c("gene", paste0(m, "_fcs_terms"), paste0("n_clusters_", suffix), paste0("evidence_score_", suffix))
     out
@@ -1038,7 +1037,7 @@ render_banded_table <- function(res_obj, height = NULL) {
   borders <- borders[borders < ncol(df)]
 
   for(n in intersect(c("CAAS adjusted","RER adjusted"),names(df))) {
-    df[[n]] <- kableExtra::cell_spec(ifelse(df[[n]],"BH significant",""),format="html",bold=TRUE,background=ifelse(df[[n]],"#FFE5A0","transparent"))
+    df[[n]] <- kableExtra::cell_spec(ifelse(is.na(df[[n]]),"Unavailable",ifelse(df[[n]],"BH significant","")),format="html",bold=TRUE,background=ifelse(df[[n]] %in% TRUE,"#FFE5A0","transparent"))
   }
   k <- kable(df, format = "html", escape = FALSE) %>%
     kable_styling(bootstrap_options = c("condensed", "hover"), full_width = FALSE)
@@ -1071,10 +1070,10 @@ render_banded_table <- function(res_obj, height = NULL) {
   
   d <- ami_disp
   if ("direction" %in% names(d) && !is.null(dir_filter)) {
-    d <- d %>% dplyr::filter(direction %in% dir_filter)
+    d <- d %>% dplyr::filter((.tool=="RER" & direction=="Global") | (.tool!="RER" & direction %in% dir_filter))
   }
   if ("domino_p_adj" %in% names(d)) {
-    d <- d %>% dplyr::filter(!is.na(domino_p_adj), domino_p_adj < (params$domino_module_thr %||% 0.05))
+    d <- d %>% dplyr::filter(!is.na(domino_p_adj), domino_p_adj <= (params$domino_module_thr %||% 0.05))
   }
   if (nrow(d) == 0) {
     return(tibble::tibble(gene = character(), caas_ami_desc = character(), rer_ami_desc = character(), fade_ami_desc = character()))
@@ -1133,18 +1132,18 @@ render_banded_table <- function(res_obj, height = NULL) {
  base$gene <- base$Gene
  base$`CAAS p` <- suppressWarnings(as.numeric(evidence_column(base,"p.emp")))
  base$`CAAS BH` <- suppressWarnings(as.numeric(evidence_column(base,"p.adj_bh")))
- base$`CAAS nominal` <- evidence_truth(evidence_column(base,"caas_nominal",FALSE))
- base$`CAAS adjusted` <- evidence_truth(evidence_column(base,"caas_adjusted",FALSE))
+ base$`CAAS nominal` <- ifelse(is.finite(base$`CAAS p`),base$`CAAS p`<.05,NA)
+ base$`CAAS adjusted` <- ifelse(is.finite(base$`CAAS BH`),base$`CAAS BH`<.05,NA)
  base
 }
 
-.gcol <- function(df, col) if (col %in% names(df)) df[[col]] else rep(FALSE, nrow(df))
+.gcol <- function(df, col) if (col %in% names(df)) df[[col]] else rep(NA, nrow(df))
 ```
 
 ```{r interesting_genes_prep, eval=has_fcs_stats_cmp}
 build_interesting_genes <- function(direction) {
-  rk_set   <- switch(direction, Top = "top", Bottom = "bottom", NULL)
-  ami_dirf <- switch(direction, Top = "Top", Bottom = "Bottom", NULL)
+  rk_set   <- switch(direction, Top = "top", Bottom = "bottom", "global")
+  ami_dirf <- switch(direction, Top = "Top", Bottom = "Bottom", "Global")
 
   suffix <- switch(direction,Top="_top",Bottom="_bottom","")
   base <- tibble::tibble(gene=gene_attr_df$gene,
@@ -1157,8 +1156,8 @@ build_interesting_genes <- function(direction) {
     FADE_dir=.gcol(gene_attr_df,paste0("flag_fade",suffix)),
     Accum_dir=.gcol(gene_attr_df,paste0("flag_accum",suffix)),
     RER_acc=.gcol(gene_attr_df,"flag_rer_acc"),RER_decc=.gcol(gene_attr_df,"flag_rer_decc"))
-  base$RER_dir <- switch(direction,Top=base$RER_acc,Bottom=base$RER_decc,base$RER_acc|base$RER_decc)
-  base$`RER adjusted` <- switch(direction,Top=.gcol(gene_attr_df,"flag_rer_acc_adjusted"),Bottom=.gcol(gene_attr_df,"flag_rer_decc_adjusted"),.gcol(gene_attr_df,"flag_rer_acc_adjusted")|.gcol(gene_attr_df,"flag_rer_decc_adjusted"))
+  base$RER_dir <- ifelse(is.finite(base$`RER p`),base$RER_acc|base$RER_decc,NA)
+  base$`RER adjusted` <- ifelse(is.finite(base$`RER BH`),base$`RER BH`<.05,NA)
 
   # Check active modules for genes
   has_accum_gene <- any(grepl("^flag_accum", names(gene_attr_df))) &&
@@ -1199,7 +1198,6 @@ build_interesting_genes <- function(direction) {
 
   all_genes <- all_genes %>%
     dplyr::mutate(
-      dplyr::across(c(`CAAS nominal`, `CAAS adjusted`, FADE_dir, Accum_dir, RER_acc, RER_decc, RER_dir), ~ dplyr::coalesce(.x, FALSE)),
       n_clusters_caas = dplyr::coalesce(as.integer(n_clusters_caas), 0L),
       n_clusters_rer  = dplyr::coalesce(as.integer(n_clusters_rer), 0L),
       weight_caas  = pmin(n_clusters_caas, .fcs_weight_cap),
@@ -1307,7 +1305,7 @@ Empirical nominal and BH-adjusted evidence is shown together. CAAS uses its cali
 
 ```{r interesting_positions_prep, eval=has_position_scores_cmp}
 build_interesting_positions <- function(direction) {
-  rk_set    <- switch(direction, Top = "top", Bottom = "bottom", NULL)
+  rk_set    <- switch(direction, Top = "top", Bottom = "bottom", "global")
   side_vals <- switch(direction, Top = "top", Bottom = "bottom", NULL)
 
   base <- position_scores_cmp_df
@@ -1458,7 +1456,7 @@ build_interesting_positions <- function(direction) {
 
   all_positions <- base %>%
     dplyr::mutate(
-      dplyr::across(c(`CAAS nominal`, `CAAS adjusted`, FADE_overlap, PE_sig), ~ dplyr::coalesce(.x, FALSE))
+      dplyr::across(c(`CAAS nominal`, `CAAS adjusted`, FADE_overlap, PE_sig), identity)
     )
 
   # Position composite: strictly CAAS + FADE site overlap. Zero gene-level weights!

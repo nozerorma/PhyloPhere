@@ -24,6 +24,8 @@ Outputs:    <list>_domino_modules.tsv       node, cluster (cluster = rank by p-v
 
 # ── Standard library ──────────────────────────────────────────────────────────
 import argparse
+import hashlib
+import json
 import glob
 import os
 import sys
@@ -76,7 +78,7 @@ def install_capturing_get_final_modules(domino_core):
             )
             final_module_threshold = module_threshold / n_putative if n_putative else module_threshold
             if sig_score <= final_module_threshold:
-                module_sigs.append((cur_G_module, sig_score / n_putative if n_putative else sig_score))
+                module_sigs.append((cur_G_module, sig_score))
 
         module_sigs = sorted(module_sigs, key=lambda a: a[1])
         captured["sig_scores"] = [s for _, s in module_sigs]
@@ -155,6 +157,20 @@ def run_one_list(domino_core, captured, list_path, network_file, slices_file, sl
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
+def gene_set_sha256(path):
+    with open(path) as handle:
+        genes = sorted({line.strip() for line in handle if line.strip()})
+    return hashlib.sha256(("\n".join(genes) + ("\n" if genes else "")).encode()).hexdigest()
+
+
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -174,6 +190,8 @@ def main():
     if not list_paths:
         raise RuntimeError(f"no *.txt gene list files found in {args.gene_lists_dir}")
 
+    network_sha = file_sha256(args.network)
+    slices_sha = file_sha256(args.slices)
     for list_path in list_paths:
         list_name = os.path.splitext(os.path.basename(list_path))[0]
         print(f"[run_domino_modules] {list_name}: running DOMINO...", file=sys.stderr)
@@ -184,6 +202,13 @@ def main():
         print(f"[run_domino_modules] {list_name}: {len(rows_stats)} final modules "
               f"({sum(r['n_genes'] for r in rows_stats)} genes total)", file=sys.stderr)
 
+        provenance = dict(contract_version=2, p_value_scale="raw_upper_tail",
+                          p_adjustment="Bonferroni_n_putative", n_putative=captured.get("n_putative", 0),
+                          active_genes_sha256=gene_set_sha256(list_path), network_sha256=network_sha,
+                          slices_sha256=slices_sha, slice_threshold=args.slice_threshold,
+                          module_threshold=args.module_threshold, final_modules=len(rows_stats))
+        with open(os.path.join(args.output_dir, f"{list_name}_domino_provenance.json"), "w") as handle:
+            json.dump(provenance, handle, indent=2)
         pd.DataFrame(rows_modules, columns=["node", "cluster"]).to_csv(
             os.path.join(args.output_dir, f"{list_name}_domino_modules.tsv"), sep="\t", index=False
         )

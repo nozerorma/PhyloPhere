@@ -26,6 +26,8 @@ for (scenario in c("mapped", "unmapped_positions", "no_coordinates")) {
   wd <- file.path(scratch, scenario)
   dir.create(wd, recursive = TRUE, showWarnings = FALSE)
   file.copy(file.path(root, "subworkflows/SCORING/local/11.Scoring_report.Rmd"), wd, overwrite = TRUE)
+  dir.create(file.path(wd,"src"),showWarnings=FALSE)
+  file.copy(file.path(root,"subworkflows/SCORING/local/src/report_evidence.R"),file.path(wd,"src"),overwrite=TRUE)
   jsonlite::write_json(list(gene_stat="max",nominal_threshold=.05,fdr_threshold=.05), file.path(wd,"gene_evidence_metadata.json"),auto_unbox=TRUE)
   write_tsv(genes, file.path(wd, "gene_scores.tsv"))
   pos <- positions
@@ -46,20 +48,11 @@ for (scenario in c("mapped", "unmapped_positions", "no_coordinates")) {
   exported <- read.delim(file.path(wd, "position_scores_annotated.tsv"))
   stopifnot(!any(grepl("fact", names(exported))),
     !any(grepl("p[.]emp_fact|p[.]adj_bh_fact", readLines(file.path(wd, "report.html")))))
-  if (scenario == "mapped") {
-    wins <- read.delim(file.path(wd, "genomic_window_accum_positions.tsv"))
-    stopifnot(sum(wins$n_positions) == 3L, nrow(env$pos_genomic) == 3L,
-      isTRUE(all.equal(wins$mean_score[match(c("1", "2"), wins$chr_label)], c(.5, .4))),
-      all(env$pos_wins$win_x == env$pos_wins$win_mid + env$chr_offsets$offset[
-        match(env$pos_wins$chr_order, env$chr_offsets$chr_order)]),
-      isTRUE(all.equal(env$gene_genomic$caas_log,
-        -log10(pmax(genes$caas_p.gen[match(env$gene_genomic$Gene, genes$Gene)], 1e-300)))))
-  } else if (scenario == "unmapped_positions") {
-    stopifnot(nrow(env$pos_wins) == 0L,
-      !file.exists(file.path(wd, "genomic_window_accum_positions.tsv")),
-      file.exists(file.path(wd, "genomic_window_accum_gene_caas.tsv")))
-  } else {
-    stopifnot(!exists("pos_genomic", envir = env, inherits = FALSE))
-  }
+  if (scenario != "no_coordinates") {
+    wins <- read.delim(file.path(wd, "genomic_window_accum_gene_caas.tsv"))
+    stopifnot(sum(wins$n_genes) == 3L,
+      isTRUE(all.equal(sort(wins$mean_score),c(0,.4,.8))),
+      !file.exists(file.path(wd,"genomic_window_accum_positions.tsv")))
+  } else stopifnot(!exists("gene_genomic", envir=env, inherits=FALSE))
   cat("PASS scoring report:", scenario, "\n")
 }

@@ -417,15 +417,11 @@ process CAAS_CORE_OBSERVED {
 }
 
 // ── 4. Merge the tiles of each block of cycles and join the blocks ───────────────
-// CAAS_CORE_MERGE runs once per block (the b_0 directory is a block of its own, with the cycle b_0): it merges the
-// tiles of all the gene batches of the block (merge_null_block.py, src/utils/null_merge.py). Gene removal and the pools
-// that calibrate each gene score are decided within a cycle over every gene of the cycle, and a cycle is in one block,
-// so the merge is exact and its memory follows the block, not the number of cycles of the run. A block gives the genes x
-// cycles matrices of the gene statistics (chosen with params.gene_stat, with the parts the other statistics are built
-// from), the scored positions of its cycles, the removed units, the per-cycle sample, quantiles and summary.
-//
-// The gene statistic of a direction is F(max)^n by default (core.scores), the statistic of the observed gene score
-// (observed_core_scores.py), so the FCS p.perm of fcs_enrich.R compares the same quantity on both sides.
+// CAAS_CORE_MERGE runs once per block (b_0 is its own block). It merges the
+// cached replay tiles, applies gene removal within each cycle and writes raw
+// maximum gene matrices plus positive-position counts. No ECDF pool or exponent
+// is computed. Observed and null gene scores both use max; FCS calibrates the
+// same statistic on both sides. Position-level null products are unchanged.
 process CAAS_CORE_MERGE {
     tag "caas_core_merge|${block}"
     label 'process_medium'

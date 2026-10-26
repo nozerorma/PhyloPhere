@@ -14,11 +14,25 @@ render_ami <- function(wd, global_list) {
   file.copy(file.path(fixture,'modules'),wd,recursive=TRUE,overwrite=TRUE)
   file.copy(file.path(fixture,'cache'),wd,recursive=TRUE,overwrite=TRUE)
   file.copy(file.path(root,'subworkflows/ENRICHMENT/local/13.AMI_analysis.Rmd'),wd,overwrite=TRUE)
+  dir.create(file.path(wd,'src'),showWarnings=FALSE)
+  file.copy(file.path(root,'subworkflows/ENRICHMENT/local/src/ami_evidence.R'),file.path(wd,'src'),overwrite=TRUE)
+  g<-read.delim(file.path(wd,'gene_scores.tsv'))
+  for(sf in c('','_top','_bottom')) {
+    g[[paste0('caas_p.gen',sf)]]<-c(rep(.01,6),rep(1,nrow(g)-6))
+    g[[paste0('caas_p.gen.adj',sf)]]<-c(.02,.03,rep(.2,nrow(g)-2))
+  }
+  for(sf in c('','_top','_bottom')) {g[[paste0('caas_nominal',sf)]]<-g[[paste0('caas_p.gen',sf)]]<.05;g[[paste0('caas_adjusted',sf)]]<-g[[paste0('caas_p.gen.adj',sf)]]<.05}
+  write.table(g,file.path(wd,'gene_scores.tsv'),sep='\t',row.names=FALSE,quote=FALSE)
+  jsonlite::write_json(list(gene_stat='max'),file.path(wd,'metadata.json'),auto_unbox=TRUE)
+  stamp<-paste0(paste(sort(unique(global_list)),collapse='\n'),if(length(global_list))'\n' else '')
+  jsonlite::write_json(list(contract_version=2L,p_value_scale='raw_upper_tail',module_threshold=.05,n_putative=3L,
+    active_genes_sha256=digest::digest(stamp,algo='sha256',serialize=FALSE),network_sha256=digest::digest(file=file.path(wd,'network.sif'),algo='sha256')),
+    file.path(wd,'modules/global_domino_provenance.json'),auto_unbox=TRUE)
   owd <- setwd(wd); on.exit(setwd(owd))
   rmarkdown::render('13.AMI_analysis.Rmd',quiet=TRUE,
     params=list(background_file='background.txt',background_basename='background.txt',
       project_name='fixture',species=9606,domino_network_score_thr=700,
-      gene_scores_file='gene_scores.tsv',string_db_dir=NULL,string_cache_dir='cache',
+      gene_scores_file='gene_scores.tsv',gene_metadata_file='metadata.json',string_db_dir=NULL,string_cache_dir='cache',
       domino_network_sif='network.sif',domino_modules_dir='modules',
       domino_edge_scores_file=NULL,seed='1998'),
     output_file='13.AMI_analysis_fixture.html',envir=new.env())

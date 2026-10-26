@@ -295,14 +295,17 @@ cycle scores; the position p-values (`p.emp`, adjusted as `p.adj_bh`) are built 
 
 ### Gene-level scores
 
-- **Global gene score**: size-adjusted max of position-level `CAAS_score` across the gene,
-  `F(max)^n` (the percentile of the gene's best position within the distribution of the max
-  of `n` draws from the genome-wide position pool, `n` = the gene's own position count).
-  A plain max or upper quantile rewards genes for merely having more detected positions
-  (an order-statistic artifact); dividing through by that expectation removes it, so genes
-  with different numbers of positions are comparable.
-- **Directional gene scores** (`gene_caas_score_top`/`_bottom`): same statistic restricted to
-  positions changing in that direction (or "both"), calibrated against the direction-matched pool.
+- **Global gene score**: largest positive position-level `CAAS_score` in the gene.
+  A position appearing on both sides contributes its best-side score once.
+- **Directional gene scores** (`gene_caas_score_top`/`_bottom`): largest positive
+  position score restricted to the corresponding side.
+- `max` is the only supported `gene_stat`. No ECDF transform or exponent is
+  applied. The gene score is calibrated against the same gene's null maxima to
+  obtain `p.gen`; BH uses the complete cleaned gene universe per ranking.
+  An old null stamped with another statistic, or without a stamp, cannot be
+  reused as a maximum null. Rebuild gene matrices from the saved maximum parts
+  or cached replay tiles, observed scores and downstream calibration; new ASR
+  replay/permulations are not needed merely to change this aggregation.
 
 ### Key output columns
 
@@ -419,7 +422,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 |---|---|---|
 | `publish_intermediates` | `false` | Publishes intermediate discovery and resampling files for debugging. |
 | `ct_bootstrap_batch_size` | `10` | Number of genes batched per bootstrap task. |
-| `gene_stat` | `size_adj_max` | Gene statistic of the permulation null and of the observed gene score: `size_adj_max` (F(max)^n), `fmax` (F(max)) or `max` (the largest position score of the gene); F is the ECDF of the position scores of the cycle in the direction. The null of a prior run must have been built with the same one. |
+| `gene_stat` | `max` | Fixed: largest positive position score. Other values are rejected; legacy gene matrices/evidence must be rebuilt with max. |
 | `caas_export_single` | `false` | Reconstruct the global `caas_perms.rds` compatibility export from canonical `caas_permulation/blocks/blk_*/matrices.rds`. Normal SCORING and calibrated FCS use blocks, roster and metadata. Export memory grows with the complete null. |
 | `caas_cycle_block_size` | `500` | Permulation cycles per block of the CAAS null: a replay task takes one batch of genes (`ct_core_batch_size`) and the labelings of one block, so its memory does not depend on `caas_full_perms`. |
 | `caas_config` | `""` | Path to custom CAAStools configuration file. |

@@ -824,7 +824,9 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 if (signif_caas_upstream) {
                     CAAS_SIGNIFICANCE_REPORT(
                         signif_caas_upstream,
-                        SCORING.out.position_scores
+                        SCORING.out.position_scores,
+                        SCORING.out.gene_scores,
+                        SCORING.out.gene_evidence_metadata
                     )
                     ran_any = true
                 }

@@ -49,6 +49,9 @@ params:
   rer_domino_network_sif: NULL
   rer_domino_modules_dir: NULL
   rer_domino_edge_scores_file: NULL
+  gene_metadata_file: NULL
+  module_description_fdr: 0.10
+  domino_module_threshold: 0.05
   seed: "1998"
 ---
 
@@ -104,6 +107,11 @@ if (requireNamespace("httr", quietly = TRUE)) {
   httr::set_config(httr::config(connecttimeout = 10, timeout = 30))
 }
 
+source("src/ami_evidence.R")
+.description_fdr <- as.numeric(params$module_description_fdr)
+stopifnot(is.finite(.description_fdr),.description_fdr>0,.description_fdr<1)
+.ami_results_registry <- list()
+
 # Minimum module size (genes) kept in the module description table and the network
 # plot; smaller modules are labeled "Too small" and dropped from both.
 .min_cluster_genes <- if (!is.null(params$min_cluster_genes)) as.integer(params$min_cluster_genes) else 3L
@@ -114,6 +122,7 @@ suppressPackageStartupMessages({
   library(kableExtra)
   library(STRINGdb)
   library(paletteer)
+  library(DT)
 })
 
 # Seed of the layout and of any random jitter.
@@ -193,7 +202,7 @@ load_local_enrichment_db <- function(species, cache_dir) {
   db
 }
 
-get_enrichment_local <- function(fg_ids, bg_ids = NULL, fdr_threshold = 0.1) {
+get_enrichment_local <- function(fg_ids, bg_ids = NULL, fdr_threshold = .description_fdr) {
   if (is.null(enrich_terms_db)) return(NULL)
   if (length(fg_ids) == 0) return(tibble::tibble())
   
@@ -396,16 +405,26 @@ createDir(ami_networks_dir)
 # (the `domino` CLI discards it). This function reads the two TSVs of a gene list:
 # <list>_domino_modules.tsv (node, cluster) and <list>_domino_module_stats.tsv.
 # It returns NULL elements when either file is missing.
-load_domino_modules <- function(list_name, modules_dir) {
+load_domino_modules <- function(list_name, modules_dir, active_file, network_file) {
   mod_file   <- file.path(modules_dir, sprintf("%s_domino_modules.tsv", list_name))
   stats_file <- file.path(modules_dir, sprintf("%s_domino_module_stats.tsv", list_name))
   if (!file.exists(mod_file) || !file.exists(stats_file)) {
     return(list(clusters_df = NULL, module_stats = NULL))
   }
-  list(
-    clusters_df  = readr::read_tsv(mod_file, col_types = "ci"),
-    module_stats = readr::read_tsv(stats_file, col_types = "iicdd")
-  )
+  provenance <- file.path(modules_dir,paste0(list_name,"_domino_provenance.json"))
+  check <- ami_module_provenance(provenance,active_file,network_file)
+  if (check$available && !isTRUE(all.equal(as.numeric(check$metadata$module_threshold),as.numeric(params$domino_module_threshold))))
+    return(list(clusters_df=NULL,module_stats=NULL,reason="module threshold provenance differs"))
+  if (!check$available) return(list(clusters_df=NULL,module_stats=NULL,reason=check$reason))
+  modules <- readr::read_tsv(mod_file,col_types="ci")
+  stats <- readr::read_tsv(stats_file,col_types="iicdd")
+  if (anyDuplicated(stats$cluster)) stop("Duplicate DOMINO module statistics")
+  expected_q <- pmin(1,stats$p_value*as.numeric(check$metadata$n_putative))
+  if(nrow(stats) && (check$metadata$n_putative<1 || any(!is.finite(stats$p_value)) || any(abs(stats$p_adj-expected_q)>1e-10*pmax(abs(expected_q),1e-300))))
+    stop("DOMINO raw p / Bonferroni values contradict provenance")
+  if (any(!is.finite(stats$p_adj)) || any(stats$p_adj > params$domino_module_threshold))
+    stop("DOMINO modules do not satisfy the recorded module threshold")
+  list(clusters_df=modules,module_stats=stats,reason="verified")
 }
 
 # ── Module-aware layout ───────────────────────────────────────────────────────
@@ -503,7 +522,18 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, to
         }
       )
     }
-    if (is.null(enrich) || nrow(enrich) == 0 || "error" %in% names(enrich)) {
+    if (is.null(enrich) || "error" %in% names(enrich)) {
+      return(tibble(cluster=cl_id,n_genes=length(display_genes),genes=gene_str,all_genes=all_gene_str,description="Enrichment unavailable"))
+    }
+    # The existing descriptive cutoff is separate from gene/FCS/module significance.
+    # Keep each source's adjusted values; do not recompute an API BH locally.
+    if (nrow(enrich)>0) {
+      if (!"fdr" %in% names(enrich)) {
+        return(tibble(cluster=cl_id,n_genes=length(display_genes),genes=gene_str,all_genes=all_gene_str,description="Enrichment unavailable"))
+      }
+      enrich <- enrich[is.finite(as.numeric(enrich$fdr)) & as.numeric(enrich$fdr)<=.description_fdr,,drop=FALSE]
+    }
+    if (nrow(enrich) == 0) {
       return(tibble(cluster = cl_id, n_genes = length(display_genes),
                     genes = gene_str, all_genes = all_gene_str, description = "No enrichment"))
     }
@@ -515,6 +545,7 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, to
            genes = gene_str, all_genes = all_gene_str, description = paste(top, collapse = " / "))
   })
 
+  desc <- desc %>% mutate(description_source=if(!is.null(enrich_terms_db))"Local STRING terms; original per-category adjustment" else "STRING API; source-adjusted FDR",description_fdr=.description_fdr)
   if (!is.null(module_stats) && nrow(module_stats) > 0) {
     desc <- desc %>%
       dplyr::left_join(
@@ -574,7 +605,7 @@ if (!"star" %in% names(igraph::shapes())) {
 # Cross-tool corroboration shape, used in the CAAS network plots only (the FADE and RER
 # sections use circles). FADE significance matches the direction of the CAAS list on
 # screen (top: flag_fade_top, bottom: flag_fade_bottom, otherwise flag_fade); RER
-# acceleration and deceleration are shown whatever the direction of the list. They are
+# positive and negative associations are shown whatever the direction of the list. They are
 # mutually exclusive, so the only overlap is FADE with either RER flag, drawn as one
 # combined shape (star).
 compute_gene_shapes <- function(dir_label, attr_df) {
@@ -711,8 +742,8 @@ plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
   }
   if (!is.null(vertex_shape)) {
     encoding_lines <- c(encoding_lines,
-      "Shape: circle=none, square=FADE-sig, diamond=RER-accelerating,",
-      "  hexagon=RER-decelerating, star=FADE+RER overlap")
+      "Shape: circle=none, square=FADE-sig, diamond=RER-positive,",
+      "  hexagon=RER-negative, star=FADE+RER overlap")
   }
   legend("bottomleft", legend = encoding_lines, bty = "n", cex = 0.5, text.col = "grey30")
 }
@@ -764,6 +795,8 @@ gene_list_files <- gene_list_files[file.exists(gene_list_files)]
 gene_list_files <- normalizePath(gene_list_files, mustWork = FALSE)
 gene_list_files <- gene_list_files[file.exists(gene_list_files)]
 if (length(gene_list_files) == 0) stop("Error: no valid gene list files found")
+
+gene_list_files <- gene_list_files[basename(gene_list_files) %in% c("global.txt","top.txt","bottom.txt")]
 
 # Tab order: direction (global, top, bottom), alphabetical within a direction. The
 # alphabetical order of list.files() would interleave directions, so the names are
@@ -848,6 +881,10 @@ MIN_MAPPED <- 5L
 gene_scores_df <- NULL
 if (!is.null(params$gene_scores_file) && file.exists(params$gene_scores_file)) {
   gene_scores_df <- readr::read_tsv(params$gene_scores_file, show_col_types = FALSE)
+  if(is.null(params$gene_metadata_file) || !file.exists(params$gene_metadata_file) ||
+     !identical(jsonlite::read_json(params$gene_metadata_file)$gene_stat,"max"))
+    stop("AMI CAAS annotations require gene_stat=max metadata")
+  if(anyDuplicated(gene_scores_df$Gene))stop("Duplicate gene evidence keys")
   cat("Loaded gene_scores_file:", params$gene_scores_file, "with", nrow(gene_scores_df), "genes.\n")
 } else {
   cat("No gene_scores_file provided or file not found. Overlap checks will be skipped.\n")
@@ -857,21 +894,25 @@ prepare_gene_attributes <- function(df) {
   if (is.null(df) || nrow(df) == 0) return(NULL)
   
   .col <- function(c, default=NA) if(c %in% names(df)) df[[c]] else rep(default,nrow(df))
-  .istrue <- function(x) !is.na(x) & x %in% c(TRUE,"TRUE","True","true",1,"1")
+  .istrue <- function(x) ifelse(is.na(x),NA,x %in% c(TRUE,"TRUE","True","true",1,"1"))
   out <- tibble::tibble(gene=df$Gene)
   for(suffix in c("","_top","_bottom"))for(kind in c("nominal","adjusted")) {
-    n <- paste0("caas_",kind,suffix);out[[n]] <- .istrue(.col(n,FALSE))
+    p <- suppressWarnings(as.numeric(.col(paste0("caas_",if(kind=="nominal")"p.gen" else "p.gen.adj",suffix))))
+    out[[paste0("caas_",kind,suffix)]] <- ifelse(is.finite(p),p<.05,NA)
   }
-  out$rer_adjusted <- .istrue(.col("rer_significant_fdr",FALSE))
+  rp <- suppressWarnings(as.numeric(.col("rer_min_pval")))
+  rq <- suppressWarnings(as.numeric(.col("rer_perm_padj")))
+  out$rer_nominal <- ifelse(is.finite(rp),rp<.05,NA)
+  out$rer_adjusted <- ifelse(is.finite(rq),rq<.05,NA)
   # FADE
   out$flag_fade_top    <- .istrue(.col("fade_significant_top"))
   out$flag_fade_bottom <- .istrue(.col("fade_significant_bottom"))
   out$flag_fade        <- out$flag_fade_top | out$flag_fade_bottom
   
   # RER
-  .rer_dir <- tolower(as.character(.col("rer_acceleration")))
-  out$flag_rer_acc     <- .istrue(.col("rer_significant")) & grepl("acc", .rer_dir)
-  out$flag_rer_decc    <- .istrue(.col("rer_significant")) & grepl("dec", .rer_dir)
+  rho <- suppressWarnings(as.numeric(.col("rer_rho")))
+  out$flag_rer_acc <- ifelse(is.finite(rho),out$rer_nominal & rho>0,NA)
+  out$flag_rer_decc <- ifelse(is.finite(rho),out$rer_nominal & rho<0,NA)
   
   # Accumulation: flag_accum is the non-directional pooled test; flag_accum_top and
   # flag_accum_bottom are the direction-restricted tests, as for FADE above.
@@ -887,7 +928,7 @@ compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label
   labels <- c("caas_nominal","caas_adjusted","caas_nominal_top","caas_adjusted_top","caas_nominal_bottom","caas_adjusted_bottom","rer_adjusted","fade","fade_top","fade_bottom","rer_acc","rer_decc","accum","accum_top","accum_bottom")
   genes <- if(length(preferred_names) && !is.na(preferred_names)) strsplit(preferred_names,"[,;]")[[1]] else character()
   x <- if(!is.null(attr_df)) attr_df[attr_df$gene %in% trimws(genes),,drop=FALSE] else NULL
-  vals <- lapply(cols,function(n) if(is.null(x)||!nrow(x)||!n %in% names(x)) NA_real_ else round(100*mean(x[[n]] %in% TRUE),1))
+  vals <- lapply(cols,function(n) if(is.null(x)||!nrow(x)||!n %in% names(x)) NA_real_ else if(all(is.na(x[[n]])))NA_real_ else round(100*mean(x[[n]],na.rm=TRUE),1))
   tibble::as_tibble(setNames(vals,labels))
 }
 
@@ -959,9 +1000,9 @@ fade_node_score <- function(dir_label) {
 # Direction classifiers. A gene list name decides (a) the direction bucket under which
 # its modules are rolled up in the tabs, and (b) which CAAS nominal/BH and flag columns
 # annotate its modules and which direction the node score builders read. CAAS and FADE
-# share the top and bottom directions. RER has accelerating and decelerating, which do
+# share the top and bottom directions. RER has positive and negative Rho, which do
 # not map onto the CAAS top and bottom directions, so RER always uses the "global"
-# annotation (both columns) and its own Acc, Decc and Global roll-up. The match is a
+# annotation (both columns) and its own Positive, Negative and Global roll-up. The match is a
 # substring, so "fade_top_significant" matches "top".
 top_bottom_dir_classifier <- function(nm) {
   if (grepl("top", nm, ignore.case = TRUE)) "top"
@@ -979,8 +1020,8 @@ top_bottom_roll_classifier <- function(other_label = "Other") {
 }
 always_global_dir_classifier <- function(nm) "global"
 rer_roll_classifier <- function(nm) {
-  if (grepl("accelerat", nm, ignore.case = TRUE)) "Acc"
-  else if (grepl("decelerat", nm, ignore.case = TRUE)) "Decc"
+  if (grepl("accelerat", nm, ignore.case = TRUE)) "Positive"
+  else if (grepl("decelerat", nm, ignore.case = TRUE)) "Negative"
   else "Global"
 }
 
@@ -1002,8 +1043,17 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
 
   res <- list(list_name = .list_name, direction = .direction, skip_message = NULL,
               connectivity_line = NULL, modules_line = NULL, display_df = NULL,
-              png_path = NULL, clust_desc = NULL, network_summary_row = NULL)
+              png_path = NULL, clust_desc = NULL, network_summary_row = NULL, available=FALSE)
 
+  if(prefix=="caas" && !is.null(gene_scores_df)) {
+    .rk <- dir_classifier(.list_name);.sf <- if(.rk=="global")"" else paste0("_",.rk)
+    .pp <- suppressWarnings(as.numeric(gene_scores_df[[paste0("caas_p.gen",.sf)]]))
+    .expected <- gene_scores_df$Gene[is.finite(.pp)&.pp<.05]
+    if(!setequal(.genes_sym,.expected)) {
+      res$skip_message <- "> CAAS seeds differ from current max empirical nominal evidence; recompute modules with the correct list."
+      return(res)
+    }
+  }
   if (length(.mapped) < MIN_MAPPED) {
     res$skip_message <- sprintf("> Too few mapped genes for %s (need >= %d).", .list_name, MIN_MAPPED)
     return(res)
@@ -1013,14 +1063,20 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
   # the active input genes: DOMINO adds connector genes (not active themselves, but
   # between active genes in the network), which is what separates network-based module
   # discovery from plain set overlap.
-  .domino <- load_domino_modules(.list_name, modules_dir)
+  .network_file <- switch(prefix,caas=params$domino_network_sif,rer=params$rer_domino_network_sif,fade=params$fade_domino_network_sif)
+  .domino <- load_domino_modules(.list_name, modules_dir,.gf,.network_file)
+  if (is.null(.domino$clusters_df)) {
+    res$skip_message <- paste0("> Modules unavailable: ",.domino$reason %||% "module files absent", ". Recompute from these exact seed lists; do not reuse historical modules.")
+    return(res)
+  }
+  res$available <- TRUE
   .clusters_df <- if (!is.null(.domino$clusters_df)) {
     .domino$clusters_df %>% dplyr::filter(node %in% igraph::V(net_full)$name)
   } else NULL
   .module_stats <- .domino$module_stats
 
-  # Modules are renumbered by size (genes, descending) and capped to the 20 largest, which
-  # keeps the legend and description table readable. module_stats is renumbered the same
+  # Modules are renumbered by size (genes, descending) without truncation.
+  # module_stats is renumbered the same
   # way so that the p_value and p_adj join stays aligned.
   .n_mod_total <- if (!is.null(.clusters_df)) length(unique(.clusters_df$cluster)) else NA_integer_
   if (!is.null(.clusters_df) && nrow(.clusters_df) > 0) {
@@ -1035,7 +1091,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
         dplyr::filter(cluster %in% as.integer(names(.cl_map))) %>%
         dplyr::mutate(cluster = .cl_map[as.character(cluster)])
     }
-    .clusters_df <- .clusters_df %>% dplyr::filter(cluster <= 20)
+    # Preserve all modules in exports and recurrence; no silent top-20 cut.
   }
   .n_mod <- if (!is.null(.clusters_df)) length(unique(.clusters_df$cluster)) else NA_integer_
 
@@ -1082,7 +1138,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
 
     .clust_file <- file.path(ami_networks_dir, sprintf("%s_%s_domino_clusters.tsv", prefix, .list_name))
     readr::write_tsv(.clusters_out %>% dplyr::arrange(cluster, gene), .clust_file)
-    res$modules_line <- sprintf("Modules found: **%d** of **%d** total (showing the 20 largest; written to `%s`)",
+    res$modules_line <- sprintf("Modules found: **%d** of **%d** total (all modules retained; written to `%s`)",
                                  .n_mod, .n_mod_total, basename(.clust_file))
 
     .clust_desc <- describe_clusters(
@@ -1110,7 +1166,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     }
 
     .clust_desc_display <- .clust_desc %>%
-      dplyr::filter(!description %in% c("Too small", "No enrichment")) %>%
+      dplyr::filter(!description %in% c("Too small", "No enrichment", "Enrichment unavailable")) %>%
       dplyr::arrange(desc(n_genes))
 
     if (nrow(.clust_desc_display) > 0) {
@@ -1121,7 +1177,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
               Module = cluster, Genes = n_genes,
               `Representative genes` = genes, `Top enriched terms` = description,
               `CAAS nominal (%)` = caas_nominal_top, `CAAS BH (%)` = caas_adjusted_top,
-              `fade_top (%)` = fade_top, `RER BH (%)` = rer_adjusted, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
+              `fade_top (%)` = fade_top, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc,
               `accum_top (%)` = accum_top
             )
         } else if (.dir_label == "bottom") {
@@ -1130,7 +1186,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
               Module = cluster, Genes = n_genes,
               `Representative genes` = genes, `Top enriched terms` = description,
               `CAAS bottom nominal (%)` = caas_nominal_bottom, `CAAS bottom BH (%)` = caas_adjusted_bottom,
-              `fade_bottom (%)` = fade_bottom, `RER BH (%)` = rer_adjusted, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
+              `fade_bottom (%)` = fade_bottom, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc,
               `accum_bottom (%)` = accum_bottom
             )
         } else {
@@ -1141,7 +1197,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
               `CAAS global nominal (%)` = caas_nominal, `CAAS global BH (%)` = caas_adjusted,
               `CAAS top nominal (%)` = caas_nominal_top, `CAAS top BH (%)` = caas_adjusted_top,
               `CAAS bottom nominal (%)` = caas_nominal_bottom, `CAAS bottom BH (%)` = caas_adjusted_bottom,
-              `fade (%)` = fade, `RER BH (%)` = rer_adjusted, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
+              `fade (%)` = fade, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc,
               `accum (%)` = accum
             )
         }
@@ -1167,7 +1223,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     }
 
     .cl_labels <- setNames(.clust_desc$description, as.character(.clust_desc$cluster))
-    .cl_labels <- .cl_labels[!.cl_labels %in% c("Too small", "No enrichment")]
+    .cl_labels <- .cl_labels[!.cl_labels %in% c("Too small", "No enrichment", "Enrichment unavailable")]
 
     .clusters_df_viz <- .clusters_df %>%
       dplyr::filter(cluster %in% .clust_desc$cluster[.clust_desc$n_genes >= .min_cluster_genes])
@@ -1176,8 +1232,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     .clusters_df_viz <- .clusters_df
   }
 
-  # The plotted graph keeps only the nodes of the shown modules (the 20 largest that
-  # pass min_cluster_genes).
+  # The plotted graph keeps nodes of modules that pass min_cluster_genes.
   .net_plot <- if (!is.null(.clusters_df_viz) && nrow(.clusters_df_viz) > 0) {
     igraph::induced_subgraph(
       .net_conn,
@@ -1197,7 +1252,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
   png(.png_path, width = 1800, height = 1500, res = 160)
   plot_cluster_network(
     .net_plot, .clusters_df_viz,
-    title          = sprintf("%s - DOMINO modules (score >= %s, top 20 modules)", .list_name, params$domino_network_score_thr),
+    title          = sprintf("%s - DOMINO modules (score >= %s)", ami_list_label(.list_name), params$domino_network_score_thr),
     cluster_labels = .cl_labels,
     node_signal    = .node_signal,
     active_genes   = .genes_sym,
@@ -1222,14 +1277,14 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
 # cached strings, data frames and file paths. Called once per direction tab that shows
 # the list (its own direction and "Global").
 print_gene_list_result <- function(res) {
-  cat(sprintf("\n\n##### %s\n\n", res$list_name))
+  cat(sprintf("\n\n##### %s\n\n", ami_list_label(res$list_name)))
   if (!is.null(res$skip_message)) { cat(res$skip_message, "\n\n"); return(invisible(NULL)) }
   if (!is.null(res$connectivity_line)) cat(res$connectivity_line, "\n\n")
   if (!is.null(res$modules_line)) cat(res$modules_line, "\n\n")
   if (!is.null(res$display_df)) {
     print(knitr::kable(
       res$display_df,
-      caption = sprintf("Module functional descriptions - %s", res$list_name),
+      caption = sprintf("Module functional descriptions - %s", ami_list_label(res$list_name)),
       escape = FALSE
     ) %>% kableExtra::kable_styling(bootstrap_options = c("striped", "condensed"), full_width = TRUE))
   }
@@ -1322,7 +1377,7 @@ collapsible_table <- function(df) {
 
 .render_rollup <- function(df, caption) {
   if (is.null(df) || nrow(df) == 0) { cat(sprintf("_No modules to show (%s)._\n\n", caption)); return(invisible(NULL)) }
-  df <- df %>% dplyr::filter(!description %in% c("Too small", "No enrichment"))
+  df <- df %>% dplyr::filter(!description %in% c("Too small", "No enrichment", "Enrichment unavailable"))
   if (nrow(df) == 0) { cat(sprintf("_No described modules to show (%s)._\n\n", caption)); return(invisible(NULL)) }
 
   if ("domino_p_adj" %in% names(df)) {
@@ -1398,9 +1453,8 @@ collapsible_table <- function(df) {
 
 # ── Nested tabs of one tool ───────────────────────────────────────────────────
 # The outer tab is the direction (Global, Top, Bottom, or Global, Acc, Decc for RER),
-# with four sub-tabs: Modules (the networks of the gene lists of that direction),
-# Recurrence Heatmap (term x gene list), Recurrence Table (term to gene-list membership)
-# and Gene lists (the module description roll-up).
+# with a Modules sub-tab. Recurrence lives in its own cross-method section.
+# Module and active-gene membership tables remain exported for downstream consumers.
 #
 # direction_tabs: named list, tab label to the `direction` value that filters the lists
 # (NULL = no filter, as in the Global tab); the direction of a list comes from
@@ -1428,7 +1482,7 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
 
   term_rows_all <- if (!is.null(clust_desc_all)) {
     clust_desc_all %>%
-      dplyr::filter(!description %in% c("Too small", "No enrichment")) %>%
+      dplyr::filter(!description %in% c("Too small", "No enrichment", "Enrichment unavailable")) %>%
       dplyr::mutate(term_raw = strsplit(description, "\\s*/\\s*")) %>%
       tidyr::unnest(term_raw) %>%
       dplyr::mutate(term_raw = trimws(term_raw)) %>%
@@ -1437,7 +1491,9 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
   if (!is.null(term_rows_all) && nrow(term_rows_all) > 0) {
     term_rows_all$term <- .cluster_terms(term_rows_all$term_raw)
   }
-  assign(sprintf(".ami_term_rows_%s", prefix), term_rows_all, envir = .GlobalEnv)
+  assign(sprintf(".ami_term_rows_%s", prefix),term_rows_all,envir=knitr::knit_global())
+  for (i in seq_along(results)) if(!is.null(results[[i]]$clust_desc) && any(results[[i]]$clust_desc$description=="Enrichment unavailable")) results[[i]]$available <- FALSE
+  .ami_results_registry[[prefix]] <<- results
 
   for (dir_label in names(direction_tabs)) {
     filter_val <- direction_tabs[[dir_label]]
@@ -1452,17 +1508,6 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
       for (r in sel) print_gene_list_result(r)
     }
 
-    cat("\n\n#### Recurrence Heatmap\n\n")
-    .render_term_heatmap(term_rows_all, gene_list_orders[[dir_label]], dir_label)
-
-    cat("\n\n#### Recurrence Table\n\n")
-    .render_term_recurrence_table(term_rows_all, gene_list_orders[[dir_label]], dir_label)
-
-    cat("\n\n#### Gene lists\n\n")
-    df <- if (is.null(filter_val)) clust_desc_all
-          else if (!is.null(clust_desc_all)) dplyr::filter(clust_desc_all, direction == filter_val)
-          else NULL
-    .render_rollup(df, sprintf("%s gene lists", dir_label))
     if(!is.null(gene_scores_df))for(r in sel) {
       gf <- gene_list_files[tools::file_path_sans_ext(basename(gene_list_files))==r$list_name][1]
       ids <- read_gene_vector(gf)
@@ -1472,8 +1517,7 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
       cols <- if(prefix=="caas")c("Gene",paste0("caas_",c("p.gen","p.gen.adj","nominal","adjusted"),suffix)) else if(prefix=="rer")c("Gene","rer_rho","rer_min_pval","rer_perm_padj","rer_significant","rer_significant_fdr") else c("Gene","fade_max_bf_top","fade_max_bf_bottom","fade_significant_top","fade_significant_bottom")
       ev <- ev[,intersect(cols,names(ev)),drop=FALSE]
       readr::write_tsv(ev,file.path(ami_networks_dir,paste0(prefix,"_",r$list_name,"_gene_evidence.tsv")))
-      cat("\n\nActive input evidence: **",r$list_name,"**\n\n",sep="")
-      print(knitr::kable(head(ev,200)))
+
     }
   }
 
@@ -1509,11 +1553,11 @@ Network score threshold: **`r params$domino_network_score_thr`** (= `r params$do
 Only nodes with at least one edge at this confidence level (both endpoints in `cleaned_background`) are in DOMINO's input network.
 Module finding + significance: **DOMINO** (Shamir-Lab) - Bonferroni-corrected hypergeometric p-value per module, computed by DOMINO itself.
 
-Network plots additionally mark cross-tool corroboration by node **shape**: circle = none, square = FADE-significant, diamond = RER-accelerating, hexagon = RER-decelerating, star = FADE-significant overlapping either RER direction.
+Network plots additionally mark cross-tool corroboration by node **shape**: circle = none, square = FADE-significant, diamond = RER-positive, hexagon = RER-negative, star = FADE-significant overlapping either RER direction.
 
 Each direction uses nominal active genes. Gold borders mark active genes with BH-adjusted empirical significance; grey nodes are connectors. FADE uses its configured BF cutoff. Module significance is separate from individual-gene significance.
 
-Each direction below (**Global**/**Top**/**Bottom**) has four sub-tabs: **Modules**, **Recurrence Heatmap**, **Recurrence Table**, and **Gene lists**.
+Each view below shows its own module analysis. Term recurrence across methods and views is in a separate section; full module membership remains in the exports.
 
 ```{r caas_domino_networks, fig.width=10, fig.height=8, results='asis'}
 .caas_net_full <- build_tool_network(params$domino_network_sif, params$domino_edge_scores_file)
@@ -1532,7 +1576,7 @@ CAAS_clust_desc_all <- render_tool_section_nested(
 
 ## RER {.tabset}
 
-RER's own DOMINO network, built against RER's own gene universe. Skipped entirely when RER didn't run this invocation. Same nested layout as CAAS above: each direction tab (**Global**/**Top**/**Bottom**) holds **Modules** / **Recurrence Heatmap** / **Recurrence Table** / **Gene lists** sub-tabs.
+RER's own DOMINO network, built against RER's own gene universe. Global pools both signs; Positive and Negative refer to Rho and do not represent CAAS Top/Bottom. Skipped entirely when RER didn't run this invocation. Modules are shown in their own views; recurrence is presented separately.
 
 ```{r rer_domino_networks, fig.width=10, fig.height=8, results='asis'}
 RER_clust_desc_all <- NULL
@@ -1545,7 +1589,8 @@ if (!is.null(params$rer_domino_network_sif) && !is.null(params$rer_gene_lists_di
     grepl("decelerat", basename(.rer_gene_list_files), ignore.case = TRUE) ~ 2L,
     TRUE ~ 0L
   )
-  .rer_gene_list_files <- .rer_gene_list_files[order(.rer_rank)]
+  .rer_gene_list_files <- .rer_gene_list_files[basename(.rer_gene_list_files) %in% c("rer_significant.txt","rer_accelerating.txt","rer_decelerating.txt")]
+  .rer_gene_list_files <- .rer_gene_list_files[order(match(basename(.rer_gene_list_files),c("rer_significant.txt","rer_accelerating.txt","rer_decelerating.txt")))]
 
   if (length(.rer_gene_list_files) > 0) {
     .rer_bg_string_ids <- if (!is.null(params$rer_background_file) && file.exists(params$rer_background_file)) {
@@ -1555,11 +1600,11 @@ if (!is.null(params$rer_domino_network_sif) && !is.null(params$rer_gene_lists_di
       .rer_gene_list_files, .rer_net_full, params$rer_domino_modules_dir, "rer",
       roll_dir_classifier = rer_roll_classifier,
       dir_classifier  = always_global_dir_classifier,
-      direction_tabs      = list(Global = "Global", Top = "Acc", Bottom = "Decc"),
+      direction_tabs      = list(Global = "Global", Positive = "Positive", Negative = "Negative"),
       gene_list_orders    = list(
         Global = c("rer_significant", "rer_accelerating", "rer_decelerating"),
-        Top    = "rer_accelerating",
-        Bottom = "rer_decelerating"
+        Positive = "rer_accelerating",
+        Negative = "rer_decelerating"
       ),
       use_shape_overlay   = FALSE,
       bg_string_ids       = .rer_bg_string_ids,
@@ -1575,7 +1620,7 @@ if (!is.null(params$rer_domino_network_sif) && !is.null(params$rer_gene_lists_di
 
 ## FADE {.tabset}
 
-FADE's own DOMINO network, built against FADE's own gene universe. Skipped entirely when FADE didn't run this invocation. Same nested layout as CAAS above: each direction tab (**Global**/**Top**/**Bottom**) holds **Modules** / **Recurrence Heatmap** / **Recurrence Table** / **Gene lists** sub-tabs.
+FADE's own DOMINO network, built against FADE's own gene universe. Skipped entirely when FADE didn't run this invocation. Modules are shown in their own views; recurrence is presented separately.
 
 ```{r fade_domino_networks, fig.width=10, fig.height=8, results='asis'}
 FADE_clust_desc_all <- NULL
@@ -1588,7 +1633,8 @@ if (!is.null(params$fade_domino_network_sif) && !is.null(params$fade_gene_lists_
     grepl("bottom", basename(.fade_gene_list_files), ignore.case = TRUE) ~ 2L,
     TRUE ~ 3L
   )
-  .fade_gene_list_files <- .fade_gene_list_files[order(.fade_rank)]
+  .fade_gene_list_files <- .fade_gene_list_files[basename(.fade_gene_list_files) %in% c("fade_global_significant.txt","fade_top_significant.txt","fade_bottom_significant.txt")]
+  .fade_gene_list_files <- .fade_gene_list_files[order(match(basename(.fade_gene_list_files),c("fade_global_significant.txt","fade_top_significant.txt","fade_bottom_significant.txt")))]
 
   if (length(.fade_gene_list_files) > 0) {
     .fade_bg_string_ids <- if (!is.null(params$fade_background_file) && file.exists(params$fade_background_file)) {
@@ -1623,13 +1669,13 @@ if (!is.null(params$fade_domino_network_sif) && !is.null(params$fade_gene_lists_
   if (!is.null(FADE_clust_desc_all)) dplyr::mutate(FADE_clust_desc_all, tool = "FADE", .before = 1)
 )
 .ami_all_terms <- dplyr::bind_rows(
-  if (exists(".ami_term_rows_caas", envir = .GlobalEnv) && !is.null(.ami_term_rows_caas)) {
+  if (exists(".ami_term_rows_caas", envir = knitr::knit_global(),inherits=FALSE) && !is.null(.ami_term_rows_caas)) {
     dplyr::mutate(.ami_term_rows_caas, tool = "CAAS", .before = 1)
   },
-  if (exists(".ami_term_rows_rer", envir = .GlobalEnv) && !is.null(.ami_term_rows_rer)) {
+  if (exists(".ami_term_rows_rer", envir = knitr::knit_global(),inherits=FALSE) && !is.null(.ami_term_rows_rer)) {
     dplyr::mutate(.ami_term_rows_rer, tool = "RER", .before = 1)
   },
-  if (exists(".ami_term_rows_fade", envir = .GlobalEnv) && !is.null(.ami_term_rows_fade)) {
+  if (exists(".ami_term_rows_fade", envir = knitr::knit_global(),inherits=FALSE) && !is.null(.ami_term_rows_fade)) {
     dplyr::mutate(.ami_term_rows_fade, tool = "FADE", .before = 1)
   }
 )
@@ -1640,6 +1686,39 @@ if (nrow(.ami_all_terms) > 0) {
   readr::write_tsv(.ami_all_terms, file.path(ami_networks_dir, "ami_term_threshold_membership_all_tools.tsv"))
 }
 ```
+
+# Term recurrence across methods {.tabset}
+
+Global uses each method's own global list, never a sum of sides. Top/Bottom use CAAS and FADE sides; RER Global (both signs) is repeated as an explicitly labelled reference, never mapped to a CAAS side. RER's own Positive/Negative module analyses remain above. Recurrence concerns retained top functional descriptions of modules, with the existing descriptive term grouping, not independent pathway confirmations or FCS significance. Term rows use the union of verified descriptions across views. Fractions use only verified, evaluable lists; NA denotes unavailable modules/descriptions, while zero denotes a verified absence. Gene universes remain method-specific.
+
+```{r recurrence-comparison,results='asis',fig.width=11,fig.height=7}
+if(nrow(.ami_all_terms)>0) .ami_all_terms$term <- .cluster_terms(.ami_all_terms$term_raw)
+for(view in c("Global","Top","Bottom")) {
+ cat(sprintf("\n## %s {.tabset}\n\n",view))
+ rec <- ami_recurrence(.ami_all_terms,.ami_results_registry,view)
+ readr::write_tsv(rec$cells,file.path(ami_networks_dir,paste0("recurrence_",tolower(view),"_matrix.tsv")))
+ readr::write_tsv(rec$summary,file.path(ami_networks_dir,paste0("recurrence_",tolower(view),"_table.tsv")))
+ readr::write_tsv(rec$availability,file.path(ami_networks_dir,paste0("recurrence_",tolower(view),"_availability.tsv")))
+ cat("\n\n### Heatmap\n\n")
+ if(nrow(rec$cells)) {
+  p <- ggplot(rec$cells,aes(list_label,term,fill=factor(present,levels=c(0,1))))+geom_tile(colour="white")+
+   scale_fill_manual(name="Description present",values=c(`0`="#eeeeee",`1`="#2c7fb8"),na.value="#bbbbbb",drop=FALSE)+
+   labs(x=NULL,y=NULL,title=paste("Module description recurrence —",view))+theme_minimal(base_size=10)+theme(axis.text.x=element_text(angle=30,hjust=1))
+  print(p);cat("\n\n")
+ } else cat("_No verified module descriptions available in this view._\n\n")
+ cat("\n\n### Table\n\n")
+ widget <- DT::datatable(rec$summary,rownames=FALSE,filter="top",options=list(pageLength=15,scrollX=TRUE,order=list()))
+ rendered_widget <- knitr::knit_print(widget)
+ knitr::knit_meta_add(attr(rendered_widget,"knit_meta"))
+ cat(rendered_widget)
+ cat("\n\n### Availability and denominators\n\n")
+ print(knitr::kable(rec$availability))
+}
+```
+
+# Evidence criteria
+
+Gene nominal/BH: empirical p/q <0.05 in their original families. DOMINO uses its own slice threshold (default 0.3) and Bonferroni module threshold (default 0.05), independently of gene calls. Functional descriptions retain their source-adjusted FDR ≤ `r .description_fdr` (default 0.10) in both local and API paths; local adjustment families and API adjustment families retain their original provenance. This descriptive cutoff is not FCS 0.15. No FCS selection determines DOMINO seeds. Inputs and module p-value scale are verified against per-list provenance; missing or stale modules remain unavailable.
 
 ---
 

@@ -378,7 +378,7 @@ species_plot_profile <- function(n_species, n_taxa = n_species, n_rings = 0L) {
 
       # Per-species annotations tighten as species are added, because the arc
       # available to each tip shrinks faster than the canvas grows.
-      n_label_size = clamp_value(6.0 - 0.020 * n_species, 2.3, 6.0),
+      n_label_size = clamp_value(4.5 - 0.015 * n_species, 1.8, 4.5),
       n_label_nudge = clamp_value(8.4 + 0.60 * pmax(0, n_rings - 2) - 0.040 * n_species, 3.2, 9.8),
       asterisk_size = clamp_value(7.0 - 0.025 * n_species, 2.5, 7.0),
       asterisk_nudge = clamp_value(7.2 + 0.55 * pmax(0, n_rings - 2) - 0.032 * n_species, 2.8, 8.6),

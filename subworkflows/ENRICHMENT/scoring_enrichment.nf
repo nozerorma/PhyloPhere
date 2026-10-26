@@ -56,6 +56,7 @@ process SCORING_AMI_REPORT {
     path gene_lists
     path background
     path gene_scores
+    path gene_metadata
     path domino_network_sif
     path domino_modules_dir
     path domino_edge_scores
@@ -149,6 +150,9 @@ process SCORING_AMI_REPORT {
                     species             = ${species},
                     domino_network_score_thr = ${net_score},
                     gene_scores_file    = ${gs_arg},
+                    gene_metadata_file  = '${gene_metadata}',
+                    module_description_fdr = ${params.ami_description_fdr ?: 0.10},
+                    domino_module_threshold = ${params.domino_module_thr ?: 0.05},
                     string_db_dir       = '${params.string_db_dir}',
                     string_cache_dir    = '${params.string_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/string"}',
                     domino_network_sif  = '${domino_network_sif}',
