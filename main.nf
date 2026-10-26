@@ -285,7 +285,10 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         def run_ct_disambiguation = toBool(params.ct_disambiguation) && (ran_discovery || params.discovery_from || params.disambiguation_input)
         def run_ct_postproc       = toBool(params.ct_postproc) && (run_ct_disambiguation || params.disambiguation_input)
         def run_ct_accumulation   = toBool(params.ct_accumulation) && (run_ct_postproc || params.accumulation_background_input)
-        def run_caas_permulation  = run_ct_disambiguation || ran_discovery || (toBool(params.enrichment) && toBool(params.caas_permulation_enrichment))
+        // A saved null satisfies enrichment without an implicit alignment replay.
+        // Otherwise an incomplete standalone replay can supply empty live channels
+        // that mask --caas_null_dir in SCORING. Live discovery/disambiguation still wins.
+        def run_caas_permulation  = run_ct_disambiguation || ran_discovery || (toBool(params.enrichment) && toBool(params.caas_permulation_enrichment) && !params.caas_null_dir)
 
         // Stable channel references for CT_POSTPROC outputs used by multiple consumers.
         // Populated inside the ct_postproc block when --ct_postproc is enabled.
