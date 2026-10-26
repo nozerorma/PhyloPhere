@@ -238,7 +238,9 @@ workflow SCORING {
         )
 
         // The same calibrated evidence feeds reporting, AMI and FCS, even with FCS disabled.
-        def calibration_blocks = (null_blocks_ch ?: Channel.empty()).flatten().collect().map { b ->
+        // collect() emits nothing for an empty channel. Emit an empty list so the
+        // saved-null fallback is evaluated and SCORING_EVIDENCE still runs without a null.
+        def calibration_blocks = (null_blocks_ch ?: Channel.empty()).flatten().collect().ifEmpty { [] }.map { b ->
             b ? b : (params.caas_null_dir ? [file(params.caas_null_dir)] : [])
         }
         def evidence_out = SCORING_EVIDENCE(compute_out.gene_scores, compute_out.position_scores,
