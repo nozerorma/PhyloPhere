@@ -10,7 +10,7 @@ def modularSourceHash(List names) {
 }
 
 process POSITION_REGISTRY {
-    label 'process_low'
+    label 'process_registry'
     memory { params.position_registry_memory ?: (background.size() < 20000 ? '8 GB' : '64 GB') }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'registry'
 
