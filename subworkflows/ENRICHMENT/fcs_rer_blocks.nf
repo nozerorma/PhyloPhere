@@ -57,7 +57,7 @@ workflow FCS_RER_BLOCKS {
     def jobs = batches.join(FCS_RER_OBSERVED.out.observed).combine(blocks)
     FCS_RER_NULL_BLOCK(jobs, sv, uv)
     FCS_CLOSE(FCS_RER_OBSERVED.out.observed.join(FCS_RER_NULL_BLOCK.out.counts.groupTuple()))
-    FCS_CONCAT(FCS_CLOSE.out.partial.collect())
+    FCS_CONCAT(FCS_CLOSE.out.partial.collect(), [])
     emit:
     enrich_file = FCS_CONCAT.out.enrich
 }

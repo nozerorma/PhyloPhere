@@ -300,7 +300,8 @@ workflow ENRICHMENT {
         if (run_fcs) {
             def scoring_fcs_compute = FCS_COMPUTE_SCORING(fcs_universe_ch, gene_calibration)
             def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch,
-                                              scoring_fcs_compute.enrich_file)
+                                              scoring_fcs_compute.enrich_file,
+                                              scoring_fcs_compute.report_metadata)
             fcs_out_report = fcs_out.report
             caas_all = fcs_out.fcs_all_results.ifEmpty { file('NO_FCS_ALL') }
             caas_le  = fcs_out.fcs_leading_edge.ifEmpty { file('NO_LEADING_EDGE') }

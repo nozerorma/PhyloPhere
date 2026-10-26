@@ -182,7 +182,7 @@ workflow FCS_COMPUTE_BLOCKS {
     def counts_by_batch = FCS_NULL_BLOCK.out.counts.groupTuple(by: 0)
     FCS_CLOSE(FCS_OBSERVED.out.observed.join(counts_by_batch, by: 0).map { id, obs, cts -> tuple(id, obs, cts) })
 
-    FCS_CONCAT(FCS_CLOSE.out.partial.collect().filter { it })
+    FCS_CONCAT(FCS_CLOSE.out.partial.collect().filter { it }, [])
 
     emit:
     enrich_file = FCS_CONCAT.out.enrich
@@ -219,7 +219,9 @@ workflow FCS_COMPUTE_CALIBRATED {
     FCS_NULL_BLOCK(jobs, universe_file, batchSize)
     FCS_CLOSE(FCS_OBSERVED.out.observed.join(FCS_NULL_BLOCK.out.counts.groupTuple(by:0), by:0)
         .map { id, observed, counts -> tuple(id, observed, counts) })
-    FCS_CONCAT(FCS_CLOSE.out.partial.collect().filter { it })
+    // Only a calibration that has the blocks carries metadata.json with the verified gene_stat
+    FCS_CONCAT(FCS_CLOSE.out.partial.collect().filter { it }, ready.map { file("${it}/metadata.json") })
     emit:
     enrich_file = FCS_CONCAT.out.enrich.mix(empty)
+    report_metadata = FCS_CONCAT.out.report_metadata
 }

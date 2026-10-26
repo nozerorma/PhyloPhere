@@ -45,6 +45,7 @@ process SCORING_FCS_REPORT {
     path fcs_stats
     path universe
     path enrich_file
+    path report_metadata     // fcs_report_metadata.json from FCS_CONCAT; staged beside enrich_file, which the report looks it up by
 
     output:
     path "12.FCS_scoring_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -240,9 +241,11 @@ process FCS_CONCAT {
 
     input:
     path(partial_files, stageAs: "partial_*")
+    path(calibration_metadata, stageAs: 'calibration_metadata.json')   // [] when not calibrated from SCORING
 
     output:
     path "fcs_enrich_merged.tsv", emit: enrich
+    path "fcs_report_metadata.json", optional: true, emit: report_metadata
 
     script:
     """
@@ -283,6 +286,14 @@ process FCS_CONCAT {
             print line
         }
     ' "\$ref" \$(printf '%s\\n' "\${files[@]}" | grep -vxF "\$ref" || true) > fcs_enrich_merged.tsv
+
+    # Calibrated runs carry the gene_stat that the null check verified upstream
+    # (calibration/metadata.json). The report reads this record to confirm gene_stat=max.
+    if [ -s calibration_metadata.json ]; then
+        gs=\$(sed -nE 's/.*"gene_stat": *"([^"]+)".*/\\1/p' calibration_metadata.json)
+        [ -n "\$gs" ] || { echo "FCS_CONCAT: no gene_stat in calibration metadata" >&2; exit 1; }
+        printf '{\\n  "gene_stat": "%s"\\n}\\n' "\$gs" > fcs_report_metadata.json
+    fi
     """
 }
 
@@ -320,7 +331,7 @@ workflow FCS_COMPUTE {
     def perms_file_bc    = perms_file.collect().map { it[0] }
 
     FCS_COMPUTE_BATCHED(batches, stats_file_bc, universe_file_bc, perms_file_bc, score_source)
-    FCS_CONCAT(FCS_COMPUTE_BATCHED.out.partial.collect())
+    FCS_CONCAT(FCS_COMPUTE_BATCHED.out.partial.collect(), [])
 
     emit:
     enrich_file = FCS_CONCAT.out.enrich
