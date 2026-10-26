@@ -196,7 +196,10 @@ workflow FCS_COMPUTE_CALIBRATED {
     calibration
     main:
     def ready = calibration.filter { !file("${it}/empty.tsv").exists() }
-    def empty = calibration.filter { file("${it}/empty.tsv").exists() }.map { file("${it}/empty.tsv") }
+    // An unavailable calibration (fewer than 2 null cycles, or no genes) has no CAAS FCS.
+    // Fail here with the reason instead of letting the report stop later on missing metadata.
+    def empty = calibration.filter { file("${it}/empty.tsv").exists() }
+        .map { d -> error("CAAS calibration unavailable (fewer than 2 null cycles or no genes): see ${d}/metadata.json; FCS needs a calibration with N >= 2") }
     def batchSize = (params.fcs_block_batch_genes ?: 1000) as int
     def gmtDir = params.gmt_dir ?: "${baseDir}/subworkflows/ENRICHMENT/dat"
     def counter = 0
