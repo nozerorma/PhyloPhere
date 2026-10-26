@@ -198,7 +198,11 @@ workflow SCORING {
         def null_summary_v
         if (have_null) {
             def null_positions_v = null_positions_ch != null ? null_positions_ch.collect().map { it[0] } : Channel.value(file("${null_dir}/null_positions.parquet"))
-            def null_blocks_v = null_blocks_ch != null ? null_blocks_ch : Channel.value(files("${null_dir}/blocks/*").sort())
+            // The block directories of a prior null. type: 'dir' is required: files() matches regular files by default
+            // and would return an empty list here, so no blk_* is staged and the block validation fails downstream.
+            def prior_blocks = null_blocks_ch == null ? files("${null_dir}/blocks/*", type: 'dir').sort() : []
+            if (null_blocks_ch == null && !prior_blocks) error("--caas_null_dir has no block directories: ${null_dir}/blocks/")
+            def null_blocks_v = null_blocks_ch != null ? null_blocks_ch : Channel.value(prior_blocks)
             def null_counts_v = null_counts_ch != null ? null_counts_ch.collect().map { it[0] } : Channel.value(file("${null_dir}/counts.json"))
             resolved_cycle_roster = cycle_roster_ch != null ? cycle_roster_ch.collect().map { it[0] } : Channel.value(file("${null_dir}/cycle_roster.txt"))
             // Preserve each summary/histogram pair; collect() otherwise flattens it
