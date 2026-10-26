@@ -71,7 +71,8 @@ for(rk in ranks) {
  suffix<-if(rk=='global')'' else paste0('_',rk)
  for(nm in c('p.gen','p.gen.adj','nominal','adjusted'))genes[[paste0('caas_',nm,suffix)]]<-tab[[nm]][match(genes$Gene,u)]
  for(nm in c('p.gen','p.gen.adj','nominal','adjusted'))stats[[paste0('caas_',nm,suffix)]]<-tab[[nm]][match(stats$gene,u)]
- active<-tab[tab$nominal,,drop=FALSE];write(data.frame(Gene=active$gene,active[,-1,drop=FALSE]),file.path('gene_lists',paste0('active_',rk,'.tsv')))
+ # Header + tab-separated rows: prepare_ami_lists.py reads these columns by name (base write() cannot write a data.frame).
+ active<-tab[tab$nominal,,drop=FALSE];write.table(data.frame(Gene=active$gene,active[,-1,drop=FALSE]),file.path('gene_lists',paste0('active_',rk,'.tsv')),sep='\t',quote=FALSE,row.names=FALSE)
 }
 write(do.call(rbind,all_evidence),'gene_evidence.tsv')
 # Existing position p-values and BH already use the pooled unique-position family.
