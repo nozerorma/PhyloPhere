@@ -25,6 +25,7 @@ params:
   domino_module_thr: 0.05  # DOMINO's own module-significance cutoff (domino.nf's domino_module_thr)
   top_n:      250
   traitname:  "trait"
+  ami_availability_file: NULL
   ami_module_desc_file:       NULL  # AMI's ami_networks/module_descriptions_all_lists.tsv (optional)
   ami_term_membership_file:   NULL  # AMI's ami_networks/term_threshold_membership.tsv (optional, recurrence table)
   posenrich_dotplot_file:     NULL  # posenrich's posenrich_overall_dotplot.tsv (optional)
@@ -40,6 +41,8 @@ params:
   # significance), same file 12.FCS_general_report.Rmd/14.Position_enrichment_report.Rmd
   # consume, reused here for the Interesting Genes/Positions tables.
   fcs_stats_file: NULL
+  gene_scores_file: NULL
+  gene_metadata_file: NULL
   # Position-level CAAS scores + FADE-site/VEP annotations, same optional
   # inputs 14.Position_enrichment_report.Rmd's Position Characterisation
   # section consumes, reused here for the Interesting Positions table.
@@ -89,6 +92,14 @@ params:
 </style>
 
 ```{r setup, include=FALSE}
+# Widgets emitted inside loops/conditionals must register their HTML dependencies.
+# cat(knit_print(widget)) alone drops knit_meta (including DT filter dependencies).
+emit_widget <- function(widget) {
+  rendered <- knitr::knit_print(widget)
+  knitr::knit_meta_add(attr(rendered, "knit_meta"))
+  cat(rendered, "\n\n")
+  invisible(NULL)
+}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
                       fig.width = 9, fig.height = 7, dev = "png", dpi = 200)
 suppressPackageStartupMessages({ library(igraph); library(tidyverse); library(knitr); library(kableExtra) })
@@ -140,11 +151,21 @@ kbl_html <- function(df, height = NULL, escape = TRUE, caption = NULL, ...) {
   )
 }
 ```
+<script>
+$(document).on('shown.bs.tab shown.bs.collapse', function () {
+  if ($.fn.dataTable) $.fn.dataTable.tables({visible: true, api: true}).columns.adjust();
+});
+</script>
+
 
 ```{r load, include=FALSE}
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 source("src/fcs_selection.R")
-REQ <- c("ranking", "database", "pathway", "stat", "p.adj", "q.perm", "sig_perm", "cluster_id")
+# Persist the actual presentation thresholds for standalone GUI regeneration.
+dir.create("compare_results", showWarnings=FALSE)
+jsonlite::write_json(params[c("fdr_thr","pperm_thr","domino_module_thr","top_n","seed")],
+  "compare_results/report_settings.json",auto_unbox=TRUE,pretty=TRUE)
+REQ <- c("ranking", "database", "pathway", "stat", "p.adj", "p.perm", "q.perm", "sig_perm", "cluster_id")
 
 # Per-module FCS results: cmp_fcs/<module>_fcs_all.tsv (caas/rer).
 mod_files <- list.files(params$fcs_dir, pattern = "_fcs_all\\.tsv$", full.names = TRUE)
@@ -196,7 +217,8 @@ le_by_mod <- list()
 for (f in le_files) {
   mod <- sub("_leading_edge\\.tsv$", "", basename(f))
   d <- tryCatch(readr::read_tsv(f, show_col_types = FALSE), error = function(e) NULL)
-  if (!is.null(d) && nrow(d) > 0) le_by_mod[[mod]] <- dplyr::mutate(d, module = mod)
+  if (!is.null(d) && all(c("ranking","database","pathway","gene") %in% names(d)))
+    le_by_mod[[mod]] <- dplyr::mutate(d, module = mod)
 }
 le <- if (length(le_by_mod)) dplyr::bind_rows(le_by_mod) else tibble()
 has_le <- nrow(le) > 0
@@ -205,17 +227,49 @@ has_le <- nrow(le) > 0
 # Neither is gene-set-ranked the way CAAS/RER FCS is, so they don't fold into
 # fcs_all_mod/le above, each gets its own section below, and all three feed
 # the Interesting Genes/Interesting Positions tables via the genes they involve.
-.file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
+.file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p) && file.info(p)$size > 0
 
-has_ami <- .file_ok(params$ami_module_desc_file)
+ami_availability <- if(.file_ok(params$ami_availability_file))
+  readr::read_tsv(params$ami_availability_file,show_col_types=FALSE) else tibble()
+if(!all(c("tool","gene_list","view","modules_verified","n_modules","descriptions_available","available","status") %in% names(ami_availability)))
+  ami_availability <- tibble()
+# All three current exports form one bundle. Do not interpret historical tables
+# or a partial bundle as verified descriptions, including header-only exports.
+ami_bundle_ok <- nrow(ami_availability)>0 && .file_ok(params$ami_module_desc_file) && .file_ok(params$ami_term_membership_file)
+has_ami <- ami_bundle_ok
 ami_df  <- if (has_ami) readr::read_tsv(params$ami_module_desc_file, show_col_types = FALSE) else NULL
+if(!is.null(ami_df) && (!"provenance_verified" %in% names(ami_df) || any(!evidence_truth(ami_df$provenance_verified)))) {
+  warning("AMI descriptions lack verified module/list provenance; regenerate AMI")
+  ami_df <- NULL; has_ami <- FALSE
+}
 ami_disp <- NULL
 
 # AMI term membership recurrence table (term_threshold_membership.tsv from
 # 13.AMI_analysis.Rmd's render_tool_section_nested()) - imported directly
 # rather than re-derived, so the table shown here matches the AMI report exactly.
-has_ami_term_membership <- .file_ok(params$ami_term_membership_file)
+has_ami_term_membership <- ami_bundle_ok
 ami_term_membership_df  <- if (has_ami_term_membership) readr::read_tsv(params$ami_term_membership_file, show_col_types = FALSE) else NULL
+if(!is.null(ami_term_membership_df) && (!"provenance_verified" %in% names(ami_term_membership_df) || any(!evidence_truth(ami_term_membership_df$provenance_verified)))) {
+  warning("AMI term membership lacks verified provenance; regenerate AMI")
+  ami_term_membership_df <- NULL; has_ami_term_membership <- FALSE
+}
+
+# Availability covers the shared Global/Top/Bottom comparison views. Signed RER
+# lists also occur in the certified exports and retain their own sections.
+if(has_ami) {
+  if(!all(c("tool","gene_list","direction","all_genes","domino_p_adj","description") %in% names(ami_df))) {
+    ami_df <- NULL; has_ami <- FALSE
+  } else {
+    has_ami <- nrow(ami_df)>0
+  }
+}
+if(has_ami_term_membership) {
+  if(!all(c("tool","gene_list","direction","term") %in% names(ami_term_membership_df))) {
+    ami_term_membership_df <- NULL; has_ami_term_membership <- FALSE
+  } else {
+    has_ami_term_membership <- nrow(ami_term_membership_df)>0
+  }
+}
 
 # Per-module leading-edge composition tables (fcs_leading_edge_composition.tsv
 # from 12.FCS_general_report.Rmd) - imported directly so the table shown here
@@ -230,16 +284,16 @@ for (f in le_comp_files) {
 le_comp_all_mod <- if (length(le_comp_by_mod)) dplyr::bind_rows(le_comp_by_mod) else tibble()
 has_le_comp <- nrow(le_comp_all_mod) > 0
 
-has_posenrich_dotplot <- .file_ok(params$posenrich_dotplot_file)
+has_posenrich_dotplot <- FALSE # historical inference is retired
 posenrich_dotplot_df  <- if (has_posenrich_dotplot) readr::read_tsv(params$posenrich_dotplot_file, show_col_types = FALSE) else NULL
 
 # posenrich_leading_edge.tsv: gene:position members of significant posenrich
 # terms (already position-granular, ranking, database, pathway, top_frac,
 # gene, gene_position). Drives the Interesting Genes/Interesting Positions tables below.
-has_posenrich_le <- .file_ok(params$posenrich_leading_edge_file)
+has_posenrich_le <- FALSE
 posenrich_le_df  <- if (has_posenrich_le) readr::read_tsv(params$posenrich_leading_edge_file, show_col_types = FALSE) else NULL
 
-has_posenrich_le_summary <- .file_ok(params$posenrich_leading_edge_summary_file)
+has_posenrich_le_summary <- FALSE
 posenrich_le_summary_df  <- if (has_posenrich_le_summary) readr::read_tsv(params$posenrich_leading_edge_summary_file, show_col_types = FALSE) else NULL
 
 # ── Gene/position-level inputs for the Interesting Genes/Positions tables ──
@@ -379,12 +433,34 @@ position_char_cmp_df  <- if (has_position_char_cmp) {
 # flag_* columns fcs_stats.tsv already carries (gate/FADE/RER/Accumulation,
 # direction-aware: flag_accum_top/flag_accum_bottom are the direction-restricted
 # tests, not the non-directional flag_accum).
-gene_attr_df <- if (has_fcs_stats_cmp) {
+.nominal_cmp <- .05; .fdr_cmp <- .05
+has_gene_scores_cmp <- .file_ok(params$gene_scores_file)
+gene_attr_df <- if(has_gene_scores_cmp) {
+  gs <- readr::read_tsv(params$gene_scores_file,show_col_types=FALSE)
+  if(anyDuplicated(gs$Gene)) stop("Duplicate canonical gene keys")
+  stamp <- params$gene_metadata_file
+  if(!.file_ok(stamp)) stamp <- file.path(dirname(params$gene_scores_file),"gene_evidence_metadata.json")
+  if(!.file_ok(stamp) || !identical(jsonlite::read_json(stamp)$gene_stat,"max")) stop("Canonical gene evidence requires max metadata")
+  .saved <- jsonlite::read_json(stamp,simplifyVector=TRUE)
+  .nominal_cmp <- as.numeric(.saved$nominal_threshold); .fdr_cmp <- as.numeric(.saved$fdr_threshold)
+  gs$gene <- as.character(gs$Gene)
+  for(sf in c("","_top","_bottom")) {
+    gs[[paste0("flag_fade",sf)]] <- if(sf=="") evidence_column(gs,"fade_significant_top",NA) | evidence_column(gs,"fade_significant_bottom",NA) else evidence_column(gs,paste0("fade_significant",sf),NA)
+    gs[[paste0("flag_accum",sf)]] <- evidence_column(gs,paste0("accum_significant",sf),NA)
+  }
+  gs$rer_p.emp <- evidence_column(gs,"rer_min_pval")
+  gs$rer_p.adj <- evidence_column(gs,"rer_perm_padj")
+  gs$flag_rer_acc <- evidence_column(gs,"rer_significant",NA) & evidence_column(gs,"rer_rho")>0
+  gs$flag_rer_decc <- evidence_column(gs,"rer_significant",NA) & evidence_column(gs,"rer_rho")<0
+  gs
+} else if (has_fcs_stats_cmp) {
   pf <- fcs_evidence_flags(fcs_stats_cmp_df)
-  for(nm in grep("^caas_p\\.gen|^rer_p\\.",names(fcs_stats_cmp_df),value=TRUE)) pf[[nm]] <- fcs_stats_cmp_df[[nm]]
-  flag_cols_cmp <- grep("^flag_", names(fcs_stats_cmp_df), value = TRUE)
-  dplyr::left_join(pf, fcs_stats_cmp_df[, c("gene", flag_cols_cmp)], by = "gene")
-} else NULL
+  for(nm in grep("^caas_p|^rer_p",names(fcs_stats_cmp_df),value=TRUE)) pf[[nm]] <- fcs_stats_cmp_df[[nm]]
+  flag_cols_cmp <- grep("^flag_",names(fcs_stats_cmp_df),value=TRUE)
+  dplyr::left_join(pf,fcs_stats_cmp_df[,c("gene",flag_cols_cmp)],by="gene")
+} else tibble::tibble(gene=character())
+has_gene_candidates <- nrow(gene_attr_df)>0 || has_le || has_ami
+
 ```
 
 ```{r cross_angle_gene_hits, include=FALSE}
@@ -399,25 +475,31 @@ gene_attr_df <- if (has_fcs_stats_cmp) {
 # AMI Global is an actual global list, not a pool of side-specific module analyses.
 # RER Positive/Negative are signs, never CAAS Top/Bottom.
 
-# FCS/RER own significance: the sig_perm of each module's FCS table (q.perm below the BH
-# threshold on the permulation p), computed once here off fcs_dir_mod.
+# FCS selection and formal significance are separate. Keep every C>0 term and every
+# formal q.perm hit (including any edge case where the input lacks C), with both labels.
 # fcs_leading_edge.tsv (`le`) is NOT itself restricted to significant terms
 # (12.FCS_general_report.Rmd's leading-edge export has every term), inner_join against
 # fcs_sig_terms is what restricts fcs_genes to genes belonging to a term each module itself
 # calls significant.
+if (has_multi && !"is_representative" %in% names(fcs_dir_mod)) fcs_dir_mod$is_representative <- NA
 fcs_sig_terms <- if (has_multi) {
   fcs_dir_mod %>%
-    dplyr::filter(sig_perm %in% TRUE) %>%
+    dplyr::filter((selected_C %in% TRUE) | (sig_RER %in% TRUE)) %>%
     dplyr::mutate(description = dplyr::coalesce(description, pathway)) %>%
-    dplyr::distinct(module, direction, database, pathway, description, cluster_id, q.perm)
+    dplyr::mutate(fcs_selected_C = selected_C %in% TRUE,
+                  fcs_formal_sig = sig_RER %in% TRUE) %>%
+    dplyr::distinct(module, direction, database, pathway, description, cluster_id, q.perm,
+                    fcs_selected_C, fcs_formal_sig, is_representative)
 } else {
   tibble::tibble(module = character(), direction = character(), database = character(),
                  pathway = character(), description = character(), cluster_id = character(),
-                 q.perm = numeric())
+                 q.perm = numeric(), fcs_selected_C = logical(), fcs_formal_sig = logical(),
+                 is_representative = logical())
 }
 
 fcs_genes <- if (has_le && has_multi) {
   le %>%
+    dplyr::select(module,ranking,database,pathway,gene) %>% distinct() %>%
     dplyr::mutate(direction = dplyr::case_when(
       ranking == "top"    ~ "top",
       ranking == "bottom" ~ "bottom",
@@ -589,12 +671,11 @@ global ranking only.
 DOMINO active-module (AMI) results and posenrich's position-level enrichment are
 neither gene-set-ranked the same way as FCS, so they get their own sections below.
 
-# Per-module significance {.tabset .tabset-fade}
+# Per-module FCS selection {.tabset .tabset-fade}
 
 Leading-edge composition from each module's own FCS report
 ([12.FCS_general_report.Rmd](12.FCS_general_report.Rmd)), imported directly so the
-tables shown here match the per-module reports exactly. For each significantly-
-enriched set, the **percentage of its leading-edge genes** carrying each attribute:
+tables shown here match the per-module reports exactly. For each set selected by C>0 (separate from formal BH significance), the **percentage of its leading-edge genes** carrying each attribute:
 nominal/BH activity flags and cross-module support. Rows follow the order of the source
 FCS report (C descending, checks descending, then q.perm/p.perm), already baked
 into the imported table, with the redundancy group of each set (`Group`, `Rep` for its
@@ -663,12 +744,18 @@ for (dr in c("global", "top", "bottom")) {
 
 # AMI module descriptions {.tabset .tabset-fade}
 
-`r if (!has_ami && !has_ami_term_membership) "> **No AMI module descriptions available (AMI/DOMINO didn't run, or the file wasn't wired in) - skipping.**"`
+`r if (!has_ami && !has_ami_term_membership) "> **No verified AMI descriptions available; consult method/view availability below.**"`
 
-DOMINO active modules ([13.AMI_analysis.Rmd](13.AMI_analysis.Rmd)) aren't gene-set-ranked
+DOMINO active modules ([informe AMI actual](`r paste0('../html_reports/13.AMI_analysis_',params$traitname,'.html')`)) aren't gene-set-ranked
 like CAAS/RER FCS, so they don't fold into the FCS tables above. The recurrence table
 below shows each described term and which gene lists it was recovered under - imported
 directly from the AMI report so the table shown here matches that report exactly.
+
+```{r ami-availability, results='asis'}
+if(nrow(ami_availability)>0) {
+  emit_widget(DT::datatable(ami_availability,rownames=FALSE,filter="top",options=list(pageLength=9,scrollX=TRUE,order=list())))
+} else cat("_La disponibilidad AMI por método/vista no está documentada; no se interpreta como ausencia de módulos._\n\n")
+```
 
 ```{r ami_term_membership_tabs, eval=has_ami_term_membership, results='asis'}
 # Imported term membership recurrence table from AMI report.
@@ -700,7 +787,7 @@ for (tl in c("CAAS", "RER", "FADE")) {
   cat(sprintf("\n## %s {.tabset}\n\n", tl))
   tl_df <- ami_tm %>% dplyr::filter(.tool == tl)
   if (nrow(tl_df) == 0) {
-    cat(sprintf("_No AMI active modules for %s._\n\n", tl))
+    cat(sprintf("_No verified described terms for %s; see availability above._\n\n", tl))
     next
   }
 
@@ -767,140 +854,51 @@ for (tl in c("CAAS", "RER", "FADE")) {
 
 ---
 
-# Posenrich position-level enrichment {.tabset .tabset-fade}
+# POSENRICH modular
 
-<details>
-<summary>Click to show/hide</summary>
+El [informe POSENRICH modular actual](`r paste0('../html_reports/POSENRICH_modular_report_',params$traitname,'.html')`)
+explica cuatro preguntas: caracterización, asociación global del ranking, localización
+dentro de proteína y proximidad. Sus efectos descriptivos no se convierten aquí en
+llamadas de enriquecimiento. Las anotaciones posicionales actuales se incorporan a las
+tablas inferiores; los TSV y el informe 14 históricos quedan excluidos.
 
-`r if (!has_posenrich_le_summary && !has_posenrich_le) "> **No posenrich outputs available (--posenrich was off, or the files weren't wired in) - skipping.**"`
+# Términos FCS y genes contribuyentes
 
-Position-level enrichment ([14.Position_enrichment_report.Rmd](14.Position_enrichment_report.Rmd))
-operates on individual CAAS positions rather than genes, so it gets its own section
-here rather than folding into the gene-set FCS tables above. Its significant terms
-feed the Interesting Genes/Interesting Positions tables further down (individual
-gene- and position-level corroboration, in full detail). Faceted by direction
-below (`r params$top_n` rows each, not one shared budget split across both) so a
-direction with fewer but stronger hits isn't crowded out of a single pooled
-table by the other.
+Se incluyen todos los términos con BH de permulación significativo y todos los seleccionados
+por C>0, con etiquetas separadas. Se conservan los no representantes. Los genes mostrados
+son contribuyentes del leading edge. La pertenencia completa a una vía es una anotación distinta. Las direcciones de
+los efectos RER conservan su signo propio. Si falta el leading edge de un módulo,
+los términos se conservan y el número de contribuyentes queda desconocido.
 
-## Overall dotplot terms - merged summary {.tabset}
-
-One row per significant term, **merged across name variants** that are
-themselves `/`-joined synonyms in their own description (e.g. a term
-described as `"V$HNF4_01 / HNF4A"` is treated as the same underlying term as
-one independently named `"HNF4A"` elsewhere) - connected via shared segments,
-not just identical full strings, so synonym spelling drift across databases
-doesn't fragment one biological term into several rows. `Merged from` lists
-every original (database, pathway) pair folded into the row, so the merge is
-auditable rather than a silent black box.
-
-`Cutoffs`/`N cutoffs` show which top-fraction cutoffs (10/5/1%) the term
-recurred significant at *before* merging - a plain recurrence count, unioned
-across merged aliases. `χ²`/`p.adj` (best across merged aliases: highest
-χ², lowest p.adj) come straight from
-[14.Position_enrichment_report.Rmd](14.Position_enrichment_report.Rmd)'s own
-Leading edge table (`posenrich_leading_edge_summary.tsv`, imported below);
-this report runs one test (Lachenbruch two-part test on the position scores), so there's
-no multi-method vote to combine here, unlike the gene-level FCS tables above.
-
-```{r posenrich_dotplot_prep, eval=has_posenrich_le_summary}
-# Sourced from the SAME imported table as the Leading edge sub-tab below
-# (posenrich_leading_edge_summary.tsv), this section is a synonym-merged
-# ROLLUP of that table, not an independent derivation, so the two never drift.
-posenrich_dotplot_disp <- posenrich_le_summary_df %>%
-  dplyr::rename(database = Database, pathway = Pathway, p_adj = `p.adj`) %>%
-  dplyr::mutate(.direction = tools::toTitleCase(Ranking))
-
-# Fuzzy '/'-synonym merge: two rows merge iff they share at least one trimmed
-# '/'-segment of their own Description, within the same direction (never
-# across direction, a top-direction term and a bottom-direction term merging
-# would conflate two different biological claims). Connected-components over
-# a segment-sharing graph, not exact-string grouping, so "HNF4A" and
-# "V$HNF4_01 / HNF4A" merge even though neither string contains the other.
-fuzzy_merge_terms <- function(df) {
-  if (nrow(df) == 0) return(df %>% dplyr::mutate(.merge_id = integer(0)))
-  df <- df %>% dplyr::mutate(.row_id = dplyr::row_number())
-  segs <- df %>%
-    dplyr::mutate(seg = strsplit(Description, "\\s*/\\s*")) %>%
-    tidyr::unnest(seg) %>%
-    dplyr::mutate(seg = trimws(tolower(seg))) %>%
-    dplyr::filter(nzchar(seg))
-  if (nrow(segs) == 0 || dplyr::n_distinct(segs$seg) == nrow(segs)) {
-    # Nothing shares a segment with anything else, every row is its own component.
-    return(df %>% dplyr::mutate(.merge_id = .row_id))
-  }
-  edges <- segs %>%
-    dplyr::inner_join(segs, by = "seg", suffix = c("_a", "_b"), relationship = "many-to-many") %>%
-    dplyr::filter(.row_id_a < .row_id_b) %>%
-    dplyr::distinct(.row_id_a, .row_id_b)
-  g <- igraph::graph_from_data_frame(edges, directed = FALSE, vertices = df$.row_id)
-  comp <- igraph::components(g)
-  df %>% dplyr::mutate(.merge_id = comp$membership[as.character(.row_id)])
-}
+```{r complete-fcs-contributors, results='asis'}
+if(has_multi) {
+  contributor_source <- if(has_le) le else tibble(module=character(),ranking=character(),database=character(),pathway=character(),gene=character())
+  contributors <- contributor_source %>% select(module,ranking,database,pathway,gene) %>% distinct() %>%
+    mutate(direction=tolower(ranking)) %>% inner_join(fcs_sig_terms,by=c("module","direction","database","pathway"))
+  dir.create("compare_results",showWarnings=FALSE)
+  write_tsv(contributors,"compare_results/fcs_contributors_all_terms.tsv")
+  terms <- contributors %>% group_by(module,ranking,database,pathway,description,q.perm,
+    fcs_formal_sig,fcs_selected_C,cluster_id,is_representative) %>%
+    summarise(n_contributors=n_distinct(gene),contributors=paste(sort(unique(gene)),collapse=", "),.groups="drop")
+  # A significant term with no retained leading edge must still remain visible.
+  terms <- fcs_sig_terms %>% mutate(ranking=direction) %>%
+    left_join(terms %>% select(module,ranking,database,pathway,n_contributors,contributors),
+              by=c("module","ranking","database","pathway")) %>%
+    mutate(leading_edge_available=module %in% names(le_by_mod),
+      n_contributors=ifelse(leading_edge_available,coalesce(n_contributors,0L),NA_integer_)) %>%
+    arrange(module,ranking,q.perm,database,pathway)
+  write_tsv(terms,"compare_results/fcs_terms_complete.tsv")
+  emit_widget(DT::datatable(terms,rownames=FALSE,filter="top",extensions="Buttons",
+    options=list(pageLength=25,scrollX=TRUE,order=list(),dom="Blfrtip",buttons=list("csv","excel"))))
+} else cat("_No hay tablas FCS/leading edge actuales disponibles._\n\n")
 ```
-
-```{r posenrich_dotplot_tabs, eval=has_posenrich_le_summary, results='asis'}
-has_chi_col <- "χ²" %in% names(posenrich_dotplot_disp)
-for (dr in c("Global", "Top", "Bottom")) {
-  cat(sprintf("\n### %s\n\n", dr))
-  dr_df <- posenrich_dotplot_disp %>% dplyr::filter(.direction == dr)
-  if (nrow(dr_df) == 0) { cat("_No terms for this direction._\n\n"); next }
-
-  merged <- fuzzy_merge_terms(dr_df) %>%
-    dplyr::group_by(.merge_id) %>%
-    dplyr::summarise(
-      Description  = dplyr::first(Description[order(p_adj)]),
-      `Merged from` = paste(unique(sprintf("%s: %s", database, pathway)), collapse = "; "),
-      Cutoffs       = paste(unique(unlist(strsplit(Cutoffs, ",\\s*"))), collapse = ", "),
-      `N cutoffs`   = suppressWarnings(max(`N cutoffs`, na.rm = TRUE)),
-      `N merged`    = dplyr::n(),
-      `χ²`          = if (has_chi_col) round(suppressWarnings(max(`χ²`, na.rm = TRUE)), 3) else NA_real_,
-      `p.adj`       = signif(suppressWarnings(min(p_adj, na.rm = TRUE)), 3),
-      .groups = "drop"
-    ) %>%
-    # Same convention as 14.Position_enrichment_report.Rmd's "Term -> cutoff
-    # membership" table: recurrence (N cutoffs) first, alphabetical tie-break.
-    dplyr::arrange(dplyr::desc(`N cutoffs`), Description) %>%
-    dplyr::select(-.merge_id) %>%
-    { if (!has_chi_col) dplyr::select(., -`χ²`) else . } %>%
-    head(params$top_n)
-
-  print(kbl_html(merged, height = if (nrow(merged) > 15) "460px" else NULL))
-}
-```
-
-## Leading edge {.tabset .tabset-fade}
-
-Imported directly from [14.Position_enrichment_report.Rmd](14.Position_enrichment_report.Rmd)'s
-own Leading edge section (`posenrich_leading_edge_summary.tsv`) so the table
-shown here matches that report exactly - one row per significant term
-(pooled across the 10/5/1% cutoffs it was tested at), with the union of
-observed `gene:position` members, cross-module corroboration columns, and
-`N cutoffs`/`Cutoffs` as a plain recurrence audit trail. Faceted by
-direction, capped at `r params$top_n` rows.
-
-```{r posenrich_le_summary_tabs, eval=has_posenrich_le_summary, results='asis'}
-for (dr in c("GLOBAL", "TOP", "BOTTOM")) {
-  cat(sprintf("\n### %s\n\n", tools::toTitleCase(dr)))
-  d <- posenrich_le_summary_df %>%
-    dplyr::filter(toupper(Ranking) == dr) %>%
-    dplyr::select(-Ranking) %>%
-    head(params$top_n)
-  if (nrow(d) == 0) {
-    cat(sprintf("_No significant terms for %s._\n\n", tools::toTitleCase(dr)))
-  } else {
-    print(kbl_html(d, height = if (nrow(d) > 15) "480px" else NULL))
-  }
-}
-```
-
-`r if (!has_posenrich_le_summary) "> **posenrich_leading_edge_summary_file not supplied - Leading edge table skipped.**"`
-
-</details>
-
----
 
 # Interesting Genes {.tabset .tabset-fade}
+
+Rows are selected by any active source-specific call or candidate annotation, then ordered
+by CAAS gene p ascending and method count descending. This is a display order, not a
+combined score or significance test. Every retained row is available through paging,
+column search/order, and CSV/Excel export.
 
 Empirical nominal and BH-adjusted evidence is shown together. CAAS uses its calibrated empirical p-value; direction-specific gene tests retain their own declared families. Position p.emp is pooled over sides. No score-percentile selection or weighted composite is used. N methods is a descriptive count of CAAS, RER and FADE calls, not a combined significance test. Pathway and network memberships are annotations.
 
@@ -945,38 +943,31 @@ Empirical nominal and BH-adjusted evidence is shown together. CAAS uses its cali
   }, character(1), USE.NAMES = FALSE)
 }
 
-# Per-gene FCS evidence per module: the number of distinct groups of overlapping significant sets
+# Per-gene FCS evidence per module: the number of distinct groups of overlapping selected/formal sets
 # (cluster_id) whose leading edge holds the gene, capped at .fcs_weight_cap (n_clusters_*, the weight
 # in the composite), and -log10 of the smallest q.perm among those sets (evidence_score_*), alongside
 # the term-description text. They surface in Interesting Genes/Positions below, distinct from the
 # plain CAAS_FCS_sig/RER_FCS_sig boolean (which only says "belongs to >= 1 significant set").
 .fcs_terms_for <- function(rk_set) {
-  empty <- tibble::tibble(gene = character(), caas_fcs_terms = character(), rer_fcs_terms = character(),
-                          n_clusters_caas = integer(), n_clusters_rer = integer(),
-                          evidence_score_caas = numeric(), evidence_score_rer = numeric())
-  if (!has_le || !has_multi) return(empty)
-  res <- le %>%
-    dplyr::filter((module=="rer" & ranking=="global") | (module!="rer" & ranking %in% rk_set)) %>%
-    dplyr::mutate(direction = dplyr::case_when(
-      tolower(ranking) == "top"    ~ "top",
-      tolower(ranking) == "bottom" ~ "bottom",
-      tolower(ranking) == "global" ~ "global",
-      TRUE                         ~ NA_character_
-    )) %>%
-    dplyr::filter(!is.na(direction)) %>%
-    dplyr::inner_join(fcs_sig_terms, by = c("module", "direction", "database", "pathway"))
-
-  per_module <- function(m, suffix) {
-    out <- res %>% dplyr::filter(module == m) %>%
-      dplyr::group_by(gene) %>%
-      dplyr::summarise(terms = paste(sort(unique(stringr::str_trunc(description, 50))), collapse = "; "),
-                       n_clusters = dplyr::n_distinct(cluster_id),
-                       evidence_score = if(any(is.finite(q.perm))) -log10(max(min(q.perm[is.finite(q.perm)]),1e-300)) else NA_real_,
-                       .groups = "drop")
-    names(out) <- c("gene", paste0(m, "_fcs_terms"), paste0("n_clusters_", suffix), paste0("evidence_score_", suffix))
+  empty <- tibble::tibble(gene=character(),caas_fcs_terms=character(),rer_fcs_terms=character(),
+    n_clusters_caas=integer(),n_clusters_rer=integer(),caas_fcs_BH=integer(),rer_fcs_BH=integer(),
+    caas_fcs_C=integer(),rer_fcs_C=integer(),min_q_caas=numeric(),min_q_rer=numeric())
+  if(!has_le || !has_multi) return(empty)
+  res <- le %>% select(module,ranking,database,pathway,gene) %>% distinct() %>%
+    filter((module=="rer" & ranking=="global") | (module!="rer" & ranking %in% rk_set)) %>%
+    mutate(direction=tolower(ranking)) %>%
+    inner_join(fcs_sig_terms,by=c("module","direction","database","pathway"))
+  per_module <- function(m) {
+    out <- res %>% filter(module==m) %>% group_by(gene) %>% summarise(
+      terms=paste(sort(unique(paste0(database,":",pathway," — ",description,
+        ifelse(fcs_selected_C," [C>0]",""),ifelse(fcs_formal_sig," [BH significant]",""),
+        ifelse(is.na(is_representative),"",ifelse(is_representative," [representative]"," [non-representative]"))))),collapse="; "),
+      groups=n_distinct(cluster_id[!is.na(cluster_id)]),BH=sum(fcs_formal_sig),C=sum(fcs_selected_C),
+      min_q=if(any(is.finite(q.perm)))min(q.perm[is.finite(q.perm)]) else NA_real_,.groups="drop")
+    names(out) <- c("gene",paste0(m,"_fcs_terms"),paste0("n_clusters_",m),paste0(m,"_fcs_BH"),paste0(m,"_fcs_C"),paste0("min_q_",m))
     out
   }
-  dplyr::full_join(per_module("caas", "caas"), per_module("rer", "rer"), by = "gene")
+  full_join(per_module("caas"),per_module("rer"),by="gene")
 }
 
 .gene_evidence_summary <- function(df, ...) {
@@ -984,7 +975,7 @@ Empirical nominal and BH-adjusted evidence is shown together. CAAS uses its cali
  df
 }
 .position_evidence_summary <- function(df, ...) {
- df$`N methods` <- as.integer(df$`CAAS nominal`) + as.integer(df$FADE_overlap)
+ df$`N methods` <- rowSums(cbind(df$`CAAS nominal` %in% TRUE,df$FADE_overlap %in% TRUE))
  df
 }
 
@@ -1000,63 +991,12 @@ render_banded_table <- function(res_obj, height = NULL) {
 
   ordered_cols <- c(meta_cols, pond_cols, desc_cols, res_cols)
   df <- df[, ordered_cols, drop = FALSE]
+  if("CAAS FCS terms" %in% names(df)) df <- df %>% mutate(across(where(is.character),htmltools::htmlEscape))
 
-  header_spec <- c()
-  header_colors <- c()
-  col_tints <- list()
-  borders <- c()
-  curr_idx <- 0
-
-  if (length(meta_cols) > 0) {
-    header_spec <- c(header_spec, "Metadata" = length(meta_cols))
-    header_colors <- c(header_colors, "#4A5568")
-    col_tints[[length(col_tints) + 1]] <- list(idx = (curr_idx + 1):(curr_idx + length(meta_cols)), bg = "#F8F9FA")
-    curr_idx <- curr_idx + length(meta_cols)
-    borders <- c(borders, curr_idx)
-  }
-  if (length(pond_cols) > 0) {
-    header_spec <- c(header_spec, "Evidence" = length(pond_cols))
-    header_colors <- c(header_colors, "#2B6CB0")
-    col_tints[[length(col_tints) + 1]] <- list(idx = (curr_idx + 1):(curr_idx + length(pond_cols)), bg = "#EFF6FF")
-    curr_idx <- curr_idx + length(pond_cols)
-    borders <- c(borders, curr_idx)
-  }
-  if (length(desc_cols) > 0) {
-    header_spec <- c(header_spec, "Descriptive" = length(desc_cols))
-    header_colors <- c(header_colors, "#C05621")
-    col_tints[[length(col_tints) + 1]] <- list(idx = (curr_idx + 1):(curr_idx + length(desc_cols)), bg = "#FFFBEB")
-    curr_idx <- curr_idx + length(desc_cols)
-    borders <- c(borders, curr_idx)
-  }
-  if (length(res_cols) > 0) {
-    header_spec <- c(header_spec, "Results" = length(res_cols))
-    header_colors <- c(header_colors, "#2F855A")
-    col_tints[[length(col_tints) + 1]] <- list(idx = (curr_idx + 1):(curr_idx + length(res_cols)), bg = "#F0FDF4")
-    curr_idx <- curr_idx + length(res_cols)
-  }
-  borders <- borders[borders < ncol(df)]
-
-  for(n in intersect(c("CAAS adjusted","RER adjusted"),names(df))) {
-    df[[n]] <- kableExtra::cell_spec(ifelse(is.na(df[[n]]),"Unavailable",ifelse(df[[n]],"BH significant","")),format="html",bold=TRUE,background=ifelse(df[[n]] %in% TRUE,"#FFE5A0","transparent"))
-  }
-  k <- kable(df, format = "html", escape = FALSE) %>%
-    kable_styling(bootstrap_options = c("condensed", "hover"), full_width = FALSE)
-
-  if (length(header_spec) > 0) {
-    k <- k %>% add_header_above(header_spec, color = "white", background = header_colors, bold = TRUE)
-  }
-  for (t in col_tints) {
-    k <- k %>% column_spec(t$idx, background = t$bg)
-  }
-  if (length(borders) > 0) {
-    k <- k %>% column_spec(borders, border_right = "2px solid #CBD5E0")
-  }
-  if (!is.null(height)) {
-    k <- k %>% scroll_box(width = "100%", height = height)
-  } else {
-    k <- k %>% scroll_box(width = "100%")
-  }
-  k
+  DT::datatable(df, rownames = FALSE, filter = "top", extensions = "Buttons", escape=FALSE,
+    options = list(pageLength = 25, lengthMenu = c(10, 25, 50, 100),
+      scrollX = TRUE, dom = "Blfrtip", buttons = list("copy", "csv", "excel"),
+      order = list()))
 }
 
 .ami_desc_for <- function(dir_filter) {
@@ -1132,174 +1072,78 @@ render_banded_table <- function(res_obj, height = NULL) {
  base$gene <- base$Gene
  base$`CAAS p` <- suppressWarnings(as.numeric(evidence_column(base,"p.emp")))
  base$`CAAS BH` <- suppressWarnings(as.numeric(evidence_column(base,"p.adj_bh")))
- base$`CAAS nominal` <- ifelse(is.finite(base$`CAAS p`),base$`CAAS p`<.05,NA)
- base$`CAAS adjusted` <- ifelse(is.finite(base$`CAAS BH`),base$`CAAS BH`<.05,NA)
+ base$`CAAS nominal` <- if("caas_nominal" %in% names(base))base$caas_nominal else ifelse(is.finite(base$`CAAS p`),base$`CAAS p`<.nominal_cmp,NA)
+ base$`CAAS adjusted` <- if("caas_adjusted" %in% names(base))base$caas_adjusted else ifelse(is.finite(base$`CAAS BH`),base$`CAAS BH`<.fdr_cmp,NA)
  base
 }
 
 .gcol <- function(df, col) if (col %in% names(df)) df[[col]] else rep(NA, nrow(df))
 ```
 
-```{r interesting_genes_prep, eval=has_fcs_stats_cmp}
+```{r interesting_genes_prep, include=FALSE}
 build_interesting_genes <- function(direction) {
-  rk_set   <- switch(direction, Top = "top", Bottom = "bottom", "global")
-  ami_dirf <- switch(direction, Top = "Top", Bottom = "Bottom", "Global")
-
-  suffix <- switch(direction,Top="_top",Bottom="_bottom","")
-  base <- tibble::tibble(gene=gene_attr_df$gene,
-    `CAAS p`=as.numeric(evidence_column(gene_attr_df,paste0("caas_p.gen",suffix))),
-    `CAAS BH`=as.numeric(evidence_column(gene_attr_df,paste0("caas_p.gen.adj",suffix))),
-    `CAAS nominal`=.gcol(gene_attr_df,paste0("caas_nominal",suffix)),
-    `CAAS adjusted`=.gcol(gene_attr_df,paste0("caas_adjusted",suffix)),
-    `RER p`=as.numeric(evidence_column(gene_attr_df,"rer_p.emp")),
-    `RER BH`=as.numeric(evidence_column(gene_attr_df,"rer_p.adj")),
-    FADE_dir=.gcol(gene_attr_df,paste0("flag_fade",suffix)),
-    Accum_dir=.gcol(gene_attr_df,paste0("flag_accum",suffix)),
-    RER_acc=.gcol(gene_attr_df,"flag_rer_acc"),RER_decc=.gcol(gene_attr_df,"flag_rer_decc"))
-  base$RER_dir <- ifelse(is.finite(base$`RER p`),base$RER_acc|base$RER_decc,NA)
-  base$`RER adjusted` <- ifelse(is.finite(base$`RER BH`),base$`RER BH`<.05,NA)
-
-  # Check active modules for genes
-  has_accum_gene <- any(grepl("^flag_accum", names(gene_attr_df))) &&
-                    any(.gcol(gene_attr_df, "flag_accum") | .gcol(gene_attr_df, "flag_accum_top") | .gcol(gene_attr_df, "flag_accum_bottom"), na.rm = TRUE)
-  has_rer_gene   <- any(grepl("^flag_rer", names(gene_attr_df))) ||
-                    (has_multi && any(fcs_dir_mod$module == "rer"))
-  has_fade_gene  <- any(grepl("^flag_fade", names(gene_attr_df))) &&
-                    any(.gcol(gene_attr_df, "flag_fade") | .gcol(gene_attr_df, "flag_fade_top") | .gcol(gene_attr_df, "flag_fade_bottom"), na.rm = TRUE)
-  has_fcs_caas   <- has_le && has_multi && any(fcs_dir_mod$module == "caas")
-  has_fcs_rer    <- has_le && has_multi && any(fcs_dir_mod$module == "rer")
-  has_ami_gene   <- has_ami && !is.null(ami_disp) && nrow(ami_disp) > 0
-  has_pe_gene    <- has_posenrich_le && !is.null(posenrich_le_df) && nrow(posenrich_le_df) > 0
-
-  all_genes <- base
-  if (has_fcs_caas || has_fcs_rer) {
-    all_genes <- all_genes %>% dplyr::left_join(.fcs_terms_for(rk_set), by = "gene")
-  } else {
-    all_genes$caas_fcs_terms <- NA_character_
-    all_genes$rer_fcs_terms  <- NA_character_
-    all_genes$n_clusters_caas <- 0L
-    all_genes$n_clusters_rer  <- 0L
-    all_genes$evidence_score_caas <- NA_real_
-    all_genes$evidence_score_rer  <- NA_real_
+  rk <- tolower(direction); sf <- if(rk=="global")"" else paste0("_",rk)
+  g <- gene_attr_df
+  base <- tibble::tibble(gene=g$gene,
+    `CAAS p`=as.numeric(evidence_column(g,paste0("caas_p.gen",sf))),
+    `CAAS BH`=as.numeric(evidence_column(g,paste0("caas_p.gen.adj",sf))),
+    `CAAS nominal`=as.logical(evidence_column(g,paste0("caas_nominal",sf),NA)),
+    `CAAS adjusted`=as.logical(evidence_column(g,paste0("caas_adjusted",sf),NA)),
+    `RER p`=as.numeric(evidence_column(g,"rer_p.emp")),`RER BH`=as.numeric(evidence_column(g,"rer_p.adj")),
+    `RER rho`=as.numeric(evidence_column(g,"rer_rho")),
+    `RER nominal`=as.logical(evidence_column(g,"rer_significant",NA)),
+    `FADE call`=as.logical(evidence_column(g,paste0("flag_fade",sf),NA)),
+    `Accumulation call`=as.logical(evidence_column(g,paste0("flag_accum",sf),NA)))
+  bf_top <- as.numeric(evidence_column(g,"fade_max_bf_top")); bf_bot <- as.numeric(evidence_column(g,"fade_max_bf_bottom"))
+  base$`FADE BF` <- if(rk=="top")bf_top else if(rk=="bottom")bf_bot else pmax(bf_top,bf_bot,na.rm=TRUE)
+  base$`FADE BF`[!is.finite(base$`FADE BF`)] <- NA_real_
+  base$`RER adjusted` <- as.logical(evidence_column(g,"rer_significant_fdr",NA))
+  # Outer joins retain FCS-only and AMI-only candidates, including RER global
+  # contributors in each view, without mapping their signs onto CAAS sides.
+  out <- full_join(base,.fcs_terms_for(rk),by="gene") %>% full_join(.ami_desc_for(direction),by="gene")
+  for(n in c("caas_fcs_terms","rer_fcs_terms","caas_ami_desc","rer_ami_desc","fade_ami_desc")) {
+    if(!n %in% names(out))out[[n]] <- NA_character_
   }
-  if (has_ami_gene) {
-    all_genes <- all_genes %>% dplyr::left_join(.ami_desc_for(ami_dirf), by = "gene")
-  } else {
-    all_genes$caas_ami_desc <- NA_character_
-    all_genes$rer_ami_desc  <- NA_character_
-    all_genes$fade_ami_desc <- NA_character_
-  }
-  if (has_pe_gene) {
-    all_genes <- all_genes %>% dplyr::left_join(.posenrich_for(rk_set), by = "gene")
-  } else {
-    all_genes$pe_position <- NA_character_
-    all_genes$pe_terms    <- NA_character_
-  }
-
-  all_genes <- all_genes %>%
-    dplyr::mutate(
-      n_clusters_caas = dplyr::coalesce(as.integer(n_clusters_caas), 0L),
-      n_clusters_rer  = dplyr::coalesce(as.integer(n_clusters_rer), 0L),
-      weight_caas  = pmin(n_clusters_caas, .fcs_weight_cap),
-      weight_rer   = pmin(n_clusters_rer, .fcs_weight_cap),
-      CAAS_FCS_sig = !is.na(caas_fcs_terms) & nzchar(caas_fcs_terms),
-      RER_FCS_sig  = !is.na(rer_fcs_terms)  & nzchar(rer_fcs_terms),
-      CAAS_AMI_net = !is.na(caas_ami_desc)  & nzchar(caas_ami_desc),
-      RER_AMI_net  = !is.na(rer_ami_desc)   & nzchar(rer_ami_desc),
-      FADE_AMI_net = !is.na(fade_ami_desc)  & nzchar(fade_ami_desc),
-      PE_sig       = !is.na(pe_terms)       & nzchar(pe_terms)
-    )
-
-  # Grouped composite score: strictly CAAS + RER + FADE. Neither posenrich nor AMI weights!
-  out <- all_genes %>%
-    .gene_evidence_summary(has_accum = has_accum_gene, has_rer = has_rer_gene, has_fade = has_fade_gene,
-                    has_fcs_caas = has_fcs_caas, has_fcs_rer = has_fcs_rer)
-
-  # Filter to genes with any active signal
-  out <- out %>%
-    dplyr::filter(
-      `CAAS nominal` | `CAAS adjusted` |
-      (if (has_fade_gene) FADE_dir else FALSE) |
-      (if (has_accum_gene) Accum_dir else FALSE) |
-      (if (has_rer_gene) RER_dir else FALSE) |
-      (if (has_fcs_caas) CAAS_FCS_sig else FALSE) |
-      (if (has_fcs_rer) RER_FCS_sig else FALSE) |
-      (if (has_ami_gene) (CAAS_AMI_net | RER_AMI_net | FADE_AMI_net) else FALSE) |
-      (if (has_pe_gene) PE_sig else FALSE)
-    )
-  if (nrow(out) == 0) return(NULL)
-
-  out <- out %>%
-    dplyr::mutate(
-      `CAAS FCS term(s)`    = .collapsible_list(caas_fcs_terms),
-      `RER FCS term(s)`     = .collapsible_list(rer_fcs_terms),
-      `CAAS AMI desc(s)`    = .collapsible_list(caas_ami_desc),
-      `RER AMI desc(s)`     = .collapsible_list(rer_ami_desc),
-      `FADE AMI desc(s)`    = .collapsible_list(fade_ami_desc),
-      `PE term(s)`          = .collapsible_list(pe_terms),
-      `CAAS clusters`       = weight_caas,
-      `RER clusters`        = weight_rer,
-      `CAAS evidence score` = round(evidence_score_caas, 2),
-      `RER evidence score`  = round(evidence_score_rer, 2)
-    )
-
-  # Define the 4 tramos dynamically based on what actually ran
-  meta_cols <- c("Gene")
-
-  pond_cols <- c("CAAS p","CAAS BH","CAAS nominal","CAAS adjusted")
-  if (has_fcs_caas)   pond_cols <- c(pond_cols, "CAAS clusters")
-  if (has_accum_gene) pond_cols <- c(pond_cols, "Accum_dir")
-  if (has_rer_gene) pond_cols <- c(pond_cols,"RER p","RER BH","RER_dir","RER adjusted")
-  if (has_fcs_rer)    pond_cols <- c(pond_cols, "RER clusters")
-  if (has_fade_gene)  pond_cols <- c(pond_cols, "FADE_dir")
-
-  desc_cols <- c()
-  if (has_fcs_caas) desc_cols <- c(desc_cols, "CAAS FCS term(s)", "CAAS evidence score")
-  if (has_fcs_rer)  desc_cols <- c(desc_cols, "RER FCS term(s)", "RER evidence score")
-  if (has_ami_gene) {
-    desc_cols <- c(desc_cols, "CAAS AMI desc(s)")
-    if (has_rer_gene)  desc_cols <- c(desc_cols, "RER AMI desc(s)")
-    if (has_fade_gene) desc_cols <- c(desc_cols, "FADE AMI desc(s)")
-  }
-  if (has_pe_gene) {
-    desc_cols <- c(desc_cols, "PE position", "PE term(s)")
-  }
-
-  res_cols <- "N methods"
-
-  out <- out %>%
-    dplyr::rename(Gene = gene, `PE position` = pe_position) %>%
-    dplyr::arrange(`CAAS p`, dplyr::desc(`N methods`)) %>%
-    dplyr::select(dplyr::all_of(c(meta_cols, pond_cols, desc_cols, res_cols))) %>%
-    head(params$top_n * 3)
-
-  list(
-    data      = out,
-    meta_cols = meta_cols,
-    pond_cols = pond_cols,
-    desc_cols = desc_cols,
-    res_cols  = res_cols
-  )
+  annotation_hit <- Reduce(`|`,lapply(out[c("caas_fcs_terms","rer_fcs_terms","caas_ami_desc","rer_ami_desc","fade_ami_desc")],function(x)!is.na(x)&nzchar(x)))
+  direct_hit <- Reduce(`|`,lapply(out[c("CAAS nominal","CAAS adjusted","RER nominal","RER adjusted","FADE call","Accumulation call")],function(x)x %in% TRUE))
+  out$`N methods` <- rowSums(cbind(out$`CAAS nominal` %in% TRUE,out$`RER nominal` %in% TRUE,out$`FADE call` %in% TRUE))
+  out$`Methods with evidence` <- rowSums(cbind(is.finite(out$`CAAS p`),is.finite(out$`RER p`),!is.na(out$`FADE call`)))
+  out <- out[direct_hit | annotation_hit,,drop=FALSE] %>% arrange(`CAAS p`,desc(`N methods`),gene)
+  out <- out %>% rename(Gene=gene,`CAAS FCS terms`=caas_fcs_terms,`RER FCS terms`=rer_fcs_terms,
+    `CAAS AMI descriptions`=caas_ami_desc,`RER AMI descriptions`=rer_ami_desc,`FADE AMI descriptions`=fade_ami_desc)
+  dir.create("compare_results",showWarnings=FALSE)
+  write_tsv(out,file.path("compare_results",paste0("interesting_genes_",rk,".tsv")))
+  if(!nrow(out)) return(NULL)
+  meta_cols <- "Gene"
+  pond_cols <- c("CAAS p","CAAS BH","CAAS nominal","CAAS adjusted","RER p","RER BH","RER rho","RER nominal","RER adjusted","FADE BF","FADE call","Accumulation call")
+  res_cols <- c("N methods","Methods with evidence")
+  desc_cols <- setdiff(names(out),c(meta_cols,pond_cols,res_cols))
+  list(data=out,meta_cols=meta_cols,pond_cols=pond_cols,desc_cols=desc_cols,res_cols=res_cols)
 }
 ```
 
-```{r interesting_genes_tabs, eval=has_fcs_stats_cmp, results='asis'}
+```{r interesting_genes_tabs, eval=has_gene_candidates, results='asis'}
 for (dr in c("Global", "Top", "Bottom")) {
   cat(sprintf("\n## %s\n\n", dr))
   res <- build_interesting_genes(dr)
+  cat(sprintf("[TSV completo](../compare/compare_results/interesting_genes_%s.tsv)\n\n",tolower(dr)))
   if (is.null(res) || is.null(res$data) || nrow(res$data) == 0) {
     cat("_No genes meet any criterion for this direction._\n\n")
     next
   }
-  print(render_banded_table(res, height = if (nrow(res$data) > 15) "480px" else NULL))
+  emit_widget(render_banded_table(res, height = if (nrow(res$data) > 15) "480px" else NULL))
 }
 ```
 
-`r if (!has_fcs_stats_cmp) "> **fcs_stats_file not supplied - Interesting Genes table skipped.**"`
+`r if (!has_gene_candidates) "> **No canonical gene evidence or FCS/AMI candidates are available.**"`
 
 ---
 
 # Interesting Positions {.tabset .tabset-fade}
+
+Positions are ordered by pooled CAAS positional p ascending and CAAS score descending.
+The same pooled CAAS p/BH pair is displayed once; FADE overlap is matched to Top/Bottom
+sites in those views and to the union of both measured sides globally.
 
 Empirical nominal and BH-adjusted evidence is shown together. CAAS uses its calibrated empirical p-value; direction-specific gene tests retain their own declared families. Position p.emp is pooled over sides. No score-percentile selection or weighted composite is used. N methods is a descriptive count of CAAS, RER and FADE calls, not a combined significance test. Pathway and network memberships are annotations.
 
@@ -1337,15 +1181,18 @@ build_interesting_positions <- function(direction) {
   base <- .position_emp_flags(base, tolower(direction))
   base <- base %>% dplyr::distinct(gene, Position, .keep_all = TRUE)
 
-  # Position-native FADE-site overlap: check if FADE site analysis was run
-  has_fade_pos <- (has_fade_sites_top_cmp && !is.null(fade_sites_top_cmp_df) && nrow(fade_sites_top_cmp_df) > 0) ||
-                  (has_fade_sites_bottom_cmp && !is.null(fade_sites_bottom_cmp_df) && nrow(fade_sites_bottom_cmp_df) > 0)
+  # An existing empty selected-sites file means evaluated with no hits;
+  # an absent side remains unknown. Global is the union of available sides.
   fade_df <- switch(direction,
     Top = fade_sites_top_cmp_df, Bottom = fade_sites_bottom_cmp_df,
     dplyr::bind_rows(fade_sites_top_cmp_df, fade_sites_bottom_cmp_df))
-  base$FADE_overlap <- if (has_fade_pos && !is.null(fade_df) && nrow(fade_df) > 0) {
-    paste(base$gene, base$Position) %in% paste(fade_df$gene, fade_df$Position)
-  } else FALSE
+  has_fade_pos <- switch(direction,Top=has_fade_sites_top_cmp,
+    Bottom=has_fade_sites_bottom_cmp,has_fade_sites_top_cmp || has_fade_sites_bottom_cmp)
+  fade_complete <- switch(direction,Top=has_fade_sites_top_cmp,
+    Bottom=has_fade_sites_bottom_cmp,has_fade_sites_top_cmp && has_fade_sites_bottom_cmp)
+  fade_hits <- if(!is.null(fade_df) && nrow(fade_df)>0)
+    paste(base$gene,base$Position) %in% paste(fade_df$gene,fade_df$Position) else rep(FALSE,nrow(base))
+  base$FADE_overlap <- ifelse(fade_hits,TRUE,if(fade_complete)FALSE else NA)
 
   # Position-native posenrich: check if posenrich was run
   has_pe_pos <- FALSE
@@ -1470,7 +1317,10 @@ build_interesting_positions <- function(direction) {
       (if (has_cosmic_pos) COSMIC == "hit" else FALSE) |
       (if (has_pai3d_pos) PAI3D_pathogenic == "pathogenic" else FALSE)
     )
-  if (nrow(out) == 0) return(NULL)
+  dir.create("compare_results",showWarnings=FALSE)
+  write_tsv(out %>% arrange(`CAAS p`,desc(CAAS_score)) %>% select(-any_of(c("p.emp","p.adj_bh"))),
+    file.path("compare_results",paste0("interesting_positions_",tolower(direction),".tsv")))
+  if(!nrow(out)) return(NULL)
 
   out <- out %>%
     dplyr::mutate(
@@ -1508,8 +1358,7 @@ build_interesting_positions <- function(direction) {
 
   desc_cols <- if (has_biochem_pos) c("biochem_groupings", "is_biochem") else c()
   if (has_pe_pos)          desc_cols <- c(desc_cols, "PE_sig", "PE term(s)")
-  if (has_pemp)            desc_cols <- c(desc_cols, "p.emp")
-  if (has_padj)            desc_cols <- c(desc_cols, "p.adj_bh")
+  # CAAS p and CAAS BH above are the canonical pooled positional pair.
   if (has_cosmic_pos)      desc_cols <- c(desc_cols, "COSMIC")
   if (has_pai3d_pos)       desc_cols <- c(desc_cols, "PAI3D_pathogenic")
   if (has_vep_ensembl_pos) desc_cols <- c(desc_cols, "VEP_consequence")
@@ -1533,8 +1382,7 @@ build_interesting_positions <- function(direction) {
 
   out <- out %>%
     dplyr::arrange(`CAAS p`, dplyr::desc(`CAAS Score`)) %>%
-    dplyr::select(dplyr::all_of(c(meta_cols, pond_cols, desc_cols, res_cols))) %>%
-    head(params$top_n * 3)
+    dplyr::select(dplyr::all_of(c(meta_cols, pond_cols, desc_cols, res_cols)))
 
   list(
     data      = out,
@@ -1550,11 +1398,12 @@ build_interesting_positions <- function(direction) {
 for (dr in c("Global", "Top", "Bottom")) {
   cat(sprintf("\n## %s\n\n", dr))
   res <- build_interesting_positions(dr)
+  cat(sprintf("[TSV completo](../compare/compare_results/interesting_positions_%s.tsv)\n\n",tolower(dr)))
   if (is.null(res) || is.null(res$data) || nrow(res$data) == 0) {
     cat("_No positions meet any criterion for this direction._\n\n")
     next
   }
-  print(render_banded_table(res, height = if (nrow(res$data) > 15) "480px" else NULL))
+  emit_widget(render_banded_table(res, height = if (nrow(res$data) > 15) "480px" else NULL))
 }
 ```
 

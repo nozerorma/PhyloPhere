@@ -39,7 +39,8 @@ process SCORING_FCS_REPORT {
     publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true, pattern: '*.html'
     publishDir path: "${params.outdir}/fcs/fcs_results",
-               mode: 'copy', overwrite: true, pattern: 'fcs_results/**'
+               mode: 'copy', overwrite: true, pattern: 'fcs_results/**',
+               saveAs: { name -> name.replaceFirst(/^fcs_results\//, '') }
 
     input:
     path fcs_stats
@@ -64,7 +65,10 @@ process SCORING_FCS_REPORT {
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     def enrich_file_arg = (enrich_file.name =~ /^NO_/) ? 'NULL' : "'${enrich_file}'"
+    def report_sources = ['12.FCS_general_report.Rmd','src/fcs_cluster.R','src/fcs_selection.R','src/evidence_flags.R'].collect { file("${local_dir}/${it}").text }.join('\n')
+    def report_hash = java.security.MessageDigest.getInstance('SHA-256').digest(report_sources.getBytes('UTF-8')).encodeHex().toString()
     def render = """
+        # FCS reporting source SHA256: ${report_hash}
         rmarkdown::render(
             '12.FCS_general_report.Rmd',
             params = list(
@@ -110,7 +114,8 @@ process RER_FCS_REPORT {
     publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true, pattern: '*.html'
     publishDir path: { "${params.outdir}/${subpath.toLowerCase()}/fcs_results" },
-               mode: 'copy', overwrite: true, pattern: 'fcs_results/**'
+               mode: 'copy', overwrite: true, pattern: 'fcs_results/**',
+               saveAs: { name -> name.replaceFirst(/^fcs_results\//, '') }
 
     input:
     val  subpath
@@ -137,7 +142,10 @@ process RER_FCS_REPORT {
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     def enrich_file_arg = (enrich_file.name =~ /^NO_/) ? 'NULL' : "'${enrich_file}'"
+    def report_sources = ['12.FCS_general_report.Rmd','src/fcs_cluster.R','src/fcs_selection.R','src/evidence_flags.R'].collect { file("${local_dir}/${it}").text }.join('\n')
+    def report_hash = java.security.MessageDigest.getInstance('SHA-256').digest(report_sources.getBytes('UTF-8')).encodeHex().toString()
     def render = """
+        # FCS reporting source SHA256: ${report_hash}
         rmarkdown::render(
             '12.FCS_general_report.Rmd',
             params = list(

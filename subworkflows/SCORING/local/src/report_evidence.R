@@ -16,9 +16,11 @@ scoring_overlap <- function(d, nominal=.05, fdr=.05) {
         sides <- if(rk=='global') c('top','bottom') else rk
         bf <- lapply(sides,function(x) col(paste0('fade_max_bf_',x)))
         calls <- lapply(sides,function(x) col(paste0('fade_significant_',x)))
-        # A missing side cannot be counted as an evaluated negative.
-        measured <- Reduce(`&`,lapply(bf,is.finite)) & Reduce(`&`,lapply(calls,function(x)!is.na(x)))
+        # Global FADE is the union of measured sides. A side with no source data
+        # stays unavailable; it does not erase evidence from the other side.
+        side_measured <- Map(function(b,c) is.finite(b) & !is.na(c), bf, calls)
         other <- Reduce(`|`,lapply(calls,function(x)x %in% TRUE))
+        measured <- other | Reduce(`&`, side_measured)
       } else {
         # Only ActualCount>0 genes belong to the accumulation tested BH family.
         # q availability is the producer's marker of that membership.

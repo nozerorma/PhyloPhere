@@ -4,17 +4,14 @@
 # =============================================================================
 # Sourced by: 12.FCS_general_report.Rmd. Defines functions only; it needs no package.
 #
-# The gene sets of the databases overlap (a pathway and its parent term, the same set in two
-# databases), so a list of significant sets repeats the same genes. The reduction is applied
-# after the significance call and changes no p or q value: it groups the significant sets of
-# one ranking by the similarity of their leading edges and names one representative per group.
-#
-# Assignment is greedy and deterministic. The significant sets are taken in order of
-# significance (smallest q.perm first). The first one is a representative; each following set
-# joins the first representative whose leading edge is at least `threshold` similar to its
-# own, and becomes a representative itself when none is. A set is compared with the
-# representatives only, never with the members of a group, so groups do not chain.
-# =============================================================================
+# Group selected sets after inference; p/q and calls are never modified.
+# The report selects C>0 and supplies its deterministic C/checks/q/p order.
+# Group independently by ranking and effect sign. A term joins the first
+# representative with leading-edge Jaccard >= threshold; comparisons against
+# group members are forbidden (no chaining). All terms remain in the exports.
+# Overlap coefficient remains an explicit alternative, not the default; it
+# over-merges hierarchical collections. Pre-test composition deduplication is
+# not performed because it would change the inferential family.
 
 # Similarity of two leading edges (character vectors of genes).
 #   jaccard : |a n b| / |a u b|
@@ -51,18 +48,21 @@ fcs_cluster_sets <- function(sets, threshold = 0.5, method = "jaccard") {
 # Adds cluster_id and is_representative to the results table of fcs_run_all().
 # enrich: the table (columns ranking, database, pathway, q.perm, p.perm, stat, sig_perm).
 # leading: long table of leading-edge genes (ranking, database, pathway, gene).
-# Groups are formed per ranking over selection_col; callers may supply a shared presentation order.
+# Groups are formed per ranking AND effect sign over selection_col; callers may supply a shared presentation order.
 # Other rows get NA; p/q and selection calls are never changed.
-# cluster_id is "<ranking>_C<k>", k following the significance of the representative.
+# cluster_id is "<ranking>_<effect>_C<k>", k following the representative order.
 fcs_add_clusters <- function(enrich, leading, threshold = 0.5, method = "jaccard", selection_col = "sig_perm", order_fun = NULL) {
-  enrich$cluster_id <- NA_character_
-  enrich$is_representative <- NA
+  enrich$cluster_id <- rep(NA_character_,nrow(enrich))
+  enrich$is_representative <- rep(NA,nrow(enrich))
   key <- function(d) paste(d$ranking, d$database, d$pathway, sep = "\r")
   keys <- key(enrich)
   le_key <- key(leading)
   genes_by_key <- split(as.character(leading$gene), le_key)
-  for (rk in unique(enrich$ranking)) {
-    idx <- which(enrich$ranking == rk & enrich[[selection_col]] %in% TRUE)
+  strata <- unique(data.frame(ranking=enrich$ranking, effect=sign(enrich$stat)))
+  for (j in seq_len(nrow(strata))) {
+    rk <- strata$ranking[j]; effect <- strata$effect[j]
+    if (!is.finite(effect)) next
+    idx <- which(enrich$ranking == rk & sign(enrich$stat) == effect & enrich[[selection_col]] %in% TRUE)
     if (length(idx) == 0) next
     d <- enrich[idx, , drop = FALSE]
     o <- if (is.null(order_fun)) order(d$q.perm, d$p.perm, -abs(d$stat), d$database, d$pathway) else {
@@ -72,7 +72,7 @@ fcs_add_clusters <- function(enrich, leading, threshold = 0.5, method = "jaccard
     sets <- lapply(keys[idx], function(k) { g <- genes_by_key[[k]]; if (is.null(g)) character(0) else unique(g) })
     names(sets) <- keys[idx]
     cl <- fcs_cluster_sets(sets, threshold = threshold, method = method)
-    enrich$cluster_id[idx] <- sprintf("%s_C%03d", rk, cl$cluster)
+    enrich$cluster_id[idx] <- sprintf("%s_%s_C%03d", rk, if(effect>0)"positive" else if(effect<0)"negative" else "zero", cl$cluster)
     enrich$is_representative[idx] <- cl$is_representative
   }
   enrich

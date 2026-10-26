@@ -329,6 +329,12 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
         render_block=render,
         output_file=output_file,
         publish_targets=[report.html_path.parent.parent / "scoring", report.html_path.parent],
+        post_lines=[
+            f'mkdir -p "{report.html_path.parent.parent}/scoring"',
+            'for f in gene_evidence_overlap.tsv genomic_window_accum_gene_caas.tsv position_scores_annotated.tsv; do',
+            f'    if [ -f "$f" ]; then cp "$f" "{report.html_path.parent.parent}/scoring/"; fi',
+            'done',
+        ],
         use_singularity=use_singularity,
     )
 
@@ -577,17 +583,13 @@ def _meta_caas_build_script(report: DetectedReport, repo_dir: Path, use_singular
 
 def _signif_significance_find_slots(outdir: Listing) -> list[InputSlot]:
     scoring = outdir / "scoring"
-    slots = list(_meta_caas_find_slots(outdir))
-    slots.append(
-        _slot("meta_caas_input", "Filtered discovery / CAAS TSV", True,
-              _first_match(outdir, "postproc/gene_filtering/filtered_discovery.tsv",
-                            "**/*filtered_discovery.tsv",
-                            "meta_caas/meta_caas/meta_caas.tsv",
-                            "**/*meta_caas.tsv"))
-    )
-    slots.append(_slot("position_scores_input", "Position scores TSV", True,
-                        _first_match(scoring, "position_scores.tsv")))
-    return slots
+    return [
+        _slot("position_scores_input", "Canonical position scores", True, _first_match(scoring,"position_scores.tsv")),
+        _slot("gene_scores_input", "Canonical gene scores", True, _first_match(scoring,"gene_scores.tsv")),
+        _slot("gene_metadata_input", "Original evidence thresholds and gene statistic", True, _first_match(scoring,"gene_evidence_metadata.json")),
+        _slot("gene_evidence_input", "Per-gene valid null counts", False, _first_match(scoring,"gene_evidence.tsv")),
+        _slot("null_universe_input", "Original positional BH family and null resolution", False, _first_match(scoring,"null_universe_summary.tsv")),
+    ]
 
 
 def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
@@ -596,8 +598,12 @@ def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, us
     render = _render_call(
         "16.CAAS_significance_report.Rmd",
         [
-            f"meta_caas_input = '{s['meta_caas_input']}'",
             f"position_scores_input = '{s['position_scores_input']}'",
+            f"gene_scores_input = '{s['gene_scores_input']}'",
+            f"gene_metadata_input = '{s['gene_metadata_input']}'",
+            f"gene_evidence_input = {_r_arg(s['gene_evidence_input'])}",
+            f"null_universe_input = {_r_arg(s['null_universe_input'])}",
+            f"traitname = '{report.traitname}'",
             "output_dir = '.'",
             "seed = '1998'",
         ],
@@ -611,6 +617,10 @@ def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, us
         render_block=render,
         output_file=output_file,
         publish_targets=[report.html_path.parent.parent / "meta_caas" / "significance", report.html_path.parent],
+        post_lines=[
+            f'mkdir -p "{report.html_path.parent.parent}/meta_caas/significance"',
+            f'if [ -d "significance" ]; then cp -R "significance/." "{report.html_path.parent.parent}/meta_caas/significance/"; fi',
+        ],
         use_singularity=use_singularity,
     )
 
@@ -679,7 +689,7 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
             "pperm_thr     = 0.025",
             "top_n         = 25",
             f"traitname     = '{report.traitname}'",
-            f"enrich_file   = {_r_arg(s['enrich_file'])}",
+            "enrich_file   = 'fcs_regen/fcs_enrich_input.tsv'",
         ],
         output_file,
     )
@@ -692,10 +702,18 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
         header_comment="ENRICHMENT — 12.FCS_general_report.Rmd (Scoring/CAAS)",
         repo_dir=repo_dir,
         local_dir="subworkflows/ENRICHMENT/local",
-        pre_lines=[],
+        pre_lines=[
+            'mkdir -p fcs_regen',
+            f'cp "{s["enrich_file"]}" fcs_regen/fcs_enrich_input.tsv',
+            f'cp "{s["metadata"]}" fcs_regen/fcs_report_metadata.json',
+        ],
         render_block=render_prefix + render,
         output_file=output_file,
         publish_targets=[report.html_path.parent.parent / "fcs", report.html_path.parent],
+        post_lines=[
+            f'mkdir -p "{report.html_path.parent.parent}/fcs/fcs_results"',
+            f'if [ -d "fcs_results" ]; then cp -R "fcs_results/." "{report.html_path.parent.parent}/fcs/fcs_results/"; fi',
+        ],
         use_singularity=use_singularity,
     )
 
@@ -722,7 +740,9 @@ def _posenrich_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(outdir, "selection/fade/top/fade_sites_top.csv")),
         _slot("fade_sites_bottom", "FADE selected sites (bottom)", False,
               _first_match(outdir, "selection/fade/bottom/fade_sites_bottom.csv")),
-        _slot("fcs_stats", "FCS stats TSV", False, _first_match(outdir, "**/fcs_stats.tsv")),
+        _slot("fcs_stats", "Canonical FCS annotation table", False, _first_match(outdir, "scoring/fcs_stats.tsv")),
+        _slot("gene_scores", "Canonical gene union (CAAS/RER/FADE)", True, _first_match(outdir,"scoring/gene_scores.tsv")),
+        _slot("gene_metadata", "Canonical gene metadata", True, _first_match(outdir,"scoring/gene_evidence_metadata.json")),
         _slot("cleaned_background", "Background/universe gene list", False,
               _first_match(outdir, "**/cleaned_background*.txt")),
     ]
@@ -814,109 +834,94 @@ def _posenrich_modular_build_script(report: DetectedReport, repo_dir: Path, use_
 
 
 def _ami_find_slots(outdir: Listing) -> list[InputSlot]:
-    scoring = outdir / "scoring"
-    ami = outdir / "ami"
-    return [
-        # scoring_evidence.nf publishes the nominal active lists as
-        # gene_lists/active_{global,top,bottom}.tsv; the regeneration script
-        # extracts their Gene column into <ranking>.txt, as the AMI process does.
-        _slot("gene_lists", "Nominal active gene lists directory (scoring)", True,
-              (scoring / "gene_lists").path if (scoring / "gene_lists").is_dir() else None),
-        _slot("background", "Background/universe gene list", True,
-              _first_match(outdir, "**/cleaned_background*.txt")),
-        _slot("gene_scores", "Gene scores TSV", False, _first_match(scoring, "gene_scores.tsv")),
-        _slot("domino_network_sif", "DOMINO network SIF", True, _first_match(ami, "**/network.sif", "**/*network*.sif")),
-        _slot("domino_modules_dir", "DOMINO modules directory", True,
-              _first_match(ami, "**/domino_modules")),
-        _slot("domino_edge_scores", "DOMINO network edge scores TSV", True,
-              _first_match(ami, "**/network_edge_scores.tsv")),
+    ami = outdir / "ami" / "ami_inputs"
+    slots = [
+        _slot("gene_scores", "Canonical gene evidence", True, _first_match(outdir,"scoring/gene_scores.tsv")),
+        _slot("gene_metadata", "Canonical gene metadata", True, _first_match(outdir,"scoring/gene_evidence_metadata.json")),
+        _slot("settings", "Saved AMI report settings (regenerate AMI to create)", True, _first_match(ami,"report_settings.json")),
     ]
+    for tool in ("caas","fade","rer"):
+        d = ami / tool
+        for key, name in (("lists","lists"),("background","background.txt"),("sif","network.sif"),("modules","domino_modules"),("edges","network_edge_scores.tsv")):
+            path = _first_match(d,name)
+            slots.append(_slot(f"{tool}_{key}",f"{tool.upper()} verified {key}",tool=="caas",path))
+    return slots
 
 
 def _ami_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
     output_file = f"13.AMI_analysis_{report.traitname}.html"
-    bg_name = s["background"].name if s["background"] else "background.txt"
-    string_cache = os.path.expanduser("~/.cache/phylophere/string")
-    pre_lines = [
-        f'for f in "{s["gene_lists"]}"/active_*.tsv; do',
-        '    [ -f "$f" ] || continue',
-        '    b=$(basename "$f" .tsv); name="${b#active_}"',
-        '    tail -n +2 "$f" | cut -f1 | grep -v "^[[:space:]]*$" > "${name}.txt" || true',
-        "done",
+    args = [
+        f"gene_list_files = list.files({_r_arg(s['caas_lists'])},pattern='[.]txt',full.names=TRUE)",
+        f"background_file = {_r_arg(s['caas_background'])}",
+        f"gene_scores_file = {_r_arg(s['gene_scores'])}",
+        f"gene_metadata_file = {_r_arg(s['gene_metadata'])}",
+        f"project_name = '{report.traitname}'",
+        f"domino_network_sif = {_r_arg(s['caas_sif'])}",
+        f"domino_modules_dir = {_r_arg(s['caas_modules'])}",
+        f"domino_edge_scores_file = {_r_arg(s['caas_edges'])}",
+        "seed = saved[['seed']]",
+        "species = saved[['species']]",
+        "domino_network_score_thr = saved[['domino_network_score_thr']]",
+        "domino_slice_threshold = saved[['domino_slice_threshold']]",
+        "domino_module_threshold = saved[['domino_module_threshold']]",
+        "module_description_fdr = saved[['module_description_fdr']]",
+        "string_db_dir = NULL",
+        f"string_cache_dir = '{os.path.expanduser('~/.cache/phylophere/string')}'",
     ]
-    render = _render_call(
-        "13.AMI_analysis.Rmd",
-        [
-            f"background_file     = '{s['background']}'",
-            f"background_basename = '{bg_name}'",
-            f"project_name        = '{report.traitname}'",
-            "species             = 9606",
-            "domino_network_score_thr = 700",
-            f"gene_scores_file    = {_r_arg(s['gene_scores'])}",
-            "string_db_dir       = NULL",
-            f"string_cache_dir    = '{string_cache}'",
-            f"domino_network_sif  = '{s['domino_network_sif']}'",
-            f"domino_modules_dir  = '{s['domino_modules_dir']}'",
-            f"domino_edge_scores_file = '{s['domino_edge_scores']}'",
-            "fade_gene_lists_dir      = NULL",
-            "fade_background_file     = NULL",
-            "fade_domino_network_sif  = NULL",
-            "fade_domino_modules_dir  = NULL",
-            "fade_domino_edge_scores_file = NULL",
-            "rer_gene_lists_dir       = NULL",
-            "rer_background_file      = NULL",
-            "rer_domino_network_sif   = NULL",
-            "rer_domino_modules_dir   = NULL",
-            "rer_domino_edge_scores_file = NULL",
-            "seed                     = '1998'",
-        ],
-        output_file,
-    )
+    for tool in ("fade","rer"):
+        # Partial method bundles must never silently produce a partial analysis.
+        present = [s[f"{tool}_{key}"] is not None for key in ("lists","background","sif","modules","edges")]
+        if any(present) and not all(present):
+            raise ValueError(f"Incomplete verified AMI {tool.upper()} input bundle; regenerate AMI")
+        for param,key in (("gene_lists_dir","lists"),("background_file","background"),("domino_network_sif","sif"),("domino_modules_dir","modules"),("domino_edge_scores_file","edges")):
+            args.append(f"{tool}_{param} = {_r_arg(s[f'{tool}_{key}'])}")
+    required_settings = "c('species','domino_network_score_thr','domino_slice_threshold','domino_module_threshold','module_description_fdr','seed')"
+    render = (f"saved <- jsonlite::read_json('{s['settings']}',simplifyVector=TRUE)\n"
+              f"stopifnot(all({required_settings} %in% names(saved)))\n"
+              + _render_call("13.AMI_analysis.Rmd",args,output_file))
     return _wrap_script(
-        header_comment="ENRICHMENT — 13.AMI_analysis.Rmd (FADE/RER cross-module sections left NULL — "
-                        "regenerate their own AMI reports if you need those sections back)",
-        repo_dir=repo_dir,
-        local_dir="subworkflows/ENRICHMENT/local",
-        pre_lines=pre_lines,
-        render_block=render,
-        output_file=output_file,
-        publish_targets=[report.html_path.parent.parent / "ami", report.html_path.parent],
+        header_comment="ENRICHMENT — AMI from verified per-method bundles; no DOMINO recomputation",
+        repo_dir=repo_dir,local_dir="subworkflows/ENRICHMENT/local",pre_lines=[],render_block=render,
+        output_file=output_file,publish_targets=[report.html_path.parent.parent / "ami",report.html_path.parent],
+        post_lines=[
+            f'mkdir -p "{report.html_path.parent.parent}/ami/ami_networks"',
+            f'if [ -d "ami_networks" ]; then cp -R "ami_networks/." "{report.html_path.parent.parent}/ami/ami_networks/"; fi',
+        ],
         use_singularity=use_singularity,
     )
 
 
-# ── ENRICHMENT: COMPARE (SCORING_COMPARE_REPORT) ──────────────────────────────
-
-
 def _compare_find_slots(outdir: Listing) -> list[InputSlot]:
-    # fcs.nf publishes into fcs/fcs_results/ with pattern 'fcs_results/**'; the
-    # emitted paths already start with "fcs_results/", so the files land one level
-    # deeper: fcs/fcs_results/fcs_results/*.tsv.
-    fcs = outdir / "fcs" / "fcs_results" / "fcs_results"
+    fcs = outdir / "fcs" / "fcs_results"
     return [
-        _slot("caas_fcs", "CAAS FCS all-results TSV", False, _first_match(fcs, "fcs_all_results.tsv")),
+        _slot("settings", "Saved comparison thresholds (regenerate comparison to create)", True,
+              _first_match(outdir,"compare/compare_results/report_settings.json")),
+        _slot("caas_fcs", "CAAS FCS all-results TSV", False, _first_match(fcs, "fcs_all_results.tsv", "fcs_results/fcs_all_results.tsv")),
         _slot("rer_fcs", "RER FCS all-results TSV", False,
-              _first_match(outdir, "rerconverge/**/fcs_results/fcs_all_results.tsv")),
-        _slot("caas_le", "CAAS leading-edge TSV", False, _first_match(fcs, "fcs_leading_edge.tsv")),
+              _first_match(outdir, "scoring/rer/fcs_results/fcs_all_results.tsv", "scoring/rer/fcs_results/fcs_results/fcs_all_results.tsv", "rerconverge/**/fcs_results/fcs_all_results.tsv")),
+        _slot("caas_le", "CAAS leading-edge TSV", False, _first_match(fcs, "fcs_leading_edge.tsv", "fcs_results/fcs_leading_edge.tsv")),
         _slot("rer_le", "RER leading-edge TSV", False,
-              _first_match(outdir, "rerconverge/**/fcs_results/fcs_leading_edge.tsv")),
+              _first_match(outdir, "scoring/rer/fcs_results/fcs_leading_edge.tsv", "scoring/rer/fcs_results/fcs_results/fcs_leading_edge.tsv", "rerconverge/**/fcs_results/fcs_leading_edge.tsv")),
         _slot("caas_le_comp", "CAAS leading-edge composition TSV", False,
-              _first_match(fcs, "fcs_leading_edge_composition.tsv")),
+              _first_match(fcs, "fcs_leading_edge_composition.tsv", "fcs_results/fcs_leading_edge_composition.tsv")),
         _slot("rer_le_comp", "RER leading-edge composition TSV", False,
-              _first_match(outdir, "rerconverge/**/fcs_results/fcs_leading_edge_composition.tsv")),
-        # scoring_enrichment.nf publishes into ami/ami_networks/ with pattern
-        # 'ami_networks/**': the same double nesting as fcs above.
+              _first_match(outdir, "scoring/rer/fcs_results/fcs_leading_edge_composition.tsv", "scoring/rer/fcs_results/fcs_results/fcs_leading_edge_composition.tsv", "rerconverge/**/fcs_results/fcs_leading_edge_composition.tsv")),
+        # Verified, current AMI outputs have one ami_networks level.
         _slot("ami_module_desc", "AMI module descriptions TSV", False,
-              _first_match(outdir, "ami/ami_networks/ami_networks/ami_module_descriptions_all_tools.tsv")),
+              _first_match(outdir, "ami/ami_networks/ami_module_descriptions_all_tools.tsv")),
+        _slot("ami_availability", "AMI method/view availability", False,
+              _first_match(outdir,"ami/ami_networks/ami_list_availability.tsv")),
         _slot("ami_term_membership", "AMI term membership TSV", False,
-              _first_match(outdir, "ami/ami_networks/ami_networks/ami_term_threshold_membership_all_tools.tsv")),
+              _first_match(outdir, "ami/ami_networks/ami_term_threshold_membership_all_tools.tsv")),
         _slot("posenrich_dotplot", "Posenrich overall dotplot TSV", False,
-              _first_match(outdir, "posenrich/posenrich_overall_dotplot.tsv")),
-        _slot("posenrich_le", "Posenrich leading-edge TSV", False, _first_match(outdir, "**/posenrich_leading_edge.tsv")),
+              None),
+        _slot("posenrich_le", "Posenrich leading-edge TSV", False, None),
         _slot("posenrich_le_summary", "Posenrich leading-edge summary TSV", False,
-              _first_match(outdir, "posenrich/posenrich_leading_edge_summary.tsv")),
-        _slot("fcs_stats", "FCS stats TSV", False, _first_match(outdir, "**/fcs_stats.tsv")),
+              None),
+        _slot("fcs_stats", "Canonical FCS annotation table", False, _first_match(outdir, "scoring/fcs_stats.tsv")),
+        _slot("gene_scores", "Canonical gene union (CAAS/RER/FADE)", True, _first_match(outdir,"scoring/gene_scores.tsv")),
+        _slot("gene_metadata", "Canonical gene metadata", True, _first_match(outdir,"scoring/gene_evidence_metadata.json")),
         _slot("position_scores", "Position scores TSV", False, _first_match(outdir, "scoring/position_scores.tsv")),
         _slot("vep_primateai", "VEP PrimateAI TSV", False, _first_match(outdir, "**/*primateai*.tsv")),
         _slot("vep_cosmic", "VEP COSMIC TSV", False, _first_match(outdir, "**/*cosmic*.tsv")),
@@ -952,17 +957,20 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
         [
             "fcs_dir    = 'cmp_fcs'",
             "fcs_le_dir = 'cmp_fcs_le'",
-            "fdr_thr    = 0.15",
-            "pperm_thr  = 0.025",
-            "domino_module_thr = 0.05",
-            "top_n      = 100",
+            "fdr_thr    = saved[['fdr_thr']]",
+            "pperm_thr  = saved[['pperm_thr']]",
+            "domino_module_thr = saved[['domino_module_thr']]",
+            "top_n      = saved[['top_n']]",
             f"traitname  = '{report.traitname}'",
             f"ami_module_desc_file      = {_r_arg(s['ami_module_desc'])}",
             f"ami_term_membership_file  = {_r_arg(s['ami_term_membership'])}",
+            f"ami_availability_file = {_r_arg(s['ami_availability'])}",
             f"posenrich_dotplot_file     = {_r_arg(s['posenrich_dotplot'])}",
             f"posenrich_leading_edge_file = {_r_arg(s['posenrich_le'])}",
             f"posenrich_leading_edge_summary_file = {_r_arg(s['posenrich_le_summary'])}",
             f"fcs_stats_file           = {_r_arg(s['fcs_stats'])}",
+            f"gene_scores_file         = {_r_arg(s['gene_scores'])}",
+            f"gene_metadata_file       = {_r_arg(s['gene_metadata'])}",
             f"position_scores_file     = {_r_arg(s['position_scores'])}",
             f"vep_primateai_file       = {_r_arg(s['vep_primateai'])}",
             f"vep_cosmic_file          = {_r_arg(s['vep_cosmic'])}",
@@ -970,10 +978,13 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"fade_sites_top_file      = {_r_arg(s['fade_sites_top'])}",
             f"fade_sites_bottom_file   = {_r_arg(s['fade_sites_bottom'])}",
             f"position_characterization_file = {_r_arg(s['position_characterization'])}",
-            "seed               = '1998'",
+            "seed               = saved[['seed']]",
         ],
         output_file,
     )
+    render = (f"saved <- jsonlite::read_json('{s['settings']}',simplifyVector=TRUE)\n"
+              "stopifnot(all(c('fdr_thr','pperm_thr','domino_module_thr','top_n','seed') %in% names(saved)))\n"
+              + render)
     return _wrap_script(
         header_comment="ENRICHMENT — 15.Comparison_report.Rmd",
         repo_dir=repo_dir,
@@ -982,6 +993,10 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
         render_block=render,
         output_file=output_file,
         publish_targets=[report.html_path.parent.parent / "compare", report.html_path.parent],
+        post_lines=[
+            f'mkdir -p "{report.html_path.parent.parent}/compare/compare_results"',
+            f'if [ -d "compare_results" ]; then cp -R "compare_results/." "{report.html_path.parent.parent}/compare/compare_results/"; fi',
+        ],
         use_singularity=use_singularity,
     )
 
@@ -1282,14 +1297,7 @@ REPORTS: list[ReportSpec] = [
         build_script=_fcs_scoring_build_script,
         guess_traitname=lambda name: _guess_trait_from_suffix(name, "12.FCS_scoring_"),
     ),
-    ReportSpec(
-        id="posenrich",
-        display_name="ENRICHMENT — Position enrichment report",
-        html_regex=re.compile(r"^14\.Position_enrichment_report_(?P<trait>.+)\.html$"),
-        find_slots=_posenrich_find_slots,
-        build_script=_posenrich_build_script,
-        guess_traitname=lambda name: _guess_trait_from_suffix(name, "14.Position_enrichment_report_"),
-    ),
+    # Historical report 14 is retained on disk but excluded from active discovery.
     ReportSpec(
         id="posenrich_modular",
         display_name="ENRICHMENT — POSENRICH modular report (WP10)",

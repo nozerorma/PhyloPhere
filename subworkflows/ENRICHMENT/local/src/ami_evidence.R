@@ -2,12 +2,26 @@
 ami_module_provenance <- function(path,active_file,network_file) {
  bad <- function(reason)list(available=FALSE,reason=reason)
  if(!file.exists(path))return(bad('missing DOMINO provenance (historical outputs are not certified)'))
- m <- jsonlite::read_json(path,simplifyVector=TRUE)
+ m <- tryCatch(jsonlite::read_json(path,simplifyVector=TRUE),error=function(e)NULL)
+ required <- c('contract_version','p_value_scale','p_adjustment','n_putative','final_modules',
+               'active_genes_sha256','network_sha256','slices_sha256','producer_sha256',
+               'modules_sha256','stats_sha256','slice_threshold','module_threshold')
+ if(is.null(m) || !all(required %in% names(m)) ||
+    any(vapply(m[required],length,integer(1))!=1L)) return(bad('incomplete or unreadable DOMINO certificate'))
  if(!identical(as.integer(m$contract_version),2L)||!identical(m$p_value_scale,'raw_upper_tail'))return(bad('old/unknown module p-value scale'))
- genes <- sort(unique(trimws(readLines(active_file,warn=FALSE))));genes<-genes[nzchar(genes)]
+ if(!identical(m$p_adjustment,'Bonferroni_n_putative'))return(bad('unknown DOMINO adjustment family'))
+ counts <- suppressWarnings(as.numeric(c(m$n_putative,m$final_modules)))
+ thresholds <- suppressWarnings(as.numeric(c(m$slice_threshold,m$module_threshold)))
+ if(any(!is.finite(counts)) || any(counts<0 | counts!=floor(counts)) ||
+    any(!is.finite(thresholds)) || any(thresholds<=0 | thresholds>1)) return(bad('invalid DOMINO family counts or thresholds'))
+ genes <- sort(unique(trimws(readLines(active_file,warn=FALSE))),method='radix');genes<-genes[nzchar(genes)]
  stamp<-paste0(paste(genes,collapse='\n'),if(length(genes))'\n' else '')
  if(!identical(digest::digest(stamp,algo='sha256',serialize=FALSE),m$active_genes_sha256))return(bad('active gene list differs from module inputs'))
  if(is.null(network_file)||!file.exists(network_file)||!identical(digest::digest(file=network_file,algo='sha256'),m$network_sha256))return(bad('network differs from module inputs'))
+ producer <- 'src/run_domino_modules.py'
+ if(!file.exists(producer) || is.null(m$producer_sha256) || !identical(digest::digest(file=producer,algo='sha256'),m$producer_sha256)) return(bad('DOMINO producer differs or source certificate is absent; regenerate modules'))
+ slices <- file.path(dirname(path),'inputs','slices.txt')
+ if(!file.exists(slices) || !identical(digest::digest(file=slices,algo='sha256'),m$slices_sha256)) return(bad('DOMINO slices certificate differs or is absent'))
  list(available=TRUE,reason='verified',metadata=m)
 }
 
@@ -19,8 +33,13 @@ ami_recurrence <- function(terms,registry,view) {
   rr<-if(length(ix))rs[[ix[1]]] else NULL
   data.frame(tool=toupper(tool),gene_list=unname(plans[tool]),
    list_label=if(tool=='rer' && view!='Global')'RER: Global (both signs; reference)' else paste(toupper(tool),view,sep=': '),
+   modules_verified=!is.null(rr)&&isTRUE(rr$modules_verified),
+   n_modules=if(is.null(rr)||is.null(rr$n_modules))NA_integer_ else rr$n_modules,
+   descriptions_available=!is.null(rr)&&isTRUE(rr$descriptions_available),
    available=!is.null(rr)&&isTRUE(rr$available),
-   status=if(is.null(rr))'Unavailable: list/method absent' else if(isTRUE(rr$available))'Verified modules and descriptions' else rr$skip_message %||% 'Descriptions unavailable',
+   status=if(is.null(rr))'Unavailable: list/method absent' else if(isTRUE(rr$available)) {
+     if(identical(rr$n_modules,0L))'Verified: zero modules' else 'Verified modules and descriptions'
+   } else rr$skip_message %||% 'Module descriptions unavailable',
    stringsAsFactors=FALSE)
  }))
  required<-c('tool','gene_list','term')

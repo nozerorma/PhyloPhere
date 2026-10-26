@@ -1,387 +1,214 @@
 ---
-title: "CAAS Position p-value Report"
-subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else ''`"
-date: "`r format(Sys.time(), '%d %B %Y')`"
-author: "PhyloPhere pipeline"
+title: "CAAS — evidencia de posiciones y genes"
+subtitle: "`r paste0('Trait: ', params$traitname)`"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   html_document:
     theme: flatly
-    syntax_highlighting: tango
     toc: true
-    toc_float:
-      collapsed: false
-    code_folding: hide
-    df_print: paged
-    fig_width: 10
-    fig_height: 6
+    toc_float: true
     self_contained: true
+    mathjax: null
+    md_extensions: "-tex_math_dollars"
 params:
-  meta_caas_input: NULL
+  meta_caas_input: NULL # Retained for old callers; the report uses canonical scoring tables.
   position_scores_input: NULL
   gene_scores_input: NULL
   gene_metadata_input: NULL
+  gene_evidence_input: NULL
+  null_universe_input: NULL
+  traitname: "trait"
   output_dir: "."
   seed: "1998"
-  max_table_rows: 2000
+  max_table_rows: 0 # Compatibility only: all positive-score rows are accessible.
 ---
-
-<style type="text/css">
-  body {
-    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  }
-  .main-container {
-    max-width: 95% !important;
-    padding-left: 40px !important;
-    padding-right: 40px !important;
-    margin-left: auto;
-    margin-right: auto;
-  }
-  .title {
-    font-size: 38px;
-    font-weight: bold;
-    color: #2c3e50;
-    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  }
-  .subtitle {
-    font-size: 24px;
-    font-weight: normal;
-    color: #7f8c8d;
-    margin-top: 10px;
-    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  }
-  .author, .date {
-    font-size: 16px;
-    color: #7f8c8d;
-    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  }
-</style>
-
-<!-- 16.CAAS_significance_report.Rmd — Annotation of the CAAS pattern table with the empirical position p-values of SCORING. -->
-<!-- PhyloPhere | subworkflows/CT_META_CAAS/local/ -->
-
-<!--
-Rendered by CAAS_SIGNIFICANCE_REPORT (ctpp_meta_caas.nf), after SCORING. The per-position CAAS table
-(meta_caas_input: meta_caas.tsv, or the post-processed discovery table SCORING evaluated; one row per
-Gene, Position and, when present, pattern) is joined with position_scores.tsv (p.emp, p.adj_bh)
-of the same run. It cannot be merged into 7.CAAS_pattern_annotation.Rmd, which runs before SCORING, when that
-table does not exist yet.
-Outputs: significance/meta_caas_significance.tsv and significance/pattern_significance_summary.tsv.
--->
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(
-  echo = TRUE,
-  warning = FALSE,
-  message = FALSE,
-  fig.width = 10,
-  fig.height = 7
-)
-
-suppressPackageStartupMessages({
-  library(tidyverse)
-  library(knitr)
-  library(kableExtra)
-  library(scales)
-  library(data.table)
-  library(paletteer)
-})
-
-createDir <- function(path) {
-  if (!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE, fig.width=10, fig.height=4)
+suppressPackageStartupMessages({library(dplyr);library(tidyr);library(readr);library(ggplot2);library(DT)})
+emit_widget <- function(widget) {
+  rendered <- knitr::knit_print(widget)
+  knitr::knit_meta_add(attr(rendered,"knit_meta"))
+  cat(rendered,"\n\n")
+  invisible(NULL)
 }
-
-# Same palette as 7.CAAS_pattern_annotation.Rmd.
-tableau_10 <- paletteer_d("ggthemes::Tableau_10")
-names(tableau_10) <- c(
-  "blue", "orange", "vermillion", "bluish_green",
-  "green", "yellow", "reddish_purple", "pink",
-  "brown", "gray"
-)
-
-seed_val <- if (!is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998
-set.seed(seed_val)
-```
-
-## 1. Data Import
-
-Load CT_META_CAAS's published meta_caas table and SCORING's published
-position score table, both from the same pipeline run.
-
-```{r data_import}
-if (is.null(params$meta_caas_input) || !file.exists(params$meta_caas_input)) {
-  stop("meta_caas_input (meta_caas.tsv) not found: ", params$meta_caas_input)
+show_table <- function(x) {
+  if(!nrow(x)) {cat("_Sin filas con score positivo en esta vista._\n\n");return(invisible(NULL))}
+  emit_widget(DT::datatable(x,rownames=FALSE,filter="top",extensions="Buttons",
+    options=list(pageLength=25,lengthMenu=c(10,25,50,100),scrollX=TRUE,order=list(),
+                 dom="Blfrtip",buttons=list("copy","csv","excel"))))
 }
-if (is.null(params$position_scores_input) || !file.exists(params$position_scores_input)) {
-  stop("position_scores_input (position_scores.tsv) not found: ", params$position_scores_input)
+file_ok <- function(f) !is.null(f) && length(f)==1L && !is.na(f) && !grepl("^NO_",basename(f)) && file.exists(f) && file.info(f)$size>0
+num <- function(d,n) if(n %in% names(d)) suppressWarnings(as.numeric(d[[n]])) else rep(NA_real_,nrow(d))
+call <- function(p,threshold) ifelse(is.finite(p),p<threshold,NA)
+status <- function(p,q) ifelse(!is.finite(p),"p no disponible",
+  ifelse(!is.finite(q),"p disponible; q no disponible",ifelse(q<fdr,"BH",ifelse(p<nominal,"Nominal","Evaluado; no significativo"))))
+for(n in c("position_scores_input","gene_scores_input")) if(!file_ok(params[[n]])) stop("Missing canonical scoring input: ",n)
+pos <- read_tsv(params$position_scores_input,show_col_types=FALSE)
+genes <- read_tsv(params$gene_scores_input,show_col_types=FALSE)
+if(!all(c("Gene","Position","side","CAAS_score") %in% names(pos))) stop("Position evidence requires Gene/Position/side/CAAS_score")
+if(!all(c("Gene","gene_caas_score","gene_caas_score_top","gene_caas_score_bottom") %in% names(genes))) stop("Missing canonical gene scores for the three rankings")
+if(anyDuplicated(genes$Gene)) stop("Duplicate gene evidence keys")
+stamp <- params$gene_metadata_input
+if(!file_ok(stamp)) stamp <- file.path(dirname(params$gene_scores_input),"gene_evidence_metadata.json")
+if(!file_ok(stamp)) stop("Missing gene_evidence_metadata.json")
+metadata <- jsonlite::read_json(stamp,simplifyVector=TRUE)
+if(!identical(metadata$gene_stat,"max")) stop("Retired gene statistic: regenerate gene evidence with max")
+nominal <- as.numeric(metadata$nominal_threshold); fdr <- as.numeric(metadata$fdr_threshold)
+stopifnot(length(nominal)==1L,is.finite(nominal),length(fdr)==1L,is.finite(fdr))
+for(n in c("CAAS_score","p.emp","p.adj_bh","n_hypotheses")) pos[[n]] <- num(pos,n)
+pos$Position <- as.integer(pos$Position)
+if(anyDuplicated(pos[c("Gene","Position","side")])) stop("Duplicate canonical position/side keys")
+conflict <- pos %>% distinct(Gene,Position,p.emp,p.adj_bh) %>% count(Gene,Position) %>% filter(n>1)
+if(nrow(conflict)) stop("Pooled position p/q disagree between sides")
+full_gene_family <- lapply(c("global","top","bottom"),function(rk) {
+  sf <- if(rk=="global")"" else paste0("_",rk)
+  data.frame(ranking=rk,genes_in_source=nrow(genes),genes_with_p=sum(is.finite(num(genes,paste0("caas_p.gen",sf)))),
+    genes_with_q=sum(is.finite(num(genes,paste0("caas_p.gen.adj",sf)))))
+}) %>% bind_rows()
+ge_file <- params$gene_evidence_input
+if(!file_ok(ge_file)) ge_file <- file.path(dirname(params$gene_scores_input),"gene_evidence.tsv")
+ge <- if(file_ok(ge_file)) read_tsv(ge_file,show_col_types=FALSE) else NULL
+if(!is.null(ge)) {
+  if(!all(c("gene","ranking","N_valid") %in% names(ge))) stop("Invalid gene calibration schema: requires gene/ranking/N_valid")
+  if(anyDuplicated(ge[c("gene","ranking")])) stop("Duplicate gene/ranking calibration records")
 }
-
-meta_caas <- read_tsv(params$meta_caas_input, show_col_types = FALSE) %>%
-  select(-matches("^p[.](emp|adj_bh)_fact$"))
-position_scores <- read_tsv(params$position_scores_input, show_col_types = FALSE) %>%
-  select(-matches("^p[.](emp|adj_bh)_fact$"))
-
-cat(sprintf("Loaded meta_caas: %d rows from %s\n", nrow(meta_caas), basename(params$meta_caas_input)))
-cat(sprintf("Loaded position_scores: %d rows from %s\n", nrow(position_scores), basename(params$position_scores_input)))
-
-required_meta_cols <- c("Gene", "Position")
-missing_meta_cols <- setdiff(required_meta_cols, names(meta_caas))
-if (length(missing_meta_cols) > 0) {
-  stop("Missing required columns in meta_caas: ", paste(missing_meta_cols, collapse = ", "))
+nu_file <- params$null_universe_input
+if(!file_ok(nu_file)) nu_file <- file.path(dirname(params$position_scores_input),"null_universe_summary.tsv")
+nu <- if(file_ok(nu_file)) read_tsv(nu_file,show_col_types=FALSE) else NULL
+if(!is.null(nu) && !all(c("metric","cycles","value") %in% names(nu))) stop("Invalid null universe summary schema")
+metadata_number <- function(n) {
+  x <- suppressWarnings(as.numeric(metadata[[n]]))
+  if(length(x)==1L && is.finite(x)) x else NA_real_
 }
-type_col <- if ("convergence_type" %in% names(meta_caas)) {
-  "convergence_type"
-} else if ("pattern" %in% names(meta_caas)) {
-  "pattern"
-} else {
-  NULL
+metric <- function(n) {
+  if(is.null(nu)) return(NA_real_)
+  x <- suppressWarnings(as.numeric(nu$value[nu$metric==n & is.na(nu$cycles)]))
+  if(length(x)) x[1] else NA_real_
 }
-type_label <- if (identical(type_col, "convergence_type")) "Convergence Type" else if (identical(type_col, "pattern")) "Pattern" else "Classification"
-```
-
-## 2. Join SCORING's position p-values onto the meta_caas rows
-
-The p-values are informative: no threshold or significance call is applied to them.
-
-- `p.emp` is the empirical permulation p of the position: the proportion of the N permuted-labeling cycles that
-  detect the position (on either phenotype side) and give it a CAAS score at least as high as the observed one,
-  counting the observed run as one more cycle, (k + 1)/(N + 1). Its minimum is 1/(N + 1), retained numerically.
-  A position with an observed score of 0 has `p.emp` = 1. `p.adj_bh` is its Benjamini-Hochberg adjustment.
-
-### Position p-values
-
-`position_scores.tsv` carries one row per (Gene, Position, side); `p.emp` and
-its adjustment `p.adj_bh` (BH over the permutation family) are already pooled across sides (max-over-sides "all" axis --
-docs/scoring_v2_p_emp.md §1 / scoring_compute.R §2f-ter), so
-both side-rows for a given (Gene, Position) carry the identical p.emp value.
-We deduplicate to one row per (Gene, Position) BEFORE joining -- joining on
-the undeduped table (or on `side`, which meta_caas doesn't have) would
-silently duplicate every meta_caas row once per side.
-
-```{r position_join}
-# Ensure p-value columns are strictly numeric
-for (.c in c("p.emp", "p.adj_bh")) {
-  if (.c %in% names(position_scores)) {
-    position_scores[[.c]] <- suppressWarnings(as.numeric(position_scores[[.c]]))
+N_position <- metric("N_cycles"); position_family <- metric("universe_size")
+positive <- pos %>% filter(is.finite(CAAS_score),CAAS_score>0,side %in% c("top","bottom"))
+views_pos <- list()
+views_gene <- list()
+for(rk in c("global","top","bottom")) {
+  sf <- if(rk=="global")"" else paste0("_",rk)
+  p <- if(rk=="global") positive else positive %>% filter(side==rk)
+  side_labels <- p %>% group_by(Gene,Position) %>% summarise(positive_sides=paste(sort(unique(side)),collapse=","),.groups="drop")
+  p <- p %>% arrange(desc(CAAS_score),desc(n_hypotheses),Gene,Position,side) %>% distinct(Gene,Position,.keep_all=TRUE) %>%
+    left_join(side_labels,by=c("Gene","Position")) %>%
+    mutate(nominal=call(p.emp,nominal),BH=call(p.adj_bh,fdr),evidence_status=status(p.emp,p.adj_bh)) %>%
+    arrange(p.emp,desc(CAAS_score),Gene,Position)
+  views_pos[[rk]] <- p
+  g <- tibble(Gene=as.character(genes$Gene),score=num(genes,paste0("gene_caas_score",sf)),
+    p.gen=num(genes,paste0("caas_p.gen",sf)),p.gen.adj=num(genes,paste0("caas_p.gen.adj",sf))) %>% filter(is.finite(score),score>0)
+  pc <- p %>% group_by(Gene) %>% summarise(positive_positions=n(),
+    positions_with_p=sum(is.finite(p.emp)),positions_with_q=sum(is.finite(p.adj_bh)),
+    positions_nominal=sum(nominal %in% TRUE),positions_BH=sum(BH %in% TRUE),.groups="drop")
+  g <- g %>% left_join(pc,by="Gene")
+  for(n in c("positive_positions","positions_with_p","positions_with_q","positions_nominal","positions_BH")) g[[n]][is.na(g[[n]])] <- 0L
+  g$N_valid <- NA_real_
+  if(!is.null(ge)) {
+    ix <- match(g$Gene,ge$gene[ge$ranking==rk]);g$N_valid <- num(ge[ge$ranking==rk,,drop=FALSE],"N_valid")[ix]
   }
+  g <- g %>% mutate(nominal=call(p.gen,nominal),BH=call(p.gen.adj,fdr),
+    carries_position_BH=positions_BH>0,evidence_status=status(p.gen,p.gen.adj),
+    min_resolvable_p=ifelse(is.finite(N_valid)&N_valid>0,1/(N_valid+1),NA_real_)) %>% arrange(p.gen,desc(score),Gene)
+  views_gene[[rk]] <- g
 }
-
-has_p_emp_cols <- all(c("p.emp", "p.adj_bh") %in% names(position_scores)) &&
-                  any(!is.na(position_scores$p.emp) & is.finite(position_scores$p.emp))
-
-# Report numerical p-values; an observed minimum does not establish the theoretical floor.
-.valid_p <- if (has_p_emp_cols) position_scores$p.emp[is.finite(position_scores$p.emp) & position_scores$p.emp > 0] else numeric(0)
-.p_floor <- if (length(.valid_p) > 0) min(.valid_p) else NA_real_
-.fmt_p <- function(p) vapply(p, function(x) {
-  if (is.na(x) || !is.finite(x)) return(NA_character_)
-  format(signif(x, 3), scientific = FALSE, trim = TRUE)
-}, character(1))
-if (!all(c("p.emp", "p.adj_bh") %in% names(position_scores))) {
-  warning("position_scores.tsv has no p.emp/p.adj_bh columns -- was it produced by ",
-          "a stale scoring_compute.R build? The p-value columns will be all-NA.")
-  pos_dedup <- tibble(Gene = character(), Position = integer(),
-                       p.emp = numeric(), p.adj_bh = numeric())
-} else {
-  pos_dedup <- position_scores %>%
-    mutate(Position = as.integer(Position)) %>%
-    distinct(Gene, Position, p.emp, p.adj_bh)
-  # Check the pooling assumption of the text above: a (Gene, Position) with more than one
-  # distinct p.emp value would duplicate meta_caas rows in the join, so warn and keep one.
-  n_dupe_keys <- pos_dedup %>% count(Gene, Position) %>% filter(n > 1) %>% nrow()
-  if (n_dupe_keys > 0) stop("Conflicting pooled position p/q for Gene/Position")
+out <- "significance"
+dir.create(out,showWarnings=FALSE,recursive=TRUE)
+for(rk in names(views_pos)) {
+  write_tsv(views_pos[[rk]],file.path(out,paste0("positive_positions_",rk,".tsv")))
+  write_tsv(views_gene[[rk]],file.path(out,paste0("positive_genes_",rk,".tsv")))
 }
-
-meta_caas <- meta_caas %>%
-  mutate(Position = as.integer(Position)) %>%
-  select(-any_of(c("p.emp", "p.adj_bh"))) %>%
-  left_join(pos_dedup, by = c("Gene", "Position"))
-
-# Annotate each existing row with one p/q pair per gene and ranking. A wide
-# many-to-one join preserves pattern multiplicity and position 0.
-.rows_before_gene_join <- nrow(meta_caas)
-if (!is.null(params$gene_scores_input) && file.exists(params$gene_scores_input)) {
-  stamp <- params$gene_metadata_input
-  if (is.null(stamp)) stamp <- file.path(dirname(params$gene_scores_input), "gene_evidence_metadata.json")
-  if (!file.exists(stamp) || !identical(jsonlite::read_json(stamp)$gene_stat,"max"))
-    stop("Gene annotation requires gene_stat=max metadata")
-  ge <- readr::read_tsv(params$gene_scores_input,show_col_types=FALSE)
-  if (anyDuplicated(ge$Gene)) stop("Duplicate gene evidence keys")
-  ge <- ge %>% select(Gene, matches("^caas_p\\.gen(\\.adj)?(_top|_bottom)?$"))
-  meta_caas <- meta_caas %>% select(-any_of(setdiff(names(ge),"Gene"))) %>% left_join(ge,by="Gene")
+summary_rows <- function(d,rk,unit,pcol,qcol,scol) {
+  p <- d[[pcol]];q <- d[[qcol]]
+  tibble(ranking=rk,unit=unit,positive_rows=nrow(d),p_available=sum(is.finite(p)),q_available=sum(is.finite(q)),
+    positive_without_p=sum(!is.finite(p)),nominal=sum(call(p,nominal) %in% TRUE),BH=sum(call(q,fdr) %in% TRUE),
+    genes_carrying_position_BH=if(unit=="genes")sum(d$carries_position_BH) else n_distinct(d$Gene[call(q,fdr) %in% TRUE]),
+    score_median=if(nrow(d))median(d[[scol]]) else NA_real_)
 }
-for (rk in c("global","top","bottom")) {
-  sf <- if(rk=="global") "" else paste0("_",rk)
-  for (nm in c("caas_p.gen","caas_p.gen.adj")) {
-    cn <- paste0(nm,sf)
-    if (!cn %in% names(meta_caas)) meta_caas[[cn]] <- NA_real_
-  }
+summary <- bind_rows(lapply(names(views_pos),function(rk) bind_rows(
+  summary_rows(views_pos[[rk]],rk,"positions","p.emp","p.adj_bh","CAAS_score"),
+  summary_rows(views_gene[[rk]],rk,"genes","p.gen","p.gen.adj","score"))))
+write_tsv(summary,file.path(out,"positive_evidence_summary.tsv"))
+write_tsv(full_gene_family,file.path(out,"original_gene_family_coverage.tsv"))
+# Compatibility export now contains canonical, globally unique positive positions.
+write_tsv(views_pos$global,file.path(out,"meta_caas_significance.tsv"))
+plot_distribution <- function(d,score,p,q,title) {
+  dd <- bind_rows(tibble(variable="score",value=d[[score]]),tibble(variable="p",value=d[[p]]),tibble(variable="q (BH)",value=d[[q]])) %>% filter(is.finite(value))
+  if(nrow(dd)) print(ggplot(dd,aes(value))+geom_histogram(bins=35,fill="#4E79A7",colour="white")+
+    facet_wrap(~variable,scales="free")+theme_minimal()+labs(title=title,x=NULL,y="Filas de esta vista"))
+  else cat("_Distribuciones no disponibles._\n\n")
 }
-stopifnot(nrow(meta_caas)==.rows_before_gene_join)
-meta_caas$gene_evidence <- dplyr::case_when(
-  !is.finite(meta_caas$caas_p.gen) ~ "Unavailable",
-  meta_caas$caas_p.gen.adj < .05 ~ "Gene BH <0.05",
-  meta_caas$caas_p.gen < .05 ~ "Gene nominal <0.05",
-  TRUE ~ "Gene evaluated, not nominal")
+```
+<script>
+$(document).on('shown.bs.tab shown.bs.collapse', function () {
+  if ($.fn.dataTable) $.fn.dataTable.tables({visible: true, api: true}).columns.adjust();
+});
+</script>
 
-.n_meta_rows <- nrow(meta_caas)
-.n_pos_matched <- meta_caas %>% filter(!is.na(p.emp) & is.finite(p.emp)) %>% nrow()
-.n_unique_pos <- n_distinct(paste(meta_caas$Gene, meta_caas$Position))
-.n_unique_pos_matched <- meta_caas %>% filter(!is.na(p.emp) & is.finite(p.emp)) %>% distinct(Gene, Position) %>% nrow()
-.pos_rate <- if (.n_meta_rows > 0) .n_pos_matched / .n_meta_rows else 0
-cat(sprintf("  p.emp position join: matched %d/%d rows (%d/%d unique positions, %.1f%%)\n",
-            .n_pos_matched, .n_meta_rows, .n_unique_pos_matched, .n_unique_pos, 100 * .pos_rate))
-if (.pos_rate < 0.5 && !("convergence_type" %in% names(meta_caas))) {
-  cat(sprintf(paste0("  WARNING: p.emp join rate %.1f%% < 50%% -- the meta_caas positions ",
-                     "and position_scores.tsv positions are likely on different coordinate ",
-                     "systems or from different pipeline runs. Treat the p-values as ",
-                     "unreliable.\n"), 100 * .pos_rate), file = stderr())
+
+<style>.main-container { max-width:95%; } </style>
+
+# Qué se muestra
+
+Solo posiciones y genes con **score observado > 0 en la vista correspondiente**.
+Global contiene una fila por posición biológica `(Gene, Position)`, con su máximo score
+entre lados; Top y Bottom usan el score de su propio lado. Las coordenadas son las del
+alineamiento recortado, base cero; la posición 0 es válida.
+
+El p posicional está agrupado entre lados y se muestra con su BH original: Top y Bottom
+no constituyen dos pruebas nuevas. Los genes tienen p y BH propios por ranking.
+**Filtrar score positivo solo cambia la presentación:** no se recalculan p/q ni sus
+familias BH. Una p ausente se muestra como no disponible y nunca como no significativa.
+Un gen BH significativo y un gen portador de una posición BH significativa son resultados
+estadísticos distintos; sus recuentos figuran por separado y corresponden a cada vista.
+
+# Cobertura, denominadores y resolución
+
+```{r coverage, results='asis'}
+cat(sprintf("Llamada nominal: p < %g; llamada BH: q < %g (metadatos de la evidencia).\n\n",nominal,fdr))
+show_table(summary)
+cat("**Familias originales de genes, antes del filtro de score:** los recuentos con p/q incluyen los genes con score cero.\n\n")
+show_table(full_gene_family)
+resolution <- tibble(unit=c("Posiciones (familia agrupada entre lados)","Genes (por ranking)"),
+  N_roster=c(N_position,metadata_number("N")),
+  roster_min_p=c(if(is.finite(N_position))1/(N_position+1) else NA_real_,if(is.finite(metadata_number("N")))1/(metadata_number("N")+1) else NA_real_),
+  original_family_size=c(position_family,metadata_number("genes")))
+write_tsv(resolution,file.path(out,"null_resolution.tsv"))
+show_table(resolution)
+cat("Los denominadores de los resúmenes son las filas positivas de su vista. El tamaño original de la familia posicional incluye posiciones del nulo sin detección observada. N_valid y la resolución real por gen se leen de gene_evidence.tsv; el suelo basado en el roster presupone todos los ciclos válidos. Una resolución no documentada queda como NA; no se deduce del mínimo p observado.\n\n")
+```
+
+# Posiciones {.tabset}
+
+```{r positions, results='asis'}
+for(rk in names(views_pos)) {
+  cat("\n## ",tools::toTitleCase(rk),"\n\n",sep="")
+  d <- views_pos[[rk]]
+  cat(sprintf("%d posiciones positivas; %d con p y %d con q disponibles.\n\n",nrow(d),sum(is.finite(d$p.emp)),sum(is.finite(d$p.adj_bh))))
+  plot_distribution(d,"CAAS_score","p.emp","p.adj_bh",paste("Posiciones",rk))
+  show_table(d)
 }
 ```
 
-## Gene annotation
+# Genes {.tabset}
 
-`caas_p.gen` / `caas_p.gen.adj` are global gene evidence calibrated from raw maxima; suffixes `_top` and `_bottom` identify their own gene rankings. Gene BH families remain the original full families. Missing gene evidence is unavailable. The color below annotates global gene evidence; it does not change the positional meaning of p.emp or its pooled BH. Coordinates are trimmed-alignment positions, base zero; position 0 is valid.
-
-## 3. Position p-values by `r type_label`
-
-Descriptive summary per `r tolower(type_label)`: number of positions, how many
-have a p-value, how many share the observed minimum `p.emp`, the smallest and median empirical p-values. These are
-not tests and no group-level statistic is combined from them.
-
-```{r pattern_summary_table, results='asis'}
-group_vars <- if (!is.null(type_col)) type_col else "Gene"
-
-.min_na <- function(x) {
-  x_num <- suppressWarnings(as.numeric(x))
-  x_clean <- x_num[!is.na(x_num) & is.finite(x_num)]
-  if (length(x_clean) == 0) NA_real_ else min(x_clean)
-}
-.med_na <- function(x) {
-  x_num <- suppressWarnings(as.numeric(x))
-  x_clean <- x_num[!is.na(x_num) & is.finite(x_num)]
-  if (length(x_clean) == 0) NA_real_ else median(x_clean)
-}
-
-pattern_summary <- meta_caas %>%
-  group_by(across(all_of(group_vars))) %>%
-  summarize(
-    n_positions = n(),
-    n_positions_with_p = sum(!is.na(p.emp) & is.finite(p.emp)),
-    n_at_min_observed_p_emp = if (!is.na(.p_floor) && is.finite(.p_floor)) sum(!is.na(p.emp) & is.finite(p.emp) & p.emp <= .p_floor * (1 + 1e-9)) else 0L,
-    min_p_emp = .min_na(p.emp),               median_p_emp = .med_na(p.emp),
-    min_p_adj_bh = .min_na(p.adj_bh),         median_p_adj_bh = .med_na(p.adj_bh),
-    n_genes = n_distinct(Gene),
-    .groups = "drop"
-  ) %>%
-  arrange(across(all_of(group_vars)))
-
-kable(pattern_summary %>% mutate(min_p_emp = .fmt_p(min_p_emp), median_p_emp = .fmt_p(median_p_emp)),
-      col.names = c(type_label, "Positions", "With p", "At minimum", "Min p", "Median p", "Min BH q", "Median BH q", "Genes"),
-      digits = 4, format.args = list(big.mark = ",")) %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
-```
-
-```{r pattern_summary_plot, fig.height=8}
-x_col <- if (!is.null(type_col)) type_col else "Gene"
-
-plot_df <- meta_caas %>%
-  select(all_of(x_col), gene_evidence, p.emp, p.adj_bh) %>%
-  mutate(across(c(p.emp, p.adj_bh), ~ suppressWarnings(as.numeric(.x)))) %>%
-  pivot_longer(c(p.emp, p.adj_bh), names_to = "p_value", values_to = "p") %>%
-  filter(!is.na(p) & is.finite(p)) %>%
-  mutate(
-    neg_log10_p = -log10(pmax(p, 1e-300)),
-    p_value = factor(p_value, levels = c("p.emp", "p.adj_bh"))
-  )
-
-if (nrow(plot_df) > 0) {
-  p_box <- ggplot(plot_df, aes(x = factor(.data[[x_col]]), y = neg_log10_p, colour=gene_evidence)) +
-    geom_boxplot(fill = "#EEEEEE", outlier.size = 0.8) +
-    scale_colour_manual(name="Global gene evidence", values=c("Gene BH <0.05"="#2166ac","Gene nominal <0.05"="#e08214","Gene evaluated, not nominal"="#555555","Unavailable"="#aaaaaa"),drop=FALSE) +
-    theme_minimal() +
-    labs(
-      title = sprintf("Position p-values by %s", type_label),
-      subtitle = "Empirical p (p.emp) and its Benjamini-Hochberg adjustment (p.adj_bh)",
-      x = type_label,
-      y = "-log10(p)"
-    ) +
-    theme(
-      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
-      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
-      plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
-      axis.text.x = element_text(angle = 0, hjust = 0.5),
-      panel.grid.major = element_line(color = "darkgray", linewidth = 0.3)
-    )
-  p_box <- p_box + facet_wrap(~ p_value, scales = "free_y")
-  print(p_box)
-} else {
-  cat("No p-values to plot.\n")
+```{r genes, results='asis'}
+for(rk in names(views_gene)) {
+  cat("\n## ",tools::toTitleCase(rk),"\n\n",sep="")
+  d <- views_gene[[rk]]
+  cat(sprintf("%d genes positivos; %d genes BH; %d genes portadores de posiciones BH de esta misma vista.\n\n",nrow(d),sum(d$BH %in% TRUE),sum(d$carries_position_BH)))
+  plot_distribution(d,"score","p.gen","p.gen.adj",paste("Genes",rk))
+  show_table(d)
 }
 ```
 
-## 4. Row-level p-value table
+# Tablas completas
 
-```{r rowlevel_table}
-key_cols <- intersect(
-  c("Gene", "Position", "convergence_type", "pattern", "side",
-    "p.emp", "p.adj_bh", "gene_evidence", "caas_p.gen", "caas_p.gen.adj", "caas_p.gen_top", "caas_p.gen.adj_top", "caas_p.gen_bottom", "caas_p.gen.adj_bottom"),
-  names(meta_caas)
-)
-other_cols <- setdiff(names(meta_caas), key_cols)
-# The widget embeds every row as JSON in the HTML, so only the most significant
-# rows are shown; the full table is exported below.
-sort_col <- intersect(c("p.emp", "p.adj_bh"), names(meta_caas))[1]
-n_show <- min(nrow(meta_caas), as.integer(params$max_table_rows))
-meta_caas_display <- meta_caas %>%
-  { if (is.na(sort_col)) . else arrange(., .data[[sort_col]]) } %>%
-  slice_head(n = n_show) %>%
-  select(all_of(c(key_cols, other_cols))) %>%
-  mutate(across(where(is.numeric), ~ round(., 4)), across(any_of("p.emp"), .fmt_p))
-
-if (requireNamespace("DT", quietly = TRUE)) {
-  DT::datatable(
-    meta_caas_display,
-    rownames = FALSE,
-    filter = "top",
-    options = list(pageLength = 15, scrollX = TRUE, autoWidth = TRUE),
-    caption = htmltools::tags$caption(
-      style = "caption-side: top; text-align: left; font-weight: bold;",
-      sprintf("Row-level CAAS position p-values (top %d of %d positions by %s; full table exported to significance/meta_caas_significance.tsv)", n_show, nrow(meta_caas), if (is.na(sort_col)) "file order" else sort_col)
-    )
-  )
-} else {
-  meta_caas_display
-}
-```
-
-## 5. Export
-
-```{r export}
-sig_dir <- "significance"
-createDir(sig_dir)
-
-write_tsv(meta_caas, file.path(sig_dir, "meta_caas_significance.tsv"))
-write_tsv(pattern_summary, file.path(sig_dir, "pattern_significance_summary.tsv"))
-
-cat(sprintf("Wrote %s (%d rows)\n", file.path(sig_dir, "meta_caas_significance.tsv"), nrow(meta_caas)))
-cat(sprintf("Wrote %s (%d rows)\n", file.path(sig_dir, "pattern_significance_summary.tsv"), nrow(pattern_summary)))
-```
-
----
-
-## Summary
-
-This report annotates the CAAS positions evaluated by SCORING with their empirical position p-values (`p.emp`)
-and their Benjamini-Hochberg adjustment (`p.adj_bh`). The p-values are
-informative and no threshold is applied. Group-level numbers are descriptive.
-
----
-
-<details>
-<summary>Session Info</summary>
-```{r session-info}
-sessionInfo()
-```
-</details>
-
-*Generated by PhyloPhere — CT Meta-CAAS Module (post-SCORING position p-value annotation)*
-*Date of generation: `r Sys.Date()`*
+Las tablas paginadas contienen todas las filas positivas y permiten buscar, ordenar y
+exportar. Los TSV numéricos completos se publican bajo `meta_caas/significance/`, con
+nombres `positive_positions_{global,top,bottom}.tsv`, `positive_genes_{global,top,bottom}.tsv`,
+`positive_evidence_summary.tsv`, `original_gene_family_coverage.tsv` y `null_resolution.tsv`. Los resúmenes
+históricos por patrón se han retirado del informe activo.

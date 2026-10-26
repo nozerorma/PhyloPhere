@@ -49,12 +49,15 @@ process DOMINO_BUILD_NETWORK {
     path "slices.txt",               emit: slices
 
     script:
+    def source_hash = java.security.MessageDigest.getInstance('SHA-256')
+        .digest(file("${baseDir}/subworkflows/ENRICHMENT/local/src/build_domino_network.py").text.getBytes('UTF-8')).encodeHex().toString()
     def db_dir_arg = string_db_dir ? "--string-db-dir ${string_db_dir}" : ""
     // The default --cache-dir of build_domino_network.py ("string_cache") is relative to the
     // work directory of the task, which is new for every task, so the STRING files would be
     // downloaded again on every run. A persistent directory is passed instead.
     def string_cache_dir = params.string_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/string"
     """
+    # DOMINO producer source SHA256: ${source_hash}
     bg_name=\$(basename ${background_file})
     if [ ! -f "${background_file}" ] || [[ "\${bg_name}" == NO_* ]]; then
         echo "[DOMINO_BUILD_NETWORK] Skipping network build: background file is absent or sentinel (\${bg_name})"
@@ -96,7 +99,10 @@ process DOMINO_RUN_MODULES {
     path "domino_modules", emit: modules_dir
 
     script:
+    def source_hash = java.security.MessageDigest.getInstance('SHA-256')
+        .digest(["run_domino_modules.py","prepare_ami_lists.py"].collect { file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text }.join("\n").getBytes('UTF-8')).encodeHex().toString()
     """
+    # DOMINO module source SHA256: ${source_hash}
     mkdir -p domino_gene_lists domino_modules
 
     if [ ! -s "${network_sif}" ] || [ ! -s "${slices_file}" ]; then
@@ -104,19 +110,8 @@ process DOMINO_RUN_MODULES {
         exit 0
     fi
 
-    # The CAAS call site passes a directory of active_*.tsv files (a header and the gene in column 1)
-    if [ -d "${gene_lists}" ]; then
-        for f in "${gene_lists}"/active_*.tsv; do
-            [ -f "\$f" ] || continue
-            name=\$(basename "\$f" .tsv); name=\${name#active_}
-            tail -n +2 "\$f" | cut -f1 | { grep -v '^[[:space:]]*\$' || true; } > "domino_gene_lists/\${name}.txt"
-        done
-    fi
-    # The FADE and RER call sites pass plain .txt files of active genes, one gene per line
-    for f in rer_significant.txt rer_accelerating.txt rer_decelerating.txt fade_top_significant.txt fade_bottom_significant.txt fade_global_significant.txt; do
-        [ -f "\$f" ] || continue
-        cp "\$f" domino_gene_lists/ 2>/dev/null || true
-    done
+    python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/prepare_ami_lists.py \
+        --method ${consumer_label} --sources ${gene_lists} --output-dir domino_gene_lists
 
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/run_domino_modules.py \
         --network ${network_sif} \

@@ -51,6 +51,7 @@ params:
   rer_domino_edge_scores_file: NULL
   gene_metadata_file: NULL
   module_description_fdr: 0.10
+  domino_slice_threshold: 0.3
   domino_module_threshold: 0.05
   seed: "1998"
 ---
@@ -90,6 +91,14 @@ params:
 <!-- PhyloPhere | subworkflows/ENRICHMENT/local/ -->
 
 ```{r setup, include=FALSE}
+# Widgets emitted inside loops/conditionals must register their HTML dependencies.
+# cat(knit_print(widget)) alone drops knit_meta (including DT filter dependencies).
+emit_widget <- function(widget) {
+  rendered <- knitr::knit_print(widget)
+  knitr::knit_meta_add(attr(rendered, "knit_meta"))
+  cat(rendered, "\n\n")
+  invisible(NULL)
+}
 knitr::opts_chunk$set(
   echo = TRUE,
   warning = FALSE,
@@ -395,6 +404,9 @@ string_db <- STRINGdb$new(
   input_directory = string_cache_dir
 )
 
+dir.create("ami_inputs",showWarnings=FALSE)
+jsonlite::write_json(params[c("species","domino_network_score_thr","domino_slice_threshold",
+  "domino_module_threshold","module_description_fdr","seed")],"ami_inputs/report_settings.json",auto_unbox=TRUE,pretty=TRUE)
 ami_networks_dir <- "ami_networks"
 createDir(ami_networks_dir)
 
@@ -415,14 +427,34 @@ load_domino_modules <- function(list_name, modules_dir, active_file, network_fil
   check <- ami_module_provenance(provenance,active_file,network_file)
   if (check$available && !isTRUE(all.equal(as.numeric(check$metadata$module_threshold),as.numeric(params$domino_module_threshold))))
     return(list(clusters_df=NULL,module_stats=NULL,reason="module threshold provenance differs"))
+  if (check$available && !isTRUE(all.equal(as.numeric(check$metadata$slice_threshold),as.numeric(params$domino_slice_threshold))))
+    return(list(clusters_df=NULL,module_stats=NULL,reason="slice threshold provenance differs"))
   if (!check$available) return(list(clusters_df=NULL,module_stats=NULL,reason=check$reason))
+  if(is.null(check$metadata$modules_sha256) || is.null(check$metadata$stats_sha256) ||
+     !identical(digest::digest(file=mod_file,algo="sha256"),check$metadata$modules_sha256) ||
+     !identical(digest::digest(file=stats_file,algo="sha256"),check$metadata$stats_sha256))
+    return(list(clusters_df=NULL,module_stats=NULL,reason="DOMINO output table certificate differs or is absent"))
   modules <- readr::read_tsv(mod_file,col_types="ci")
   stats <- readr::read_tsv(stats_file,col_types="iicdd")
   if (anyDuplicated(stats$cluster)) stop("Duplicate DOMINO module statistics")
+  if(anyNA(modules) || anyNA(stats$cluster) || any(stats$cluster<1) ||
+     anyDuplicated(modules[c("node","cluster")]) ||
+     !setequal(unique(modules$cluster),stats$cluster) ||
+     nrow(stats)!=as.integer(check$metadata$final_modules))
+    stop("DOMINO module membership/statistics contradict the certificate")
+  for(i in seq_len(nrow(stats))) {
+    nodes <- sort(modules$node[modules$cluster==stats$cluster[i]],method="radix")
+    if(!is.finite(stats$n_genes[i]) || length(nodes)!=stats$n_genes[i] ||
+       !identical(paste(nodes,collapse=","),stats$genes[i]))
+      stop("DOMINO module genes contradict the statistics table")
+  }
   expected_q <- pmin(1,stats$p_value*as.numeric(check$metadata$n_putative))
-  if(nrow(stats) && (check$metadata$n_putative<1 || any(!is.finite(stats$p_value)) || any(abs(stats$p_adj-expected_q)>1e-10*pmax(abs(expected_q),1e-300))))
+  if(nrow(stats) && (check$metadata$n_putative<nrow(stats) || any(!is.finite(stats$p_value)) ||
+     any(stats$p_value<0 | stats$p_value>1) || any(!is.finite(stats$p_adj)) ||
+     any(abs(stats$p_adj-expected_q)>1e-10*pmax(abs(expected_q),1e-300))))
     stop("DOMINO raw p / Bonferroni values contradict provenance")
-  if (any(!is.finite(stats$p_adj)) || any(stats$p_adj > params$domino_module_threshold))
+  if (any(!is.finite(stats$p_adj)) || any(stats$p_adj<0 | stats$p_adj>1) ||
+      any(stats$p_adj > params$domino_module_threshold))
     stop("DOMINO modules do not satisfy the recorded module threshold")
   list(clusters_df=modules,module_stats=stats,reason="verified")
 }
@@ -816,6 +848,12 @@ gene_list_files <- gene_list_files[basename(gene_list_files) %in% c("global.txt"
 gene_list_files <- .ami_list_order(gene_list_files)
 
 ```
+<script>
+$(document).on('shown.bs.tab shown.bs.collapse', function () {
+  if ($.fn.dataTable) $.fn.dataTable.tables({visible: true, api: true}).columns.adjust();
+});
+</script>
+
 
 # AMI analysis configuration
 
@@ -875,15 +913,17 @@ if (length(bg_string_ids) < 5) {
 # Load gene scores for overlap checking
 
 ```{r load_gene_scores}
-# Minimum number of STRING-mapped genes for a gene list to get a network.
-MIN_MAPPED <- 5L
-
 gene_scores_df <- NULL
+.nominal_threshold <- .05
+.fdr_threshold <- .05
 if (!is.null(params$gene_scores_file) && file.exists(params$gene_scores_file)) {
   gene_scores_df <- readr::read_tsv(params$gene_scores_file, show_col_types = FALSE)
   if(is.null(params$gene_metadata_file) || !file.exists(params$gene_metadata_file) ||
      !identical(jsonlite::read_json(params$gene_metadata_file)$gene_stat,"max"))
     stop("AMI CAAS annotations require gene_stat=max metadata")
+  .gene_metadata <- jsonlite::read_json(params$gene_metadata_file,simplifyVector=TRUE)
+  .nominal_threshold <- as.numeric(.gene_metadata$nominal_threshold)
+  .fdr_threshold <- as.numeric(.gene_metadata$fdr_threshold)
   if(anyDuplicated(gene_scores_df$Gene))stop("Duplicate gene evidence keys")
   cat("Loaded gene_scores_file:", params$gene_scores_file, "with", nrow(gene_scores_df), "genes.\n")
 } else {
@@ -898,12 +938,12 @@ prepare_gene_attributes <- function(df) {
   out <- tibble::tibble(gene=df$Gene)
   for(suffix in c("","_top","_bottom"))for(kind in c("nominal","adjusted")) {
     p <- suppressWarnings(as.numeric(.col(paste0("caas_",if(kind=="nominal")"p.gen" else "p.gen.adj",suffix))))
-    out[[paste0("caas_",kind,suffix)]] <- ifelse(is.finite(p),p<.05,NA)
+    out[[paste0("caas_",kind,suffix)]] <- ifelse(is.finite(p),p < if(kind=="nominal") .nominal_threshold else .fdr_threshold,NA)
   }
   rp <- suppressWarnings(as.numeric(.col("rer_min_pval")))
   rq <- suppressWarnings(as.numeric(.col("rer_perm_padj")))
-  out$rer_nominal <- ifelse(is.finite(rp),rp<.05,NA)
-  out$rer_adjusted <- ifelse(is.finite(rq),rq<.05,NA)
+  out$rer_nominal <- ifelse(is.finite(rp),rp<.nominal_threshold,NA)
+  out$rer_adjusted <- ifelse(is.finite(rq),rq<.fdr_threshold,NA)
   # FADE
   out$flag_fade_top    <- .istrue(.col("fade_significant_top"))
   out$flag_fade_bottom <- .istrue(.col("fade_significant_bottom"))
@@ -1043,22 +1083,34 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
 
   res <- list(list_name = .list_name, direction = .direction, skip_message = NULL,
               connectivity_line = NULL, modules_line = NULL, display_df = NULL,
-              png_path = NULL, clust_desc = NULL, network_summary_row = NULL, available=FALSE)
+              png_path = NULL, clust_desc = NULL, network_summary_row = NULL, available=FALSE,
+              modules_verified=FALSE,descriptions_available=FALSE,n_modules=NA_integer_)
 
   if(prefix=="caas" && !is.null(gene_scores_df)) {
     .rk <- dir_classifier(.list_name);.sf <- if(.rk=="global")"" else paste0("_",.rk)
     .pp <- suppressWarnings(as.numeric(gene_scores_df[[paste0("caas_p.gen",.sf)]]))
-    .expected <- gene_scores_df$Gene[is.finite(.pp)&.pp<.05]
+    .expected <- gene_scores_df$Gene[is.finite(.pp)&.pp<.nominal_threshold]
     if(!setequal(.genes_sym,.expected)) {
       res$skip_message <- "> CAAS seeds differ from current max empirical nominal evidence; recompute modules with the correct list."
       return(res)
     }
   }
-  if (length(.mapped) < MIN_MAPPED) {
-    res$skip_message <- sprintf("> Too few mapped genes for %s (need >= %d).", .list_name, MIN_MAPPED)
-    return(res)
+  if(prefix %in% c("fade","rer") && !is.null(gene_scores_df)) {
+    if(prefix=="fade") {
+      .side <- dir_classifier(.list_name)
+      .ft <- gene_scores_df$fade_significant_top; .fb <- gene_scores_df$fade_significant_bottom
+      .hit <- if(.side=="top") .ft else if(.side=="bottom") .fb else .ft | .fb
+    } else {
+      .hit <- is.finite(gene_scores_df$rer_min_pval) & gene_scores_df$rer_min_pval < .nominal_threshold
+      if(.direction=="Positive") .hit <- .hit & gene_scores_df$rer_rho>0
+      if(.direction=="Negative") .hit <- .hit & gene_scores_df$rer_rho<0
+    }
+    .expected <- gene_scores_df$Gene[.hit %in% TRUE]
+    if(!setequal(.genes_sym,.expected)) {
+      res$skip_message <- paste0("> ",toupper(prefix)," seeds differ from current method-specific evidence; regenerate the canonical lists and modules.")
+      return(res)
+    }
   }
-
   # The modules are loaded before the plotted network is built and are not restricted to
   # the active input genes: DOMINO adds connector genes (not active themselves, but
   # between active genes in the network), which is what separates network-based module
@@ -1070,10 +1122,22 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     return(res)
   }
   res$available <- TRUE
-  .clusters_df <- if (!is.null(.domino$clusters_df)) {
-    .domino$clusters_df %>% dplyr::filter(node %in% igraph::V(net_full)$name)
-  } else NULL
+  res$modules_verified <- TRUE
+  res$n_modules <- as.integer(nrow(.domino$module_stats))
+  .clusters_df <- .domino$clusters_df
   .module_stats <- .domino$module_stats
+  if(any(!.clusters_df$node %in% igraph::V(net_full)$name)) {
+    res$available <- FALSE
+    res$skip_message <- "> Verified DOMINO modules contain nodes absent from the report network; check network loading and thresholds."
+    return(res)
+  }
+  if(res$n_modules==0L) {
+    res$descriptions_available <- TRUE
+    res$modules_line <- "**Verified DOMINO result: zero modules.** This is an evaluated absence, not missing provenance."
+    res$network_summary_row <- tibble(gene_list=.list_name,n_input=length(.genes_sym),
+      n_in_network=length(.mapped),n_connected=NA_integer_,n_edges=NA_integer_,n_modules=0L)
+    return(res)
+  }
 
   # Modules are renumbered by size (genes, descending) without truncation.
   # module_stats is renumbered the same
@@ -1115,14 +1179,6 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     "Connected nodes: **%d** (%d input genes + %d DOMINO connector genes) | Edges: **%d** | Input genes in network: **%d**",
     .n_nodes, .n_nodes - .n_connector, .n_connector, .n_edges, length(.mapped))
 
-  if (.n_nodes < 3) {
-    res$skip_message <- "> Too few connected nodes - network plot skipped."
-    res$network_summary_row <- tibble(
-      gene_list = .list_name, n_input = length(.mapped), n_connected = .n_nodes,
-      n_edges = .n_edges, n_modules = .n_mod_total)
-    return(res)
-  }
-
   .dir_label <- dir_classifier(.list_name)
 
   if (!is.null(.clusters_df)) {
@@ -1146,6 +1202,8 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
       module_stats = .module_stats, min_cluster_genes = .min_cluster_genes,
       bg_string_ids = bg_string_ids, active_genes = .genes_sym
     )
+    res$descriptions_available <- !any(.clust_desc$description=="Enrichment unavailable")
+    res$available <- res$descriptions_available
 
     if (!is.null(gene_scores_df) && !is.null(attr_df) && nrow(.clust_desc) > 0) {
       .cl_pcts <- purrr::map_dfr(sort(unique(.clusters_df$cluster)), function(cl_id) {
@@ -1248,6 +1306,12 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
 
   .node_shape <- if (use_shape_overlay) compute_gene_shapes(.dir_label, .attr_df_global) else NULL
 
+  if(igraph::vcount(.net_plot)<3L) {
+    res$connectivity_line <- paste0(res$connectivity_line," | Network plot omitted: fewer than three nodes; module tables retained.")
+    res$network_summary_row <- tibble(gene_list=.list_name,n_input=length(.genes_sym),
+      n_in_network=length(.mapped),n_connected=.n_nodes,n_edges=.n_edges,n_modules=.n_mod)
+    return(res)
+  }
   .png_path <- file.path(ami_networks_dir, sprintf("%s_%s_domino_network.png", prefix, .list_name))
   png(.png_path, width = 1800, height = 1500, res = 160)
   plot_cluster_network(
@@ -1267,7 +1331,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
   res$png_path <- .png_path
 
   res$network_summary_row <- tibble(
-    gene_list = .list_name, n_input = length(.mapped), n_connected = .n_nodes,
+    gene_list = .list_name, n_input = length(.genes_sym), n_in_network=length(.mapped), n_connected = .n_nodes,
     n_edges = .n_edges, n_modules = .n_mod
   )
   res
@@ -1494,6 +1558,13 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
   assign(sprintf(".ami_term_rows_%s", prefix),term_rows_all,envir=knitr::knit_global())
   for (i in seq_along(results)) if(!is.null(results[[i]]$clust_desc) && any(results[[i]]$clust_desc$description=="Enrichment unavailable")) results[[i]]$available <- FALSE
   .ami_results_registry[[prefix]] <<- results
+  status_rows <- dplyr::bind_rows(lapply(results,function(z) tibble::tibble(tool=toupper(prefix),
+    gene_list=z$list_name,direction=z$direction,modules_verified=isTRUE(z$modules_verified),
+    n_modules=z$n_modules,descriptions_available=isTRUE(z$descriptions_available),available=isTRUE(z$available),
+    status=if(!is.null(z$skip_message))z$skip_message else if(isTRUE(z$available)) {
+      if(identical(z$n_modules,0L))"Verified: zero modules" else "Verified modules and descriptions"
+    } else "Module descriptions unavailable")))
+  readr::write_tsv(status_rows,file.path(ami_networks_dir,paste0(prefix,"_list_availability.tsv")))
 
   for (dir_label in names(direction_tabs)) {
     filter_val <- direction_tabs[[dir_label]]
@@ -1679,20 +1750,39 @@ if (!is.null(params$fade_domino_network_sif) && !is.null(params$fade_gene_lists_
     dplyr::mutate(.ami_term_rows_fade, tool = "FADE", .before = 1)
   }
 )
-if (nrow(.ami_all_desc) > 0) {
+if(nrow(.ami_all_terms)>0) .ami_all_terms$term <- .cluster_terms(.ami_all_terms$term_raw)
+if(ncol(.ami_all_desc)) .ami_all_desc$provenance_verified <- rep(TRUE,nrow(.ami_all_desc))
+if(ncol(.ami_all_terms)) .ami_all_terms$provenance_verified <- rep(TRUE,nrow(.ami_all_terms))
+if(!ncol(.ami_all_desc)) .ami_all_desc <- tibble::tibble(tool=character(),gene_list=character(),direction=character(),cluster=integer(),description=character(),genes=character(),domino_p_adj=numeric(),provenance_verified=logical())
+if(!ncol(.ami_all_terms)) .ami_all_terms <- tibble::tibble(tool=character(),gene_list=character(),direction=character(),term=character(),term_raw=character(),genes=character(),provenance_verified=logical())
+{
   readr::write_tsv(.ami_all_desc, file.path(ami_networks_dir, "ami_module_descriptions_all_tools.tsv"))
 }
-if (nrow(.ami_all_terms) > 0) {
+{
   readr::write_tsv(.ami_all_terms, file.path(ami_networks_dir, "ami_term_threshold_membership_all_tools.tsv"))
 }
 ```
 
+```{r export-availability, include=FALSE}
+.availability_all <- bind_rows(lapply(c("Global","Top","Bottom"),function(v) {
+  x <- ami_recurrence(.ami_all_terms,.ami_results_registry,v)$availability
+  x$view <- v
+  x
+}))
+readr::write_tsv(.availability_all,file.path(ami_networks_dir,"ami_list_availability.tsv"))
+```
+
 # Term recurrence across methods {.tabset}
+
+Availability records distinguish verified modules, the number of modules and the
+availability of their functional descriptions. Zero modules is a measured absence
+only after the input and output certificates pass. Missing descriptions remain
+unavailable for recurrence even when the modules themselves are verified. Small
+seed lists are not rejected by a presentation cutoff.
 
 Global uses each method's own global list, never a sum of sides. Top/Bottom use CAAS and FADE sides; RER Global (both signs) is repeated as an explicitly labelled reference, never mapped to a CAAS side. RER's own Positive/Negative module analyses remain above. Recurrence concerns retained top functional descriptions of modules, with the existing descriptive term grouping, not independent pathway confirmations or FCS significance. Term rows use the union of verified descriptions across views. Fractions use only verified, evaluable lists; NA denotes unavailable modules/descriptions, while zero denotes a verified absence. Gene universes remain method-specific.
 
 ```{r recurrence-comparison,results='asis',fig.width=11,fig.height=7}
-if(nrow(.ami_all_terms)>0) .ami_all_terms$term <- .cluster_terms(.ami_all_terms$term_raw)
 for(view in c("Global","Top","Bottom")) {
  cat(sprintf("\n## %s {.tabset}\n\n",view))
  rec <- ami_recurrence(.ami_all_terms,.ami_results_registry,view)

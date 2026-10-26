@@ -276,10 +276,13 @@ class WorkflowMap {
                                "${outdir}/html_reports/13.AMI_fade.html",
                                "${outdir}/html_reports/13.AMI_accumulation.html"] ],
 
-            [ id: 'posenrich', name: 'Position Enrichment',              type: 'reporting', ran: ctx.posenrich,
-              filesDirs: ["${outdir}/posenrich",
-                          "${outdir}/posenrich/gmts"],
-              htmlCandidates: ["${outdir}/html_reports/14.Position_enrichment_report.html"] ],
+            [ id: 'posenrich', name: 'POSENRICH modular',                 type: 'reporting', ran: ctx.posenrich,
+              filesDirs: ["${outdir}/posenrich/registry",
+                          "${outdir}/posenrich/characterization",
+                          "${outdir}/posenrich/localization",
+                          "${outdir}/posenrich/global",
+                          "${outdir}/posenrich/proximity"],
+              htmlCandidates: ["${outdir}/posenrich/POSENRICH_modular_report.html"] ],
 
             [ id: 'compare',     name: 'Cross-module comparison',         type: 'reporting', ran: ctx.compare,
               filesDirs: ["${outdir}/compare",
@@ -516,7 +519,7 @@ class WorkflowMap {
         'fcs': 'Functional enrichment (FCS)',
         'ami': 'AMI (DOMINO active modules)',
         'compare': 'Cross-module comparison',
-        'posenrich': 'Position Enrichment'
+        'posenrich': 'POSENRICH modular'
       };
       return names[stageId] || stageId;
     }
@@ -575,7 +578,10 @@ class WorkflowMap {
                             'selection/fade/top/ami', 'selection/fade/bottom/ami',
                             'accumulation/top/ami', 'accumulation/bottom/ami', 'accumulation/all/ami'],
             compare      : ['compare'],
-            posenrich    : ['posenrich']
+            // Ignore historical report 14 outputs; active POSENRICH is the modular
+            // registry/report tree only.
+            posenrich    : ['posenrich/registry', 'posenrich/characterization',
+                            'posenrich/localization', 'posenrich/global', 'posenrich/proximity']
         ]
     }
 

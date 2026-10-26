@@ -84,6 +84,14 @@ params:
 <!-- PhyloPhere | subworkflows/ENRICHMENT/local/ -->
 
 ```{r setup, include=FALSE}
+# Widgets emitted inside loops/conditionals must register their HTML dependencies.
+# cat(knit_print(widget)) alone drops knit_meta (including DT filter dependencies).
+emit_widget <- function(widget) {
+  rendered <- knitr::knit_print(widget)
+  knitr::knit_meta_add(attr(rendered, "knit_meta"))
+  cat(rendered, "\n\n")
+  invisible(NULL)
+}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
                       fig.width = 10, fig.height = 7, dev = "png", dpi = 200)
 
@@ -153,6 +161,12 @@ kbl_html <- function(df, height = NULL, escape = TRUE, caption = NULL, ...) {
   k
 }
 ```
+<script>
+$(document).on('shown.bs.tab shown.bs.collapse', function () {
+  if ($.fn.dataTable) $.fn.dataTable.tables({visible: true, api: true}).columns.adjust();
+});
+</script>
+
 
 ```{r load, include=FALSE}
 # ── Inputs ────────────────────────────────────────────────────────────────────
@@ -307,15 +321,18 @@ enrich <- fcs_add_clusters(enrich, leading,
                            selection_col="selected_C",order_fun=fcs_selection_order) %>%
   dplyr::mutate(sig = sig_perm %in% TRUE)
 has_perm_any <- any(!is.na(enrich$p.perm))
-n_sig <- sum(enrich$sig, na.rm = TRUE)
+n_sig <- sum(enrich$sig_RER, na.rm = TRUE) # Current presentation cutoff; producer calls remain intact.
 
 # Shared selection order within each ranking.
 ord_sig <- fcs_selection_order
 
 dir.create("fcs_results", showWarnings = FALSE)
-enrich$gene_stat <- params$gene_stat
-enrich$score_source <- params$score_source
+enrich$gene_stat <- rep(params$gene_stat,nrow(enrich))
+enrich$score_source <- rep(params$score_source,nrow(enrich))
 readr::write_tsv(enrich %>% select(-any_of("gene.vals")), "fcs_results/fcs_all_results.tsv")
+leading <- leading %>% select(-any_of(c("cluster_id","is_representative"))) %>%
+  left_join(enrich %>% select(ranking,database,pathway,cluster_id,is_representative),
+            by=c("ranking","database","pathway"))
 readr::write_tsv(leading, "fcs_results/fcs_leading_edge.tsv")
 ```
 
@@ -339,7 +356,7 @@ for(rk in ranking_names) {
  disp <- d %>% select(database,pathway,description,C,checks,all_of(.rule_cols),stat,p.adj,p.perm,q.perm,direction,cluster_id,is_representative)
  disp <- disp %>% mutate(across(all_of(.rule_cols),~ifelse(.x,"✓","·")),C=round(C,3))
  names(disp)[names(disp)=="sig_RER"] <- "BH of permulation"
- cat(knitr::knit_print(DT::datatable(disp,rownames=FALSE,filter="top",options=list(pageLength=15,scrollX=TRUE,order=list()))))
+ emit_widget(DT::datatable(disp,rownames=FALSE,filter="top",options=list(pageLength=15,scrollX=TRUE,order=list())))
 }
 ```
 
@@ -395,9 +412,16 @@ for(rk in ranking_names) {
  present <- intersect(names(disp_names),names(show)); names(show)[match(present,names(show))] <- disp_names[present]
  show <- show %>% mutate(across(all_of(.rule_cols),~ifelse(.x,"✓","·")),C=round(C,3))
  names(show)[names(show)=="sig_RER"] <- "BH of permulation"
- cat(knitr::knit_print(DT::datatable(show,rownames=FALSE,filter="top",options=list(pageLength=15,scrollX=TRUE,order=list()))))
+ emit_widget(DT::datatable(show,rownames=FALSE,filter="top",options=list(pageLength=15,scrollX=TRUE,order=list())))
 }
-le_comp_export <- bind_rows(le_comp_all)
+le_comp_export <- if(length(le_comp_all)) bind_rows(le_comp_all) else {
+  # Preserve the consumer schema even when no term passes C>0.
+  empty <- selected[0, c("ranking","database","pathway","description","C","checks",.rule_cols,
+    "direction","q.perm","cluster_id","is_representative"),drop=FALSE]
+  empty$n_le <- integer(0)
+  for(nm in attr_cols_all) empty[[nm]] <- numeric(0)
+  empty %>% mutate(Description=description,Group=cluster_id,Rep=character())
+}
 readr::write_tsv(le_comp_export,"fcs_results/fcs_leading_edge_composition.tsv")
 ```
 
@@ -452,7 +476,7 @@ for multiple testing. It is reported next to the rule above as `redlich_level`: 
 the levels `r params$analytic_levels` that the set meets (empty when it meets none). It does not
 change `sig_perm`; it contributes to C and selection before similarity grouping. Neither rule imposes a positive-statistic filter.
 
-The selected sets (`C>0`) are ordered by C descending, checks descending, q.perm, p.perm, database and set identity. The order does not depend on direction. Greedy grouping uses leading-edge Jaccard >= the saved threshold (default 0.5) within each ranking. Representatives follow this same order; grouping changes presentation only, with every selected term retained. Empty leading edges form their own groups.
+The selected sets (`C>0`) are ordered by C descending, checks descending, q.perm, p.perm, database and set identity. The order does not depend on direction. Greedy grouping uses leading-edge Jaccard >= the saved threshold (default 0.5) within each ranking and effect sign. Opposite effects remain in separate groups. Representatives follow this same order; grouping changes presentation only, with every selected term retained. Empty leading edges form their own groups.
 
 # Method
 

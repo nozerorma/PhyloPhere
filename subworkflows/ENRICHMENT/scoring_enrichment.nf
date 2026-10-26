@@ -30,8 +30,7 @@ process SCORING_AMI_REPORT {
     tag "scoring_ami|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
 
-    errorStrategy { task.attempt <= 3 ? 'retry' : 'ignore' }
-    maxRetries    3
+    errorStrategy 'terminate' // A failed render must not silently leave an old AMI HTML active.
 
     publishDir path: "${params.outdir}/ami",
                mode: 'copy', overwrite: true,
@@ -41,16 +40,23 @@ process SCORING_AMI_REPORT {
                pattern: '*.html'
     publishDir path: "${params.outdir}/ami/ami_results",
                mode: 'copy', overwrite: true,
-               pattern: 'ami_results/**'
+               pattern: 'ami_results/**',
+               saveAs: { name -> name.replaceFirst(/^ami_results\//, '') }
     publishDir path: "${params.outdir}/ami/ami_summary",
                mode: 'copy', overwrite: true,
-               pattern: 'ami_summary/**'
+               pattern: 'ami_summary/**',
+               saveAs: { name -> name.replaceFirst(/^ami_summary\//, '') }
     publishDir path: "${params.outdir}/ami/ami_plots",
                mode: 'copy', overwrite: true,
-               pattern: 'ami_plots/**'
+               pattern: 'ami_plots/**',
+               saveAs: { name -> name.replaceFirst(/^ami_plots\//, '') }
+    publishDir path: "${params.outdir}/ami", mode: 'copy', overwrite: true, pattern: 'ami_inputs'
+    // The task output already contains the ami_networks/ prefix. Strip it when
+    // publishing into the matching output directory to avoid ami_networks/ami_networks.
     publishDir path: "${params.outdir}/ami/ami_networks",
                mode: 'copy', overwrite: true,
-               pattern: 'ami_networks/**'
+               pattern: 'ami_networks/**',
+               saveAs: { name -> name.replaceFirst(/^ami_networks\//, '') }
 
     input:
     path gene_lists
@@ -91,9 +97,11 @@ process SCORING_AMI_REPORT {
     path "ami_results/**",                     emit: ami_results,             optional: true
     path "ami_summary/**",                     emit: ami_summary,             optional: true
     path "ami_plots/**",                       emit: ami_plots,               optional: true
+    path "ami_inputs", emit: report_inputs
     path "ami_networks/**",                    emit: ami_networks,            optional: true
-    path "ami_networks/ami_module_descriptions_all_tools.tsv",     emit: module_descriptions, optional: true
-    path "ami_networks/ami_term_threshold_membership_all_tools.tsv", emit: term_membership,     optional: true
+    path "ami_networks/ami_module_descriptions_all_tools.tsv",     emit: module_descriptions
+    path "ami_networks/ami_term_threshold_membership_all_tools.tsv", emit: term_membership
+    path "ami_networks/ami_list_availability.tsv", emit: availability
 
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
@@ -102,6 +110,9 @@ process SCORING_AMI_REPORT {
     def net_score = params.domino_network_score_thr ?: 700
     def bg_name   = background.getName().replace("'", "\\'")
     def gs_arg    = (gene_scores.name =~ /^NO_GENE_SCORES/) ? 'NULL' : "'${gene_scores}'"
+    def ami_source_hash = ['13.AMI_analysis.Rmd', 'src/ami_evidence.R', 'src/prepare_ami_lists.py'].collect {
+        file("${local_dir}/${it}").text
+    }.join('\n').with { java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString() }
 
     // A tool that did not run gets NULL for all its parameters, so that
     // 13.AMI_analysis.Rmd skips its section.
@@ -121,29 +132,41 @@ process SCORING_AMI_REPORT {
     def stage_cmd = """
         cp -R ${local_dir}/* .
 
-        # One gene list per direction: the Gene column of active_<name>.tsv becomes <name>.txt
-        for f in ${gene_lists}/active_*.tsv; do
-            if [ -f "\$f" ]; then
-                basename=\$(basename "\$f" .tsv)
-                name=\${basename#active_}
-                # First column without the header line, blank lines dropped
-                tail -n +2 "\$f" | cut -f1 | { grep -v "^[[:space:]]*\$" || true; } > "\${name}.txt"
-            fi
-        done
-
-        # The FADE and RER gene lists are staged flat next to the CAAS lists above;
-        # moving them to their own directories keeps each tool's section of the Rmd
-        # from reading the other lists (their file names are fixed).
-        mkdir -p fade_lists rer_lists
-        mv fade_top_significant.txt fade_bottom_significant.txt fade_global_significant.txt fade_lists/ 2>/dev/null || true
-        mv rer_significant.txt rer_accelerating.txt rer_decelerating.txt rer_lists/ 2>/dev/null || true
+        python3 src/prepare_ami_lists.py --method caas --sources ${gene_lists} --output-dir caas_lists
+        mkdir -p fade_lists rer_lists ami_inputs/caas
+        cp -R caas_lists ami_inputs/caas/lists
+        cp '${domino_network_sif}' ami_inputs/caas/network.sif
+        cp '${domino_edge_scores}' ami_inputs/caas/network_edge_scores.tsv
+        cp -RL '${domino_modules_dir}' ami_inputs/caas/domino_modules
+        cp '${background}' ami_inputs/caas/background.txt
+        if [ '${fade_ok}' = 'true' ]; then
+            python3 src/prepare_ami_lists.py --method fade --sources ${fade_gene_lists} --output-dir fade_lists
+            mkdir -p ami_inputs/fade
+            cp -R fade_lists ami_inputs/fade/lists
+            cp '${fade_domino_network_sif}' ami_inputs/fade/network.sif
+            cp '${fade_domino_edge_scores}' ami_inputs/fade/network_edge_scores.tsv
+            cp -RL '${fade_domino_modules_dir}' ami_inputs/fade/domino_modules
+            cp '${fade_background}' ami_inputs/fade/background.txt
+        fi
+        if [ '${rer_ok}' = 'true' ]; then
+            python3 src/prepare_ami_lists.py --method rer --sources ${rer_gene_lists} --output-dir rer_lists
+            mkdir -p ami_inputs/rer
+            cp -R rer_lists ami_inputs/rer/lists
+            cp '${rer_domino_network_sif}' ami_inputs/rer/network.sif
+            cp '${rer_domino_edge_scores}' ami_inputs/rer/network_edge_scores.tsv
+            cp -RL '${rer_domino_modules_dir}' ami_inputs/rer/domino_modules
+            cp '${rer_background}' ami_inputs/rer/background.txt
+        fi
     """
 
+    def ami_rscript = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def render_cmd = """
-        Rscript -e "
+        # AMI report source SHA256: ${ami_source_hash}
+        ${ami_rscript} -e "
             rmarkdown::render(
                 '13.AMI_analysis.Rmd',
                 params = list(
+                    gene_list_files     = list.files('caas_lists', pattern='[.]txt', full.names=TRUE),
                     background_file     = '${background}',
                     background_basename = '${bg_name}',
                     project_name        = '${traitname}',
@@ -152,6 +175,7 @@ process SCORING_AMI_REPORT {
                     gene_scores_file    = ${gs_arg},
                     gene_metadata_file  = '${gene_metadata}',
                     module_description_fdr = ${params.ami_description_fdr ?: 0.10},
+                    domino_slice_threshold = ${params.domino_slice_thr ?: 0.3},
                     domino_module_threshold = ${params.domino_module_thr ?: 0.05},
                     string_db_dir       = '${params.string_db_dir}',
                     string_cache_dir    = '${params.string_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/string"}',
@@ -175,17 +199,10 @@ process SCORING_AMI_REPORT {
         "
     """
 
-    if (params.use_singularity || params.use_apptainer) {
-        """
-        ${stage_cmd}
-        /usr/local/bin/_entrypoint.sh ${render_cmd}
-        """
-    } else {
-        """
-        ${stage_cmd}
-        ${render_cmd}
-        """
-    }
+    """
+    ${stage_cmd}
+    ${render_cmd}
+    """
 }
 
 
@@ -203,7 +220,8 @@ process SCORING_COMPARE_REPORT {
                pattern: '*.html'
     publishDir path: "${params.outdir}/compare/compare_results",
                mode: 'copy', overwrite: true,
-               pattern: 'compare_results/**'
+               pattern: 'compare_results/**',
+               saveAs: { name -> name.replaceFirst(/^compare_results\//, '') }
 
     input:
     // One fcs_all_results.tsv per module, staged under distinct names. A module that
@@ -224,6 +242,7 @@ process SCORING_COMPARE_REPORT {
     // module did not run.
     path ami_module_desc,     stageAs: 'ami_module_descriptions.tsv'
     path ami_term_membership, stageAs: 'ami_term_membership.tsv'
+    path ami_availability, stageAs: 'ami_list_availability.tsv'
     path posenrich_dotplot,   stageAs: 'posenrich_overall_dotplot.tsv'
     // posenrich_leading_edge.tsv (gene:position members of the significant terms) feeds
     // the posenrich evidence of the Integrated gene scorecard and the Interesting
@@ -250,6 +269,8 @@ process SCORING_COMPARE_REPORT {
     // layers posenrich tests as GMTs, flattened for a Gene/Position join onto the
     // Interesting Positions table.
     path position_char,       stageAs: 'position_characterization.tsv'
+    path canonical_genes, stageAs: 'canonical_gene_scores.tsv'
+    path canonical_metadata, stageAs: 'canonical_gene_metadata.json'
 
     output:
     path "15.Comparison_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -275,9 +296,14 @@ process SCORING_COMPARE_REPORT {
     def fade_sites_top_arg    = (fade_sites_top.name =~ /^NO_/)    ? 'NULL' : "'${fade_sites_top}'"
     def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_/) ? 'NULL' : "'${fade_sites_bottom}'"
     def position_char_arg     = (position_char.name =~ /^NO_/)     ? 'NULL' : "'${position_char}'"
+    def compare_source_hash = ['15.Comparison_report.Rmd', 'src/fcs_selection.R', 'src/evidence_flags.R'].collect {
+        file("${local_dir}/${it}").text
+    }.join('\n').with { java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString() }
 
+    def compare_rscript = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def render_cmd = """
-        Rscript -e "
+        # Comparison report source SHA256: ${compare_source_hash}
+        ${compare_rscript} -e "
             rmarkdown::render(
                 '15.Comparison_report.Rmd',
                 params = list(
@@ -290,10 +316,13 @@ process SCORING_COMPARE_REPORT {
                     traitname  = '${traitname}',
                     ami_module_desc_file      = ${ami_arg},
                     ami_term_membership_file  = ${ami_tm_arg},
+                    ami_availability_file = '${ami_availability}',
                     posenrich_dotplot_file     = ${posenrich_dot_arg},
                     posenrich_leading_edge_file = ${posenrich_le_arg},
                     posenrich_leading_edge_summary_file = ${posenrich_le_summary_arg},
                     fcs_stats_file           = ${fcs_stats_arg},
+                    gene_scores_file         = '${canonical_genes}',
+                    gene_metadata_file       = '${canonical_metadata}',
                     position_scores_file     = ${position_scores_arg},
                     vep_primateai_file       = ${vep_primateai_arg},
                     vep_cosmic_file          = ${vep_cosmic_arg},
@@ -322,15 +351,8 @@ process SCORING_COMPARE_REPORT {
         done
     """
 
-    if (params.use_singularity || params.use_apptainer) {
-        """
-        ${stage_cmd}
-        /usr/local/bin/_entrypoint.sh ${render_cmd}
-        """
-    } else {
-        """
-        ${stage_cmd}
-        ${render_cmd}
-        """
-    }
+    """
+    ${stage_cmd}
+    ${render_cmd}
+    """
 }

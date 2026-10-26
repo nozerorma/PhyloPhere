@@ -85,6 +85,8 @@ process CAAS_SIGNIFICANCE_REPORT {
     path position_scores
     path gene_scores
     path gene_metadata
+    path gene_evidence
+    path null_universe
 
     output:
     path "*.html", emit: report
@@ -95,9 +97,12 @@ process CAAS_SIGNIFICANCE_REPORT {
     script:
     def local_dir = "${baseDir}/subworkflows/CT_META_CAAS/local"
     def outdir = "${params.outdir}/meta_caas/significance"
+    def report_hash = java.security.MessageDigest.getInstance('SHA-256')
+        .digest(file("${local_dir}/16.CAAS_significance_report.Rmd").text.getBytes('UTF-8')).encodeHex().toString()
 
     if (params.use_singularity || params.use_apptainer) {
         """
+        # Significance report source SHA256: ${report_hash}
         cp -R ${local_dir}/* .
 
         # Render R Markdown report
@@ -109,6 +114,9 @@ process CAAS_SIGNIFICANCE_REPORT {
                     position_scores_input = '${position_scores}',
                     gene_scores_input = '${gene_scores}',
                     gene_metadata_input = '${gene_metadata}',
+                    gene_evidence_input = '${gene_evidence}',
+                    null_universe_input = '${null_universe}',
+                    traitname = '${params.traitname ?: 'trait'}',
                     output_dir = '${outdir}',
                     seed = '${params.seed ?: 1998}'
                 ),
@@ -118,6 +126,7 @@ process CAAS_SIGNIFICANCE_REPORT {
         """
     } else {
         """
+        # Significance report source SHA256: ${report_hash}
         cp -R ${local_dir}/* .
 
         # Render R Markdown report
@@ -129,6 +138,9 @@ process CAAS_SIGNIFICANCE_REPORT {
                     position_scores_input = '${position_scores}',
                     gene_scores_input = '${gene_scores}',
                     gene_metadata_input = '${gene_metadata}',
+                    gene_evidence_input = '${gene_evidence}',
+                    null_universe_input = '${null_universe}',
+                    traitname = '${params.traitname ?: 'trait'}',
                     output_dir = '${outdir}',
                     seed = '${params.seed ?: 1998}'
                 ),

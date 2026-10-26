@@ -480,6 +480,8 @@ workflow ENRICHMENT {
             .ifEmpty { file('NO_AMI_MODULE_DESC') }
         def ami_term_membership_ch = (run_ami ? ami_out.term_membership : Channel.empty())
             .ifEmpty { file('NO_AMI_TERM_MEMBERSHIP') }
+        def ami_availability_ch = (run_ami ? ami_out.availability : Channel.empty())
+            .ifEmpty { file('NO_AMI_AVAILABILITY') }
         def posenrich_dotplot_ch = (posenrich_out ? posenrich_out.overall_dotplot : Channel.empty())
             .ifEmpty { file('NO_POSENRICH_DOTPLOT') }
         def posenrich_le_ch = (posenrich_out ? posenrich_out.leading_edge : Channel.empty())
@@ -563,14 +565,16 @@ workflow ENRICHMENT {
 
         def cmp_out = SCORING_COMPARE_REPORT(caas_all, rer_all, caas_le, rer_le,
                                               caas_le_comp, rer_le_comp,
-                                              ami_module_desc_ch, ami_term_membership_ch,
+                                              ami_module_desc_ch, ami_term_membership_ch, ami_availability_ch,
                                               posenrich_dotplot_ch, posenrich_le_ch,
                                               posenrich_le_summary_ch,
                                               cmp_fcs_stats_ch, cmp_pos_scores_ch,
                                               cmp_vep_pai_ch, cmp_vep_cosmic_ch,
                                               cmp_vep_ensembl_ch,
                                               cmp_fade_top_ch, cmp_fade_bot_ch,
-                                              posenrich_position_char_ch)
+                                              posenrich_position_char_ch,
+                                              gene_scores,
+                                              gene_calibration.map { it.resolve("metadata.json") }.ifEmpty { file("NO_GENE_METADATA") })
         final_reports = final_reports.mix(cmp_out.report)
 
     emit:

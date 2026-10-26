@@ -29,6 +29,7 @@ import json
 import glob
 import os
 import sys
+import shutil
 
 # ── Third-party ───────────────────────────────────────────────────────────────
 import pandas as pd
@@ -190,11 +191,16 @@ def main():
     if not list_paths:
         raise RuntimeError(f"no *.txt gene list files found in {args.gene_lists_dir}")
 
+    inputs = os.path.join(args.output_dir, 'inputs')
+    os.makedirs(inputs, exist_ok=True)
+    shutil.copyfile(args.slices, os.path.join(inputs, 'slices.txt'))
+    shutil.copytree(args.gene_lists_dir, os.path.join(inputs, 'lists'), dirs_exist_ok=True)
     network_sha = file_sha256(args.network)
     slices_sha = file_sha256(args.slices)
     for list_path in list_paths:
         list_name = os.path.splitext(os.path.basename(list_path))[0]
         print(f"[run_domino_modules] {list_name}: running DOMINO...", file=sys.stderr)
+        captured.clear()
         rows_modules, rows_stats = run_one_list(
             domino_core, captured, list_path, args.network, args.slices,
             args.slice_threshold, args.module_threshold,
@@ -202,19 +208,23 @@ def main():
         print(f"[run_domino_modules] {list_name}: {len(rows_stats)} final modules "
               f"({sum(r['n_genes'] for r in rows_stats)} genes total)", file=sys.stderr)
 
-        provenance = dict(contract_version=2, p_value_scale="raw_upper_tail",
+        provenance = dict(producer_sha256=file_sha256(__file__), contract_version=2, p_value_scale="raw_upper_tail",
                           p_adjustment="Bonferroni_n_putative", n_putative=captured.get("n_putative", 0),
                           active_genes_sha256=gene_set_sha256(list_path), network_sha256=network_sha,
                           slices_sha256=slices_sha, slice_threshold=args.slice_threshold,
                           module_threshold=args.module_threshold, final_modules=len(rows_stats))
-        with open(os.path.join(args.output_dir, f"{list_name}_domino_provenance.json"), "w") as handle:
-            json.dump(provenance, handle, indent=2)
         pd.DataFrame(rows_modules, columns=["node", "cluster"]).to_csv(
             os.path.join(args.output_dir, f"{list_name}_domino_modules.tsv"), sep="\t", index=False
         )
         pd.DataFrame(rows_stats, columns=["cluster", "n_genes", "genes", "p_value", "p_adj"]).to_csv(
             os.path.join(args.output_dir, f"{list_name}_domino_module_stats.tsv"), sep="\t", index=False
         )
+        provenance['modules_sha256'] = file_sha256(os.path.join(args.output_dir, f"{list_name}_domino_modules.tsv"))
+        provenance['stats_sha256'] = file_sha256(os.path.join(args.output_dir, f"{list_name}_domino_module_stats.tsv"))
+        # Publish the certificate last, after both output tables are complete.
+        with open(os.path.join(args.output_dir, f"{list_name}_domino_provenance.json"), "w") as handle:
+            json.dump(provenance, handle, indent=2)
+
 
 
 if __name__ == "__main__":

@@ -79,6 +79,14 @@ params:
 <!-- Author: Miguel Ramon (miguel.ramon@upf.edu) -->
 
 ```{r setup, include=FALSE}
+# Widgets emitted inside loops/conditionals must register their HTML dependencies.
+# cat(knit_print(widget)) alone drops knit_meta (including DT filter dependencies).
+emit_widget <- function(widget) {
+  rendered <- knitr::knit_print(widget)
+  knitr::knit_meta_add(attr(rendered, "knit_meta"))
+  cat(rendered, "\n\n")
+  invisible(NULL)
+}
 knitr::opts_chunk$set(
   echo    = FALSE,
   warning = FALSE,
@@ -136,6 +144,12 @@ safe_cor <- function(x, y, method = "pearson") {
 }
 
 ```
+<script>
+$(document).on('shown.bs.tab shown.bs.collapse', function () {
+  if ($.fn.dataTable) $.fn.dataTable.tables({visible: true, api: true}).columns.adjust();
+});
+</script>
+
 
 ```{r load-data}
 pos_df  <- read_tsv(params$position_scores_file, show_col_types = FALSE) %>%
@@ -386,8 +400,7 @@ auto-annotated with the cross-module scoring signals (CAAS nominal/BH activity
 calls, FADE, accumulation) produced here. A link is live only if the
 corresponding module was part of this run. FADE and Accumulation do not run
 their own FCS ranking; they appear there as cross-module corroboration flags.
-Position Characterisation (PrimateAI-3D + COSMIC validation) is part of the
-Position-level FCS report below.
+Position annotations and their coverage are described in POSENRICH modular. Evolutionary and clinical annotations are descriptive and do not constitute independent validation.
 
 ```{r companion-reports, results='asis'}
 .trait <- if (is.null(params$traitname) || !nzchar(params$traitname)) "unknown_trait" else params$traitname
@@ -396,10 +409,10 @@ Position-level FCS report below.
   "FCS - CAAS (this scoring run)",      sprintf("12.FCS_scoring_%s.html",    .trait),
   "FCS - RERconverge (+ p.perm)",       sprintf("12.FCS_rer_%s.html",        .trait),
   "AMI (DOMINO active modules)",        sprintf("13.AMI_analysis_%s.html", .trait),
-  "Position-level FCS (+ Position Characterisation)", sprintf("14.Position_enrichment_report_%s.html", .trait),
+  "POSENRICH modular — characterization, global association, localization and proximity", sprintf("POSENRICH_modular_report_%s.html", .trait),
   "COMPARE - cross-module overview",    sprintf("15.Comparison_report_%s.html",.trait)
 )
-cat(paste0("- [", .companions$Report, "](", .companions$File, ")", collapse = "\n"))
+cat(paste0("- [", .companions$Report, "](../html_reports/", .companions$File, ")", collapse = "\n"))
 cat("\n")
 ```
 
@@ -1119,19 +1132,23 @@ cat("_No `p.emp` column in `position_scores.tsv` (no counters of the null suppli
 
 ## Empirical evidence {.tabset}
 
-Gene nominal: p.gen < 0.05; genes_BH: p.gen.adj < 0.05, each original full gene family per ranking. Position nominal: p.emp < 0.05; positions_BH: p.adj_bh < 0.05 in the original pooled unique-position family (including null-only positions at p=1). Genes carrying a BH position are not gene BH hits. Counts below cover available observed rows, not the size of the position BH family. A position appearing on both sides has one pooled p.emp and is counted once globally. Missing empirical evidence remains unavailable.
+Gene nominal: p.gen < `r params$evidence_p_threshold`; genes_BH: p.gen.adj < `r params$evidence_fdr_threshold`, each original full gene family per ranking. Position nominal: p.emp < `r params$evidence_p_threshold`; positions_BH: p.adj_bh < `r params$evidence_fdr_threshold` in the original pooled unique-position family (including null-only positions at p=1). Genes carrying a BH position are not gene BH hits. Counts below cover available observed rows, not the size of the position BH family. A position appearing on both sides has one pooled p.emp and is counted once globally. Missing empirical evidence remains unavailable.
 
 ### Counts
 
 ```{r evidence-counts}
 .evidence_col <- function(df,n,default=NA_real_) if(n %in% names(df)) df[[n]] else rep(default,nrow(df))
+evidence_positions <- function(d,rk) {
+  d <- d[order(-d$CAAS_score, d$Gene, d$Position, d$side, na.last=TRUE),,drop=FALSE]
+  if(rk=="global") d[!duplicated(d[c("Gene","Position")]),,drop=FALSE] else d[d$side==rk,,drop=FALSE]
+}
 .counts <- list()
 for(rk in c("global","top","bottom")) {
   suffix <- if(rk=="global") "" else paste0("_",rk)
   gp <- .evidence_col(gene_df,paste0("caas_p.gen",suffix))
   gn <- is.finite(gp) & gp < params$evidence_p_threshold
   gq <- .evidence_col(gene_df,paste0("caas_p.gen.adj",suffix)); ga <- is.finite(gq) & gq < params$evidence_fdr_threshold
-  pp <- if(rk=="global") pos_df[!duplicated(paste(pos_df$Gene,pos_df$Position,sep="\t")),] else pos_df[pos_df$side==rk,]
+  pp <- evidence_positions(pos_df, rk)
   .counts[[rk]] <- tibble::tibble(ranking=rk,genes_with_p=sum(is.finite(gp)),genes_with_q=sum(is.finite(gq)),genes_nominal=sum(gn),genes_BH=sum(ga),positions_with_p=sum(is.finite(pp$p.emp)),positions_with_q=sum(is.finite(pp$p.adj_bh)),positions_nominal=sum(is.finite(pp$p.emp) & pp$p.emp < params$evidence_p_threshold),positions_BH=sum(is.finite(pp$p.adj_bh) & pp$p.adj_bh < params$evidence_fdr_threshold))
 }
 DT::datatable(dplyr::bind_rows(.counts),rownames=FALSE,options=list(pageLength=3,scrollX=TRUE,dom="t",order=list()))
@@ -1147,10 +1164,22 @@ for(rk in c("global","top","bottom")) {
   x$`p.gen.adj` <- .evidence_col(x,paste0("caas_p.gen.adj",suffix))
   x$nominal <- ifelse(is.finite(x$p.gen),x$p.gen < params$evidence_p_threshold,NA)
   x$adjusted <- ifelse(is.finite(x$p.gen.adj),x$p.gen.adj < params$evidence_fdr_threshold,NA)
+  .bf_top <- as.numeric(.evidence_col(x,"fade_max_bf_top"))
+  .bf_bottom <- as.numeric(.evidence_col(x,"fade_max_bf_bottom"))
+  .ft <- .evidence_col(x,"fade_significant_top",NA)
+  .fb <- .evidence_col(x,"fade_significant_bottom",NA)
+  x$`FADE BF` <- if(rk=="top") .bf_top else if(rk=="bottom") .bf_bottom else pmax(.bf_top,.bf_bottom,na.rm=TRUE)
+  x$`FADE BF`[!is.finite(x$`FADE BF`)] <- NA_real_
+  x$`FADE call` <- if(rk=="top") .ft else if(rk=="bottom") .fb else .ft | .fb
+  x$`CAAS score in view` <- .evidence_col(x,paste0("gene_caas_score",suffix))
   x <- x[order(x$p.gen,x$p.gen.adj,na.last=TRUE),]
-  cols <- intersect(c("Gene","p.gen","p.gen.adj","nominal","adjusted","rer_min_pval","rer_perm_padj","rer_rho","rer_significant","rer_significant_fdr","fade_max_bf_top","fade_max_bf_bottom","accum_p","accum_fdr"),names(x))
+  cols <- intersect(c("Gene","CAAS score in view","FADE BF","FADE call",
+    "n_positions","n_positions_top","n_positions_bottom","p.gen","p.gen.adj","nominal","adjusted",
+    "rer_min_pval","rer_perm_padj","rer_rho","rer_significant","rer_significant_fdr",
+    "fade_max_bf_top","fade_significant_top","fade_max_bf_bottom","fade_significant_bottom",
+    "accum_p","accum_fdr"),names(x))
   cat("\n#### ",rk,"\n\n",sep="")
-  cat(knitr::knit_print(DT::datatable(x[,cols,drop=FALSE], rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list()))))
+  emit_widget(DT::datatable(x[,cols,drop=FALSE], rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list())))
 }
 ```
 
@@ -1158,17 +1187,19 @@ for(rk in c("global","top","bottom")) {
 
 ```{r empirical-position-tables, results='asis'}
 for(rk in c("global","top","bottom")) {
- x <- if(rk=="global") pos_df[!duplicated(paste(pos_df$Gene,pos_df$Position,sep="\t")),] else pos_df[pos_df$side==rk,]
+ x <- evidence_positions(pos_df, rk)
  x <- x[order(x$p.emp,x$p.adj_bh,na.last=TRUE),]
  cat("\n#### ",rk,"\n\n",sep="")
- cols <- intersect(c("Gene","Position","side","CAAS_score","p.emp","p.adj_bh","caas_nominal","caas_adjusted","nd","null_unseen"),names(x))
- cat(knitr::knit_print(DT::datatable(x[,cols,drop=FALSE], rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list()))))
+ cols <- intersect(c("Gene","Position","side","CAAS_score","asr_path_score","p.emp","p.adj_bh",
+   "caas_nominal","caas_adjusted","nd","null_unseen","caas","supporting_hypotheses",
+   "n_hypotheses","participating_hypotheses","top_species_residues","bottom_species_residues","n_top_species","n_bottom_species"),names(x))
+ emit_widget(DT::datatable(x[,cols,drop=FALSE], rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list())))
 }
 ```
 
 ### Cross-method gene overlap {.tabset}
 
-CAAS and other are calls within their shared evaluable gene universe; overlap is their intersection. RER includes both signs in every CAAS view: intersection is not biological concordance. Missing p/q is excluded at the corresponding level. FADE uses its BF criterion; accumulation uses its own configured BH criterion, separately for all/top/bottom. Original gene BH values are preserved. Fisher is two-sided; its BH family comprises the 18 planned ranking × method × call comparisons, including unavailable comparisons in the family size. Degenerate measured tables have Fisher p=1; empty universes are unavailable.
+CAAS and other are calls within their shared evaluable gene universe; overlap is their intersection. RER includes both signs in every CAAS view: intersection is not biological concordance. Missing p/q is excluded at the corresponding level. FADE uses its original BF calls; Global is their union, with a missing side remaining unknown unless the measured side is positive; accumulation uses its own configured BH criterion, separately for all/top/bottom. Original gene BH values are preserved. Fisher is two-sided; its BH family comprises the 18 planned ranking × method × call comparisons, including unavailable comparisons in the family size. Degenerate measured tables have Fisher p=1; empty universes are unavailable.
 
 ```{r empirical-overlap, results='asis'}
 source("src/report_evidence.R")
@@ -1176,7 +1207,7 @@ source("src/report_evidence.R")
 readr::write_tsv(.overlap,file.path(params$output_dir,"gene_evidence_overlap.tsv"))
 for(rk in c("global","top","bottom")) {
  cat("\n#### ",rk,"\n\n",sep="")
- cat(knitr::knit_print(DT::datatable(.overlap[.overlap$ranking==rk,],rownames=FALSE,filter="top",options=list(pageLength=15,scrollX=TRUE,order=list()))))
+ emit_widget(DT::datatable(.overlap[.overlap$ranking==rk,],rownames=FALSE,filter="top",options=list(pageLength=15,scrollX=TRUE,order=list())))
 }
 ```
 
@@ -1211,7 +1242,7 @@ if(nrow(pos_df)>1)print(ggplot(pos_df,aes(CAAS_score,fill=side))+geom_histogram(
   
   bf_col <- intersect(c("max_site_bf", "max_bf", "bayes_factor", "bf"), names(df))[1]
   if (is.na(bf_col)) {
-    df$max_site_bf <- 0
+    df$max_site_bf <- rep(NA_real_,nrow(df))
   } else {
     df$max_site_bf <- as.numeric(df[[bf_col]])
   }
@@ -1220,14 +1251,14 @@ if(nrow(pos_df)>1)print(ggplot(pos_df,aes(CAAS_score,fill=side))+geom_histogram(
   if (!is.na(aa_col)) {
     df$top_target_aa <- as.character(df[[aa_col]])
   } else {
-    df$top_target_aa <- NA_character_
+    df$top_target_aa <- rep(NA_character_,nrow(df))
   }
   
   bias_col <- intersect(c("fade_biased", "biased"), names(df))[1]
   if (!is.na(bias_col)) {
     df$fade_biased <- as.logical(df[[bias_col]])
   } else {
-    df$fade_biased <- df$max_site_bf >= 100
+    df$fade_biased <- rep(NA,nrow(df)) # No original call: do not impose an undocumented BF cutoff.
   }
   
   df %>%
@@ -1464,18 +1495,17 @@ if (has_fade_pos) {
     if (!is.null(fade_bot_df)) fade_bot_df %>% mutate(fade_direction = "BOTTOM") else NULL
   )
   if (nrow(fade_combined) > 0) {
-    # Per-side rows: a "both" position is two rows; take TOP FADE by priority
+    # Match every CAAS row to its own FADE side; never annotate Bottom with Top.
     fade_for_join <- fade_combined %>%
-      mutate(fade_direction_priority = if_else(fade_direction == "TOP", 1L, 2L)) %>%
-      group_by(Gene, Position) %>%
-      slice_min(fade_direction_priority, n = 1, with_ties = FALSE) %>%
-      ungroup() %>%
-      select(Gene, Position,
+      mutate(side = tolower(fade_direction)) %>%
+      arrange(desc(max_site_bf), top_target_aa) %>%
+      distinct(Gene, Position, side, .keep_all = TRUE) %>%
+      select(Gene, Position, side,
              fade_max_site_bf     = max_site_bf,
              fade_top_target_aa   = top_target_aa,
              fade_biased,
              fade_direction)
-    supp_df <- supp_df %>% left_join(fade_for_join, by = c("Gene", "Position"))
+    supp_df <- supp_df %>% left_join(fade_for_join, by = c("Gene", "Position", "side"))
   }
 }
 

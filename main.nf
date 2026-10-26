@@ -807,12 +807,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                               taxid_map_ch)
             }
 
-            // CAAS_SIGNIFICANCE_REPORT: a DISTINCT, LATER stage than
-            // CAAS_META_CAAS_REPORT (run above inside the run_meta_caas
-            // block). It must run after SCORING because it joins
-            // position_scores.tsv (p.emp, p.adj_bh) onto the postproc-filtered
-            // discovery table (the exact pooled dataset evaluated by SCORING),
-            // with fallback to CT_META_CAAS's meta_caas.tsv when standalone.
+            // Canonical positive-score position/gene evidence, downstream of SCORING.
+            // meta_caas is a compatibility input; it no longer defines report rows.
             if (params.scoring) {
                 def signif_caas_upstream = scoring_postproc_ch
                 if (!signif_caas_upstream && core_observed) {
@@ -821,15 +817,15 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     signif_caas_upstream = observed_meta.meta_caas
                 }
 
-                if (signif_caas_upstream) {
-                    CAAS_SIGNIFICANCE_REPORT(
-                        signif_caas_upstream,
+                CAAS_SIGNIFICANCE_REPORT(
+                        signif_caas_upstream ?: Channel.value(file('NO_META_CAAS')),
                         SCORING.out.position_scores,
                         SCORING.out.gene_scores,
-                        SCORING.out.gene_evidence_metadata
+                        SCORING.out.gene_evidence_metadata,
+                        SCORING.out.gene_evidence,
+                        SCORING.out.null_universe_summary.ifEmpty { file('NO_NULL_UNIVERSE') }
                     )
-                    ran_any = true
-                }
+                ran_any = true
             }
 
             // VEP after SCORING: fed directly by position_scores.tsv.

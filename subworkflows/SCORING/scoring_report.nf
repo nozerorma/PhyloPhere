@@ -33,7 +33,7 @@ process SCORING_REPORT {
 
     publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
-               pattern: '*.html'
+               pattern: '{*.html,gene_evidence_overlap.tsv,genomic_window_accum_gene_caas.tsv,position_scores_annotated.tsv}'
     publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
@@ -59,11 +59,17 @@ process SCORING_REPORT {
 
     output:
     path "11.Scoring_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path 'gene_evidence_overlap.tsv', emit: gene_overlap
+    path 'genomic_window_accum_gene_caas.tsv', emit: genomic_windows, optional: true
+    path 'position_scores_annotated.tsv', emit: annotated_positions, optional: true
 
     script:
     def local_dir      = "${baseDir}/subworkflows/SCORING/local"
-    def outdir         = "${params.outdir}/scoring"
+    def outdir         = "." // Derived TSVs are task outputs, published by Nextflow.
     def traitname      = params.traitname ?: 'unknown_trait'
+    def report_hash = ['11.Scoring_report.Rmd','src/report_evidence.R'].collect { file("${local_dir}/${it}").text }.join('\n').with {
+        java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString()
+    }
     // Optional inputs: a sentinel file becomes the R literal NULL, a real file its quoted name
     def fs_top_arg = (fade_site_top_file.name =~ /^NO_FADE_SITE_TOP/) ? 'NULL' : "'${fade_site_top_file}'"
     def fs_bot_arg = (fade_site_bot_file.name =~ /^NO_FADE_SITE_BOT/) ? 'NULL' : "'${fade_site_bot_file}'"
@@ -83,6 +89,7 @@ process SCORING_REPORT {
 
     if (params.use_singularity || params.use_apptainer) {
         """
+        # Scoring report source SHA256: ${report_hash}
         cp -R ${local_dir}/* .
 
         REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
@@ -119,6 +126,7 @@ process SCORING_REPORT {
         """
     } else {
         """
+        # Scoring report source SHA256: ${report_hash}
         cp -R ${local_dir}/* .
 
         REPORT_CORES=${task.cpus} Rscript -e "

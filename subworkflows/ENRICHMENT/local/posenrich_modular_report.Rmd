@@ -30,11 +30,31 @@ params:
 ---
 
 ```{r setup, include=FALSE}
+# Widgets emitted inside loops/conditionals must register their HTML dependencies.
+# cat(knit_print(widget)) alone drops knit_meta (including DT filter dependencies).
+emit_widget <- function(widget) {
+  rendered <- knitr::knit_print(widget)
+  knitr::knit_meta_add(attr(rendered, "knit_meta"))
+  cat(rendered, "\n\n")
+  invisible(NULL)
+}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 suppressPackageStartupMessages({library(dplyr); library(readr); library(DT); library(jsonlite)})
 
+component_file <- function(path,name) if(is.null(path)||!length(path)||is.na(path)||!nzchar(path)) "" else file.path(path,name)
+show_scoped <- function(data) {
+  key <- intersect(c("rank_direction","direction","ranking"),names(data))
+  key <- key[vapply(key,function(k) any(tolower(as.character(data[[k]])) %in% c("global","top","bottom")),logical(1))]
+  if(!length(key)) {emit_widget(datatable(data,rownames=FALSE,filter="top",options=list(pageLength=25,scrollX=TRUE)));return(invisible(NULL))}
+  for(view in c("global","top","bottom")) {
+    cat("\n## ",tools::toTitleCase(view),"\n\n",sep="")
+    d <- data[tolower(as.character(data[[key[1]]])) %in% view,,drop=FALSE]
+    if(nrow(d)) emit_widget(datatable(d,rownames=FALSE,filter="top",options=list(pageLength=25,scrollX=TRUE)))
+    else cat("_Sin filas de esta vista; consultar cobertura y manifiesto._\n\n")
+  }
+}
 read_manifest <- function(path, name = "manifest.json") {
-  f <- file.path(path, name)
+  f <- component_file(path, name)
   if (!file.exists(f)) return(NULL)
   fromJSON(f, simplifyVector = FALSE)
 }
@@ -57,18 +77,24 @@ preview_datatable <- function(data, source, ...) {
     htmltools::tags$p(sprintf("Vista previa: primeras %d filas. Tabla completa en %s.",
                              preview_rows, source))
   } else NULL
-  htmltools::tagList(note, datatable(data, rownames = FALSE, ...))
+  htmltools::tagList(note, htmltools::tags$a(href=paste0("../",source), "Descargar TSV completo"),
+    datatable(data, rownames = FALSE, filter="top", ...))
 }
 ```
+<script>
+$(document).on('shown.bs.tab shown.bs.collapse', function () {
+  if ($.fn.dataTable) $.fn.dataTable.tables({visible: true, api: true}).columns.adjust();
+});
+</script>
 
-# Overview
 
-POSENRICH modular interpreta la priorización por posición en tres componentes:
-**caracterización**, **enriquecimiento del ranking** (localización dentro de proteínas y
-asociación global, en contratos separados) y **proximidad** a sitios o regiones de interés.
+# Preguntas y estado de la evidencia
+
+POSENRICH modular interpreta la priorización por posición mediante cuatro preguntas:
+**caracterización**, **asociación global**, **localización dentro de proteínas** y **proximidad** a sitios o regiones de interés.
 
 - **Unidad:** una posición biológica `(Gene, Position)`, Position 0-based en el alineamiento
-  recortado de CAAS. El p.emp es el máximo entre lados: una prueba por posición, no dos.
+  recortado de CAAS. El p.emp compartido procede de la prueba agrupada entre lados: una prueba por posición, no dos.
 - Los parámetros y el estado de cada componente se leen de sus manifiestos publicados.
 - Los efectos se condicionan a posiciones con score canónico positivo (o p canónico en la
   sensibilidad). No representan el universo completo de posiciones evaluables. Un score
@@ -80,9 +106,9 @@ asociación global, en contratos separados) y **proximidad** a sitios o regiones
 ```{r overview}
 reg_manifest <- read_manifest(params$registry_dir)
 char_manifest <- read_manifest(params$characterization_dir, "characterization_manifest.json")
-loc_manifest <- if (dir.exists(params$localization_dir)) fromJSON(file.path(params$localization_dir, "localization_manifest.json"), simplifyVector = FALSE) else NULL
-glob_manifest <- if (dir.exists(params$global_dir)) fromJSON(file.path(params$global_dir, "global_manifest.json"), simplifyVector = FALSE) else NULL
-prox_manifest <- if (dir.exists(params$proximity_dir)) fromJSON(file.path(params$proximity_dir, "proximity_manifest.json"), simplifyVector = FALSE) else NULL
+loc_manifest <- read_manifest(params$localization_dir,"localization_manifest.json")
+glob_manifest <- read_manifest(params$global_dir,"global_manifest.json")
+prox_manifest <- read_manifest(params$proximity_dir,"proximity_manifest.json")
 
 overview <- data.frame(
   component = c("Registro común", "Caracterización", "Localización dentro de proteínas", "Asociación global", "Proximidad"),
@@ -97,31 +123,41 @@ overview <- data.frame(
 datatable(overview, rownames = FALSE)
 ```
 
+Los cuatro bloques responden a preguntas distintas: qué anotaciones tienen las posiciones
+(caracterización); si los miembros de un término ocupan mejores puestos que el fondo
+(asociación global); si ocupan mejores puestos dentro de su propia proteína
+(localización); y a qué distancia están de sitios o regiones anotadas (proximidad).
+Los tres últimos muestran efectos descriptivos: las puertas de validación estadística
+siguen abiertas y sus valores no deben presentarse como inferencia validada.
+El antiguo informe 14 de Lachenbruch está retirado de las vistas activas.
+
 # 1. Registro común y cobertura
 
 El registro (`posenrich/registry/`) es la tabla normalizada única: posiciones con su estado de
 evaluación y coordenadas, evidencia por lado con el p compartido, colecciones, miembros,
 cobertura con denominadores explícitos y mapeos pendientes (nunca negativos).
 
-```{r registro}
-f <- file.path(params$characterization_dir, "universe_summary.tsv")
+```{r registro, results='asis'}
+f <- component_file(params$characterization_dir, "universe_summary.tsv")
 universe <- if (file.exists(f)) read_tsv(f, show_col_types = FALSE) else NULL
-coverage_f <- file.path(params$registry_dir, "coverage.tsv")
+coverage_f <- component_file(params$registry_dir, "coverage.tsv")
 coverage <- if (file.exists(coverage_f)) read_tsv(coverage_f, show_col_types = FALSE) else NULL
-pending_f <- file.path(params$registry_dir, "pending_mappings.tsv")
+pending_f <- component_file(params$registry_dir, "pending_mappings.tsv")
 pending <- read_preview(pending_f)
 
 if (!is.null(universe)) {
   cat("**Estados de evaluación del universo posicional** (denominador: posiciones del registro)\n\n")
-  datatable(universe %>% filter(!grepl("^coverage:", evaluation_status)), rownames = FALSE)
+  emit_widget(datatable(universe %>% filter(!grepl("^coverage:", evaluation_status)), rownames = FALSE))
 }
 if (!is.null(coverage)) {
   cat("**Cobertura por colección** (denominador: posiciones anotables del universo)\n\n")
-  datatable(coverage %>% filter(scope == "collection"), rownames = FALSE)
+  emit_widget(datatable(coverage %>% filter(scope == "collection"), rownames = FALSE))
 }
 if (!is.null(pending) && nrow(pending)) {
   cat("**Mapeos pendientes** (registros originales sin proyectar a CAAS; no son negativos)\n\n")
-  preview_datatable(pending, "posenrich/registry/pending_mappings.tsv")
+  emit_widget(preview_datatable(pending, "posenrich/registry/pending_mappings.tsv"))
+} else if (is.null(pending)) {
+  cat("**Mapeos pendientes:** tabla no disponible; no se interpreta como ausencia de mapeos pendientes.\n")
 } else {
   cat("**Mapeos pendientes:** ninguno.\n")
 }
@@ -132,32 +168,32 @@ if (!is.null(pending) && nrow(pending)) {
 Capas de anotación por posición, resumen por colección/término y distribución del ranking.
 Ninguna anotación recibe significación de enriquecimiento por el mero hecho de anotar.
 
-```{r caracterizacion}
-char_pos_f <- file.path(params$characterization_dir, "position_characterization.tsv")
-coll_f <- file.path(params$characterization_dir, "collection_summary.tsv")
-rank_f <- file.path(params$characterization_dir, "ranking_summary.tsv")
+```{r caracterizacion, results='asis'}
+char_pos_f <- component_file(params$characterization_dir, "position_characterization.tsv")
+coll_f <- component_file(params$characterization_dir, "collection_summary.tsv")
+rank_f <- component_file(params$characterization_dir, "ranking_summary.tsv")
 char_pos <- read_preview(char_pos_f)
 coll_sum <- if (file.exists(coll_f)) read_tsv(coll_f, show_col_types = FALSE) else NULL
 rank_sum <- if (file.exists(rank_f)) read_tsv(rank_f, show_col_types = FALSE) else NULL
 
 if (!is.null(rank_sum)) {
   cat("**Distribución del ranking** (sin cortes de selección; nominal/ajustado como vistas)\n\n")
-  datatable(rank_sum, rownames = FALSE)
+  emit_widget(datatable(rank_sum, rownames = FALSE))
 }
 if (!is.null(coll_sum)) {
   cat("**Colecciones y cruces exactos con el ranking** (proporciones con denominador explícito)\n\n")
-  datatable(coll_sum, rownames = FALSE)
+  emit_widget(datatable(coll_sum, rownames = FALSE))
 }
 if (!is.null(char_pos)) {
   cat("**Posiciones caracterizadas** (anotadas o con score positivo)\n\n")
-  preview_datatable(char_pos, "posenrich/characterization/position_characterization.tsv",
-                    options = list(pageLength = 25))
+  emit_widget(preview_datatable(char_pos, "posenrich/characterization/position_characterization.tsv",
+                    options = list(pageLength = 25)))
 } else {
   cat("Caracterización no ejecutada o sin tabla disponible.\n")
 }
 ```
 
-# 3. Localización dentro de proteínas (prioritaria)
+# 3. Localización dentro de proteínas {.tabset}
 
 **Estimando:** AUC de los miembros del término frente a los no miembros elegibles de la
 **misma proteína**, con medio crédito a empates; solo informan genes con ambos grupos.
@@ -167,8 +203,8 @@ está pendiente de validar cobertura, detectabilidad y agrupación espacial. **I
 p y q no disponibles, B válido = 0. Los parámetros de permutación se conservan como solicitud;
 no se ejecutan permutaciones productivas hasta superar la puerta científica.
 
-```{r localizacion}
-loc_f <- file.path(params$localization_dir, "localization_results.tsv")
+```{r localizacion, results='asis'}
+loc_f <- component_file(params$localization_dir, "localization_results.tsv")
 loc <- if (file.exists(loc_f)) read_tsv(loc_f, show_col_types = FALSE) else NULL
 if (!is.null(loc) && nrow(loc)) {
   n_not_id <- sum(loc$status == "not_identifiable")
@@ -179,25 +215,27 @@ if (!is.null(loc) && nrow(loc)) {
                        "informativos, sin p.\n\n"), n_not_id))
   }
   cat("AUC−0,5 es un efecto descriptivo; no se estima la media de un control no validado.\n\n")
-  # Última expresión del bloque: knitr renderiza el widget solo como valor del chunk.
-  datatable(loc, rownames = FALSE, options = list(pageLength = 25))
+  # Render every scoped table and retain its widget dependencies.
+  cat("[Descargar TSV completo](../posenrich/localization/localization_results.tsv)\n\n")
+  show_scoped(loc)
 } else {
   cat("Localización no ejecutada o sin resultados (términos sin miembros evaluables).\n")
 }
 ```
 
-# 4. Asociación global (vía separada)
+# 4. Asociación global {.tabset}
 
 AUC del conjunto frente al fondo global compatible, con composición por genes y sensibilidad
 leave-one-gene-out. **Sin calibración global reproducible por ciclo no hay p**: los contadores
-marginales del null no reconstruyen scores ni coocurrencias por ciclo, y el p.emp máximo entre
+marginales del null no reconstruyen scores ni coocurrencias por ciclo, y el p.emp compartido entre
 lados no permite inventar un nulo direccional. El p de localización no se reutiliza aquí.
 
-```{r global}
-glob_f <- file.path(params$global_dir, "global_results.tsv")
+```{r global, results='asis'}
+glob_f <- component_file(params$global_dir, "global_results.tsv")
 glob <- if (file.exists(glob_f)) read_tsv(glob_f, show_col_types = FALSE) else NULL
 if (!is.null(glob) && nrow(glob)) {
-  datatable(glob, rownames = FALSE, options = list(pageLength = 25))
+  cat("[Descargar TSV completo](../posenrich/global/global_results.tsv)\n\n")
+  show_scoped(glob)
 } else {
   cat("Asociación global no ejecutada o sin resultados.\n")
 }
@@ -211,25 +249,25 @@ proteínas sin referencia comparable se informan como falta de cobertura, nunca 
 infinita. Los radios son descriptivos y se recuperan del manifiesto de proximidad.
 El control de distancias no está validado: no se infiere p.
 
-```{r proximidad}
-prox_p_f <- file.path(params$proximity_dir, "proximity_protein_summary.tsv")
-prox_g_f <- file.path(params$proximity_dir, "proximity_genomic_summary.tsv")
+```{r proximidad, results='asis'}
+prox_p_f <- component_file(params$proximity_dir, "proximity_protein_summary.tsv")
+prox_g_f <- component_file(params$proximity_dir, "proximity_genomic_summary.tsv")
 prox_p <- if (file.exists(prox_p_f)) read_tsv(prox_p_f, show_col_types = FALSE) else NULL
 prox_g <- if (file.exists(prox_g_f)) read_tsv(prox_g_f, show_col_types = FALSE) else NULL
 if (!is.null(prox_p)) {
   cat("**Proximidad proteica** (distancia en residuos de referencia)\n\n")
-  datatable(prox_p, rownames = FALSE)
+  emit_widget(datatable(prox_p, rownames = FALSE))
 }
 if (!is.null(prox_g)) {
   cat("**Proximidad genómica** (distancia en nt, contrato separado)\n\n")
-  datatable(prox_g, rownames = FALSE)
+  emit_widget(datatable(prox_g, rownames = FALSE))
 }
 if (is.null(prox_p) && is.null(prox_g)) cat("Proximidad no ejecutada o sin resultados.\n")
 ```
 
 # 6. Estados, procedencia y límites
 
-```{r limites}
+```{r limites, results='asis'}
 provenance <- list(localization = loc_manifest$parameters, global = glob_manifest$parameters,
                    proximity = prox_manifest$parameters)
 cat("**Parámetros efectivos publicados**\n\n")
@@ -252,7 +290,5 @@ for (nm in names(lims)) {
 }
 cat("\n**Procedencia:** registro `posenrich/registry/`, componentes en sus subdirectorios; "
     , "manifiesto del registro con SHA-256 de fuentes; caracterización con huellas de sus entradas.\n")
-cat("\nDistinguir: implementado (código y pruebas dirigidas), validado de forma dirigida "
-    , "(tests con oráculos y controles sintéticos) y aceptado a escala (requiere la corrida "
-    , "integrada 1000/4000/10000 en cluster, no solicitada por este informe).\n")
+cat("\nLos manifiestos describen la ejecución y la cobertura. No acreditan validación inferencial: asociación global y proximidad son descriptivas y la inferencia de localización permanece retenida.\n")
 ```
