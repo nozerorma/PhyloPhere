@@ -515,14 +515,18 @@ def main():
     if not evidence.empty:
         positive = evidence[evidence['CAAS_score'] != 'NA']
         positive_keys = set(zip(positive['Gene'], positive['Position'].astype(int)))
-        for idx, row in positions.iterrows():
-            if (row['Gene'], row['Position']) in positive_keys:
-                positions.loc[idx, 'evaluation_status'] = 'detected_positive'
+        # One boolean mask per rule, built from the same (Gene, Position) tuples as before.
+        # The masks read only the flag columns, never evaluation_status, so applying them in
+        # sequence matches the former row loops (not_evaluable is applied after detected_positive).
+        keys = list(zip(positions['Gene'], positions['Position']))
+        is_positive = pd.Series([k in positive_keys for k in keys], index=positions.index, dtype=bool)
+        positions.loc[is_positive, 'evaluation_status'] = 'detected_positive'
         evaluable = evidence[evidence['score_status'] != 'not_evaluable']
         known = set(zip(evaluable['Gene'], evaluable['Position'].astype(int)))
-        for idx, row in positions.iterrows():
-            if row['in_discovery'] and not row['in_scores_positive'] and (row['Gene'], row['Position']) not in known:
-                positions.loc[idx, 'evaluation_status'] = 'not_evaluable'
+        not_known = pd.Series([k not in known for k in keys], index=positions.index, dtype=bool)
+        is_unevaluable = (positions['in_discovery'].astype(bool) & ~positions['in_scores_positive'].astype(bool)
+                          & not_known)
+        positions.loc[is_unevaluable, 'evaluation_status'] = 'not_evaluable'
     members_df = build_members_df(coll['members'])
     collections_df = build_collections_df(coll, members_df, sources)
     coverage_df = build_coverage_df(positions, members_df, collections_df, null_universe,
