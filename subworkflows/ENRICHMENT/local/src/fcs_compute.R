@@ -12,7 +12,7 @@
 #
 # Left to 12.FCS_general_report.Rmd, after the batches are merged:
 #   - the GMT description join, which uses the full (unbatched) GMT directory;
-#   - the redundancy reduction of the significant terms (fcs_cluster.R).
+#   - the term blocks of the selected terms (term_blocks.R).
 #
 # Args (named flags, from task.script):
 #   --stats-file        gene scores, one score_<ranking> column per ranking

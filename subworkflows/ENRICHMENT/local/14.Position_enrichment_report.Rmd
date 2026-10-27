@@ -209,13 +209,11 @@ le_summary <- if (!is.null(le_raw)) {
 
 # Direction-aware corroboration columns (as cols_by_rk of 12.FCS_general_report.Rmd):
 # pct_fade_bottom only under `bottom`, pct_fade_top only under `top`, and no combined
-# fade column under `global`. pct_accum_top and pct_accum_bottom are the
-# direction-restricted accumulation tests, as for FADE; the non-directional pct_accum is
-# reserved for `global`. Only the columns present in the results are shown.
+# fade column under `global`. Only the columns present in the results are shown.
 flag_cols_by_rk <- list(
-  global = c("pct_rer_acc", "pct_rer_decc", "pct_accum"),
-  top    = c("pct_fade_top", "pct_rer_acc", "pct_rer_decc", "pct_accum_top"),
-  bottom = c("pct_fade_bottom", "pct_rer_acc", "pct_rer_decc", "pct_accum_bottom")
+  global = c("pct_rer_acc", "pct_rer_decc"),
+  top    = c("pct_fade_top", "pct_rer_acc", "pct_rer_decc"),
+  bottom = c("pct_fade_bottom", "pct_rer_acc", "pct_rer_decc")
 )
 
 .fcs_stats_file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
@@ -290,10 +288,10 @@ Position evidence uses canonical p.emp and its BH adjustment; nominal active pos
 `fold > 1` = enriched, `< 1` = depleted. UCR core and UCR flank (and their
 per-orthogroup counterparts) are tested as independent, potentially-overlapping
 layers, not a forced partition - nothing here requires them to be disjoint.
-When available, `%gate_sig`/`%fade_*`/`%rer_*`/`%accum` columns
+When available, `%gate_sig`/`%fade_*`/`%rer_*` columns
 report the percentage of *distinct genes* contributing to the overlap (never
 raw positions - one gene must not dominate) that are independently flagged by
-SCORING's own significance/FADE/RER/accumulation criteria - a cross-module
+SCORING's own significance/FADE/RER criteria - a cross-module
 corroboration check for whether a hit is broadly supported or isolated.
 
 ```{r enrichment-tables, echo=FALSE, results='asis'}
@@ -337,12 +335,12 @@ if (!has_res) {
         }
         # Cross-module corroboration: % of the DISTINCT genes in the overlap
         # (never % of raw positions - one gene must not dominate) carrying
-        # each SCORING flag (gate_sig/fade/rer/accum). Only present
+        # each SCORING flag (gate_sig/fade/rer). Only present
         # when POSENRICH was run with --annot-file. Direction-restricted via
         # flag_cols_by_rk (same convention as the Leading edge section below) --
         # posenrich_enrich.py computes pct_<flag> for every flag regardless of
         # direction, so without this restriction a `bottom` table would show
-        # `%accum_top`/`%fade_top` alongside its own `%accum_bottom`/`%fade_bottom`.
+        # `%fade_top` alongside its own `%fade_bottom`.
         want_rk <- flag_cols_by_rk[[rk]]
         if (is.null(want_rk)) want_rk <- character(0)
         flag_cols <- intersect(want_rk, names(tf_src))
@@ -722,8 +720,8 @@ if (nrow(sc_all) == 0) {
 One row per **significant** (`p.adj < `r PADJ``) pathway - pooled across the
 10%/5%/1% cutoffs it was tested at, not one row per cutoff - with the union
 of observed `gene:position` members across those cutoffs, plus the same
-cross-module corroboration columns as above (`%gate_sig`/`%fade_*`/`%rer_*`/
-`%accum`, direction-aware - `%fade_bottom` only appears under `BOTTOM`,
+cross-module corroboration columns as above (`%gate_sig`/`%fade_*`/`%rer_*`,
+direction-aware - `%fade_bottom` only appears under `BOTTOM`,
 `%fade_top` only under `TOP`, plain `%fade` under `GLOBAL`). `N cutoffs`/
 `Cutoffs` record which of the tighter cutoffs recovered the term as a plain
 audit trail. The full per-cutoff member list is also written to

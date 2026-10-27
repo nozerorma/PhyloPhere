@@ -10,6 +10,7 @@ output:
     toc: true
     toc_float:
       collapsed: false
+      smooth_scroll: false
     code_folding: hide
     df_print: paged
     fig_width: 10
@@ -51,6 +52,8 @@ params:
   rer_domino_edge_scores_file: NULL
   gene_metadata_file: NULL
   module_description_fdr: 0.10
+  ami_max_blocks: 8            # blocks shown in the module label and the block summary (the tables keep every block)
+  ami_block_threshold: 0.2     # minimum Jaccard of the module genes of two terms in the same block (before the cap)
   domino_slice_threshold: 0.3
   domino_module_threshold: 0.05
   seed: "1998"
@@ -100,7 +103,7 @@ emit_widget <- function(widget) {
   invisible(NULL)
 }
 knitr::opts_chunk$set(
-  echo = TRUE,
+  echo = FALSE,
   warning = FALSE,
   message = FALSE,
   fig.width = 10,
@@ -117,8 +120,13 @@ if (requireNamespace("httr", quietly = TRUE)) {
 }
 
 source("src/ami_evidence.R")
+source("src/report_presentation.R")
+source("src/term_blocks.R")
 .description_fdr <- as.numeric(params$module_description_fdr)
 stopifnot(is.finite(.description_fdr),.description_fdr>0,.description_fdr<1)
+.max_blocks <- as.integer(params$ami_max_blocks)
+.block_thr <- as.numeric(params$ami_block_threshold)
+stopifnot(is.finite(.max_blocks),.max_blocks>=1,is.finite(.block_thr),.block_thr>0,.block_thr<=1)
 .ami_results_registry <- list()
 
 # Minimum module size (genes) kept in the module description table and the network
@@ -406,7 +414,7 @@ string_db <- STRINGdb$new(
 
 dir.create("ami_inputs",showWarnings=FALSE)
 jsonlite::write_json(params[c("species","domino_network_score_thr","domino_slice_threshold",
-  "domino_module_threshold","module_description_fdr","seed")],"ami_inputs/report_settings.json",auto_unbox=TRUE,pretty=TRUE)
+  "domino_module_threshold","module_description_fdr","ami_max_blocks","ami_block_threshold","seed")],"ami_inputs/report_settings.json",auto_unbox=TRUE,pretty=TRUE)
 ami_networks_dir <- "ami_networks"
 createDir(ami_networks_dir)
 
@@ -498,8 +506,10 @@ cluster_layout <- function(net, clusters_df, seed = seed_val) {
 # module with its top terms. The module significance comes from module_stats (DOMINO's
 # p_value and p_adj, joined at the end), not from this function. The columns are
 # cluster, n_genes, genes (at most 8, for display), all_genes (every member) and
-# description ("Too small" and "No enrichment" are placeholders).
-describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, top_terms = 3,
+# description ("Too small" and "No enrichment" are placeholders). The description joins the
+# representatives of the first max_blocks term blocks. The terms of every module (category,
+# term id, FDR, module genes, block) travel in attr(result, "terms").
+describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, max_blocks = .max_blocks,
                                min_cluster_genes = 3, bg_string_ids = NULL, active_genes = NULL) {
   # With no modules the result keeps the column schema of the populated path: callers
   # reference n_genes before any nrow() > 0 guard, and arrange() cannot resolve a
@@ -512,6 +522,7 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, to
   # compute_gene_list_result() passes the mapped background of each tool (CAAS, FADE
   # and RER enrich against their own universe, as their DOMINO networks do).
   if (is.null(bg_string_ids)) bg_string_ids <- get("bg_string_ids", envir = .GlobalEnv)
+  term_tab <- list()
   desc <- purrr::map_dfr(sort(unique(clusters_df$cluster)), function(cl_id) {
     cl_nodes <- clusters_df$node[clusters_df$cluster == cl_id]
     genes    <- id2gene[cl_nodes]
@@ -569,10 +580,23 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, to
       return(tibble(cluster = cl_id, n_genes = length(display_genes),
                     genes = gene_str, all_genes = all_gene_str, description = "No enrichment"))
     }
-    pvcol   <- intersect(c("fdr", "p_value", "pvalue", "p.adjust"), names(enrich))[1]
-    if (!is.na(pvcol)) enrich <- enrich[order(enrich[[pvcol]]), ]
+    # BH within a category gives many identical FDR values, so the order is completed with
+    # the p-value, the category and the term id: the labels never depend on the row order.
+    pcol <- intersect(c("p_value", "pvalue"), names(enrich))[1]
+    enrich <- enrich[order(as.numeric(enrich$fdr), if (is.na(pcol)) 0 else as.numeric(enrich[[pcol]]),
+                           as.character(enrich$category), as.character(enrich$term), method = "radix"), , drop = FALSE]
     dcol    <- intersect(c("description", "term", "name"), names(enrich))[1]
-    top     <- head(as.character(enrich[[dcol]]), top_terms)
+    # Module genes annotated by each term (preferredNames, local and API paths).
+    sets <- lapply(strsplit(as.character(enrich$preferredNames), "\\s*,\\s*"), function(g) unique(g[nzchar(g)]))
+    names(sets) <- paste(enrich$category, enrich$term, sep = "\r")
+    bl <- term_blocks(sets, rank = seq_along(sets), thr = .block_thr)
+    top <- head(as.character(enrich[[dcol]])[bl$is_representative], max_blocks)
+    term_tab[[length(term_tab) + 1L]] <<- tibble(
+      cluster = cl_id, category = as.character(enrich$category), term_id = as.character(enrich$term),
+      term = as.character(enrich[[dcol]]), fdr = as.numeric(enrich$fdr),
+      n_module_genes = lengths(sets), genes = vapply(sets, paste, "", collapse = ", "),
+      block = bl$block, is_representative = bl$is_representative, shown = bl$block <= max_blocks,
+      block_size = bl$block_size, block_min_jaccard = bl$block_min_jaccard)
     tibble(cluster = cl_id, n_genes = length(display_genes),
            genes = gene_str, all_genes = all_gene_str, description = paste(top, collapse = " / "))
   })
@@ -585,6 +609,7 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, to
         by = "cluster"
       )
   }
+  attr(desc, "terms") <- dplyr::bind_rows(term_tab)
   desc
 }
 
@@ -954,18 +979,12 @@ prepare_gene_attributes <- function(df) {
   out$flag_rer_acc <- ifelse(is.finite(rho),out$rer_nominal & rho>0,NA)
   out$flag_rer_decc <- ifelse(is.finite(rho),out$rer_nominal & rho<0,NA)
   
-  # Accumulation: flag_accum is the non-directional pooled test; flag_accum_top and
-  # flag_accum_bottom are the direction-restricted tests, as for FADE above.
-  out$flag_accum        <- .istrue(.col("accum_significant"))
-  out$flag_accum_top    <- .istrue(.col("accum_significant_top"))
-  out$flag_accum_bottom <- .istrue(.col("accum_significant_bottom"))
-
   out
 }
 
 compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label) {
-  cols <- c("caas_nominal","caas_adjusted","caas_nominal_top","caas_adjusted_top","caas_nominal_bottom","caas_adjusted_bottom","rer_adjusted","flag_fade","flag_fade_top","flag_fade_bottom","flag_rer_acc","flag_rer_decc","flag_accum","flag_accum_top","flag_accum_bottom")
-  labels <- c("caas_nominal","caas_adjusted","caas_nominal_top","caas_adjusted_top","caas_nominal_bottom","caas_adjusted_bottom","rer_adjusted","fade","fade_top","fade_bottom","rer_acc","rer_decc","accum","accum_top","accum_bottom")
+  cols <- c("caas_nominal","caas_adjusted","caas_nominal_top","caas_adjusted_top","caas_nominal_bottom","caas_adjusted_bottom","rer_adjusted","flag_fade","flag_fade_top","flag_fade_bottom","flag_rer_acc","flag_rer_decc")
+  labels <- c("caas_nominal","caas_adjusted","caas_nominal_top","caas_adjusted_top","caas_nominal_bottom","caas_adjusted_bottom","rer_adjusted","fade","fade_top","fade_bottom","rer_acc","rer_decc")
   genes <- if(length(preferred_names) && !is.na(preferred_names)) strsplit(preferred_names,"[,;]")[[1]] else character()
   x <- if(!is.null(attr_df)) attr_df[attr_df$gene %in% trimws(genes),,drop=FALSE] else NULL
   vals <- lapply(cols,function(n) if(is.null(x)||!nrow(x)||!n %in% names(x)) NA_real_ else if(all(is.na(x[[n]])))NA_real_ else round(100*mean(x[[n]],na.rm=TRUE),1))
@@ -1083,7 +1102,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
 
   res <- list(list_name = .list_name, direction = .direction, skip_message = NULL,
               connectivity_line = NULL, modules_line = NULL, display_df = NULL,
-              png_path = NULL, clust_desc = NULL, network_summary_row = NULL, available=FALSE,
+              png_path = NULL, clust_desc = NULL, module_terms = NULL, network_summary_row = NULL, available=FALSE,
               modules_verified=FALSE,descriptions_available=FALSE,n_modules=NA_integer_)
 
   if(prefix=="caas" && !is.null(gene_scores_df)) {
@@ -1204,6 +1223,10 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     )
     res$descriptions_available <- !any(.clust_desc$description=="Enrichment unavailable")
     res$available <- res$descriptions_available
+    .module_terms <- attr(.clust_desc, "terms")
+    if (!is.null(.module_terms) && nrow(.module_terms) > 0) {
+      res$module_terms <- .module_terms %>% dplyr::mutate(gene_list = .list_name, direction = .direction, .before = 1)
+    }
 
     if (!is.null(gene_scores_df) && !is.null(attr_df) && nrow(.clust_desc) > 0) {
       .cl_pcts <- purrr::map_dfr(sort(unique(.clusters_df$cluster)), function(cl_id) {
@@ -1235,8 +1258,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
               Module = cluster, Genes = n_genes,
               `Representative genes` = genes, `Top enriched terms` = description,
               `CAAS nominal (%)` = caas_nominal_top, `CAAS BH (%)` = caas_adjusted_top,
-              `fade_top (%)` = fade_top, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc,
-              `accum_top (%)` = accum_top
+              `fade_top (%)` = fade_top, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc
             )
         } else if (.dir_label == "bottom") {
           display_df <- .clust_desc_display %>%
@@ -1244,8 +1266,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
               Module = cluster, Genes = n_genes,
               `Representative genes` = genes, `Top enriched terms` = description,
               `CAAS bottom nominal (%)` = caas_nominal_bottom, `CAAS bottom BH (%)` = caas_adjusted_bottom,
-              `fade_bottom (%)` = fade_bottom, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc,
-              `accum_bottom (%)` = accum_bottom
+              `fade_bottom (%)` = fade_bottom, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc
             )
         } else {
           display_df <- .clust_desc_display %>%
@@ -1255,8 +1276,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
               `CAAS global nominal (%)` = caas_nominal, `CAAS global BH (%)` = caas_adjusted,
               `CAAS top nominal (%)` = caas_nominal_top, `CAAS top BH (%)` = caas_adjusted_top,
               `CAAS bottom nominal (%)` = caas_nominal_bottom, `CAAS bottom BH (%)` = caas_adjusted_bottom,
-              `fade (%)` = fade, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc,
-              `accum (%)` = accum
+              `fade (%)` = fade, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc
             )
         }
       } else {
@@ -1341,7 +1361,6 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
 # cached strings, data frames and file paths. Called once per direction tab that shows
 # the list (its own direction and "Global").
 print_gene_list_result <- function(res) {
-  cat(sprintf("\n\n##### %s\n\n", ami_list_label(res$list_name)))
   if (!is.null(res$skip_message)) { cat(res$skip_message, "\n\n"); return(invisible(NULL)) }
   if (!is.null(res$connectivity_line)) cat(res$connectivity_line, "\n\n")
   if (!is.null(res$modules_line)) cat(res$modules_line, "\n\n")
@@ -1358,52 +1377,6 @@ print_gene_list_result <- function(res) {
 
 # ── Roll-up across gene lists ─────────────────────────────────────────────────
 # Term x gene-list heatmap and tables; generic over the module descriptions of any tool.
-.normalize_term <- function(x) {
-  x <- tolower(x)
-  x <- gsub("[^a-z0-9 ]", " ", x)
-  gsub("\\s+", " ", trimws(x))
-}
-# The description of a module recurs, worded slightly differently, across nested gene
-# lists that share most of their genes. Two kinds of duplicate are merged into one row:
-# near-duplicate strings (case, punctuation, minor rewording), found with a normalized
-# edit distance (utils::adist()), and nested terms, whose full word set is contained in
-# that of another term ("NADPH oxidase complex" inside "phagocyte NADPH oxidase
-# complex"). The edit distance alone rejects the nested pair because the extra words
-# dominate the ratio, so containment is tested explicitly and forces the merge.
-# Different terms (no containment, low similarity) stay separate.
-.term_contains <- function(a, b) {
-  wa <- strsplit(a, " ")[[1]]; wb <- strsplit(b, " ")[[1]]
-  if (length(wa) == 0 || length(wb) == 0) return(FALSE)
-  short <- if (length(wa) <= length(wb)) wa else wb
-  long  <- if (length(wa) <= length(wb)) wb else wa
-  all(short %in% long)
-}
-.cluster_terms <- function(terms, sim_thr = 0.85) {
-  norm <- vapply(terms, .normalize_term, character(1))
-  reps_norm <- character(0); reps_orig <- character(0)
-  assign <- integer(length(terms))
-  for (i in seq_along(terms)) {
-    if (length(reps_norm) == 0) { reps_norm <- norm[i]; reps_orig <- terms[i]; assign[i] <- 1L; next }
-    d <- utils::adist(norm[i], reps_norm)[1, ]
-    sim <- 1 - d / pmax(nchar(norm[i]), nchar(reps_norm), 1)
-    contained <- vapply(reps_norm, function(r) .term_contains(norm[i], r), logical(1))
-    sim[contained] <- 1
-    best <- which.max(sim)
-    if (sim[best] >= sim_thr) {
-      assign[i] <- best
-      # When a compound description folds into a shorter one (containment), the shorter
-      # text becomes the representative, being the more canonical wording. Plain
-      # near-duplicate merges keep the term seen first.
-      if (contained[best] && nchar(terms[i]) < nchar(reps_orig[best])) {
-        reps_orig[best] <- terms[i]
-      }
-    } else {
-      reps_norm <- c(reps_norm, norm[i]); reps_orig <- c(reps_orig, terms[i])
-      assign[i] <- length(reps_norm)
-    }
-  }
-  reps_orig[assign]
-}
 
 # ── Collapsible long cells ────────────────────────────────────────────────────
 # Character values longer than char_thr are wrapped in a native <details>/<summary>
@@ -1544,17 +1517,8 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
   if (nrow(clust_desc_all) == 0) clust_desc_all <- NULL
   network_summary_all <- dplyr::bind_rows(lapply(results, `[[`, "network_summary_row"))
 
-  term_rows_all <- if (!is.null(clust_desc_all)) {
-    clust_desc_all %>%
-      dplyr::filter(!description %in% c("Too small", "No enrichment", "Enrichment unavailable")) %>%
-      dplyr::mutate(term_raw = strsplit(description, "\\s*/\\s*")) %>%
-      tidyr::unnest(term_raw) %>%
-      dplyr::mutate(term_raw = trimws(term_raw)) %>%
-      dplyr::filter(nzchar(term_raw))
-  } else NULL
-  if (!is.null(term_rows_all) && nrow(term_rows_all) > 0) {
-    term_rows_all$term <- .cluster_terms(term_rows_all$term_raw)
-  }
+  term_rows_all <- dplyr::bind_rows(lapply(results, `[[`, "module_terms"))
+  if (nrow(term_rows_all) == 0) term_rows_all <- NULL
   assign(sprintf(".ami_term_rows_%s", prefix),term_rows_all,envir=knitr::knit_global())
   for (i in seq_along(results)) if(!is.null(results[[i]]$clust_desc) && any(results[[i]]$clust_desc$description=="Enrichment unavailable")) results[[i]]$available <- FALSE
   .ami_results_registry[[prefix]] <<- results
@@ -1568,11 +1532,10 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
 
   for (dir_label in names(direction_tabs)) {
     filter_val <- direction_tabs[[dir_label]]
-    cat(sprintf("\n\n### %s {.tabset}\n\n", dir_label))
+    cat(sprintf("\n\n### %s\n\n", dir_label))
 
     sel <- if (is.null(filter_val)) results else Filter(function(r) r$direction == filter_val, results)
 
-    cat("\n\n#### Modules {.tabset}\n\n")
     if (length(sel) == 0) {
       cat("_No gene lists for this direction._\n\n")
     } else {
@@ -1750,11 +1713,10 @@ if (!is.null(params$fade_domino_network_sif) && !is.null(params$fade_gene_lists_
     dplyr::mutate(.ami_term_rows_fade, tool = "FADE", .before = 1)
   }
 )
-if(nrow(.ami_all_terms)>0) .ami_all_terms$term <- .cluster_terms(.ami_all_terms$term_raw)
 if(ncol(.ami_all_desc)) .ami_all_desc$provenance_verified <- rep(TRUE,nrow(.ami_all_desc))
 if(ncol(.ami_all_terms)) .ami_all_terms$provenance_verified <- rep(TRUE,nrow(.ami_all_terms))
 if(!ncol(.ami_all_desc)) .ami_all_desc <- tibble::tibble(tool=character(),gene_list=character(),direction=character(),cluster=integer(),description=character(),genes=character(),domino_p_adj=numeric(),provenance_verified=logical())
-if(!ncol(.ami_all_terms)) .ami_all_terms <- tibble::tibble(tool=character(),gene_list=character(),direction=character(),term=character(),term_raw=character(),genes=character(),provenance_verified=logical())
+if(!ncol(.ami_all_terms)) .ami_all_terms <- tibble::tibble(tool=character(),gene_list=character(),direction=character(),cluster=integer(),category=character(),term_id=character(),term=character(),fdr=numeric(),n_module_genes=integer(),genes=character(),block=integer(),is_representative=logical(),shown=logical(),block_size=integer(),block_min_jaccard=numeric(),provenance_verified=logical())
 {
   readr::write_tsv(.ami_all_desc, file.path(ami_networks_dir, "ami_module_descriptions_all_tools.tsv"))
 }
@@ -1772,6 +1734,34 @@ if(!ncol(.ami_all_terms)) .ami_all_terms <- tibble::tibble(tool=character(),gene
 readr::write_tsv(.availability_all,file.path(ami_networks_dir,"ami_list_availability.tsv"))
 ```
 
+# Term blocks
+
+```{r ami-reduction-note, results='asis'}
+report_term_reduction_note()
+```
+
+```{r ami-reduction-map}
+if(nrow(.ami_all_terms)) {
+  # Blocks are homogeneous (Jaccard >= the threshold between all members); only the first
+  # ami_max_blocks appear in the module label. The share of module genes annotated by the
+  # shown blocks says how much of the module the label covers.
+  .gene_share <- function(g, shown) {
+    all_g <- unique(unlist(strsplit(g, ",\\s*"))); sh <- unique(unlist(strsplit(g[shown], ",\\s*")))
+    length(sh) / max(length(all_g), 1L)
+  }
+  .block_summary <- .ami_all_terms %>%
+    dplyr::group_by(tool, gene_list, cluster) %>%
+    dplyr::summarise(n_terms = dplyr::n(), n_blocks = dplyr::n_distinct(block),
+                     blocks_shown = dplyr::n_distinct(block[shown]), terms_in_shown = sum(shown),
+                     module_genes_covered_by_shown = round(.gene_share(genes, shown), 3),
+                     largest_block = max(block_size),
+                     lowest_block_jaccard = suppressWarnings(min(block_min_jaccard, na.rm = TRUE)), .groups = "drop") %>%
+    dplyr::mutate(lowest_block_jaccard = ifelse(is.finite(lowest_block_jaccard), round(lowest_block_jaccard, 3), NA_real_))
+  readr::write_tsv(.block_summary, file.path(ami_networks_dir, "term_block_summary.tsv"))
+  report_table(.block_summary)
+}
+```
+
 # Term recurrence across methods {.tabset}
 
 Availability records distinguish verified modules, the number of modules and the
@@ -1780,29 +1770,35 @@ only after the input and output certificates pass. Missing descriptions remain
 unavailable for recurrence even when the modules themselves are verified. Small
 seed lists are not rejected by a presentation cutoff.
 
-Global uses each method's own global list, never a sum of sides. Top/Bottom use CAAS and FADE sides; RER Global (both signs) is repeated as an explicitly labelled reference, never mapped to a CAAS side. RER's own Positive/Negative module analyses remain above. Recurrence concerns retained top functional descriptions of modules, with the existing descriptive term grouping, not independent pathway confirmations or FCS significance. Term rows use the union of verified descriptions across views. Fractions use only verified, evaluable lists; NA denotes unavailable modules/descriptions, while zero denotes a verified absence. Gene universes remain method-specific.
+Global uses each method's own global list, never a sum of sides. Top/Bottom use CAAS and FADE sides; RER Global (both signs) is repeated as an explicitly labelled reference, never mapped to a CAAS side. RER's own Positive/Negative module analyses remain above. Recurrence concerns the functional terms of modules, matched by exact description text, not independent pathway confirmations or FCS significance. Representatives keep the best term of each block of its module; All terms keeps every term below the description cutoff. Term rows use the union of verified descriptions across views. Fractions use only verified, evaluable lists; NA denotes unavailable modules/descriptions, while zero denotes a verified absence. Gene universes remain method-specific.
 
 ```{r recurrence-comparison,results='asis',fig.width=11,fig.height=7}
 for(view in c("Global","Top","Bottom")) {
  cat(sprintf("\n## %s {.tabset}\n\n",view))
- rec <- ami_recurrence(.ami_all_terms,.ami_results_registry,view)
+ rec <- ami_recurrence(.ami_all_terms[.ami_all_terms$is_representative %in% TRUE,,drop=FALSE],.ami_results_registry,view)
  readr::write_tsv(rec$cells,file.path(ami_networks_dir,paste0("recurrence_",tolower(view),"_matrix.tsv")))
  readr::write_tsv(rec$summary,file.path(ami_networks_dir,paste0("recurrence_",tolower(view),"_table.tsv")))
  readr::write_tsv(rec$availability,file.path(ami_networks_dir,paste0("recurrence_",tolower(view),"_availability.tsv")))
- cat("\n\n### Heatmap\n\n")
+ cat("\n\n### Representatives {.tabset}\n\n")
+ cat("\n\n#### Heatmap\n\n")
  if(nrow(rec$cells)) {
   p <- ggplot(rec$cells,aes(list_label,term,fill=factor(present,levels=c(0,1))))+geom_tile(colour="white")+
    scale_fill_manual(name="Description present",values=c(`0`="#eeeeee",`1`="#2c7fb8"),na.value="#bbbbbb",drop=FALSE)+
    labs(x=NULL,y=NULL,title=paste("Module description recurrence —",view))+theme_minimal(base_size=10)+theme(axis.text.x=element_text(angle=30,hjust=1))
   print(p);cat("\n\n")
  } else cat("_No verified module descriptions available in this view._\n\n")
- cat("\n\n### Table\n\n")
- widget <- DT::datatable(rec$summary,rownames=FALSE,filter="top",options=list(pageLength=15,scrollX=TRUE,order=list()))
+ cat("\n\n#### Table\n\n")
+ widget <- report_table(rec$summary)
  rendered_widget <- knitr::knit_print(widget)
  knitr::knit_meta_add(attr(rendered_widget,"knit_meta"))
  cat(rendered_widget)
- cat("\n\n### Availability and denominators\n\n")
- print(knitr::kable(rec$availability))
+ cat("\n\n### All terms\n\n")
+ raw_rec <- ami_recurrence(.ami_all_terms,.ami_results_registry,view)
+ report_emit(report_table(raw_rec$summary))
+ readr::write_tsv(raw_rec$summary,file.path(ami_networks_dir,paste0("recurrence_",tolower(view),"_all_terms.tsv")))
+ cat("<details><summary>Availability and denominators</summary>\n\n")
+ report_emit(report_table(rec$availability))
+ cat("</details>\n\n")
 }
 ```
 

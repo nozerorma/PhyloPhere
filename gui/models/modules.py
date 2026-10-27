@@ -125,17 +125,6 @@ class DisambiguationConfig(ModuleConfigBase):
     # background_input) are derived from PrecomputedConfig.
 
 
-# ── Accumulation ──────────────────────────────────────────────────────────────
-
-
-@dataclass(kw_only=True)
-class AccumulationConfig(ModuleConfigBase):
-    accumulation_fdr: str = "0.1"  # --accumulation_fdr
-
-    # Precomputed inputs (accumulation_caas_input, accumulation_background_input) are
-    # derived from PrecomputedConfig.
-
-
 # ── RERconverge ───────────────────────────────────────────────────────────────
 
 
@@ -290,8 +279,7 @@ class EnrichmentConfig(ModuleConfigBase):
     pfam_cache_dir: str = ""  # --pfam_cache_dir (blank -> ~/.cache/phylophere/pfam)
     fcs_pperm_thr: str = "0.025"  # --fcs_pperm_thr (Redlich rule, raw p.perm)
     fcs_analytic_levels: str = "0.05,0.1,0.15"  # --fcs_analytic_levels (comma-separated)
-    fcs_cluster_similarity: str = "jaccard"  # --fcs_cluster_similarity: "jaccard" | "overlap"
-    fcs_cluster_threshold: str = "0.5"  # --fcs_cluster_threshold
+    fcs_cluster_threshold: str = "0.2"  # --fcs_cluster_threshold (minimum Jaccard inside a term block)
     fcs_top_n: str = "20"  # --fcs_top_n
     fcs_batch_size: str = "4"  # --fcs_batch_size (GMTs per FCS_COMPUTE_BATCHED task)
     fcs_block_batch_genes: str = "1000"
@@ -309,6 +297,8 @@ class EnrichmentConfig(ModuleConfigBase):
     domino_network_score_thr: str = "700"  # --domino_network_score_thr
     domino_slice_thr: str = "0.3"  # --domino_slice_thr
     domino_module_thr: str = "0.05"  # --domino_module_thr
+    ami_max_blocks: str = "8"  # --ami_max_blocks (blocks shown in the label and summary of each AMI module)
+    ami_block_threshold: str = "0.2"  # --ami_block_threshold (minimum Jaccard of module genes inside a block)
     # Off by default: the network, module and edge-score files are large and only
     # needed to regenerate the AMI report by hand.
     publish_domino_intermediates: bool = False  # --publish_domino_intermediates
@@ -352,6 +342,12 @@ class EnrichmentConfig(ModuleConfigBase):
     posenrich_seed: str = "1"  # --posenrich_seed
     posenrich_radios: str = "0,5,10"  # --posenrich_radios (radios descriptivos de proximidad)
 
+    # Level 1 of POSENRICH (Accumulation, CT_ACCUMULATION): gated by posenrich_modular.
+    accumulation_fdr: str = "0.1"  # --accumulation_fdr (Benjamini-Hochberg threshold of the gene lists and report)
+    # Standalone inputs; a blank value falls back to the Post-processing output (live or precomputed).
+    accumulation_caas_input: str = ""  # --accumulation_caas_input (filtered_discovery.tsv)
+    accumulation_background_input: str = ""  # --accumulation_background_input (cleaned_background_main.txt)
+
     # posenrich_background_file (CT's background.output, used when CT is off) is derived
     # from PrecomputedConfig.use_discovery.
 
@@ -365,7 +361,6 @@ class ModulesConfig:
 
     caas: CaasConfig = field(default_factory=CaasConfig)
     disambiguation: DisambiguationConfig = field(default_factory=DisambiguationConfig)
-    accumulation: AccumulationConfig = field(default_factory=AccumulationConfig)
     rer: RerConfig = field(default_factory=RerConfig)
     fade: FadeConfig = field(default_factory=FadeConfig)
     vep: VepConfig = field(default_factory=VepConfig)

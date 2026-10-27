@@ -125,7 +125,7 @@ workflow {
         Channel.value(file(params.fixture_discovery)),
         Channel.value(file(params.fixture_null)),
         absent(), absent(), absent(), absent(), absent(), absent(),
-        absent(), absent(), absent(), absent(), absent(), absent(), absent()
+        absent(), absent(), absent(), absent(), absent(), absent()
     )
 }
 """

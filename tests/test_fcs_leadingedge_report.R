@@ -27,7 +27,7 @@ for (scenario in c("significant", "no_significant_sets")) {
   dir.create(wd, recursive = TRUE, showWarnings = FALSE)
   file.copy(file.path(local_dir, "12.FCS_general_report.Rmd"), wd, overwrite = TRUE)
   dir.create(file.path(wd, "src"), showWarnings = FALSE)
-  file.copy(file.path(local_dir, "src", c("fcs_enrich.R", "fcs_cluster.R", "evidence_flags.R")),
+  file.copy(file.path(local_dir, "src", c("fcs_enrich.R", "term_blocks.R", "fcs_selection.R", "evidence_flags.R", "report_presentation.R")),
             file.path(wd, "src"), overwrite = TRUE)
   dir.create(file.path(wd, "gmts"), showWarnings = FALSE)
   writeLines(c(paste(c("setA", "Test pathway", genes), collapse = "\t"),
@@ -39,6 +39,8 @@ for (scenario in c("significant", "no_significant_sets")) {
   ev <- enrich
   if (scenario == "no_significant_sets") {
     ev$q.perm <- 1
+    ev$p.perm <- 1
+    ev$p.adj <- 1
     ev$sig_perm <- FALSE
     ev$redlich_level <- NA_real_
   }
@@ -54,9 +56,9 @@ for (scenario in c("significant", "no_significant_sets")) {
                             show_col_types = FALSE, name_repair = "minimal")
     stopifnot(!anyNA(names(comp)), all(nzchar(names(comp))), !anyDuplicated(names(comp)),
       setequal(comp$ranking, c("global", "top", "bottom", "custom")),
-      all(comp$n_le == 2), comp$`rer_acc BH`[comp$ranking == "global"] == 50,
-      comp$`rer_acc BH`[comp$ranking == "top"] == 50,
-      comp$`rer_decc BH`[comp$ranking == "bottom"] == 50,
+      all(comp$n_le == 2), comp$flag_rer_acc_adjusted[comp$ranking == "global"] == 50,
+      comp$flag_rer_acc_adjusted[comp$ranking == "top"] == 50,
+      comp$flag_rer_decc_adjusted[comp$ranking == "bottom"] == 50,
       comp$flag_custom[comp$ranking == "custom"] == 50)
   } else {
     stopifnot(nrow(env$le_comp_export) == 0L)

@@ -79,13 +79,6 @@ if [ "${RUN_DISAMBIGUATION:-true}" = true ]; then
     )
 fi
 
-if [ "${RUN_ACCUMULATION:-true}" = true ]; then
-    NF_FLAGS+=(
-        --ct_accumulation
-        --ct_disambig_asr_cache_dir "$ASR_CACHE_DIR"
-    )
-fi
-
 # RERConverge Flags
 if [ "${RUN_RER:-false}" = true ]; then
     NF_FLAGS+=(

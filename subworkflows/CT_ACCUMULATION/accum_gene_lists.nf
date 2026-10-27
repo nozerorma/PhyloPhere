@@ -1,6 +1,6 @@
 #!/usr/bin/env nextflow
 
-// accum_gene_lists.nf — Gene lists and a score table from the accumulation test output.
+// accum_gene_lists.nf — Gene lists from the accumulation test output.
 // PhyloPhere | subworkflows/CT_ACCUMULATION/
 
 /*
@@ -12,8 +12,7 @@
  *  Consumes:  direction ('top', 'bottom' or 'all') and the accumulation_<direction>_results.csv
  *             file of that direction (CT_ACCUMULATION_TEST)
  *  Produces:  background.txt (all genes with a result for this direction),
- *             accumulation_<direction>_significant.txt (genes with FDR below params.accumulation_fdr),
- *             fcs_stats.tsv (gene, score_accumulation = -log10 of the p, accum_p, fdr_q, flag_gate_sig)
+ *             accumulation_<direction>_significant.txt (genes with FDR below params.accumulation_fdr)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -25,7 +24,7 @@ process ACCUMULATION_GENE_LISTS {
     label 'process_low'
     errorStrategy 'ignore'
 
-    publishDir path: { "${params.outdir}/accumulation/${direction}/gene_lists" },
+    publishDir path: { "${params.outdir}/posenrich/accumulation/${direction}/gene_lists" },
                mode: 'copy', overwrite: true,
                pattern: '*.txt'
 
@@ -36,7 +35,6 @@ process ACCUMULATION_GENE_LISTS {
     output:
     val  direction,        emit: direction
     path "*.txt",          emit: gene_lists
-    path "fcs_stats.tsv",  emit: fcs_stats
 
     script:
     def fdr_thr = params.accumulation_fdr ?: 0.1
@@ -71,15 +69,6 @@ process ACCUMULATION_GENE_LISTS {
 
         writeLines(gene_syms, 'background.txt')
         writeLines(sig_genes, 'accumulation_${direction}_significant.txt')
-
-        fcs_stats <- data.frame(
-            gene               = gene_syms,
-            score_accumulation = -log10(pmax(pvals, 1e-300)),
-            accum_p            = pvals,
-            fdr_q              = fdr_q,
-            flag_gate_sig      = sig_mask
-        )
-        write.table(fcs_stats, 'fcs_stats.tsv', sep = '\\t', row.names = FALSE, quote = FALSE)
 
         cat(sprintf('[ACCUMULATION_GENE_LISTS] direction=${direction}  bg=%d  sig=%d (FDR<%g)\\\\n',
             length(gene_syms), length(sig_genes), ${fdr_thr}))

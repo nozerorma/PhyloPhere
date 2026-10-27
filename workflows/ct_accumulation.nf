@@ -92,7 +92,7 @@ workflow CT_ACCUMULATION {
         // The test filters the observed CAAS by direction and names outputs
         // accumulation_{direction}_results.csv.
         // "all" uses --change-side both (a position detected on both sides counts once) for the
-        // global accumulation score used in gene-level significance characterisation.
+        // gene-level test of the pooled detections.
         // Universe U inputs, broadcast to every direction. All are required: a missing one stops the run.
         def tested_pos_val = (tested_positions_channel ?: Channel.empty())
             .ifEmpty { error "CT_ACCUMULATION requires the tested positions (caastools background.output): run CAAS discovery or pass --posenrich_background_file." }
@@ -129,15 +129,8 @@ workflow CT_ACCUMULATION {
         // ── Accumulation report (rendered after all directions complete) ──────
         ACCUMULATION_REPORT(test_out.results.collect())
 
-        // ── Gene list extraction (always automatic) ───────────────────────
-        // Accumulation no longer runs its own FCS ranking — its FCS "significance"
-        // was inflated by the missing permulation null (no compensating check against
-        // the RER/CAAS-tuned FDR threshold). It now contributes as a cross-module
-        // corroboration flag on CAAS's own leading edge instead. Its standalone AMI
-        // report (DOMINO active modules) was removed too — never produced usable
-        // output and Accumulation isn't part of the unified 13.AMI_analysis.Rmd
-        // (only CAAS/FADE/RER are). There's no separate --ami flag anymore; gene
-        // lists are simply always computed and published whenever Accumulation runs.
+        // ── Gene lists ────────────────────────────────────────────────────
+        // Background and significant gene lists per direction, always written when Accumulation runs.
         ACCUMULATION_GENE_LISTS(test_out.direction, test_out.results)
 
     emit:

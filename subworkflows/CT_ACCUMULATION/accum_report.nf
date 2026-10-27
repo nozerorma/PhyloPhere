@@ -23,10 +23,10 @@ process ACCUMULATION_REPORT {
     label 'process_reporting'
     errorStrategy 'ignore'
 
-    publishDir path: "${params.outdir}/accumulation",
+    publishDir path: "${params.outdir}/posenrich/accumulation",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
-    publishDir path: "${params.outdir}/accumulation",
+    publishDir path: "${params.outdir}/posenrich/accumulation",
                mode: 'copy', overwrite: true,
                pattern: '*.tsv'
     publishDir path: "${params.outdir}/html_reports",
@@ -42,7 +42,7 @@ process ACCUMULATION_REPORT {
 
     script:
     def local_dir = "${baseDir}/subworkflows/CT_ACCUMULATION/local"
-    def outdir    = "${params.outdir}/accumulation"
+    def outdir    = "${params.outdir}/posenrich/accumulation"
     def traitname = params.traitname ?: 'unknown_trait'
     def fdr_thr   = params.accumulation_fdr ?: 0.1
     def wrapper   = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh ' : ''

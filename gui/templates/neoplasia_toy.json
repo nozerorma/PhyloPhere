@@ -114,11 +114,6 @@
       "extreme_threshold": "0.99",
       "iqr_multiplier": "3"
     },
-    "accumulation": {
-      "enabled": true,
-      "extra_flags": "",
-      "accumulation_fdr": "0.15"
-    },
     "rer": {
       "enabled": true,
       "extra_flags": "",
@@ -205,8 +200,7 @@
       "pfam_cache_dir": "",
       "fcs_pperm_thr": "0.025",
       "fcs_analytic_levels": "0.05,0.1,0.15",
-      "fcs_cluster_similarity": "jaccard",
-      "fcs_cluster_threshold": "0.5",
+      "fcs_cluster_threshold": "0.2",
       "fcs_top_n": "25",
       "fcs_batch_size": "4",
       "fcs_block_batch_genes": "1000",
@@ -239,7 +233,10 @@
       "posenrich_aggregation": "mean",
       "posenrich_n_permutations": "999",
       "posenrich_seed": "1998",
-      "posenrich_radios": "0,5,10"
+      "posenrich_radios": "0,5,10",
+      "accumulation_fdr": "0.15",
+      "accumulation_caas_input": "",
+      "accumulation_background_input": ""
     }
   },
   "precomputed": {
@@ -249,7 +246,6 @@
     "use_resample": false,
     "use_disambiguation": false,
     "use_postproc": false,
-    "use_accumulation": false,
     "use_rer": true,
     "use_fade": true,
     "use_vep": false

@@ -37,7 +37,7 @@ def test_characterization_layers_and_summaries(tmp_path):
     assert g10['CAAS_score'] == '0.9' and g10['sides'] == 'bottom;top'
     assert g10['p.emp'] == '0.01' and g10['caas_nominal'] == 'TRUE'
     assert g12['pfam_domain'] == 'D1;D2' and g12['pfam_clan'] == 'C1'
-    assert g12['ucr_region'] == 'core' and g12['fubar_selection'] == 'negative'
+    assert g12['ucr_region'] == 'core' and g12['fubar_selection'] == 'purifying'
     assert g12['fade_bottom_sig'] == '1' and g12['fade_top_sig'] == '0'
     assert g12['evaluation_status'] == 'detected_positive'
 

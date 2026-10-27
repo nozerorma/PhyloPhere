@@ -74,7 +74,7 @@ params:
   }
 </style>
 
-<!-- 11.Scoring_report.Rmd — Position-level and gene-level CAAS scores of one trait, with FADE, RERConverge and accumulation evidence. -->
+<!-- 11.Scoring_report.Rmd — Position-level and gene-level CAAS scores of one trait, with FADE and RERConverge evidence. -->
 <!-- PhyloPhere | subworkflows/SCORING/local/ -->
 <!-- Author: Miguel Ramon (miguel.ramon@upf.edu) -->
 
@@ -192,7 +192,6 @@ if ("side" %in% names(pos_df)) pos_df$side <- as.character(pos_df$side)
 
 .num_cols_gene <- c(
   "gene_caas_score", "gene_caas_score_top", "gene_caas_score_bottom",
-  "accum_p", "accum_fdr", "accum_score",
   "rer_min_pval", "rer_rho", "rer_p.adj", "ami_score", "fcs_score",
   "fade_max_bf_top", "fade_max_bf_bottom"
 )
@@ -217,9 +216,7 @@ if (!"asr_score" %in% names(pos_df)) {
   }
 }
 
-# Provisional availability flags from gene_df; has_rand and has_rer are set again from the same
-# columns further down.
-has_rand <- "accum_p" %in% names(gene_df) && any(!is.na(gene_df$accum_p))
+# Availability flag of the RER evidence, derived from gene_df.
 has_rer  <- "rer_min_pval"    %in% names(gene_df) && any(!is.na(gene_df$rer_min_pval)) &&
             "rer_rho"         %in% names(gene_df)
 
@@ -277,12 +274,6 @@ pos_bottom <- pos_df %>% filter(side == "bottom")
 gene_df$gene_caas_top <- .num_col("gene_caas_score_top")
 gene_df$gene_caas_bot <- .num_col("gene_caas_score_bottom")
 
-# ── Gene-level accumulation significance ──────────────────────────────────────
-# Accumulation is represented by its exact hypergeometric p-value (accum_p),
-# with BH FDR (accum_fdr) and accum_significant (accum_fdr below the configured accumulation_fdr).
-has_accum_score <- "accum_p" %in% names(gene_df) && any(!is.na(gene_df$accum_p))
-has_rand <- has_accum_score
-
 # ── Gene-level direction assignment ───────────────────────────────────────────
 # Assign direction to each gene from its top-scoring position
 gene_direction_df <- pos_df %>%
@@ -312,7 +303,7 @@ gene_bot_list <- .gate_genes(pos_bottom)
   list(lbl = "All Positions", top = gene_top_list, bot = gene_bot_list)
 )
 
-# Background universe for gene-set overlap Fisher tests (RER / FADE / Accumulation
+# Background universe for gene-set overlap Fisher tests (RER / FADE
 # Venn panels) - every gene that received a CAAS gene score in this run.
 gene_universe_n <- nrow(gene_df)
 
@@ -323,7 +314,7 @@ rank_norm <- function(x) {
   (r - 1) / (max(r, na.rm = TRUE) - 1)
 }
 
-# ── Venn diagram helpers (used across RER / FADE / Accumulation tabs) ─────────
+# ── Venn diagram helpers (used across RER / FADE tabs) ─────────
 # Overlap enrichment is tested with a Fisher exact test (mathematically the
 # hypergeometric test on a 2x2 table) against the full gene universe passed in
 # `universe_n` - for gene-level overlaps this is nrow(gene_df), i.e. every gene
@@ -375,32 +366,11 @@ rank_norm <- function(x) {
 
 ## Introduction
 
-CAAS Scoring ranks the positions by their convergence score, then rolls that up to a per-gene score comparable against
-independent evolutionary evidence.
-
-1. **Position score (`CAAS_score`)**: the CAAS convergence score on the pair's
-   Voronoi domain. Evidence that the convergence reflects independent origins,
-   not shared ancestry. The biochemical groupings of the derived side
-   (`biochem_groupings`) do not enter the score; they are described in the
-   position-level enrichment report.
-
-2. **Gene score (`gene_caas_score_top` / `_bottom`)**: the gene's strongest
-   positive position score in that direction. No ECDF transform or adjustment
-   for the number of positions is applied. Gene p.gen is calibrated against the
-   raw maximum of the same gene in each null cycle. Compared against:
-   `r if (has_rand) "- **accum_p**: Exact hypergeometric p-value of CAAS accumulation (+ BH FDR accum_fdr)."`
-   `r if (has_rer) "- RERConverge empirical p-value and sign of Rho (positive / negative)."`
-   - FADE: gene is significant per direction if any position has BF >= 100.
+Positions are ranked by convergence score. Gene maxima are calibrated against each gene's permulation null. RER and FADE provide separate evolutionary annotations.
 
 ## Companion reports
 
-This scoring report is the hub of the downstream enrichment suite. The reports below
-are rendered as sibling HTML files in the same `html_reports/` directory and are
-auto-annotated with the cross-module scoring signals (CAAS nominal/BH activity
-calls, FADE, accumulation) produced here. A link is live only if the
-corresponding module was part of this run. FADE and Accumulation do not run
-their own FCS ranking; they appear there as cross-module corroboration flags.
-Position annotations and their coverage are described in POSENRICH modular. Evolutionary and clinical annotations are descriptive and do not constitute independent validation.
+Related enrichment and annotation reports from this run:
 
 ```{r companion-reports, results='asis'}
 .trait <- if (is.null(params$traitname) || !nzchar(params$traitname)) "unknown_trait" else params$traitname
@@ -420,84 +390,18 @@ cat("\n")
 
 ## Scoring Methodology
 
-This section documents the exact weighting and combination logic used to
-produce every score in this report, so results can be interpreted and
-reproduced independently of the pipeline code.
+| Quantity | Interpretation |
+|---|---|
+| `CAAS_score = caas_row = asr_path_score` | Convergence score in [0,1]: mean over fixed Voronoi domains of PSS-weighted hypothesis evidence for independent origins. Undetected hypotheses contribute zero. |
+| `gene_caas_score` | Largest positive position score of the gene. Global uses the best side per position; Top/Bottom use their own sides. |
+| `p.gen` | Inclusive upper-tail comparison with the same gene's null maxima, with add-one smoothing. Missing null gene-cycles contribute zero. |
+| `p.emp` | Positional empirical evidence for detection and score exceedance, pooled over sides. |
+| BH-adjusted evidence | The producer's adjustment within its declared test family. Nominal activity and BH significance are displayed separately. |
+| `derived_agreement`, `biochem_groupings`, `is_biochem` | Descriptive residue annotations. |
+| RER | Empirical p/BH q and sign of Rho. Both signs remain available in each CAAS view. |
+| FADE | Per-direction maximum site BF and the producer's selected-site call. |
 
-::: {.scoring-methodology}
-
-
-
----
-
-### Position-Level Score
-
-`CAAS_score` is built from one evidence axis; `caas_row` and the position score (its `caas_row`) both lie in [0, 1]:
-
-#### 1. Position evolution: `asr_path_score` (`asr_score`)
-
-Core v3: `asr_path_score`, the CAAS convergence score on the pair's
-Voronoi domain, built from the per-node ASR posteriors (full definitions in
-[`docs/scoring_v3_core.md`](../../docs/scoring_v3_core.md)):
-
-| Quantity | What it rewards |
-|--------|-----------------|
-| `asr_path_score` | mean over the K fixed Voronoi domains of the domain score: the PSS-weighted mean, over the species that represent the domain in the design's pairs, of their hypothesis scores (a hypothesis that does not detect the position counts 0). A hypothesis score is the noisy-OR independence of the domain with its same-residue partners (one minus the probability that the derived residue was already at their shared LCA) |
-| `derived_agreement` | retained descriptor (not a score factor): changed pairs landing on the same derived residue per side |
-
-(Core v3 removed the pairwise isolation factor `s_c^s * s_d^s` and the earlier
-`independence` / `mrca_diversity` / `conservation_gate` axes from the score.)
-
-#### 2. Position score and biochemical groupings
-
-`caas_row = asr_path_score`; `CAAS_score = caas_row`.
-
-(`caas_row` carries no permutation-rank phenotype factor, on the observed or the null side.) `biochem_groupings` lists the
-groupings GS1-GS4 in which the derived residues of the position share one class that differs from the ancestral class,
-and `is_biochem` says whether there is any; they are descriptors and do not enter any score. The position-level
-enrichment report analyses them.
-
-
----
-
-### Gene-Level Scores
-
-#### gene_caas_top / gene_caas_bot
-
-For each direction, the gene score is the largest positive `CAAS_score` among
-that gene's positions. Global uses the best side of each position; top and
-bottom use their respective sides. There is no ECDF transform or exponent.
-
-`gene_caas_score = max(positive position scores)`
-
-A direction with no scored position is unavailable in the observed score table;
-the canonical gene null uses zero for an absent/removed/unscored gene-cycle.
-The maximum itself is a score, not a p-value. `p.gen` compares it with the same
-gene's null maxima, using the inclusive upper tail and add-one smoothing.
-Genes with more positions can have more opportunities for a large maximum;
-the per-gene empirical null preserves that gene's null opportunities.
-
-#### gene_accum_score (`accum_p`) *(optional)*
-
-Exact hypergeometric p-value of CAAS accumulation.
-Reported with BH FDR (`accum_fdr`); `accum_significant` uses the effective `params.accumulation_fdr` supplied to the producer, separately for all/top/bottom.
-
-#### RERConverge characterisation *(optional)*
-
-`p.perm` supplies empirical gene evidence; missing values stay unavailable, with no analytic fallback. Direction describes the sign of `Rho` (positive / negative). Nominal `p.perm < 0.05`; BH `p.perm.adj < 0.05` in its original RER family. Both signs remain in every CAAS view.
-
-#### FADE gene-level characterisation *(optional)*
-
-A gene is FADE-significant per direction if it contains at least one position
-with `max_site_bf >= 100`.
-
----
-
-### Empirical activity and adjusted evidence
-
-Genes use the empirical p.gen obtained from their own permulation null. Positions use p.emp (detects and exceeds, pooled over sides). Activity lists use the configured nominal threshold; the same tables and AMI networks highlight BH-adjusted significance. All tested genes remain in the continuous FCS ranking. No fraction of the score distribution is selected.
-
-:::
+Observed directions without a scored position remain unavailable. Gene-specific nulls preserve each gene's opportunities for a high maximum. FCS uses the continuous ranking; AMI uses nominal active genes and marks BH-adjusted hits.
 
 ---
 
@@ -890,18 +794,21 @@ canonical pairs (H1) of each null cycle with those of the run, and shows how the
 If the run lies in the body of the null in these quantities, the null is comparable to it; if it lies in a tail, the
 volume comparison of the previous tabs must be read with that in mind.
 
-```{r pos-null-design, eval=has_pos_null && .file_ok(params$perm_manifest_file) && .file_ok(params$hypotheses_pairs_file), fig.height=6.5, fig.width=10}
+```{r pos-null-design, eval=has_pos_null && .file_ok(params$perm_manifest_file), fig.height=6.5, fig.width=10, results="asis"}
 .man <- readr::read_tsv(params$perm_manifest_file, show_col_types = FALSE)
-.hp1 <- readr::read_tsv(params$hypotheses_pairs_file, show_col_types = FALSE) %>% filter(hypothesis_id == "H1")
+.hp1 <- if(.file_ok(params$hypotheses_pairs_file)) readr::read_tsv(params$hypotheses_pairs_file, show_col_types = FALSE) else tibble()
+if("hypothesis_id" %in% names(.hp1)) .hp1 <- .hp1 %>% filter(hypothesis_id=="H1")
+if(!nrow(.hp1)) cat("_Observed canonical pairs are unavailable: null-cycle design is shown; the observed reference and its percentile cannot be estimated._\n\n")
 # |delta| of the canonical pairs from the trait values of the manifest when the run predates the design columns
 .mean_abs <- function(f, b) mean(abs(as.numeric(strsplit(f, ",")[[1]]) - as.numeric(strsplit(b, ",")[[1]])))
 if (!"mean_abs_diff" %in% names(.man) && all(c("fg_values", "bg_values") %in% names(.man)))
   .man$mean_abs_diff <- mapply(.mean_abs, .man$fg_values, .man$bg_values)
-.des_obs <- c(mean_distance = mean(.hp1$distance), mean_pss = mean(.hp1$pss_score), mean_abs_diff = mean(.hp1$abs_diff))
+.des_obs <- c(mean_distance = if(nrow(.hp1))mean(.hp1$distance) else NA_real_, mean_pss = if(nrow(.hp1))mean(.hp1$pss_score) else NA_real_, mean_abs_diff = if(nrow(.hp1))mean(.hp1$abs_diff) else NA_real_)
 .des_lab <- c(mean_distance = "mean patristic distance of the pairs", mean_pss = "mean PSS of the pairs", mean_abs_diff = "mean |trait difference| of the pairs")
 .des_cols <- intersect(names(.des_lab), names(.man))
 .des_cols <- .des_cols[vapply(.des_cols, function(m) any(is.finite(.man[[m]])), logical(1))]
 
+if(length(.des_cols)) {
 .des_long <- dplyr::bind_rows(lapply(.des_cols, function(m) tibble::tibble(metric = .des_lab[[m]], value = .man[[m]]))) %>%
   filter(is.finite(value)) %>% mutate(metric = factor(metric, levels = unname(.des_lab[.des_cols])))
 p_des <- ggplot(.des_long, aes(value)) +
@@ -909,7 +816,7 @@ p_des <- ggplot(.des_long, aes(value)) +
   geom_vline(data = tibble::tibble(metric = factor(unname(.des_lab[.des_cols]), levels = levels(.des_long$metric)), v = unname(.des_obs[.des_cols])),
              aes(xintercept = v), colour = "#E15759", linewidth = 1) +
   facet_wrap(~metric, scales = "free", nrow = 1) +
-  labs(title = "Canonical pairs per null cycle (grey) and in the run (red)", x = NULL, y = "cycles") + .theme_p
+  labs(title = if(nrow(.hp1))"Canonical pairs per null cycle (grey) and in the run (red)" else "Canonical pairs per null cycle (observed design unavailable)", x = NULL, y = "cycles") + .theme_p
 
 # Detections of each cycle against the distance of its pairs
 if ("mean_distance" %in% .des_cols) {
@@ -920,7 +827,7 @@ if ("mean_distance" %in% .des_cols) {
     geom_point(alpha = .3, size = 1, colour = "grey35") +
     geom_point(data = tibble::tibble(mean_distance = .des_obs[["mean_distance"]], positions = max(nrow(.sets$global$obs), 1)), colour = "#E15759", size = 3) +
     scale_y_log10() +
-    labs(title = sprintf("Positions detected per cycle vs distance of its pairs (Spearman %.2f)", .rho),
+    labs(title = sprintf("Positions detected per cycle vs distance of its pairs (Spearman %.4f)", .rho),
          x = "mean patristic distance of the pairs", y = "positions detected (log10)") + .theme_p
   gridExtra::grid.arrange(p_des, p_sc2, ncol = 1, heights = c(1, 1.1))
 } else {
@@ -930,17 +837,19 @@ if ("mean_distance" %in% .des_cols) {
 .des_tab <- dplyr::bind_rows(lapply(.des_cols, function(m) {
   v <- .man[[m]]; o <- .des_obs[[m]]
   tibble::tibble(quantity = .des_lab[[m]], run = o, `null median` = median(v, na.rm = TRUE), q05 = quantile(v, .05, na.rm = TRUE),
-                 q95 = quantile(v, .95, na.rm = TRUE), `cycles >= run` = sprintf("%.1f%%", 100 * mean(v >= o, na.rm = TRUE)))
+                 q95 = quantile(v, .95, na.rm = TRUE), `cycles >= run` = if(is.finite(o))sprintf("%.4f%%", 100 * mean(v >= o, na.rm = TRUE)) else NA_character_)
 }))
-knitr::kable(.des_tab, digits = 3, caption = "Design of the canonical pairs: the run against the null cycles")
+print(knitr::kable(.des_tab, format="html", digits = 4, caption = "Design of the canonical pairs: the run against the null cycles"))
+} else cat("_No finite design metrics are available in the manifest._\n\n")
+
 ```
 
 ```{r pos-null-design-old, eval=exists(".des_cols") && !("mean_distance" %in% .des_cols), results='asis'}
-cat("_This `permulation_manifest.tsv` has no distance or PSS columns (it was written before the permulation harvest recorded the design of the canonical pairs), so only the trait difference is shown._\n\n")
+cat("_Distance is unavailable in the manifest; the panel shows the available design metrics._\n\n")
 ```
 
-```{r pos-null-design-na, eval=has_pos_null && !(.file_ok(params$perm_manifest_file) && .file_ok(params$hypotheses_pairs_file)), results='asis'}
-cat("_The design panel needs `permulation_manifest.tsv` of the permulation harvest and the observed `contrast_hypotheses_pairs.tsv`; at least one is not available for this run._\n\n")
+```{r pos-null-design-na, eval=has_pos_null && !.file_ok(params$perm_manifest_file), results='asis'}
+cat("_Null design is unavailable: `permulation_manifest.tsv` was not supplied._\n\n")
 ```
 
 When the permulations are harvested with `perm_match_pss`, the PSS of the canonical pairs of each cycle follows the PSS of
@@ -1176,8 +1085,7 @@ for(rk in c("global","top","bottom")) {
   cols <- intersect(c("Gene","CAAS score in view","FADE BF","FADE call",
     "n_positions","n_positions_top","n_positions_bottom","p.gen","p.gen.adj","nominal","adjusted",
     "rer_min_pval","rer_perm_padj","rer_rho","rer_significant","rer_significant_fdr",
-    "fade_max_bf_top","fade_significant_top","fade_max_bf_bottom","fade_significant_bottom",
-    "accum_p","accum_fdr"),names(x))
+    "fade_max_bf_top","fade_significant_top","fade_max_bf_bottom","fade_significant_bottom"),names(x))
   cat("\n#### ",rk,"\n\n",sep="")
   emit_widget(DT::datatable(x[,cols,drop=FALSE], rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list())))
 }
@@ -1199,7 +1107,7 @@ for(rk in c("global","top","bottom")) {
 
 ### Cross-method gene overlap {.tabset}
 
-CAAS and other are calls within their shared evaluable gene universe; overlap is their intersection. RER includes both signs in every CAAS view: intersection is not biological concordance. Missing p/q is excluded at the corresponding level. FADE uses its original BF calls; Global is their union, with a missing side remaining unknown unless the measured side is positive; accumulation uses its own configured BH criterion, separately for all/top/bottom. Original gene BH values are preserved. Fisher is two-sided; its BH family comprises the 18 planned ranking × method × call comparisons, including unavailable comparisons in the family size. Degenerate measured tables have Fisher p=1; empty universes are unavailable.
+CAAS and other are calls within their shared evaluable gene universe; overlap is their intersection. RER includes both signs in every CAAS view: intersection is not biological concordance. Missing p/q is excluded at the corresponding level. FADE uses its original BF calls; Global is their union, with a missing side remaining unknown unless the measured side is positive. Original gene BH values are preserved. Fisher is two-sided; its BH family comprises the 12 planned ranking × method × call comparisons, including unavailable comparisons in the family size. Degenerate measured tables have Fisher p=1; empty universes are unavailable.
 
 ```{r empirical-overlap, results='asis'}
 source("src/report_evidence.R")
@@ -1523,21 +1431,20 @@ cat(sprintf("Columns: %s\n", paste(names(supp_df), collapse = ", ")))
 
 ```{r summary-stats}
 # Fixed counts shown in the summary table, not derived from the data.
-n_components <- 5L
+n_components <- 1L
 
 n_gene_components <- 1L  # gene_caas always present
-if (has_accum_score) n_gene_components <- n_gene_components + 1L
 if (has_rer)         n_gene_components <- n_gene_components + 1L
 
 summary_tbl <- tibble(
   Metric = c(
     "Positions scored", "Genes scored",
-    "Position-level components", "Gene-level components",
+    "Position-level components", "Gene-level evidence sources",
     "CAAS Score (median)", "Position nominal empirical threshold",
     "Gene CAAS TOP (median)", "Gene nominal empirical threshold",
     "FADE site-level analysis available",
     "FADE gene-level analysis available",
-    "Accumulation score available", "RERConverge available",
+    "RERConverge available",
     "Genomic coordinates available"
   ),
   Value = c(
@@ -1551,7 +1458,6 @@ summary_tbl <- tibble(
     sprintf("%.4f", params$evidence_p_threshold),
     ifelse(has_fade_pos,     "Yes", "No"),
     ifelse(has_fade_gene,    "Yes", "No"),
-    ifelse(has_accum_score,  "Yes", "No"),
     ifelse(has_rer,          "Yes", "No"),
     ifelse(has_genomic,      "Yes", "No")
   )

@@ -284,7 +284,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // scored by CT_OBSERVED instead, with the same code.
         def run_ct_disambiguation = toBool(params.ct_disambiguation) && (ran_discovery || params.discovery_from || params.disambiguation_input)
         def run_ct_postproc       = toBool(params.ct_postproc) && (run_ct_disambiguation || params.disambiguation_input)
-        def run_ct_accumulation   = toBool(params.ct_accumulation) && (run_ct_postproc || params.accumulation_background_input)
+        def run_ct_accumulation   = toBool(params.posenrich_modular) && (run_ct_postproc || params.accumulation_background_input)
         // A saved null satisfies enrichment without an implicit alignment replay.
         // Otherwise an incomplete standalone replay can supply empty live channels
         // that mask --caas_null_dir in SCORING. Live discovery/disambiguation still wins.
@@ -505,7 +505,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     CAAS_CORE_MERGE_REDUCE_STRICT(merged_strict.block_out.filter { it[0] != 'b0' }.map { it[1] }.collect(), caas_universe_ch, core.labelings)
                 }
                 scoring_caas_perms_ch = caas_perm_out.perms
-                scoring_null_positions_ch = caas_perm_out.null_positions    // the scored positions of the null with nd: the universe of SCORING and CT_ACCUMULATION
+                scoring_null_positions_ch = caas_perm_out.null_positions    // the scored positions of the null with nd: the universe of SCORING and of POSENRICH Accumulation
                 scoring_null_blocks_ch = merged_blocks.map { bs -> [blocks: bs] }.combine(caas_perm_out.metadata).map { wrapped, meta -> wrapped.blocks }                      // the blocks' scored positions: SCORING counts them against the observed positions
                 scoring_null_counts_ch = caas_perm_out.counts
                 scoring_caas_pos_sample_ch = caas_perm_out.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))  // cycle-stratified sample for distribution plots
@@ -522,16 +522,16 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         if (run_ct_accumulation) {
 
             if (!params.ct_postproc && !params.accumulation_background_input) {
-                error "CT_ACCUMULATION requires CT post-processing output (--ct_postproc) or a standalone background file (--accumulation_background_input)."
+                error "POSENRICH Accumulation requires CT post-processing output (--ct_postproc) or a standalone background file (--accumulation_background_input)."
             }
             if (!params.ct_postproc && !params.accumulation_caas_input) {
-                error "CT_ACCUMULATION requires CT post-processing output (--ct_postproc) or a standalone CAAS file (--accumulation_caas_input)."
+                error "POSENRICH Accumulation requires CT post-processing output (--ct_postproc) or a standalone CAAS file (--accumulation_caas_input)."
             }
 
             // The universe U is defined by the permuted null, which has no cycle when only b_0 is replayed
             // (--caas_full_perms 0). Written without `?:`: Groovy reads a numeric 0 as false.
             if (core && params.caas_full_perms != null && (params.caas_full_perms as int) == 0) {
-                error "CT_ACCUMULATION needs the permuted null to define the universe U, and it is empty with --caas_full_perms 0: raise --caas_full_perms or disable CT_ACCUMULATION."
+                error "POSENRICH Accumulation needs the permuted null to define the universe U, and it is empty with --caas_full_perms 0: raise --caas_full_perms or disable --posenrich_modular."
             }
 
             // Use filtered_discovery.tsv from postproc (gene_filtering stage)
@@ -724,7 +724,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             def scoring_fade_site_bot_ch = params.fade ? FADE.out.sites_csv_bottom : fade_precomp_sites_bot_ch
             def scoring_rer_ch           = (params.rer_tool || params.rer_continuous_file || params.rer_binary_file) ? RER_MAIN.out.summary_tsv : null
             def scoring_rer_perms_ch     = (params.rer_tool || params.rer_continuous_file || params.rer_binary_file) ? RER_MAIN.out.perms      : null
-            def scoring_accum_ch         = accum_results     ? accum_results.results               : null
             // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
             // scoring_caas_* are built above, outside this block — see the comment there.
 
@@ -763,7 +762,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 scoring_fade_top_ch,
                 scoring_fade_bot_ch,
                 scoring_rer_ch,
-                scoring_accum_ch,
                 null,  // genomic_info — resolved from params.gene_ensembl_file in scoring.nf
                 scoring_fade_site_top_ch,
                 scoring_fade_site_bot_ch,
@@ -842,7 +840,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 def fcs_stats_ch = params.scoring ? SCORING.out.fcs_stats : Channel.empty()
                 def fcs_stats_rer_ch = params.scoring ? SCORING.out.fcs_stats_rer : Channel.empty()
                 def fcs_stats_fade_ch = params.scoring ? SCORING.out.fcs_stats_fade : Channel.empty()
-                def fcs_stats_accum_ch = params.scoring ? SCORING.out.fcs_stats_accum : Channel.empty()
                 def gene_lists_ch = params.scoring ? SCORING.out.gene_lists : Channel.empty()
                 def gene_scores_ch = params.scoring ? SCORING.out.gene_scores : Channel.empty()
                 def position_scores_ch = params.scoring ? SCORING.out.position_scores : Channel.empty()
@@ -904,7 +901,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     fcs_stats_ch,
                     fcs_stats_rer_ch,
                     fcs_stats_fade_ch,
-                    fcs_stats_accum_ch,
                     gene_lists_ch,
                     gene_scores_ch,
                     pp_cleaned_bg,
@@ -939,7 +935,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         }
 
         if (!ran_any) {
-            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_disambiguation, --ct_postproc, --enrichment, --ct_accumulation, --fade, --scoring, or --rer_tool."
+            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_disambiguation, --ct_postproc, --enrichment, --posenrich_modular, --fade, --scoring, or --rer_tool."
         }
     }
 }

@@ -195,13 +195,13 @@ class WorkflowMap {
               htmlCandidates: ["${outdir}/html_reports/8.Characterization_report.html"] ],
 
             [ id: 'ct_acc',      name: 'CT accumulation (convergence)',   type: 'processes', ran: ctx.ctAccum,
-              filesDirs: ["${outdir}/accumulation",
-                          "${outdir}/accumulation/top",
-                          "${outdir}/accumulation/bottom",
-                          "${outdir}/accumulation/all",
-                          "${outdir}/accumulation/top/gene_lists",
-                          "${outdir}/accumulation/bottom/gene_lists",
-                          "${outdir}/accumulation/all/gene_lists"],
+              filesDirs: ["${outdir}/posenrich/accumulation",
+                          "${outdir}/posenrich/accumulation/top",
+                          "${outdir}/posenrich/accumulation/bottom",
+                          "${outdir}/posenrich/accumulation/all",
+                          "${outdir}/posenrich/accumulation/top/gene_lists",
+                          "${outdir}/posenrich/accumulation/bottom/gene_lists",
+                          "${outdir}/posenrich/accumulation/all/gene_lists"],
               htmlCandidates: ["${outdir}/html_reports/10.Accumulation_report.html"] ],
 
             [ id: 'vep',         name: 'VEP characterization',            type: 'prepost',   ran: ctx.vep,
@@ -243,13 +243,12 @@ class WorkflowMap {
 
             // The main ENRICHMENT workflow (workflows/enrichment.nf) runs downstream of
             // --scoring when --enrichment is also set. It only ever runs per-module FCS
-            // for CAAS ('fcs') and RER ('scoring/rer') — FADE and accumulation no longer
-            // run their own FCS ranking (see subworkflows/ENRICHMENT/fcs.nf), so there is
-            // no 12.FCS_fade/12.FCS_accumulation to look for. AMI is separate: the
+            // for CAAS ('fcs') and RER ('scoring/rer'); FADE has no FCS ranking of its own
+            // (see subworkflows/ENRICHMENT/fcs.nf), so there is no 12.FCS_fade to look for. AMI is separate: the
             // centralized DOMINO-based run (--scoring_ami) lives under ENRICHMENT and
-            // publishes to ami/*, while each of RER/FADE/accumulation can *also* run
+            // publishes to ami/*, while each of RER/FADE can *also* run
             // its own AMI report directly from its own workflow file (--ami, a
-            // distinct flag — see workflows/rerconverge.nf, fade.nf, ct_accumulation.nf),
+            // distinct flag — see workflows/rerconverge.nf, fade.nf),
             // publishing under that module's own output tree instead of ami/.
             [ id: 'fcs',         name: 'Functional enrichment (FCS)',     type: 'reporting', ran: ctx.fcs,
               filesDirs: ["${outdir}/fcs",
@@ -267,14 +266,10 @@ class WorkflowMap {
                           // workflow file rather than centralized ENRICHMENT/DOMINO).
                           "${outdir}/rerconverge/ami",
                           "${outdir}/selection/fade/top/ami",
-                          "${outdir}/selection/fade/bottom/ami",
-                          "${outdir}/accumulation/top/ami",
-                          "${outdir}/accumulation/bottom/ami",
-                          "${outdir}/accumulation/all/ami"],
+                          "${outdir}/selection/fade/bottom/ami"],
               htmlCandidates: ["${outdir}/html_reports/13.AMI_analysis.html",
                                "${outdir}/html_reports/13.AMI_rer.html",
-                               "${outdir}/html_reports/13.AMI_fade.html",
-                               "${outdir}/html_reports/13.AMI_accumulation.html"] ],
+                               "${outdir}/html_reports/13.AMI_fade.html"] ],
 
             [ id: 'posenrich', name: 'POSENRICH modular',                 type: 'reporting', ran: ctx.posenrich,
               filesDirs: ["${outdir}/posenrich/registry",
@@ -567,7 +562,7 @@ class WorkflowMap {
             ct_disambig  : ['ct_disambiguation'],
             asr_diagnostics : ['asr_diagnostics'],
             ct_postproc  : ['postproc', 'postproc/preprocessed'],
-            ct_acc       : ['accumulation'],
+            ct_acc       : ['posenrich/accumulation'],
             vep          : ['vep'],
             rer          : ['rerconverge', 'rerconverge/rer_results'],
             fade         : ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
@@ -575,8 +570,7 @@ class WorkflowMap {
             ct_signif_sig: ['meta_caas/significance'],
             fcs          : ['fcs', 'scoring/rer'],
             ami          : ['ami', 'rerconverge/ami',
-                            'selection/fade/top/ami', 'selection/fade/bottom/ami',
-                            'accumulation/top/ami', 'accumulation/bottom/ami', 'accumulation/all/ami'],
+                            'selection/fade/top/ami', 'selection/fade/bottom/ami'],
             compare      : ['compare'],
             // Ignore historical report 14 outputs; active POSENRICH is the modular
             // registry/report tree only.

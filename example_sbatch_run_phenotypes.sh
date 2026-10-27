@@ -53,7 +53,6 @@ export RUN_REPORTING=true
 export RUN_PRUNE=true
 export RUN_CAAS=true
 export RUN_DISAMBIGUATION=true
-export RUN_ACCUMULATION=true
 export RUN_VEP=true
 export RUN_SCORING=true
 export RUN_SCORING_STRESS=true

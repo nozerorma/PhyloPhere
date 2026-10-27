@@ -86,6 +86,9 @@ theme_set(
     plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
   )
 )
+emit_widget <- function(w) {
+ r <- knitr::knit_print(w); knitr::knit_meta_add(attr(r,"knit_meta")); cat(r,"\n\n")
+}
 fdr_thr   <- params$fdr_threshold
 pval_thr  <- fdr_thr
 accum_dir <- params$accum_dir
@@ -210,6 +213,25 @@ for (dir in directions) {
 
 ---
 
+## Genes with large CAAS pools {.tabset}
+
+All genes, ordered by `PoolPositions` descending. `ActualCount`, `MeanNull`, `SD`, p and BH q show whether a large pool also has many observed CAAS. Zero observed counts remain visible; their q is unavailable under the report's testing family.
+
+```{r pool-tables, results='asis'}
+for (dir in directions) {
+ cat(sprintf("\n\n### %s\n\n", str_to_title(dir)))
+ d <- accum %>% filter(direction==dir) %>%
+   select(gene, ActualCount, PoolPositions, MeanNull, SD, PValue, FDR) %>%
+   arrange(desc(PoolPositions),desc(ActualCount),gene)
+ w <- DT::datatable(d,rownames=FALSE,filter="top",extensions="Buttons",
+   options=list(pageLength=20,scrollX=TRUE,order=list(),dom="Blfrtip",buttons=c("csv","excel"))) %>%
+   DT::formatRound(c("MeanNull","SD","PValue","FDR"),digits=4,mark="")
+ emit_widget(w)
+}
+```
+
+---
+
 ## P-value distributions {.tabset}
 
 ```{r pval-tabs, results='asis'}
@@ -243,8 +265,7 @@ for (dir in directions) {
   sig <- accum %>%
     filter(direction == dir, significant) %>%
     select(gene, ActualCount, PoolPositions, MeanNull, SD, PValue, FDR) %>%
-    arrange(FDR, gene) %>%
-    mutate(PValue = formatC(PValue, format = "e", digits = 2))
+    arrange(FDR, gene)
 
   if (nrow(sig) == 0) { cat("*No significant genes.*\n\n"); next }
 

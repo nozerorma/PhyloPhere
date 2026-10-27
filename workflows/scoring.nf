@@ -4,7 +4,7 @@
  * PHYLOPHERE: CAAS Scoring Workflow
  *
  * Computes position-level and gene-level CAAS scores by integrating outputs
- * from CT_POSTPROC, FADE, RERConverge, and CT_ACCUMULATION.
+ * from CT_POSTPROC, FADE and RERConverge.
  * Runs once on the full postproc pool; directional characterisation is
  * performed post-scoring via the side column.
  *
@@ -26,7 +26,6 @@ workflow SCORING {
         fade_summary_top_ch      // Channel<path> or null — fade_summary_top.tsv
         fade_summary_bottom_ch   // Channel<path> or null — fade_summary_bottom.tsv
         rer_summary_ch           // Channel<path> or null — rerconverge_summary_{trait}.tsv
-        accum_ch                 // Channel<path> or null — collected accumulation CSVs (all directions)
         genomic_info_ch          // Channel<path> or null — gene genomic coords TSV  (optional)
         fade_site_top_ch         // Channel<path> or null — fade_site_bf_top.tsv     (optional)
         fade_site_bot_ch         // Channel<path> or null — fade_site_bf_bottom.tsv  (optional)
@@ -71,30 +70,6 @@ workflow SCORING {
 
         def resolved_rer = (rer_summary_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_rer_input ?: (params.rer_continuous_file ?: (params.rer_binary_file ?: 'NO_RER'))) }
-
-        // Accumulation: collect all CSVs (top + bottom + all) into a single value channel.
-        // The R script selects accumulation_all_* files via pattern matching.
-        def accum_source = (accum_ch ?: Channel.empty())
-        if (params.scoring_accum_dir) {
-            def accum_dir = params.scoring_accum_dir ?: ''
-            accum_source = accum_source.ifEmpty {
-                // Recursive: live output is accumulation/{top,bottom,all}/accumulation_<direction>_results.csv,
-                // one level below accum_dir, not flat inside it — a plain listFiles() here
-                // would find zero matches against the real directory-layout.
-                if (accum_dir && file(accum_dir).isDirectory()) {
-                    def csvs = []
-                    file(accum_dir).eachFileRecurse(groovy.io.FileType.FILES) { f ->
-                        if (f.name.endsWith('.csv') && f.name.startsWith('accumulation_')) csvs << f
-                    }
-                    if (csvs.size() > 0) return csvs
-                }
-                [file('NO_ACCUM')]
-            }
-        }
-        def accum_all_ch = accum_source
-            .flatten()
-            .collect()
-            .ifEmpty { [file('NO_ACCUM')] }
 
         def resolved_genomic_info = (genomic_info_ch ?: Channel.empty())
             .ifEmpty {
@@ -177,7 +152,7 @@ workflow SCORING {
             .map { it[0] }
 
         // Positional universe and N of the null (see null_position_stats.py). The tested positions are the live
-        // background.output, else --posenrich_background_file (the same file CT_ACCUMULATION reads); the cleaned background
+        // background.output, else --posenrich_background_file (the same file POSENRICH Accumulation reads); the cleaned background
         // (resolved_background) limits the null to the genes of the run. Each falls back to a NO_* sentinel: the universe is
         // then every null-positive position, and the log says so.
         def resolved_tested_pos = (tested_positions_ch ?: Channel.empty())
@@ -229,7 +204,6 @@ workflow SCORING {
             resolved_fade_site_top_ch,
             resolved_fade_site_bot_ch,
             resolved_rer,
-            accum_all_ch,
             resolved_hyp_pairs,
             null_counters_v,
             null_fit_v,
@@ -299,7 +273,6 @@ workflow SCORING {
         fcs_stats        = evidence_out.fcs_stats
         fcs_stats_rer    = compute_out.fcs_stats_rer
         fcs_stats_fade   = compute_out.fcs_stats_fade
-        fcs_stats_accum  = compute_out.fcs_stats_accum
         gene_lists       = evidence_out.gene_lists
         position_lists   = evidence_out.position_lists
         // WP10 POSENRICH modular: the registry consumes the evaluated positions and

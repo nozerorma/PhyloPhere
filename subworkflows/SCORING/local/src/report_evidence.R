@@ -5,7 +5,7 @@ scoring_overlap <- function(d, nominal=.05, fdr=.05) {
   rows <- list()
   for(rk in c('global','top','bottom')) {
     sf <- if(rk=='global') '' else paste0('_',rk)
-    for(tool in c('RER','FADE','Accumulation')) for(level in c('nominal','adjusted')) {
+    for(tool in c('RER','FADE')) for(level in c('nominal','adjusted')) {
       cp <- col(paste0('caas_',if(level=='nominal') 'p.gen' else 'p.gen.adj',sf))
       ca <- cp < if(level=='nominal') nominal else fdr
       if(tool=='RER') {
@@ -21,11 +21,6 @@ scoring_overlap <- function(d, nominal=.05, fdr=.05) {
         side_measured <- Map(function(b,c) is.finite(b) & !is.na(c), bf, calls)
         other <- Reduce(`|`,lapply(calls,function(x)x %in% TRUE))
         measured <- other | Reduce(`&`, side_measured)
-      } else {
-        # Only ActualCount>0 genes belong to the accumulation tested BH family.
-        # q availability is the producer's marker of that membership.
-        measured <- is.finite(col(paste0('accum_fdr',sf))) & !is.na(col(paste0('accum_significant',sf)))
-        other <- col(paste0('accum_significant',sf)) %in% TRUE
       }
       ok <- is.finite(cp) & measured
       ca <- ca[ok]; ot <- other[ok]

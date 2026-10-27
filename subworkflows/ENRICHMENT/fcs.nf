@@ -17,10 +17,9 @@
  *    SCORING_FCS_REPORT : CAAS report (global/top/bottom rankings, cross-module flags)
  *    RER_FCS_REPORT     : RERconverge report (also takes the CAAS stats as annot_file)
  *
- *  FADE and Accumulation have no FCS ranking of their own: the FADE statistic is a
- *  maximum over many sites and Accumulation has no permulation null, so neither
- *  supports a reliable standalone significance test. They enter as cross-module
- *  corroboration flags on the leading edge of the CAAS and RER rankings.
+ *  FADE has no FCS ranking of its own: its statistic is a maximum over many sites,
+ *  which does not support a reliable standalone significance test. It enters as a
+ *  cross-module corroboration flag on the leading edge of the CAAS and RER rankings.
  *
  *  Consumes:  stats TSV, universe file, permutations file, GMT directory
  *  Produces:  12.FCS_*.html, fcs_results/ (fcs_all_results.tsv, fcs_leading_edge.tsv,
@@ -65,7 +64,7 @@ process SCORING_FCS_REPORT {
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     def enrich_file_arg = (enrich_file.name =~ /^NO_/) ? 'NULL' : "'${enrich_file}'"
-    def report_sources = ['12.FCS_general_report.Rmd','src/fcs_cluster.R','src/fcs_selection.R','src/evidence_flags.R'].collect { file("${local_dir}/${it}").text }.join('\n')
+    def report_sources = ['12.FCS_general_report.Rmd','src/term_blocks.R','src/fcs_selection.R','src/evidence_flags.R','src/report_presentation.R'].collect { file("${local_dir}/${it}").text }.join('\n')
     def report_hash = java.security.MessageDigest.getInstance('SHA-256').digest(report_sources.getBytes('UTF-8')).encodeHex().toString()
     def render = """
         # FCS reporting source SHA256: ${report_hash}
@@ -82,7 +81,6 @@ process SCORING_FCS_REPORT {
                 pperm_thr     = ${pperm_thr},
                 analytic_levels = '${params.fcs_analytic_levels}',
                 gene_stat = '${params.gene_stat ?: "max"}',
-                cluster_similarity = '${params.fcs_cluster_similarity}',
                 cluster_threshold  = ${params.fcs_cluster_threshold},
                 top_n         = ${top_n},
                 traitname     = '${traitname}',
@@ -142,7 +140,7 @@ process RER_FCS_REPORT {
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     def enrich_file_arg = (enrich_file.name =~ /^NO_/) ? 'NULL' : "'${enrich_file}'"
-    def report_sources = ['12.FCS_general_report.Rmd','src/fcs_cluster.R','src/fcs_selection.R','src/evidence_flags.R'].collect { file("${local_dir}/${it}").text }.join('\n')
+    def report_sources = ['12.FCS_general_report.Rmd','src/term_blocks.R','src/fcs_selection.R','src/evidence_flags.R','src/report_presentation.R'].collect { file("${local_dir}/${it}").text }.join('\n')
     def report_hash = java.security.MessageDigest.getInstance('SHA-256').digest(report_sources.getBytes('UTF-8')).encodeHex().toString()
     def render = """
         # FCS reporting source SHA256: ${report_hash}
@@ -160,7 +158,6 @@ process RER_FCS_REPORT {
                 pperm_thr     = ${pperm_thr},
                 analytic_levels = '${params.fcs_analytic_levels}',
                 gene_stat = '${params.gene_stat ?: "max"}',
-                cluster_similarity = '${params.fcs_cluster_similarity}',
                 cluster_threshold  = ${params.fcs_cluster_threshold},
                 top_n         = ${top_n},
                 traitname     = '${params.traitname ?: "trait"}',

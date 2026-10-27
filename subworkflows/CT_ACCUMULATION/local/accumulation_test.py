@@ -7,13 +7,13 @@ Accumulation test: does a gene hold more CAAS positions than expected from its s
 
 Universe U
 ----------
-U is the set of positions an observed CAAS could come from, the same universe SCORING and POSENRICH use:
-the positions CAAStools tested (background.output) in the genes that survive post-processing
-(cleaned_background_main.txt), kept when they score > 0 in at least one cycle and side of the
-filtered permulation null (null_positions.parquet: one row per position the null scores, with the number of
-cycles that score it), plus every observed CAAS position. A position the
-null never scores cannot produce a CAAS under the permulation labelings, so it is not part of the
-opportunity of a gene.
+U is the set of positions an observed CAAS could come from, the same universe SCORING and POSENRICH use
+(built by posenrich_universe.py): the positions CAAStools tested (background.output) in the genes of the
+gene list (--bg-caas), kept when they score > 0 in at least one cycle and side of the filtered permulation
+null (null_positions.parquet: one row per position the null scores, with the number of cycles that score it),
+plus every observed positive position (a top or bottom row of --caas-csv with a positive asr_path_score).
+A position the null never scores cannot produce a CAAS under the permulation labelings, so it is not part
+of the opportunity of a gene.
 
 Test
 ----
@@ -39,89 +39,19 @@ Outputs:    --output CSV with columns Gene, ActualCount, PoolPositions, MeanNull
 import argparse
 import logging
 import os
+import sys
+from pathlib import Path
 
 # ── Third-party ───────────────────────────────────────────────────────────────
 import numpy as np
 import pandas as pd
 from scipy.stats import hypergeom
 
-POS_BITS = 32                      # position keys: gene id << 32 | position
+# The universe U is built by the module POSENRICH shares (one definition for every consumer).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'ENRICHMENT' / 'local' / 'src'))
+from posenrich_universe import POS_BITS, build_universe, load_null_positive, load_observed_positive, load_universe_genes  # noqa: E402
+
 COLUMNS = ['Gene', 'ActualCount', 'PoolPositions', 'MeanNull', 'SD', 'PValue']
-
-
-# ── Universe U ────────────────────────────────────────────────────────────────
-
-
-def pair_keys(gene_ids, positions):
-    """One int64 key per (gene id, position)."""
-    return (np.asarray(gene_ids, dtype=np.int64) << POS_BITS) + np.asarray(positions, dtype=np.int64)
-
-
-def load_universe_genes(path):
-    """Genes that survive post-processing (cleaned_background_main.txt: one gene per line), in file order."""
-    with open(path) as f:
-        genes = [line.strip() for line in f if line.strip() and line.strip() != "Gene"]
-    return list(dict.fromkeys(genes))
-
-
-def load_tested_keys(background_file, gene_to_id):
-    """Positions CAAStools tested, as int64 keys (gene id, position) of the genes in `gene_to_id`.
-
-    Format mirrors posenrich's build_background(): `gene<TAB>comma-separated positions`, one line per gene,
-    in the coordinate space of filtered_discovery's `Position`. Genes outside `gene_to_id` (removed by
-    post-processing) can never contribute an observed CAAS and are dropped.
-    """
-    keys = []
-    with open(background_file) as f:
-        for line in f:
-            parts = line.rstrip("\n").rstrip("\r").split("\t")
-            if len(parts) < 2 or parts[0] not in gene_to_id or parts[1] in ("", "NULL", "Position"):
-                continue
-            pos = np.array([int(p) for p in parts[1].split(",") if p.strip()], dtype=np.int64)
-            keys.append(pair_keys(np.full(pos.size, gene_to_id[parts[0]]), pos))
-    return np.unique(np.concatenate(keys)) if keys else np.empty(0, dtype=np.int64)
-
-
-def load_null_positive_keys(null_path, gene_to_id):
-    """Keys (gene id, position) of the positions the filtered null scores (null_positions.parquet).
-
-    The table has one row per (gene, position) with at least one cycle that scores it on either side. Genes of the null
-    outside `gene_to_id` are ignored.
-    """
-    import pyarrow.parquet as pq
-
-    table = pq.read_table(null_path, columns=['gene', 'position', 'nd'])
-    missing = [c for c in ('gene', 'position', 'nd') if c not in table.column_names]
-    if missing:
-        raise ValueError(f"{null_path} lacks column(s) {missing}: regenerate the CAAS permulation null (CAAS_CORE_MERGE_REDUCE).")
-    df = table.to_pandas()
-    df = df[df['nd'] > 0]
-    gene = df['gene'].map(gene_to_id)
-    ok = gene.notna().to_numpy()
-    return np.unique(pair_keys(gene[ok].to_numpy(), df['position'][ok].to_numpy()))
-
-
-def load_observed_keys(caas_csv, gene_to_id):
-    """Observed CAAS positions by side: (keys of the top rows, keys of the bottom rows).
-
-    filtered_discovery.tsv has one row per (gene, position, side); a position detected on both sides appears
-    in both arrays. Rows of genes outside `gene_to_id` are dropped with a warning.
-    """
-    empty = np.empty(0, dtype=np.int64)
-    if os.path.getsize(caas_csv) == 0:
-        logging.warning("CAAS input file is empty: no positions passed the filter")
-        return empty, empty
-    df = pd.read_csv(caas_csv, sep=None, engine='python', usecols=lambda c: c in ('Gene', 'Position', 'side'))
-    missing = [c for c in ('Gene', 'Position', 'side') if c not in df.columns]
-    if missing:
-        raise ValueError(f"{caas_csv} lacks column(s) {missing}: expected filtered_discovery.tsv.")
-    gene = df['Gene'].map(gene_to_id)
-    if gene.isna().any():
-        logging.warning(f"{int(gene.isna().sum())} observed rows belong to genes outside the cleaned background and are dropped")
-    df = df[gene.notna().to_numpy()]
-    keys = pair_keys(gene[gene.notna()].to_numpy(), df['Position'].to_numpy())
-    side = df['side'].astype(str).str.strip().str.lower().to_numpy()
-    return np.unique(keys[side == 'top']), np.unique(keys[side == 'bottom'])
 
 
 # ── Test ──────────────────────────────────────────────────────────────────────
@@ -149,36 +79,31 @@ def run(args):
     Reads from args: caas_csv, background_positions, bg_caas, null_positions, change_side, output.
     """
     genes = load_universe_genes(args.bg_caas)
-    gene_to_id = {g: i for i, g in enumerate(genes)}
-    n_genes = len(genes)
-    logging.info(f"Universe (cleaned background) genes: {n_genes}")
+    logging.info(f"Universe genes: {len(genes)}")
 
-    tested = load_tested_keys(args.background_positions, gene_to_id)
-    null_positive = load_null_positive_keys(args.null_positions, gene_to_id)
-    if null_positive.size == 0:
+    null_positive = load_null_positive(args.null_positions)
+    if null_positive.empty:
         raise ValueError(f"{args.null_positions} has no position the null scores (a null without cycles, for "
                          f"example --caas_full_perms 0): the universe U cannot be defined.")
-    top, bottom = load_observed_keys(args.caas_csv, gene_to_id)
+    universe = build_universe(genes, null_positive, load_observed_positive(args.caas_csv), args.background_positions)
+    m = universe.metrics
+    logging.info(f"Null-positive in U: {m['n_null_positive_in_universe']}; |U| = {m['n_universe']}; tested set: "
+                 f"{m['tested_set']}; {m.get('n_observed_outside_tested', 0)} observed positions lie outside the tested "
+                 f"set and stay in U")
+    M = int(universe.keys.size)
+    n_genes = len(genes)
+    n_pool = np.bincount(universe.keys >> POS_BITS, minlength=n_genes)
 
-    # U: tested and null-positive positions, plus every observed position (either side)
-    observed_any = np.union1d(top, bottom)
-    universe = np.union1d(np.intersect1d(tested, null_positive, assume_unique=True), observed_any)
-    n_outside_tested = int(np.setdiff1d(observed_any, tested, assume_unique=True).size)
-    logging.info(f"Tested positions: {tested.size}; null-positive: {null_positive.size}; |U| = {universe.size}; "
-                 f"{n_outside_tested} observed positions lie outside the tested set and stay in U")
-    M = int(universe.size)
-    n_pool = np.bincount(universe >> POS_BITS, minlength=n_genes)
-
-    # Observed CAAS positions of the direction: distinct positions, so a position detected on both sides
-    # is one observed CAAS position in 'both'
-    observed = {'top': top, 'bottom': bottom, 'both': observed_any}[args.change_side]
+    # Observed positive positions of the direction: distinct positions, so a position detected on both sides
+    # is one observed position in 'both'
+    observed = {'top': universe.top, 'bottom': universe.bottom, 'both': universe.observed}[args.change_side]
     K = int(observed.size)
     actual = np.bincount(observed >> POS_BITS, minlength=n_genes)
-    logging.info(f"Direction '{args.change_side}': {K} distinct observed CAAS positions; "
+    logging.info(f"Direction '{args.change_side}': {K} distinct observed positive positions; "
                  f"fraction of U observed = {K / M:.4f}")
 
     p, mean, sd = hypergeometric_test(actual, n_pool, M, K)
-    logging.info(f"Genes tested (observed CAAS > 0): {int((actual > 0).sum())} of {n_genes}")
+    logging.info(f"Genes tested (observed positives > 0): {int((actual > 0).sum())} of {n_genes}")
 
     os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
     pd.DataFrame({'Gene': genes, 'ActualCount': actual, 'PoolPositions': n_pool,

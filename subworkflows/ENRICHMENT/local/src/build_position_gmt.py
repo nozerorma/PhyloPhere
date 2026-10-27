@@ -510,11 +510,11 @@ def collect_fubar_members(fubar_file, map_cache, active_genes, pending=None, inc
                                 'detail': f"hg38_aa_pos={pos_residue};call=positive"})
             elif is_neg == 1:
                 gene_neg_sel_cols.setdefault(gene, set()).add(col)
-                fubar_char[(gene, col)] = 'negative'
+                fubar_char[(gene, col)] = 'purifying'
                 members.append({'collection_id': 'fubar_purifying', 'term_id': 'global', 'gene': gene,
                                 'position': col, 'source_record_id': record_id,
                                 'term_label': 'FUBAR_purifying', 'mapping_status': 'direct_caas' if space == 'CAAS_0based' else 'projected_via_map',
-                                'detail': f"hg38_aa_pos={pos_residue};call=negative"})
+                                'detail': f"hg38_aa_pos={pos_residue};call=purifying"})
             else:
                 fubar_char[(gene, col)] = 'neutral'
             # Coverage collection: every tested position, so "neutral" (tested, not

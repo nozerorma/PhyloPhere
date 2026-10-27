@@ -21,7 +21,7 @@ process CT_ACCUMULATION_TEST {
     tag "ct_accumulation_test|${direction}"
     label 'process_medium'
 
-    publishDir path: { "${params.outdir}/accumulation/${direction}" },
+    publishDir path: { "${params.outdir}/posenrich/accumulation/${direction}" },
                mode: 'copy', overwrite: true,
                pattern: '*_results.csv'
 

@@ -110,7 +110,7 @@ process SCORING_AMI_REPORT {
     def net_score = params.domino_network_score_thr ?: 700
     def bg_name   = background.getName().replace("'", "\\'")
     def gs_arg    = (gene_scores.name =~ /^NO_GENE_SCORES/) ? 'NULL' : "'${gene_scores}'"
-    def ami_source_hash = ['13.AMI_analysis.Rmd', 'src/ami_evidence.R', 'src/prepare_ami_lists.py'].collect {
+    def ami_source_hash = ['13.AMI_analysis.Rmd', 'src/ami_evidence.R','src/report_presentation.R','src/term_blocks.R', 'src/prepare_ami_lists.py'].collect {
         file("${local_dir}/${it}").text
     }.join('\n').with { java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString() }
 
@@ -175,6 +175,8 @@ process SCORING_AMI_REPORT {
                     gene_scores_file    = ${gs_arg},
                     gene_metadata_file  = '${gene_metadata}',
                     module_description_fdr = ${params.ami_description_fdr ?: 0.10},
+                    ami_max_blocks      = ${params.ami_max_blocks ?: 8},
+                    ami_block_threshold = ${params.ami_block_threshold ?: 0.2},
                     domino_slice_threshold = ${params.domino_slice_thr ?: 0.3},
                     domino_module_threshold = ${params.domino_module_thr ?: 0.05},
                     string_db_dir       = '${params.string_db_dir}',
@@ -226,8 +228,8 @@ process SCORING_COMPARE_REPORT {
     input:
     // One fcs_all_results.tsv per module, staged under distinct names. A module that
     // did not run arrives as the NO_FCS_ALL sentinel, which the non-empty (-s) test
-    // below drops. FADE and Accumulation have no FCS ranking of their own (see fcs.nf);
-    // they enter as corroboration flags on the leading edge.
+    // below drops. FADE has no FCS ranking of its own (see fcs.nf);
+    // it enters as a corroboration flag on the leading edge.
     path caas_fcs,  stageAs: 'caas_fcs_all.tsv'    // CAAS (composite) FCS results
     path rer_fcs,   stageAs: 'rer_fcs_all.tsv'     // RER FCS results
     // Leading-edge tables feed the attribute composition and cross-module
@@ -252,7 +254,7 @@ process SCORING_COMPARE_REPORT {
     // exported by 14.Position_enrichment_report.Rmd for the Leading edge sub-tab of the
     // Posenrich section.
     path posenrich_le_summary, stageAs: 'posenrich_leading_edge_summary.tsv'
-    // SCORING's gene-level table (nominal/BH activity flags and FADE, RER and Accumulation
+    // SCORING's gene-level table (nominal/BH activity flags and FADE and RER
     // significance) for the Interesting Genes and Positions tables.
     path fcs_stats,           stageAs: 'fcs_stats.tsv'
     // Position-level CAAS scores with FADE-site and VEP annotations, for the
@@ -296,7 +298,7 @@ process SCORING_COMPARE_REPORT {
     def fade_sites_top_arg    = (fade_sites_top.name =~ /^NO_/)    ? 'NULL' : "'${fade_sites_top}'"
     def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_/) ? 'NULL' : "'${fade_sites_bottom}'"
     def position_char_arg     = (position_char.name =~ /^NO_/)     ? 'NULL' : "'${position_char}'"
-    def compare_source_hash = ['15.Comparison_report.Rmd', 'src/fcs_selection.R', 'src/evidence_flags.R'].collect {
+    def compare_source_hash = ['15.Comparison_report.Rmd', 'src/fcs_selection.R', 'src/evidence_flags.R','src/report_presentation.R','src/ami_evidence.R'].collect {
         file("${local_dir}/${it}").text
     }.join('\n').with { java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString() }
 

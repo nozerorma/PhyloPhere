@@ -55,13 +55,14 @@ Module flag              Description
                           See: --help --ct_tool <discovery|resample>
 --ct_disambiguation       Classify CAAS as convergent/parallel/divergent via ASR.
 --ct_postproc             Cluster/gene-level filtering + characterization report.
---ct_accumulation         Exact hypergeometric test for CAAS accumulation per gene.
+--posenrich_modular       POSENRICH modular module; level 1 is the exact hypergeometric test
+                          of CAAS accumulation per gene.
 --vep                     Annotate CAAS positions with PrimateAI-3D / COSMIC.
 --fade                    HyPhy FADE directional (top/bottom) selection scan.
 --rer_tool <steps>        RERconverge relative-evolutionary-rate analysis
                           (comma-separated: build_trait,build_trees,build_matrix,continuous).
 --scoring                 Composite position- and gene-level scoring across
-                          CAAS, FADE, RER, accumulation and VEP signals.
+                          CAAS, FADE, RER and VEP signals.
 --enrichment              FCS ranked enrichment, DOMINO/STRING network
                           analysis (POSENRICH is currently skipped pending its position-null redesign).
 
@@ -215,7 +216,7 @@ Usage:
 
 def accumulation_help() {
     return '''
-CT Accumulation — Help
+POSENRICH Accumulation (level 1) — Help
 =============================================
 Exact hypergeometric test for whether a gene holds more CAAS positions than its
 share of the position universe U predicts; runs once per direction (top/bottom/all).
@@ -318,7 +319,7 @@ def scoring_help() {
 CAAS Scoring — Help
 =============================================
 Computes composite CAAS scores at position-level and gene-level, integrating
-CT, FADE, RER, accumulation and VEP signals.
+CT, FADE, RER and VEP signals.
 
 Usage:
 --scoring                   <true|false>            false
@@ -340,11 +341,10 @@ Standalone mode (provide inputs directly):
 --scoring_fade_site_top                  <"fade_site_top.tsv">              ""
 --scoring_fade_site_bottom                  <"fade_site_bottom.tsv">           ""
 --scoring_rer_input                           <"rerconverge_summary.tsv">        ""
---scoring_accum_dir                              <"accumulation_dir/">              ""
 --scoring_vep_primateai                            <"vep_primateai.tsv">              ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
 --scoring_vep_cosmic                                  <"vep_cosmic.tsv">                  ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
 --scoring_vep_ensembl                                <"ensembl_vep_mapped.tsv">          ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
---caas_null_dir                                          <"caas_permulation/">          ""    (caas_permulation/ directory of a prior run: canonical SCORING null; its positive-position keys define the accumulation universe when no live core is available)
+--caas_null_dir                                          <"caas_permulation/">          ""    (caas_permulation/ directory of a prior run: canonical SCORING null; its positive-position keys define the POSENRICH Accumulation universe when no live core is available)
 
 Position-level components: ASR, convergence, parallel, [FADE]
 Gene-level scores: gene_caas, [gene_rer], [gene_fade], gene_composite
@@ -370,8 +370,7 @@ Usage:
 --fcs_fdr                                <FLOAT 0-1>              0.15   (BH on the permulation p of each set, per ranking and database: q.perm)
 --fcs_pperm_thr                            <FLOAT 0-1>              0.025  (raw permulation-p threshold of the Redlich rule)
 --fcs_analytic_levels                        <LIST>                   0.05,0.1,0.15  (analytic rule of Redlich et al. 2024, column redlich_level: BH of the analytic p below each level and p.perm below --fcs_pperm_thr)
---fcs_cluster_similarity                    <jaccard|overlap>        jaccard (leading-edge similarity of the redundancy groups of significant sets)
---fcs_cluster_threshold                     <FLOAT 0-1>              0.5    (similarity at which a set joins the first representative)
+--fcs_cluster_threshold                     <FLOAT 0-1>              0.2    (minimum Jaccard of the full gene sets inside a term block; complete linkage)
 --fcs_top_n                                  <INTEGER>                20
 --fcs_batch_size                             <INTEGER>                4 (GMT databases per task)
 --fcs_block_batch_genes                      <INTEGER>                1000 (GENE_P genes per task; all cycles retained for these genes)
@@ -412,14 +411,14 @@ workflow HELP {
     // Check if --help is provided
     if (params.help) {
         // Most module toggles default to `true`/non-empty in conf/common.config and
-        // conf/ct.config (the "core" CT+disambiguation+postproc+accumulation+VEP chain
+        // conf/ct.config (the "core" CT+disambiguation+postproc+VEP chain
         // runs unless explicitly disabled), so there is no boolean signal that reliably
         // means "the user explicitly asked for this module." Instead: always show the
         // general overview first, then append detail for every module that WOULD run
         // given the current params — i.e. help for the run you are about to launch.
         // To see only the overview, explicitly disable the modules you don't need
         // (e.g. --ct_tool "" --ct_disambiguation false --ct_postproc false
-        // --ct_accumulation false --vep false --help).
+        // --posenrich_modular false --vep false --help).
         log.info general_help()
 
         if (params.contrast_selection)   log.info contrast_selection_help()
@@ -433,7 +432,7 @@ workflow HELP {
 
         if (params.ct_disambiguation)    log.info disambiguation_help()
         if (params.ct_postproc)          log.info postproc_help()
-        if (params.ct_accumulation)      log.info accumulation_help()
+        if (params.posenrich_modular)    log.info accumulation_help()
         if (params.vep)                  log.info vep_help()
         if (params.fade)                 log.info fade_help()
         if (params.rer_tool)             log.info rer_help()

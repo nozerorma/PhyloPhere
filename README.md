@@ -48,14 +48,14 @@ nextflow run main.nf \
   --caas_config     caas_config.tab \
   --contrast_selection \
   --ct_tool         discovery,resample \
-  --ct_disambiguation --ct_postproc --ct_accumulation \
+  --ct_disambiguation --ct_postproc \
   --scoring --enrichment \
   -profile slurm \
   --outdir out/
 ```
 
 The "core" chain — CT, `--ct_disambiguation`, `--ct_postproc`,
-`--ct_accumulation`, `--vep` — runs by default (see [Configuration
+`--vep` — runs by default (see [Configuration
 reference](#configuration-reference)); `--scoring`, `--enrichment`,
 `--fade`, `--rer_tool` and `--contrast_selection` are opt-in and default to
 off, so a first-time user should not expect scoring, enrichment, FADE, or RER
@@ -115,7 +115,7 @@ Execution order as wired in `main.nf`:
 4. **CT_META_CAAS** — genome-wide significance/FDR of discovered CAAS (runs whenever bootstrap ran, or standalone via `--bootstrap_from`).
 5. **Observed scoring** (`--ct_disambiguation`): ASR-based convergent/parallel/divergent classification; the observed labeling is the `b_0` slice of the permulation core (**CAAS_CORE**), or **CAAS_OBSERVED** for a discovery table given with `--discovery_from`.
 6. **CT_POSTPROC** (`--ct_postproc`) — cluster/gene filtering, background cleanup, characterization report; also fans out **ASR_DIAGNOSTICS** in parallel as an independent descriptive report of the observed scores and of the ancestral-state posteriors of the domains.
-7. **CT_ACCUMULATION** (`--ct_accumulation`), **VEP** (`--vep`), **FADE** (`--fade`), **RER_MAIN** (`--rer_tool`) — four largely independent evidence-generating stages that can run in any combination.
+7. **VEP** (`--vep`), **FADE** (`--fade`), **RER_MAIN** (`--rer_tool`) — three largely independent evidence-generating stages that can run in any combination. **CT_ACCUMULATION** (level 1 of POSENRICH, gene vs. its share of the position universe) runs under `--posenrich_modular` and publishes to `posenrich/accumulation/`.
 8. **SCORING** (`--scoring`): integrates all of the above into composite position- and gene-level scores; optionally triggers the permulation core (**CAAS_CORE**, **CAAS_CORE_MERGE**) for a genome-wide permutation null (`--caas_permulation_enrichment`).
 9. **ENRICHMENT** (`--enrichment`, nested under `--scoring`) — FCS ranked gene-set enrichment, DOMINO active-module + STRING functional enrichment; POSENRICH is currently skipped pending its position-AUC phase.
 
@@ -388,7 +388,6 @@ These parameters define the primary input data files, phenotype target, and modu
 | `prune_data` / `prune_list` | `""` / `""` | Flags and species list files for species-level dataset pruning. |
 | `ct_disambiguation` | `true` | Toggle for CT ancestral-state reconstruction (ASR) disambiguation stage. |
 | `ct_postproc` | `true` | Toggle for CT cluster filtering and background cleanup stage. |
-| `ct_accumulation` | `true` | Toggle for CT gene-level CAAS burden accumulation stage. |
 
 </details>
 
@@ -458,7 +457,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `caas_evidence_top_n` | `0` | Number of best positions of `position_scores.tsv` whose evidence is written after SCORING to `scoring/evidence/` (`evidence_top<N>.tsv`, `top_positions.tsv`); `0` = off. Needs `--scoring`, the observed `discovery.tab` (the run's own, or `--discovery_from`) and `ct_disambig_asr_cache_dir`. |
 | `scoring_compare_fdr` / `scoring_compare_top_n` | `0.15` / `20` | Significance FDR and top-N gene count for cross-tool comparison reports. |
 | `scoring_window_size_bp` | `1000000` | Genomic window size (bp) for genomic overlap reporting. |
-| `scoring_postproc_input`, `scoring_fade_summary_top/bottom`, `scoring_rer_input`, `scoring_accum_dir`, `scoring_fade_site_top/bottom`, `scoring_background_input`, `caas_null_dir` | `""` | Standalone input file/directory fallbacks when running SCORING independently. `caas_null_dir` (the `caas_permulation/` directory of a prior run: `null_positions.parquet`, `blocks/`, `cycle_roster.txt`, `counts.json`, `cycle_summary.tsv`, `cycle_hist.tsv`) is the canonical null store of SCORING; its positive-position keys define the accumulation universe. Preserve its metadata/index as well. |
+| `scoring_postproc_input`, `scoring_fade_summary_top/bottom`, `scoring_rer_input`, `scoring_fade_site_top/bottom`, `scoring_background_input`, `caas_null_dir` | `""` | Standalone input file/directory fallbacks when running SCORING independently. `caas_null_dir` (the `caas_permulation/` directory of a prior run: `null_positions.parquet`, `blocks/`, `cycle_roster.txt`, `counts.json`, `cycle_summary.tsv`, `cycle_hist.tsv`) is the canonical null store of SCORING; its positive-position keys define the accumulation universe. Preserve its metadata/index as well. |
 | `scoring_vep_primateai`, `scoring_vep_cosmic`, `scoring_vep_ensembl` | `""` | Precomputed PrimateAI-3D/COSMIC score TSVs and Ensembl VEP consequence TSV (one row per transcript, keyed by Gene, Position and side). Not read by SCORING itself; ENRICHMENT (POSENRICH) reuses these as its own precomputed-VEP fallback when `--vep` did not run live. |
 
 </details>
@@ -486,12 +485,14 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `domino_network_score_thr` | `700` | STRING combined-score threshold for edges included in DOMINO network construction. |
 | `domino_slice_thr` | `0.3` | Relevance threshold for DOMINO network slicing. |
 | `domino_module_thr` | `0.05` | Bonferroni-corrected p-value cutoff for accepting DOMINO active modules. |
+| `ami_max_blocks` | `8` | Blocks shown in the label and in the block summary of each AMI module. Blocks themselves are not capped: they are formed with `ami_block_threshold`, and the exports keep all of them (`block`, `is_representative`, `shown`). Cutting the tree by count was rejected because complete linkage then leaves one very large, heterogeneous block. |
+| `ami_block_threshold` | `0.2` | Minimum Jaccard of the module genes annotated by any two terms of the same AMI block (complete linkage on the terms of a module with FDR below `ami_description_fdr`). The module label joins the representatives of the first `ami_max_blocks` blocks; the block summary reports the share of module genes they cover. |
 | `fcs_min_genes` / `fcs_max_genes` | `10` / `0` | Minimum / maximum gene set size required for FCS enrichment evaluation (`0` = no upper limit). |
 | `fcs_block_batch_genes` | `1000` | Genes per CAAS calibration task. GENE_P needs all cycles of these genes; memory grows with their number and total cycles. |
 | `fcs_batch_size` | `4` | GMT databases per FCS task; null tasks consume one block of cycles. |
 | `fcs_fdr` | `0.15` | Benjamini-Hochberg threshold on the permulation p of each gene set (`q.perm`), per ranking and database. |
 | `fcs_analytic_levels` | `0.05,0.1,0.15` | Analytic rule of Redlich et al. 2024, reported next to the permulation rule as `redlich_level` (the smallest level met, empty when none): the analytic BH-adjusted p (`p.adj`) below the level and `p.perm` below `fcs_pperm_thr`. It does not enter `sig_perm`. |
-| `fcs_cluster_similarity` / `fcs_cluster_threshold` | `jaccard` / `0.5` | Redundancy reduction of the significant sets of each ranking, applied after the significance call (no p or q value changes): the sets are grouped greedily by significance, a set joining the first representative whose leading edge is at least this similar (`jaccard`, or `overlap`, which over-merges hierarchical databases). Gives `cluster_id` and `is_representative`. |
+| `fcs_cluster_threshold` | `0.2` | Term blocks of the selected sets of each ranking and effect sign, applied after the significance call (no p or q value changes): complete linkage on the Jaccard similarity of the full gene sets (members in the universe), so every pair inside a block has at least this similarity. Gives `cluster_id`, `is_representative`, `cluster_size` and `cluster_min_jaccard`. |
 | `fcs_pperm_thr` | `0.025` | Raw permulation-p threshold of the Redlich rule, combined with the three analytic BH levels. It does not filter `sig_perm` (the RER rule). |
 | `fcs_top_n` | `20` | Number of top-ranked gene sets highlighted in report tables. |
 | `caas_permulation_enrichment` | `true` | Runs the permulation core (CAAS_CORE, CAAS_CORE_MERGE) to build the genome-wide null used for CAAS's FCS permulation p-value. |
@@ -579,7 +580,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 ### `conf/ct_accumulation.config` — CAAS Burden Accumulation
 
 #### Common Use (Essential) Parameters
-*(Main toggle `ct_accumulation` lives in `conf/common.config`)*
+*(The stage runs when `posenrich_modular` is on, see `conf/enrichment.config`; output under `posenrich/accumulation/`)*
 
 #### Advanced Parameters
 

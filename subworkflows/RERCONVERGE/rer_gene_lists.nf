@@ -65,8 +65,8 @@ process RER_GENE_LISTS {
         writeLines(sig\$gene[sig\$Rho < 0], "rer_decelerating.txt")
 
         # Directional RER significance lives in flag_rer_acc and flag_rer_decc; gate_sig is
-        # a CAAS flag and is not set here. The CAAS directional scores and the FADE and
-        # accumulation flags come from the scoring gene-scores file below, when given.
+        # a CAAS flag and is not set here. The CAAS directional scores and the FADE
+        # flags come from the scoring gene-scores file below, when given.
         rer_sig       <- !is.na(pval_col) & pval_col < ${pval_thr}
         flag_rer_acc  <- rer_sig & df\$Rho > 0
         flag_rer_decc <- rer_sig & df\$Rho < 0
@@ -83,7 +83,7 @@ process RER_GENE_LISTS {
         )
 
         # Optional cross-module columns from the scoring gene-scores TSV (CAAS directional
-        # scores, FADE and accumulation flags). Columns absent from the file are not joined.
+        # scores and FADE flags). Columns absent from the file are not joined.
         gs_file <- "${gene_scores}"
         if (file.exists(gs_file) && !grepl("^NO_", basename(gs_file))) {
             gs <- tryCatch(read.delim(gs_file, stringsAsFactors = FALSE), error = function(e) NULL)
@@ -93,7 +93,7 @@ process RER_GENE_LISTS {
                     if (!is.na(gcol)) colnames(gs)[colnames(gs) == gcol] <- "gene"
                 }
                 want <- c("score_top","score_bottom",
-                          "flag_fade","flag_fade_top","flag_fade_bottom","flag_accum")
+                          "flag_fade","flag_fade_top","flag_fade_bottom")
                 want <- intersect(want, colnames(gs))
                 if ("gene" %in% colnames(gs) && length(want) > 0) {
                     fcs_stats <- merge(fcs_stats, gs[, c("gene", want)], by = "gene", all.x = TRUE)

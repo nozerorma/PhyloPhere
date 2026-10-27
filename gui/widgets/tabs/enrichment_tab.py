@@ -102,8 +102,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="fcs_fdr", label="FCS FDR threshold", importance="default"),
         FieldSpec(name="fcs_pperm_thr", label="FCS Redlich permulation p threshold", importance="default"),
         FieldSpec(name="fcs_analytic_levels", label="FCS analytic rule (Redlich): BH levels, comma-separated", importance="default"),
-        FieldSpec(name="fcs_cluster_similarity", label="FCS redundancy groups: leading-edge similarity", kind="choice", choices=("jaccard", "overlap"), importance="default"),
-        FieldSpec(name="fcs_cluster_threshold", label="FCS redundancy groups: similarity threshold", importance="default"),
+        FieldSpec(name="fcs_cluster_threshold", label="FCS term blocks: minimum Jaccard inside a block", importance="default"),
         FieldSpec(name="fcs_top_n", label="FCS top-N leading edge", importance="optional"),
         FieldSpec(name="fcs_batch_size", label="FCS GMTs per task", importance="optional"),
         FieldSpec(name="fcs_block_batch_genes", label="GENE_P genes per task", importance="optional"),
@@ -117,6 +116,8 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="domino_network_score_thr", label="DOMINO network score threshold", importance="default"),
         FieldSpec(name="domino_slice_thr", label="DOMINO slice threshold", importance="default"),
         FieldSpec(name="domino_module_thr", label="DOMINO module significance threshold", importance="default"),
+        FieldSpec(name="ami_max_blocks", label="AMI term blocks: blocks shown per module", importance="default"),
+        FieldSpec(name="ami_block_threshold", label="AMI term blocks: minimum Jaccard of module genes", importance="default"),
         FieldSpec(
             name="publish_domino_intermediates",
             label="Publish DOMINO network.sif/modules/edge scores (debug)",

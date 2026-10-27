@@ -866,6 +866,8 @@ def _ami_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
         "domino_slice_threshold = saved[['domino_slice_threshold']]",
         "domino_module_threshold = saved[['domino_module_threshold']]",
         "module_description_fdr = saved[['module_description_fdr']]",
+        "ami_max_blocks = if(is.null(saved[['ami_max_blocks']])) 8L else saved[['ami_max_blocks']]",
+        "ami_block_threshold = if(is.null(saved[['ami_block_threshold']])) 0.2 else saved[['ami_block_threshold']]",
         "string_db_dir = NULL",
         f"string_cache_dir = '{os.path.expanduser('~/.cache/phylophere/string')}'",
     ]

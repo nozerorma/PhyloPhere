@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# scoring_compute.R — Position-level and gene-level CAAS scores, integrated with FADE, RER and accumulation, with the
+# scoring_compute.R — Position-level and gene-level CAAS scores, integrated with FADE and RER, with the
 # biochemical groupings that the derived side of each position agrees with.
 # PhyloPhere | subworkflows/SCORING/local/src/
 # =============================================================================
@@ -10,7 +10,7 @@
 # The biochemical groupings (aa_grouping.R) do not enter either score: they annotate each position with the groupings
 # in which its derived residues share one class that differs from the ancestral one. This script adds the empirical permulation p-values of positions (p.emp and
 # their BH adjustments), joins the per-gene evidence of
-# FADE, RERConverge and accumulation, and writes the tables that the ENRICHMENT
+# FADE and RERConverge, and writes the tables that the ENRICHMENT
 # subworkflow and the reports read (the nominal activity lists are produced by
 # scoring_evidence.R). It runs once on the full pool of
 # filtered_discovery.tsv; direction is carried by the `side` column (top, bottom, none).
@@ -22,7 +22,6 @@
 #   --fade_top, --fade_bottom         gene-level FADE summaries (fade_summary_{top,bottom}.tsv)
 #   --fade_site_top, --fade_site_bot  per-site FADE tables (comma-delimited)
 #   --rer                 rerconverge_summary_<trait>.tsv
-#   --accum_dir           directory with accumulation_<direction>_results.csv
 #   --null_counters       null_counters.tsv (null_position_stats.py reduce): per observed position the counters of the
 #                         position-level null used by p.emp
 #   --null_fit            null_fit.tsv: legacy staging metadata (unused)
@@ -39,7 +38,7 @@
 #   gene_scores.tsv                one row per Gene
 #   gene_correlations.tsv          pairwise correlations between gene scores (header only while one score exists)
 #   fcs_stats.tsv                  gene scores and flags for the FCS reports
-#   fcs_stats_{rer,fade,accum}.tsv per-module FCS rankings, written when that evidence exists
+#   fcs_stats_{rer,fade}.tsv per-module FCS rankings, written when that evidence exists
 #                                  (the nominal activity lists gene_lists/ and position_lists/ are written by
 #                                  scoring_evidence.R, not by this script)
 # =============================================================================
@@ -67,7 +66,6 @@ fade_bottom_file     <- parse_arg("--fade_bottom")
 fade_site_top_file   <- parse_arg("--fade_site_top")
 fade_site_bot_file   <- parse_arg("--fade_site_bot")
 rer_file             <- parse_arg("--rer")
-accum_dir            <- parse_arg("--accum_dir")
 hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS otherwise
 core_positions_file  <- parse_arg("--core_positions")  # observed_core_scores.py: CAAS_score per (Gene, Position, side)
 core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: raw maximum gene CAAS scores
@@ -82,11 +80,7 @@ score_aggregation <- "caas_pos_species_pss"
 # Position and side, hypothesis NA), so scoring never pools hypotheses itself.
 nominal_threshold <- as.numeric(parse_arg("--nominal_threshold", "0.05"))
 fdr_threshold <- as.numeric(parse_arg("--fdr_threshold", "0.05"))
-accumulation_fdr_threshold <- as.numeric(parse_arg("--accumulation_fdr_threshold", "0.1"))
 fade_bf_threshold <- as.numeric(parse_arg("--fade_bf_threshold", "100"))
-if (!is.finite(accumulation_fdr_threshold) || accumulation_fdr_threshold < 0 || accumulation_fdr_threshold > 1) {
-  stop("--accumulation_fdr_threshold must be a finite number in [0, 1]")
-}
 # Direction is not a parameter: scoring runs on the full pool and the `side` column carries it.
 
 # TRUE for a real file; a sentinel (basename starting with NO_) or an empty name counts as absent.
@@ -96,7 +90,7 @@ file_exists <- function(f) {
 
 # Position and gene CAAS scores are computed once, by core.scores (observed_core_scores.py for
 # this run, gene_wrapper.py for the permulation null), and read back here. This script
-# integrates them with FADE / RER / accumulation and tests the observed position score
+# integrates them with FADE / RER and tests the observed position score
 # against the null.
 #
 # Ties: position scores are means of a few values, so scores that are equal in exact
@@ -506,78 +500,6 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
             sum(!is.na(gene_caas$gene_caas_score_top)),
             sum(!is.na(gene_caas$gene_caas_score_bottom))))
 
-# ── 4b. Gene Accumulation Score (optional) ────────────────────────────────────
-# Reads accumulation_<direction>_results.csv for direction in {all, top, bottom};
-# ct_accumulation.nf runs the three directions and stages all of them in accum_dir. "all" pools every
-# position with side != "none"; "top" / "bottom" restrict to that side, so the flag is
-# direction-aware like FADE and RER.
-#
-# Returns a tibble with Gene + accum_p<suffix> (the empirical p),
-# accum_fdr<suffix> / accum_significant<suffix> (suffix = "" for "all",
-# "_top" / "_bottom" otherwise); the suffixes let the three directions full_join onto gene_scores without colliding.
-compute_accum_significance <- function(accum_dir, direction, suffix) {
-  empty <- tibble(
-    Gene = character(),
-    !!paste0("accum_p", suffix)       := numeric(),
-    !!paste0("accum_fdr", suffix)     := numeric(),
-    !!paste0("accum_significant", suffix) := logical()
-  )
-
-  pattern <- paste0("accumulation_", direction, "_results.csv")
-  f <- list.files(accum_dir, pattern = pattern, full.names = TRUE)
-  if (length(f) == 0) {
-    cat(sprintf("Accumulation (%s): file not found (%s), skipping\n", direction, pattern))
-    return(list(df = empty, ok = FALSE))
-  }
-
-  cat(sprintf("Loading accumulation (%s) from: %s\n", direction, basename(f[1])))
-  d <- read_csv(f[1], show_col_types = FALSE)
-
-  gcol <- intersect(c("Gene", "gene"), names(d))[1]
-  pval_col <- grep("^PValue$", names(d), value = TRUE)[1]
-  if (is.na(gcol) || is.na(pval_col)) {
-    cat(sprintf("  Accumulation (%s): missing Gene or PValue column, skipping\n", direction))
-    return(list(df = empty, ok = FALSE))
-  }
-
-  pvals <- as.numeric(d[[pval_col]])
-  out <- tibble(
-    Gene = d[[gcol]],
-    !!paste0("accum_p", suffix)       := pvals
-  )
-
-  fp_col <- paste0("accum_p", suffix)
-  # BH FDR on genes with at least one observed CAAS (ActualCount > 0). Genes
-  # with no CAAS have p = 1 by construction - they are background members
-  # only and must not enter the FDR denominator.
-  act_col <- grep("ActualCount", names(d), value = TRUE)[1]
-  if (is.na(act_col)) {
-    cat(sprintf("  Accumulation (%s): missing ActualCount column, skipping\n", direction))
-    return(list(df = empty, ok = FALSE))
-  }
-  tested <- !is.na(out[[fp_col]]) & !is.na(d[[act_col]]) & as.numeric(d[[act_col]]) > 0
-  fdr_q  <- rep(NA_real_, nrow(out))
-  if (any(tested)) fdr_q[tested] <- p.adjust(out[[fp_col]][tested], method = "BH")
-  out[[paste0("accum_fdr", suffix)]] <- fdr_q
-  out[[paste0("accum_significant", suffix)]] <- !is.na(fdr_q) & fdr_q < accumulation_fdr_threshold
-
-  cat(sprintf("  Accumulation (%s): %d genes, %d significant (exact hypergeometric p, BH FDR < %g)\n",
-              direction, nrow(out), sum(out[[paste0("accum_significant", suffix)]], na.rm = TRUE), accumulation_fdr_threshold))
-  list(df = out, ok = TRUE)
-}
-
-has_accum_dir <- file_exists(accum_dir) && dir.exists(accum_dir)
-if (!has_accum_dir) cat("Accumulation: directory not available, skipping\n")
-
-.accum_all    <- if (has_accum_dir) compute_accum_significance(accum_dir, "all",    "")        else list(df = tibble(Gene = character(), accum_p = numeric(), accum_fdr = numeric(), accum_significant = logical()), ok = FALSE)
-.accum_top    <- if (has_accum_dir) compute_accum_significance(accum_dir, "top",    "_top")    else list(df = tibble(Gene = character(), accum_p_top = numeric(), accum_fdr_top = numeric(), accum_significant_top = logical()), ok = FALSE)
-.accum_bottom <- if (has_accum_dir) compute_accum_significance(accum_dir, "bottom", "_bottom") else list(df = tibble(Gene = character(), accum_p_bottom = numeric(), accum_fdr_bottom = numeric(), accum_significant_bottom = logical()), ok = FALSE)
-
-has_accum <- .accum_all$ok
-gene_rand <- .accum_all$df %>%
-  full_join(.accum_top$df,    by = "Gene") %>%
-  full_join(.accum_bottom$df, by = "Gene")
-
 # ── 4c. Gene RERConverge Score (optional) ─────────────────────────────────────
 has_rer <- file_exists(rer_file)
 if (has_rer) {
@@ -677,25 +599,11 @@ if (nrow(fade_bottom_df) > 0) {
 
 # ── 4e. Assemble gene scores ──────────────────────────────────────────────────
 # full_join, not left_join: gene_caas only covers genes with a CAAS-detected position, whereas
-# gene_rand, gene_rer and gene_fade each have their own, larger gene universe (RERConverge scores every
+# gene_rer and gene_fade each have their own, larger gene universe (RERConverge scores every
 # gene with a sufficiently populated gene tree). A left_join rooted at gene_caas would drop every gene
-# with RER, FADE or accumulation evidence but no CAAS position, and the per-module fcs_stats_*.tsv files
+# with RER or FADE evidence but no CAAS position, and the per-module fcs_stats_*.tsv files
 # would then be truncated to the CAAS gene set instead of the universe of each module.
 gene_scores <- gene_caas
-
-if (nrow(gene_rand) > 0) {
-  gene_scores <- gene_scores %>% full_join(gene_rand, by = "Gene")
-} else {
-  gene_scores$accum_p                  <- NA_real_
-  gene_scores$accum_fdr                <- NA_real_
-  gene_scores$accum_significant        <- NA
-  gene_scores$accum_p_top              <- NA_real_
-  gene_scores$accum_fdr_top            <- NA_real_
-  gene_scores$accum_significant_top    <- NA
-  gene_scores$accum_p_bottom           <- NA_real_
-  gene_scores$accum_fdr_bottom         <- NA_real_
-  gene_scores$accum_significant_bottom <- NA
-}
 
 if (nrow(gene_rer) > 0) {
   gene_scores <- gene_scores %>% full_join(gene_rer, by = "Gene")
@@ -722,8 +630,8 @@ if (nrow(gene_fade) > 0) {
 
 cat("\n─── Correlation analysis ──────────────────────────────────────\n")
 
-# Correlations use gene_caas_score as the primary axis. Accumulation, RER and FADE
-# are represented by their native significance (accum_p / RER p / FADE BF),
+# Correlations use gene_caas_score as the primary axis. RER and FADE
+# are represented by their native significance (RER p / FADE BF),
 # not numeric score axes, so they are not included here.
 score_cols <- c("gene_caas_score")
 
@@ -801,9 +709,6 @@ gene_out <- gene_scores %>%
     Gene,
     n_positions, n_positions_top, n_positions_bottom,
     gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
-    any_of(c("accum_p", "accum_fdr", "accum_significant",
-             "accum_p_top", "accum_fdr_top", "accum_significant_top",
-             "accum_p_bottom", "accum_fdr_bottom", "accum_significant_bottom")),
     any_of(c("rer_min_pval", "rer_P", "rer_significant", "rer_perm_padj", "rer_significant_fdr", "rer_rho", "rer_acceleration")),
     any_of(c("fade_max_bf_top", "fade_significant_top",
              "fade_max_bf_bottom", "fade_significant_bottom"))
@@ -841,13 +746,7 @@ fcs_stats <- tibble(
   flag_rer_decc_adjusted = ifelse(is.finite(.rer_q_fcs) & is.finite(.rer_rho_fcs),.rer_q_fcs<.05 & .rer_rho_fcs<0,NA),
   fade_available_top = is.finite(.col(gene_scores,"fade_max_bf_top")),
   fade_available_bottom = is.finite(.col(gene_scores,"fade_max_bf_bottom")),
-  rer_available = is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs),
-  accum_available = is.finite(.col(gene_scores,"accum_fdr")),
-  accum_available_top = is.finite(.col(gene_scores,"accum_fdr_top")),
-  accum_available_bottom = is.finite(.col(gene_scores,"accum_fdr_bottom")),
-  flag_accum        = nullable_flag(.col(gene_scores, "accum_significant")),
-  flag_accum_top    = nullable_flag(.col(gene_scores, "accum_significant_top")),
-  flag_accum_bottom = nullable_flag(.col(gene_scores, "accum_significant_bottom"))
+  rer_available = is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs)
 ) %>%
   mutate(flag_fade = flag_fade_top | flag_fade_bottom)
 write_tsv(fcs_stats, "fcs_stats.tsv")
@@ -857,7 +756,7 @@ cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom)\n",
 
 # ── Per-module FCS ranking files ──────────────────────────────────────────────
 # Each carries only the score_<ranking> columns of its module. The cross-module annotation (CAAS scores,
-# FADE, accumulation flags) reaches the FCS report separately, as annot_file = fcs_stats.tsv. SCORING can
+# FADE flags) reaches the FCS report separately, as annot_file = fcs_stats.tsv. SCORING can
 # thus render one FCS report per module, ranked by that module's own statistic and annotated with the
 # evidence of every module.
 .nonempty <- function(col) .has(gene_scores, col) && any(!is.na(gene_scores[[col]]))
@@ -881,17 +780,6 @@ if (.nonempty("fade_max_bf_top") || .nonempty("fade_max_bf_bottom")) {
     score_bottom = suppressWarnings(as.numeric(.col(gene_scores, "fade_max_bf_bottom")))
   ), "fcs_stats_fade.tsv")
   cat("  fcs_stats_fade.tsv written (FADE BF rankings)\n")
-}
-
-if (.nonempty("accum_p")) {
-  # FCS ranks in descending order (higher = more significant) while empirical p runs the other way, so
-  # the ranking axis is -log10(accum_p), derived here and not stored as a column of gene_scores.
-  .afp <- suppressWarnings(as.numeric(.col(gene_scores, "accum_p")))
-  write_tsv(tibble(
-    gene         = gene_scores$Gene,
-    score_global = ifelse(is.na(.afp), NA_real_, -log10(pmax(.afp, 1e-300)))
-  ), "fcs_stats_accum.tsv")
-  cat("  fcs_stats_accum.tsv written (accumulation rankings, -log10 p)\n")
 }
 
 # Correlations

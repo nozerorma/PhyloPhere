@@ -38,8 +38,8 @@ def test_saved_null_reaches_caas_seed_preparation(tmp_path, mode):
     echo "${x4}" > null_source
     touch ''' + ' '.join(o for o in evidence_outputs if o != 'gene_lists')
     mocks = _mock_process('SCORING_NULL_POSITIONS', 7, ['counters', 'fit', 'base'])
-    mocks += _mock_process('SCORING_COMPUTE', 12, ['gene_scores', 'position_scores', 'fcs_stats',
-                          'fcs_stats_rer', 'fcs_stats_fade', 'fcs_stats_accum',
+    mocks += _mock_process('SCORING_COMPUTE', 11, ['gene_scores', 'position_scores', 'fcs_stats',
+                          'fcs_stats_rer', 'fcs_stats_fade',
                           'null_universe_summary', 'gene_correlations'])
     mocks += _mock_process('SCORING_EVIDENCE', 6, evidence_outputs + ['null_source'],
                           body + '\n')
@@ -77,7 +77,7 @@ workflow {
         (ran_discovery || run_ct_disambiguation ? Channel.value(file("${params.caas_null_dir}/null_positions.parquet")) : Channel.empty())
     def live_blocks = !run_caas_permulation ? null :
         (ran_discovery || run_ct_disambiguation ? Channel.value([file("${params.caas_null_dir}/blocks/blk_1")]) : Channel.empty())
-    SCORING(Channel.value(file(params.scoring_postproc_input)), null, null, null, null, null, null, null,
+    SCORING(Channel.value(file(params.scoring_postproc_input)), null, null, null, null, null, null,
         Channel.value(file(params.scoring_background_input)), null, null,
         live_positions, live_blocks, null, null, null, null, null, null, null, null, null)
     PREPARE_SEEDS(SCORING.out.gene_lists)

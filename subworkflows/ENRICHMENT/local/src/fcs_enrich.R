@@ -204,8 +204,8 @@ fcs_run_ranking <- function(vals, gmts, num_g = 10, max_g = 0, alternative = "tw
     if (nrow(res) == 0) next
     res$p.adj <- p.adjust(res$pval, method = "BH")
     # The p-value of fastwilcoxGMT (simpleAUCgenesRanks) is always two-sided. For
-    # one-sided magnitude rankings (non-negative, zero-floored: CAAS, FADE and
-    # accumulation scores) the analytic p-value is
+    # one-sided magnitude rankings (non-negative, zero-floored: CAAS and FADE
+    # scores) the analytic p-value is
     # recomputed one-sided from the AUC, so a depleted set (stat < 0) is not flagged,
     # and BH is applied again per GMT. The background is the annotated genes of the
     # GMT, as in fastwilcoxGMT. The variance of the rank sum carries the tie term of

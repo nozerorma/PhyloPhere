@@ -17,7 +17,6 @@ workflow {
         Channel.value(file("${saved}/postproc/gene_filtering/filtered_discovery.tsv")),
         null, null,
         Channel.value(file("${saved}/rerconverge/rer_results/rerconverge_summary_marine.tsv")),
-        Channel.fromPath("${saved}/accumulation/**/*.csv"),
         null, null, null, universe, null,
         reduced.perms, reduced.null_positions, validated, reduced.counts,
         reduced.cycle_summary.combine(reduced.cycle_hist), reduced.pos_sample, reduced.pos_quantiles,

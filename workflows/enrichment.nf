@@ -214,7 +214,6 @@ workflow ENRICHMENT {
         fcs_stats
         fcs_stats_rer
         fcs_stats_fade
-        fcs_stats_accum
         gene_lists
         gene_scores
         cleaned_background_ch
