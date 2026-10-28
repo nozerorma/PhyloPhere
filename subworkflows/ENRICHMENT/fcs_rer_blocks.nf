@@ -1,6 +1,7 @@
 #!/usr/bin/env nextflow
 include { FCS_CLOSE } from './fcs_blocks.nf'
 include { FCS_CONCAT } from './fcs.nf'
+include { asValue } from './channel_utils.nf'
 
 process FCS_RER_OBSERVED {
     label 'process_fcs_batched'
@@ -46,8 +47,8 @@ workflow FCS_RER_BLOCKS {
     universe
     blocks
     main:
-    def sv = stats.first()
-    def uv = universe.map { it instanceof List ? it[0] : it }.first()
+    def sv = asValue(stats)
+    def uv = asValue(universe.map { it instanceof List ? it[0] : it })
     def counter = 0
     def batchSize = (params.fcs_batch_size ?: 4) as int
     def batches = Channel.fromPath("${params.gmt_dir ?: "${baseDir}/subworkflows/ENRICHMENT/dat"}/*.gmt")

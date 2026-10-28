@@ -9,6 +9,7 @@
 
 nextflow.enable.dsl = 2
 include { FCS_CONCAT } from './fcs.nf'
+include { asValue } from './channel_utils.nf'
 
 process FCS_BLOCK_TRANSPOSE {
     tag "${block_id}"
@@ -154,8 +155,8 @@ workflow FCS_COMPUTE_BLOCKS {
         .collate(gmtBatchSize)
         .map { batch -> tuple(String.format('fcs_batch_%03d', ++counter), batch.size(), batch) }
 
-    def universe_v = universe_file.first()
-    def stats_v    = stats_file.first()
+    def universe_v = asValue(universe_file)
+    def stats_v    = asValue(stats_file)
     def nb_ch = universe_v.flatMap { f -> (1..((f.readLines().findAll { it.trim() }.size() + batchSize - 1).intdiv(batchSize))) }
 
     FCS_BLOCK_TRANSPOSE(blocks, universe_v, batchSize)
@@ -168,7 +169,7 @@ workflow FCS_COMPUTE_BLOCKS {
     def gp_v  = FCS_GENE_P.out.gp.collect()
     def obs_v = FCS_GENE_P.out.obs.collect()
 
-    FCS_OBSERVED(gmtBatches, obs_v.filter { it }.first(), universe_v)
+    FCS_OBSERVED(gmtBatches, asValue(obs_v.filter { it }), universe_v)
 
     // every GMT batch with its observed rows, crossed with each block and rank
     def batch_obs = gmtBatches.join(FCS_OBSERVED.out.observed.map { id, f -> tuple(id, f) }, by: 0)

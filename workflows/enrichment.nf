@@ -380,8 +380,7 @@ workflow ENRICHMENT {
         // Interesting Genes/Positions tables use optional gene/position-level inputs
         // (fcs_stats, position_scores, VEP, FADE sites, POSENRICH characterization): all
         // workflow-level take: params, so available whether or not their module ran.
-        // Reuses annot_ch (fcs_stats.first(), already established above as the
-        // broadcastable form of fcs_stats -- see its own definition) rather than
+        // Reuses annot_ch (the fcs_stats channel already established above) rather than
         // touching the raw fcs_stats channel a further time.
         def cmp_fcs_stats_ch  = annot_ch ?: file('NO_FCS_STATS')
         def cmp_pos_scores_ch = position_scores ? position_scores : file('NO_POS_SCORES')
