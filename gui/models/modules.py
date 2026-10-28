@@ -5,8 +5,8 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Modules: one dataclass per pipeline module (CAAS, Disambiguation, Accumulation,
-RERconverge, FADE, VEP, Scoring, Enrichment) plus the ModulesConfig container.
+Modules: one dataclass per pipeline module (CAAS, Disambiguation,
+RERconverge, FADE, VEP, Scoring, POSENRICH, Enrichment) plus the ModulesConfig container.
 
 Each field maps to one conf/*.config param (named in the inline `# --flag` comment),
 so the full tuning surface of every module is a GUI field. Inputs that substitute for
@@ -256,7 +256,7 @@ class ScoringConfig(ModuleConfigBase):
     caas_evidence_top_n: str = "0"  # --caas_evidence_top_n (evidence table of the N best positions after SCORING; 0 = off)
     scoring_hypotheses_pairs: str = ""  # --scoring_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for SCORING)
 
-    # Precomputed inputs (scoring_postproc_input, scoring_accum_dir, scoring_vep_primateai, scoring_vep_cosmic, scoring_vep_ensembl,
+    # Precomputed inputs (scoring_postproc_input, scoring_vep_primateai, scoring_vep_cosmic, scoring_vep_ensembl,
     # scoring_background_input, scoring_fade_site_top/bottom) are derived
     # from PrecomputedConfig.
 
@@ -265,18 +265,51 @@ class ScoringConfig(ModuleConfigBase):
 
 
 @dataclass(kw_only=True)
+class PosenrichConfig(ModuleConfigBase):
+    """POSENRICH (conf/posenrich.config): Accumulation (level 1) and the position registry with its components."""
+
+    enabled: bool = False  # RUN_POSENRICH -> --posenrich
+
+    # Universe U and level 1 (Accumulation). Standalone inputs; a blank value falls back to the Post-processing output (live or precomputed).
+    accumulation_fdr: str = "0.1"  # --accumulation_fdr (Benjamini-Hochberg threshold of the report tables)
+    accumulation_caas_input: str = ""  # --accumulation_caas_input (filtered_discovery.tsv)
+    accumulation_background_input: str = ""  # --accumulation_background_input (cleaned_background_main.txt)
+
+    # Position references: a blank file generates the layer from the productive alignments.
+    posenrich_domains: bool = True  # --posenrich_domains
+    domain_variability_file: str = ""  # --domain_variability_file
+    domain_ref_species: str = ""  # --domain_ref_species (blank -> fallback to RuntimeConfig.ref_species_name)
+    pfam_cache_dir: str = ""  # --pfam_cache_dir (blank -> ~/.cache/phylophere/pfam)
+    posenrich_ucr: bool = True  # --posenrich_ucr
+    ucr_positions_file: str = ""  # --ucr_positions_file
+    fubar_sites_file: str = ""  # --fubar_sites_file
+
+
+    # Level 2: concentration of the signal inside genes, calibrated with the null cycles.
+    posenrich_collections: str = ""  # --posenrich_collections (blank: the collections informative inside a protein)
+    posenrich_min_nonzero_cycles: str = "30"  # --posenrich_min_nonzero_cycles
+    posenrich_holdout: str = "0"  # --posenrich_holdout (validation mode: null cycles played as the observed one; 0 = off)
+    posenrich_within_gene_memory: str = ""  # --posenrich_within_gene_memory (blank: 16 GB)
+
+    # Registry components: characterization, proximity.
+    posenrich_radios: str = "0,5,10"  # --posenrich_radios (descriptive proximity radii)
+    position_registry_memory: str = ""  # --position_registry_memory (blank: sized from the background)
+    position_module_memory: str = ""  # --position_module_memory (blank: sized from the registry)
+
+    # posenrich_background_file (CT's background.output, used when CT is off) is derived
+    # from PrecomputedConfig.use_discovery.
+
+
+@dataclass(kw_only=True)
 class EnrichmentConfig(ModuleConfigBase):
-    posenrich_enabled: bool = True  # RUN_POSENRICH -> --posenrich
     fcs_enabled: bool = True  # Gate FCS (ranked-Wilcoxon) enrichment
     gmt_dir: str = ""  # --gmt_dir
     auto_fetch_gmt: bool = False  # Also download the current GO and WikiPathways gene sets
-    auto_fetch_eggnog: bool = False  # Download the eggNOG pair instead of using the versioned copy
 
     # FCS (ranked-Wilcoxon) enrichment
     fcs_min_genes: str = "10"  # --fcs_min_genes
     fcs_max_genes: str = "0"  # --fcs_max_genes (0 = no limit)
     fcs_fdr: str = "0.15"  # --fcs_fdr (BH on the permulation p: q.perm)
-    pfam_cache_dir: str = ""  # --pfam_cache_dir (blank -> ~/.cache/phylophere/pfam)
     fcs_pperm_thr: str = "0.025"  # --fcs_pperm_thr (Redlich rule, raw p.perm)
     fcs_analytic_levels: str = "0.05,0.1,0.15"  # --fcs_analytic_levels (comma-separated)
     fcs_cluster_threshold: str = "0.2"  # --fcs_cluster_threshold (minimum Jaccard inside a term block)
@@ -304,7 +337,7 @@ class EnrichmentConfig(ModuleConfigBase):
     publish_domino_intermediates: bool = False  # --publish_domino_intermediates
     # Active-module identification (DOMINO) run and cross-module COMPARE report
     # (conf/scoring.config, gated inside workflows/enrichment.nf). The gene lists of
-    # RER, FADE and Accumulation are built whenever those tools run and feed the
+    # RER and FADE are built whenever those tools run and feed the
     # FADE and RER sections of this report directly.
     scoring_ami: bool = True  # --scoring_ami
     scoring_string: bool = True  # --scoring_string
@@ -313,43 +346,8 @@ class EnrichmentConfig(ModuleConfigBase):
     # Concordance null of the unpaired CAAS and RER gene scores in the COMPARE
     # report (a randomization null, not a joint permulation p).
 
-    # POSENRICH component toggles & data files (conf/enrichment.config).
-    posenrich_domains: bool = True  # Include precomputed Pfam annotation table
-    domain_variability_file: str = ""  # --domain_variability_file
-    domain_ref_species: str = ""  # --domain_ref_species (blank -> fallback to RuntimeConfig.ref_species_name)
-
-    posenrich_ucr: bool = True  # Include precomputed UCR annotation table
-    ucr_positions_file: str = ""  # --ucr_positions_file
-    posenrich_custom_file: str = ""  # TSV in zero-based CAAS coordinates
-
-    eggnog_taxid: str = ""  # eggNOG taxon level (blank -> fallback to RuntimeConfig.clade_taxid)
-    egg_members_file: str = ""  # --egg_members_file
-    egg_annotations_file: str = ""  # --egg_annotations_file
-
-    fubar_sites_file: str = ""  # --fubar_sites_file
-
-    # POSENRICH thresholds (position-wise Lachenbruch test, same gates as the gene FCS above)
-    posenrich_min_size: str = "2"  # --posenrich_min_size
-    posenrich_max_size: str = "0"  # --posenrich_max_size
-    posenrich_batch_size: str = "4"  # --posenrich_batch_size (GMTs per POSENRICH_RUN_BATCHED task; 1 = no batching)
-
-    # POSENRICH modular (WP10): registro común + caracterización + localización dentro de
-    # proteínas + asociación global + proximidad. Independiente de --posenrich (omitido).
-    posenrich_modular: bool = False  # --posenrich_modular
-    posenrich_ranking: str = "caas_score"  # --posenrich_ranking (caas_score | minus_log10_pemp)
-    posenrich_aggregation: str = "mean"  # --posenrich_aggregation (mean | pair_weighted)
-    posenrich_n_permutations: str = "999"  # --posenrich_n_permutations
-    posenrich_seed: str = "1"  # --posenrich_seed
-    posenrich_radios: str = "0,5,10"  # --posenrich_radios (radios descriptivos de proximidad)
-
-    # Level 1 of POSENRICH (Accumulation, CT_ACCUMULATION): gated by posenrich_modular.
-    accumulation_fdr: str = "0.1"  # --accumulation_fdr (Benjamini-Hochberg threshold of the gene lists and report)
-    # Standalone inputs; a blank value falls back to the Post-processing output (live or precomputed).
-    accumulation_caas_input: str = ""  # --accumulation_caas_input (filtered_discovery.tsv)
-    accumulation_background_input: str = ""  # --accumulation_background_input (cleaned_background_main.txt)
-
-    # posenrich_background_file (CT's background.output, used when CT is off) is derived
-    # from PrecomputedConfig.use_discovery.
+    # PP2A position sets (TSV in zero-based CAAS coordinates); the PP2A assay is kept apart from POSENRICH.
+    posenrich_custom_file: str = ""  # --posenrich_custom_file
 
 
 # ── Aggregate ─────────────────────────────────────────────────────────────────
@@ -365,4 +363,5 @@ class ModulesConfig:
     fade: FadeConfig = field(default_factory=FadeConfig)
     vep: VepConfig = field(default_factory=VepConfig)
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
+    posenrich: PosenrichConfig = field(default_factory=PosenrichConfig)
     enrichment: EnrichmentConfig = field(default_factory=EnrichmentConfig)

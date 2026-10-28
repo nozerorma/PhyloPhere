@@ -9,7 +9,7 @@ so that the per-gene <gene>.entropy.tsv files exist without a prior ortholog_cha
 compute_variability.py (same directory) computes one gene per call; this driver only adds the
 batching. All numbers come from that script.
 
-Called by:  COMPUTE_ALIGNMENT_ENTROPY Nextflow process (subworkflows/ENRICHMENT/ucr_generation.nf →
+Called by:  COMPUTE_ALIGNMENT_ENTROPY Nextflow process (subworkflows/POSENRICH/ucr_generation.nf →
             compute_alignment_entropy.py); consumed by RUN_UCR_DETECTION and AGGREGATE_UCR_POSITIONS
 Inputs:     --alignment-dir    directory of FASTA alignments, one file per gene
             --taxid-tsv        required by compute_variability.py for its per-clade output

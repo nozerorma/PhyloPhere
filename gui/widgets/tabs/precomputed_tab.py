@@ -50,13 +50,12 @@ class PrecomputedTab(QWidget):
         *,
         caas_tab,
         disambiguation_tab,
-        accumulation_tab,
         rer_tab,
         fade_tab,
         vep_tab,
         parent=None,
     ):
-        """The six *_tab arguments are the already-built module tabs (see
+        """The five *_tab arguments are the already-built module tabs (see
         MainWindow._build_project_tabs, which constructs this tab after them).
         Checking a box here calls that tab's own enable_toggle, so its config field
         and display update through its existing logic instead of this tab writing to
@@ -66,7 +65,6 @@ class PrecomputedTab(QWidget):
         self._module_tabs = {
             "ct": caas_tab,
             "disambiguation": disambiguation_tab,
-            "accumulation": accumulation_tab,
             "rer": rer_tab,
             "fade": fade_tab,
             "vep": vep_tab,
@@ -109,9 +107,6 @@ class PrecomputedTab(QWidget):
             # gui/generation/context.py derives it from Disambiguation's toggle and
             # from this checkbox, so no module tab needs to be toggled here.
             "Post-processing", "use_postproc", lambda v: None
-        ))
-        content_layout.addWidget(self._build_simple_section(
-            "Accumulation", "use_accumulation", lambda v: self._toggle_module("accumulation", v)
         ))
         content_layout.addWidget(self._build_simple_section(
             "RERconverge", "use_rer", lambda v: self._toggle_module("rer", v)

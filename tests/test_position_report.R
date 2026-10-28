@@ -39,3 +39,23 @@ stopifnot(top$data$VEP_consequence[top$data$Gene=='G1']=='missense_variant',
  !bottom$data$FADE_overlap[bottom$data$Gene=='G1'])
 setwd(old_eval_wd)
 writeLines('VEP_REPORT_PASS: MANE preference, side-specific joins, Pfam overlap and FADE sites',file.path(work,'validation.txt'))
+
+# Sin position_characterization.tsv (POSENRICH no corrió) el informe renderiza y omite solo las columnas de la caracterización.
+work2 <- file.path(work, 'without_characterization')
+dir.create(file.path(work2, 'src'), recursive=TRUE, showWarnings=FALSE)
+file.copy(file.path(work, '15.Comparison_report.Rmd'), work2, overwrite=TRUE)
+file.copy(list.files(file.path(work, 'src'), full.names=TRUE), file.path(work2, 'src'), overwrite=TRUE)
+for (f in c('scores.tsv', 'vep.tsv', 'fade.csv', 'fade_bottom.csv')) file.copy(file.path(work, f), work2, overwrite=TRUE)
+env2 <- new.env()
+rmarkdown::render(file.path(work2, '15.Comparison_report.Rmd'), output_dir=work2, quiet=TRUE, envir=env2,
+ params=list(traitname='annotation_fixture', fcs_dir=file.path(work2, 'absent_fcs'), fcs_le_dir=file.path(work2, 'absent_le'),
+ position_scores_file=file.path(work2, 'scores.tsv'), vep_ensembl_file=file.path(work2, 'vep.tsv'),
+ fade_sites_top_file=file.path(work2, 'fade.csv'), fade_sites_bottom_file=file.path(work2, 'fade_bottom.csv'),
+ position_characterization_file=file.path(work2, 'absent_characterization.tsv')))
+env2$params <- list(top_n=100)
+setwd(normalizePath(work2))
+top2 <- env2$build_interesting_positions('Top')
+stopifnot(top2$data$VEP_consequence[top2$data$Gene=='G1']=='missense_variant',
+ !'Pfam domain' %in% names(top2$data), !'FUBAR selection' %in% names(top2$data))
+setwd(old_eval_wd)
+writeLines('NO_CHARACTERIZATION_REPORT_PASS', file.path(work2, 'validation.txt'))

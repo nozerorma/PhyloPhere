@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'bin'))
-sys.path.insert(0,str(ROOT/'subworkflows/ENRICHMENT/local/src'))
-from build_position_gmt import collect_ucr_members,collect_fubar_members
+sys.path.insert(0,str(ROOT/'subworkflows/POSENRICH/local/src'))
+from position_sources import collect_ucr_members,collect_fubar_members
 from map_pp2a_to_caas import project
 from build_reference_tables import project_ppga
 
@@ -60,13 +60,6 @@ def test_ppga_projection_detects_fubar_map_disagreement(tmp_path):
  with pytest.raises(ValueError,match='hg38_aa_pos mismatch'):project_ppga(base,tmp_path/'bad')
 
 
-def test_annotation_only_does_not_retain_normalized_members(tmp_path):
- u=tmp_path/'ucr.tsv';u.write_text('gene\tposition\tregion_type\tmethod\tvariability\tcoordinate_space\nG\t0\tcore\tsliding\t0.1\tCAAS_0based\n')
- standard=collect_ucr_members(u,{}, {'G'})
- compact=collect_ucr_members(u,{}, {'G'},include_members=False)
- assert standard[:-1]==compact[:-1] and standard[-1] and compact[-1]==[]
-
-
 def test_reference_preflight_checks_alignment_hash_and_inventory(tmp_path):
  import shutil,subprocess,hashlib
  nf=shutil.which('nextflow')
@@ -76,7 +69,7 @@ def test_reference_preflight_checks_alignment_hash_and_inventory(tmp_path):
  meta=dict(alignment_dir=str(align),alignments={'G.fa':hashlib.sha256(fa.read_bytes()).hexdigest()},table_sha256=hashlib.sha256(table.read_bytes()).hexdigest())
  Path(str(table)+'.manifest.json').write_text(json.dumps(meta))
  script=ROOT/'.smoke_reference_preflight.nf'
- script.write_text("include { validatePositionReferences } from './workflows/enrichment.nf'\nworkflow { validatePositionReferences(); log.info 'REFERENCE_PREFLIGHT_PASSED' }\n")
+ script.write_text("include { validatePositionReferences } from './workflows/posenrich.nf'\nworkflow { validatePositionReferences(); log.info 'REFERENCE_PREFLIGHT_PASSED' }\n")
  cmd=[nf,'run',str(script),'--alignment',str(align),'--posenrich_domains','true','--domain_variability_file',str(table),'-ansi-log','false']
  try:
   result=subprocess.run(cmd,cwd=ROOT,capture_output=True,text=True,timeout=90)
@@ -115,4 +108,4 @@ def test_direct_fubar_keeps_tested_sites_without_human_residue(tmp_path):
  result=collect_fubar_members(f,{}, {'G'})
  assert result[0]=={'G':{4}}
  assert result[2][('G',4)]=='positive'
- assert len(result[-1])==2 and 'hg38_aa_pos=NA' in result[-1][0]['detail']
+ assert len(result)==3

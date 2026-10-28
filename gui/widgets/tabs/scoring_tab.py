@@ -20,7 +20,7 @@ from gui.widgets.common.specs import FieldSpec, ModuleTabSpec, Section
 SPEC = ModuleTabSpec(
     title="Scoring",
     blurb=(
-        "Combines CAAS, RERconverge, FADE, Accumulation, and VEP outputs into a "
+        "Combines CAAS, RERconverge, FADE, and VEP outputs into a "
         "composite per-gene / per-position score."
     ),
     disclaimer=(

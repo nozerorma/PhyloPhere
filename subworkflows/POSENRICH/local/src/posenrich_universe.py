@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # posenrich_universe.py — Universe U of positions shared by Accumulation and POSENRICH.
-# PhyloPhere | subworkflows/ENRICHMENT/local/src/
+# PhyloPhere | subworkflows/POSENRICH/local/src/
 
 """Build the universe U: the positions an observed CAAS could come from.
 
@@ -17,8 +17,10 @@ file is in another coordinate space), the tested set is ignored, the same rule a
 Observed positions are the rows with a positive score on the top or bottom side: `asr_path_score` of
 filtered_discovery.tsv or `CAAS_score` of position_scores.tsv.
 
-Used as a library by CT_ACCUMULATION (accumulation_test.py). As a command it writes:
-  universe.tsv.gz        gene, position, nd (cycles that score the position), observed_positive (0/1)
+The table universe.tsv.gz is the single universe of POSENRICH: level 1 (accumulation_test.py) and level 2
+(posenrich_within_gene.py) both read it. As a command it writes:
+  universe.tsv.gz        gene, position, nd (cycles that score the position), observed_positive,
+                         observed_top, observed_bottom (0/1; positive on either side, on the top side, on the bottom side)
   universe_manifest.json input hashes, counts and the tested-set decision
 """
 
@@ -49,6 +51,15 @@ def sha256_file(path):
         for chunk in iter(lambda: f.read(1 << 20), b''):
             h.update(chunk)
     return h.hexdigest()
+
+
+def gene_list_digest(genes):
+    """SHA-256 of a gene list as a set: sorted unique names joined by newlines.
+
+    SCORING records the same digest of its gene list (null_position_stats.py gene_list_identity), so the order of
+    the file or a header line does not matter when two consumers compare lists.
+    """
+    return hashlib.sha256("\n".join(sorted(set(genes))).encode()).hexdigest()
 
 
 # ── Inputs ────────────────────────────────────────────────────────────────────
@@ -145,11 +156,12 @@ class Universe:
         return np.union1d(self.top, self.bottom)
 
     def table(self):
-        """DataFrame (gene, position, nd, observed_positive) of U."""
-        observed = np.isin(self.keys, self.observed)
+        """DataFrame (gene, position, nd, observed_positive, observed_top, observed_bottom) of U."""
+        flag = lambda keys: np.isin(self.keys, keys).astype(np.int8)
         return pd.DataFrame({'gene': np.asarray(self.genes, dtype=object)[self.keys >> POS_BITS],
                              'position': self.keys & ((1 << POS_BITS) - 1),
-                             'nd': self.nd, 'observed_positive': observed.astype(np.int8)})
+                             'nd': self.nd, 'observed_positive': flag(self.observed),
+                             'observed_top': flag(self.top), 'observed_bottom': flag(self.bottom)})
 
 
 def _membership(frame, tested):
@@ -231,6 +243,7 @@ def manifest(universe, inputs):
             'contract_version': 1,
             'inputs': {k: {'path': os.path.abspath(v), 'sha256': sha256_file(v)} for k, v in inputs.items() if v},
             'gene_list_sha256': sha256_file(inputs['background_genes']),
+            'gene_set_sha256': gene_list_digest(universe.genes),
             'metrics': universe.metrics}
 
 

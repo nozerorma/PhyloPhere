@@ -1,0 +1,447 @@
+---
+title: "POSENRICH: position-level enrichment of CAAS detections"
+subtitle: "`r paste0('Trait: ', params$traitname)`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
+output:
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+    df_print: paged
+    self_contained: true
+    mathjax: null
+    md_extensions: "-tex_math_dollars"
+params:
+  universe_dir: NULL           # universe.tsv.gz and universe_manifest.json
+  registry_dir: NULL           # registry manifest (gene-list check) and coverage
+  characterization_dir: NULL   # collection_summary.tsv, ranking_summary.tsv, universe_summary.tsv
+  accumulation_dir: NULL       # accumulation_{all,top,bottom}_results.csv (level 1)
+  within_gene_dir: NULL        # within_gene_results.tsv, within_gene_by_gene.tsv, holdout_fpr.tsv (level 2)
+  proximity_dir: NULL          # proximity_{protein,genomic}_summary.tsv
+  traitname: "trait"
+  fdr_threshold: 0.1           # Benjamini-Hochberg threshold of both inferential levels
+  table_rows: 2000             # rows of a table kept in the HTML; the complete tables are published as TSV/CSV
+  detail_terms: 50             # terms whose per-gene rows are embedded (the most significant ones)
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+suppressPackageStartupMessages({library(dplyr); library(readr); library(DT); library(jsonlite)})
+
+# Shared table helpers (lazy-mounted DataTables). The file sits next to the report in a process work directory
+# and in ENRICHMENT/local/src when the report is rendered in place.
+.helpers <- c("src/report_presentation.R", "../../ENRICHMENT/local/src/report_presentation.R")
+.helpers <- .helpers[file.exists(.helpers)]
+if (!length(.helpers)) stop("report_presentation.R not found next to the report")
+source(.helpers[1])
+
+fdr <- as.numeric(params$fdr_threshold)
+max_rows <- as.integer(params$table_rows)
+stopifnot(length(fdr) == 1L, is.finite(fdr), fdr > 0, fdr < 1, length(max_rows) == 1L, !is.na(max_rows), max_rows > 0L)
+
+component_file <- function(path, name) {
+  if (is.null(path) || !length(path) || is.na(path) || !nzchar(path)) "" else file.path(path, name)
+}
+read_json_file <- function(path, name) {
+  f <- component_file(path, name)
+  if (file.exists(f)) fromJSON(f, simplifyVector = FALSE) else NULL
+}
+read_table <- function(path, name, ...) {
+  f <- component_file(path, name)
+  if (file.exists(f)) read_tsv(f, show_col_types = FALSE, ...) else NULL
+}
+
+fmt_int <- function(x) ifelse(is.na(x), "NA", format(round(x), big.mark = ",", scientific = FALSE, trim = TRUE))
+fmt_prop <- function(x, digits = 4) ifelse(is.na(x), "NA", formatC(x, format = "f", digits = digits))
+
+# A component that did not run is stated, never read as an empty result.
+unavailable <- function(what, why) cat(sprintf("**%s: not available.** %s\n\n", what, why))
+
+# Tables beyond max_rows keep the first rows (callers order them by relevance) and say where the rest is.
+emit_table <- function(df, source, sci_cols = NULL, caption = NULL) {
+  n <- nrow(df)
+  if (n > max_rows) {
+    cat(sprintf("Showing the first %s of %s rows; the complete table is `%s`.\n\n", fmt_int(max_rows), fmt_int(n), source))
+    df <- head(df, max_rows)
+  }
+  report_emit(report_table(df, caption = caption, sci_cols = sci_cols))
+}
+
+universe_manifest <- read_json_file(params$universe_dir, "universe_manifest.json")
+registry_manifest <- read_json_file(params$registry_dir, "manifest.json")
+wg_manifest <- read_json_file(params$within_gene_dir, "within_gene_manifest.json")
+prox_manifest <- read_json_file(params$proximity_dir, "proximity_manifest.json")
+
+universe_file <- component_file(params$universe_dir, "universe.tsv.gz")
+universe <- if (file.exists(universe_file)) {
+  read_tsv(universe_file, show_col_types = FALSE,
+           col_types = cols(gene = col_character(), position = col_integer(), nd = col_integer(),
+                            observed_positive = col_integer(), observed_top = col_integer(),
+                            observed_bottom = col_integer()))
+} else NULL
+n_u <- if (is.null(universe)) NA_integer_ else nrow(universe)
+
+accumulation <- lapply(c(all = "all", top = "top", bottom = "bottom"), function(d) {
+  f <- component_file(params$accumulation_dir, sprintf("accumulation_%s_results.csv", d))
+  if (file.exists(f)) read_csv(f, show_col_types = FALSE) else NULL
+})
+wg_results <- read_table(params$within_gene_dir, "within_gene_results.tsv")
+wg_by_gene <- read_table(params$within_gene_dir, "within_gene_by_gene.tsv",
+                         col_types = cols_only(collection_id = col_character(), term_id = col_character(),
+                                               gene = col_character(), n_positions_gene = col_integer(),
+                                               n_members = col_integer(), positives_gene = col_double(),
+                                               positives_members = col_double(), residual = col_double(),
+                                               sd_null = col_double(), cycles_nonzero = col_integer(),
+                                               eligible = col_integer(), excluded_reason = col_character()))
+holdout <- read_table(params$within_gene_dir, "holdout_fpr.tsv")
+```
+<script>
+$(document).on('shown.bs.tab shown.bs.collapse', function () {
+  if ($.fn.dataTable) $.fn.dataTable.tables({visible: true, api: true}).columns.adjust();
+});
+</script>
+
+# Scope and state of the components
+
+A position is **positive** when its canonical score of convergent amino acid substitution (CAAS) is greater than 0. Every question refers to positive positions and to sets of positions (collections: protein domains, conserved regions, selection calls, site lists). The unit is a position of the trimmed CAAS alignment, `(Gene, Position)`, zero-based.
+
+| Part | Question | Inference |
+|---|---|---|
+| Universe | Which positions could produce a detection? | none |
+| Characterization | How do the positive positions distribute over the annotation layers? | none (tables with denominators) |
+| Level 1 | Does a gene hold more positive positions than its share of the universe? | exact hypergeometric test per gene |
+| Level 2 | Within genes, do the positive positions concentrate in a term beyond what the gene already accumulates? | statistic calibrated with the null cycles |
+| Proximity | Are detections closer to the sites or regions of their protein? | none (descriptive) |
+
+```{r states, results='asis'}
+acc_present <- names(accumulation)[!vapply(accumulation, is.null, logical(1))]
+wg_state <- if (!is.null(wg_results)) "available" else if (!is.null(holdout)) "validation mode: only the false-positive table was written" else "not available"
+states <- data.frame(
+  Component = c("Universe", "Registry", "Characterization", "Level 1 (Accumulation)", "Level 2 (within-gene concentration)", "Proximity"),
+  State = c(
+    if (is.null(universe)) "not available" else "available",
+    if (is.null(registry_manifest)) "not available" else "available",
+    if (is.null(read_table(params$characterization_dir, "collection_summary.tsv"))) "not available" else "available",
+    if (length(acc_present) == 3L) "available" else if (length(acc_present)) paste("partial:", paste(acc_present, collapse = ", ")) else "not available",
+    wg_state,
+    if (is.null(read_table(params$proximity_dir, "proximity_protein_summary.tsv"))) "not available" else "available (descriptive)"),
+  stringsAsFactors = FALSE)
+report_emit(report_table(states))
+```
+
+# 1. Universe and coverage
+
+The universe U holds the positions that CAAStools tested in the genes of the gene list and that score above 0 in at least one cycle of the filtered permulation null, plus every observed positive position. A position the null never scores cannot yield a detection under the permulation labelings, so it is not part of a gene's opportunity. Positions outside U are not negatives: they are not evaluable for frequency, and they remain valid targets for proximity.
+
+```{r universe, results='asis'}
+if (is.null(universe)) {
+  unavailable("Universe", "`universe.tsv.gz` was not found in the published universe directory.")
+} else {
+  n_pos <- sum(universe$observed_positive)
+  n_top <- sum(universe$observed_top)
+  n_bot <- sum(universe$observed_bottom)
+  n_both <- sum(universe$observed_top == 1L & universe$observed_bottom == 1L)
+  m <- universe_manifest$metrics
+  n_list <- if (!is.null(m$n_genes)) m$n_genes else NA
+  n_genes_u <- length(unique(universe$gene))
+  rows <- data.frame(
+    Quantity = c("Positions in U", "Genes in the gene list", "Genes with at least one position in U",
+                 "Observed positive positions (either side)", "Positive on the top side", "Positive on the bottom side",
+                 "Positive on both sides", "Positions of U that the null scores in no cycle",
+                 "Observed positives outside the tested positions"),
+    Count = c(n_u, n_list, n_genes_u, n_pos, n_top, n_bot, n_both, sum(universe$nd == 0L),
+              if (is.null(m$n_observed_outside_tested)) NA else m$n_observed_outside_tested),
+    Denominator = c(NA, NA, n_list, n_u, n_u, n_u, n_pos, n_u, n_pos),
+    Denominator_is = c("", "", "genes in the gene list", "positions in U", "positions in U", "positions in U",
+                       "observed positive positions", "positions in U", "observed positive positions"),
+    stringsAsFactors = FALSE)
+  rows$Proportion <- ifelse(is.na(rows$Denominator) | rows$Denominator == 0, NA, rows$Count / rows$Denominator)
+  names(rows) <- c("Quantity", "Count", "Denominator", "Denominator is", "Proportion")
+  report_emit(report_table(rows))
+  cat(sprintf("\nThe base rate of positive positions in U is %s (%s of %s). The tested-position set was %s.\n\n",
+              fmt_prop(n_pos / n_u), fmt_int(n_pos), fmt_int(n_u),
+              switch(if (is.null(m$tested_set)) "unknown" else m$tested_set,
+                     used = "used to restrict the null",
+                     ignored_incompatible = "ignored (it lies in another coordinate space than the null)",
+                     not_given = "not given",
+                     unknown = "not recorded", m$tested_set)))
+  nd_q <- quantile(universe$nd, c(0.05, 0.5, 0.95))
+  cat(sprintf("Detectability varies across U: the number of null cycles that score a position has median %s and 5th to 95th percentile %s to %s.\n\n",
+              fmt_int(nd_q[2]), fmt_int(nd_q[1]), fmt_int(nd_q[3])))
+}
+
+check <- registry_manifest$universe$gene_list_check
+wg_check <- wg_manifest$gene_list_check
+if (is.null(check) && is.null(wg_check)) {
+  unavailable("Gene-list check", "Neither the registry manifest nor the level 2 manifest records the fingerprint of the gene list.")
+} else {
+  status_of <- function(x) if (is.null(x$status)) "not_recorded" else x$status
+  digest_of <- function(x) if (is.null(x)) NA_character_ else substr(as.character(x), 1, 12)
+  chk <- data.frame(
+    Comparison = c("Registry gene list vs. SCORING gene list", "Universe gene list vs. registry gene list"),
+    Status = c(if (is.null(check)) "not_recorded" else status_of(check), if (is.null(wg_check)) "not_recorded" else status_of(wg_check)),
+    Fingerprint_A = c(digest_of(check$registry_digest), digest_of(wg_check$universe_digest)),
+    Fingerprint_B = c(digest_of(check$scoring_digest), digest_of(wg_check$registry_digest)),
+    stringsAsFactors = FALSE)
+  names(chk) <- c("Comparison", "Status", "Fingerprint A (SHA-256, first 12)", "Fingerprint B (SHA-256, first 12)")
+  cat("**Gene-list check** (`match` means both consumers used the same set of genes; `not_recorded` means a manifest lacks the fingerprint)\n\n")
+  report_emit(report_table(chk))
+  if (any(chk$Status == "mismatch"))
+    cat("\n**Warning:** two consumers used different gene lists; their tables are not defined on the same universe.\n\n")
+}
+
+states_tbl <- read_table(params$characterization_dir, "universe_summary.tsv")
+if (!is.null(states_tbl)) {
+  ev <- states_tbl %>% filter(!grepl("^coverage:", evaluation_status)) %>%
+    transmute(`Evaluation status` = evaluation_status, Positions = n_positions, Proportion = proportion, Denominator = denominator)
+  cov <- states_tbl %>% filter(grepl("^coverage:", evaluation_status)) %>%
+    transmute(Metric = sub("^coverage:", "", evaluation_status), Value = n_positions)
+  if (nrow(ev)) {
+    cat("**Evaluation states of the registry positions** (denominator: positions of the registry)\n\n")
+    report_emit(report_table(ev))
+  }
+  if (nrow(cov)) {
+    cat("\n**Registry coverage**\n\n")
+    report_emit(report_table(cov))
+  }
+}
+```
+
+# 2. Raw characterization of the positive positions
+
+Counts of positive positions by annotation layer and term, with their denominators. No test is applied: an annotation does not gain significance by annotating.
+
+```{r characterization, results='asis'}
+coll_sum <- read_table(params$characterization_dir, "collection_summary.tsv")
+rank_sum <- read_table(params$characterization_dir, "ranking_summary.tsv")
+n_positive_total <- if (!is.null(universe)) sum(universe$observed_positive) else if (!is.null(states_tbl)) {
+  v <- states_tbl$n_positions[states_tbl$evaluation_status == "detected_positive"]; if (length(v)) v[1] else NA
+} else NA
+
+if (is.null(coll_sum)) {
+  unavailable("Characterization", "`collection_summary.tsv` was not found in the characterization directory.")
+} else {
+  by_layer <- coll_sum %>% group_by(Layer = collection_id) %>%
+    summarise(Terms = n(), `Annotated positions (summed over terms)` = sum(n_members),
+              `Positive positions (summed over terms)` = sum(n_members_positive),
+              `Genes (max over terms)` = max(n_genes), .groups = "drop") %>%
+    mutate(`Positive / annotated` = ifelse(`Annotated positions (summed over terms)` > 0,
+                                           `Positive positions (summed over terms)` / `Annotated positions (summed over terms)`, NA))
+  cat("**By layer.** A position that belongs to several terms is counted once per term.\n\n")
+  report_emit(report_table(by_layer))
+  terms <- coll_sum %>%
+    mutate(prop_members_positive = ifelse(n_members > 0, n_members_positive / n_members, NA),
+           share_of_positives = if (is.na(n_positive_total) || n_positive_total == 0) NA else n_members_positive / n_positive_total) %>%
+    arrange(desc(n_members_positive)) %>%
+    transmute(Layer = collection_id, Term = term_id, Type = term_type,
+              `Genes` = n_genes, `Positions in term` = n_members, `Positive positions in term` = n_members_positive,
+              `Positive / positions in term` = prop_members_positive,
+              `Positive in term / all positive` = share_of_positives)
+  cat(sprintf("\n**By term**, ordered by the number of positive positions. The share of all positive positions uses %s positive positions as denominator.\n\n",
+              fmt_int(n_positive_total)))
+  emit_table(terms, "posenrich/characterization/collection_summary.tsv")
+}
+if (!is.null(rank_sum)) {
+  cat("\n**Distribution of the canonical score of the positive positions** by direction.\n\n")
+  rk <- rank_sum %>% select(Direction = ranking, Positions = n_positions, `Scored positions` = n_scored,
+                            Minimum = min, `25th percentile` = q25, Median = median, `75th percentile` = q75, Maximum = max,
+                            `Nominal p < 0.05` = n_nominal, `Adjusted p < 0.05` = n_adjusted, `Without p` = n_p_unavailable)
+  report_emit(report_table(rk))
+}
+```
+
+# 3. Level 1: accumulation per gene
+
+For each direction, M is the number of positions of U, K the number of observed positive positions of the direction (a position positive on both sides counts once in `all`) and n~g~ the positions of gene g in U. The observed count of gene g is compared with a hypergeometric distribution `Hyper(M, n_g, K)`; the p-value is the exact upper tail. Benjamini-Hochberg (BH) adjustment runs over the tested genes, those with at least one positive position in the direction. Genes of the list without positions in U (n~g~ = 0) have no row and are not tested.
+
+```{r level1, results='asis'}
+if (!length(acc_present)) {
+  unavailable("Level 1", "No `accumulation_<direction>_results.csv` was published: the module ran without level 1.")
+} else {
+  level1 <- lapply(accumulation[acc_present], function(d) {
+    tested <- d$ActualCount > 0
+    d$q <- NA_real_
+    d$q[tested] <- p.adjust(d$PValue[tested], method = "BH")
+    d
+  })
+  K_of <- c(all = if (is.null(universe)) NA else sum(universe$observed_positive),
+            top = if (is.null(universe)) NA else sum(universe$observed_top),
+            bottom = if (is.null(universe)) NA else sum(universe$observed_bottom))
+  summary_rows <- do.call(rbind, lapply(acc_present, function(dir) {
+    d <- level1[[dir]]
+    data.frame(Direction = dir, `Positions in U (M)` = n_u, `Observed positives (K)` = K_of[[dir]],
+               `Genes in U` = nrow(d), `Genes tested` = sum(d$ActualCount > 0),
+               `Genes above their share, q < threshold` = sum(!is.na(d$q) & d$q < fdr & d$ActualCount > d$MeanNull),
+               `Smallest q` = if (any(!is.na(d$q))) min(d$q, na.rm = TRUE) else NA,
+               check.names = FALSE, stringsAsFactors = FALSE)
+  }))
+  cat(sprintf("**Summary by direction** (BH threshold q < %s)\n\n", fdr))
+  report_emit(report_table(summary_rows, sci_cols = "Smallest q"))
+  cat("\n\n")
+  cat("**Limit.** The hypergeometric test treats all positions of U as equivalent. Their detectability is not: the number of null cycles that score a position varies widely (section 1), so the p-values of level 1 are not calibrated with the null and understate the variance of genes with many easily detected positions. They rank genes; they do not give a calibrated error rate.\n\n")
+  cat("## Genes above their share of U {.tabset}\n\n")
+  for (dir in acc_present) {
+    d <- level1[[dir]]
+    cat(sprintf("\n### %s\n\n", dir))
+    shown <- d %>% filter(ActualCount > MeanNull, !is.na(q)) %>% arrange(PValue, desc(ActualCount)) %>%
+      transmute(Gene, `Positions in gene (n_g)` = PoolPositions, `Observed positives` = ActualCount,
+                `Expected` = MeanNull, `Observed / expected` = ActualCount / MeanNull,
+                p = PValue, q = q, `q < threshold` = q < fdr)
+    cat(sprintf("%s tested genes hold more positive positions than expected; %s have q < %s.\n\n",
+                fmt_int(nrow(shown)), fmt_int(sum(shown$`q < threshold`)), fdr))
+    if (nrow(shown)) emit_table(shown, sprintf("posenrich/accumulation/%s/accumulation_%s_results.csv", dir, dir), sci_cols = c("p", "q"))
+  }
+  cat("\n\nThe table lists tested genes whose observed count exceeds the expected one, ordered by p. The published CSV holds every gene of U with its raw p-value; q is computed here.\n\n")
+}
+```
+
+# 4. Level 2: concentration within genes
+
+For a term S and a gene g with positions inside and outside S, let W~g~ be the summed weight of the gene (the canonical score for a positive position, 0 otherwise), n~g~ its positions in U and m~g~ those in S. The residual is r~g~ = (weight in S) − W~g~ m~g~ / n~g~. The **normalized statistic** sums r~g~ / s~g~ over eligible genes, where s~g~ is the standard deviation of r~g~ over the null cycles, computed without the cycle being evaluated. The **simple statistic** sums r~g~ and is a sensitivity analysis. Both are computed on the observed data and on each null cycle with the margins of that cycle; p = (1 + cycles with statistic ≥ observed) / (N + 1) over the N null cycles, and q is BH within each collection. A gene is eligible only if it has positions inside and outside the term and an estimable s~g~; the others are excluded and listed with their reason, and no residual is imputed.
+
+```{r level2, results='asis'}
+n_cycles <- if (!is.null(wg_manifest$counts$n_null_cycles)) wg_manifest$counts$n_null_cycles else NA
+if (is.null(wg_results)) {
+  if (is.null(holdout))
+    unavailable("Level 2", "`within_gene_results.tsv` was not found: the module ran without level 2 or the engine did not finish.")
+  else
+    unavailable("Level 2 term results", "The engine ran in validation mode (`--holdout`), which writes only the false-positive table.")
+} else {
+  res <- wg_results
+  # A term without an identifiable statistic carries no p or q.
+  not_id <- res$status == "not_identifiable"
+  for (col in c("p_normalized", "p_simple", "q_normalized", "q_simple", "stat_normalized", "stat_simple")) res[[col]][not_id] <- NA
+  p_floor <- if (is.na(n_cycles)) NA else 1 / (n_cycles + 1)
+  cat(sprintf("%s terms were evaluated against %s null cycles (smallest attainable p = 1 / (N + 1) = %s). Terms whose status is `not_identifiable` have no eligible gene and show no p or q.\n\n",
+              fmt_int(nrow(res)), fmt_int(n_cycles), if (is.na(p_floor)) "NA" else format(p_floor, digits = 3)))
+
+  by_coll <- res %>% group_by(Collection = collection_id) %>%
+    summarise(Terms = n(), `Not identifiable` = sum(status == "not_identifiable"), Tested = sum(status == "tested"),
+              `q normalized < threshold` = sum(!is.na(q_normalized) & q_normalized < fdr),
+              `q simple < threshold` = sum(!is.na(q_simple) & q_simple < fdr),
+              `Smallest p normalized` = if (any(!is.na(p_normalized))) min(p_normalized, na.rm = TRUE) else NA,
+              .groups = "drop")
+  cat(sprintf("**Summary by collection** (BH threshold q < %s)\n\n", fdr))
+  report_emit(report_table(by_coll, sci_cols = "Smallest p normalized"))
+
+  # Excluded genes per term, by reason, from the per-gene table
+  excl <- if (is.null(wg_by_gene)) NULL else wg_by_gene %>% group_by(collection_id, term_id) %>%
+    summarise(excluded_no_nonmembers = sum(excluded_reason == "no_nonmembers", na.rm = TRUE),
+              excluded_unstable_sd = sum(excluded_reason == "unstable_sd", na.rm = TRUE), .groups = "drop")
+  ordered <- res %>% arrange(is.na(p_normalized), p_normalized, desc(abs(stat_normalized)))
+  if (!is.null(excl)) ordered <- ordered %>% left_join(excl, by = c("collection_id", "term_id"))
+  term_tbl <- ordered %>%
+    transmute(Collection = collection_id, Term = term_id, Status = status,
+              `Genes eligible` = n_genes_eligible, `Genes excluded` = n_genes_excluded,
+              `Excluded: no positions outside the term` = if (is.null(excl)) NA_integer_ else excluded_no_nonmembers,
+              `Excluded: unstable s_g` = if (is.null(excl)) NA_integer_ else excluded_unstable_sd,
+              `Eligible positions in term` = n_members_eligible, `Positive eligible positions in term` = positives_members_eligible,
+              `Normalized statistic` = stat_normalized, `p normalized` = p_normalized, `q normalized` = q_normalized,
+              `Simple statistic` = stat_simple, `p simple` = p_simple, `q simple` = q_simple,
+              `Frequency in term` = frequency_members, `Frequency in rest of genes` = frequency_rest,
+              `Frequency difference` = frequency_difference,
+              `Mean score in term` = mean_score_members, `Mean score in rest of genes` = mean_score_rest,
+              `Intensity difference` = intensity_difference)
+  cat("\n**Terms**, ordered by the normalized p. Frequency is the proportion of positive positions among the positions of U of the eligible genes inside the term, against the same proportion in the rest of those genes. Intensity is the difference between the mean score of the positive positions inside the term and outside it. The p-values do not separate frequency from intensity; the two effect sizes are descriptive and carry no p-value.\n\n")
+  emit_table(term_tbl, "posenrich/within_gene/within_gene_results.tsv",
+             sci_cols = c("p normalized", "q normalized", "p simple", "q simple"))
+
+  # Per-gene rows of the most significant terms, filterable by term
+  if (is.null(wg_by_gene)) {
+    unavailable("Per-gene table", "`within_gene_by_gene.tsv` was not found.")
+  } else {
+    top_terms <- ordered %>% filter(status == "tested") %>% head(as.integer(params$detail_terms)) %>% select(collection_id, term_id)
+    cat(sprintf("\n**Genes of the most significant terms** (up to %s terms; eligible and excluded, with the reason). Filter the Term column to read one term. The complete table is `posenrich/within_gene/within_gene_by_gene.tsv`.\n\n",
+                nrow(top_terms)))
+    if (nrow(top_terms)) {
+      detail <- wg_by_gene %>% semi_join(top_terms, by = c("collection_id", "term_id")) %>%
+        mutate(excluded_reason = ifelse(is.na(excluded_reason) | excluded_reason == "", "eligible",
+                                        c(no_nonmembers = "excluded: no positions outside the term", unstable_sd = "excluded: unstable s_g")[excluded_reason])) %>%
+        transmute(Collection = collection_id, Term = term_id, Gene = gene, `Positions in gene` = n_positions_gene,
+                  `Positions in term` = n_members, `Positive positions in gene` = positives_gene,
+                  `Positive positions in term` = positives_members, Residual = residual, `s_g` = sd_null,
+                  `Null cycles with nonzero residual` = cycles_nonzero, Eligibility = excluded_reason)
+      emit_table(detail, "posenrich/within_gene/within_gene_by_gene.tsv")
+    } else cat("No term has an identifiable statistic.\n\n")
+  }
+}
+
+if (!is.null(holdout)) {
+  cat("\n## False-positive rate with held-out cycles\n\n")
+  cat("A subset of the null cycles plays the observed data; the rate of terms called at each nominal level estimates the false-positive rate of the procedure. Term-cycle pairs are not independent (terms share positions and each cycle shifts all its terms), so the precision of a rate is set by the number of held-out cycles, not by the number of pairs.\n\n")
+  hf <- holdout %>% transmute(Collection = collection_id, Statistic = statistic, `Nominal level` = alpha,
+                              `Terms tested` = n_terms_tested, `Held-out cycles` = n_holdout_cycles,
+                              `Term-cycle pairs` = n_pairs, `False-positive rate` = fpr,
+                              `Rate minus nominal level` = fpr - alpha)
+  report_emit(report_table(hf))
+} else {
+  cat("\n**False-positive rate with held-out cycles:** not available; the engine ran without `--holdout`, so the calibration was not checked in this run.\n\n")
+}
+```
+
+# 5. Proximity (descriptive)
+
+Two separate contracts: **protein** distance in reference residues (0 inside a region), and **genomic** distance in nucleotides on the same chromosome (0 on coincidence). Proteins without a comparable reference have no distance and count as missing coverage. Radii are fixed before looking at the data. The distance control is not validated, so no p-value is reported.
+
+```{r proximity, results='asis'}
+prox_p <- read_table(params$proximity_dir, "proximity_protein_summary.tsv")
+prox_g <- read_table(params$proximity_dir, "proximity_genomic_summary.tsv")
+if (is.null(prox_p) && is.null(prox_g)) {
+  unavailable("Proximity", "No summary table was found in the proximity directory.")
+} else {
+  radii <- unlist(prox_manifest$parameters$radios)
+  if (length(radii)) cat(sprintf("Radii: %s.\n\n", paste(radii, collapse = ", ")))
+  prox_view <- function(d) d %>% transmute(Collection = collection_id, Term = term_id,
+      `Positions evaluated` = n_positions_evaluated, `Positions with a distance` = n_positions_measured,
+      `Coverage` = coverage_proportion, `Median distance` = median_distance, `Mean distance` = mean_distance,
+      `Genes with sites` = n_genes_with_sites, `Within 0` = prop_within_0, `Within 5` = prop_within_5,
+      `Within 10` = prop_within_10, Control = control_status)
+  if (!is.null(prox_p)) {
+    cat("**Protein proximity** (residues; proportions `Within r` have the positions with a distance as denominator)\n\n")
+    emit_table(prox_view(prox_p), "posenrich/proximity/proximity_protein_summary.tsv")
+  }
+  if (!is.null(prox_g)) {
+    cat("\n**Genomic proximity** (nucleotides; `Within r` counts positions at most r nucleotides away)\n\n")
+    emit_table(prox_view(prox_g), "posenrich/proximity/proximity_genomic_summary.tsv")
+  }
+}
+```
+
+# 6. Methods and limits
+
+```{r methods, results='asis'}
+min_cycles <- wg_manifest$parameters$min_nonzero_cycles
+cat(paste0(
+  "- **Estimand.** Positive positions of the canonical score. A position that is not detected carries weight 0 in level 2 and is never imputed as a negative outside U.\n",
+  "- **Universe.** U is conditioned on positive evidence: positions the null scores in at least one cycle, plus the observed positives. All counts and rates refer to U, not to every tested position.\n",
+  "- **Calibration.** Level 2 is calibrated with the null cycles (",
+  if (is.na(n_cycles)) "number not recorded" else paste0(fmt_int(n_cycles), " in this run"),
+  "), which carry the detectability of each position, the co-occurrence of detections within a gene and the gene filter of the null. Level 1 is not calibrated with the null.\n",
+  "- **Global ranking only.** The null stores the best side of each position (`all`), so there is no null per side. The side is described in the observed data (the top and bottom flags of section 1); it is not calibrated.\n",
+  "- **Leave-one-cycle-out dispersion.** Each null cycle is normalized with the s~g~ computed without that cycle, as the observed data are. With the s~g~ of all cycles, an extreme cycle inflates its own dispersion and its statistic is underestimated against the observed one.\n",
+  "- **Eligibility threshold.** A gene needs a nonzero residual in at least ",
+  if (is.null(min_cycles)) "a minimum number of" else min_cycles,
+  " null cycles for a stable s~g~. The threshold is a heuristic and was fixed before looking at the observed results.\n",
+  "- **Level 1 equivalence.** The hypergeometric test treats all positions of U as equivalent (section 3).\n",
+  "- **Validation.** ",
+  if (is.null(holdout)) "This run has no held-out cycles, so the false-positive rate of level 2 was not measured here. "
+  else sprintf("The held-out cycles of this run (%s) bound the false-positive rate only to the precision they allow. ", paste(unique(holdout$n_holdout_cycles), collapse = ", ")),
+  "A conclusive validation needs all 10,000 null cycles and several sets of terms.\n",
+  "- **Proximity.** Descriptive; the control of distances is not validated and the positions queried are the positive ones.\n"))
+if (!is.null(wg_manifest$parameters)) {
+  p <- wg_manifest$parameters
+  cat("\n**Level 2 parameters.**\n\n")
+  report_emit(report_table(data.frame(
+    Parameter = c("Collections", "Minimum null cycles with a nonzero residual", "Held-out cycles", "Null cycles", "Null blocks", "Terms", "Term-gene pairs", "Eligible pairs"),
+    Value = c(if (is.null(p$collections)) "informative collections" else paste(unlist(p$collections), collapse = ", "),
+              as.character(p$min_nonzero_cycles), as.character(p$holdout), as.character(n_cycles),
+              as.character(wg_manifest$counts$n_blocks), as.character(wg_manifest$counts$n_terms),
+              as.character(wg_manifest$counts$n_pairs), as.character(wg_manifest$counts$n_pairs_eligible)),
+    stringsAsFactors = FALSE)))
+}
+```
+
+**Provenance.** The tables come from `posenrich/universe`, `posenrich/registry`, `posenrich/characterization`, `posenrich/accumulation`, `posenrich/within_gene` and `posenrich/proximity`; each component writes a manifest with the hashes of its inputs. Pfam, UCR and selection layers derive from related evolutionary analyses and are not independent external validation; VEP, COSMIC and PrimateAI layers are descriptive annotations.

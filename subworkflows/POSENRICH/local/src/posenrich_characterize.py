@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# posenrich_characterize.py — General characterization of prioritized positions (POSENRICH component 1).
-# PhyloPhere | subworkflows/ENRICHMENT/local/src/
+# posenrich_characterize.py: characterization of prioritized positions (POSENRICH).
+# PhyloPhere | subworkflows/POSENRICH/local/src/
 
 """Characterize the prioritized positions and the collections, without inference.
 
-WP10 P2 (docs/fases/WP10_posenrich_modular.md). Consumes the common registry
+Consumes the common registry
 (posenrich_registry.py) and produces the characterization tables. This component
 does not run any enrichment test and assigns no enrichment significance to a
 mere annotation. It works with or without a null, without hits and without
@@ -12,7 +12,7 @@ annotations: every table reports explicit states (executed without evidence,
 not available, not executed).
 
 Inputs:
-  --registry_dir   directory with positions.tsv, position_evidence.tsv, members.tsv,
+  --registry_dir   directory with positions.tsv, position_evidence.tsv, regions.tsv, sites.tsv,
                    collections.tsv, coverage.tsv, manifest.json
   --output_dir     destination directory (required)
 
@@ -38,7 +38,9 @@ import os
 
 import pandas as pd
 
-REGISTRY_FILES = ['positions.tsv', 'position_evidence.tsv', 'members.tsv',
+import posenrich_members as pm
+
+REGISTRY_FILES = ['positions.tsv', 'position_evidence.tsv', 'regions.tsv', 'sites.tsv',
                   'collections.tsv', 'coverage.tsv', 'manifest.json']
 
 
@@ -104,63 +106,43 @@ def position_scores_by_key(evidence):
     return out
 
 
-def build_position_characterization(positions, evidence, members):
-    """One row per annotated or positively scored (Gene, Position)."""
+def build_position_characterization(positions, evidence, pfam_members):
+    """One row per annotated or positively scored (Gene, Position).
+
+    positions: positions.tsv with its attribute columns (ucr_region, ucr_variability, fubar_call, fade_top_sig,
+    fade_bottom_sig); pfam_members: members of pfam_domains and pfam_clans (collection_id, term_label, Gene, Position).
+    A position is annotated when it has a Pfam term, a UCR region, a FUBAR call or a FADE flag.
+    """
     scores = position_scores_by_key(evidence)
-    status_by_key = {(r.Gene, int(r.Position)): r.evaluation_status for r in positions.itertuples(index=False)}
+    names = {}
+    for row in pfam_members.itertuples(index=False):
+        entry = names.setdefault((row.Gene, int(row.Position)), (set(), set()))
+        entry[0 if row.collection_id == 'pfam_domains' else 1].add(row.term_label)
 
     layers = {}
-    for row in members.itertuples(index=False):
+    status_by_key = {}
+    attributes = ['ucr_region', 'ucr_variability', 'fubar_call', 'fade_top_sig', 'fade_bottom_sig']
+    for row in positions[['Gene', 'Position', 'evaluation_status'] + attributes].itertuples(index=False):
         key = (row.Gene, int(row.Position))
-        layer = layers.get(key)
-        if layer is None:
-            layer = {'pfam_domain': None, 'pfam_clan': None,
-                     'ucr_region': None, 'variability': '',
-                     'fubar_call': '', 'fade_top': 0, 'fade_bottom': 0}
-            layers[key] = layer
-        if row.collection_id == 'pfam_domains':
-            if layer['pfam_domain'] is None:
-                layer['pfam_domain'] = set()
-            layer['pfam_domain'].add(row.term_label)
-        elif row.collection_id == 'pfam_clans':
-            if layer['pfam_clan'] is None:
-                layer['pfam_clan'] = set()
-            layer['pfam_clan'].add(row.term_label)
-        elif row.collection_id in ('ucr_core', 'ucr_flank'):
-            detail = parse_detail(row.detail)
-            region = detail.get('region', '')
-            # 'core' wins over flank whenever both occur.
-            if region == 'core' or layer['ucr_region'] in (None, '', 'flank_up', 'flank_down'):
-                if layer['ucr_region'] != 'core':
-                    layer['ucr_region'] = region
-                    layer['variability'] = detail.get('variability', '')
-        elif row.collection_id == 'fubar_tested':
-            detail = parse_detail(row.detail)
-            layer['fubar_call'] = detail.get('call', '')
-        elif row.collection_id == 'fade_top_sig':
-            layer['fade_top'] = 1
-        elif row.collection_id == 'fade_bottom_sig':
-            layer['fade_bottom'] = 1
+        status_by_key[key] = row.evaluation_status
+        if row.ucr_region or row.fubar_call or row.fade_top_sig == '1' or row.fade_bottom_sig == '1':
+            layers[key] = {'ucr_region': row.ucr_region, 'variability': row.ucr_variability,
+                           'fubar_call': row.fubar_call, 'fade_top': int(row.fade_top_sig == '1'),
+                           'fade_bottom': int(row.fade_bottom_sig == '1')}
+    empty = {'ucr_region': '', 'variability': '', 'fubar_call': '', 'fade_top': 0, 'fade_bottom': 0}
 
-    keys = list(layers)
-    keys.extend(key for key in scores if key not in layers)
-    keys.sort()
+    keys = set(layers) | set(names) | set(scores)
     rows = []
-    for gene, pos in keys:
-        # Release the accumulated annotation as each output row is materialized;
-        # do not retain both full representations until DataFrame construction.
-        layer = layers.pop((gene, pos), None)
-        if layer is None:
-            layer = {'pfam_domain': None, 'pfam_clan': None,
-                     'ucr_region': None, 'variability': '',
-                     'fubar_call': '', 'fade_top': 0, 'fade_bottom': 0}
+    for gene, pos in sorted(keys):
+        layer = layers.get((gene, pos), empty)
+        domains, clans = names.get((gene, pos), (set(), set()))
         sc = scores.get((gene, pos))
         rows.append({
             'Gene': gene, 'Position': pos,
             'evaluation_status': status_by_key.get((gene, pos), 'NA'),
-            'pfam_domain': ';'.join(sorted(layer['pfam_domain'] or ())),
-            'pfam_clan': ';'.join(sorted(layer['pfam_clan'] or ())),
-            'ucr_region': layer['ucr_region'] or '',
+            'pfam_domain': ';'.join(sorted(domains)),
+            'pfam_clan': ';'.join(sorted(clans)),
+            'ucr_region': layer['ucr_region'],
             'position_variability': layer['variability'],
             'fubar_selection': layer['fubar_call'],
             'fade_top_sig': layer['fade_top'],
@@ -179,26 +161,29 @@ def build_position_characterization(positions, evidence, members):
                                        'caas_nominal', 'caas_adjusted'])
 
 
-def build_collection_summary(collections, members, evidence, coverage):
+def build_collection_summary(collections, member_frames, evidence, coverage):
     """Per collection/term: sizes and exact crosses with the ranking (no inference)."""
     scores = position_scores_by_key(evidence)
+    if isinstance(member_frames, pd.DataFrame):
+        member_frames = [member_frames]
     # One pass over memberships, rather than scanning the entire registry for
     # every term. Keep only counters and distinct genes, not per-term row copies.
     totals = {(r.collection_id, r.term_id): [0, set(), 0, 0, 0, 0]
               for r in collections.itertuples(index=False) if r.status == 'included'}
-    for collection, term, gene, position in zip(
-            members['collection_id'], members['term_id'], members['Gene'], members['Position']):
-        counts = totals.get((collection, term))
-        if counts is None:
-            continue
-        counts[0] += 1
-        counts[1].add(gene)
-        score = scores.get((gene, int(position)))
-        if score is not None:
-            counts[2] += score['score'] is not None
-            counts[3] += score['score'] is None
-            counts[4] += score['caas_nominal'] == 'TRUE'
-            counts[5] += score['caas_adjusted'] == 'TRUE'
+    for members in member_frames:
+        for collection, term, gene, position in zip(
+                members['collection_id'], members['term_id'], members['Gene'], members['Position']):
+            counts = totals.get((collection, term))
+            if counts is None:
+                continue
+            counts[0] += 1
+            counts[1].add(gene)
+            score = scores.get((gene, int(position)))
+            if score is not None:
+                counts[2] += score['score'] is not None
+                counts[3] += score['score'] is None
+                counts[4] += score['caas_nominal'] == 'TRUE'
+                counts[5] += score['caas_adjusted'] == 'TRUE'
     n_annotable = 0
     for row in coverage.itertuples(index=False):
         if row.scope == 'universe' and row.metric == 'n_positions_annotable':
@@ -303,10 +288,10 @@ def main():
         raise SystemExit(f'registry incomplete, missing: {missing}')
 
     positions = read_tsv(os.path.join(args.registry_dir, 'positions.tsv'),
-                         usecols=['Gene', 'Position', 'evaluation_status'])
+                         usecols=['Gene', 'Position', 'evaluation_status'] + pm.ATTRIBUTE_COLUMNS)
     evidence = read_tsv(os.path.join(args.registry_dir, 'position_evidence.tsv'))
-    members = read_tsv(os.path.join(args.registry_dir, 'members.tsv'),
-                       usecols=['collection_id', 'term_id', 'Gene', 'Position', 'detail', 'term_label'])
+    regions = read_tsv(os.path.join(args.registry_dir, 'regions.tsv'))
+    sites = read_tsv(os.path.join(args.registry_dir, 'sites.tsv'))
     collections = read_tsv(os.path.join(args.registry_dir, 'collections.tsv'))
     coverage = read_tsv(os.path.join(args.registry_dir, 'coverage.tsv'))
     with open(os.path.join(args.registry_dir, 'manifest.json')) as f:
@@ -315,8 +300,12 @@ def main():
     n_cycles = manifest.get('evidence', {}).get('null_cycles')
     n_cycles = None if n_cycles in ('NA', None) else float(n_cycles)
 
-    pos_char = build_position_characterization(positions, evidence, members)
-    coll_summary = build_collection_summary(collections, members, evidence, coverage)
+    pfam = pd.concat([f for _, f in pm.iter_members(None, regions, None, ['pfam_domains', 'pfam_clans'])],
+                     ignore_index=True) if len(regions) else pd.DataFrame(columns=pm.MEMBER_COLUMNS)
+    pos_char = build_position_characterization(positions, evidence, pfam)
+    del pfam
+    coll_summary = build_collection_summary(
+        collections, (frame for _, frame in pm.iter_members(positions, regions, sites)), evidence, coverage)
     ranking = build_ranking_summary(evidence, n_cycles)
     universe = build_universe_summary(positions, coverage)
 
@@ -335,8 +324,6 @@ def main():
                        'note': 'usados solo si la evidencia carece de flags canonicos'},
         'states': {
             'characterization': 'executed',
-            'localization': 'not_executed',
-            'global_association': 'not_executed',
             'proximity': 'not_executed',
         },
         'limits': ['sin inferencia de enriquecimiento',

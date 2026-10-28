@@ -6,7 +6,7 @@
 AggregateUcr: joins the per-gene UCR windows (detect_ucr.py) with the per-position
 Valdar tables, optional Pfam domain hits and optional positive-selection calls.
 
-Called by:  AGGREGATE_UCR_POSITIONS Nextflow process (subworkflows/ENRICHMENT/ucr_generation.nf → aggregate_ucr.py)
+Called by:  AGGREGATE_UCR_POSITIONS Nextflow process (subworkflows/POSENRICH/ucr_generation.nf → aggregate_ucr.py)
 Inputs:     --ucr_dir      directory of <gene>.ucr.tsv (detect_ucr.py via run_ucr_detection.py)
             --entropy_dir  directory of <gene>.entropy.tsv (compute_alignment_entropy.py)
             --prot_dir     directory of <gene>.fa protein alignments

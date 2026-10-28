@@ -60,7 +60,7 @@ def _read_hyp_pairs(path) -> Dict[str, List[Tuple[str, str]]]:
 
 def _index_alignment_dir(alignment_dir) -> Dict[str, str]:
     """gene symbol -> alignment file path. Flat directory; the gene is the file name up to the
-    first '.', the convention of CT_ACCUMULATION's concatenate.py."""
+    first '.'."""
     import glob
     import os
     out: Dict[str, str] = {}

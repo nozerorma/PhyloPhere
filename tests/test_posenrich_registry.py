@@ -1,14 +1,16 @@
-"""Common position registry: evaluation states, members, coverage, manifest and GMT export."""
+"""Common position registry: evaluation states, members, coverage and manifest."""
 import csv
+import pandas as pd
 import json
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / 'subworkflows/ENRICHMENT/local/src'
+SRC = ROOT / 'subworkflows/POSENRICH/local/src'
+sys.path.insert(0, str(SRC))
+import posenrich_members as pm  # noqa: E402
 REGISTRY = SRC / 'posenrich_registry.py'
-BUILDER = SRC / 'build_position_gmt.py'
 
 MAP_TSV = ('ori_codon_col\tstatus\tprot_ali_col\thg38_aa_pos\thg38_nt_coord\n'
            '1\tselected\t1\t10\tchr1:1000000\n'
@@ -82,7 +84,6 @@ def make_fixture(tmp_path):
 
 def run_registry(tmp_path, files, maps, extra=()):
     out = tmp_path / 'registry'
-    gmt = tmp_path / 'gmt_export'
     cmd = [sys.executable, str(REGISTRY),
            '--map_dir', maps, '--cleaned_background', files['background'],
            '--position_scores', files['scores'], '--postproc', files['postproc'],
@@ -90,10 +91,10 @@ def run_registry(tmp_path, files, maps, extra=()):
            '--domain_variability_file', files['domains'], '--ucr_positions_file', files['ucr'],
            '--fubar_sites_file', files['fubar'], '--fade_sites_top_file', files['fade_top'],
            '--fade_sites_bottom_file', files['fade_bottom'], '--custom_marker_file', files['custom'],
-           '--output_dir', str(out), '--gmt_dir', str(gmt), *extra]
+           '--output_dir', str(out), *extra]
     result = subprocess.run(cmd, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    return out, gmt
+    return out
 
 
 def read_tsv(path):
@@ -103,7 +104,7 @@ def read_tsv(path):
 
 def test_registry_states_members_coverage_manifest(tmp_path):
     files, maps = make_fixture(tmp_path)
-    out, gmt = run_registry(tmp_path, files, maps)
+    out = run_registry(tmp_path, files, maps)
 
     positions = {(r['Gene'], int(r['Position'])): r for r in read_tsv(out / 'positions.tsv')}
     assert set(positions) == {('G1', 0), ('G1', 1), ('G1', 2), ('G1', 3)}
@@ -136,8 +137,9 @@ def test_registry_states_members_coverage_manifest(tmp_path):
     # Directional scores stay separate from the shared p.
     assert {r['CAAS_score'] for r in g10} == {'0.9', '0.8'}
 
-    members = {(r['collection_id'], r['term_id'], r['Gene'], int(r['Position']))
-               for r in read_tsv(out / 'members.tsv')}
+    assert not list(out.glob('members*'))   # the expanded memberships are not stored
+    members = {(r.collection_id, r.term_id, r.Gene, int(r.Position))
+               for r in pm.read_members(out).itertuples(index=False)}
     assert ('pfam_domains', 'PF1', 'G1', 2) in members
     assert ('pfam_domains', 'PF2', 'G1', 2) in members
     assert ('pfam_clans', 'CL1', 'G1', 2) in members
@@ -147,14 +149,14 @@ def test_registry_states_members_coverage_manifest(tmp_path):
     assert ('fubar_purifying', 'global', 'G1', 2) in members
     assert ('fade_top_sig', 'global', 'G1', 0) in members
     assert ('fade_bottom_sig', 'global', 'G1', 2) in members
-    assert ('genomic_windows_1mb', 'chr1_0M', 'G1', 0) in members
-    assert ('genomic_windows_1mb', 'chr1_1M', 'G1', 2) in members
+    assert ('genomic_windows', 'chr1_0M', 'G1', 0) in members
+    assert ('genomic_windows', 'chr1_1M', 'G1', 2) in members
     assert ('custom', 'PP2A', 'G1', 0) in members
 
     collections = {(r['collection_id'], r['term_id']): r for r in read_tsv(out / 'collections.tsv')}
-    assert collections[('genomic_windows_1mb', 'chr1_1M')]['informative_within_protein'] == '0'
+    assert collections[('genomic_windows', 'chr1_1M')]['informative_within_protein'] == '0'
     assert collections[('pfam_domains', 'PF1')]['informative_within_protein'] == '1'
-    assert collections[('genomic_windows_1mb', 'chr1_1M')]['analyses'] == 'proximity_genomic'
+    assert collections[('genomic_windows', 'chr1_1M')]['analyses'] == 'proximity_genomic'
     assert collections[('custom', 'PP2A')]['status'] == 'included'
     assert collections[('pfam_domains', 'PF1')]['source_sha256'] != 'NA'
 
@@ -177,7 +179,7 @@ def test_registry_states_members_coverage_manifest(tmp_path):
     assert all(r['note'] for r in pending)
 
     manifest = json.loads((out / 'manifest.json').read_text())
-    assert manifest['contract_version'] == 1
+    assert manifest['contract_version'] == 2
     assert manifest['positions']['by_status']['detected_positive'] == 2
     assert manifest['positions']['by_status']['evaluated_no_detection'] == 1
     assert manifest['evidence']['p_available'] == 3
@@ -188,22 +190,6 @@ def test_registry_states_members_coverage_manifest(tmp_path):
     assert by_id['custom']['status'] == 'included'
     assert by_id['ucr_core']['n_members'] == 1
     assert manifest['sources']['position_scores']['sha256'] != 'NA'
-
-    # The GMT export is byte-identical to build_position_gmt.py over the same inputs.
-    ref = tmp_path / 'gmt_ref'
-    result = subprocess.run([sys.executable, str(BUILDER), '--map_dir', maps,
-                             '--cleaned_background', files['background'],
-                             '--domain_variability_file', files['domains'],
-                             '--ucr_positions_file', files['ucr'],
-                             '--fubar_sites_file', files['fubar'],
-                             '--fade_sites_top_file', files['fade_top'],
-                             '--fade_sites_bottom_file', files['fade_bottom'],
-                             '--custom_marker_file', files['custom'],
-                             '--output_dir', str(ref)], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    for name in ('pfam_domains.gmt', 'pfam_clans.gmt', 'genomic_locations.gmt',
-                 'custom_features.gmt', 'characterization_layers.tsv'):
-        assert (gmt / name).read_text() == (ref / name).read_text(), name
 
 
 def test_registry_without_map_scores_or_null(tmp_path):
@@ -226,7 +212,7 @@ def test_registry_without_map_scores_or_null(tmp_path):
     manifest = json.loads((out / 'manifest.json').read_text())
     assert manifest['evidence']['null_cycles'] == 'NA'
     assert all(c['status'] == 'missing' for c in manifest['collections'])
-    assert (out / 'members.tsv').read_text().count('\n') == 1
+    assert (out / 'regions.tsv').read_text().count('\n') == 1 and (out / 'sites.tsv').read_text().count('\n') == 1
     assert (out / 'pending_mappings.tsv').read_text().count('\n') == 1
 
 
@@ -277,7 +263,7 @@ def test_discovery_missing_and_zero_keep_distinct_states(tmp_path):
     files, maps = make_fixture(tmp_path)
     with open(files['postproc'], 'a') as f:
         f.write('G1\t1\tF/L\tconvergent\tCAAS_x:1\tFFF/FLL:1\tH1\t1\t2.0\ttop\tNA\n')
-    out, _ = run_registry(tmp_path, files, maps)
+    out = run_registry(tmp_path, files, maps)
     positions = {r['Position']: r for r in read_tsv(out / 'positions.tsv')}
     assert positions['1']['evaluation_status'] == 'not_evaluable'
     assert positions['3']['evaluation_status'] == 'evaluated_no_detection'
@@ -295,3 +281,83 @@ def test_registry_rejects_inconsistent_shared_p(tmp_path):
     import pytest
     with pytest.raises(AssertionError, match='inconsistent shared p.emp'):
         run_registry(tmp_path, files, maps)
+
+
+def old_members(files, maps, window_size=1_000_000):
+    """Members as the source readers deliver them: one (collection, term, gene, position) per position and term."""
+    import position_sources as ps
+    genes = {'G1'}
+    cache = ps.build_map_cache(maps, genes)
+    rows = set()
+
+    def add_terms(collection, terms):
+        rows.update((collection, term, g, int(c)) for term, (_, members) in terms.items()
+                    for g, c in (m.split(':') for m in members))
+
+    def add_columns(collection, cols):
+        rows.update((collection, 'global', g, c) for g, columns in cols.items() for c in columns)
+
+    domains, clans = ps.collect_pfam_members(files['domains'], cache, genes)
+    add_terms('pfam_domains', domains)
+    add_terms('pfam_clans', clans)
+    core, flank, _, _ = ps.collect_ucr_members(files['ucr'], cache, genes)
+    add_columns('ucr_core', core)
+    add_columns('ucr_flank', flank)
+    positive, purifying, calls = ps.collect_fubar_members(files['fubar'], cache, genes)
+    add_columns('fubar_positive', positive)
+    add_columns('fubar_purifying', purifying)
+    rows.update(('fubar_tested', 'global', g, c) for g, c in calls)
+    add_columns('fade_top_sig', ps.collect_fade_sites(files['fade_top'], cache, genes))
+    add_columns('fade_bottom_sig', ps.collect_fade_sites(files['fade_bottom'], cache, genes))
+    add_terms('genomic_windows', ps.collect_genomic_windows(cache, window_size=window_size))
+    add_terms('custom', ps.collect_custom_members(files['custom'], cache, genes, strict=False)[0])
+    return rows
+
+
+def test_compact_registry_expands_to_the_members_of_the_readers(tmp_path):
+    files, maps = make_fixture(tmp_path)
+    out = run_registry(tmp_path, files, maps)
+    frame = pm.read_members(out)
+    new = {(r.collection_id, r.term_id, r.Gene, int(r.Position)) for r in frame.itertuples(index=False)}
+    assert new == old_members(files, maps)
+    # One row per (term, gene, position): no repeats after expansion.
+    assert not frame.duplicated(['collection_id', 'term_id', 'Gene', 'Position']).any()
+
+
+def test_attributes_are_columns_and_regions_are_runs(tmp_path):
+    files, maps = make_fixture(tmp_path)
+    out = run_registry(tmp_path, files, maps)
+    positions = {(r['Gene'], int(r['Position'])): r for r in read_tsv(out / 'positions.tsv')}
+    assert positions[('G1', 2)]['ucr_core'] == '1' and positions[('G1', 0)]['ucr_flank'] == '1'
+    assert positions[('G1', 0)]['fubar_call'] == 'positive' and positions[('G1', 2)]['fubar_call'] == 'purifying'
+    assert positions[('G1', 0)]['fade_top_sig'] == '1' and positions[('G1', 2)]['fade_bottom_sig'] == '1'
+    assert positions[('G1', 0)]['window'] == 'chr1_0M' and positions[('G1', 2)]['window'] == 'chr1_1M'
+    regions = read_tsv(out / 'regions.tsv')
+    assert regions and all(int(r['start']) <= int(r['end']) for r in regions)
+    assert {r['collection_id'] for r in regions} == {'pfam_domains', 'pfam_clans'}
+
+
+def test_runs_split_at_gaps_and_expand_without_repeats():
+    import position_sources as ps
+    assert ps.column_runs([0, 2, 3, 4, 9]) == [(0, 0), (2, 4), (9, 9)]
+    regions = pd.DataFrame({'collection_id': 'pfam_domains', 'term_id': ['T', 'T', 'U'], 'term_label': 'x',
+                            'Gene': 'G', 'start': ['0', '2', '3'], 'end': ['1', '4', '3']})
+    expanded = pm.expand_runs(regions)
+    got = sorted((r.term_id, int(r.Position)) for r in expanded.itertuples(index=False))
+    assert got == [('T', 0), ('T', 1), ('T', 2), ('T', 3), ('T', 4), ('U', 3)]
+    overlapping = pd.concat([regions.iloc[[1]], regions.iloc[[1]]])
+    assert len(pm.expand_runs(overlapping)) == 3          # the same run twice is one set of positions
+
+
+def test_window_size_comes_from_the_argument(tmp_path):
+    files, maps = make_fixture(tmp_path)
+    out = run_registry(tmp_path, files, maps, extra=('--window_size_bp', '2000'))
+    positions = {(r['Gene'], int(r['Position'])): r for r in read_tsv(out / 'positions.tsv')}
+    # Coordinates 1,000,000 and 1,000,005 (positions 0 and 2). Windows are 1-based and inclusive: 2 kb windows end at
+    # 1,000,000 and 1,002,000, so the two positions fall in different windows (names count the start in kb).
+    assert positions[('G1', 0)]['window'] == 'chr1_998k' and positions[('G1', 2)]['window'] == 'chr1_1000k'
+    members = {(r.collection_id, r.term_id) for r in pm.read_members(out, ['genomic_windows']).itertuples(index=False)}
+    assert members == {('genomic_windows', 'chr1_998k'), ('genomic_windows', 'chr1_1000k')}
+    expanded = {(r.collection_id, r.term_id, r.Gene, int(r.Position))
+                for r in pm.read_members(out, ['genomic_windows']).itertuples(index=False)}
+    assert expanded == {m for m in old_members(files, maps, 2000) if m[0] == 'genomic_windows'}

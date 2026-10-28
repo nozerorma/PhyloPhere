@@ -23,7 +23,7 @@ module's output.
 tab populates them, since those inputs live on the Precomputed Run tab. The group
 box is built only when a spec lists some, so no tab shows an empty box.
 
-Imported by: gui/widgets/tabs/{accumulation,caas,disambiguation,enrichment,fade,
+Imported by: gui/widgets/tabs/{caas,disambiguation,enrichment,fade,posenrich,
 rerconverge,scoring,vep}_tab.py
 """
 

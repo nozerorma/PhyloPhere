@@ -5,6 +5,7 @@ import math
 import subprocess
 import sys
 from argparse import Namespace
+import os
 from pathlib import Path
 
 import numpy as np
@@ -15,10 +16,10 @@ from scipy.stats import hypergeom
 pytest.importorskip('pyarrow')
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / 'subworkflows/ENRICHMENT/local/src'
+SRC = ROOT / 'subworkflows/POSENRICH/local/src'
 UNIVERSE = SRC / 'posenrich_universe.py'
 SCORING_SRC = ROOT / 'subworkflows/SCORING/local/src/null_position_stats.py'
-ACCUMULATION = ROOT / 'subworkflows/CT_ACCUMULATION/local/accumulation_test.py'
+ACCUMULATION = ROOT / 'subworkflows/POSENRICH/local/src/accumulation_test.py'
 
 
 def load(path, name):
@@ -127,6 +128,7 @@ def test_command_writes_table_and_manifest(files, tmp_path):
                     '--observed', str(files / 'observed.tsv'), '--output-dir', str(out)], check=True)
     table = pd.read_csv(out / 'universe.tsv.gz', sep='\t')
     assert len(table) == 7 and table['observed_positive'].sum() == 4
+    assert table['observed_top'].sum() == 3 and table['observed_bottom'].sum() == 2
     manifest = json.loads((out / 'universe_manifest.json').read_text())
     assert manifest['gene_list_sha256'] == uni.sha256_file(files / 'genes.txt')
     assert manifest['metrics']['n_universe'] == 7
@@ -147,16 +149,63 @@ def test_agrees_with_scoring_universe(files):
     assert metrics['n_null_u'] == len(scoring_keys)
 
 
-def test_accumulation_uses_the_shared_universe(files, tmp_path):
+def test_table_flags_sides_and_both_count_once(files):
+    table = build(files).table()
+    both = table[(table.gene == 'G1') & (table.position == 1)].iloc[0]
+    assert (both.observed_positive, both.observed_top, both.observed_bottom) == (1, 1, 1)
+    assert list(table.columns) == ['gene', 'position', 'nd', 'observed_positive', 'observed_top', 'observed_bottom']
+    assert ((table.observed_top | table.observed_bottom) == table.observed_positive).all()
+
+
+def run_accumulation(files, tmp_path, side, genes=None):
+    """Write the universe table of the fixture and run the test of one direction on it."""
     acc = load(ACCUMULATION, 'accumulation_under_test')
+    table = tmp_path / 'universe.tsv.gz'
+    build(files, genes=genes).table().to_csv(table, sep='\t', index=False)
+    out = tmp_path / f'{side}.csv'
+    acc.run(Namespace(universe=str(table), change_side=side, output=str(out)))
+    return pd.read_csv(out).set_index('Gene')
+
+
+def test_accumulation_reads_the_shared_universe_table(files, tmp_path):
     for side, K, actual_g1 in (('both', 4, 3), ('top', 3, 2), ('bottom', 2, 2)):
-        out = tmp_path / f'{side}.csv'
-        acc.run(Namespace(caas_csv=str(files / 'observed.tsv'), background_positions=str(files / 'background.output'),
-                          bg_caas=str(files / 'genes.txt'), null_positions=str(files / 'null_positions.parquet'),
-                          change_side=side, output=str(out)))
-        res = pd.read_csv(out).set_index('Gene')
+        res = run_accumulation(files, tmp_path, side)
         assert res.loc['G1', 'PoolPositions'] == 5 and res.loc['G2', 'PoolPositions'] == 2
         assert res.loc['G1', 'ActualCount'] == actual_g1
         expected = hypergeom.sf(actual_g1 - 1, 7, 5, K)
         assert res.loc['G1', 'PValue'] == pytest.approx(expected)
         assert res['ActualCount'].sum() == K
+
+
+def test_accumulation_omits_genes_without_positions_in_u(files, tmp_path):
+    # G4 is on the gene list but has no tested and null-scored position: n_g = 0, no row, no test.
+    (files / 'background.output').write_text(BACKGROUND + 'G4\t' + ','.join(map(str, range(3))) + '\n')
+    res = run_accumulation(files, tmp_path, 'both', genes=['G1', 'G2', 'G4'])
+    assert list(res.index) == ['G1', 'G2']
+    assert (res['PoolPositions'] > 0).all()
+
+
+# Real run (10,000-cycle malignant_prevalence_complete): ~/.cc/enr_modular holds its inputs and the three outputs
+# the former per-process universe produced. The shared universe table must reproduce them exactly; the genes of the
+# list without a position in U (n_g = 0) are the only rows that disappear.
+REAL = Path(os.path.expanduser('~/.cc/enr_modular'))
+
+
+@pytest.mark.skipif(not (REAL / 'null_positions.parquet').exists(), reason='real run inputs not available locally')
+@pytest.mark.parametrize('observed_file', ['position_scores.tsv', 'filtered_discovery.tsv'])
+def test_accumulation_reproduces_the_real_run(tmp_path, observed_file):
+    genes = uni.load_universe_genes(REAL / 'cleaned_postproc_11530.txt')
+    universe = uni.build_universe(genes, uni.load_null_positive(REAL / 'null_positions.parquet'),
+                                  uni.load_observed_positive(REAL / observed_file), REAL / 'background.output')
+    table = tmp_path / 'universe.tsv.gz'
+    universe.table().to_csv(table, sep='\t', index=False)
+    acc = load(ACCUMULATION, 'accumulation_under_test')
+    for direction, side in (('all', 'both'), ('top', 'top'), ('bottom', 'bottom')):
+        out = tmp_path / f'{direction}.csv'
+        acc.run(Namespace(universe=str(table), change_side=side, output=str(out)))
+        new = pd.read_csv(out).set_index('Gene')
+        reference = pd.read_csv(REAL / f'accumulation_{direction}_results.csv').set_index('Gene')
+        assert new.index.is_unique and set(new.index) <= set(reference.index)
+        dropped = reference.loc[reference.index.difference(new.index)]
+        assert (dropped['PoolPositions'] == 0).all() and (dropped['ActualCount'] == 0).all()
+        pd.testing.assert_frame_equal(new, reference.loc[new.index], check_exact=True)

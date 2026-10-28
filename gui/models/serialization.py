@@ -50,8 +50,20 @@ _RETIRED_FIELDS = {
     "scoring": ("scoring_weight_caas", "scoring_weight_rer", "scoring_weight_fade", "scoring_rer_direction", "scoring_stress", "scoring_stress_top_n",
                 "scoring_stress_rank_metric", "scoring_ami", "scoring_string", "scoring_compare_fdr", "scoring_compare_top_n"),
     "enrichment": ("posenrich_eggnog", "cosmic_db", "fcs_fdr_wilcoxon", "fcs_fdr_lachenbruch"),
-    "accumulation": ("accumulation_n_randomizations", "accumulation_randomization_type", "accumulation_entropy_dir"),
+    "posenrich": ("posenrich_ranking", "eggnog_taxid", "auto_fetch_eggnog", "egg_members_file", "egg_annotations_file"),
 }
+
+# Fields of the POSENRICH module that older projects hold in the enrichment section.
+_POSENRICH_FIELDS = (
+    "accumulation_fdr", "accumulation_caas_input", "accumulation_background_input",
+    "posenrich_domains", "domain_variability_file", "domain_ref_species", "pfam_cache_dir",
+    "posenrich_ucr", "ucr_positions_file", "fubar_sites_file",
+    "posenrich_radios", "position_registry_memory", "position_module_memory",
+)
+# Parameters of the position-set enrichment test, which no process reads.
+_RETIRED_POSENRICH_FIELDS = ("posenrich_min_size", "posenrich_max_size", "posenrich_batch_size", "posenrich_enabled",
+                             "posenrich_n_permutations", "posenrich_seed", "posenrich_aggregation", "position_annotation_memory",
+                             "posenrich_ranking", "eggnog_taxid", "auto_fetch_eggnog", "egg_members_file", "egg_annotations_file")
 
 
 def to_dict(project: ProjectConfig) -> dict[str, Any]:
@@ -123,6 +135,25 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
     # copied to disambiguation.caas_map_dir unless that is already set.
     modules = data.get("modules")
     if isinstance(modules, dict):
+        # POSENRICH has its own section. Older projects hold its fields in the enrichment section (and the Accumulation
+        # FDR in a module of its own); a value already in the posenrich section wins.
+        posenrich = modules.setdefault("posenrich", {})
+        old_acc = modules.pop("accumulation", None)
+        if isinstance(old_acc, dict) and "accumulation_fdr" in old_acc:
+            posenrich.setdefault("accumulation_fdr", old_acc["accumulation_fdr"])
+        enrichment = modules.get("enrichment")
+        if isinstance(enrichment, dict):
+            if enrichment.pop("posenrich_modular", False):
+                posenrich.setdefault("enabled", True)
+            for name in _POSENRICH_FIELDS:
+                if name in enrichment:
+                    posenrich.setdefault(name, enrichment.pop(name))
+            gone = [k for k in _RETIRED_POSENRICH_FIELDS if enrichment.pop(k, None) is not None]
+            if gone:
+                logger.warning("project parameters %s were retired (module posenrich): no process reads them any more", ", ".join(gone))
+        precomputed = data.get("precomputed")
+        if isinstance(precomputed, dict):
+            precomputed.pop("use_accumulation", None)
         old = (modules.get("vep") or {}).pop("vep_map_dir", None)
         disambiguation = modules.get("disambiguation")
         if old and isinstance(disambiguation, dict) and not disambiguation.get("caas_map_dir"):

@@ -379,7 +379,7 @@ Related enrichment and annotation reports from this run:
   "FCS - CAAS (this scoring run)",      sprintf("12.FCS_scoring_%s.html",    .trait),
   "FCS - RERconverge (+ p.perm)",       sprintf("12.FCS_rer_%s.html",        .trait),
   "AMI (DOMINO active modules)",        sprintf("13.AMI_analysis_%s.html", .trait),
-  "POSENRICH modular — characterization, global association, localization and proximity", sprintf("POSENRICH_modular_report_%s.html", .trait),
+  "POSENRICH - universe, accumulation, within-gene concentration and proximity", sprintf("14.POSENRICH_report_%s.html", .trait),
   "COMPARE - cross-module overview",    sprintf("15.Comparison_report_%s.html",.trait)
 )
 cat(paste0("- [", .companions$Report, "](../html_reports/", .companions$File, ")", collapse = "\n"))
@@ -519,44 +519,57 @@ variation and not a confidence interval.
 
 ### Composition of detections
 
-Each plot compares what the null detects (pooling its cycles) with what the run detects. Similar shapes mean that the
-null produces detections of the same kind as the run, so that a difference in the excedance plot comes from how many
-positions are detected and not from what a detection looks like.
+Each null cycle is one possible run, so the score of its detections is summarised per cycle and the run is placed among
+those summaries. Similar values mean that the null produces detections of the same kind as the run, so that a
+difference in the excedance plot comes from how many positions are detected and not from what a detection looks like.
 
 ```{r pos-null-comp-data, eval=has_pos_null}
-# The null detections, from the histogram of its scores pooled over the cycles: one point per bin (its centre) carrying the
-# number of detections of the bin as weight. The run's detections are its own scores.
-.null_pooled <- function(d) {
-  h <- .null_hist[.null_hist$direction == d, ] %>% group_by(bin) %>% summarise(n = sum(n), .groups = "drop")
-  tibble::tibble(score = (h$bin + 0.5) / 100, weight = as.numeric(h$n))
-}
-.comp <- dplyr::bind_rows(lapply(.dirs, function(d)
-  dplyr::bind_rows(tibble::tibble(direction = d, source = "Observed", score = .sets[[d]]$obs$score, weight = 1),
-                   dplyr::mutate(.null_pooled(d), direction = d, source = "Null")))) %>%
-  mutate(direction = factor(direction, levels = c("global", "top", "bottom")),
-         source    = factor(source, levels = c("Null", "Observed")))
 .theme_p <- theme_minimal(base_size = 11)
 ```
 
 #### Score of the detected positions (score > 0)
 
-```{r pos-null-score-density, eval=has_pos_null, fig.height=3.8, fig.width=10, results='asis'}
-.comp_pos <- .comp %>% filter(score > 0, weight > 0)
-if (nrow(.comp_pos) > 0) {
-  p_dens <- ggplot(.comp_pos, aes(score, weight = weight, colour = source, fill = source)) +
-    geom_density(alpha = .25, adjust = 1.2) + facet_wrap(~direction, scales = "free_y") +
-    scale_colour_manual(values = .src_pal) + scale_fill_manual(values = .src_pal) +
-    labs(x = "CAAS Score", y = "density", colour = NULL, fill = NULL) +
-    .theme_p + theme(legend.position = "top")
-  print(p_dens)
+```{r pos-null-score-median, eval=has_pos_null, fig.height=3.8, fig.width=10, results='asis'}
+# Median score of the detections of every null cycle, from its histogram (bins 0..100 by cycle). Cycles with fewer than
+# .min_det detections are left out, as a median of a handful of scores is unstable.
+.min_det <- 20
+.cycle_median <- function(bins) {
+  cs  <- apply(bins, 2, cumsum)
+  tot <- cs[nrow(cs), ]
+  vapply(seq_along(tot), function(j) if (tot[j] >= .min_det) which(cs[, j] >= tot[j] / 2)[1] - 1L else NA_integer_, integer(1))
+}
+.det_null <- dplyr::bind_rows(lapply(.dirs, function(d)
+  tibble::tibble(direction = d, med = (.cycle_median(.null_bins(d)) + .5) / 100))) %>% filter(is.finite(med))
+# The run's scores are binned like the null (floor(100 * score)), so both medians are on the same grid.
+.det_obs <- dplyr::bind_rows(lapply(.dirs, function(d) {
+  b <- sort(floor(100 * .sets[[d]]$obs$score[is.finite(.sets[[d]]$obs$score) & .sets[[d]]$obs$score > 0]))
+  tibble::tibble(direction = d, obs = if (length(b) >= .min_det) (b[ceiling(length(b) / 2)] + .5) / 100 else NA_real_)
+}))
+if (nrow(.det_null) > 0) {
+  .lv <- c("global", "top", "bottom")
+  p_med <- ggplot(mutate(.det_null, direction = factor(direction, .lv)), aes(med)) +
+    geom_histogram(binwidth = .01, boundary = 0, fill = "grey65", colour = "grey35") +
+    geom_vline(data = mutate(filter(.det_obs, is.finite(obs)), direction = factor(direction, .lv)),
+               aes(xintercept = obs), colour = "#E15759", linewidth = 1) +
+    facet_wrap(~direction, scales = "free_y") +
+    labs(x = "median CAAS Score of the detections of a cycle", y = "cycles") + .theme_p
+  print(p_med)
+  print(knitr::kable(.det_null %>% left_join(.det_obs, by = "direction") %>% group_by(direction) %>%
+    summarise(`cycles used` = n(), `null median` = median(med), q05 = quantile(med, .05), q95 = quantile(med, .95),
+              run = first(obs), `cycles >= run` = sprintf("%.1f%%", 100 * mean(med >= first(obs))), .groups = "drop") %>%
+    mutate(direction = factor(direction, .lv)) %>% arrange(direction),
+    digits = 3, caption = "Median score of the detections per null cycle and in the run"))
 } else {
   cat("_No positions with score > 0 available._\n\n")
 }
 ```
 
-Detections require a strictly positive score. Zero entries in gene null matrices
-represent no detected signal in that cycle; missing empirical evidence is unavailable.
-Histogram bin 0 contains positive scores below 0.01 and does not identify exact zeros.
+Each grey count is one null cycle, placed at the median score of its own detections; the red line is the median of the run.
+The share of cycles at or above the line tells whether the run detects higher-scoring positions than a typical cycle.
+Every cycle weighs the same, whatever its volume. Detections require a strictly positive score. Zero entries in gene
+null matrices represent no detected signal in that cycle; missing empirical evidence is unavailable. Scores are binned
+at 0.01, so differences of that size between medians are not resolved, and histogram bin 0 contains positive scores
+below 0.01 and does not identify exact zeros.
 
 ### Top and bottom balance
 
@@ -655,7 +668,10 @@ cat(paste0(
   "- **Observed positive positions**: ", .nu_n(.nu_val("observed_positive_positions")), "\n",
   "- **Observed positions the null never scored**: ", .nu_n(.nu_val("observed_unseen_positions")),
   sprintf(" (%.1f%%)\n", 100 * .nu_val("fraction_unseen")),
-  "- **|U|**: ", .nu_n(.nu_val("universe_size")), " positions\n\n",
+  "- **|U|**: ", .nu_n(.nu_val("universe_size")), " positions\n",
+  if (is.finite(.nu_val("gene_list_sha256"))) paste0("- **Gene list**: ", .nu_n(.nu_val("gene_list_sha256")), " genes (digest ",
+                                                       substr(.nu_note("gene_list_sha256"), 1, 12), ")\n") else "",
+  "\n",
   "An unseen position is a position no null cycle scored. It keeps p = 1/(N + 1) and stays in the BH families and ",
   "in the enrichment background: the unseen fraction diagnoses whether N cycles are enough for the null to reach ",
   "the positions that can be scored, and demotes nothing.\n\n"))

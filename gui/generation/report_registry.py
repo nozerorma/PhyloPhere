@@ -434,53 +434,6 @@ def _make_fade_spec(direction: str) -> ReportSpec:
     )
 
 
-# ── CT_ACCUMULATION ───────────────────────────────────────────────────────────
-
-
-def _accumulation_find_slots(outdir: Listing) -> list[InputSlot]:
-    accum = outdir / "accumulation"
-    dirs_present = [
-        d for d in ("top", "bottom", "all")
-        if next(iter((accum / d).glob(f"accumulation_{d}_results.csv")), None) is not None
-    ]
-    return [
-        _slot("results", "Per-direction accumulation results CSVs", True,
-              accum if dirs_present else None,
-              note=f"directions found: {', '.join(dirs_present) or 'none'}"),
-    ]
-
-
-def _accumulation_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
-    accum = report.html_path.parent.parent / "accumulation"
-    output_file = "10.Accumulation_report.html"
-    pre_lines = ["mkdir -p accum_root"]
-    for direction in ("top", "bottom", "all"):
-        pre_lines.append(
-            f'[ -f "{accum}/{direction}/accumulation_{direction}_results.csv" ] && '
-            f'cp "{accum}/{direction}/accumulation_{direction}_results.csv" accum_root/ || true'
-        )
-    render = _render_call(
-        "10.Accumulation_report.Rmd",
-        [
-            "accum_dir      = 'accum_root'",
-            f"traitname      = '{report.traitname}'",
-            "fdr_threshold  = 0.05",
-            "output_dir     = '.'",
-        ],
-        output_file,
-    )
-    return _wrap_script(
-        header_comment="CT_ACCUMULATION — 10.Accumulation_report.Rmd",
-        repo_dir=repo_dir,
-        local_dir="subworkflows/CT_ACCUMULATION/local",
-        pre_lines=pre_lines,
-        render_block=render,
-        output_file=output_file,
-        publish_targets=[accum, report.html_path.parent],
-        use_singularity=use_singularity,
-    )
-
-
 # ── CT_POSTPROC ───────────────────────────────────────────────────────────────
 
 
@@ -718,111 +671,63 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
     )
 
 
-# ── ENRICHMENT: POSENRICH ─────────────────────────────────────────────────────
+# ── POSENRICH: report 14 ──────────────────────────────────────────────────────
 
 
 def _posenrich_find_slots(outdir: Listing) -> list[InputSlot]:
     posenrich = outdir / "posenrich"
+
+    def dir_slot(key, label, sub, required=True):
+        p = posenrich / sub
+        return _slot(key, label, required, p.path if p.is_dir() else None)
+
+    # The report states a missing level 1, level 2 or proximity; the universe, the registry and the
+    # characterization are what it cannot be written without.
     return [
-        # posenrich.nf emits this file (emit: results) as
-        # posenrich_characterization.tsv, a name without "results".
-        _slot("results", "Posenrich results TSV", True,
-              _first_match(posenrich, "posenrich_characterization.tsv", "*results*.tsv")),
-        _slot("leading_edge", "Posenrich leading-edge TSV", True, _first_match(posenrich, "*leading_edge*.tsv")),
-        _slot("position_scores", "Position scores TSV", False, _first_match(outdir, "scoring/position_scores.tsv")),
-        _slot("gene_scores", "Gene scores TSV", False, _first_match(outdir, "scoring/gene_scores.tsv")),
-        _slot("vep_primateai", "VEP PrimateAI TSV", False, _first_match(outdir, "**/*primateai*.tsv")),
-        _slot("vep_cosmic", "VEP COSMIC TSV", False, _first_match(outdir, "**/*cosmic*.tsv")),
-        _slot("vep_ensembl", "VEP Ensembl consequence TSV", False, _first_match(outdir, "vep/ensembl_vep_mapped.tsv", "**/*ensembl_vep*.tsv")),
-        _slot("genomic_info", "Gene genomic coordinates TSV", False,
-              _first_match(outdir, "postproc/postproc_inputs/*", "**/*genomic_info*.tsv")),
-        _slot("fade_sites_top", "FADE selected sites (top)", False,
-              _first_match(outdir, "selection/fade/top/fade_sites_top.csv")),
-        _slot("fade_sites_bottom", "FADE selected sites (bottom)", False,
-              _first_match(outdir, "selection/fade/bottom/fade_sites_bottom.csv")),
-        _slot("fcs_stats", "Canonical FCS annotation table", False, _first_match(outdir, "scoring/fcs_stats.tsv")),
-        _slot("gene_scores", "Canonical gene union (CAAS/RER/FADE)", True, _first_match(outdir,"scoring/gene_scores.tsv")),
-        _slot("gene_metadata", "Canonical gene metadata", True, _first_match(outdir,"scoring/gene_evidence_metadata.json")),
-        _slot("cleaned_background", "Background/universe gene list", False,
-              _first_match(outdir, "**/cleaned_background*.txt")),
+        dir_slot("universe", "Universe directory", "universe"),
+        dir_slot("registry", "POSENRICH registry directory", "registry"),
+        dir_slot("characterization", "Characterization directory", "characterization"),
+        dir_slot("accumulation", "Level 1 (Accumulation) results directory", "accumulation", required=False),
+        dir_slot("within_gene", "Level 2 (within-gene) results directory", "within_gene", required=False),
+        dir_slot("proximity", "Proximity results directory", "proximity", required=False),
     ]
 
 
 def _posenrich_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
-    output_file = f"14.Position_enrichment_report_{report.traitname}.html"
+    output_file = f"14.POSENRICH_report_{report.traitname}.html"
+    # The report reads accumulation_<direction>_results.csv from one directory; the module publishes them per direction.
+    accumulation = s.get("accumulation")
+    pre_lines = ["mkdir -p accumulation_root", "mkdir -p src",
+                 f'cp "{repo_dir}/subworkflows/ENRICHMENT/local/src/report_presentation.R" src/']
+    if accumulation:
+        for direction in ("top", "bottom", "all"):
+            pre_lines.append(
+                f'[ -f "{accumulation}/{direction}/accumulation_{direction}_results.csv" ] && '
+                f'cp "{accumulation}/{direction}/accumulation_{direction}_results.csv" accumulation_root/ || true'
+            )
+
+    def optional(key):
+        return f"'{s[key]}'" if s.get(key) else "NULL"
+
     render = _render_call(
-        "14.Position_enrichment_report.Rmd",
+        "14.POSENRICH_report.Rmd",
         [
-            f"results_file = '{s['results']}'",
-            f"leading_edge_file = '{s['leading_edge']}'",
-            f"traitname = '{report.traitname}'",
-            "padj_thr = 0.05",
-            f"position_scores_file = {_r_arg(s['position_scores'])}",
-            f"gene_scores_file     = {_r_arg(s['gene_scores'])}",
-            f"vep_primateai_file   = {_r_arg(s['vep_primateai'])}",
-            f"vep_cosmic_file      = {_r_arg(s['vep_cosmic'])}",
-            f"vep_ensembl_file     = {_r_arg(s['vep_ensembl'])}",
-            f"genomic_info_file    = {_r_arg(s['genomic_info'])}",
-            f"fade_sites_top_file    = {_r_arg(s['fade_sites_top'])}",
-            f"fade_sites_bottom_file = {_r_arg(s['fade_sites_bottom'])}",
-            f"fcs_stats_file = {_r_arg(s['fcs_stats'])}",
-            f"universe_file  = {_r_arg(s['cleaned_background'])}",
-            "seed = '1998'",
-        ],
-        output_file,
-    )
-    return _wrap_script(
-        header_comment="ENRICHMENT — 14.Position_enrichment_report.Rmd",
-        repo_dir=repo_dir,
-        local_dir="subworkflows/ENRICHMENT/local",
-        pre_lines=[],
-        render_block=render,
-        output_file=output_file,
-        publish_targets=[report.html_path.parent.parent / "posenrich", report.html_path.parent],
-        use_singularity=use_singularity,
-    )
-
-
-# ── ENRICHMENT: POSENRICH modular (WP10) ──────────────────────────────────────
-
-
-def _posenrich_modular_find_slots(outdir: Listing) -> list[InputSlot]:
-    posenrich = outdir / "posenrich"
-
-    def dir_slot(key, label, sub):
-        p = posenrich / sub
-        return _slot(key, label, True, p.path if p.is_dir() else None)
-
-    return [
-        dir_slot("registry", "POSENRICH modular registry directory", "registry"),
-        dir_slot("characterization", "Characterization directory", "characterization"),
-        dir_slot("localization", "Localization results directory", "localization"),
-        dir_slot("global", "Global association results directory", "global"),
-        dir_slot("proximity", "Proximity results directory", "proximity"),
-    ]
-
-
-def _posenrich_modular_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
-    s = {slot.key: slot.path for slot in report.slots}
-    output_file = f"POSENRICH_modular_report_{report.traitname}.html"
-    render = _render_call(
-        "posenrich_modular_report.Rmd",
-        [
+            f"universe_dir         = '{s['universe']}'",
             f"registry_dir         = '{s['registry']}'",
             f"characterization_dir = '{s['characterization']}'",
-            f"localization_dir     = '{s['localization']}'",
-            f"global_dir           = '{s['global']}'",
-            f"proximity_dir        = '{s['proximity']}'",
+            "accumulation_dir     = 'accumulation_root'",
+            f"within_gene_dir      = {optional('within_gene')}",
+            f"proximity_dir        = {optional('proximity')}",
             f"traitname            = '{report.traitname}'",
         ],
         output_file,
     )
     return _wrap_script(
-        header_comment="ENRICHMENT — posenrich_modular_report.Rmd (WP10)",
+        header_comment="POSENRICH — 14.POSENRICH_report.Rmd",
         repo_dir=repo_dir,
-        local_dir="subworkflows/ENRICHMENT/local",
-        pre_lines=[],
+        local_dir="subworkflows/POSENRICH/local",
+        pre_lines=pre_lines,
         render_block=render,
         output_file=output_file,
         publish_targets=[report.html_path.parent.parent / "posenrich", report.html_path.parent],
@@ -916,11 +821,6 @@ def _compare_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(outdir,"ami/ami_networks/ami_list_availability.tsv")),
         _slot("ami_term_membership", "AMI term membership TSV", False,
               _first_match(outdir, "ami/ami_networks/ami_term_threshold_membership_all_tools.tsv")),
-        _slot("posenrich_dotplot", "Posenrich overall dotplot TSV", False,
-              None),
-        _slot("posenrich_le", "Posenrich leading-edge TSV", False, None),
-        _slot("posenrich_le_summary", "Posenrich leading-edge summary TSV", False,
-              None),
         _slot("fcs_stats", "Canonical FCS annotation table", False, _first_match(outdir, "scoring/fcs_stats.tsv")),
         _slot("gene_scores", "Canonical gene union (CAAS/RER/FADE)", True, _first_match(outdir,"scoring/gene_scores.tsv")),
         _slot("gene_metadata", "Canonical gene metadata", True, _first_match(outdir,"scoring/gene_evidence_metadata.json")),
@@ -933,7 +833,7 @@ def _compare_find_slots(outdir: Listing) -> list[InputSlot]:
         _slot("fade_sites_bottom", "FADE selected sites (bottom)", False,
               _first_match(outdir, "selection/fade/bottom/fade_sites_bottom.csv")),
         _slot("position_characterization", "Position characterization TSV", False,
-              _first_match(outdir, "posenrich/characterization/position_characterization.tsv", "posenrich/gmts/position_characterization.tsv")),
+              _first_match(outdir, "posenrich/characterization/position_characterization.tsv")),
     ]
 
 
@@ -967,9 +867,6 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"ami_module_desc_file      = {_r_arg(s['ami_module_desc'])}",
             f"ami_term_membership_file  = {_r_arg(s['ami_term_membership'])}",
             f"ami_availability_file = {_r_arg(s['ami_availability'])}",
-            f"posenrich_dotplot_file     = {_r_arg(s['posenrich_dotplot'])}",
-            f"posenrich_leading_edge_file = {_r_arg(s['posenrich_le'])}",
-            f"posenrich_leading_edge_summary_file = {_r_arg(s['posenrich_le_summary'])}",
             f"fcs_stats_file           = {_r_arg(s['fcs_stats'])}",
             f"gene_scores_file         = {_r_arg(s['gene_scores'])}",
             f"gene_metadata_file       = {_r_arg(s['gene_metadata'])}",
@@ -1255,13 +1152,6 @@ REPORTS: list[ReportSpec] = [
     _make_fade_spec("top"),
     _make_fade_spec("bottom"),
     ReportSpec(
-        id="accumulation",
-        display_name="CT_ACCUMULATION — Accumulation report",
-        html_regex=re.compile(r"^10\.Accumulation_report\.html$"),
-        find_slots=_accumulation_find_slots,
-        build_script=_accumulation_build_script,
-    ),
-    ReportSpec(
         id="postproc",
         display_name="CT_POSTPROC — Characterization report",
         html_regex=re.compile(r"^8\.Characterization_report\.html$"),
@@ -1299,14 +1189,13 @@ REPORTS: list[ReportSpec] = [
         build_script=_fcs_scoring_build_script,
         guess_traitname=lambda name: _guess_trait_from_suffix(name, "12.FCS_scoring_"),
     ),
-    # Historical report 14 is retained on disk but excluded from active discovery.
     ReportSpec(
-        id="posenrich_modular",
-        display_name="ENRICHMENT — POSENRICH modular report (WP10)",
-        html_regex=re.compile(r"^POSENRICH_modular_report_(?P<trait>.+)\.html$"),
-        find_slots=_posenrich_modular_find_slots,
-        build_script=_posenrich_modular_build_script,
-        guess_traitname=lambda name: _guess_trait_from_suffix(name, "POSENRICH_modular_report_"),
+        id="posenrich",
+        display_name="POSENRICH — Position-level enrichment report",
+        html_regex=re.compile(r"^14\.POSENRICH_report_(?P<trait>.+)\.html$"),
+        find_slots=_posenrich_find_slots,
+        build_script=_posenrich_build_script,
+        guess_traitname=lambda name: _guess_trait_from_suffix(name, "14.POSENRICH_report_"),
     ),
     ReportSpec(
         id="ami",

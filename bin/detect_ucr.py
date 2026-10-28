@@ -16,7 +16,7 @@ DetectUcr: finds runs of highly conserved alignment columns with three complemen
 Each region gets flank_size positions on both sides (clamped to the alignment), stored as
 flank_start / flank_end.
 
-Called by:  run_ucr_detection.py (one call per gene; RUN_UCR_DETECTION in subworkflows/ENRICHMENT/ucr_generation.nf)
+Called by:  run_ucr_detection.py (one call per gene; RUN_UCR_DETECTION in subworkflows/POSENRICH/ucr_generation.nf)
 Inputs:     --entropy_tsv  <gene>.entropy.tsv (compute_variability.py): position, C_trident,
                            variability, g
 Outputs:    --out_tsv      <gene>.ucr.tsv, one row per region; not written when the gene has none

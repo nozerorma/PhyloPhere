@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / 'subworkflows/ENRICHMENT/local/src'
+SRC = ROOT / 'subworkflows/POSENRICH/local/src'
 REGISTRY = SRC / 'posenrich_registry.py'
 PROXIMITY = SRC / 'posenrich_proximity.py'
 

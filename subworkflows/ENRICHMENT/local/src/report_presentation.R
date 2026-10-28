@@ -12,7 +12,7 @@ report_collapsible <- function(x, limit=85L) vapply(as.character(x),function(s) 
  if(nchar(s)<=limit) return(esc(s))
  paste0('<details><summary>',esc(paste0(substr(s,1,limit),'…')),'</summary><div style="max-width:65em;white-space:normal">',esc(s),'</div></details>')
 },character(1),USE.NAMES=FALSE)
-report_table <- function(df, caption=NULL, ...) {
+report_table <- function(df, caption=NULL, sci_cols=NULL, ...) {
  df <- as.data.frame(df,check.names=FALSE)
  if('database' %in% names(df) && !'abbreviation' %in% names(df)) df$database <- report_db_abbrev(df$database)
  # Provenance is enforced and exported by producers, rather than shown as an annotation.
@@ -27,7 +27,10 @@ report_table <- function(df, caption=NULL, ...) {
  nums <- names(df)[vapply(df,is.numeric,logical(1)) & !vapply(df,is.integer,logical(1))]
  # Counts remain integers; continuous evidence always has four decimal places.
  nums <- nums[!grepl('^(n_|N |Rows$|checks$|num.genes$|Genes$|Module$|Position$|.*count$)',nums,ignore.case=TRUE)]
+ # sci_cols (p-values and similar quantities that span many orders of magnitude) keep three significant digits.
+ sci_cols <- intersect(sci_cols,names(df)); nums <- setdiff(nums,sci_cols)
  if(length(nums)) w <- DT::formatRound(w,nums,digits=4,mark='')
+ if(length(sci_cols)) w <- DT::formatSignif(w,sci_cols,digits=3,mark='')
  w
 }
 # Inert templates keep hidden/remote sections from initializing large tables.

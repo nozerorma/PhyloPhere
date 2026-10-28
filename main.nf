@@ -49,7 +49,7 @@ include {NAME_CURATION} from './subworkflows/TRAIT_ANALYSIS/ta_name_curation.nf'
 include {CT_META_CAAS} from './workflows/ct_meta_caas.nf'
 include {CT_POSTPROC} from './workflows/ct_postproc.nf'
 include {CT_OBSERVED} from './workflows/ct_observed.nf'
-include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
+include {POSENRICH; validatePositionReferences} from './workflows/posenrich.nf'
 include {FADE}           from './workflows/fade.nf'
 include {FADE_REPORT as FADE_REPORT_PRECOMP_TOP; FADE_REPORT as FADE_REPORT_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_report.nf'
 include {FADE_GENE_LISTS as FADE_GENE_LISTS_PRECOMP_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_gene_lists.nf'
@@ -60,7 +60,7 @@ include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_META_CAAS/ctpp_meta_c
 include {CAAS_CORE; CAAS_CORE_OBSERVED; CAAS_CORE_MERGE; CAAS_CORE_MERGE_REDUCE; CAAS_PERMS_PREP; strictOutputOn} from './subworkflows/CT/caas_permulation.nf'
 include {CAAS_CORE_OBSERVED as CAAS_CORE_OBSERVED_STRICT; CAAS_CORE_MERGE as CAAS_CORE_MERGE_STRICT; CAAS_CORE_MERGE_REDUCE as CAAS_CORE_MERGE_REDUCE_STRICT} from './subworkflows/CT/caas_permulation.nf'
 include {CAAS_EVIDENCE}   from './subworkflows/CT_DISAMBIGUATION/ct_evidence.nf'
-include {ENRICHMENT; validatePositionReferences}      from './workflows/enrichment.nf'
+include {ENRICHMENT}      from './workflows/enrichment.nf'
 
 // Coerce a param that may arrive as Boolean, String ("false", "0", ...) or null into a Boolean.
 def toBool(val) {
@@ -88,7 +88,7 @@ def resolve_fg_species(tables_dir, filename) {
 workflow {
     if (params.gene_stat != "max") error "Only --gene_stat max is supported; rebuild legacy gene scores/null matrices."
 
-    if (params.enrichment && !params.help) validatePositionReferences()
+    if (params.posenrich && !params.help) validatePositionReferences()
 
     def version = "2.0.0"
 
@@ -284,7 +284,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // scored by CT_OBSERVED instead, with the same code.
         def run_ct_disambiguation = toBool(params.ct_disambiguation) && (ran_discovery || params.discovery_from || params.disambiguation_input)
         def run_ct_postproc       = toBool(params.ct_postproc) && (run_ct_disambiguation || params.disambiguation_input)
-        def run_ct_accumulation   = toBool(params.posenrich_modular) && (run_ct_postproc || params.accumulation_background_input)
+        def run_accumulation      = toBool(params.posenrich) && (run_ct_postproc || params.accumulation_background_input)
         // A saved null satisfies enrichment without an implicit alignment replay.
         // Otherwise an incomplete standalone replay can supply empty live channels
         // that mask --caas_null_dir in SCORING. Live discovery/disambiguation still wins.
@@ -517,50 +517,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         }
 
 
-        def accum_results = null
-
-        if (run_ct_accumulation) {
-
-            if (!params.ct_postproc && !params.accumulation_background_input) {
-                error "POSENRICH Accumulation requires CT post-processing output (--ct_postproc) or a standalone background file (--accumulation_background_input)."
-            }
-            if (!params.ct_postproc && !params.accumulation_caas_input) {
-                error "POSENRICH Accumulation requires CT post-processing output (--ct_postproc) or a standalone CAAS file (--accumulation_caas_input)."
-            }
-
-            // The universe U is defined by the permuted null, which has no cycle when only b_0 is replayed
-            // (--caas_full_perms 0). Written without `?:`: Groovy reads a numeric 0 as false.
-            if (core && params.caas_full_perms != null && (params.caas_full_perms as int) == 0) {
-                error "POSENRICH Accumulation needs the permuted null to define the universe U, and it is empty with --caas_full_perms 0: raise --caas_full_perms or disable --posenrich_modular."
-            }
-
-            // Use filtered_discovery.tsv from postproc (gene_filtering stage)
-            def acc_caas_ch       = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
-            def acc_background_ch = pp_cleaned_bg    ?: Channel.empty()
-            // background.output = the positions CAAStools actually TESTED. They are the starting point of
-            // the accumulation universe U (intersected with the cleaned-background genes and
-            // restricted to the null-positive positions inside the subworkflow), the same U as SCORING.
-            // Resolved exactly like POSENRICH's own
-            // background: live CT output when discovery ran, else the precomputed param.
-            def acc_tested_pos_ch = core_observed
-                ? core_observed.background
-                : (params.posenrich_background_file
-                    ? Channel.fromPath(params.posenrich_background_file)
-                    : Channel.empty())
-
-            // The universe U reads the same filtered null SCORING uses (null_positions.parquet); it
-            // falls back to --caas_null_dir for reruns without a live permulation core
-            // (resolved inside CT_ACCUMULATION).
-            def acc_null_positions_ch = scoring_null_positions_ch
-
-            accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch,
-                                            acc_tested_pos_ch, acc_null_positions_ch)
-            ran_any = true
-
-        }
-
         // VEP is invoked further down after SCORING: it consumes position_scores.tsv
-        // directly from SCORING (SCORING -> VEP -> ENRICHMENT).
+        // directly from SCORING (SCORING -> VEP).
 
         if (params.fade) {
             // Resolve upstream channel sources for SELECTION_PREP.
@@ -694,6 +652,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // CAAS_PERMS_PREP and CAAS_CORE.
 
 
+        // RER permutations: consumed by SCORING and by ENRICHMENT's centralized RER FCS
+        def scoring_rer_perms_ch     = (params.rer_tool || params.rer_continuous_file || params.rer_binary_file) ? RER_MAIN.out.perms : null
         def evidence_top_n = (params.caas_evidence_top_n ?: 0) as int
         if (evidence_top_n > 0 && !params.scoring) {
             error "caas_evidence_top_n > 0 explains the best positions of position_scores.tsv: it needs --scoring."
@@ -723,7 +683,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             def scoring_fade_site_top_ch = params.fade ? FADE.out.sites_csv_top    : fade_precomp_sites_top_ch
             def scoring_fade_site_bot_ch = params.fade ? FADE.out.sites_csv_bottom : fade_precomp_sites_bot_ch
             def scoring_rer_ch           = (params.rer_tool || params.rer_continuous_file || params.rer_binary_file) ? RER_MAIN.out.summary_tsv : null
-            def scoring_rer_perms_ch     = (params.rer_tool || params.rer_continuous_file || params.rer_binary_file) ? RER_MAIN.out.perms      : null
             // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
             // scoring_caas_* are built above, outside this block — see the comment there.
 
@@ -834,99 +793,131 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 VEP(SCORING.out.position_scores)
             }
 
-            if (params.enrichment) {
-                // The null SCORING resolved, so ENRICHMENT's FCS p.perm uses the same matrices as the scoring report.
-                def caas_perms_for_enrich = params.scoring ? SCORING.out.caas_perms : scoring_caas_perms_ch
-                def fcs_stats_ch = params.scoring ? SCORING.out.fcs_stats : Channel.empty()
-                def fcs_stats_rer_ch = params.scoring ? SCORING.out.fcs_stats_rer : Channel.empty()
-                def fcs_stats_fade_ch = params.scoring ? SCORING.out.fcs_stats_fade : Channel.empty()
-                def gene_lists_ch = params.scoring ? SCORING.out.gene_lists : Channel.empty()
-                def gene_scores_ch = params.scoring ? SCORING.out.gene_scores : Channel.empty()
-                def position_scores_ch = params.scoring ? SCORING.out.position_scores : Channel.empty()
-                // WP10 POSENRICH modular: evaluated positions and null-universe summary feed the registry.
-                def enrich_postproc_ch = params.scoring ? SCORING.out.postproc : Channel.empty()
-                def enrich_null_universe_ch = params.scoring ? SCORING.out.null_universe_summary : Channel.empty()
-                def scoring_vep_pai_ch     = params.vep ? VEP.out.primateai_tsv   : null
-                def scoring_vep_cosmic_ch  = params.vep ? VEP.out.cosmic_tsv      : null
-                def scoring_vep_ensembl_ch = params.vep ? VEP.out.ensembl_vep_tsv : null
-                // POSENRICH background = caastools background.output (tested positions);
-                // the engine restricts it to the cleaned_background genes.
-                def posenrich_background_ch = core_observed ? core_observed.background : file('NO_FILE')
+        }
 
-                // RER's own gene universe + gene lists (significant/accelerating/
-                // decelerating) and FADE's per-direction universe + significant
-                // gene lists -- feed the unified 13.AMI_analysis.Rmd's FADE/RER
-                // sections (see ENRICHMENT workflow). Only populated when the
-                // respective tool actually ran this invocation --
-                // OR (FADE, mirroring rer_continuous_file's precomputed-input
-                // role for RER) when its summary TSV is available from a prior
-                // run via --fade_tables_dir_top/_bottom without --fade itself
-                // this invocation: FADE_GENE_LISTS only needs that summary TSV,
-                // so it's re-derived here from fade_precomp_{top,bot}_out the
-                // same way scoring_fade_top_ch/scoring_fade_bot_ch already do
-                // above, rather than requiring a live --fade run just for AMI.
-                def rer_ran  = params.rer_tool || params.rer_continuous_file || params.rer_binary_file
-                def rer_gene_lists_bg_ch       = rer_ran    ? RER_MAIN.out.gene_lists_bg       : Channel.empty()
-                def rer_gene_lists_interest_ch = rer_ran    ? RER_MAIN.out.gene_lists_interest : Channel.empty()
-
-                def fade_gene_lists_bg_top_ch
-                def fade_gene_lists_sig_top_ch
-                if (params.fade) {
-                    fade_gene_lists_bg_top_ch  = FADE.out.gene_lists_bg_top
-                    fade_gene_lists_sig_top_ch = FADE.out.gene_lists_sig_top
-                } else if (fade_precomp_top_out) {
-                    def precomp_top_lists = FADE_GENE_LISTS_PRECOMP_TOP(Channel.value('top'), fade_precomp_top_out.summary_tsv)
-                    fade_gene_lists_bg_top_ch  = precomp_top_lists.gene_lists.flatten().filter { it.name == 'background.txt' }.collect()
-                    fade_gene_lists_sig_top_ch = precomp_top_lists.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
-                } else {
-                    fade_gene_lists_bg_top_ch  = Channel.empty()
-                    fade_gene_lists_sig_top_ch = Channel.empty()
+        // ── POSENRICH: position-level enrichment (level 1 Accumulation, position registry and components) ──
+        // Downstream of SCORING, upstream of ENRICHMENT. Level 1 does not need SCORING; the registry does.
+        def posenrich_out = null
+        if (params.posenrich) {
+            if (run_accumulation) {
+                if (!params.ct_postproc && !params.accumulation_background_input) {
+                    error "POSENRICH Accumulation requires CT post-processing output (--ct_postproc) or a standalone background file (--accumulation_background_input)."
                 }
-
-                def fade_gene_lists_bg_bottom_ch
-                def fade_gene_lists_sig_bottom_ch
-                if (params.fade) {
-                    fade_gene_lists_bg_bottom_ch  = FADE.out.gene_lists_bg_bottom
-                    fade_gene_lists_sig_bottom_ch = FADE.out.gene_lists_sig_bottom
-                } else if (fade_precomp_bot_out) {
-                    def precomp_bot_lists = FADE_GENE_LISTS_PRECOMP_BOTTOM(Channel.value('bottom'), fade_precomp_bot_out.summary_tsv)
-                    fade_gene_lists_bg_bottom_ch  = precomp_bot_lists.gene_lists.flatten().filter { it.name == 'background.txt' }.collect()
-                    fade_gene_lists_sig_bottom_ch = precomp_bot_lists.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
-                } else {
-                    fade_gene_lists_bg_bottom_ch  = Channel.empty()
-                    fade_gene_lists_sig_bottom_ch = Channel.empty()
+                if (!params.ct_postproc && !params.accumulation_caas_input) {
+                    error "POSENRICH Accumulation requires CT post-processing output (--ct_postproc) or a standalone CAAS file (--accumulation_caas_input)."
                 }
-
-                ENRICHMENT(
-                    fcs_stats_ch,
-                    fcs_stats_rer_ch,
-                    fcs_stats_fade_ch,
-                    gene_lists_ch,
-                    gene_scores_ch,
-                    pp_cleaned_bg,
-                    scoring_rer_perms_ch,
-                    caas_perms_for_enrich,
-                    (scoring_null_blocks_ch ?: (params.caas_null_dir ? Channel.value([file(params.caas_null_dir)]) : Channel.value([]))),
-                    (params.scoring ? SCORING.out.calibration : Channel.empty()),
-                    scoring_caas_pos_sample_ch,
-                    position_scores_ch,
-                    enrich_postproc_ch,
-                    enrich_null_universe_ch,
-                    posenrich_background_ch,
-                    scoring_vep_pai_ch,
-                    scoring_vep_cosmic_ch,
-                    scoring_vep_ensembl_ch,
-                    params.fade ? FADE.out.sites_csv_top    : fade_precomp_sites_top_ch,
-                    params.fade ? FADE.out.sites_csv_bottom : fade_precomp_sites_bot_ch,
-                    rer_gene_lists_bg_ch,
-                    rer_gene_lists_interest_ch,
-                    fade_gene_lists_bg_top_ch,
-                    fade_gene_lists_bg_bottom_ch,
-                    fade_gene_lists_sig_top_ch,
-                    fade_gene_lists_sig_bottom_ch,
-                    taxid_map_ch
-                )
+                // The universe U is defined by the permuted null, which has no cycle when only b_0 is replayed
+                // (--caas_full_perms 0). Written without `?:`: Groovy reads a numeric 0 as false.
+                if (core && params.caas_full_perms != null && (params.caas_full_perms as int) == 0) {
+                    error "POSENRICH Accumulation needs the permuted null to define the universe U, and it is empty with --caas_full_perms 0: raise --caas_full_perms or disable --posenrich."
+                }
             }
+            posenrich_out = POSENRICH(
+                run_accumulation,
+                // filtered_discovery.tsv of the gene filtering stage
+                postproc_results ? postproc_results.filtered_discovery : Channel.empty(),
+                pp_cleaned_bg ?: Channel.empty(),
+                // background.output = the positions CAAStools actually TESTED, the start of the universe U
+                // (the same U as SCORING): live CT output when discovery ran, else the precomputed param.
+                core_observed
+                    ? core_observed.background
+                    : (params.posenrich_background_file ? Channel.fromPath(params.posenrich_background_file) : Channel.empty()),
+                // The filtered null SCORING uses (null_positions.parquet); level 1 falls back to --caas_null_dir.
+                scoring_null_positions_ch ?: Channel.empty(),
+                scoring_null_blocks_ch ?: Channel.empty(),         // the blocks of cycles level 2 calibrates with (else those of --caas_null_dir)
+                params.scoring ? SCORING.out.position_scores : Channel.empty(),
+                params.scoring ? SCORING.out.postproc : Channel.empty(),
+                params.scoring ? SCORING.out.null_universe_summary : Channel.empty(),
+                params.fade ? FADE.out.sites_csv_top    : (fade_precomp_sites_top_ch ?: Channel.empty()),
+                params.fade ? FADE.out.sites_csv_bottom : (fade_precomp_sites_bot_ch ?: Channel.empty())
+            )
+            ran_any = true
+        }
+
+        if (params.scoring && params.enrichment) {
+            // The null SCORING resolved, so ENRICHMENT's FCS p.perm uses the same matrices as the scoring report.
+            def caas_perms_for_enrich = params.scoring ? SCORING.out.caas_perms : scoring_caas_perms_ch
+            def fcs_stats_ch = params.scoring ? SCORING.out.fcs_stats : Channel.empty()
+            def fcs_stats_rer_ch = params.scoring ? SCORING.out.fcs_stats_rer : Channel.empty()
+            def fcs_stats_fade_ch = params.scoring ? SCORING.out.fcs_stats_fade : Channel.empty()
+            def gene_lists_ch = params.scoring ? SCORING.out.gene_lists : Channel.empty()
+            def gene_scores_ch = params.scoring ? SCORING.out.gene_scores : Channel.empty()
+            def position_scores_ch = params.scoring ? SCORING.out.position_scores : Channel.empty()
+            def scoring_vep_pai_ch     = params.vep ? VEP.out.primateai_tsv   : null
+            def scoring_vep_cosmic_ch  = params.vep ? VEP.out.cosmic_tsv      : null
+            def scoring_vep_ensembl_ch = params.vep ? VEP.out.ensembl_vep_tsv : null
+
+            // RER's own gene universe + gene lists (significant/accelerating/
+            // decelerating) and FADE's per-direction universe + significant
+            // gene lists -- feed the unified 13.AMI_analysis.Rmd's FADE/RER
+            // sections (see ENRICHMENT workflow). Only populated when the
+            // respective tool actually ran this invocation --
+            // OR (FADE, mirroring rer_continuous_file's precomputed-input
+            // role for RER) when its summary TSV is available from a prior
+            // run via --fade_tables_dir_top/_bottom without --fade itself
+            // this invocation: FADE_GENE_LISTS only needs that summary TSV,
+            // so it's re-derived here from fade_precomp_{top,bot}_out the
+            // same way scoring_fade_top_ch/scoring_fade_bot_ch already do
+            // above, rather than requiring a live --fade run just for AMI.
+            def rer_ran  = params.rer_tool || params.rer_continuous_file || params.rer_binary_file
+            def rer_gene_lists_bg_ch       = rer_ran    ? RER_MAIN.out.gene_lists_bg       : Channel.empty()
+            def rer_gene_lists_interest_ch = rer_ran    ? RER_MAIN.out.gene_lists_interest : Channel.empty()
+
+            def fade_gene_lists_bg_top_ch
+            def fade_gene_lists_sig_top_ch
+            if (params.fade) {
+                fade_gene_lists_bg_top_ch  = FADE.out.gene_lists_bg_top
+                fade_gene_lists_sig_top_ch = FADE.out.gene_lists_sig_top
+            } else if (fade_precomp_top_out) {
+                def precomp_top_lists = FADE_GENE_LISTS_PRECOMP_TOP(Channel.value('top'), fade_precomp_top_out.summary_tsv)
+                fade_gene_lists_bg_top_ch  = precomp_top_lists.gene_lists.flatten().filter { it.name == 'background.txt' }.collect()
+                fade_gene_lists_sig_top_ch = precomp_top_lists.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
+            } else {
+                fade_gene_lists_bg_top_ch  = Channel.empty()
+                fade_gene_lists_sig_top_ch = Channel.empty()
+            }
+
+            def fade_gene_lists_bg_bottom_ch
+            def fade_gene_lists_sig_bottom_ch
+            if (params.fade) {
+                fade_gene_lists_bg_bottom_ch  = FADE.out.gene_lists_bg_bottom
+                fade_gene_lists_sig_bottom_ch = FADE.out.gene_lists_sig_bottom
+            } else if (fade_precomp_bot_out) {
+                def precomp_bot_lists = FADE_GENE_LISTS_PRECOMP_BOTTOM(Channel.value('bottom'), fade_precomp_bot_out.summary_tsv)
+                fade_gene_lists_bg_bottom_ch  = precomp_bot_lists.gene_lists.flatten().filter { it.name == 'background.txt' }.collect()
+                fade_gene_lists_sig_bottom_ch = precomp_bot_lists.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
+            } else {
+                fade_gene_lists_bg_bottom_ch  = Channel.empty()
+                fade_gene_lists_sig_bottom_ch = Channel.empty()
+            }
+
+            ENRICHMENT(
+                fcs_stats_ch,
+                fcs_stats_rer_ch,
+                fcs_stats_fade_ch,
+                gene_lists_ch,
+                gene_scores_ch,
+                pp_cleaned_bg,
+                scoring_rer_perms_ch,
+                caas_perms_for_enrich,
+                (scoring_null_blocks_ch ?: (params.caas_null_dir ? Channel.value([file(params.caas_null_dir)]) : Channel.value([]))),
+                (params.scoring ? SCORING.out.calibration : Channel.empty()),
+                scoring_caas_pos_sample_ch,
+                position_scores_ch,
+                scoring_vep_pai_ch,
+                scoring_vep_cosmic_ch,
+                scoring_vep_ensembl_ch,
+                params.fade ? FADE.out.sites_csv_top    : fade_precomp_sites_top_ch,
+                params.fade ? FADE.out.sites_csv_bottom : fade_precomp_sites_bot_ch,
+                rer_gene_lists_bg_ch,
+                rer_gene_lists_interest_ch,
+                fade_gene_lists_bg_top_ch,
+                fade_gene_lists_bg_bottom_ch,
+                fade_gene_lists_sig_top_ch,
+                fade_gene_lists_sig_bottom_ch,
+                taxid_map_ch,
+                posenrich_out ? posenrich_out.position_char : Channel.empty()
+            )
         }
 
         // Standalone VEP is retired: VEP strictly depends on SCORING and is fed by position_scores.tsv.
@@ -935,7 +926,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         }
 
         if (!ran_any) {
-            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_disambiguation, --ct_postproc, --enrichment, --posenrich_modular, --fade, --scoring, or --rer_tool."
+            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_disambiguation, --ct_postproc, --enrichment, --posenrich, --fade, --scoring, or --rer_tool."
         }
     }
 }

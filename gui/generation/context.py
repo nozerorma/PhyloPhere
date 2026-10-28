@@ -69,6 +69,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
     disambig = project.modules.disambiguation
     scoring = project.modules.scoring
     enrichment = project.modules.enrichment
+    posenrich = project.modules.posenrich
 
     ctx["ct_tool_string"] = _ct_tool_string(caas)
     ctx["rer_tool_string"] = _rer_tool_string(project.modules.rer)
@@ -87,7 +88,6 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
     caas_enabled = caas.enabled and not (pc.use_discovery or pc.use_resample or pc.use_ct)
     disambiguation_enabled = disambig.enabled and not pc.use_disambiguation
     ct_postproc_enabled = disambig.enabled and not pc.use_postproc
-    accumulation_enabled = project.modules.accumulation.enabled and not pc.use_accumulation
     rer_enabled = project.modules.rer.enabled and not pc.use_rer
     fade_enabled = project.modules.fade.enabled and not pc.use_fade
     vep_enabled = project.modules.vep.enabled and not pc.use_vep
@@ -105,22 +105,20 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "ct_postproc": _bool_str(ct_postproc_enabled),
         "run_postproc_exploratory": _bool_str(getattr(disambig, 'run_postproc_exploratory', True)),
         "run_postproc_filter": _bool_str(getattr(disambig, 'run_postproc_filter', True)),
-        "accumulation": _bool_str(accumulation_enabled),
         "rer": _bool_str(rer_enabled),
         "fade": _bool_str(fade_enabled),
         "vep": _bool_str(vep_enabled),
         "scoring": _bool_str(scoring.enabled),
         "enrichment": _bool_str(enrichment.enabled),
-        "posenrich": _bool_str(enrichment.posenrich_enabled),
+        "posenrich": _bool_str(posenrich.enabled),
         "scoring_ami": _bool_str(getattr(enrichment, 'scoring_ami', enrichment.scoring_string)),
         "scoring_string": _bool_str(enrichment.scoring_string),
         "publish_domino_intermediates": _bool_str(enrichment.publish_domino_intermediates),
         "auto_generate_ensembl": _bool_str(scoring.auto_generate_ensembl),
         "fcs_enabled": _bool_str(enrichment.fcs_enabled),
         "auto_fetch_gmt": _bool_str(enrichment.auto_fetch_gmt),
-        "auto_fetch_eggnog": _bool_str(enrichment.auto_fetch_eggnog),
-        "posenrich_domains": _bool_str(enrichment.posenrich_domains),
-        "posenrich_ucr": _bool_str(enrichment.posenrich_ucr),
+        "posenrich_domains": _bool_str(posenrich.posenrich_domains),
+        "posenrich_ucr": _bool_str(posenrich.posenrich_ucr),
         "miss_pair": _bool_str(caas.miss_pair),
         "resample_use_n": _bool_str(getattr(caas, 'resample_use_n', True)),
         "multi_hypothesis": _bool_str(getattr(caas, 'multi_hypothesis', True)),

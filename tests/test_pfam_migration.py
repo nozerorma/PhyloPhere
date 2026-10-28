@@ -7,9 +7,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'bin'))
-sys.path.insert(0, str(ROOT / 'subworkflows/ENRICHMENT/local/src'))
+sys.path.insert(0, str(ROOT / 'subworkflows/POSENRICH/local/src'))
 from migrate_pfam_coordinates import migrate
-from build_position_gmt import collect_pfam_members
+from position_sources import collect_pfam_members
 
 
 def fixture(tmp_path):
@@ -42,9 +42,9 @@ def test_verified_migration_preserves_gaps_and_original(tmp_path):
     assert row['coordinate_space'] == 'CAAS_0based'
     assert args[0].read_bytes() == before
     assert manifest['n_hits'] == 1 and manifest['references'][0]['alignment_sha256']
-    terms, _, _, members = collect_pfam_members(str(args[-1]), {}, {'G1'})
+    terms, clans = collect_pfam_members(str(args[-1]), {}, {'G1'})
     assert terms['PF00001'][1] == ['G1:0', 'G1:3']
-    assert len(members) == 4  # domain and clan for each mapped column
+    assert [v[1] for v in clans.values()] == [['G1:0', 'G1:3']]
     with pytest.raises(ValueError, match='already exists'):
         migrate(*args)
 

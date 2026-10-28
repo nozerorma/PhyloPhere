@@ -1,7 +1,7 @@
 """Independent report regeneration: scripts the GUI builds must match the migrated Rmd contracts.
 
 detect_reports()/build_script() are exercised on a synthetic outdir that carries the
-HTML of every migrated report (11/5/12/14/POSENRICH modular/13/15) plus the published
+HTML of every migrated report (11/5/12/14/13/15) plus the published
 artefacts they read. Each generated script must (a) parse as bash, (b) pass only
 params the target Rmd declares in its YAML frontmatter, and (c) stage the nominal
 active gene lists (active_*.tsv) for AMI, never the retired slice_*.tsv.
@@ -18,8 +18,7 @@ RMD_OF = {
     "scoring": "subworkflows/SCORING/local/11.Scoring_report.Rmd",
     "rer": "subworkflows/RERCONVERGE/local/5.RERconverge_report.Rmd",
     "fcs_scoring": "subworkflows/ENRICHMENT/local/12.FCS_general_report.Rmd",
-    "posenrich": "subworkflows/ENRICHMENT/local/14.Position_enrichment_report.Rmd",
-    "posenrich_modular": "subworkflows/ENRICHMENT/local/posenrich_modular_report.Rmd",
+    "posenrich": "subworkflows/POSENRICH/local/14.POSENRICH_report.Rmd",
     "ami": "subworkflows/ENRICHMENT/local/13.AMI_analysis.Rmd",
     "compare": "subworkflows/ENRICHMENT/local/15.Comparison_report.Rmd",
 }
@@ -37,8 +36,7 @@ def _make_outdir(base: Path) -> Path:
     _touch(reports / "11.Scoring_report_trait.html")
     _touch(reports / "5.RERconverge_report.html")
     _touch(reports / "12.FCS_scoring_trait.html")
-    _touch(reports / "14.Position_enrichment_report_trait.html")
-    _touch(reports / "POSENRICH_modular_report_trait.html")
+    _touch(reports / "14.POSENRICH_report_trait.html")
     _touch(reports / "13.AMI_analysis_trait.html")
     _touch(reports / "15.Comparison_report_trait.html")
     _touch(out / "scoring" / "position_scores.tsv")
@@ -52,9 +50,7 @@ def _make_outdir(base: Path) -> Path:
     _touch(out / "fcs" / "fcs_results" / "fcs_enrich_input.tsv")
     _touch(out / "fcs" / "fcs_results" / "fcs_report_metadata.json")
     _touch(out / "fcs_stats.tsv")
-    _touch(out / "posenrich" / "posenrich_characterization.tsv")
-    _touch(out / "posenrich" / "posenrich_leading_edge.tsv")
-    for sub in ("registry", "characterization", "localization", "global", "proximity"):
+    for sub in ("universe", "registry", "characterization", "accumulation/top", "accumulation/bottom", "accumulation/all", "within_gene", "proximity"):
         (out / "posenrich" / sub).mkdir(parents=True, exist_ok=True)
     _touch(out / "ami" / "network.sif")
     (out / "ami" / "domino_modules").mkdir(parents=True, exist_ok=True)

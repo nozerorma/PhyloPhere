@@ -613,7 +613,7 @@ write_tsv(gene_summary_annotated, file.path(outliers_dir, "gene_summary_annotate
 cat("\n### 1.2.1 Genes removed by each gene-level filter\n\n")
 saved_extreme_threshold <- suppressWarnings(mean(gene_summary_annotated$threshold_extreme, na.rm = TRUE))
 extreme_threshold_text <- if (is.finite(saved_extreme_threshold)) sprintf("%.4f", saved_extreme_threshold) else "not available"
-cat(sprintf("Extreme genes exceed the effective density percentile threshold (%s in the saved stats). Dubious genes exceed the Q3 + %.1f×IQR count threshold and have at least one cluster-train position. Genes tagged Both appear in both filter lists but are removed once; list counts must not be added.\n\n",
+cat(sprintf("Extreme genes exceed the effective density percentile threshold (%s in this run). Dubious genes exceed the Q3 + %.1f×IQR count threshold and have at least one cluster-train position. Genes tagged Both appear in both filter lists but are removed once; list counts must not be added.\n\n",
             extreme_threshold_text, iqr_multiplier))
 gene_filter_rows <- gene_summary_annotated %>%
   mutate(
@@ -713,7 +713,7 @@ if (!is.null(selected_minlen) && !is.null(selected_maxcaas) && length(filter_roo
         cat("No positions were flagged as Discarded for this parameter pair.\n\n")
       } else {
         cluster_rows_flagged <- sum(selected_cluster_data$clustering_flag == "Discarded", na.rm = TRUE)
-        cat(sprintf("%d genes have %d distinct Gene/Position keys flagged across %d Discarded artifact rows (%d repeated-key rows). The parameter-sweep DiscardedCount counts output rows. Cluster/window identifiers are not written by the producer, so per-window membership cannot be reconstructed; these are per-gene position lists. Position coordinates are zero-based columns of the trimmed MSA.\n\n",
+        cat(sprintf("%d genes have %d distinct Gene_Position keys flagged across %d iscarded artifact rows (%d repeated-key rows). The parameter-sweep **DiscardedCount** counts output rows.\n\n",
                     nrow(by_cluster_gene), nrow(discarded_positions), cluster_rows_flagged,
                     cluster_rows_flagged - nrow(discarded_positions)))
         print(DT::datatable(
@@ -743,17 +743,18 @@ if (!is.null(selected_minlen) && !is.null(selected_maxcaas) && length(filter_roo
 
 Spatial clustering detects and mitigates artificial clusters ("trains") of CAAS positions within genes.
 Clustering evaluation is performed as follows:
-- **Grouping**: Each gene is evaluated independently across all hypotheses pooled in the disambiguated dataset.
-- **Algorithm**: For every sliding interval `[start, end]` of CAAS positions within a gene with span `span = end - start + 1 >= minlen`, the local density `density = count_positions / span` is calculated.
-- **Discard criteria**: If `density >= maxcaas`, all positions within that window are flagged as `Discarded`.
-- **Decoupled removal**: When cluster removal is enabled (`--remove_caas_clusters`), flagged positions are filtered out from the downstream discovery dataset, regardless of whether gene-level outlier filtering (`--gene_filter_mode`) is set to `none`, `extreme`, `dubious`, or `both`.
 
-**MAP and coordinate interpretation.** The cluster producer consults a per-gene MAP only when `--map-dir` resolves to a directory and a gene has an unambiguous map. It maps each zero-based trimmed `Position` to the MAP's one-based `prot_ali_col` and uses the corresponding untrimmed one-based alignment column to measure interval span; columns removed by trimming can therefore contribute to span without adding a CAAS. The `Position` written to the cluster artifact remains the original zero-based trimmed-MSA position. If no MAP is found for a gene, span is measured directly in the trimmed positions; the producer logs the number of genes without MAP. The gene-length filter also prefers untrimmed MAP length and falls back to the Ensembl TSV for genes without a usable MAP. A configured `map-dir` alone does not establish per-gene coverage; consult the producer log. Cluster artifacts do not preserve MAP coverage or cluster-window IDs, so those details cannot be reconstructed from the report inputs alone.
+- **Grouping**: Each gene is evaluated independently **across all hypotheses** pooled in the disambiguated dataset.
+
+- **Algorithm**: For every sliding interval `[start, end]` of CAAS positions within a gene with span `span = end - start + 1 >= minlen`, the local density `density = count_positions / span` is calculated.
+
+- **Discard criteria**: If `density >= maxcaas`, all positions within that window are flagged as `Discarded`.
+
+- **Decoupled removal**: When cluster removal is enabled (`--remove_caas_clusters`), flagged positions are filtered out from the downstream discovery dataset, regardless of whether gene-level outlier filtering (`--gene_filter_mode`) is set to `none`, `extreme`, `dubious`, or `both`.
 
 ```{r cluster_analysis_load}
 filter_summary <- read_tsv(filter_summary_file, show_col_types = FALSE)
 load_msgs <- c(
-  "Loading cluster filter summary...\n",
   sprintf("  Parameter combinations tested: %d\n", nrow(filter_summary))
 )
 
@@ -1003,7 +1004,11 @@ membership_counts <- gene_filter_flags %>%
 nonzero_membership <- membership_counts %>% filter(n > 0)
 
 filter_totals_msg <- sprintf(
-  "\nFilter-specific totals across all analyzed genes (%d unique genes):\n  Extreme only or combined : %d genes\n  Dubious only or combined : %d genes\n  Cluster only or combined : %d genes\n  Any filter flagged       : %d / %d genes (%.1f%%)\n",
+  "Filter-specific totals across all analyzed genes **(%d unique genes)**:
+    - **Extreme only or combined** : %d genes
+    - **Dubious only or combined** : %d genes 
+    - **Cluster only or combined** : %d genes
+    - **Any filter flagged** : %d / %d genes (%.1f%%)\n",
   total_analyzed_genes,
   sum(gene_level_flags$Extreme),
   sum(gene_level_flags$Dubious),

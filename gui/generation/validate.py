@@ -97,7 +97,7 @@ def validate(project: ProjectConfig) -> list[str]:
     any_precomp_checked = any(
         [
             pc.use_discovery, pc.use_resample, pc.use_disambiguation,
-            pc.use_postproc, pc.use_accumulation, pc.use_rer, pc.use_fade, pc.use_vep,
+            pc.use_postproc, pc.use_rer, pc.use_fade, pc.use_vep,
         ]
     )
     if any_precomp_checked:
@@ -136,7 +136,7 @@ def validate(project: ProjectConfig) -> list[str]:
         if not any([pc.use_discovery, pc.use_resample]):
             errors.append(
                 "CAAS is disabled but no Discovery/Resample reuse box is checked on "
-                "the Precomputed Run tab — downstream modules (Disambiguation, Accumulation) "
+                "the Precomputed Run tab — downstream modules (Disambiguation, POSENRICH) "
                 "have no input."
             )
 
@@ -159,19 +159,18 @@ def validate(project: ProjectConfig) -> list[str]:
     # and Scoring checks below cover the case that still needs its output through
     # pc.use_postproc.
 
-    # ── Accumulation ──────────────────────────────────────────────────────────
-    accum = project.modules.accumulation
+    # ── POSENRICH (level 1: Accumulation; the position registry also needs Scoring) ──
+    posenrich = project.modules.posenrich
     scoring = project.modules.scoring
-    if accum.enabled:
-        if not disambig.enabled and not pc.use_postproc:
+    if posenrich.enabled:
+        has_standalone = posenrich.accumulation_caas_input and posenrich.accumulation_background_input
+        if not disambig.enabled and not pc.use_postproc and not has_standalone:
             errors.append(
-                "Accumulation is enabled but Post-processing is disabled with no "
-                "'Use precomputed Post-processing output' box checked on the Precomputed Run tab."
+                "POSENRICH is enabled but Post-processing is disabled with no "
+                "'Use precomputed Post-processing output' box checked on the Precomputed Run tab "
+                "and no standalone Accumulation inputs on the POSENRICH tab."
             )
-    # Scoring does not require Accumulation: with no accumulation channel, main.nf
-    # passes null, scoring.nf resolves a NO_ACCUM sentinel and scoring_compute.R
-    # skips every accumulation code path (has_accum_dir). The only hard upstream of
-    # Scoring is CT post-processing, checked below.
+    # Scoring does not depend on Accumulation. Its only hard upstream is CT post-processing, checked below.
 
     # ── RERconverge ───────────────────────────────────────────────────────────
     rer = project.modules.rer
@@ -221,21 +220,13 @@ def validate(project: ProjectConfig) -> list[str]:
             errors.append("Scoring: evidence of the best positions needs the observed discovery.tab: enable CAAS and "
                           "Disambiguation, or reuse a discovery on the Precomputed Run tab with Disambiguation enabled.")
 
-    # ── Enrichment (+ POSENRICH) ──────────────────────────────────────────────
-    enrichment = project.modules.enrichment
+    # ── Enrichment ────────────────────────────────────────────────────────────
     # gmt_dir is not required: left blank, it defaults to the curated gene sets of
     # subworkflows/ENRICHMENT/dat/ (plus the downloaded sets when auto_fetch_gmt is
     # on, through bin/resolve_gmts.py).
-    if enrichment.posenrich_enabled:
-        # Nothing is required for POSENRICH. cosmic_db and fubar_sites_file fall back
-        # to NO_FILE sentinels (workflows/enrichment.nf, posenrich.nf) and their
-        # layers are skipped when absent. egg_members_file and egg_annotations_file,
-        # both blank, use the pair versioned in subworkflows/ENRICHMENT/dat/, or a
-        # download when auto_fetch_eggnog is set (eggnog_resolution.nf).
-        # ucr_positions_file and domain_variability_file, when blank, are generated
-        # from the alignment (ucr_generation.nf, domain_variability_generation.nf);
-        # ucr_positions_file also needs runtime.tax_id, itself optional.
-        pass
+    # Nothing is required for POSENRICH either: fubar_sites_file falls back to a NO_* sentinel and its layer is
+    # skipped when absent. ucr_positions_file and domain_variability_file, when blank, are generated from the
+    # alignment (ucr_generation.nf, domain_variability_generation.nf).
 
     return errors
 
@@ -280,13 +271,11 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("Scoring: contrast hypotheses pairs file", m.scoring.scoring_hypotheses_pairs, "file"),
         ("Disambiguation: contrast hypotheses pairs file", m.disambiguation.ct_disambig_hypotheses_pairs, "file"),
         ("Enrichment: GMT directory", m.enrichment.gmt_dir, "dir"),
-        ("Enrichment: Pfam cache directory", m.enrichment.pfam_cache_dir, "dir"),
+        ("POSENRICH: Pfam cache directory", m.posenrich.pfam_cache_dir, "dir"),
         ("Enrichment: STRING database directory", m.enrichment.string_db_dir, "dir"),
-        ("Enrichment: eggNOG members file", m.enrichment.egg_members_file, "file"),
-        ("Enrichment: eggNOG annotations file", m.enrichment.egg_annotations_file, "file"),
-        ("Enrichment: domain variability file", m.enrichment.domain_variability_file, "file"),
-        ("Enrichment: UCR positions file", m.enrichment.ucr_positions_file, "file"),
-        ("Enrichment: FUBAR sites file", m.enrichment.fubar_sites_file, "file"),
+        ("POSENRICH: domain variability file", m.posenrich.domain_variability_file, "file"),
+        ("POSENRICH: UCR positions file", m.posenrich.ucr_positions_file, "file"),
+        ("POSENRICH: FUBAR sites file", m.posenrich.fubar_sites_file, "file"),
     ]
 
     # Precomputed Run tab: the per-phenotype paths derived from base_path, not stored strings.

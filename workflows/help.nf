@@ -55,8 +55,9 @@ Module flag              Description
                           See: --help --ct_tool <discovery|resample>
 --ct_disambiguation       Classify CAAS as convergent/parallel/divergent via ASR.
 --ct_postproc             Cluster/gene-level filtering + characterization report.
---posenrich_modular       POSENRICH modular module; level 1 is the exact hypergeometric test
-                          of CAAS accumulation per gene.
+--posenrich               POSENRICH position-level enrichment: level 1 is the exact
+                          hypergeometric test of CAAS accumulation per gene; the position
+                          registry and its components need --scoring.
 --vep                     Annotate CAAS positions with PrimateAI-3D / COSMIC.
 --fade                    HyPhy FADE directional (top/bottom) selection scan.
 --rer_tool <steps>        RERconverge relative-evolutionary-rate analysis
@@ -64,7 +65,7 @@ Module flag              Description
 --scoring                 Composite position- and gene-level scoring across
                           CAAS, FADE, RER and VEP signals.
 --enrichment              FCS ranked enrichment, DOMINO/STRING network
-                          analysis (POSENRICH is currently skipped pending its position-null redesign).
+                          analysis.
 
 Each module can also run standalone from a precomputed input of an upstream
 module — see the module-specific help (or the README's Configuration
@@ -171,7 +172,7 @@ Usage:
 '''
 }
 
-// ── CT disambiguation / post-processing / accumulation ─────────────────────
+// ── CT disambiguation / post-processing ─────────────────────
 
 def disambiguation_help() {
     return '''
@@ -214,17 +215,40 @@ Usage:
 '''
 }
 
-def accumulation_help() {
+// ── POSENRICH ────────────────────────────────────────────────────────────────
+
+def posenrich_help() {
     return '''
-POSENRICH Accumulation (level 1) — Help
+POSENRICH — Help
 =============================================
-Exact hypergeometric test for whether a gene holds more CAAS positions than its
-share of the position universe U predicts; runs once per direction (top/bottom/all).
+Position-level enrichment of CAAS detections on the universe U of positions (the same U as
+SCORING). The universe table (universe.tsv.gz) is shared by both levels. Level 1 (Accumulation)
+is an exact hypergeometric test of whether a gene holds more CAAS positions than its share of U
+predicts; it runs once per direction (top/bottom/all). The position registry, its characterization, level 2 (concentration of the
+signal inside genes, calibrated with the null cycles) and the proximity components read SCORING's
+tables and need --scoring. Level 2 is not yet validated at scale (10,000 null cycles): its p and q are
+provisional. Outputs go to posenrich/ (accumulation, universe, registry, characterization, within_gene,
+proximity) and report 14 (14.POSENRICH_report_<trait>.html).
 
 Usage:
---accumulation_caas_input             <"filtered_discovery.tsv">   null  (standalone entry)
---accumulation_background_input        <"background_file">           null
---accumulation_fdr                               <FLOAT 0-1>                    0.1
+--posenrich                          <true|false>                   false
+--accumulation_fdr                   <FLOAT 0-1>                    0.1   (BH threshold of the report tables of levels 1 and 2)
+--accumulation_caas_input            <"filtered_discovery.tsv">     null  (standalone entry: observed positives of U)
+--accumulation_background_input      <"background_file">            null  (standalone entry: gene list of U)
+--posenrich_background_file          <"background_file">            null  (tested positions, background.output)
+--posenrich_domains, --posenrich_ucr <true|false>                   true  (blank tables are generated on the productive alignments)
+--domain_variability_file, --ucr_positions_file   (optional precomputed annotation sources; each needs an explicit coordinate_space)
+--pfam_cache_dir                     <"pfam_cache_dir">             ~/.cache/phylophere/pfam
+--domain_ref_species                 <"species">                    ref_species_name
+--fubar_sites_file                   (optional; cannot be generated in-house
+                                      -- see github.com/nozerorma/ortholog_characterizator)
+--posenrich_custom_file              (TSV: gene, zero-based CAAS position, term, description; no header)
+--posenrich_collections              <"id1,id2">                    "" (level 2 collections; blank = those informative inside a protein)
+--posenrich_min_nonzero_cycles       <int>                          30 (null cycles with signal a gene needs to enter the level 2 statistic)
+--posenrich_holdout                  <int>                          0 (validation: null cycles played as the observed one; 0 = off)
+--posenrich_within_gene_memory       <"16 GB">                      "" (level 2 memory; blank = 16 GB)
+--posenrich_radios                   <LIST>                         0,5,10 (descriptive protein-proximity radii)
+--position_registry_memory, --position_module_memory   (blank sizes them from the inputs)
 '''
 }
 
@@ -341,9 +365,9 @@ Standalone mode (provide inputs directly):
 --scoring_fade_site_top                  <"fade_site_top.tsv">              ""
 --scoring_fade_site_bottom                  <"fade_site_bottom.tsv">           ""
 --scoring_rer_input                           <"rerconverge_summary.tsv">        ""
---scoring_vep_primateai                            <"vep_primateai.tsv">              ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
---scoring_vep_cosmic                                  <"vep_cosmic.tsv">                  ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
---scoring_vep_ensembl                                <"ensembl_vep_mapped.tsv">          ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
+--scoring_vep_primateai                            <"vep_primateai.tsv">              ""    (also the precomputed-VEP fallback of the comparison report, see enrichment.nf)
+--scoring_vep_cosmic                                  <"vep_cosmic.tsv">                  ""    (also the precomputed-VEP fallback of the comparison report, see enrichment.nf)
+--scoring_vep_ensembl                                <"ensembl_vep_mapped.tsv">          ""    (also the precomputed-VEP fallback of the comparison report, see enrichment.nf)
 --caas_null_dir                                          <"caas_permulation/">          ""    (caas_permulation/ directory of a prior run: canonical SCORING null; its positive-position keys define the POSENRICH Accumulation universe when no live core is available)
 
 Position-level components: ASR, convergence, parallel, [FADE]
@@ -355,12 +379,13 @@ Gene-level scores: gene_caas, [gene_rer], [gene_fade], gene_composite
 
 def enrichment_help() {
     return '''
-Enrichment (FCS / DOMINO-STRING / POSENRICH) — Help
+Enrichment (FCS / DOMINO-STRING) — Help
 =============================================
 Ranked gene-set enrichment (FCS, Wilcoxon-AUC on GMT gene sets) run
 separately for CAAS and RER rankings, an orthogonal cross-module Comparison
 report, optional DOMINO active-module detection + STRING functional
-enrichment, and position-level enrichment (POSENRICH, currently skipped after retirement of its position-by-cycle null).
+enrichment. The comparison report reads the position characterization of POSENRICH when
+it is available.
 
 Usage:
 --enrichment                        <true|false>          false
@@ -382,28 +407,6 @@ DOMINO / STRING:
 --domino_network_score_thr                  <INTEGER>                700
 --domino_slice_thr                             <FLOAT 0-1>              0.3
 --domino_module_thr                              <FLOAT 0-1>              0.05
-
-POSENRICH (position-level; currently skipped with a warning, no report 14):
---posenrich                        <true|false>          true
---posenrich_min_size                 <INTEGER>                5
---posenrich_max_size                   <INTEGER>                0    (0 = no cap)
---posenrich_background_file                  <"background_file">      null
---domain_variability_file, --ucr_positions_file      (optional precomputed annotation sources;
-                                              blank generates enabled Pfam/UCR layers; original PPGA tables accepted)
---egg_members_file, --egg_annotations_file   (blank uses the versioned human Primates pair; other clades need explicit files or download)
---posenrich_custom_file                     (TSV: gene, zero-based CAAS position, term, description; no header)
---fubar_sites_file                           (optional; cannot be generated in-house
-                                              -- see github.com/nozerorma/ortholog_characterizator)
-
-POSENRICH modular (WP10; independent of the flag above, which stays skipped):
---posenrich_modular                <true|false>          false  (registry + characterization +
-                                                            localization + global + proximity)
---posenrich_ranking                <caas_score|minus_log10_pemp>  caas_score (minus_log10_pemp: explicit
-                                                            sensitivity over the shared p.emp)
---posenrich_aggregation            <mean|pair_weighted>  mean (principal; pair_weighted: sensitivity)
---posenrich_n_permutations         <INTEGER>                999 (reserved; inference withheld pending control validation)
---posenrich_seed                   <INTEGER>                1
---posenrich_radios                 <LIST>                   0,5,10 (descriptive protein-proximity radii)
 '''
 }
 
@@ -418,7 +421,7 @@ workflow HELP {
         // given the current params — i.e. help for the run you are about to launch.
         // To see only the overview, explicitly disable the modules you don't need
         // (e.g. --ct_tool "" --ct_disambiguation false --ct_postproc false
-        // --posenrich_modular false --vep false --help).
+        // --posenrich false --vep false --help).
         log.info general_help()
 
         if (params.contrast_selection)   log.info contrast_selection_help()
@@ -432,7 +435,7 @@ workflow HELP {
 
         if (params.ct_disambiguation)    log.info disambiguation_help()
         if (params.ct_postproc)          log.info postproc_help()
-        if (params.posenrich_modular)    log.info accumulation_help()
+        if (params.posenrich)            log.info posenrich_help()
         if (params.vep)                  log.info vep_help()
         if (params.fade)                 log.info fade_help()
         if (params.rer_tool)             log.info rer_help()

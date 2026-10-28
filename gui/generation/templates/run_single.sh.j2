@@ -53,7 +53,7 @@ if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
     # The exploratory pass only sweeps minlen_values x maxcaas_values. Every downstream
     # module waits for the _complete pass, RER and FADE included (they do not depend on
     # post-processing); they run there when enabled in the project.
-    RUN_ACCUMULATION=false
+    RUN_POSENRICH=false
     RUN_VEP=false
     RUN_FADE=false
     RUN_RER=false
@@ -112,8 +112,8 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     DISAMBIGUATION_DIR="${CAAS_REUSE_OUTDIR}/ct_disambiguation"
     BACKGROUND_INPUT="${CAAS_REUSE_OUTDIR}/caastools/background_genes.output"
     # background.output (tested positions, gene<TAB>comma-separated columns) is the
-    # position-level counterpart of background_genes.output; posenrich_enrich.py
-    # builds its background position set from it. PRECOMP_USE_DISCOVERY sets the same
+    # position-level counterpart of background_genes.output; POSENRICH Accumulation
+    # builds its universe of positions from it. PRECOMP_USE_DISCOVERY sets the same
     # variable below. This pass skips live CT, so without it the file would fall back
     # to the NO_FILE sentinel and POSENRICH would fail.
     POSENRICH_BACKGROUND_FILE="${CAAS_REUSE_OUTDIR}/caastools/background.output"
@@ -217,7 +217,7 @@ if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     POSENRICH_BACKGROUND_FILE="${PRECOMP_OUTDIR}/caastools/background.output"
     # These exist only if the source run had --caas_permulation_enrichment on. The caas_permulation/ directory
     # (null_positions.parquet, blocks/, cycle_roster.txt, counts.json, cycle_summary.tsv, cycle_hist.tsv) is the
-    # position-level null of SCORING and CT_ACCUMULATION. The reuse_exploratory branch above sets the same
+    # position-level null of SCORING and POSENRICH Accumulation. The reuse_exploratory branch above sets the same
     # variable; keep the two in sync.
     CAAS_NULL_DIR="${PRECOMP_OUTDIR}/caas_permulation"
     [ -f "$CAAS_NULL_DIR/cycle_roster.txt" ] || {
@@ -239,14 +239,13 @@ fi
 if [ "${PRECOMP_USE_POSTPROC:-false}" = true ]; then
     # gene_filtering/ and cleaned_backgrounds/ exist only if the source run had
     # gene_filter_mode other than 'none' (the default).
-    ACCUMULATION_CAAS_INPUT="${PRECOMP_OUTDIR}/postproc/gene_filtering/filtered_discovery.tsv"
-    SCORING_POSTPROC_INPUT="$ACCUMULATION_CAAS_INPUT"
-    ACCUMULATION_BACKGROUND_INPUT="${PRECOMP_OUTDIR}/postproc/cleaned_backgrounds/cleaned_background_main.txt"
-    SCORING_BACKGROUND_INPUT="$ACCUMULATION_BACKGROUND_INPUT"
-fi
-
-if [ "${PRECOMP_USE_ACCUMULATION:-false}" = true ]; then
-    SCORING_ACCUM_DIR="${PRECOMP_OUTDIR}/accumulation"
+    _PP_CAAS="${PRECOMP_OUTDIR}/postproc/gene_filtering/filtered_discovery.tsv"
+    _PP_BACKGROUND="${PRECOMP_OUTDIR}/postproc/cleaned_backgrounds/cleaned_background_main.txt"
+    SCORING_POSTPROC_INPUT="$_PP_CAAS"
+    SCORING_BACKGROUND_INPUT="$_PP_BACKGROUND"
+    # A standalone Accumulation input given in the POSENRICH tab wins over the precomputed Post-processing output.
+    [ -n "${ACCUMULATION_CAAS_INPUT:-}" ] || ACCUMULATION_CAAS_INPUT="$_PP_CAAS"
+    [ -n "${ACCUMULATION_BACKGROUND_INPUT:-}" ] || ACCUMULATION_BACKGROUND_INPUT="$_PP_BACKGROUND"
 fi
 
 if [ "${PRECOMP_USE_RER:-false}" = true ]; then
@@ -322,7 +321,6 @@ _RUN_REPORTING="${RUN_REPORTING:-{{ run_defaults.reporting }}}"
 _RUN_CAAS="${RUN_CAAS:-{{ run_defaults.caas }}}"
 _RUN_DISAMBIGUATION="${RUN_DISAMBIGUATION:-{{ run_defaults.disambiguation }}}"
 _RUN_CT_POSTPROC="${RUN_CT_POSTPROC:-{{ run_defaults.ct_postproc }}}"
-_RUN_ACCUMULATION="${RUN_ACCUMULATION:-{{ run_defaults.accumulation }}}"
 _RUN_RER="${RUN_RER:-{{ run_defaults.rer }}}"
 _RUN_FADE="${RUN_FADE:-{{ run_defaults.fade }}}"
 _RUN_VEP="${RUN_VEP:-{{ run_defaults.vep }}}"
@@ -546,11 +544,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "auto_generate_ensembl": ${AUTO_GENERATE_ENSEMBL:-false},
   "ensembl_dataset": "${ENSEMBL_DATASET:-}",
 
-  "ct_accumulation": $_RUN_ACCUMULATION,
-  "accumulation_fdr": "${ACCUMULATION_FDR:-0.1}",
-  "accumulation_caas_input": "${ACCUMULATION_CAAS_INPUT:-}",
-  "accumulation_background_input": "${ACCUMULATION_BACKGROUND_INPUT:-}",
-
   "rer_tool": "$_RER_TOOL_STR",
   "gene_trees": "${GENE_TREES:-}",
   "rer_perm_batches": "${RER_PERM_BATCHES:-10}",
@@ -603,7 +596,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring_hypotheses_pairs": "${SCORING_HYPOTHESES_PAIRS:-}",
   "ct_disambig_hypotheses_pairs": "${CT_DISAMBIG_HYPOTHESES_PAIRS:-}",
   "scoring_postproc_input": "${SCORING_POSTPROC_INPUT:-}",
-  "scoring_accum_dir": "${SCORING_ACCUM_DIR:-}",
   "scoring_vep_primateai": "${SCORING_VEP_PRIMATEAI:-}",
   "scoring_background_input": "${SCORING_BACKGROUND_INPUT:-}",
   "scoring_rer_input": "${SCORING_RER_INPUT:-}",
@@ -632,12 +624,10 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "enrichment": $_RUN_ENRICHMENT,
   "fcs_enabled": ${FCS_ENABLED:-true},
   "auto_fetch_gmt": ${AUTO_FETCH_GMT:-false},
-  "auto_fetch_eggnog": ${AUTO_FETCH_EGGNOG:-false},
   "gmt_dir": "${GMT_DIR:-$REPO_DIR/subworkflows/ENRICHMENT/dat}",
   "fcs_min_genes": "${FCS_MIN_GENES:-10}",
   "fcs_max_genes": "${FCS_MAX_GENES:-0}",
   "fcs_fdr": "${FCS_FDR:-0.15}",
-  "pfam_cache_dir": "${PFAM_CACHE_DIR:-}",
   "fcs_pperm_thr": "${FCS_PPERM_THR:-0.025}",
   "fcs_analytic_levels": "${FCS_ANALYTIC_LEVELS:-0.05,0.1,0.15}",
   "fcs_cluster_threshold": "${FCS_CLUSTER_THRESHOLD:-0.2}",
@@ -659,26 +649,25 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring_compare_top_n": "${SCORING_COMPARE_TOP_N:-20}",
 
   "posenrich": $_RUN_POSENRICH,
+  "accumulation_fdr": "${ACCUMULATION_FDR:-0.1}",
+  "accumulation_caas_input": "${ACCUMULATION_CAAS_INPUT:-}",
+  "accumulation_background_input": "${ACCUMULATION_BACKGROUND_INPUT:-}",
   "posenrich_domains": ${POSENRICH_DOMAINS:-true},
   "domain_variability_file": "${DOMAIN_VARIABILITY_FILE:-}",
   "domain_ref_species": "${DOMAIN_REF_SPECIES:-}",
+  "pfam_cache_dir": "${PFAM_CACHE_DIR:-}",
   "posenrich_ucr": ${POSENRICH_UCR:-true},
   "ucr_positions_file": "${UCR_POSITIONS_FILE:-}",
   "posenrich_custom_file": "${POSENRICH_CUSTOM_FILE:-}",
-  "eggnog_taxid": "${EGGNOG_TAXID:-}",
-  "egg_members_file": "${EGG_MEMBERS_FILE:-}",
-  "egg_annotations_file": "${EGG_ANNOTATIONS_FILE:-}",
   "fubar_sites_file": "${FUBAR_SITES_FILE:-}",
-  "posenrich_min_size": "${POSENRICH_MIN_SIZE:-2}",
-  "posenrich_max_size": "${POSENRICH_MAX_SIZE:-0}",
-  "posenrich_batch_size": "${POSENRICH_BATCH_SIZE:-4}",
   "posenrich_background_file": "${POSENRICH_BACKGROUND_FILE:-}",
-  "posenrich_modular": ${POSENRICH_MODULAR:-false},
-  "posenrich_ranking": "${POSENRICH_RANKING:-caas_score}",
-  "posenrich_aggregation": "${POSENRICH_AGGREGATION:-mean}",
-  "posenrich_n_permutations": "${POSENRICH_N_PERMUTATIONS:-999}",
-  "posenrich_seed": "${POSENRICH_SEED:-1}",
-  "posenrich_radios": "${POSENRICH_RADIOS:-0,5,10}"
+  "posenrich_collections": "${POSENRICH_COLLECTIONS:-}",
+  "posenrich_min_nonzero_cycles": "${POSENRICH_MIN_NONZERO_CYCLES:-30}",
+  "posenrich_holdout": "${POSENRICH_HOLDOUT:-0}",
+  "posenrich_within_gene_memory": "${POSENRICH_WITHIN_GENE_MEMORY:-}",
+  "posenrich_radios": "${POSENRICH_RADIOS:-0,5,10}",
+  "position_registry_memory": "${POSITION_REGISTRY_MEMORY:-}",
+  "position_module_memory": "${POSITION_MODULE_MEMORY:-}"
 }
 PARAMS_EOF
 
@@ -717,11 +706,6 @@ if [ "$_RUN_DISAMBIGUATION" = true ]; then
     NF_ENGINE+=({{ modules.disambiguation.extra_flags }})
 fi
 {% endif %}
-{% if modules.accumulation.extra_flags %}
-if [ "$_RUN_ACCUMULATION" = true ]; then
-    NF_ENGINE+=({{ modules.accumulation.extra_flags }})
-fi
-{% endif %}
 {% if modules.rer.extra_flags %}
 if [ "$_RUN_RER" = true ]; then
     NF_ENGINE+=({{ modules.rer.extra_flags }})
@@ -740,6 +724,11 @@ fi
 {% if modules.vep.extra_flags %}
 if [ "$_RUN_VEP" = true ]; then
     NF_ENGINE+=({{ modules.vep.extra_flags }})
+fi
+{% endif %}
+{% if modules.posenrich.extra_flags %}
+if [ "$_RUN_POSENRICH" = true ]; then
+    NF_ENGINE+=({{ modules.posenrich.extra_flags }})
 fi
 {% endif %}
 {% if modules.enrichment.extra_flags %}

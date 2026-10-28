@@ -40,18 +40,18 @@ def test_all_templates_load_save_and_render(tmp_path):
 
 
 def test_bool_exports_are_json_safe_lowercase():
-    """Regression: a raw Python bool in a template export (POSENRICH_MODULAR in the
-    WP10 sbatch template) reached params.json as True/False and broke Nextflow's JSON
+    """Regression: a raw Python bool in a template export (RUN_POSENRICH in the
+    sbatch template) reached params.json as True/False and broke Nextflow's JSON
     parser. Every boolean export must render as the lowercase string, and no
     capitalized True/False may reach any generated script."""
     from gui.project_io import load_project
     from gui.generation.render import render_single, render_batch
     project = load_project(ROOT / 'gui/templates/neoplasia_toy.json')
-    assert project.modules.enrichment.posenrich_modular is True
+    assert project.modules.posenrich.enabled is True
     batch = render_batch(project)
-    assert 'export POSENRICH_MODULAR="true"' in batch
+    assert 'export RUN_POSENRICH=true' in batch
     single = render_single(project)
-    assert '"posenrich_modular": ${POSENRICH_MODULAR:-false},' in single
+    assert '"posenrich": $_RUN_POSENRICH,' in single
     for text, name in ((batch, 'sbatch_array'), (single, 'run_single')):
         assert '="True"' not in text, f'{name}: capitalized boolean leaked'
         assert '="False"' not in text, f'{name}: capitalized boolean leaked'

@@ -27,8 +27,6 @@ Path templates, relative to base_path/<TRAIT>, matched to the publishDir of each
   Disambiguation: ct_disambiguation/caas_convergence_master.csv, ct_disambiguation/ (dir)
   Post-processing: postproc/gene_filtering/filtered_discovery.tsv,
                   postproc/cleaned_backgrounds/cleaned_background_main.txt
-  Accumulation  : accumulation/ (dir; workflows/scoring.nf reads
-                  <dir>/{top,bottom,all}/accumulation_<direction>_results.csv)
   RER           : rerconverge/rer_results/<TRAIT>.continuous.{output,perms.rds},
                   rerconverge/rer_results/rerconverge_summary_<TRAIT>.tsv (resolved by glob
                   at generation time, because the filename carries a variable suffix)
@@ -73,11 +71,8 @@ class PrecomputedConfig:
     # --- Post-processing (no enable toggle: it runs with Disambiguation unless
     # this box supplies its outputs; see ct_postproc_enabled in gui/generation/context.py) ---
     use_postproc: bool = False  # wires the filtered-discovery/cleaned-background pair
-    # that Accumulation, VEP and Scoring take as input; it does not turn off
+    # that Accumulation (POSENRICH), VEP and Scoring take as input; it does not turn off
     # Disambiguation (use_disambiguation does)
-
-    # --- Accumulation ---
-    use_accumulation: bool = False  # turns off Accumulation; wires scoring_accum_dir
 
     # --- RERconverge ---
     use_rer: bool = False  # turns off RER; wires rer_continuous_file/rer_perms_file plus
@@ -131,9 +126,6 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         background = os.path.join(outdir, "postproc", "cleaned_backgrounds", "cleaned_background_main.txt")
         entries.append(("accumulation_caas_input / scoring_postproc_input", gene_list, "file"))
         entries.append(("accumulation_background_input / scoring_background_input", background, "file"))
-
-    if config.use_accumulation:
-        entries.append(("scoring_accum_dir", os.path.join(outdir, "accumulation"), "dir"))
 
     if config.use_rer:
         rer_dir = os.path.join(outdir, "rerconverge", "rer_results")

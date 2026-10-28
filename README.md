@@ -93,18 +93,18 @@ flowchart TD
     D --> E[Observed scoring\nASR: convergent/parallel/divergent]
     E --> E2[ASR_DIAGNOSTICS\nscore and ancestral-posterior description, parallel report]
     E --> F[CT_POSTPROC\ncluster/gene filtering + characterization]
-    E --> G[CT_ACCUMULATION\nper-gene CAAS burden test]
     E --> H[VEP\nPrimateAI-3D / COSMIC annotation]
     subgraph independent[independent of CT, same trait]
       I[FADE\nHyPhy directional selection, top+bottom]
       J[RER_MAIN\nRERconverge relative evolutionary rate]
     end
     F --> K[SCORING\ncomposite position + gene scores]
-    G --> K
     H --> K
     I --> K
     J --> K
-    K --> L[ENRICHMENT\nFCS ranked enrichment, DOMINO/STRING, POSENRICH]
+    K --> P[POSENRICH\nAccumulation, position registry and components]
+    P --> L[ENRICHMENT\nFCS ranked enrichment, DOMINO/STRING]
+    K --> L
 ```
 
 Execution order as wired in `main.nf`:
@@ -115,9 +115,10 @@ Execution order as wired in `main.nf`:
 4. **CT_META_CAAS** — genome-wide significance/FDR of discovered CAAS (runs whenever bootstrap ran, or standalone via `--bootstrap_from`).
 5. **Observed scoring** (`--ct_disambiguation`): ASR-based convergent/parallel/divergent classification; the observed labeling is the `b_0` slice of the permulation core (**CAAS_CORE**), or **CAAS_OBSERVED** for a discovery table given with `--discovery_from`.
 6. **CT_POSTPROC** (`--ct_postproc`) — cluster/gene filtering, background cleanup, characterization report; also fans out **ASR_DIAGNOSTICS** in parallel as an independent descriptive report of the observed scores and of the ancestral-state posteriors of the domains.
-7. **VEP** (`--vep`), **FADE** (`--fade`), **RER_MAIN** (`--rer_tool`) — three largely independent evidence-generating stages that can run in any combination. **CT_ACCUMULATION** (level 1 of POSENRICH, gene vs. its share of the position universe) runs under `--posenrich_modular` and publishes to `posenrich/accumulation/`.
+7. **VEP** (`--vep`), **FADE** (`--fade`), **RER_MAIN** (`--rer_tool`) — three largely independent evidence-generating stages that can run in any combination.
 8. **SCORING** (`--scoring`): integrates all of the above into composite position- and gene-level scores; optionally triggers the permulation core (**CAAS_CORE**, **CAAS_CORE_MERGE**) for a genome-wide permutation null (`--caas_permulation_enrichment`).
-9. **ENRICHMENT** (`--enrichment`, nested under `--scoring`) — FCS ranked gene-set enrichment, DOMINO active-module + STRING functional enrichment; POSENRICH is currently skipped pending its position-AUC phase.
+9. **POSENRICH** (`--posenrich`) — downstream of SCORING, upstream of ENRICHMENT: level 1 (Accumulation, gene vs. its share of the position universe; publishes to `posenrich/accumulation/`) and, with `--scoring`, the position universe, the position registry with its characterization and proximity components, and level 2 (concentration of the signal inside genes, calibrated with the null cycles).
+10. **ENRICHMENT** (`--enrichment`, nested under `--scoring`) — FCS ranked gene-set enrichment, DOMINO active-module + STRING functional enrichment; the comparison report reads the POSENRICH position characterization when it exists.
 
 On completion, `workflow.onComplete` (in `main.nf`, backed by `lib/WorkflowMap.groovy`) writes `workflow_map.html` into `--outdir` — a visual summary of which stages ran and links to every HTML report/output directory produced.
 
@@ -170,17 +171,59 @@ triggers **ASR_DIAGNOSTICS**, an independent report that describes the observed
 `asr_path_score`, `derived_agreement` and the ancestral-state posteriors of the
 Voronoi domains, without altering the main data path. Emits gene lists consumed by FADE's `gene_set` mode.
 
-### CT_ACCUMULATION — per-gene CAAS burden
-Exact hypergeometric test for whether a gene holds more CAAS positions than its
-share of the position universe U predicts, run once per direction
-(top/bottom/all). U is the set of positions CAAStools tested that score in the
-filtered permulation null (`null_positions.parquet`), plus the observed
-positions; a gene's length enters through its number of positions in U
-(`PoolPositions`), and a position detected on both sides counts once. It takes
-`filtered_discovery.tsv`, the cleaned background, the tested positions and the
-permulation null (no alignment needed); standalone via
-`--accumulation_caas_input`, `--accumulation_background_input`,
-`--posenrich_background_file` and `--caas_null_dir`.
+### POSENRICH — position-level enrichment
+POSENRICH asks how the positive positions (CAAS score > 0) relate to genes and to sets of positions
+(Pfam domains and clans, UCR core and flank, FUBAR and FADE sites, genomic windows, custom site lists). It is a
+module of its own, switched on with `--posenrich`, and runs after SCORING and before ENRICHMENT
+(SCORING → POSENRICH → ENRICHMENT). Level 1 can run without `--scoring`; the registry, level 2, characterization,
+proximity and report 14 need it.
+
+**Universe U.** The positions CAAStools tested in the genes of the cleaned background that score above zero in at
+least one cycle of the filtered permulation null, plus the observed positives. `posenrich_universe.py` writes it
+once as `universe.tsv.gz` (one row per position, with `nd` and the observed flags per direction), and levels 1 and 2
+read the same table. Positions outside U are not treated as negatives.
+
+**Level 1, Accumulation (whole gene).** Does a gene hold more positive positions than its share of U predicts? For
+each direction (all, top, bottom) the count of a gene is compared with a hypergeometric draw of K positives from
+U (exact upper-tail p; Benjamini-Hochberg over the genes with at least one positive, applied in report 14). It treats the positions of U
+as equivalent and is not calibrated with the null cycles.
+
+**Level 2, concentration within genes (term ∩ gene).** Given what each gene already accumulates, does a term
+(domain, clan, region, site list) hold a larger share of the gene's detection weight than its share of the gene's
+positions? Each position weighs its CAAS score (0 if not detected); the statistic sums, over the genes with
+positions inside and outside the term, the residual of the term's weight against the proportional expectation,
+divided by the null standard deviation of that residual. It is calibrated against the same statistic on each of the
+null cycles (`p = (1 + exceedances) / (N + 1)`, floor `1/(N + 1)`), with BH per collection. Excluded genes
+are listed per term with their reason; nothing is imputed. Frequency and intensity are reported as two descriptive effect
+sizes without p-values.
+
+> **Validation pending.** The level 2 statistic and its calibration have been checked against an independent dense
+> oracle, across block partitions, and with held-out null cycles on a real 500-cycle block. They have not been
+> validated at scale with 10,000 cycles and several term sets (null cycles played as the observed one, false-positive
+> rate per term and collection). Treat level 2 p and q values as provisional until then. The proximity control is also
+> unvalidated and its results are descriptive. See [the design](docs/POSENRICH_DISENO.md).
+
+**Inputs.** `--scoring` provides the position tables, the null (`caas_permulation/`) and the cleaned background.
+Standalone level 1 uses `--accumulation_caas_input` (`filtered_discovery.tsv`), `--accumulation_background_input`
+(gene list of U), `--posenrich_background_file` (tested positions) and `--caas_null_dir`. Optional position sources:
+`--domain_variability_file`, `--ucr_positions_file` (generated on the productive alignments when blank),
+`--fubar_sites_file`, `--fade_sites_*` and `--posenrich_custom_file`.
+
+**Outputs** (under `posenrich/`):
+
+| Path | Content |
+|---|---|
+| `accumulation/{all,top,bottom}/` | Level 1: `accumulation_<direction>_results.csv` (`Gene`, `ActualCount`, `PoolPositions`, `MeanNull`, `SD`, `PValue`; BH is applied in report 14) |
+| `universe/` | `universe.tsv.gz` and its manifest (|U|, gene list fingerprint, counts) |
+| `registry/` | `positions.tsv` (one row per position, annotation attributes as columns), `regions.tsv` (Pfam runs of columns), `sites.tsv` (custom sites), `collections.tsv`, `coverage.tsv`, `pending_mappings.tsv`, `manifest.json` |
+| `characterization/` | Raw characterization of the positives by layer (`position_characterization.tsv`, read by the comparison report) |
+| `within_gene/` | Level 2: `within_gene_results.tsv` (one term per row), `within_gene_by_gene.tsv`, manifest, and `holdout_fpr.tsv` in validation mode |
+| `proximity/` | Protein and genomic distances of the positives to sites and regions |
+| `14.POSENRICH_report_<trait>.html` | Report 14 (also in `html_reports/`): universe and coverage, characterization, level 1, level 2, proximity, methods and limits |
+
+The Pfam and UCR tables of the registry are generated here when none is supplied (`core_inputs/`). See
+[position collections](docs/POSITION_COLLECTIONS.md). The parameters are listed in
+[`conf/posenrich.config`](#confposenrichconfig--posenrich).
 
 ### VEP — pathogenicity annotation
 Annotates filtered CAAS positions with PrimateAI-3D pathogenicity scores and
@@ -224,13 +267,13 @@ permutation-corrected p-values. `--rer_continuous_file` renders the report
 standalone from a precomputed RDS.
 
 ### SCORING — composite integration
-Combines CT_POSTPROC (CAAS), FADE, RERconverge, and CT_ACCUMULATION into
+Combines CT_POSTPROC (CAAS), FADE and RERconverge into
 unified position-level and gene-level composite scores. See [Composite CAAS
 scoring framework](#composite-caas-scoring-framework) below for the full
 formulation. Also wires in the permulation core (**CAAS_CORE**), a genome-wide permutation
 null built by replaying permuted labelings through disambiguation — when
 `--caas_permulation_enrichment` is set. PrimateAI-3D/COSMIC position
-characterization is handled by ENRICHMENT (POSENRICH), not SCORING.
+characterization is handled by POSENRICH, not SCORING.
 
 ### ENRICHMENT — functional & network enrichment
 Runs FCS (a ranked, Wilcoxon-AUC, GMT-based enrichment engine — the single
@@ -244,7 +287,7 @@ terms are read as one; the RER ranking is the signed statistic
 on every permulated phenotype), an
 orthogonal cross-module Comparison report, optional DOMINO active-module
 detection + STRING functional enrichment (`--scoring_ami`), and optional
-POSENRICH position-level enrichment (`--posenrich`). POSENRICH is currently skipped with a warning because WP5 retired its position-by-cycle null; report 14 is not produced. The modular POSENRICH phase (WP10, `--posenrich_modular`) is implemented on a common position registry: characterization, within-protein localization (descriptive AUC; inference withheld pending scientific validation), global association (descriptive) and proximity, with its own report (`posenrich/POSENRICH_modular_report_<trait>.html`); see `docs/fases/WP10_posenrich_modular.md` and `docs/POSITION_COLLECTIONS.md`. UCR/FUBAR/domain-variability/PrimateAI-3D/COSMIC annotations remain available to other consumers.
+reading of the POSENRICH position characterization (`position_characterization.tsv`, an optional input of the comparison report). Position-level analyses live in POSENRICH.
 Universe files are module-specific (`--rer_universe_file`,
 `--fade_universe_file`) rather than shared.
 
@@ -267,10 +310,10 @@ run with `--reporting`.
 ## Composite CAAS Scoring Framework
 
 PhyloPhere integrates multiple independent evidence lines (CT convergence,
-FADE selection, RER continuous association, and accumulation) into unified
+FADE selection and RER continuous association) into unified
 position-level and gene-level scores. VEP/PrimateAI-3D/COSMIC position
-characterization is a separate evidence line handled by ENRICHMENT
-(POSENRICH), not part of this composite.
+characterization is a separate evidence line handled by POSENRICH, not part of
+this composite.
 
 ### Position-level score (`CAAS_score`)
 
@@ -314,14 +357,13 @@ cycle scores; the position p-values (`p.emp`, adjusted as `p.adj_bh`) are built 
 side, `ancestral_aa` and `derived_aa` (comma-separated, most frequent first). The `caas` column is the pattern
 `<top residues>/<bottom residues>` and has no direction.
 
-**`gene_scores.tsv`**: `gene_caas_score` (+ `_top`/`_bottom`), `accum_p`
-(exact hypergeometric accumulation p) with BH FDR `accum_fdr` and
-`accum_significant`, `rer_min_pval`, `rer_acceleration`,
+**`gene_scores.tsv`**: `gene_caas_score` (+ `_top`/`_bottom`),
+`rer_min_pval`, `rer_acceleration`,
 `fade_max_bf_top`/`_bottom`, `fade_significant_top`/`_bottom`.
 
 ### Downstream slices & enrichment inputs
 
-- **`gene_lists/slice_*.tsv`** (12 ranked lists: 3 directions `{global,top,bottom}` x 4 percentile cuts `{25,10,5,1}`) - the ranked lists FCS/DOMINO consume, each annotated with `is_fade`/`is_rer`/`is_accum` flags.
+- **`gene_lists/slice_*.tsv`** (12 ranked lists: 3 directions `{global,top,bottom}` x 4 percentile cuts `{25,10,5,1}`) - the ranked lists FCS/DOMINO consume, each annotated with `is_fade`/`is_rer` flags.
 - **`fcs_stats.tsv`**: the merged per-gene score table FCS runs ranked enrichment against.
 - **`gene_threshold_enrichment.tsv` / `pos_threshold_enrichment.tsv`**: Fisher's-exact odds-ratio/p-value curves testing whether tighter `CAAS_score` thresholds (top100/50/25/10/5/1) enrich for independent RER/FADE/accumulation significance.
 
@@ -354,11 +396,7 @@ These parameters define the primary input data files, phenotype target, and modu
 | `scoring` | `false` | Main toggle to enable the Composite Scoring integration module (`--scoring`). |
 | `vep` | `true` | Enables VEP pathogenicity annotation (PrimateAI-3D and COSMIC scores). |
 | `enrichment` | `false` | Main toggle to enable the FCS ranked gene-set enrichment module (`--enrichment`). |
-| `posenrich` | `true` | Requests position-level enrichment; currently skipped with a warning after WP5, pending a separate method evaluation. |
-| `posenrich_modular` | `false` | WP10 modular POSENRICH: common registry + characterization + within-protein localization + global association + proximity (`posenrich/registry`, `posenrich/characterization`, `posenrich/localization`, `posenrich/global`, `posenrich/proximity`). Independent of `--posenrich`. |
-| `posenrich_ranking` / `posenrich_aggregation` | `caas_score` / `mean` | Ranking and across-gene aggregation of the localization contrast (`minus_log10_pemp` and `pair_weighted` are explicit sensitivities). |
-| `posenrich_n_permutations` / `posenrich_seed` | `999` / `1` | Reserved control settings; production inference is withheld (B_valid=0, p/q unavailable). |
-| `posenrich_radios` | `0,5,10` | Descriptive protein-proximity radii (reference residues), fixed before any contrast. |
+| `posenrich` | `false` | Enables POSENRICH: level 1 (Accumulation) and, with `--scoring`, the position registry and its components (`posenrich/registry`, `posenrich/universe`, `posenrich/characterization`, `posenrich/within_gene`, `posenrich/proximity`). Parameters in [`conf/posenrich.config`](#confposenrichconfig--posenrich). |
 | `fade` | `false` | Main toggle to enable HyPhy FADE directional selection scanning (`--fade`). |
 | `rer_tool` | `""` | Enables RERconverge relative evolutionary rate analysis (`"continuous"` or `"build_trait"`). |
 | `contrast_selection` | `false` | Enables automatic independent-contrasts extreme selection for continuous phenotypes. |
@@ -496,13 +534,6 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `fcs_pperm_thr` | `0.025` | Raw permulation-p threshold of the Redlich rule, combined with the three analytic BH levels. It does not filter `sig_perm` (the RER rule). |
 | `fcs_top_n` | `20` | Number of top-ranked gene sets highlighted in report tables. |
 | `caas_permulation_enrichment` | `true` | Runs the permulation core (CAAS_CORE, CAAS_CORE_MERGE) to build the genome-wide null used for CAAS's FCS permulation p-value. |
-| `posenrich_min_size` / `posenrich_max_size` | `2` / `0` | Position set size boundaries for POSENRICH (0 = un-capped). |
-| `posenrich_background_file` | `""` | Optional static background override file. |
-| `fubar_sites_file` | `""` | Optional upstream position annotation file (generated by `ortholog_characterizator`). |
-| `domain_variability_file`, `ucr_positions_file` | `""` | Reuse supplied annotation tables, including original PPGA Pfam tables. Blank generates enabled Pfam/UCR layers on the input alignments; see [position collections](docs/POSITION_COLLECTIONS.md). |
-| `posenrich_custom_file` | `""` | Custom positional TSV: gene, zero-based CAAS Position, term, optional description; no header. |
-| `egg_members_file`, `egg_annotations_file` | `""` | Leave blank to use the eggNOG 5.0 Primates (taxid 9443) pair, human members only, versioned in `subworkflows/ENRICHMENT/dat/`. Another clade or reference species needs `auto_fetch_eggnog`. |
-| `auto_fetch_eggnog` | `false` | Download the eggNOG pair of `eggnog_taxid` instead of using the versioned copy. A failed download stops the run. Either way `core_inputs/eggnog/eggnog_source.json` records the source and the SHA-256 of the files. |
 
 </details>
 
@@ -577,21 +608,35 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 
 ---
 
-### `conf/ct_accumulation.config` — CAAS Burden Accumulation
+### `conf/posenrich.config` — POSENRICH
 
 #### Common Use (Essential) Parameters
-*(The stage runs when `posenrich_modular` is on, see `conf/enrichment.config`; output under `posenrich/accumulation/`)*
+| Parameter | Default | Purpose |
+|---|---|---|
+| `posenrich` | `false` | Enables the module. Level 1 (Accumulation) needs CT post-processing or the standalone inputs below; the position registry and its components also need `--scoring`. Output under `posenrich/`. |
+| `accumulation_fdr` | `0.1` | Benjamini-Hochberg FDR cutoff of the report tables of levels 1 and 2. |
+| `posenrich_domains` / `posenrich_ucr` | `true` / `true` | Include the Pfam / UCR layers; a blank table is generated on the productive alignments. |
 
 #### Advanced Parameters
 
 <details>
-<summary>Click to view Advanced Parameters for ct_accumulation.config</summary>
+<summary>Click to view Advanced Parameters for posenrich.config</summary>
 
 | Parameter | Default | Purpose |
 |---|---|---|
-| `accumulation_caas_input` | `""` | Standalone `filtered_discovery.tsv` input file. |
-| `accumulation_background_input` | `""` | Standalone background gene list or directory. |
-| `accumulation_fdr` | `0.1` | Benjamini-Hochberg FDR cutoff for significant accumulation (governs both gene lists and report tables). |
+| `accumulation_caas_input` | `""` | Standalone `filtered_discovery.tsv` input file (the observed positives of the universe U). |
+| `accumulation_background_input` | `""` | Standalone background gene list or directory (the gene list of U). |
+| `posenrich_background_file` | `""` | Static override of the tested positions (`background.output`). |
+| `domain_variability_file`, `ucr_positions_file` | `""` | Reuse supplied annotation tables (each needs an explicit `coordinate_space`; original PPGA tables are converted first with `bin/build_reference_tables.py project-ppga`). Blank generates enabled Pfam/UCR layers on the input alignments; see [position collections](docs/POSITION_COLLECTIONS.md). |
+| `pfam_cache_dir` / `domain_ref_species` | `""` / reference species | Local Pfam-A cache and reference species of the Pfam scan. |
+| `fubar_sites_file` | `""` | Optional upstream position annotation file (generated by `ortholog_characterizator`). |
+| `posenrich_custom_file` | `""` | Custom positional TSV: gene, zero-based CAAS Position, term, optional description; no header (the PP2A sets; its GUI field is on the Enrichment tab). |
+| `posenrich_collections` | `""` | Collections of level 2 (comma-separated ids); blank uses those the registry marks as informative inside a protein. |
+| `posenrich_min_nonzero_cycles` | `30` | Null cycles with a nonzero residual a gene needs to enter the level 2 statistic of a term (stability rule of its standard deviation; heuristic). |
+| `posenrich_holdout` | `0` | Validation mode: this many null cycles play the observed one, and only `holdout_fpr.tsv` is written. `0` runs the observed data. |
+| `posenrich_within_gene_memory` | `""` | Memory of level 2, which reads one block of the null at a time; blank requests 16 GB. |
+| `posenrich_radios` | `0,5,10` | Descriptive protein-proximity radii (reference residues), fixed before any contrast. |
+| `position_registry_memory` / `position_module_memory` | `""` | Memory of the registry and of its components; blank sizes them from the inputs. |
 
 </details>
 

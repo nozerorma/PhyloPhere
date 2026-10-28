@@ -81,8 +81,6 @@ export INPUT_TAX_ID="${DATADIR}/taxid_species.tsv"
 # --- EXTERNAL DATABASES ---
 export GMT_DIR="${DATADIR}/GMTs"
 export STRING_DB_DIR="${DATADIR}/STRING"
-export EGG_MEMBERS_FILE="${DATADIR}/eggNOG/members.tsv"
-export EGG_ANNOTATIONS_FILE="${DATADIR}/eggNOG/annotations.tsv"
 export DOMAIN_VARIABILITY_FILE="${ALI_WORSKPACE}/reports/variability/domain_variability.tsv"
 export UCR_POSITIONS_FILE="${ALI_WORSKPACE}/reports/variability/ucr_positions.tsv"
 export FUBAR_SITES_FILE="${ALI_WORSKPACE}/reports/positive_selection/fubar_sites.tsv"

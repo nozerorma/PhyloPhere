@@ -200,7 +200,7 @@ workflow FADE {
         // A single upstream filter starves every downstream _TOP/_BOTTOM branch
         // for a skipped direction (no tasks scheduled) without restructuring
         // any of the branch{}/process-call wiring below, mirroring how
-        // CT_ACCUMULATION's 'all' direction is handled as a filter, not a new
+        // POSENRICH Accumulation's 'all' direction is handled as a filter, not a new
         // contrast scheme.
         def wanted_directions = (params.fade_direction == 'both')
             ? ['top', 'bottom']

@@ -1,12 +1,12 @@
 #!/usr/bin/env nextflow
-// domain_variability_generation.nf — Generate the Pfam domain table of ENRICHMENT when none is supplied.
-// PhyloPhere | subworkflows/ENRICHMENT/
+// domain_variability_generation.nf — Generate the Pfam domain table of POSENRICH when none is supplied.
+// PhyloPhere | subworkflows/POSENRICH/
 
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *  DOMAIN_VARIABILITY_GENERATION: builds the --domain_variability_file by scanning the
  *  reference-species sequence of every gene against Pfam-A with hmmscan
- *  (bin/compute_domain_variability.py). Called from workflows/enrichment.nf.
+ *  (bin/compute_domain_variability.py). Called from workflows/posenrich.nf.
  *
  *  The Pfam-A.hmm and Pfam-A.clans.tsv cache (about 1.5 GB uncompressed) is downloaded once
  *  to --pfam_cache_dir and reused by later runs.

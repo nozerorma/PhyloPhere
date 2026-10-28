@@ -49,10 +49,10 @@ from gui.remote import RemoteCheckError, check_remote_paths
 from gui.models.project import ProjectConfig
 from gui.widgets.common.regenerate_dialog import RegenerateReportsDialog
 from gui.widgets.tabs.about_tab import AboutTab
-from gui.widgets.tabs.accumulation_tab import AccumulationTab
 from gui.widgets.tabs.caas_tab import CaasTab
 from gui.widgets.tabs.disambiguation_tab import DisambiguationTab
 from gui.widgets.tabs.enrichment_tab import EnrichmentTab
+from gui.widgets.tabs.posenrich_tab import PosenrichTab
 from gui.widgets.tabs.fade_tab import FadeTab
 from gui.widgets.tabs.general_tab import GeneralTab
 from gui.widgets.tabs.precomputed_tab import PrecomputedTab
@@ -110,17 +110,16 @@ class MainWindow(QMainWindow):
         modules = self.project.modules
         self.caas_tab = CaasTab(modules.caas)
         self.disambiguation_tab = DisambiguationTab(modules.disambiguation)
-        self.accumulation_tab = AccumulationTab(modules.accumulation)
         self.rerconverge_tab = RerConvergeTab(modules.rer)
         self.fade_tab = FadeTab(modules.fade)
         self.vep_tab = VepTab(modules.vep)
         self.scoring_tab = ScoringTab(modules.scoring)
         self.enrichment_tab = EnrichmentTab(modules.enrichment)
+        self.posenrich_tab = PosenrichTab(modules.posenrich)
         self.precomputed_tab = PrecomputedTab(
             self.project.precomputed,
             caas_tab=self.caas_tab,
             disambiguation_tab=self.disambiguation_tab,
-            accumulation_tab=self.accumulation_tab,
             rer_tab=self.rerconverge_tab,
             fade_tab=self.fade_tab,
             vep_tab=self.vep_tab,
@@ -135,12 +134,12 @@ class MainWindow(QMainWindow):
             (self.runtime_tab, "Runtime"),
             (self.caas_tab, "CAAS"),
             (self.disambiguation_tab, "Disambiguation"),
-            (self.accumulation_tab, "Accumulation"),
             (self.rerconverge_tab, "RERconverge"),
             (self.fade_tab, "FADE"),
             (self.vep_tab, "VEP"),
             (self.scoring_tab, "Scoring"),
             (self.enrichment_tab, "Enrichment"),
+            (self.posenrich_tab, "POSENRICH"),
             (self.precomputed_tab, "Precomputed Run"),
             (self.resources_tab, "Resources"),
         ]
@@ -454,7 +453,7 @@ class MainWindow(QMainWindow):
                     f"Disambiguation tab to your chosen values, regenerate, then run "
                     f"{complete_name} — it reuses {expl_name}'s CAAS/Disambiguation output "
                     "directly (no recomputation) and runs the full downstream workflow "
-                    "(Accumulation/VEP/Scoring/Enrichment, plus RER/FADE if you've enabled "
+                    "(VEP/Scoring/Enrichment/POSENRICH, plus RER/FADE if you've enabled "
                     "them) on top of it.\n\n"
                     "Enjoy!",
                 )

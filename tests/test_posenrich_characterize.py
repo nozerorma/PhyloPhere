@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / 'subworkflows/ENRICHMENT/local/src'
+SRC = ROOT / 'subworkflows/POSENRICH/local/src'
 REGISTRY = SRC / 'posenrich_registry.py'
 CHARACTERIZE = SRC / 'posenrich_characterize.py'
 
@@ -24,7 +24,7 @@ def run_characterize(registry_dir, out_dir):
 
 def test_characterization_layers_and_summaries(tmp_path):
     files, maps = make_fixture(tmp_path)
-    registry_dir, _ = run_registry(tmp_path, files, maps)
+    registry_dir = run_registry(tmp_path, files, maps)
     out = run_characterize(registry_dir, tmp_path / 'char')
 
     rows = {(r['Gene'], int(r['Position'])): r for r in read_tsv(out / 'position_characterization.tsv')}
@@ -69,7 +69,7 @@ def test_characterization_layers_and_summaries(tmp_path):
 
     manifest = json.loads((out / 'characterization_manifest.json').read_text())
     assert manifest['states']['characterization'] == 'executed'
-    assert manifest['states']['localization'] == 'not_executed'
+    assert manifest['states']['proximity'] == 'not_executed'
     assert 'sin inferencia de enriquecimiento' in manifest['limits']
 
 

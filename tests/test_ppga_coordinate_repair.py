@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT/'bin'), str(ROOT/'subworkflows/ENRICHMENT/local/src')]
+sys.path[:0] = [str(ROOT/'bin'), str(ROOT/'subworkflows/POSENRICH/local/src')]
 from ppga_position_references import project_ppga
-from build_position_gmt import build_map_cache, collect_pfam_members, collect_ucr_members
+from position_sources import build_map_cache, collect_pfam_members, collect_ucr_members
 
 
 def fixture(tmp_path):

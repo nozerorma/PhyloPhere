@@ -6,7 +6,7 @@
 RunUcrDetection: loops detect_ucr.py (one gene per call) over the <gene>.entropy.tsv files of
 a directory; the detection logic is entirely in detect_ucr.py.
 
-Called by:  RUN_UCR_DETECTION Nextflow process (subworkflows/ENRICHMENT/ucr_generation.nf → run_ucr_detection.py)
+Called by:  RUN_UCR_DETECTION Nextflow process (subworkflows/POSENRICH/ucr_generation.nf → run_ucr_detection.py)
 Inputs:     --entropy-dir   directory of <gene>.entropy.tsv (compute_alignment_entropy.py);
                             <gene>.clade_entropy.tsv files are ignored
             any other argument is forwarded to detect_ucr.py for every gene

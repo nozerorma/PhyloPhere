@@ -23,8 +23,8 @@ def load(name,path):
 def test_native_producer_outputs_are_consumed_without_coordinate_conversion(tmp_path,monkeypatch):
  pfam=load('upstream_pfam_contract',SRC/'map_domain_variability.py')
  ucr=load('upstream_ucr_contract',SRC/'aggregate_ucr.py')
- sys.path.insert(0,str(ROOT/'subworkflows/ENRICHMENT/local/src'))
- import build_position_gmt as consumer
+ sys.path.insert(0,str(ROOT/'subworkflows/POSENRICH/local/src'))
+ import position_sources as consumer
  prot=tmp_path/'prot';prot.mkdir();(prot/'G.fa').write_text('>Homo_sapiens\nAX-S\n')
  ent=tmp_path/'entropy';ent.mkdir();(ent/'G.entropy.tsv').write_text(
  'gene\tposition\tt\tr\tg\tC_trident\tvariability\n'

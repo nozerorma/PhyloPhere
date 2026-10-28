@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# posenrich_proximity.py — Proximity of prioritized positions to sites/regions (POSENRICH component 3).
-# PhyloPhere | subworkflows/ENRICHMENT/local/src/
+# posenrich_proximity.py: proximity of prioritized positions to sites and regions (POSENRICH).
+# PhyloPhere | subworkflows/POSENRICH/local/src/
 
 """Do the prioritized positions concentrate near sites or regions of interest?
 
-WP10 P5 (docs/fases/WP10_posenrich_modular.md). Protein and genomic proximity are
+Protein and genomic proximity are
 separate contracts: protein distance is measured in reference residues
 (hg38_aa_pos), never in MSA columns with gaps; genomic distance is measured in
 nucleotides and never mixed into the protein result.
@@ -19,9 +19,8 @@ Genomic proximity: distance in nucleotides to the nearest member of the term
 within the same gene and chromosome; 0 on coincidence. Window membership (1 Mb bins) stays in the
 registry members and is not re-measured here.
 
-The distance control is not assumed to be the AUC control: the first
-implementation is descriptive with an explicit state; radii are fixed before any
-contrast and reported as descriptive.
+The distance control is not validated: results are descriptive with an explicit
+state, and radii are fixed before any contrast.
 
 Outputs (in --output_dir):
   proximity_protein_distances.tsv   one row per evaluated position x term (genes with sites)
@@ -41,7 +40,9 @@ from contextlib import ExitStack
 
 import numpy as np
 
-REGISTRY_FILES = ['positions.tsv', 'position_evidence.tsv', 'members.tsv',
+import posenrich_members as pm
+
+REGISTRY_FILES = ['positions.tsv', 'position_evidence.tsv', 'regions.tsv', 'sites.tsv',
                   'collections.tsv', 'coverage.tsv', 'manifest.json']
 
 # Collections measured as protein sites/regions; coverage and genomic-window
@@ -176,10 +177,8 @@ def main():
     # Stream registry inputs instead of materializing dataframes and record copies.
     term_members = {}
     needed = {}
-    for row in read_tsv(os.path.join(args.registry_dir, 'members.tsv')):
+    for row in pm.member_records(args.registry_dir, selected_collections):
         key = (row['collection_id'], row['term_id'])
-        if row['collection_id'] not in selected_collections:
-            continue
         gene, pos = row['Gene'], int(row['Position'])
         term_members.setdefault(key, {}).setdefault(gene, set()).add(pos)
         needed.setdefault(gene, set()).add(pos)
@@ -292,9 +291,7 @@ def main():
         'contracts': {'protein': 'distancia en residuos de referencia (hg38_aa_pos) dentro de la misma proteina; 0 dentro de region',
                       'genomic': 'distancia en nt dentro del mismo gen y cromosoma; 0 en coincidencia'},
         'states': {'proximity': 'executed_descriptive' if protein_rows.rows_written else 'no_terms',
-                   'characterization': 'not_executed (componente separado)',
-                   'localization': 'not_executed (componente separado)',
-                   'global_association': 'not_executed (componente separado)'},
+                   'characterization': 'not_executed (componente separado)'},
         'control': {'status': 'not_validated',
                     'reason': 'el control de AUC no se asume valido para distancias; '
                               'no se infiere p en esta primera implementacion'},

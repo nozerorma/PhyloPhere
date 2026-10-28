@@ -19,7 +19,7 @@ mkdir -p "$out/registry"
 
 # Code under test: the checkout this script belongs to
 code=$(realpath "$(dirname "$0")/../..")
-registry_py="$code/subworkflows/ENRICHMENT/local/src/posenrich_registry.py"
+registry_py="$code/subworkflows/POSENRICH/local/src/posenrich_registry.py"
 PYTHON=${PYTHON:-python3}
 
 # Same arguments as the task's .command.sh, resolved against the task work dir
@@ -38,7 +38,6 @@ args=(
     --fade_sites_bottom_file fade_sites_bottom.csv
     --custom_marker_file pp2a_custom.tsv
     --output_dir "$out/registry"
-    --gmt_dir "$out/registry/gmts"
 )
 
 # Wall time and peak memory of the profiled run. cProfile adds overhead, so the

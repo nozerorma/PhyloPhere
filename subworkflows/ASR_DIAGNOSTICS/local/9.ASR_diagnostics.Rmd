@@ -134,7 +134,7 @@ For one hypothesis and one side, a domain is *changed* when its observed foregro
 
 `derived_agreement` is `agree_num / agree_den`: the fraction of the changed domains whose modal derived residue is the most frequent one. It describes the row and does not enter the score.
 
-The posterior threshold removes from the recorded distribution of a node every residue below it, except the most probable one. Removed mass is unrecorded, so a higher threshold can only raise `P` and lower the scores. The threshold is applied when the ASR posteriors are read; this report shows its value and does not vary it.
+The posterior threshold removes from the recorded distribution of a node every residue below it, except the most probable one. Removed mass is unrecorded, so a higher threshold can only raise `P` and lower the scores. The threshold is applied when the ASR posteriors are read; this report shows its value and does not vary it. By default, it is fixed at 0.1.
 
 ---
 
@@ -245,19 +245,6 @@ write_tsv_safe(agree_tab, "convergence_type_by_side.tsv")
 agree_tab %>%
   kable(format = "html", digits = 2, caption = "Convergence type and ambiguous agreement per side (convergence_type_by_side.tsv)") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-```
-
-The two descriptors against each other: the score depends on how many domains changed and on the posterior at their LCAs, `derived_agreement` only on which residues the changed domains carry.
-
-```{r plot-score-vs-agreement, fig.height=8, fig.cap="asr_path_score against derived_agreement; colour is the number of rows per bin (log scale)."}
-p_sa <- ggplot(agree_df, aes(x = derived_agreement, y = asr_path_score)) +
-  geom_bin2d(bins = 25) +
-  scale_fill_viridis_c(trans = "log10", name = "Rows") +
-  facet_wrap(~ side) +
-  labs(title = "Score against derived agreement", x = "derived_agreement", y = "asr_path_score")
-
-print(p_sa)
-save_plot(p_sa, "asr_path_score_vs_derived_agreement.png", width = 10, height = 6)
 ```
 
 ---

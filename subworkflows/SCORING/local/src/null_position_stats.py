@@ -164,7 +164,19 @@ def build_universe(null: pa.Table, obs_genes: List[str], obs_pos: np.ndarray, te
     return classes, breaks, sizes, metrics
 
 
-def write_universe(out: Path, classes, breaks, sizes, metrics, n_cycles: int, n_present: int) -> None:
+def gene_list_identity(path: Path) -> Tuple[int, str]:
+    """(number of genes, digest) of a gene list file: one gene per line, optional 'Gene' header.
+
+    The digest is the SHA-256 of the sorted unique names joined by newlines, the one posenrich_universe.gene_list_digest
+    computes, so consumers compare lists by content and not by file layout.
+    """
+    import hashlib
+
+    genes = {g.strip() for g in Path(path).read_text().splitlines() if g.strip() and g.strip() != "Gene"}
+    return len(genes), hashlib.sha256("\n".join(sorted(genes)).encode()).hexdigest()
+
+
+def write_universe(out: Path, classes, breaks, sizes, metrics, n_cycles: int, n_present: int, gene_list=None) -> None:
     out.mkdir(parents=True, exist_ok=True)
     pq.write_table(classes, out / "null_classes.parquet", compression="zstd")
     with open(out / "null_fit.tsv", "w") as fh:
@@ -179,6 +191,8 @@ def write_universe(out: Path, classes, breaks, sizes, metrics, n_cycles: int, n_
         fh.write(f"N_cycles_present_in_null\tNA\t{n_present}\t\n")
         fh.write(f"null_positive_positions_all\tNA\t{metrics['n_null_raw']}\t\n")
         fh.write(f"null_positive_positions_in_universe\tNA\t{metrics['n_null_u']}\t{metrics['rate_note']}\n")
+        if gene_list is not None:  # value = number of genes, note = digest of the gene list the universe received
+            fh.write(f"gene_list_sha256\tNA\t{gene_list[0]}\t{gene_list[1]}\n")
         for k, v in metrics["curve"]:
             fh.write(f"null_positive_positions_cumulative\t{k}\t{v}\tdistinct null-positive positions of U seen in the first k cycles\n")
 
@@ -304,7 +318,8 @@ def main(argv=None) -> int:
                       f"'{SCORE_RULE}': p.emp and p.adj_bh would compare different statistics. Rebuild the null (CAAS_CORE_MERGE).",
                       file=sys.stderr)
                 return 1
-        write_universe(a.output_dir, classes, breaks, sizes, metrics, len(roster), present)
+        gene_list = gene_list_identity(a.universe) if a.universe is not None and Path(a.universe).is_file() else None
+        write_universe(a.output_dir, classes, breaks, sizes, metrics, len(roster), present, gene_list)
         print(f"[null] universe: {metrics['n_null_u']} of {metrics['n_null_raw']} null-positive positions kept "
               f"({metrics['rate_note']}); {len(breaks) + 1} classes", file=sys.stderr)
         return 0

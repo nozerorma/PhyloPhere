@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-# posenrich_registry.py — Common registry of positions, collections and coverage for POSENRICH modular.
-# PhyloPhere | subworkflows/ENRICHMENT/local/src/
+# posenrich_registry.py: common registry of positions, collections and coverage for POSENRICH.
+# PhyloPhere | subworkflows/POSENRICH/local/src/
 
 """Build the normalized position registry shared by every POSENRICH component.
 
-WP10 P1 (docs/fases/WP10_posenrich_modular.md). The registry keeps normalized
-tables; GMT is only a compatible export (--gmt_dir), never the sole record.
+Attributes, regions and sites are stored in compact form, one table each.
 
 Inputs (all optional except --output_dir; NO_* sentinels and missing paths mean absent):
   --position_scores        SCORING's position_scores.tsv (one row per Gene, Position, side
@@ -18,17 +17,25 @@ Inputs (all optional except --output_dir; NO_* sentinels and missing paths mean 
   --gene_ensembl_file      gene/human_protein_id table (trazability only)
   --domain_variability_file, --ucr_positions_file, --fubar_sites_file,
   --fade_sites_top_file, --fade_sites_bottom_file, --custom_marker_file
-                           the same collection sources as build_position_gmt.py
+                           the collection sources read by position_sources.py
+  --window_size_bp         genomic window size (scoring_window_size_bp, 1,000,000 by default)
 
 Outputs (in --output_dir):
   positions.tsv            one row per (Gene, Position) of the universe: evaluation status,
-                           coordinates (raw codon column, reference residue, genomic) and MAP
+                           coordinates (raw codon column, reference residue, genomic), MAP and the
+                           single-valued annotation attributes (ucr_core, ucr_flank, ucr_region,
+                           ucr_variability, fubar_call, fade_top_sig, fade_bottom_sig, window)
   position_evidence.tsv    one row per (Gene, Position, side): CAAS_score, p.emp/p.adj_bh
                            (shared p, never two directional tests), nd, flags, N cycles
   collections.tsv          one row per (collection_id, term_id): type, coordinate space,
                            source hash, sizes, compatible analyses, within-protein contrast
-  members.tsv              one row per (collection_id, term_id, Gene, Position): several
-                           evidences may support one member without multiplying the row
+  regions.tsv              one record per run of consecutive CAAS columns of a Pfam domain or
+                           clan in a gene (start..end inclusive)
+  sites.tsv                one row per (collection_id, term_id, Gene, Position) of the custom
+                           lists: several evidences may support one site without multiplying
+                           the row
+                           posenrich_members.py expands attributes, regions and sites to members
+                           when a consumer needs them
   coverage.tsv             per gene/collection/universe metrics with explicit denominators
   pending_mappings.tsv     original records that could not be mapped; never turned into
                            negatives
@@ -43,35 +50,41 @@ import json
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 
-import build_position_gmt as bpg
+import position_sources as ps
+import posenrich_members as pm
+import posenrich_universe as pu
 
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
 
 # collection_id -> (term_type, coordinate_space, analyses, informative_within_protein, source key)
 COLLECTION_META = {
-    'pfam_domains':       ('region', 'CAAS_0based', 'localization;global;proximity_protein', 1, 'domain_variability_file'),
-    'pfam_clans':         ('region', 'CAAS_0based', 'localization;global;proximity_protein', 1, 'domain_variability_file'),
-    'ucr_core':           ('region', 'CAAS_0based', 'localization;global;proximity_protein', 1, 'ucr_positions_file'),
-    'ucr_flank':          ('region', 'CAAS_0based', 'localization;global;proximity_protein', 1, 'ucr_positions_file'),
-    'fubar_positive':     ('site',   'CAAS_0based', 'localization;global;proximity_protein', 1, 'fubar_sites_file'),
-    'fubar_purifying':    ('site',   'CAAS_0based', 'localization;global;proximity_protein', 1, 'fubar_sites_file'),
+    'pfam_domains':       ('region', 'CAAS_0based', 'within_gene;proximity_protein', 1, 'domain_variability_file'),
+    'pfam_clans':         ('region', 'CAAS_0based', 'within_gene;proximity_protein', 1, 'domain_variability_file'),
+    'ucr_core':           ('region', 'CAAS_0based', 'within_gene;proximity_protein', 1, 'ucr_positions_file'),
+    'ucr_flank':          ('region', 'CAAS_0based', 'within_gene;proximity_protein', 1, 'ucr_positions_file'),
+    'fubar_positive':     ('site',   'CAAS_0based', 'within_gene;proximity_protein', 1, 'fubar_sites_file'),
+    'fubar_purifying':    ('site',   'CAAS_0based', 'within_gene;proximity_protein', 1, 'fubar_sites_file'),
     'fubar_tested':       ('coverage', 'CAAS_0based', 'characterization', 0, 'fubar_sites_file'),
-    'fade_top_sig':       ('site',   'CAAS_0based', 'localization;global;proximity_protein', 1, 'fade_sites_top_file'),
-    'fade_bottom_sig':    ('site',   'CAAS_0based', 'localization;global;proximity_protein', 1, 'fade_sites_bottom_file'),
-    'genomic_windows_1mb': ('window', 'hg38_1mb_bins', 'proximity_genomic', 0, 'map_dir'),
-    'custom':             ('site',   'CAAS_0based', 'localization;global;proximity_protein', 1, 'custom_marker_file'),
+    'fade_top_sig':       ('site',   'CAAS_0based', 'within_gene;proximity_protein', 1, 'fade_sites_top_file'),
+    'fade_bottom_sig':    ('site',   'CAAS_0based', 'within_gene;proximity_protein', 1, 'fade_sites_bottom_file'),
+    'genomic_windows':    ('window', 'hg38_windows', 'proximity_genomic', 0, 'map_dir'),
+    'custom':             ('site',   'CAAS_0based', 'within_gene;proximity_protein', 1, 'custom_marker_file'),
 }
 
-# Global characterization layers (single-term collections) -> GMT layer name and description.
-LAYER_NAMES = {
-    'ucr_core': 'UCR_core', 'ucr_flank': 'UCR_flank',
-    'fubar_positive': 'FUBAR_positive', 'fubar_purifying': 'FUBAR_purifying',
-    'fade_top_sig': 'FADE_top_sig', 'fade_bottom_sig': 'FADE_bottom_sig',
+# Global layers (single-term collections) and their descriptions.
+LAYER_DESCRIPTIONS = {
+    'ucr_core': 'Ultra-conserved core positions',
+    'ucr_flank': 'UCR flanking positions',
+    'fubar_positive': 'FUBAR positive-selection sites (FDR)',
+    'fubar_purifying': 'FUBAR purifying-selection sites',
+    'fade_top_sig': 'FADE directional selection sites, top (BF >= threshold)',
+    'fade_bottom_sig': 'FADE directional selection sites, bottom (BF >= threshold)',
 }
 
-# Coverage collections without a GMT layer: fixed description.
+# Coverage collection: fixed description.
 COVERAGE_LAYERS = {'fubar_tested': 'FUBAR tested positions (coverage)'}
 
 
@@ -88,9 +101,9 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     for key in SOURCE_KEYS:
         p.add_argument(f'--{key}', required=False, default=None)
+    p.add_argument('--window_size_bp', type=int, default=1_000_000,
+                   help='Genomic window size in bp (scoring_window_size_bp)')
     p.add_argument('--output_dir', required=True)
-    p.add_argument('--gmt_dir', required=False, default=None,
-                   help='Optional directory for the compatible GMT export of the registry')
     return p.parse_args()
 
 
@@ -98,7 +111,7 @@ def clean_optional(value):
     """NO_* sentinel, 'None' or empty means absent; resolve .gz siblings."""
     if value is None or value == '' or os.path.basename(str(value)).startswith('NO_'):
         return None
-    return bpg.resolve_path(str(value))
+    return ps.resolve_path(str(value))
 
 
 def sha256_file(path):
@@ -161,6 +174,7 @@ def load_null_universe(path):
     out = {}
     for row in df.itertuples(index=False):
         if str(row.cycles) in ('NA', ''):
+            out[row.metric + '__note'] = row.note
             try:
                 out[row.metric] = float(row.value)
             except (ValueError, TypeError):
@@ -168,8 +182,23 @@ def load_null_universe(path):
     return out
 
 
-def build_positions(active_genes, map_cache, discovery_keys, score_keys):
-    """positions.tsv rows: the union of MAP columns, CT detections and positive scores."""
+def gene_list_check(active_genes, null_universe):
+    """Compare the registry's gene list with the one SCORING's universe received (digest of the list as a set).
+
+    status: match, mismatch, or not_recorded (a null universe summary without the digest).
+    """
+    digest = pu.gene_list_digest(active_genes)
+    scoring = null_universe.get('gene_list_sha256__note')
+    scoring = None if scoring in (None, '', 'NA') else str(scoring)
+    n_scoring = null_universe.get('gene_list_sha256')
+    status = 'not_recorded' if scoring is None else ('match' if scoring == digest else 'mismatch')
+    return {'status': status, 'registry_n_genes': len(active_genes), 'registry_digest': digest,
+            'scoring_n_genes': None if scoring is None or not isinstance(n_scoring, float) else int(n_scoring),
+            'scoring_digest': scoring}
+
+
+def build_positions(active_genes, map_cache, discovery_keys, score_keys, extra_keys=()):
+    """positions.tsv rows: the union of MAP columns, CT detections, positive scores and annotated positions."""
     rows = {}
 
     def entry(gene, pos):
@@ -198,6 +227,8 @@ def build_positions(active_genes, map_cache, discovery_keys, score_keys):
         entry(gene, pos)['in_discovery'] = 1
     for gene, pos in score_keys:
         entry(gene, pos)['in_scores_positive'] = 1
+    for gene, pos in extra_keys:
+        entry(gene, pos)
 
     out = []
     for (gene, pos), e in sorted(rows.items()):
@@ -208,7 +239,7 @@ def build_positions(active_genes, map_cache, discovery_keys, score_keys):
         elif e['in_map']:
             status = 'map_only_not_in_discovery'
         else:
-            status = 'not_evaluable'
+            status = 'no_map'
         cause = '' if e['in_map'] else 'no_map'
         out.append({'Gene': gene, 'Position': pos, 'evaluation_status': status,
                     'exclusion_cause': cause, 'in_map': e['in_map'],
@@ -290,46 +321,109 @@ def build_evidence(position_scores_path, active_genes, n_cycles, postproc_path=N
 
 
 def collect_all_members(args, map_cache, active_genes, pending):
-    """Run every collection builder, gathering members, terms and char layers."""
+    """Run every collection builder: regions and attribute dicts in compact form, and the custom sites as members."""
     result = {}
-    result['pfam_domains'], result['pfam_clans'], pfam_char, m = bpg.collect_pfam_members(
-        args.domain_variability_file, map_cache, active_genes, pending=pending)
-    result['_pfam_char'] = pfam_char
-    result['members'] = list(m)
-    result['ucr_core_cols'], result['ucr_flank_cols'], ucr_region_char, ucr_variability_char, m = \
-        bpg.collect_ucr_members(args.ucr_positions_file, map_cache, active_genes, pending=pending)
-    result['_ucr_region_char'] = ucr_region_char
-    result['_ucr_variability_char'] = ucr_variability_char
-    result['members'] += m
-    result['fubar_positive_cols'], result['fubar_purifying_cols'], fubar_char, m = \
-        bpg.collect_fubar_members(args.fubar_sites_file, map_cache, active_genes, pending=pending)
-    result['_fubar_char'] = fubar_char
-    result['members'] += m
-    result['fade_top_cols'], m = bpg.collect_fade_sites(
-        args.fade_sites_top_file, map_cache, active_genes, 'fade_top_sig', pending=pending)
-    result['members'] += m
-    result['fade_bottom_cols'], m = bpg.collect_fade_sites(
-        args.fade_sites_bottom_file, map_cache, active_genes, 'fade_bottom_sig', pending=pending)
-    result['members'] += m
-    result['genomic_windows_1mb'], m = bpg.collect_genomic_windows(map_cache)
-    result['members'] += m
+    regions = []
+    result['pfam_domains'], result['pfam_clans'] = ps.collect_pfam_members(
+        args.domain_variability_file, map_cache, active_genes, pending=pending, regions=regions)
+    result['_regions'] = regions
+    (result['ucr_core_cols'], result['ucr_flank_cols'], result['_ucr_region_char'],
+     result['_ucr_variability_char']) = ps.collect_ucr_members(
+        args.ucr_positions_file, map_cache, active_genes, pending=pending)
+    result['fubar_positive_cols'], result['fubar_purifying_cols'], result['_fubar_char'] = \
+        ps.collect_fubar_members(args.fubar_sites_file, map_cache, active_genes, pending=pending)
+    result['fade_top_cols'] = ps.collect_fade_sites(args.fade_sites_top_file, map_cache, active_genes, pending=pending)
+    result['fade_bottom_cols'] = ps.collect_fade_sites(
+        args.fade_sites_bottom_file, map_cache, active_genes, pending=pending)
+    result['genomic_windows'] = ps.collect_genomic_windows(map_cache, window_size=args.window_size_bp)
+    result['members'] = []
     custom_error = None
     try:
-        result['custom'], m = bpg.collect_custom_members(
+        result['custom'], m = ps.collect_custom_members(
             args.custom_marker_file, map_cache, active_genes, strict=False, pending=pending)
         result['members'] += m
     except ValueError as e:
         custom_error = str(e)
     result['_custom_error'] = custom_error
-    result['_char_layers'] = bpg.build_char_layers(
-        result['ucr_core_cols'], result['ucr_flank_cols'],
-        result['fubar_positive_cols'], result['fubar_purifying_cols'],
-        result['fade_top_cols'], result['fade_bottom_cols'])
     return result
 
 
+def attribute_keys(coll):
+    """(gene, position) keys carrying an attribute, so positions outside the MAP are not lost."""
+    keys = set()
+    for cols in (coll['ucr_core_cols'], coll['ucr_flank_cols'], coll['fade_top_cols'], coll['fade_bottom_cols']):
+        for gene, columns in cols.items():
+            keys.update((gene, c) for c in columns)
+    keys.update(coll['_fubar_char'])
+    return keys
+
+
+def add_attribute_columns(positions, coll, map_cache, window_size):
+    """Add the single-valued annotation attributes as columns of positions.tsv (see posenrich_members.py)."""
+    core, flank = coll['ucr_core_cols'], coll['ucr_flank_cols']
+    region, variability, fubar = coll['_ucr_region_char'], coll['_ucr_variability_char'], coll['_fubar_char']
+    fade_top, fade_bottom = coll['fade_top_cols'], coll['fade_bottom_cols']
+    out = {name: [] for name in pm.ATTRIBUTE_COLUMNS}
+    for gene, pos in zip(positions['Gene'], positions['Position']):
+        key = (gene, pos)
+        out['ucr_core'].append('1' if pos in core.get(gene, ()) else '0')
+        out['ucr_flank'].append('1' if pos in flank.get(gene, ()) else '0')
+        out['ucr_region'].append(region.get(key, ''))
+        out['ucr_variability'].append(str(variability.get(key, '')))
+        out['fubar_call'].append(fubar.get(key, ''))
+        out['fade_top_sig'].append('1' if pos in fade_top.get(gene, ()) else '0')
+        out['fade_bottom_sig'].append('1' if pos in fade_bottom.get(gene, ()) else '0')
+        cache = map_cache.get(gene)
+        genomic = cache['col_to_genomic'].get(pos) if cache else None
+        term = ps.window_term(genomic, window_size) if genomic else None
+        out['window'].append(term[0] if term else '')
+    for name, values in out.items():
+        positions[name] = values
+    return positions
+
+
+def build_regions_df(regions):
+    """regions.tsv: one record per run of consecutive CAAS columns of a term in a gene."""
+    frame = pd.DataFrame(regions, columns=['collection_id', 'term_id', 'term_label', 'gene', 'start', 'end',
+                                           'source_record_id', 'mapping_status', 'detail'])
+    frame = frame.rename(columns={'gene': 'Gene'})
+    return frame.sort_values(['collection_id', 'term_id', 'Gene', 'start', 'end'], kind='stable')[pm.REGION_COLUMNS] \
+        .reset_index(drop=True)
+
+
+def membership_summary(positions, regions_df, sites_df):
+    """Counters of the memberships taken one collection at a time, without holding every member row.
+
+    Returns {'terms': {(collection, term): (n_members, n_genes)},
+             'collections': {collection: {'n_terms', 'n_positions', 'n_genes'}},
+             'annotated': bool array aligned with the rows of `positions`: the position belongs to a term of a
+                          collection that is not a coverage description (fubar_tested, windows)}.
+    """
+    ids = {}
+
+    def keys(genes, positions_):
+        gid = np.array([ids.setdefault(g, len(ids)) for g in genes], dtype=np.int64)
+        return pu.pair_keys(gid, np.asarray(positions_, dtype=np.int64))
+
+    terms, collections, annotated = {}, {}, []
+    for cid, frame in pm.iter_members(positions, regions_df, sites_df):
+        by_term = frame.groupby('term_id')
+        n_members, n_genes = by_term.size(), by_term['Gene'].nunique()
+        for term in n_members.index:
+            terms[(cid, term)] = (int(n_members[term]), int(n_genes[term]))
+        collections[cid] = {'n_terms': int(len(n_members)),
+                            'n_positions': int(len(frame[['Gene', 'Position']].drop_duplicates())),
+                            'n_genes': int(frame['Gene'].nunique())}
+        if cid not in pm.COVERAGE_COLLECTIONS:
+            annotated.append(np.unique(keys(frame['Gene'], frame['Position'])))
+    flag = np.zeros(len(positions), dtype=bool)
+    if annotated:
+        flag = np.isin(keys(positions['Gene'], positions['Position']), np.unique(np.concatenate(annotated)))
+    return {'terms': terms, 'collections': collections, 'annotated': flag}
+
+
 def build_members_df(members):
-    """members.tsv: one row per (collection_id, term_id, Gene, Position).
+    """Custom sites as one row per (collection_id, term_id, Gene, Position).
 
     Several evidences may support one member without multiplying the row: their
     source_record_id values are joined with ';'.
@@ -362,20 +456,18 @@ def build_members_df(members):
                                        'source_record_id', 'mapping_status', 'detail'])
 
 
-def build_collections_df(coll, members_df, sources):
+def build_collections_df(coll, term_stats, sources):
     """collections.tsv: one row per (collection_id, term_id)."""
     rows = []
-    grouped = members_df.groupby(['collection_id', 'term_id'])
-    # Terms present in the GMT-ready dicts but without members (omitted from GMT).
+    # Terms of the reader dicts, including those without members.
     term_desc = {}
-    for cid in ('pfam_domains', 'pfam_clans', 'genomic_windows_1mb', 'custom'):
+    for cid in ('pfam_domains', 'pfam_clans', 'genomic_windows', 'custom'):
         for term, (desc, _members) in coll.get(cid, {}).items():
             term_desc[(cid, term)] = desc
-    for cid, layer in LAYER_NAMES.items():
+    for cid, desc in LAYER_DESCRIPTIONS.items():
         source_key = COLLECTION_META[cid][4]
         if sources.get(source_key, 'NA') == 'NA':
             continue  # absent source: the collection is missing, not an empty term
-        desc = coll['_char_layers'].get(layer, ('', []))[0]
         term_desc[(cid, 'global')] = desc
     for cid, desc in COVERAGE_LAYERS.items():
         source_key = COLLECTION_META[cid][4]
@@ -387,9 +479,7 @@ def build_collections_df(coll, members_df, sources):
         term_desc[('custom', 'NA')] = 'Custom annotation term'
     for (cid, term), desc in sorted(term_desc.items()):
         meta = COLLECTION_META[cid]
-        sub = grouped.get_group((cid, term)) if (cid, term) in grouped.groups else None
-        n_members = 0 if sub is None else len(sub)
-        n_genes = 0 if sub is None else sub['Gene'].nunique()
+        n_members, n_genes = term_stats.get((cid, term), (0, 0))
         status = 'included' if n_members else 'empty'
         if cid == 'custom' and coll.get('_custom_error'):
             status = 'incompatible'
@@ -406,7 +496,7 @@ def build_collections_df(coll, members_df, sources):
                                        'informative_within_protein', 'status'])
 
 
-def build_coverage_df(positions, members_df, collections_df, null_universe, universe_genes):
+def build_coverage_df(positions, summary, collections_df, null_universe, universe_genes):
     """coverage.tsv: metrics with explicit denominators and their limitations."""
     rows = []
 
@@ -432,12 +522,10 @@ def build_coverage_df(positions, members_df, collections_df, null_universe, univ
         'evaluada por CT; no es el universo completo de posiciones')
     add('universe', '*', 'n_positions_positive', n_pos, 'NA', 'posiciones con CAAS_score > 0', 'position_scores.tsv',
         'position_scores.tsv no contiene todas las posiciones evaluadas')
-    annotated = set()
-    if not members_df.empty:
-        annotated = set(zip(members_df['Gene'], members_df['Position']))
-    n_annot = sum(1 for g, p in zip(positions['Gene'], positions['Position']) if (g, p) in annotated) \
-        if not positions.empty else 0
-    add('universe', '*', 'n_positions_annotated', n_annot, 'NA', 'posiciones en al menos una coleccion', 'members.tsv',
+    flag = pd.Series(summary['annotated'], index=positions.index)
+    n_annot = int(flag.sum())
+    add('universe', '*', 'n_positions_annotated', n_annot, 'NA',
+        'posiciones en algun termino de una coleccion de anotacion (no ventanas ni cobertura FUBAR)', 'registry',
         'ausencia de anotacion no demuestra ausencia biologica')
     for metric in ('N_cycles', 'null_positive_positions_in_universe', 'observed_positive_positions',
                    'observed_unseen_positions', 'universe_size'):
@@ -452,30 +540,18 @@ def build_coverage_df(positions, members_df, collections_df, null_universe, univ
                 'posiciones detectadas por CT', 'filtered_discovery.tsv', '')
             add('gene', gene, 'n_positive_positions', int(sub['in_scores_positive'].sum()), 'NA',
                 'posiciones con CAAS_score > 0', 'position_scores.tsv', '')
-            n_ann = sum(1 for g, p in zip(sub['Gene'], sub['Position']) if (g, p) in annotated)
-            add('gene', gene, 'n_annotated_positions', n_ann, 'NA', 'posiciones en al menos una coleccion', 'members.tsv', '')
-    if not members_df.empty:
-        for cid, sub in members_df.groupby('collection_id'):
-            n_positions = len(set(zip(sub['Gene'], sub['Position'])))
-            prop = (n_positions / n_map) if n_map else 'NA'
-            add('collection', cid, 'n_terms', int(sub['term_id'].nunique()), 'NA', 'terminos con al menos un miembro', 'members.tsv', '')
-            add('collection', cid, 'n_positions', n_positions, n_map, denom_def, 'members.tsv', '')
-            add('collection', cid, 'coverage_proportion', prop, n_map, denom_def, 'members.tsv',
-                'proporcion de posiciones anotables cubiertas por la coleccion')
-            add('collection', cid, 'n_genes', int(sub['Gene'].nunique()), 'NA', 'genes con al menos un miembro', 'members.tsv', '')
+            n_ann = int(flag[sub.index].sum())
+            add('gene', gene, 'n_annotated_positions', n_ann, 'NA',
+                'posiciones en algun termino de una coleccion de anotacion', 'registry', '')
+    for cid, stats in sorted(summary['collections'].items()):
+        prop = (stats['n_positions'] / n_map) if n_map else 'NA'
+        add('collection', cid, 'n_terms', stats['n_terms'], 'NA', 'terminos con al menos un miembro', 'registry', '')
+        add('collection', cid, 'n_positions', stats['n_positions'], n_map, denom_def, 'registry', '')
+        add('collection', cid, 'coverage_proportion', prop, n_map, denom_def, 'registry',
+            'proporcion de posiciones anotables cubiertas por la coleccion')
+        add('collection', cid, 'n_genes', stats['n_genes'], 'NA', 'genes con al menos un miembro', 'registry', '')
     return pd.DataFrame(rows, columns=['scope', 'id', 'metric', 'value', 'denominator',
                                        'denominator_definition', 'source', 'limitation'])
-
-
-def export_gmt(gmt_dir, coll):
-    """Compatible GMT export from the registry terms (same files as build_position_gmt.py)."""
-    os.makedirs(gmt_dir, exist_ok=True)
-    bpg.write_gmt(os.path.join(gmt_dir, 'pfam_domains.gmt'), coll['pfam_domains'])
-    bpg.write_gmt(os.path.join(gmt_dir, 'pfam_clans.gmt'), coll['pfam_clans'])
-    bpg.write_gmt(os.path.join(gmt_dir, 'genomic_locations.gmt'), coll['genomic_windows_1mb'])
-    if coll.get('custom'):
-        bpg.write_gmt(os.path.join(gmt_dir, 'custom_features.gmt'), coll['custom'])
-    bpg.write_gmt(os.path.join(gmt_dir, 'characterization_layers.tsv'), coll['_char_layers'])
 
 
 def main():
@@ -498,19 +574,25 @@ def main():
         sources[key] = path
         sources[key + '_sha256'] = sha256_file(path) if os.path.isfile(path) else 'NA(directory)'
 
-    universe_genes = bpg.load_universe_genes(args.cleaned_background)
-    map_cache = bpg.build_map_cache(args.map_dir, universe_genes)
+    universe_genes = ps.load_universe_genes(args.cleaned_background)
+    map_cache = ps.build_map_cache(args.map_dir, universe_genes)
     active_genes = set(universe_genes) if universe_genes is not None else set(map_cache.keys())
 
     discovery_keys, n_disc_rows, n_disc_out = load_discovery_keys(args.postproc, active_genes)
     score_keys, n_score_rows, n_score_out = load_position_keys(args.position_scores, active_genes)
     null_universe = load_null_universe(args.null_universe)
     n_cycles = null_universe.get('N_cycles')
+    gene_check = gene_list_check(active_genes, null_universe)
+    if gene_check['status'] == 'mismatch':
+        print(f"WARNING: the registry gene list ({gene_check['registry_n_genes']} genes) differs from the one SCORING's "
+              f"universe received ({gene_check['scoring_n_genes']} genes): |U| and every position p are defined on different "
+              f"gene lists.", file=sys.stderr)
 
     pending = []
     coll = collect_all_members(args, map_cache, active_genes, pending)
 
-    positions = build_positions(active_genes, map_cache, discovery_keys, score_keys)
+    positions = build_positions(active_genes, map_cache, discovery_keys, score_keys, attribute_keys(coll))
+    positions = add_attribute_columns(positions, coll, map_cache, args.window_size_bp)
     evidence = build_evidence(args.position_scores, active_genes, n_cycles, args.postproc)
     if not evidence.empty:
         positive = evidence[evidence['CAAS_score'] != 'NA']
@@ -527,10 +609,11 @@ def main():
         is_unevaluable = (positions['in_discovery'].astype(bool) & ~positions['in_scores_positive'].astype(bool)
                           & not_known)
         positions.loc[is_unevaluable, 'evaluation_status'] = 'not_evaluable'
-    members_df = build_members_df(coll['members'])
-    collections_df = build_collections_df(coll, members_df, sources)
-    coverage_df = build_coverage_df(positions, members_df, collections_df, null_universe,
-                                    active_genes)
+    regions_df = build_regions_df(coll['_regions'])
+    sites_df = build_members_df(coll['members'])
+    summary = membership_summary(positions, regions_df, sites_df)
+    collections_df = build_collections_df(coll, summary['terms'], sources)
+    coverage_df = build_coverage_df(positions, summary, collections_df, null_universe, active_genes)
     pending_df = pd.DataFrame(pending, columns=['source', 'record_id', 'gene', 'raw_position', 'reason']) \
         if pending else pd.DataFrame(columns=['source', 'record_id', 'gene', 'raw_position', 'reason'])
     pending_df['candidates'] = 'NA'
@@ -541,11 +624,10 @@ def main():
     write_tsv(positions, os.path.join(args.output_dir, 'positions.tsv'))
     write_tsv(evidence, os.path.join(args.output_dir, 'position_evidence.tsv'))
     write_tsv(collections_df, os.path.join(args.output_dir, 'collections.tsv'))
-    write_tsv(members_df, os.path.join(args.output_dir, 'members.tsv'))
+    write_tsv(regions_df, os.path.join(args.output_dir, 'regions.tsv'))
+    write_tsv(sites_df, os.path.join(args.output_dir, 'sites.tsv'))
     write_tsv(coverage_df, os.path.join(args.output_dir, 'coverage.tsv'))
     write_tsv(pending_df, os.path.join(args.output_dir, 'pending_mappings.tsv'))
-    if args.gmt_dir:
-        export_gmt(args.gmt_dir, coll)
 
     # Manifest: included/empty/oversized/unmapped/incompatible, with audited losses.
     status_counts = positions['evaluation_status'].value_counts().to_dict() if not positions.empty else {}
@@ -559,8 +641,7 @@ def main():
                             'incompatible' if cid == 'custom' and coll.get('_custom_error') else
                             'included' if not sub.empty and (sub['n_members'] > 0).any() else 'empty'),
                  'n_terms': int(len(sub)), 'n_members': int(sub['n_members'].sum()) if len(sub) else 0,
-                 'n_genes': int(members_df[members_df['collection_id'] == cid]['Gene'].nunique())
-                 if not members_df.empty else 0,
+                 'n_genes': summary['collections'].get(cid, {}).get('n_genes', 0),
                  'source': sources.get(meta[4], 'NA')}
         if cid == 'custom' and coll.get('_custom_error'):
             entry['note'] = coll['_custom_error']
@@ -568,7 +649,8 @@ def main():
     manifest = {
         'contract_version': CONTRACT_VERSION,
         'coordinate_space': 'CAAS_0based',
-        'universe': {'source': sources.get('cleaned_background', 'NA'), 'n_genes': len(active_genes)},
+        'universe': {'source': sources.get('cleaned_background', 'NA'), 'n_genes': len(active_genes),
+                     'gene_list_check': gene_check},
         'sources': {key: {'path': sources.get(key, 'NA'), 'sha256': sources.get(key + '_sha256', 'NA')}
                     for key in SOURCE_KEYS},
         'positions': {'total': int(len(positions)), 'by_status': {k: int(v) for k, v in status_counts.items()}},
@@ -587,14 +669,13 @@ def main():
             'discovery_rows': n_disc_rows,
             'score_rows': n_score_rows,
         },
-        'gmt_export': os.path.abspath(args.gmt_dir) if args.gmt_dir else None,
     }
     with open(os.path.join(args.output_dir, 'manifest.json'), 'w') as f:
         json.dump(manifest, f, indent=2, sort_keys=True)
         f.write('\n')
 
     print(f"registry: {len(positions)} positions ({len(active_genes)} genes), "
-          f"{len(members_df)} member rows, {len(collections_df)} terms, "
+          f"{len(regions_df)} region records, {len(sites_df)} site rows, {len(collections_df)} terms, "
           f"{len(pending_df)} pending mappings -> {args.output_dir}")
 
 

@@ -13,10 +13,10 @@
  *  background and DOMINO network. Ranked enrichment is in SCORING_FCS_REPORT (fcs.nf).
  *
  *  SCORING_COMPARE_REPORT renders 15.Comparison_report.Rmd: top versus bottom
- *  comparison of the FCS outputs (CAAS and RER) with the posenrich, AMI and
- *  gene/position-level evidence tables.
+ *  comparison of the FCS outputs (CAAS and RER) with the AMI and gene/position-level
+ *  evidence tables.
  *
- *  Consumes:  SCORING gene_lists/ and position_lists/, FCS and posenrich results,
+ *  Consumes:  SCORING gene_lists/ and position_lists/, FCS results, the POSENRICH characterization (optional),
  *             DOMINO networks and modules
  *  Produces:  ami/ (HTML, ami_results/, ami_summary/, ami_plots/, ami_networks/),
  *             compare/ (HTML, compare_results/)
@@ -240,26 +240,15 @@ process SCORING_COMPARE_REPORT {
     // Leading-edge composition tables exported by each module's 12.FCS_general_report.Rmd.
     path caas_le_comp, stageAs: 'caas_leading_edge_composition.tsv'
     path rer_le_comp,  stageAs: 'rer_leading_edge_composition.tsv'
-    // Optional inputs from the AMI and posenrich modules; NO_* sentinels when the
-    // module did not run.
+    // Optional inputs from the AMI module; NO_* sentinels when the module did not run.
     path ami_module_desc,     stageAs: 'ami_module_descriptions.tsv'
     path ami_term_membership, stageAs: 'ami_term_membership.tsv'
     path ami_availability, stageAs: 'ami_list_availability.tsv'
-    path posenrich_dotplot,   stageAs: 'posenrich_overall_dotplot.tsv'
-    // posenrich_leading_edge.tsv (gene:position members of the significant terms) feeds
-    // the posenrich evidence of the Integrated gene scorecard and the Interesting
-    // Genes and Interesting Positions tables.
-    path posenrich_le,        stageAs: 'posenrich_leading_edge.tsv'
-    // Leading edge table of posenrich, one row per significant term (not per cutoff),
-    // exported by 14.Position_enrichment_report.Rmd for the Leading edge sub-tab of the
-    // Posenrich section.
-    path posenrich_le_summary, stageAs: 'posenrich_leading_edge_summary.tsv'
     // SCORING's gene-level table (nominal/BH activity flags and FADE and RER
     // significance) for the Interesting Genes and Positions tables.
     path fcs_stats,           stageAs: 'fcs_stats.tsv'
     // Position-level CAAS scores with FADE-site and VEP annotations, for the
-    // Interesting Positions table (the inputs of the Position Characterisation
-    // section of 14.Position_enrichment_report.Rmd).
+    // Interesting Positions table.
     path position_scores,     stageAs: 'position_scores.tsv'
     path vep_primateai,       stageAs: 'vep_primateai.tsv'
     path vep_cosmic,          stageAs: 'vep_cosmic.tsv'
@@ -267,9 +256,9 @@ process SCORING_COMPARE_REPORT {
     path fade_sites_top,      stageAs: 'fade_sites_top.csv'
     path fade_sites_bottom,   stageAs: 'fade_sites_bottom.csv'
     // Per-position Pfam domain/clan, UCR core/flank region and variability, and FUBAR
-    // selection call (position_characterization.tsv from build_position_gmt.py): the
-    // layers posenrich tests as GMTs, flattened for a Gene/Position join onto the
-    // Interesting Positions table.
+    // selection call (position_characterization.tsv of POSENRICH), flattened for a
+    // Gene/Position join onto the Interesting Positions table. A NO_* sentinel when POSENRICH
+    // did not run: the report then omits that section.
     path position_char,       stageAs: 'position_characterization.tsv'
     path canonical_genes, stageAs: 'canonical_gene_scores.tsv'
     path canonical_metadata, stageAs: 'canonical_gene_metadata.json'
@@ -287,9 +276,6 @@ process SCORING_COMPARE_REPORT {
     def top_n     = params.scoring_compare_top_n  ?: 100
     def ami_arg            = (ami_module_desc.name =~ /^NO_/)     ? 'NULL' : "'${ami_module_desc}'"
     def ami_tm_arg         = (ami_term_membership.name =~ /^NO_/) ? 'NULL' : "'${ami_term_membership}'"
-    def posenrich_dot_arg  = (posenrich_dotplot.name  =~ /^NO_/) ? 'NULL' : "'${posenrich_dotplot}'"
-    def posenrich_le_arg   = (posenrich_le.name  =~ /^NO_/)      ? 'NULL' : "'${posenrich_le}'"
-    def posenrich_le_summary_arg = (posenrich_le_summary.name =~ /^NO_/) ? 'NULL' : "'${posenrich_le_summary}'"
     def fcs_stats_arg      = (fcs_stats.name =~ /^NO_/)          ? 'NULL' : "'${fcs_stats}'"
     def position_scores_arg = (position_scores.name =~ /^NO_/)   ? 'NULL' : "'${position_scores}'"
     def vep_primateai_arg  = (vep_primateai.name =~ /^NO_/)      ? 'NULL' : "'${vep_primateai}'"
@@ -319,9 +305,6 @@ process SCORING_COMPARE_REPORT {
                     ami_module_desc_file      = ${ami_arg},
                     ami_term_membership_file  = ${ami_tm_arg},
                     ami_availability_file = '${ami_availability}',
-                    posenrich_dotplot_file     = ${posenrich_dot_arg},
-                    posenrich_leading_edge_file = ${posenrich_le_arg},
-                    posenrich_leading_edge_summary_file = ${posenrich_le_summary_arg},
                     fcs_stats_file           = ${fcs_stats_arg},
                     gene_scores_file         = '${canonical_genes}',
                     gene_metadata_file       = '${canonical_metadata}',

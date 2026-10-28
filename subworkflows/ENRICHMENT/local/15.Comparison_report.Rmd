@@ -29,34 +29,23 @@ params:
   ami_availability_file: NULL
   ami_module_desc_file:       NULL  # AMI's ami_networks/module_descriptions_all_lists.tsv (optional)
   ami_term_membership_file:   NULL  # AMI's ami_networks/term_threshold_membership.tsv (optional, recurrence table)
-  posenrich_dotplot_file:     NULL  # posenrich's posenrich_overall_dotplot.tsv (optional)
-  # posenrich_leading_edge.tsv (gene:position members of significant posenrich
-  # terms, already position-granular), drives the Interesting Genes/Positions tables' posenrich angle
-  # AND the Interesting Genes/Interesting Positions tables below.
-  posenrich_leading_edge_file: NULL
-  # posenrich's pooled-per-term leading-edge display table (one row per
-  # significant term, not per cutoff), 14.Position_enrichment_report.Rmd's
-  # own Leading edge section export, posenrich_leading_edge_summary.tsv.
-  posenrich_leading_edge_summary_file: NULL
   # SCORING's own gene-level table (nominal/BH activity flags + FADE/RER
-  # significance), same file 12.FCS_general_report.Rmd/14.Position_enrichment_report.Rmd
-  # consume, reused here for the Interesting Genes/Positions tables.
+  # significance), used by 12.FCS_general_report.Rmd,
+  # reused here for the Interesting Genes/Positions tables.
   fcs_stats_file: NULL
   gene_scores_file: NULL
   gene_metadata_file: NULL
-  # Position-level CAAS scores + FADE-site/VEP annotations, same optional
-  # inputs 14.Position_enrichment_report.Rmd's Position Characterisation
-  # section consumes, reused here for the Interesting Positions table.
+  # Position-level CAAS scores + FADE-site/VEP annotations for the Interesting
+  # Positions table.
   position_scores_file:  NULL
   vep_primateai_file:    NULL
   vep_cosmic_file:       NULL
   vep_ensembl_file:      NULL
   fade_sites_top_file:    NULL
   fade_sites_bottom_file: NULL
-  # posenrich's own per-position characterization layers (PFAM domain/clan,
-  # UCR core/flank region + per-position variability, FUBAR selection call),
-  # build_position_gmt.py's position_characterization.tsv - the same GMT-source
-  # layers posenrich tests, flattened for a direct Gene/Position join here.
+  # POSENRICH's per-position characterization layers (PFAM domain/clan, UCR core/flank
+  # region + per-position variability, FUBAR selection call): position_characterization.tsv,
+  # flattened for a direct Gene/Position join here. Optional; without it those columns are omitted.
   position_characterization_file: NULL
   seed:               "1998"
 ---
@@ -194,8 +183,7 @@ if (has_multi) {
 # Per-module leading-edge tables (cmp_fcs_le/<module>_leading_edge.tsv) feed
 # the Interesting Genes/Positions criteria below: each module's own
 # directional nominal/BH activity flags + cross-module corroboration flags
-# (FADE/RER, and PrimateAI-3D/COSMIC once wired in from
-# posenrich). Activity flags reflect CAAS's own evidence in every module's
+# (FADE/RER, and PrimateAI-3D/COSMIC). Activity flags reflect CAAS's own evidence in every module's
 # leading edge (per-module FCS
 # reports are annotated with CAAS's fcs_stats.tsv as their overlay) - that's
 # intentional, not a bug: it's the shared reference axis every module's
@@ -211,10 +199,10 @@ for (f in le_files) {
 le <- if (length(le_by_mod)) dplyr::bind_rows(le_by_mod) else tibble()
 has_le <- nrow(le) > 0
 
-# ── Cross-angle inputs: AMI (network modules) + posenrich (position-level) ──
-# Neither is gene-set-ranked the way CAAS/RER FCS is, so they don't fold into
-# fcs_all_mod/le above, each gets its own section below, and all three feed
-# the Interesting Genes/Interesting Positions tables via the genes they involve.
+# ── Cross-angle inputs: AMI (network modules) ──
+# AMI is not gene-set-ranked the way CAAS/RER FCS is, so it does not fold into
+# fcs_all_mod/le above; it gets its own section below and feeds the Interesting
+# Genes/Interesting Positions tables via the genes it involves.
 .file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p) && file.info(p)$size > 0
 
 ami_availability <- if(.file_ok(params$ami_availability_file))
@@ -277,22 +265,9 @@ for (f in le_comp_files) {
 le_comp_all_mod <- if (length(le_comp_by_mod)) dplyr::bind_rows(le_comp_by_mod) else tibble()
 has_le_comp <- nrow(le_comp_all_mod) > 0
 
-has_posenrich_dotplot <- FALSE # historical inference is retired
-posenrich_dotplot_df  <- if (has_posenrich_dotplot) readr::read_tsv(params$posenrich_dotplot_file, show_col_types = FALSE) else NULL
-
-# posenrich_leading_edge.tsv: gene:position members of significant posenrich
-# terms (already position-granular, ranking, database, pathway, top_frac,
-# gene, gene_position). Drives the Interesting Genes/Interesting Positions tables below.
-has_posenrich_le <- FALSE
-posenrich_le_df  <- if (has_posenrich_le) readr::read_tsv(params$posenrich_leading_edge_file, show_col_types = FALSE) else NULL
-
-has_posenrich_le_summary <- FALSE
-posenrich_le_summary_df  <- if (has_posenrich_le_summary) readr::read_tsv(params$posenrich_leading_edge_summary_file, show_col_types = FALSE) else NULL
-
 # ── Gene/position-level inputs for the Interesting Genes/Positions tables ──
-# Same optional files 12.FCS_general_report.Rmd (fcs_stats) and
-# 14.Position_enrichment_report.Rmd (position_scores, VEP, FADE sites) already
-# consume, reused here rather than re-derived.
+# Optional files (fcs_stats, position_scores, VEP, FADE sites) used as they are,
+# not re-derived.
 has_fcs_stats_cmp <- .file_ok(params$fcs_stats_file)
 fcs_stats_cmp_df  <- if (has_fcs_stats_cmp) readr::read_tsv(params$fcs_stats_file, show_col_types = FALSE) else NULL
 
@@ -405,9 +380,8 @@ read_fade_sites_cmp <- function(path) {
 fade_sites_top_cmp_df <- if(has_fade_sites_top_cmp) read_fade_sites_cmp(params$fade_sites_top_file) else NULL
 fade_sites_bottom_cmp_df <- if(has_fade_sites_bottom_cmp) read_fade_sites_cmp(params$fade_sites_bottom_file) else NULL
 
-# posenrich's per-position PFAM domain/clan, UCR core/flank region + per-position
-# variability, and FUBAR selection call (build_position_gmt.py's
-# position_characterization.tsv) - characterization-only, like COSMIC/PAI3D
+# POSENRICH's per-position PFAM domain/clan, UCR core/flank region + per-position
+# variability, and FUBAR selection call (position_characterization.tsv) - characterization-only, like COSMIC/PAI3D
 # below, so joined straight in without any selection or significance gating.
 has_position_char_cmp <- .file_ok(params$position_characterization_file)
 position_char_cmp_df  <- if (has_position_char_cmp) {
@@ -421,7 +395,7 @@ position_char_cmp_df  <- if (has_position_char_cmp) {
     dplyr::mutate(Position = suppressWarnings(as.integer(Position)))
 } else NULL
 if(!is.null(position_char_cmp_df) && "fubar_selection" %in% names(position_char_cmp_df))
-  position_char_cmp_df$fubar_selection <- dplyr::recode(position_char_cmp_df$fubar_selection,negative="purifying",pervasive="purifying")
+  position_char_cmp_df$fubar_selection <- dplyr::recode(as.character(position_char_cmp_df$fubar_selection),negative="purifying",pervasive="purifying")
 
 
 # Per-gene attribute table: nominal/BH activity flags (from the canonical gene
@@ -461,7 +435,7 @@ has_gene_candidates <- nrow(gene_attr_df)>0 || has_le || has_ami
 # ── Cross-angle gene-level hit sets ───────────────────────────────────────
 # Computed once here so the per-module significance section, the AMI module
 # description section, and the Interesting Genes/Positions tables below all
-# read the same per-gene FCS/posenrich corroboration, one shared definition,
+# read the same per-gene FCS corroboration, one shared definition,
 # not three drifting copies.
 #
 # Each method retains its own significance criterion. Gene BH, FCS selection C,
@@ -591,32 +565,6 @@ ami_genes <- if (has_ami && !is.null(ami_df) && nrow(ami_df) > 0) {
   tibble::tibble(gene = character(), direction = character(), ami_hit = logical())
 }
 
-# Posenrich angle: posenrich_leading_edge.tsv is ALREADY restricted to
-# significant terms (Lachenbruch gates of posenrich_enrich.py)
-# itself (only rows with r["sig"] get written), no additional gate needed
-# here, just direction mapping (now including "global"). Also carries the
-# actual Position(s) behind each hit (kept for the Interesting Genes/Positions tables' Position
-# column below, lets a reader see whether the specific position posenrich
-# flagged for a gene is the same one driving that gene's FCS/AMI signal, not
-# just that the gene appears in both).
-posenrich_genes <- if (has_posenrich_le) {
-  posenrich_le_df %>%
-    dplyr::mutate(direction = dplyr::case_when(
-      ranking == "top"    ~ "top",
-      ranking == "bottom" ~ "bottom",
-      ranking == "global" ~ "global",
-      TRUE                ~ NA_character_
-    ),
-    Position = sub(".*:", "", gene_position)) %>%
-    dplyr::filter(!is.na(direction)) %>%
-    dplyr::mutate(direction = tools::toTitleCase(direction)) %>%
-    dplyr::group_by(gene, direction) %>%
-    dplyr::summarise(Position = paste(sort(unique(Position)), collapse = ", "), .groups = "drop") %>%
-    dplyr::mutate(posenrich_hit = TRUE)
-} else {
-  tibble::tibble(gene = character(), direction = character(), Position = character(), posenrich_hit = logical())
-}
-
 ```
 
 # Overview
@@ -643,8 +591,8 @@ separate Redlich rule and the grouping of overlapping sets (`cluster_id`) that
 this report's tables use. CAAS has the global, top and bottom rankings; RER has its signed
 global ranking only.
 
-DOMINO active-module (AMI) results and posenrich's position-level enrichment are
-neither gene-set-ranked the same way as FCS, so they get their own sections below.
+DOMINO active-module (AMI) results are not gene-set-ranked the same way as FCS, so they
+get their own section below.
 
 # Database abbreviations and term reduction
 
@@ -866,14 +814,6 @@ if(has_ami_term_membership && nrow(ami_availability)) {
 } else cat("_Verified AMI recurrence inputs are unavailable._\n\n")
 ```
 
-# POSENRICH modular
-
-El [informe POSENRICH modular actual](`r paste0('../html_reports/POSENRICH_modular_report_',params$traitname,'.html')`)
-explica cuatro preguntas: caracterización, asociación global del ranking, localización
-dentro de proteína y proximidad. Sus efectos descriptivos no se convierten aquí en
-llamadas de enriquecimiento. Las anotaciones posicionales actuales se incorporan a las
-tablas inferiores; los TSV y el informe 14 históricos quedan excluidos.
-
 # Términos FCS y genes contribuyentes {.tabset}
 
 Se incluyen todos los términos con BH de permulación significativo y todos los seleccionados
@@ -1090,29 +1030,6 @@ render_banded_table <- function(res_obj, height = NULL) {
     dplyr::full_join(fade, by = "gene")
 }
 
-.posenrich_for <- function(rk_set) {
-  if (!has_posenrich_le) return(tibble::tibble(gene = character(), pe_position = character(), pe_terms = character()))
-  pe <- posenrich_le_df %>%
-    dplyr::filter(is.null(rk_set) | ranking %in% rk_set) %>%
-    dplyr::mutate(Position = sub(".*:", "", gene_position))
-  if (has_posenrich_dotplot) {
-    pe <- pe %>%
-      dplyr::left_join(
-        posenrich_dotplot_df %>% dplyr::mutate(description = dplyr::coalesce(description, pathway)) %>%
-          dplyr::distinct(ranking, database, pathway, description),
-        by = c("ranking", "database", "pathway")
-      ) %>%
-      dplyr::mutate(description = dplyr::coalesce(description, pathway))
-  } else {
-    pe$description <- pe$pathway
-  }
-  pe %>%
-    dplyr::group_by(gene) %>%
-    dplyr::summarise(pe_position = paste(sort(unique(Position)), collapse = ", "),
-                      pe_terms    = paste(sort(unique(stringr::str_trunc(description, 50))), collapse = "; "),
-                      .groups = "drop")
-}
-
 .position_emp_flags <- function(base, dir_key) {
  base$gene <- sub("\\.[0-9]+$","",trimws(base$Gene))
  base$`CAAS p` <- suppressWarnings(as.numeric(evidence_column(base,"p.emp")))
@@ -1249,22 +1166,6 @@ build_interesting_positions <- function(direction) {
   base$`Gene CAAS FCS all terms` <- base$caas_fcs_terms_all
   base$`Gene RER FCS all terms` <- base$rer_fcs_terms_all
 
-  # Position-native posenrich: check if posenrich was run
-  has_pe_pos <- FALSE
-  if (has_posenrich_le && !is.null(posenrich_le_df) && nrow(posenrich_le_df) > 0) {
-    pe <- posenrich_le_df %>%
-      dplyr::filter(is.null(rk_set) | ranking %in% rk_set) %>%
-      dplyr::mutate(gene = sub(":.*", "", gene_position), Position = suppressWarnings(as.integer(sub(".*:", "", gene_position)))) %>%
-      dplyr::group_by(gene, Position) %>%
-      dplyr::summarise(pe_terms = paste(sort(unique(pathway)), collapse = "; "), .groups = "drop")
-    base <- base %>% dplyr::left_join(pe, by = c("gene", "Position"))
-    base$PE_sig <- !is.na(base$pe_terms) & nzchar(base$pe_terms)
-    has_pe_pos <- any(base$PE_sig, na.rm = TRUE)
-  } else {
-    base$pe_terms <- NA_character_
-    base$PE_sig   <- FALSE
-  }
-
   # Biochemical groupings of the derived side (biochem_groupings and is_biochem); the columns are not shown when
   # position_scores.tsv does not carry them.
   has_biochem_pos <- "biochem_groupings" %in% names(base)
@@ -1358,7 +1259,7 @@ build_interesting_positions <- function(direction) {
 
   all_positions <- base %>%
     dplyr::mutate(
-      dplyr::across(c(`CAAS nominal`, `CAAS adjusted`, FADE_overlap, PE_sig), identity)
+      dplyr::across(c(`CAAS nominal`, `CAAS adjusted`, FADE_overlap), identity)
     )
 
   # Position composite: strictly CAAS + FADE site overlap. Zero gene-level weights!
@@ -1368,7 +1269,7 @@ build_interesting_positions <- function(direction) {
   # Filter to positions meeting at least one active criterion
   out <- out %>%
     dplyr::filter(
-      `CAAS nominal` | `CAAS adjusted` | FADE_overlap | is_biochem | (if (has_pe_pos) PE_sig else FALSE) |
+      `CAAS nominal` | `CAAS adjusted` | FADE_overlap | is_biochem |
       (if (has_cosmic_pos) COSMIC == "hit" else FALSE) |
       (if (has_pai3d_pos) PAI3D_pathogenic == "pathogenic" else FALSE)
     )
@@ -1381,7 +1282,6 @@ build_interesting_positions <- function(direction) {
     dplyr::mutate(
       `N Hypotheses`        = if ("n_hypotheses" %in% names(.)) as.integer(n_hypotheses) else NA_integer_,
       `Hypotheses`          = if ("supporting_hypotheses" %in% names(.)) supporting_hypotheses else "",
-      `PE term(s)`          = pe_terms,
       `CAAS`                = if ("caas" %in% names(.)) caas else NA_character_,
       `Top species residues`    = {
         .ts <- if ("top_species_residues" %in% names(.)) top_species_residues else NA_character_
@@ -1413,7 +1313,6 @@ build_interesting_positions <- function(direction) {
 
   desc_cols <- if (has_biochem_pos) c("biochem_groupings", "is_biochem") else c()
   desc_cols <- c(desc_cols,"Gene CAAS FCS terms","Gene RER FCS terms","Gene CAAS FCS all terms","Gene RER FCS all terms")
-  if (has_pe_pos)          desc_cols <- c(desc_cols, "PE_sig", "PE term(s)")
   # CAAS p and CAAS BH above are the canonical pooled positional pair.
   if (has_cosmic_pos)      desc_cols <- c(desc_cols, "COSMIC")
   if (has_pai3d_pos)       desc_cols <- c(desc_cols, "PAI3D_pathogenic")
@@ -1434,7 +1333,8 @@ build_interesting_positions <- function(direction) {
   if ("pfam_clan" %in% names(out)) out$`Pfam clan` <- out$pfam_clan
   if ("ucr_region" %in% names(out)) out$`UCR region` <- out$ucr_region
   if ("position_variability" %in% names(out)) out$`Position variability` <- out$position_variability
-  if ("fubar_selection" %in% names(out)) out$`FUBAR selection` <- dplyr::recode(out$fubar_selection,negative="purifying",pervasive="purifying")
+  # fubar_selection is an all-NA logical column when no FUBAR table was supplied; recode needs character
+  if ("fubar_selection" %in% names(out)) out$`FUBAR selection` <- dplyr::recode(as.character(out$fubar_selection),negative="purifying",pervasive="purifying")
 
   out <- out %>%
     dplyr::arrange(`CAAS p`, dplyr::desc(`CAAS Score`)) %>%

@@ -12,11 +12,6 @@ include { RER_FCS_REPORT  as MODULE_FCS_RER }             from '../subworkflows/
 // CAAS calibrates per-gene rankings; both sources count pathway AUC by null block.
 include { FCS_COMPUTE_CALIBRATED as FCS_COMPUTE_SCORING } from '../subworkflows/ENRICHMENT/fcs_blocks.nf'
 include { FCS_RER as FCS_COMPUTE_RER } from '../subworkflows/ENRICHMENT/fcs_inputs.nf'
-include { DOMAIN_VARIABILITY_GENERATION } from '../subworkflows/ENRICHMENT/domain_variability_generation.nf'
-include { UCR_GENERATION } from '../subworkflows/ENRICHMENT/ucr_generation.nf'
-include { POSITION_ANNOTATIONS } from '../subworkflows/ENRICHMENT/position_annotations.nf'
-include { POSENRICH_MODULAR } from '../subworkflows/ENRICHMENT/posenrich_modular.nf'
-include { EGGNOG_RESOLUTION }                                from '../subworkflows/ENRICHMENT/eggnog_resolution.nf'
 // Nextflow forbids invoking the same process/subworkflow more than once in one workflow
 // scope without a distinct alias per call site (DuplicateProcessInvocation) -- DOMINO_MODULES
 // is called up to 3 times below (main/CAAS, FADE, RER), each against a different
@@ -122,93 +117,6 @@ def unwrap1(ch) {
     return ch.map { it instanceof List ? it[0] : it }
 }
 
-// Validate supplied references before any expensive workflow tasks are submitted.
-def validatePositionReferences() {
-    if ((params.posenrich_domains && !params.domain_variability_file) ||
-        (params.posenrich_ucr && !params.ucr_positions_file)) {
-        if (!params.alignment || !java.nio.file.Files.isDirectory(file(params.alignment)))
-            error "Automatic Pfam/UCR annotations require --alignment pointing to the productive protein FASTA directory"
-    }
-    def checkedAlignments = [] as Set
-    def checkedMaps = [] as Set
-    def hashFile = { path ->
-        def digest = java.security.MessageDigest.getInstance('SHA-256')
-        new java.security.DigestInputStream(java.nio.file.Files.newInputStream(path), digest).withCloseable { stream ->
-            stream.transferTo(java.io.OutputStream.nullOutputStream())
-        }
-        digest.digest().encodeHex().toString()
-    }
-    def sources = [
-        [key: 'domain_variability_file', enabled: params.posenrich_domains, required: ['gene','pfam_id','target_name','description','clan_acc','clan_name','ali_start','ali_end']],
-        [key: 'ucr_positions_file', enabled: params.posenrich_ucr, required: ['gene','position','region_type','method','variability']],
-        [key: 'fubar_sites_file', enabled: true, required: ['gene','is_pos_hit','is_neg_hit','hg38_aa_pos']],
-        [key: 'posenrich_custom_file', enabled: true, required: []]
-    ]
-    sources.each { spec ->
-        def source = params[spec.key]
-        if (spec.enabled && source && !source.toString().startsWith('NO_')) {
-            def input = file(source)
-            if (!input.exists() && !source.toString().endsWith('.gz')) input = file("${source}.gz")
-            if (!input.exists()) error "Supplied ${spec.key} does not exist: ${source}"
-            if (spec.required) {
-                def stream = java.nio.file.Files.newInputStream(input)
-                if (input.toString().endsWith('.gz')) stream = new java.util.zip.GZIPInputStream(stream)
-                def header = new BufferedReader(new InputStreamReader(stream, 'UTF-8')).withCloseable { it.readLine() }
-                def columns = header ? header.split('\t').toList() : []
-                def missing = spec.required.findAll { !columns.contains(it) }
-                if (missing) {
-                    error "${spec.key} '${input}' missing columns: ${missing}"
-                }
-                if (spec.key in ['domain_variability_file', 'ucr_positions_file'] && !columns.contains('coordinate_space')) {
-                    error "${spec.key} '${input}' has no coordinate_space: convert the verified source with bin/build_reference_tables.py project-ppga or regenerate it before running"
-                }
-            }
-            def manifest = file("${input}.manifest.json")
-            if (manifest.exists()) {
-                def meta = new groovy.json.JsonSlurper().parseText(manifest.text)
-                if (meta.table_sha256 && hashFile.call(input) != meta.table_sha256)
-                    error "Reference checksum mismatch: ${input}"
-                if (meta.alignment_dir && params.alignment) {
-                    def expected = file(meta.alignment_dir).toRealPath()
-                    def productive = file(params.alignment).toRealPath()
-                    if (expected != productive) error "${spec.key} belongs to alignment '${expected}', but this run uses '${productive}'"
-                    if (meta.alignments && !checkedAlignments.contains(productive.toString())) {
-                        log.info "Validating ${meta.alignments.size()} productive alignments for positional references: ${productive}"
-                        def actualNames = java.nio.file.Files.list(productive).withCloseable { paths ->
-                            paths.filter { java.nio.file.Files.isRegularFile(it) && it.fileName.toString().toLowerCase() ==~ /.*\.(fa|fasta|faa|fas)/ }
-                                .map { it.fileName.toString() }.collect(java.util.stream.Collectors.toSet())
-                        }
-                        if (actualNames != meta.alignments.keySet()) error "Alignment inventory changed since reference generation: ${productive}"
-                        meta.alignments.each { name, expectedHash ->
-                            def alignment = productive.resolve(name)
-                            if (!java.nio.file.Files.exists(alignment) || hashFile.call(alignment) != expectedHash)
-                                error "Productive alignment changed since reference generation: ${alignment}"
-                        }
-                        checkedAlignments.add(productive.toString())
-                    }
-                }
-                if (meta.map_dir && params.caas_map_dir && file(meta.map_dir).toRealPath() != file(params.caas_map_dir).toRealPath())
-                    error "${spec.key} was validated with a different MAP directory: ${meta.map_dir}"
-                if (meta.map_dir && meta.maps && params.caas_map_dir && !checkedMaps.contains(meta.map_dir)) {
-                    log.info "Validating ${meta.maps.size()} productive MAP files for positional references"
-                    def mapRoot = file(params.caas_map_dir)
-                    def actualMaps = java.nio.file.Files.list(mapRoot).withCloseable { paths ->
-                        paths.filter { java.nio.file.Files.isRegularFile(it) && it.fileName.toString().endsWith('.map.tsv') }
-                            .map { it.fileName.toString() }.collect(java.util.stream.Collectors.toSet())
-                    }
-                    if (actualMaps != meta.maps.keySet()) error "MAP inventory changed since reference generation: ${mapRoot}"
-                    meta.maps.each { name, expectedHash ->
-                        def mapPath = file(params.caas_map_dir).resolve(name)
-                        if (!java.nio.file.Files.exists(mapPath) || hashFile.call(mapPath) != expectedHash)
-                            error "Productive MAP changed since reference generation: ${mapPath}"
-                    }
-                    checkedMaps.add(meta.map_dir)
-                }
-            }
-        }
-    }
-}
-
 workflow ENRICHMENT {
     take:
         fcs_stats
@@ -223,9 +131,6 @@ workflow ENRICHMENT {
         gene_calibration
         caas_pos_sample_ch
         position_scores
-        scoring_postproc_ch        // filtered_discovery.tsv (evaluated positions; POSENRICH modular registry)
-        scoring_null_universe_ch   // null_universe_summary.tsv (positional null universe; POSENRICH modular registry)
-        background_output_ch
         vep_primateai_ch     // optional: PrimateAI-3D score TSV (null when --vep not run)
         vep_cosmic_ch        // optional: COSMIC Mutant Census score TSV (null when --vep not run)
         vep_ensembl_ch       // optional: Ensembl VEP consequence TSV (null when --vep not run)
@@ -237,10 +142,10 @@ workflow ENRICHMENT {
         fade_gene_lists_bg_bottom_ch  // FADE bottom direction's own background.txt
         fade_gene_lists_sig_top_ch    // fade_top_significant.txt
         fade_gene_lists_sig_bottom_ch // fade_bottom_significant.txt
-        taxid_map_ch                  // tax_id map (curated by NAME_CURATION) for the clade variability of UCR, or NO_FILE
+        taxid_map_ch                  // tax_id map (curated by NAME_CURATION), or NO_FILE
+        posenrich_position_char_ch    // optional: position_characterization.tsv of POSENRICH (null or empty when --posenrich did not run)
 
     main:
-        validatePositionReferences()
         def fcs_universe_ch = (cleaned_background_ch ?: Channel.empty())
             .ifEmpty { file('NO_BACKGROUND') }
             .collect()
@@ -462,17 +367,8 @@ workflow ENRICHMENT {
             final_reports = final_reports.mix(ami_out.report)
         }
 
-        // ── Position-level FCS ──
-        // POSENRICH took its p.perm from the position-level null as a table of every (position, cycle). The null is kept as
-        // counters per block of cycles, with no such table, so the module is not run (docs/POSENRICH_PORTE_EVALUACION.md
-        // describes how to port it to the counters).
-        def posenrich_out = null
-        if (params.posenrich) {
-            log.warn "[POSENRICH] skipped: the position-level permulation null is no longer written as a table of every (position, cycle), which its p.perm needs. The position-level enrichment (report 14) is not produced."
-        }
-
         // ── Comparison report — pulls in CAAS/RER FCS, plus (when available) AMI's
-        // module descriptions and posenrich's position-level results, all called
+        // module descriptions and POSENRICH's position characterization, all called
         // above so their outputs exist as real objects by this point in the DAG. ──
 
         def ami_module_desc_ch = (run_ami ? ami_out.module_descriptions : Channel.empty())
@@ -481,16 +377,9 @@ workflow ENRICHMENT {
             .ifEmpty { file('NO_AMI_TERM_MEMBERSHIP') }
         def ami_availability_ch = (run_ami ? ami_out.availability : Channel.empty())
             .ifEmpty { file('NO_AMI_AVAILABILITY') }
-        def posenrich_dotplot_ch = (posenrich_out ? posenrich_out.overall_dotplot : Channel.empty())
-            .ifEmpty { file('NO_POSENRICH_DOTPLOT') }
-        def posenrich_le_ch = (posenrich_out ? posenrich_out.leading_edge : Channel.empty())
-            .ifEmpty { file('NO_POSENRICH_LE') }
-        def posenrich_le_summary_ch = (posenrich_out ? posenrich_out.leading_edge_summary : Channel.empty())
-            .ifEmpty { file('NO_POSENRICH_LE_SUMMARY') }
-        // Interesting Genes/Positions tables reuse the SAME optional gene/position-
-        // level inputs POSENRICH's own report already consumes (fcs_stats,
-        // position_scores, VEP, FADE sites) -- all workflow-level take: params, so
-        // available here whether or not POSENRICH itself ran this invocation.
+        // Interesting Genes/Positions tables use optional gene/position-level inputs
+        // (fcs_stats, position_scores, VEP, FADE sites, POSENRICH characterization): all
+        // workflow-level take: params, so available whether or not their module ran.
         // Reuses annot_ch (fcs_stats.first(), already established above as the
         // broadcastable form of fcs_stats -- see its own definition) rather than
         // touching the raw fcs_stats channel a further time.
@@ -505,73 +394,18 @@ workflow ENRICHMENT {
             .ifEmpty { precomputedOrSentinel('scoring_vep_ensembl', params.scoring_vep_ensembl, 'NO_VEP_ENSEMBL') }
         def cmp_fade_top_ch   = (fade_sites_top_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_TOP') }
         def cmp_fade_bot_ch   = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_BOTTOM') }
-        // Supplied tables take priority. Enabled layers with blank files are
-        // generated once on the productive alignment columns and shared by both paths.
-        def domain_annotations_ch = Channel.value(file('NO_ANNOT_DOMAIN'))
-        if (params.posenrich_domains) {
-            if (params.domain_variability_file) {
-                domain_annotations_ch = Channel.value(precomputedOrSentinel('domain_variability_file', params.domain_variability_file, 'NO_ANNOT_DOMAIN'))
-            } else {
-                DOMAIN_VARIABILITY_GENERATION(Channel.value(file(params.alignment)))
-                domain_annotations_ch = DOMAIN_VARIABILITY_GENERATION.out.domain_variability_file
-            }
-        }
-        def ucr_annotations_ch = Channel.value(file('NO_ANNOT_UCR'))
-        if (params.posenrich_ucr) {
-            if (params.ucr_positions_file) {
-                ucr_annotations_ch = Channel.value(precomputedOrSentinel('ucr_positions_file', params.ucr_positions_file, 'NO_ANNOT_UCR'))
-            } else {
-                UCR_GENERATION(Channel.value(file(params.alignment)))
-                ucr_annotations_ch = UCR_GENERATION.out.ucr_positions_file
-            }
-        }
-        def posenrich_position_char_ch = Channel.empty()
-        if (!params.posenrich_modular) {
-            POSITION_ANNOTATIONS(
-                Channel.value(precomputedOrSentinel('gene_ensembl_file', params.gene_ensembl_file, 'NO_ANNOT_ENSEMBL')),
-                domain_annotations_ch,
-                ucr_annotations_ch,
-                Channel.value(precomputedOrSentinel('fubar_sites_file', params.fubar_sites_file, 'NO_ANNOT_FUBAR')),
-                Channel.value(precomputedOrSentinel('caas_map_dir', params.caas_map_dir, 'NO_ANNOT_MAP')),
-                fcs_universe_ch.map { it[0] },
-                cmp_fade_top_ch, cmp_fade_bot_ch,
-                Channel.value(precomputedOrSentinel('posenrich_custom_file', params.posenrich_custom_file, 'NO_ANNOT_CUSTOM'))
-            )
-            posenrich_position_char_ch = POSITION_ANNOTATIONS.out.position_char
-        }
-
-        // ── POSENRICH modular (WP10) ──
-        // Common registry + characterization + within-protein localization + global
-        // association + proximity, gated by params.posenrich_modular. The historical
-        // POSENRICH inference (Lachenbruch) stays omitted; no legacy null is reused.
-        if (params.posenrich_modular) {
-            def modular_out = POSENRICH_MODULAR(
-                cmp_pos_scores_ch,
-                (scoring_postproc_ch ?: Channel.empty()).ifEmpty { file('NO_POSTPROC') },
-                (scoring_null_universe_ch ?: Channel.empty()).ifEmpty { file('NO_NULL_UNIVERSE') },
-                Channel.value(precomputedOrSentinel('caas_map_dir', params.caas_map_dir, 'NO_ANNOT_MAP')),
-                fcs_universe_ch.map { it[0] },
-                Channel.value(precomputedOrSentinel('gene_ensembl_file', params.gene_ensembl_file, 'NO_ANNOT_ENSEMBL')),
-                domain_annotations_ch,
-                ucr_annotations_ch,
-                Channel.value(precomputedOrSentinel('fubar_sites_file', params.fubar_sites_file, 'NO_ANNOT_FUBAR')),
-                cmp_fade_top_ch, cmp_fade_bot_ch,
-                Channel.value(precomputedOrSentinel('posenrich_custom_file', params.posenrich_custom_file, 'NO_ANNOT_CUSTOM'))
-            )
-            posenrich_position_char_ch = modular_out.position_char
-            final_reports = final_reports.mix(modular_out.report)
-        }
+        // The characterization table of POSENRICH; without it the report omits the characterization columns.
+        def cmp_position_char_ch = (posenrich_position_char_ch ?: Channel.empty())
+            .ifEmpty { file('NO_POSITION_CHAR') }
 
         def cmp_out = SCORING_COMPARE_REPORT(caas_all, rer_all, caas_le, rer_le,
                                               caas_le_comp, rer_le_comp,
                                               ami_module_desc_ch, ami_term_membership_ch, ami_availability_ch,
-                                              posenrich_dotplot_ch, posenrich_le_ch,
-                                              posenrich_le_summary_ch,
                                               cmp_fcs_stats_ch, cmp_pos_scores_ch,
                                               cmp_vep_pai_ch, cmp_vep_cosmic_ch,
                                               cmp_vep_ensembl_ch,
                                               cmp_fade_top_ch, cmp_fade_bot_ch,
-                                              posenrich_position_char_ch,
+                                              cmp_position_char_ch,
                                               gene_scores,
                                               gene_calibration.map { it.resolve("metadata.json") }.ifEmpty { file("NO_GENE_METADATA") })
         final_reports = final_reports.mix(cmp_out.report)

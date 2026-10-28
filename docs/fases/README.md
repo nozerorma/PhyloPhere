@@ -1,7 +1,7 @@
 # Ejecución por fases: arranque, cierre y registro
 
 Cada paquete de trabajo (WP) se ejecuta en una conversación independiente. Este directorio es lo que debe bastar para arrancar una conversación nueva sin contexto previo y para dejar constancia de lo hecho.
-Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diagnóstico y mediciones: `docs/PLAN_NULO_10K_PERMULACIONES.md`. Revisión del FCS: `docs/FCS_REVISION_RERCONVERGE.md`. Porte de POSENRICH: `docs/POSENRICH_PORTE_EVALUACION.md`.
+Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diagnóstico y mediciones: `docs/PLAN_NULO_10K_PERMULACIONES.md`. Revisión del FCS: `docs/FCS_REVISION_RERCONVERGE.md`. Diseño vigente de POSENRICH: `docs/POSENRICH_DISENO.md`.
 
 ## Estado
 
@@ -17,7 +17,7 @@ Plan aprobado (copia versionada): `docs/fases/PLAN_APROBADO_2026-10-21.md`. Diag
 | WP7 | `WP7_caas_perms_por_bloques.md` | Fase 5 | WP5 | IMPLEMENTADO y validado dirigido: bloques + roster + índice canónicos; RDS único opcional (false por defecto). Seis reconstrucciones y Nextflow con/sin exportación aprobados; SCORING y 399 resultados FCS conservados. Aceptación integrada y recursos reales a escala pendientes |
 | WP8 | `WP8_cierre.md` | | WP5–WP7 | IMPLEMENTADO y validado dirigido: limpieza inerte retirada, remove_work mínimo real, GUI/plantillas y DOMINO sin aristas; aceptación integrada y escala pendientes |
 | WP9 | `WP9_estadistico_gen.md` | | A1, WP5–WP7 | A1 y control FCS dirigido hechos; recomendación provisional size_adj_max; A2 y elección definitiva pendientes |
-| WP10 | `WP10_posenrich_modular.md` | | WP8, contrato de evidencia y colecciones | REVISADO: componentes descriptivos y correcciones dirigidas en `../POSENRICH_MODULAR_REVISION.md`; inferencia P3 retenida hasta validar universo/cobertura/control. P6 inferencial, PP2A y aceptación a escala pendientes |
+| WP10 | `WP10_posenrich_modular.md` | | WP8, contrato de evidencia y colecciones | REVISADO: componentes descriptivos y diseño vigente en `../POSENRICH_DISENO.md`; inferencia P3 retenida hasta validar universo/cobertura/control. P6 inferencial, PP2A y aceptación a escala pendientes |
 
 Actualiza esta tabla (estado y, en el fichero de la fase, el registro) al cerrar cada fase.
 Paralelismo posible: WP1 y WP2 son independientes (ficheros disjuntos); WP9-A1 ya está hecho; WP4 y WP5 son seriales porque comparten el formato de tabla de la tesela.
@@ -71,7 +71,7 @@ Un commit de implementación o de avance parcial no implica haber superado la ac
 - `PhyloPhere_validation/unification/legacy_fcs/` con `fcs_enrich.R`, `fcs_compute.R` y `percentile_flags.R` idénticos a los del commit (verificado por SHA-256).
 - Trabajo 7568379 en el cluster: huellas SHA-256 de las salidas de neoplasia y maligno completo en `~/scratch/0.Phylophere/.tmp/golden/` y revisión del checkout (`d246e82`).
 - WP9-A1 ejecutado (resultados en `WP9_estadistico_gen.md`; ficheros en `/home/miguel/IBE-UPF/PhD/PhyloPhere_validation/golden_581b999/a1_gene_statistic/`).
-- `docs/POSENRICH_PORTE_EVALUACION.md` redactado (entregable de WP2).
+- Evaluación del porte de POSENRICH redactada (entregable de WP2; documento retirado, vigente: `docs/POSENRICH_DISENO.md`).
 - Medidas de recursos a 1000 a 10.000 ciclos (FCS, `scoring_caas_perms.R`, RESAMPLE, parseo de etiquetas): `docs/PLAN_NULO_10K_PERMULACIONES.md`, secciones 3, 5 y 8.
 
 ## Hallazgos pendientes de asignar a una fase

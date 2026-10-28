@@ -4,8 +4,8 @@
 
 """
 ComputeDomainVariability: scans the reference-species sequence of every gene against Pfam-A
-with hmmscan and writes the domain table that build_position_gmt.py turns into the Pfam
-domain and clan gene sets.
+with hmmscan and writes the domain table that the POSENRICH registry reads (position_sources.py) into the Pfam
+domain and clan collections.
 
 The table holds Pfam metadata per hit (name, description, clan), not variability statistics, so
 its schema differs from the domain_variability.tsv of map_domain_variability.py. The hmmscan
@@ -17,7 +17,7 @@ Cache: --cache-dir (default ~/.cache/phylophere/pfam) holds Pfam-A.hmm (with its
 and Pfam-A.clans.tsv, downloaded once from the EBI Pfam FTP and reused. Requires hmmscan and
 hmmpress on the PATH.
 
-Called by:  COMPUTE_DOMAIN_VARIABILITY Nextflow process (subworkflows/ENRICHMENT/domain_variability_generation.nf → compute_domain_variability.py)
+Called by:  COMPUTE_DOMAIN_VARIABILITY Nextflow process (subworkflows/POSENRICH/domain_variability_generation.nf → compute_domain_variability.py)
 Inputs:     --alignment-dir     directory of FASTA alignments, one per gene (gene = file name without
                                 extension); only fasta is supported
             --ref-species       species whose sequence is scanned (default Homo_sapiens); a gene

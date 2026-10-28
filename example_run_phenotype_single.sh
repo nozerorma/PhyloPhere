@@ -126,12 +126,9 @@ if [ "${RUN_ENRICHMENT:-true}" = true ]; then
 fi
 
 # POSENRICH Flags
-if [ "${RUN_POSENRICH:-true}" = true ]; then
+if [ "${RUN_POSENRICH:-false}" = true ]; then
     NF_FLAGS+=(
         --posenrich
-        --egg_members_file "${EGG_MEMBERS_FILE}"
-        --egg_annotations_file "${EGG_ANNOTATIONS_FILE}"
-        --cosmic_db "${COSMIC_DB}"
         --domain_variability_file "${DOMAIN_VARIABILITY_FILE}"
         --ucr_positions_file "${UCR_POSITIONS_FILE}"
         --fubar_sites_file "${FUBAR_SITES_FILE}"

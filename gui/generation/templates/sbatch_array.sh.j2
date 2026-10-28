@@ -103,7 +103,6 @@ export RUN_REPORTING={{ run_defaults.reporting }}
 export RUN_CAAS={{ run_defaults.caas }}
 export RUN_DISAMBIGUATION={{ run_defaults.disambiguation }}
 export RUN_CT_POSTPROC={{ run_defaults.ct_postproc }}
-export RUN_ACCUMULATION={{ run_defaults.accumulation }}
 export RUN_RER={{ run_defaults.rer }}
 export RUN_FADE={{ run_defaults.fade }}
 export RUN_VEP={{ run_defaults.vep }}
@@ -182,9 +181,10 @@ export POSTPROC_IQR_MULTIPLIER="{{ modules.disambiguation.iqr_multiplier }}"
 export PRECOMP_USE_DISAMBIGUATION="{{ 'true' if precomputed.use_disambiguation else 'false' }}"
 export PRECOMP_USE_POSTPROC="{{ 'true' if precomputed.use_postproc else 'false' }}"
 
-# ── Accumulation ──────────────────────────────────────────────────────────────
-export ACCUMULATION_FDR="{{ modules.accumulation.accumulation_fdr }}"
-export PRECOMP_USE_ACCUMULATION="{{ 'true' if precomputed.use_accumulation else 'false' }}"
+# ── POSENRICH level 1: Accumulation ───────────────────────────────────────────
+export ACCUMULATION_FDR="{{ modules.posenrich.accumulation_fdr }}"
+export ACCUMULATION_CAAS_INPUT="{{ modules.posenrich.accumulation_caas_input }}"
+export ACCUMULATION_BACKGROUND_INPUT="{{ modules.posenrich.accumulation_background_input }}"
 
 # ── RERconverge ───────────────────────────────────────────────────────────────
 export RER_TOOL="{{ rer_tool_string }}"
@@ -249,15 +249,13 @@ export CAAS_EVIDENCE_TOP_N="{{ modules.scoring.caas_evidence_top_n }}"
 export SCORING_HYPOTHESES_PAIRS="{{ modules.scoring.scoring_hypotheses_pairs }}"
 export CT_DISAMBIG_HYPOTHESES_PAIRS="{{ modules.disambiguation.ct_disambig_hypotheses_pairs }}"
 
-# ── Enrichment / POSENRICH ────────────────────────────────────────────────────
+# ── Enrichment ────────────────────────────────────────────────────────────────
 export FCS_ENABLED="{{ run_defaults.fcs_enabled }}"
 export AUTO_FETCH_GMT="{{ run_defaults.auto_fetch_gmt }}"
-export AUTO_FETCH_EGGNOG="{{ run_defaults.auto_fetch_eggnog }}"
 export GMT_DIR="{{ modules.enrichment.gmt_dir }}"
 export FCS_MIN_GENES="{{ modules.enrichment.fcs_min_genes }}"
 export FCS_MAX_GENES="{{ modules.enrichment.fcs_max_genes }}"
 export FCS_FDR="{{ modules.enrichment.fcs_fdr }}"
-export PFAM_CACHE_DIR="{{ modules.enrichment.pfam_cache_dir }}"
 export FCS_PPERM_THR="{{ modules.enrichment.fcs_pperm_thr }}"
 export FCS_ANALYTIC_LEVELS="{{ modules.enrichment.fcs_analytic_levels }}"
 export FCS_CLUSTER_THRESHOLD="{{ modules.enrichment.fcs_cluster_threshold }}"
@@ -274,25 +272,23 @@ export AMI_MAX_BLOCKS="{{ modules.enrichment.ami_max_blocks }}"
 export AMI_BLOCK_THRESHOLD="{{ modules.enrichment.ami_block_threshold }}"
 export SCORING_COMPARE_FDR="{{ modules.enrichment.scoring_compare_fdr }}"
 export SCORING_COMPARE_TOP_N="{{ modules.enrichment.scoring_compare_top_n }}"
-export POSENRICH_DOMAINS="{{ run_defaults.posenrich_domains }}"
-export DOMAIN_VARIABILITY_FILE="{{ modules.enrichment.domain_variability_file }}"
-export DOMAIN_REF_SPECIES="{{ modules.enrichment.domain_ref_species if modules.enrichment.domain_ref_species else runtime.ref_species_name }}"
-export POSENRICH_UCR="{{ run_defaults.posenrich_ucr }}"
 export POSENRICH_CUSTOM_FILE="{{ modules.enrichment.posenrich_custom_file }}"
-export UCR_POSITIONS_FILE="{{ modules.enrichment.ucr_positions_file }}"
-export EGGNOG_TAXID="{{ modules.enrichment.eggnog_taxid if modules.enrichment.eggnog_taxid else runtime.clade_taxid }}"
-export EGG_MEMBERS_FILE="{{ modules.enrichment.egg_members_file }}"
-export EGG_ANNOTATIONS_FILE="{{ modules.enrichment.egg_annotations_file }}"
-export FUBAR_SITES_FILE="{{ modules.enrichment.fubar_sites_file }}"
-export POSENRICH_MIN_SIZE="{{ modules.enrichment.posenrich_min_size }}"
-export POSENRICH_MAX_SIZE="{{ modules.enrichment.posenrich_max_size }}"
-export POSENRICH_BATCH_SIZE="{{ modules.enrichment.posenrich_batch_size }}"
-export POSENRICH_MODULAR="{{ 'true' if modules.enrichment.posenrich_modular else 'false' }}"
-export POSENRICH_RANKING="{{ modules.enrichment.posenrich_ranking }}"
-export POSENRICH_AGGREGATION="{{ modules.enrichment.posenrich_aggregation }}"
-export POSENRICH_N_PERMUTATIONS="{{ modules.enrichment.posenrich_n_permutations }}"
-export POSENRICH_SEED="{{ modules.enrichment.posenrich_seed }}"
-export POSENRICH_RADIOS="{{ modules.enrichment.posenrich_radios }}"
+
+# ── POSENRICH: position references and registry components ───────────────────
+export POSENRICH_DOMAINS="{{ run_defaults.posenrich_domains }}"
+export DOMAIN_VARIABILITY_FILE="{{ modules.posenrich.domain_variability_file }}"
+export DOMAIN_REF_SPECIES="{{ modules.posenrich.domain_ref_species if modules.posenrich.domain_ref_species else runtime.ref_species_name }}"
+export PFAM_CACHE_DIR="{{ modules.posenrich.pfam_cache_dir }}"
+export POSENRICH_UCR="{{ run_defaults.posenrich_ucr }}"
+export UCR_POSITIONS_FILE="{{ modules.posenrich.ucr_positions_file }}"
+export FUBAR_SITES_FILE="{{ modules.posenrich.fubar_sites_file }}"
+export POSENRICH_COLLECTIONS="{{ modules.posenrich.posenrich_collections }}"
+export POSENRICH_MIN_NONZERO_CYCLES="{{ modules.posenrich.posenrich_min_nonzero_cycles }}"
+export POSENRICH_HOLDOUT="{{ modules.posenrich.posenrich_holdout }}"
+export POSENRICH_WITHIN_GENE_MEMORY="{{ modules.posenrich.posenrich_within_gene_memory }}"
+export POSENRICH_RADIOS="{{ modules.posenrich.posenrich_radios }}"
+export POSITION_REGISTRY_MEMORY="{{ modules.posenrich.position_registry_memory }}"
+export POSITION_MODULE_MEMORY="{{ modules.posenrich.position_module_memory }}"
 
 REPO_DIR="{{ general.repo_dir }}"
 SINGLE_RUNNER="${REPO_DIR}/{{ single_runner_filename if single_runner_filename else 'run_phenotype_single.sh' }}"

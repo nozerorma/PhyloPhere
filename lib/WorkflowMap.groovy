@@ -194,15 +194,12 @@ class WorkflowMap {
                           "${outdir}/postproc/cleaned_backgrounds"],
               htmlCandidates: ["${outdir}/html_reports/8.Characterization_report.html"] ],
 
-            [ id: 'ct_acc',      name: 'CT accumulation (convergence)',   type: 'processes', ran: ctx.ctAccum,
+            [ id: 'ct_acc',      name: 'POSENRICH level 1: Accumulation',   type: 'processes', ran: ctx.ctAccum,
               filesDirs: ["${outdir}/posenrich/accumulation",
                           "${outdir}/posenrich/accumulation/top",
                           "${outdir}/posenrich/accumulation/bottom",
-                          "${outdir}/posenrich/accumulation/all",
-                          "${outdir}/posenrich/accumulation/top/gene_lists",
-                          "${outdir}/posenrich/accumulation/bottom/gene_lists",
-                          "${outdir}/posenrich/accumulation/all/gene_lists"],
-              htmlCandidates: ["${outdir}/html_reports/10.Accumulation_report.html"] ],
+                          "${outdir}/posenrich/accumulation/all"],
+              htmlCandidates: [] ],
 
             [ id: 'vep',         name: 'VEP characterization',            type: 'prepost',   ran: ctx.vep,
               filesDirs: ["${outdir}/vep"],
@@ -271,13 +268,13 @@ class WorkflowMap {
                                "${outdir}/html_reports/13.AMI_rer.html",
                                "${outdir}/html_reports/13.AMI_fade.html"] ],
 
-            [ id: 'posenrich', name: 'POSENRICH modular',                 type: 'reporting', ran: ctx.posenrich,
+            [ id: 'posenrich', name: 'POSENRICH position-level enrichment',   type: 'reporting', ran: ctx.posenrich,
               filesDirs: ["${outdir}/posenrich/registry",
                           "${outdir}/posenrich/characterization",
-                          "${outdir}/posenrich/localization",
-                          "${outdir}/posenrich/global",
+                          "${outdir}/posenrich/universe",
+                          "${outdir}/posenrich/within_gene",
                           "${outdir}/posenrich/proximity"],
-              htmlCandidates: ["${outdir}/posenrich/POSENRICH_modular_report.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/14.POSENRICH_report.html"] ],
 
             [ id: 'compare',     name: 'Cross-module comparison',         type: 'reporting', ran: ctx.compare,
               filesDirs: ["${outdir}/compare",
@@ -303,8 +300,8 @@ class WorkflowMap {
             "${projectDir}/conf/ct.config",
             "${projectDir}/conf/ct_disambiguation.config",
             "${projectDir}/conf/ct_postproc.config",
-            "${projectDir}/conf/ct_accumulation.config",
             "${projectDir}/conf/enrichment.config",
+            "${projectDir}/conf/posenrich.config",
             "${projectDir}/conf/vep.config",
             "${projectDir}/conf/rerconverge.config",
             "${projectDir}/conf/fade.config",
@@ -505,7 +502,7 @@ class WorkflowMap {
         'ct_disambig': 'CT disambiguation (convergence)',
         'asr_diagnostics': 'ASR Diagnostics',
         'ct_postproc': 'CT post-processing',
-        'ct_acc': 'CT accumulation (convergence)',
+        'ct_acc': 'POSENRICH level 1: Accumulation',
         'vep': 'VEP characterization',
         'rer': 'RERconverge (RER)',
         'fade': 'FADE (selection)',
@@ -514,7 +511,7 @@ class WorkflowMap {
         'fcs': 'Functional enrichment (FCS)',
         'ami': 'AMI (DOMINO active modules)',
         'compare': 'Cross-module comparison',
-        'posenrich': 'POSENRICH modular'
+        'posenrich': 'POSENRICH position registry'
       };
       return names[stageId] || stageId;
     }
@@ -572,10 +569,9 @@ class WorkflowMap {
             ami          : ['ami', 'rerconverge/ami',
                             'selection/fade/top/ami', 'selection/fade/bottom/ami'],
             compare      : ['compare'],
-            // Ignore historical report 14 outputs; active POSENRICH is the modular
-            // registry/report tree only.
+            // POSENRICH component directories; level 1 has its own stage (ct_acc).
             posenrich    : ['posenrich/registry', 'posenrich/characterization',
-                            'posenrich/localization', 'posenrich/global', 'posenrich/proximity']
+                            'posenrich/universe', 'posenrich/within_gene', 'posenrich/proximity']
         ]
     }
 

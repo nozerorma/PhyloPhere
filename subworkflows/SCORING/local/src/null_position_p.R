@@ -78,6 +78,8 @@ null_universe_summary <- function(base, n_obs, n_unseen) {
   metrics <- c("N_cycles", "N_cycles_present_in_null", "null_positive_positions_all", "null_positive_positions_in_universe",
                "observed_positive_positions", "observed_unseen_positions", "fraction_unseen", "universe_size")
   curve <- base[base$metric == "null_positive_positions_cumulative", c("metric", "cycles", "value", "note")]
+  # the gene list the universe received: value = number of genes, note = digest (null_position_stats.py)
+  genes <- base[base$metric == "gene_list_sha256" & is.na(base$cycles), c("metric", "cycles", "value", "note")]
   rbind(
     data.frame(metric = metrics, cycles = NA_integer_,
                value = c(val("N_cycles"), val("N_cycles_present_in_null"), val("null_positive_positions_all"), n_u, n_obs,
@@ -86,5 +88,5 @@ null_universe_summary <- function(base, n_obs, n_unseen) {
                         "positions whose null detections are 0 (p = 1/(N+1), kept)", "",
                         "null-positive positions of U plus the observed positions the null never scored"),
                stringsAsFactors = FALSE),
-    curve)
+    genes, curve)
 }

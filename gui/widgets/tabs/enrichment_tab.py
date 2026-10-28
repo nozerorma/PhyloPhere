@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# enrichment_tab.py — Enrichment module tab (bundles FCS, STRING/DOMINO, COMPARE, POSENRICH).
+# enrichment_tab.py — Enrichment module tab (bundles FCS, STRING/DOMINO, COMPARE).
 # PhyloPhere | gui/widgets/tabs/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
@@ -7,9 +7,9 @@
 """
 EnrichmentTab: field specification of the Enrichment module (conf/enrichment.config).
 
-One tab covers gene-set enrichment (FCS, STRING/DOMINO, COMPARE) and the
-position-wise POSENRICH analysis, because conf/enrichment.config holds the
-parameters of both and workflows/enrichment.nf runs them together.
+One tab covers gene-set enrichment (FCS, STRING/DOMINO, COMPARE). The position-wise
+POSENRICH parameters live in posenrich_tab.py (conf/posenrich.config); the PP2A position sets
+(posenrich_custom_file) stay here.
 
 scoring_string (with its alias scoring_ami) is the single toggle for the
 DOMINO-based active-module identification (AMI) run, which workflows/enrichment.nf
@@ -27,8 +27,7 @@ SPEC = ModuleTabSpec(
     title="Enrichment",
     blurb=(
         "Gene-set enrichment (FCS ranked-Wilcoxon + optional STRING/DOMINO + cross-"
-        "module COMPARE) and, if POSENRICH is on, position-wise Fisher-exact "
-        "enrichment against domain/UCR/FUBAR annotations."
+        "module COMPARE). Position-wise enrichment has its own POSENRICH tab."
     ),
     disclaimer="This is the final module in the pipeline — nothing downstream depends on it.",
     essential_fields=(
@@ -85,7 +84,6 @@ SPEC = ModuleTabSpec(
     ),
     advanced_fields=(
         Section("Caching"),
-        FieldSpec(name="pfam_cache_dir", label="Pfam cache directory (optional)", kind="path_dir", importance="optional"),
         FieldSpec(
             name="string_cache_dir",
             label="STRING cache directory",
@@ -126,104 +124,6 @@ SPEC = ModuleTabSpec(
         ),
         FieldSpec(name="scoring_compare_fdr", label="COMPARE report FDR threshold", importance="default"),
         FieldSpec(name="scoring_compare_top_n", label="COMPARE report top-N", importance="optional"),
-        Section("POSENRICH position-wise enrichment parameters"),
-        FieldSpec(name="posenrich_enabled", label="Run POSENRICH", kind="bool", importance="optional"),
-        FieldSpec(name="posenrich_domains", label="Include Pfam annotations (blank file = automatic)", kind="bool", importance="optional"),
-        FieldSpec(name="domain_variability_file", label="Domain variability file (optional; blank = automatic)", kind="path_file", importance="optional"),
-        FieldSpec(
-            name="domain_ref_species",
-            label="Domain reference species (blank = reference species name)",
-            placeholder="Homo_sapiens",
-            importance="optional",
-            help=(
-                "Reference species name in alignment headers used to extract "
-                "sequences for Pfam hmmscan (default: reference species name). Specify "
-                "this when running non-human/non-primate alignments."
-            ),
-        ),
-        FieldSpec(name="posenrich_ucr", label="Include UCR annotations (blank file = automatic)", kind="bool", importance="optional"),
-        FieldSpec(name="ucr_positions_file", label="UCR positions file (optional; blank = automatic sliding UCR)", kind="path_file", importance="optional"),
-        FieldSpec(
-            name="eggnog_taxid",
-            label="eggNOG clade TaxID (blank = clade TaxID)",
-            importance="optional",
-        ),
-        FieldSpec(
-            name="auto_fetch_eggnog",
-            label="Download eggNOG orthogroups instead of the versioned copy",
-            kind="bool",
-            importance="optional",
-            help=(
-                "Blank eggNOG files use the human Primates (taxid 9443) pair versioned in "
-                "subworkflows/ENRICHMENT/dat/. Any other clade or reference species needs this option "
-                "(network required); the run records the source and checksums in eggnog_source.json."
-            ),
-        ),
-        FieldSpec(
-            name="egg_members_file",
-            label="eggNOG members file (optional)",
-            kind="path_file",
-            importance="optional",
-            help=(
-                "eggNOG orthogroup members. Leave blank to use the versioned "
-                "copy (or the download, with the option above)."
-            ),
-        ),
-        FieldSpec(
-            name="egg_annotations_file",
-            label="eggNOG annotations file (optional)",
-            kind="path_file",
-            importance="optional",
-            help=(
-                "eggNOG orthogroup annotations, paired with the members "
-                "file above. Leave blank to resolve it together with it."
-            ),
-        ),
-        FieldSpec(
-            name="fubar_sites_file",
-            label="FUBAR sites file (optional)",
-            kind="path_file",
-            importance="optional",
-            help="Cannot be generated in-house: HyPhy's per-site FUBAR fit needs "
-                 "the full phylogeny + codon alignment + MCMC/VB inference, not "
-                 "just the alignment plus a public DB. See "
-                 "github.com/nozerorma/ortholog_characterizator.",
-        ),
-        FieldSpec(name="posenrich_min_size", label="POSENRICH min set size", importance="default"),
-        FieldSpec(name="posenrich_max_size", label="POSENRICH max set size (0 = uncapped)", importance="default"),
-        FieldSpec(
-            name="posenrich_batch_size",
-            label="POSENRICH GMTs per task (1 = no batching)",
-            importance="optional",
-        ),
-        Section("POSENRICH modular (WP10): registro + caracterización + localización + global + proximidad"),
-        FieldSpec(
-            name="posenrich_modular",
-            label="Run POSENRICH modular (registry, characterization, localization, global, proximity)",
-            kind="bool",
-            importance="optional",
-            help=(
-                "Módulo general de posiciones: registro común, caracterización, localización "
-                "dentro de proteínas (AUC descriptiva; inferencia pendiente de validación), asociación global "
-                "(descriptiva) y proximidad proteica/genómica. La inferencia histórica "
-                "(Lachenbruch) sigue omitida."
-            ),
-        ),
-        FieldSpec(
-            name="posenrich_ranking",
-            label="Ranking (caas_score | minus_log10_pemp)",
-            placeholder="caas_score",
-            importance="optional",
-        ),
-        FieldSpec(
-            name="posenrich_aggregation",
-            label="Aggregation across genes (mean | pair_weighted)",
-            placeholder="mean",
-            importance="optional",
-        ),
-        FieldSpec(name="posenrich_n_permutations", label="Requested permutations (reserved; inference withheld)", importance="optional"),
-        FieldSpec(name="posenrich_seed", label="Reserved control seed", importance="optional"),
-        FieldSpec(name="posenrich_radios", label="Proximity radii (residues, descriptive)", placeholder="0,5,10", importance="optional"),
     ),
 )
 

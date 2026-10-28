@@ -40,7 +40,7 @@ def master_fields(max_pairs: int) -> List[str]:
         # residues across every pooled hypothesis, not one hypothesis's raw
         # pattern (see disambiguate_single._derive_convergent_call). These
         # tallies carry the full per-hypothesis breakdown. There is no separate
-        # row-identifier column: CT_ACCUMULATION reads `tag_support` as the row tag.
+        # row-identifier column: consumers read `tag_support` as the row tag.
         "tag_support",
         "caas_support",
         # Hypotheses that drove >= 1 changed domain on THIS SIDE: the only
