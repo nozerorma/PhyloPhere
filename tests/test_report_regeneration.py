@@ -15,12 +15,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 RMD_OF = {
-    "scoring": "subworkflows/SCORING/local/11.Scoring_report.Rmd",
+    "scoring": "subworkflows/SCORING/local/10.Scoring_report.Rmd",
     "rer": "subworkflows/RERCONVERGE/local/5.RERconverge_report.Rmd",
-    "fcs_scoring": "subworkflows/ENRICHMENT/local/12.FCS_general_report.Rmd",
-    "posenrich": "subworkflows/POSENRICH/local/14.POSENRICH_report.Rmd",
-    "ami": "subworkflows/ENRICHMENT/local/13.AMI_analysis.Rmd",
-    "compare": "subworkflows/ENRICHMENT/local/15.Comparison_report.Rmd",
+    "fcs_scoring": "subworkflows/ENRICHMENT/local/11.FCS_general_report.Rmd",
+    "posenrich": "subworkflows/POSENRICH/local/13.POSENRICH_report.Rmd",
+    "ami": "subworkflows/ENRICHMENT/local/12.AMI_analysis.Rmd",
+    "compare": "subworkflows/ENRICHMENT/local/14.Comparison_report.Rmd",
 }
 
 
@@ -33,12 +33,12 @@ def _touch(path):
 def _make_outdir(base: Path) -> Path:
     out = base / "outdir"
     reports = out / "html_reports"
-    _touch(reports / "11.Scoring_report_trait.html")
+    _touch(reports / "10.Scoring_report_trait.html")
     _touch(reports / "5.RERconverge_report.html")
-    _touch(reports / "12.FCS_scoring_trait.html")
-    _touch(reports / "14.POSENRICH_report_trait.html")
-    _touch(reports / "13.AMI_analysis_trait.html")
-    _touch(reports / "15.Comparison_report_trait.html")
+    _touch(reports / "11.FCS_scoring_trait.html")
+    _touch(reports / "13.POSENRICH_report_trait.html")
+    _touch(reports / "12.AMI_analysis_trait.html")
+    _touch(reports / "14.Comparison_report_trait.html")
     _touch(out / "scoring" / "position_scores.tsv")
     _touch(out / "scoring" / "gene_scores.tsv")
     _touch(out / "scoring" / "gene_correlations.tsv")

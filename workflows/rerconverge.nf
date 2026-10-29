@@ -79,7 +79,7 @@ workflow RER_MAIN {
         def rer_report_out = null
         def rer_perms_out  = null
         // RER's own gene universe (background.txt) + gene lists (significant/
-        // accelerating/decelerating) for the unified 13.AMI_analysis.Rmd RER
+        // accelerating/decelerating) for the unified 12.AMI_analysis.Rmd RER
         // section. Always computed automatically whenever RER itself produced
         // a report; empty otherwise.
         def rer_gene_lists_bg_out       = null
@@ -165,7 +165,7 @@ workflow RER_MAIN {
         // ── Gene list extraction (always automatic — no --ami flag anymore) ──
         // Cheap (just an R script producing .txt files), so it always runs
         // whenever RER itself produced a report; feeds the unified
-        // 13.AMI_analysis.Rmd (ENRICHMENT workflow)'s RER section directly.
+        // 12.AMI_analysis.Rmd (ENRICHMENT workflow)'s RER section directly.
         // Safe to call unconditionally even when RER didn't run this
         // invocation: RER_GENE_LISTS' input channel is then empty, so
         // Nextflow never actually executes it.
@@ -200,7 +200,7 @@ workflow RER_MAIN {
                 Channel.value('rerconverge'),
                 rer_lists.fcs_stats,
                 rer_bg_ch,
-                Channel.value("12.FCS_rer_${params.traitname}"),
+                Channel.value("11.FCS_rer_${params.traitname}"),
                 perms_file_ch,
                 Channel.value(file('NO_FILE')),  // annot_file: in-branch report uses its own stats (+ optional rer_gene_scores join)
                 rer_fcs_compute.enrich_file
@@ -214,7 +214,7 @@ workflow RER_MAIN {
         // RER's own gene universe/background.txt (verified to match the
         // manually-published universes/rer_background_*.txt exactly on real
         // cluster data) + its 3 gene lists (significant/accelerating/
-        // decelerating) -- feeds the unified 13.AMI_analysis.Rmd's RER section.
+        // decelerating) -- feeds the unified 12.AMI_analysis.Rmd's RER section.
         gene_lists_bg       = rer_gene_lists_bg_out       ?: Channel.empty()
         gene_lists_interest = rer_gene_lists_interest_out ?: Channel.empty()
 }

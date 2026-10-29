@@ -26,6 +26,8 @@ params:
   extreme_threshold: 0.99
   iqr_multiplier: 3.0
   gene_filter_mode: "both"
+  gene_filter_k_far: 3.0
+  gene_filter_k_near: 1.5
   remove_caas_clusters: true
   seed: "1998"
   selected_filter_minlen: NULL
@@ -289,6 +291,12 @@ processing_mode <- params$processing_mode
 extreme_threshold <- params$extreme_threshold
 iqr_multiplier <- params$iqr_multiplier
 gene_filter_mode <- params$gene_filter_mode
+gene_filter_k_far <- if (is.null(params$gene_filter_k_far)) 3.0 else as.numeric(params$gene_filter_k_far)
+gene_filter_k_near <- if (is.null(params$gene_filter_k_near)) 1.5 else as.numeric(params$gene_filter_k_near)
+# Rule texts of the two gene filters; in stratified mode the fences are those of the gene-length stratum.
+stratified_mode <- identical(gene_filter_mode, "stratified")
+extreme_rule <- if (stratified_mode) sprintf("count > Q3 + %.1f×IQR of its length stratum", gene_filter_k_far) else sprintf("top %.0f%% density", 100 * (1 - extreme_threshold))
+dubious_rule <- if (stratified_mode) sprintf("count > Q3 + %.1f×IQR of its length stratum, with a cluster train", gene_filter_k_near) else sprintf("Q3 + %.1f×IQR count", iqr_multiplier)
 remove_caas_clusters <- if (is.null(params$remove_caas_clusters)) TRUE else isTRUE(as.logical(params$remove_caas_clusters))
 
 if (is.null(discovery_file)) stop("Error: discovery_file parameter is required")
@@ -382,8 +390,8 @@ cat(
   "Processing mode:", processing_mode, "\n",
   "Gene filtering mode:", gene_filter_mode, "\n",
   "Cluster removal:", ifelse(remove_caas_clusters, "enabled (spatial clusters discarded)", "disabled (spatial clusters retained)"), "\n",
-  "Extreme threshold:", extreme_threshold, paste0("(top ", 100*(1-extreme_threshold), "%)"), "\n",
-  "IQR multiplier:", iqr_multiplier, "\n",
+  "Extreme rule:", extreme_rule, "\n",
+  "Dubious rule:", dubious_rule, "\n",
   "\nInput files:\n",
   "  Discovery:", discovery_file, "\n",
   "  Filter summary:", filter_summary_file, "\n",
@@ -452,7 +460,7 @@ p_gross_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS, fill = category))
   scale_fill_manual(values = category_palette, breaks = c("Extreme", "Dubious", "Both", "Normal")) +
   scale_x_log10(breaks = c(1, 2, 5, 10, 20, 50, 100, 200)) +
   labs(title = "CAAS Count Distribution",
-       subtitle = "Dubious threshold (Q3 + 3×IQR) shown as dashed line",
+       subtitle = if (stratified_mode) "Fences vary with gene length (stratified mode)" else "Dubious threshold (Q3 + 3×IQR) shown as dashed line",
        x = "Number of CAAS Positions", y = "Gene Count") +
   theme_minimal(base_size = 16) +
   theme(
@@ -478,7 +486,7 @@ p_density_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS_per_length, fill
   scale_fill_manual(values = category_palette, breaks = c("Extreme", "Dubious", "Both", "Normal")) +
   scale_x_log10(breaks = c(0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100)) +
   labs(title = "CAAS Density Distribution",
-       subtitle = paste0("Top ", 100*(1-extreme_threshold), "% density threshold shown as dashed line"),
+       subtitle = if (stratified_mode) "Fences vary with gene length (stratified mode)" else paste0("Top ", 100*(1-extreme_threshold), "% density threshold shown as dashed line"),
        x = "CAAS Density (positions / gene length)", y = "Gene Count") +
   theme_minimal(base_size = 16) +
   theme(
@@ -539,8 +547,8 @@ if (nrow(removed_cat_summary) > 0) {
     labs(
       title    = "Removed Genes by category",
       subtitle = paste0(
-        "Extreme: top ", 100 * (1 - extreme_threshold), "% density  |  ",
-        "Dubious: Q3 + ", iqr_multiplier, "\u00d7IQR count  |  ",
+        "Extreme: ", extreme_rule, "  |  ",
+        "Dubious: ", dubious_rule, "  |  ",
         "Both: both criteria"
       ),
       x = "Removal category",
@@ -581,7 +589,13 @@ thr <- gene_summary_annotated %>%
     threshold_dubious_max  = max(threshold_dubious, na.rm = TRUE)
   )
 
-thresh_lines <- if (nrow(thr) == 0) "  no thresholds (no gene has a length)\n" else if (n_hyp > 1) {
+thresh_lines <- if (nrow(thr) == 0) "  no thresholds (no gene has a length)\n" else if (stratified_mode) {
+  sprintf(
+    "  Fences vary with gene length (mean [min - max] positions): far %.1f [%.0f - %.0f], near %.1f [%.0f - %.0f]\n",
+    thr$threshold_extreme_mean, thr$threshold_extreme_min, thr$threshold_extreme_max,
+    thr$threshold_dubious_mean, thr$threshold_dubious_min, thr$threshold_dubious_max
+  )
+} else if (n_hyp > 1) {
   sprintf(
     "  %d hypotheses:\n    Extreme (top %.0f%% density): mean %.4f [%.4f - %.4f]\n    Dubious (Q3 + %.1f×IQR): mean %.1f [%.0f - %.0f] positions\n",
     n_hyp, 100 * (1 - extreme_threshold),
@@ -613,8 +627,12 @@ write_tsv(gene_summary_annotated, file.path(outliers_dir, "gene_summary_annotate
 cat("\n### 1.2.1 Genes removed by each gene-level filter\n\n")
 saved_extreme_threshold <- suppressWarnings(mean(gene_summary_annotated$threshold_extreme, na.rm = TRUE))
 extreme_threshold_text <- if (is.finite(saved_extreme_threshold)) sprintf("%.4f", saved_extreme_threshold) else "not available"
-cat(sprintf("Extreme genes exceed the effective density percentile threshold (%s in this run). Dubious genes exceed the Q3 + %.1f×IQR count threshold and have at least one cluster-train position. Genes tagged Both appear in both filter lists but are removed once; list counts must not be added.\n\n",
-            extreme_threshold_text, iqr_multiplier))
+if (stratified_mode) {
+  cat("Stratified mode: Extreme genes exceed the far fence of their length stratum; Dubious genes exceed the near fence and have at least one cluster-train position. Genes tagged Both appear in both filter lists but are removed once; list counts must not be added.\n\n")
+} else {
+  cat(sprintf("Extreme genes exceed the effective density percentile threshold (%s in this run). Dubious genes exceed the Q3 + %.1f×IQR count threshold and have at least one cluster-train position. Genes tagged Both appear in both filter lists but are removed once; list counts must not be added.\n\n",
+              extreme_threshold_text, iqr_multiplier))
+}
 gene_filter_rows <- gene_summary_annotated %>%
   mutate(
     Extreme = as.logical(Extreme),
@@ -648,12 +666,12 @@ render_filter_gene_table <- function(df, label) {
   }
 }
 
-if (gene_filter_mode %in% c("extreme", "both")) {
+if (gene_filter_mode %in% c("extreme", "both", "stratified")) {
   render_filter_gene_table(gene_filter_rows, "Extreme")
 } else {
   cat("Extreme filter was not enabled for this run.\n\n")
 }
-if (gene_filter_mode %in% c("dubious", "both")) {
+if (gene_filter_mode %in% c("dubious", "both", "stratified")) {
   render_filter_gene_table(gene_filter_rows, "Dubious")
 } else {
   cat("Dubious filter was not enabled for this run.\n\n")
@@ -690,8 +708,8 @@ if (!is.null(selected_minlen) && !is.null(selected_maxcaas) && length(filter_roo
         )
       full_gene_removals <- gene_filter_rows %>%
         transmute(Gene, gene_removed =
-                    (Extreme & gene_filter_mode %in% c("extreme", "both")) |
-                    (Dubious & gene_filter_mode %in% c("dubious", "both")))
+                    (Extreme & gene_filter_mode %in% c("extreme", "both", "stratified")) |
+                    (Dubious & gene_filter_mode %in% c("dubious", "both", "stratified")))
       by_cluster_gene <- discarded_positions %>%
         group_by(Gene) %>%
         summarise(`Distinct cluster positions` = n(), .groups = "drop") %>%
@@ -1068,8 +1086,7 @@ desc_grid <- (
   plot_annotation(
     title    = "Gene descriptor distributions by filter membership",
     subtitle = sprintf(
-      "Extreme = top %.0f%% density  |  Dubious = Q3 + %.1f×IQR count  |  Cluster = cluster-filtered",
-      100 * (1 - extreme_threshold), iqr_multiplier
+      "Extreme = %s  |  Dubious = %s  |  Cluster = cluster-filtered", extreme_rule, dubious_rule
     ),
     theme = theme(plot.title = element_text(face = "bold", size = 16),
                   plot.subtitle = element_text(size = 12))

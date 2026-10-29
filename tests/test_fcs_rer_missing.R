@@ -58,7 +58,7 @@ local({
   }
 
   # Execute the report's actual fallback expression, independently of HTML rendering.
-  rmd <- readLines(file.path(src, "../12.FCS_general_report.Rmd"))
+  rmd <- readLines(file.path(src, "../11.FCS_general_report.Rmd"))
   start <- grep('^if \\(!is.null\\(params\\$enrich_file\\)', rmd)
   end <- grep('^# Gene-set descriptions need', rmd)
   fallback <- parse(text = rmd[start:(end - 1)])

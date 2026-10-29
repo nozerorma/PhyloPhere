@@ -25,7 +25,7 @@ write_tsv <- function(x, path) write.table(x, path, sep = "\t", quote = FALSE, r
 for (scenario in c("mapped", "unmapped_positions", "no_coordinates")) {
   wd <- file.path(scratch, scenario)
   dir.create(wd, recursive = TRUE, showWarnings = FALSE)
-  file.copy(file.path(root, "subworkflows/SCORING/local/11.Scoring_report.Rmd"), wd, overwrite = TRUE)
+  file.copy(file.path(root, "subworkflows/SCORING/local/10.Scoring_report.Rmd"), wd, overwrite = TRUE)
   dir.create(file.path(wd,"src"),showWarnings=FALSE)
   file.copy(file.path(root,"subworkflows/SCORING/local/src/report_evidence.R"),file.path(wd,"src"),overwrite=TRUE)
   jsonlite::write_json(list(gene_stat="max",nominal_threshold=.05,fdr_threshold=.05), file.path(wd,"gene_evidence_metadata.json"),auto_unbox=TRUE)
@@ -38,7 +38,7 @@ for (scenario in c("mapped", "unmapped_positions", "no_coordinates")) {
   write_tsv(data.frame(Gene = character(), correlation = numeric()), file.path(wd, "gene_correlations.tsv"))
   write_tsv(coords, file.path(wd, "coordinates.tsv"))
   env <- new.env(parent = globalenv())
-  rmarkdown::render(file.path(wd, "11.Scoring_report.Rmd"), quiet = TRUE, envir = env,
+  rmarkdown::render(file.path(wd, "10.Scoring_report.Rmd"), quiet = TRUE, envir = env,
     params = list(position_scores_file = "position_scores.tsv", gene_scores_file = "gene_scores.tsv",
       gene_corr_file = "gene_correlations.tsv", output_dir = wd, window_size_bp = 100000,
       genomic_info_file = if (scenario == "no_coordinates") NULL else "coordinates.tsv"),

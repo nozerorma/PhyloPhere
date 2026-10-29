@@ -24,7 +24,7 @@ include { DOMINO_MODULES as DOMINO_MODULES_RER }           from '../subworkflows
 // FADE's AMI network is built once per trait (not once per direction) against
 // the union of both directions' own universes -- they differ by only ~12
 // genes out of ~16k on real data, so the union is a safe superset either way.
-// The Global gene list (for the unified 13.AMI_analysis.Rmd's "Global" FADE
+// The Global gene list (for the unified 12.AMI_analysis.Rmd's "Global" FADE
 // tab) is likewise the union of both directions' significant-gene lists.
 process FADE_UNION_BACKGROUND {
     label 'process_low'
@@ -215,7 +215,7 @@ workflow ENRICHMENT {
                 def rer_fcs_compute = FCS_COMPUTE_RER(fcs_stats_rer, rer_universe_ch, rer_perms_resolved)
                 def rer_fcs = MODULE_FCS_RER(
                     Channel.value('scoring/rer'),   fcs_stats_rer,
-                    rer_universe_ch, Channel.value("12.FCS_rer_${trait_lbl}"),
+                    rer_universe_ch, Channel.value("11.FCS_rer_${trait_lbl}"),
                     rer_perms_resolved, annot_ch, rer_fcs_compute.enrich_file)
                 rer_fcs_report = rer_fcs.report
                 rer_all  = rer_fcs.fcs_all_results.ifEmpty  { file('NO_FCS_ALL') }
@@ -286,7 +286,7 @@ workflow ENRICHMENT {
             // the universe resolved above -- never reuse CAAS's network for
             // these. Each is gated on whether that tool actually ran this
             // invocation; when it didn't, a NO_-prefixed sentinel flows
-            // through so 13.AMI_analysis.Rmd's NULL-arg checks (mirroring the
+            // through so 12.AMI_analysis.Rmd's NULL-arg checks (mirroring the
             // existing gene_scores/gs_arg pattern) skip that tool's section
             // gracefully.
             def fade_gene_list_files_arg

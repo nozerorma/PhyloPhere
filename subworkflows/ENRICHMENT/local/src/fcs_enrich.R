@@ -2,7 +2,7 @@
 # fcs_enrich.R — Functional class scoring (FCS) core: Wilcoxon-AUC test with permulation p.
 # PhyloPhere | subworkflows/ENRICHMENT/local/src/
 # =============================================================================
-# Sourced by: fcs_compute.R (FCS_COMPUTE_BATCHED process, fcs.nf) and 12.FCS_general_report.Rmd.
+# Sourced by: fcs_compute.R (FCS_COMPUTE_BATCHED process, fcs.nf) and 11.FCS_general_report.Rmd.
 # Defines functions only.
 #
 # Tests the gene sets of GMT files against a gene ranking with the Wilcoxon-AUC test
@@ -470,7 +470,7 @@ fcs_resolve_corstat_rk <- function(rk, corStat_byrank, base_corStat) {
 # ── Result table ──────────────────────────────────────────────────────────────
 
 # Column types of the FCS result table (fcs_enrich_merged.tsv), for the readr::read_tsv
-# of the row-concatenated batch outputs (the enrich_file path of 12.FCS_general_report.Rmd).
+# of the row-concatenated batch outputs (the enrich_file path of 11.FCS_general_report.Rmd).
 # A header-only TSV, which a small gene universe can produce, gives readr nothing to
 # infer from and every column would be read as logical; this spec keeps the types stable
 # whatever the number of rows.

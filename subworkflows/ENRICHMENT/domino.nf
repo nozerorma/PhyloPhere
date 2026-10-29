@@ -10,7 +10,7 @@
  *  run_single_string()), because the significance test of DOMINO accepts the full analysis
  *  background, which get_ppi_enrichment() of STRING does not take at that size. The functional and term enrichment of STRING
  *  (get_enrichment_local() / get_enrichment()) is not replaced and lives in
- *  13.AMI_analysis.Rmd. Called from workflows/enrichment.nf, once per consumer
+ *  12.AMI_analysis.Rmd. Called from workflows/enrichment.nf, once per consumer
  *  (caas, fade, rer).
  *
  *  DOMINO_BUILD_NETWORK filters the STRING links file (cached once, unfiltered) to

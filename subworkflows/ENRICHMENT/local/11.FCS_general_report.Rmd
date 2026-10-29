@@ -80,7 +80,7 @@ params:
   }
 </style>
 
-<!-- 12.FCS_general_report.Rmd — Multi-method FCS gene-set enrichment report for one set of gene rankings. -->
+<!-- 11.FCS_general_report.Rmd — Multi-method FCS gene-set enrichment report for one set of gene rankings. -->
 <!-- PhyloPhere | subworkflows/ENRICHMENT/local/ -->
 
 ```{r setup, include=FALSE}

@@ -10,7 +10,7 @@
 # rows of one batch never need reconciling with another and a row-concat of all batches
 # (FCS_CONCAT in fcs.nf) is exact.
 #
-# Left to 12.FCS_general_report.Rmd, after the batches are merged:
+# Left to 11.FCS_general_report.Rmd, after the batches are merged:
 #   - the GMT description join, which uses the full (unbatched) GMT directory;
 #   - the term blocks of the selected terms (term_blocks.R).
 #
@@ -73,7 +73,7 @@ suppressMessages(invisible(capture.output(source(src))))
 
 # ── Stats, universe and rankings ──────────────────────────────────────────────
 
-# Same logic as the `load` and `run` chunks of 12.FCS_general_report.Rmd.
+# Same logic as the `load` and `run` chunks of 11.FCS_general_report.Rmd.
 stats <- readr::read_tsv(stats_file, show_col_types = FALSE)
 if (!"gene" %in% names(stats)) {
   gcol <- intersect(c("Gene", "GENE"), names(stats))[1]

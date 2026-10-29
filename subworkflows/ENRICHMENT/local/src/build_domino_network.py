@@ -12,13 +12,13 @@ background. The network is therefore restricted to the analysis background here,
 left to DOMINO.
 
 The raw STRING links and protein-info files are cached unfiltered (the same cache
-convention as ensure_string_cache() in 13.AMI_analysis.Rmd), so one cache serves any
+convention as ensure_string_cache() in 12.AMI_analysis.Rmd), so one cache serves any
 --score-threshold, which is applied at use time. Node IDs are mapped from ENSP to gene
 symbol in a single hop with the protein-info file; no round trip through Ensembl gene IDs.
 
 network.sif keeps the three columns DOMINO's own tools (slicer, run_domino_modules.py)
 expect (gene A, "pp", gene B; only columns 0 and 2 are read). The combined score, which
-the SIF cannot carry, goes to a sidecar table that 13.AMI_analysis.Rmd uses to scale the
+the SIF cannot carry, goes to a sidecar table that 12.AMI_analysis.Rmd uses to scale the
 width of the network edges.
 
 Called by:  DOMINO_BUILD_NETWORK Nextflow process (domino.nf → build_domino_network.py)

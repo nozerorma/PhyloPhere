@@ -109,7 +109,7 @@ Code: `subworkflows/CT/local/scripts/permulations.R:69-74, 328-353, 412-575`; `b
 
 ![Null draws by tier](img/null_draw_tiers.png)
 
-*Outcome of the null draws: Tier 1 (all pairs independent), Tier 2 (one pair below Dunn 1) and rejected draws. Report 11.*
+*Outcome of the null draws: Tier 1 (all pairs independent), Tier 2 (one pair below Dunn 1) and rejected draws. Report 10.*
 
 ![Capacity of the null traits](img/null_capacity.png)
 
@@ -214,7 +214,7 @@ Code: `subworkflows/SCORING/local/src/scoring_compute.R:174-347`; `null_position
 
 ![Evidence classes](img/evidence_classes.png)
 
-*Share of positions and genes in each evidence class: BH, nominal, evaluated but not significant. Report 16.*
+*Share of positions and genes in each evidence class: BH, nominal, evaluated but not significant. Report 15.*
 
 ![Position score against p](img/positions_score_vs_p.png)
 
@@ -230,7 +230,7 @@ Code: `subworkflows/SCORING/local/src/scoring_compute.R:174-347`; `null_position
 
 ![Gene score along the genome](img/gene_score_windows.png)
 
-*Maximum gene score in 0.1 Mb windows along the human chromosomes (bars: window mean; points: window maximum). Report 11.*
+*Maximum gene score in 0.1 Mb windows along the human chromosomes (bars: window mean; points: window maximum). Report 10.*
 
 ## 8. RERconverge
 
@@ -304,7 +304,7 @@ Code: `subworkflows/ENRICHMENT/local/src/fcs_enrich.R:127-513`; `subworkflows/SC
 
 ![FCS of the CAAS global ranking](img/fcs_caas_global.png)
 
-*Representative gene sets of the global CAAS ranking. Columns: BH of the permulation p, and the analytic rule at levels 0.05, 0.10 and 0.15 (R05, R10, R15). A dot means the rule is passed and a cross that it is not; the color gives the sign of AUC - 0.5. Report 12.*
+*Representative gene sets of the global CAAS ranking. Columns: BH of the permulation p, and the analytic rule at levels 0.05, 0.10 and 0.15 (R05, R10, R15). A dot means the rule is passed and a cross that it is not; the color gives the sign of AUC - 0.5. Report 11.*
 
 ![FCS of the RER ranking](img/fcs_rer_global.png)
 
@@ -312,11 +312,11 @@ Code: `subworkflows/ENRICHMENT/local/src/fcs_enrich.R:127-513`; `subworkflows/SC
 
 ## 11. Active modules (AMI)
 
-AMI looks for connected subnetworks. DOMINO builds a STRING network on the background genes (edges with combined score above `--domino_network_score_thr`, 700), slices it, and reports modules whose gene lists are enriched in the analysis genes (`--domino_module_thr`, 0.05). Each module is labeled with STRING enrichment terms (`--ami_description_fdr`); labels are descriptive and carry their own FDR. One run is made per evidence line present: CAAS, FADE, RER. The network is built for human proteins (taxon 9606); `--string_species` changes only the labels of report 13.
+AMI looks for connected subnetworks. DOMINO builds a STRING network on the background genes (edges with combined score above `--domino_network_score_thr`, 700), slices it, and reports modules whose gene lists are enriched in the analysis genes (`--domino_module_thr`, 0.05). Each module is labeled with STRING enrichment terms (`--ami_description_fdr`); labels are descriptive and carry their own FDR. One run is made per evidence line present: CAAS, FADE, RER. The network is built for human proteins (taxon 9606); `--string_species` changes only the labels of report 12.
 
 ![DOMINO modules of the global CAAS list](img/ami_caas_network.png)
 
-*DOMINO modules of the global CAAS gene list on the STRING network (score of at least 700). Node size scales with -log10 of the gene p, colors are modules labeled with their enriched terms, and a gold border marks genes that also pass the empirical BH threshold. Report 13.*
+*DOMINO modules of the global CAAS gene list on the STRING network (score of at least 700). Node size scales with -log10 of the gene p, colors are modules labeled with their enriched terms, and a gold border marks genes that also pass the empirical BH threshold. Report 12.*
 
 ## 12. POSENRICH
 
@@ -348,7 +348,7 @@ Code: `subworkflows/POSENRICH/local/src/accumulation_test.py`, `posenrich_within
 
 ![Coverage of the annotation layers](img/posenrich_coverage.png)
 
-*Positive positions per annotation layer, with the share of the annotated positions that are positive. Report 14.*
+*Positive positions per annotation layer, with the share of the annotated positions that are positive. Report 13.*
 
 ![Level 1: observed share against null share](img/posenrich_level1_share.png)
 
@@ -368,7 +368,7 @@ After SCORING, positions are annotated with PrimateAI-3D pathogenicity, COSMIC s
 
 ## 14. Report map
 
-Numbers follow the order of the pipeline; number 10 is unused.
+Numbers follow the order of the pipeline.
 
 | # | Report | Module | Reads |
 |---|---|---|---|
@@ -382,12 +382,12 @@ Numbers follow the order of the pipeline; number 10 is unused.
 | 7 | CAAS pattern annotation | CT_META_CAAS | discovery |
 | 8 | Characterization | CT_POSTPROC | filtered discovery |
 | 9 | ASR diagnostics | CT_POSTPROC | disambiguation |
-| 11 | Scoring | SCORING | scores, null |
-| 12 | FCS (CAAS, RER) | ENRICHMENT | rankings, null |
-| 13 | AMI | ENRICHMENT | gene lists |
-| 14 | POSENRICH | POSENRICH | universe, registry |
-| 15 | Comparison | ENRICHMENT | FCS, AMI, VEP |
-| 16 | CAAS significance | CT_META_CAAS | scores, p.emp |
+| 10 | Scoring | SCORING | scores, null |
+| 11 | FCS (CAAS, RER) | ENRICHMENT | rankings, null |
+| 12 | AMI | ENRICHMENT | gene lists |
+| 13 | POSENRICH | POSENRICH | universe, registry |
+| 14 | Comparison | ENRICHMENT | FCS, AMI, VEP |
+| 15 | CAAS significance | CT_META_CAAS | scores, p.emp |
 
 `workflow_map.html` in the output directory links every report and result directory of the run.
 

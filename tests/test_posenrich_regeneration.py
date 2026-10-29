@@ -1,9 +1,9 @@
-"""Report 14 regeneration recovers the published component directories and invents no setting."""
+"""Report 13 regeneration recovers the published component directories and invents no setting."""
 from pathlib import Path
 from test_report_regeneration import _make_outdir
 
 ROOT = Path(__file__).resolve().parents[1]
-RMD = ROOT / 'subworkflows/POSENRICH/local/14.POSENRICH_report.Rmd'
+RMD = ROOT / 'subworkflows/POSENRICH/local/13.POSENRICH_report.Rmd'
 
 
 def _script(tmp_path, drop=()):
@@ -23,7 +23,7 @@ def test_regeneration_passes_every_component_directory(tmp_path):
     for param in ('universe_dir', 'registry_dir', 'characterization_dir', 'accumulation_dir', 'within_gene_dir',
                   'proximity_dir', 'traitname'):
         assert param in script
-    assert "14.POSENRICH_report_trait.html" in script and 'report_presentation.R' in script
+    assert "13.POSENRICH_report_trait.html" in script and 'report_presentation.R' in script
     for invented in ('fdr_threshold', 'ranking', 'aggregation', 'n_permutations', 'seed', 'radios'):
         assert f'{invented} ' not in script.split('rmarkdown::render')[1]
 

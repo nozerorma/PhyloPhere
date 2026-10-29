@@ -150,7 +150,7 @@ _TRAIT_SUFFIX_RE = re.compile(r"_(?P<trait>[A-Za-z0-9][A-Za-z0-9_.-]*)\.html$")
 
 
 def _guess_trait_from_suffix(basename: str, prefix_to_strip: str) -> str:
-    """Trait name from a report filename: '11.Scoring_report_um_myotis.html' → 'um_myotis'.
+    """Trait name from a report filename: '10.Scoring_report_um_myotis.html' → 'um_myotis'.
 
     Falls back to 'unknown_trait', the default several Nextflow report processes use
     when --traitname is empty, if the name carries no trait suffix.
@@ -294,9 +294,9 @@ def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
 
 def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
-    output_file = f"11.Scoring_report_{report.traitname}.html"
+    output_file = f"10.Scoring_report_{report.traitname}.html"
     render = _render_call(
-        "11.Scoring_report.Rmd",
+        "10.Scoring_report.Rmd",
         [
             f"position_scores_file = '{s['position_scores']}'",
             f"gene_scores_file     = '{s['gene_scores']}'",
@@ -322,7 +322,7 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
         output_file,
     )
     return _wrap_script(
-        header_comment="SCORING — 11.Scoring_report.Rmd",
+        header_comment="SCORING — 10.Scoring_report.Rmd",
         repo_dir=repo_dir,
         local_dir="subworkflows/SCORING/local",
         pre_lines=[],
@@ -547,9 +547,9 @@ def _signif_significance_find_slots(outdir: Listing) -> list[InputSlot]:
 
 def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
-    output_file = "16.CAAS_significance_report.html"
+    output_file = "15.CAAS_significance_report.html"
     render = _render_call(
-        "16.CAAS_significance_report.Rmd",
+        "15.CAAS_significance_report.Rmd",
         [
             f"position_scores_input = '{s['position_scores_input']}'",
             f"gene_scores_input = '{s['gene_scores_input']}'",
@@ -563,7 +563,7 @@ def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, us
         output_file,
     )
     return _wrap_script(
-        header_comment="CAAS_SIGNIFICANCE — 16.CAAS_significance_report.Rmd",
+        header_comment="CAAS_SIGNIFICANCE — 15.CAAS_significance_report.Rmd",
         repo_dir=repo_dir,
         local_dir="subworkflows/CT_META_CAAS/local",
         pre_lines=["mkdir -p src", f'cp "{repo_dir}/subworkflows/ENRICHMENT/local/src/report_presentation.R" src/'],
@@ -629,9 +629,9 @@ def _fcs_scoring_find_slots(outdir: Listing) -> list[InputSlot]:
 
 def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
-    output_file = f"12.FCS_scoring_{report.traitname}.html"
+    output_file = f"11.FCS_scoring_{report.traitname}.html"
     render = _render_call(
-        "12.FCS_general_report.Rmd",
+        "11.FCS_general_report.Rmd",
         [
             f"stats_file    = '{s['fcs_stats']}'",
             f"universe_file = '{s['universe']}'",
@@ -652,7 +652,7 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
     # would close early.
     render_prefix = f"REPO_DIR <- '{repo_dir}'\n    "
     return _wrap_script(
-        header_comment="ENRICHMENT — 12.FCS_general_report.Rmd (Scoring/CAAS)",
+        header_comment="ENRICHMENT — 11.FCS_general_report.Rmd (Scoring/CAAS)",
         repo_dir=repo_dir,
         local_dir="subworkflows/ENRICHMENT/local",
         pre_lines=[
@@ -671,7 +671,7 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
     )
 
 
-# ── POSENRICH: report 14 ──────────────────────────────────────────────────────
+# ── POSENRICH: report 13 ──────────────────────────────────────────────────────
 
 
 def _posenrich_find_slots(outdir: Listing) -> list[InputSlot]:
@@ -695,14 +695,14 @@ def _posenrich_find_slots(outdir: Listing) -> list[InputSlot]:
 
 def _posenrich_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
-    output_file = f"14.POSENRICH_report_{report.traitname}.html"
+    output_file = f"13.POSENRICH_report_{report.traitname}.html"
     pre_lines = ["mkdir -p src", f'cp "{repo_dir}/subworkflows/ENRICHMENT/local/src/report_presentation.R" src/']
 
     def optional(key):
         return f"'{s[key]}'" if s.get(key) else "NULL"
 
     render = _render_call(
-        "14.POSENRICH_report.Rmd",
+        "13.POSENRICH_report.Rmd",
         [
             f"universe_dir         = '{s['universe']}'",
             f"registry_dir         = '{s['registry']}'",
@@ -715,7 +715,7 @@ def _posenrich_build_script(report: DetectedReport, repo_dir: Path, use_singular
         output_file,
     )
     return _wrap_script(
-        header_comment="POSENRICH — 14.POSENRICH_report.Rmd",
+        header_comment="POSENRICH — 13.POSENRICH_report.Rmd",
         repo_dir=repo_dir,
         local_dir="subworkflows/POSENRICH/local",
         pre_lines=pre_lines,
@@ -746,7 +746,7 @@ def _ami_find_slots(outdir: Listing) -> list[InputSlot]:
 
 def _ami_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
-    output_file = f"13.AMI_analysis_{report.traitname}.html"
+    output_file = f"12.AMI_analysis_{report.traitname}.html"
     args = [
         f"gene_list_files = list.files({_r_arg(s['caas_lists'])},pattern='[.]txt',full.names=TRUE)",
         f"background_file = {_r_arg(s['caas_background'])}",
@@ -777,7 +777,7 @@ def _ami_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
     required_settings = "c('species','domino_network_score_thr','domino_slice_threshold','domino_module_threshold','module_description_fdr','seed')"
     render = (f"saved <- jsonlite::read_json('{s['settings']}',simplifyVector=TRUE)\n"
               f"stopifnot(all({required_settings} %in% names(saved)))\n"
-              + _render_call("13.AMI_analysis.Rmd",args,output_file))
+              + _render_call("12.AMI_analysis.Rmd",args,output_file))
     return _wrap_script(
         header_comment="ENRICHMENT — AMI from verified per-method bundles; no DOMINO recomputation",
         repo_dir=repo_dir,local_dir="subworkflows/ENRICHMENT/local",pre_lines=[],render_block=render,
@@ -830,7 +830,7 @@ def _compare_find_slots(outdir: Listing) -> list[InputSlot]:
 
 def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
-    output_file = f"15.Comparison_report_{report.traitname}.html"
+    output_file = f"14.Comparison_report_{report.traitname}.html"
     pre_lines = ["mkdir -p cmp_fcs cmp_fcs_le"]
     if s["caas_fcs"]:
         pre_lines.append(f'cp "{s["caas_fcs"]}" cmp_fcs/caas_fcs_all.tsv')
@@ -846,7 +846,7 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
         pre_lines.append(f'cp "{s["rer_le_comp"]}" cmp_fcs_le/rer_leading_edge_composition.tsv')
 
     render = _render_call(
-        "15.Comparison_report.Rmd",
+        "14.Comparison_report.Rmd",
         [
             "fcs_dir    = 'cmp_fcs'",
             "fcs_le_dir = 'cmp_fcs_le'",
@@ -876,7 +876,7 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
               "stopifnot(all(c('fdr_thr','pperm_thr','domino_module_thr','top_n','seed') %in% names(saved)))\n"
               + render)
     return _wrap_script(
-        header_comment="ENRICHMENT — 15.Comparison_report.Rmd",
+        header_comment="ENRICHMENT — 14.Comparison_report.Rmd",
         repo_dir=repo_dir,
         local_dir="subworkflows/ENRICHMENT/local",
         pre_lines=pre_lines,
@@ -1128,10 +1128,10 @@ REPORTS: list[ReportSpec] = [
     ReportSpec(
         id="scoring",
         display_name="SCORING — Scoring report",
-        html_regex=re.compile(r"^11\.Scoring_report_(?P<trait>.+)\.html$"),
+        html_regex=re.compile(r"^10\.Scoring_report_(?P<trait>.+)\.html$"),
         find_slots=_scoring_find_slots,
         build_script=_scoring_build_script,
-        guess_traitname=lambda name: _guess_trait_from_suffix(name, "11.Scoring_report_"),
+        guess_traitname=lambda name: _guess_trait_from_suffix(name, "10.Scoring_report_"),
     ),
     ReportSpec(
         id="rer",
@@ -1161,7 +1161,7 @@ REPORTS: list[ReportSpec] = [
     ReportSpec(
         id="signif_significance",
         display_name="CT_META_CAAS — CAAS significance report (post-scoring)",
-        html_regex=re.compile(r"^16\.CAAS_significance_report\.html$"),
+        html_regex=re.compile(r"^15\.CAAS_significance_report\.html$"),
         find_slots=_signif_significance_find_slots,
         build_script=_signif_significance_build_script,
     ),
@@ -1175,34 +1175,34 @@ REPORTS: list[ReportSpec] = [
     ReportSpec(
         id="fcs_scoring",
         display_name="ENRICHMENT — FCS report (Scoring/CAAS)",
-        html_regex=re.compile(r"^12\.FCS_scoring_(?P<trait>.+)\.html$"),
+        html_regex=re.compile(r"^11\.FCS_scoring_(?P<trait>.+)\.html$"),
         find_slots=_fcs_scoring_find_slots,
         build_script=_fcs_scoring_build_script,
-        guess_traitname=lambda name: _guess_trait_from_suffix(name, "12.FCS_scoring_"),
+        guess_traitname=lambda name: _guess_trait_from_suffix(name, "11.FCS_scoring_"),
     ),
     ReportSpec(
         id="posenrich",
         display_name="POSENRICH — Position-level enrichment report",
-        html_regex=re.compile(r"^14\.POSENRICH_report_(?P<trait>.+)\.html$"),
+        html_regex=re.compile(r"^13\.POSENRICH_report_(?P<trait>.+)\.html$"),
         find_slots=_posenrich_find_slots,
         build_script=_posenrich_build_script,
-        guess_traitname=lambda name: _guess_trait_from_suffix(name, "14.POSENRICH_report_"),
+        guess_traitname=lambda name: _guess_trait_from_suffix(name, "13.POSENRICH_report_"),
     ),
     ReportSpec(
         id="ami",
         display_name="ENRICHMENT — AMI (DOMINO modules) report",
-        html_regex=re.compile(r"^13\.AMI_analysis_(?P<trait>.+)\.html$"),
+        html_regex=re.compile(r"^12\.AMI_analysis_(?P<trait>.+)\.html$"),
         find_slots=_ami_find_slots,
         build_script=_ami_build_script,
-        guess_traitname=lambda name: _guess_trait_from_suffix(name, "13.AMI_analysis_"),
+        guess_traitname=lambda name: _guess_trait_from_suffix(name, "12.AMI_analysis_"),
     ),
     ReportSpec(
         id="compare",
         display_name="ENRICHMENT — Comparison report",
-        html_regex=re.compile(r"^15\.Comparison_report_(?P<trait>.+)\.html$"),
+        html_regex=re.compile(r"^14\.Comparison_report_(?P<trait>.+)\.html$"),
         find_slots=_compare_find_slots,
         build_script=_compare_build_script,
-        guess_traitname=lambda name: _guess_trait_from_suffix(name, "15.Comparison_report_"),
+        guess_traitname=lambda name: _guess_trait_from_suffix(name, "14.Comparison_report_"),
     ),
     ReportSpec(
         id="ta_data_prune",

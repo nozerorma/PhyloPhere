@@ -19,7 +19,7 @@ Inputs:
 Outputs (in --output_dir):
   position_characterization.tsv  one row per annotated or scored (Gene, Position):
                                  annotation layers + ranking columns. Single owner of
-                                 this table for reports 14/15.
+                                 this table for reports 13/14.
   collection_summary.tsv         per collection/term: sizes, exact crosses with the
                                  ranking (counts and proportions, denominators shown)
   ranking_summary.tsv            score distribution and nominal/adjusted counts per

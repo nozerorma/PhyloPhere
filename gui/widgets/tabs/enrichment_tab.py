@@ -12,7 +12,7 @@ POSENRICH parameters live in posenrich_tab.py (conf/posenrich.config).
 
 scoring_string (with its alias scoring_ami) is the single toggle for the
 DOMINO-based active-module identification (AMI) run, which workflows/enrichment.nf
-enables when either parameter is set; its report is 13.AMI_analysis.Rmd.
+enables when either parameter is set; its report is 12.AMI_analysis.Rmd.
 
 Imported by: gui/widgets/main_window.py
 """

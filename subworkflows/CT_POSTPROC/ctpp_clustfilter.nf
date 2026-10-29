@@ -119,7 +119,7 @@ process CT_FILTER_SUMMARY {
     """
 }
 
-// Removes extreme and dubious genes, and the flagged positions when params.remove_caas_clusters is set (filter_caas_genes.py).
+// Removes extreme and dubious genes (or the length-stratified outliers), and the flagged positions when params.remove_caas_clusters is set (filter_caas_genes.py).
 process CAAS_FILTER_GENES {
     tag "gene_filter:${params.gene_filter_mode}"
     label 'CT_FILTER'
@@ -149,6 +149,9 @@ process CAAS_FILTER_GENES {
         -m ${params.gene_filter_mode} \
         --extreme-percentile ${params.extreme_threshold} \
         --iqr-multiplier ${params.iqr_multiplier} \
+        --strata ${params.gene_filter_strata} \
+        --k-far ${params.gene_filter_k_far} \
+        --k-near ${params.gene_filter_k_near} \
         -o filtered_discovery.tsv \
         -s removed_genes_summary.tsv \
         -g gene_stats.tsv

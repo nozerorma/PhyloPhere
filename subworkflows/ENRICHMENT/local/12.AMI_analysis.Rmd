@@ -90,7 +90,7 @@ params:
   }
 </style>
 
-<!-- 13.AMI_analysis.Rmd — DOMINO active-module report with STRING functional labels, one network per gene list and tool. -->
+<!-- 12.AMI_analysis.Rmd — DOMINO active-module report with STRING functional labels, one network per gene list and tool. -->
 <!-- PhyloPhere | subworkflows/ENRICHMENT/local/ -->
 
 ```{r setup, include=FALSE}
@@ -534,7 +534,7 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, ma
     display_genes <- if (!is.null(active_genes)) intersect(genes_sorted, active_genes) else genes_sorted
     # `genes` is capped at 8 to keep the display table readable; `all_genes` keeps every
     # member, so the written *_domino_module_descriptions.tsv files and the roll-ups keep
-    # the full membership. 15.Comparison_report.Rmd reads all_genes: the capped list
+    # the full membership. 14.Comparison_report.Rmd reads all_genes: the capped list
     # would undercount the support of a module larger than 8 genes.
     gene_str     <- paste(head(display_genes, 8), collapse = ", ")
     all_gene_str <- paste(display_genes, collapse = ", ")

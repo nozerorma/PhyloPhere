@@ -4,7 +4,7 @@
 
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  SCORING_REPORT: renders 11.Scoring_report.Rmd for one trait from the tables of
+ *  SCORING_REPORT: renders 10.Scoring_report.Rmd for one trait from the tables of
  *  SCORING_COMPUTE and the optional evidence files.
  *
  *  Consumes:  position_scores.tsv, gene_scores.tsv, gene_correlations.tsv,
@@ -18,7 +18,7 @@
  *             optional inputs are NO_* sentinel files when absent and reach the report
  *             as NULL; caas_pos_sample, caas_pos_quantiles and background_file are
  *             passed to the report but its body does not read them.
- *  Produces:  11.Scoring_report_<trait>.html, published to scoring/ and html_reports/
+ *  Produces:  10.Scoring_report_<trait>.html, published to scoring/ and html_reports/
  *             (the report also writes position_scores_annotated.tsv and the genomic
  *             window tables into scoring/)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -58,7 +58,7 @@ process SCORING_REPORT {
     path null_universe       // optional: null_universe_summary.tsv, N, universe size, unseen observed positions and saturation curve of the null (NO_NULL_UNIVERSE sentinel when absent)
 
     output:
-    path "11.Scoring_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "10.Scoring_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
     path 'gene_evidence_overlap.tsv', emit: gene_overlap
     path 'genomic_window_accum_gene_caas.tsv', emit: genomic_windows, optional: true
     path 'position_scores_annotated.tsv', emit: annotated_positions, optional: true
@@ -67,7 +67,7 @@ process SCORING_REPORT {
     def local_dir      = "${baseDir}/subworkflows/SCORING/local"
     def outdir         = "." // Derived TSVs are task outputs, published by Nextflow.
     def traitname      = params.traitname ?: 'unknown_trait'
-    def report_hash = ['11.Scoring_report.Rmd','src/report_evidence.R'].collect { file("${local_dir}/${it}").text }.join('\n').with {
+    def report_hash = ['10.Scoring_report.Rmd','src/report_evidence.R'].collect { file("${local_dir}/${it}").text }.join('\n').with {
         java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString()
     }
     // Optional inputs: a sentinel file becomes the R literal NULL, a real file its quoted name
@@ -94,7 +94,7 @@ process SCORING_REPORT {
 
         REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                '11.Scoring_report.Rmd',
+                '10.Scoring_report.Rmd',
                 params = list(
                     position_scores_file = '${position_scores}',
                     gene_scores_file     = '${gene_scores}',
@@ -120,7 +120,7 @@ process SCORING_REPORT {
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'
                 ),
-                output_file = '11.Scoring_report_${traitname}.html'
+                output_file = '10.Scoring_report_${traitname}.html'
             )
         "
         """
@@ -131,7 +131,7 @@ process SCORING_REPORT {
 
         REPORT_CORES=${task.cpus} Rscript -e "
             rmarkdown::render(
-                '11.Scoring_report.Rmd',
+                '10.Scoring_report.Rmd',
                 params = list(
                     position_scores_file = '${position_scores}',
                     gene_scores_file     = '${gene_scores}',
@@ -157,7 +157,7 @@ process SCORING_REPORT {
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'
                 ),
-                output_file = '11.Scoring_report_${traitname}.html'
+                output_file = '10.Scoring_report_${traitname}.html'
             )
         "
         """

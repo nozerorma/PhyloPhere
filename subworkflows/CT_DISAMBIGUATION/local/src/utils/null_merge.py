@@ -69,23 +69,59 @@ class BlockTables:
         self.s_bottom = scores["bottom"].to_numpy(zero_copy_only=False).astype(np.float64)
 
 
+CATEGORIES = ("Extreme", "Dubious", "Both")   # codes 0, 1, 2 of the category column of units.parquet
+
+
 def removal_units(t: BlockTables, lengths: Dict[str, float], mode: str, iqr_multiplier: float,
-                  extreme_percentile: float) -> np.ndarray:
-    """Boolean per unit: removed by gene removal (core.postproc.gene_removal, each cycle against its own units)."""
+                  extreme_percentile: float, detail: Optional[dict] = None, *, strata: int = 10,
+                  k_far: float = 3.0, k_near: float = 1.5) -> np.ndarray:
+    """Boolean per unit: removed by gene removal (core.postproc.gene_removal, each cycle against its own units).
+
+    `detail`, when given, receives `thresholds` (cycle -> (count threshold, density threshold)) and `flagged`
+    ((cycle, gene) -> category); the decisions do not depend on it.
+    """
     removed = np.zeros(len(t.u_gene), dtype=bool)
     if (mode or "none").lower() == "none" or not len(t.u_gene):
         return removed
     n_pos, clust = t.units["n_pos"], t.units["clust"]
     stream = (GeneUnit(t.cycles[c], t.genes[g], int(n), bool(k))
               for c, g, n, k in zip(t.u_cycle.tolist(), t.u_gene.tolist(), n_pos.tolist(), clust.tolist()))
+    thresholds: Dict[str, Tuple[float, Optional[float]]] = {}
     flagged = gene_removal(stream, lengths, mode=mode, iqr_multiplier=iqr_multiplier,
-                           extreme_percentile=extreme_percentile)
+                           extreme_percentile=extreme_percentile, thresholds=thresholds,
+                           strata=strata, k_far=k_far, k_near=k_near)
+    if detail is not None:
+        detail["thresholds"], detail["flagged"] = thresholds, flagged
     if flagged:
         cyc_index = {c: i for i, c in enumerate(t.cycles)}
         gene_index = {g: i for i, g in enumerate(t.genes)}
         keys = {cyc_index[c] * len(t.genes) + gene_index[g] for c, g in flagged}
         removed = np.isin(t.u_cycle * len(t.genes) + t.u_gene, np.fromiter(keys, dtype=np.int64, count=len(keys)))
     return removed
+
+
+def units_table(t: BlockTables, removed: np.ndarray, flagged: Optional[dict]) -> pa.Table:
+    """One row per (gene, cycle) unit before any removal: its distinct positions, the cluster flag and the category
+    of the removal that dropped it (null when kept). It is what the gene filter decides on, so any rule can be
+    recomputed from it without the tiles."""
+    cat = np.zeros(len(t.u_gene), dtype=np.int8)
+    if flagged and removed.any():
+        idx = np.flatnonzero(removed)
+        code = {name: i for i, name in enumerate(CATEGORIES)}
+        cat[idx] = [code[flagged[(t.cycles[c], t.genes[g])]] for c, g in zip(t.u_cycle[idx].tolist(), t.u_gene[idx].tolist())]
+    dictionary = lambda codes, values, mask=None: pa.DictionaryArray.from_arrays(pa.array(codes, mask=mask), pa.array(list(values), pa.string()))
+    return pa.table({
+        "gene": dictionary(t.u_gene.astype(np.int32), t.genes),
+        "cycle": dictionary(t.u_cycle.astype(np.int32), t.cycles),
+        "n_pos": pa.array(t.units["n_pos"].astype(np.int32)),
+        "clust": pa.array(t.units["clust"].astype(bool)),
+        "category": dictionary(cat, CATEGORIES, mask=~removed),
+    })
+
+
+def threshold_rows(detail: dict, n_units: Dict[str, int]) -> List[Tuple[str, int, float, Optional[float]]]:
+    """(cycle, units of the cycle, count threshold, density threshold) of the cycles the removal looked at."""
+    return [(c, n_units.get(c, 0), thr_dub, thr_ext) for c, (thr_dub, thr_ext) in sorted(detail.get("thresholds", {}).items())]
 
 
 def _flagged_pairs(t: BlockTables, removed: np.ndarray) -> List[Tuple[str, str]]:
@@ -258,7 +294,8 @@ def _write_tsv(path: Path, header: Sequence[str], rows: Iterable[Sequence]) -> N
 def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str], *, universe: Optional[Iterable[str]] = None,
                 lengths: Optional[Dict[str, float]] = None, gene_filter_mode: str = "none", iqr_multiplier: float = 3.0,
                 extreme_percentile: float = 0.99, gene_stat: str = "max", seed: int = 1998,
-                sample_per_cycle: int = 200) -> dict:
+                sample_per_cycle: int = 200, gene_strata: int = 10, gene_k_far: float = 3.0,
+                gene_k_near: float = 1.5) -> dict:
     """Merge the tiles of one block into `out_dir`; returns counts (units, removed units, scored positions, cycles present)."""
     if gene_stat not in GENE_STATS:
         raise ValueError(f"gene_stat must be one of {GENE_STATS}, not {gene_stat!r}")
@@ -267,7 +304,9 @@ def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str],
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     t = BlockTables(tile_dirs, cycles, universe)
-    removed = removal_units(t, lengths or {}, gene_filter_mode, iqr_multiplier, extreme_percentile)
+    detail: dict = {}
+    removed = removal_units(t, lengths or {}, gene_filter_mode, iqr_multiplier, extreme_percentile, detail,
+                            strata=gene_strata, k_far=gene_k_far, k_near=gene_k_near)
     keep = kept_scores(t, removed)
     parts = gene_statistics(t, removed)
 
@@ -280,8 +319,15 @@ def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str],
 
     pq.write_table(position_table(t, keep), out_dir / "positions.parquet", compression="zstd")
     pq.write_table(position_detections(t, keep), out_dir / "detections.parquet", compression="zstd")
+    # The unit table (n_pos, cluster flag, category of the removal) and the per-cycle thresholds: what the gene filter
+    # decided on, kept so any gene rule can be evaluated later without replaying the tiles.
+    pq.write_table(units_table(t, removed, detail.get("flagged")), out_dir / "units.parquet", compression="zstd")
     if (gene_filter_mode or "none").lower() != "none":
         _write_tsv(out_dir / "removed_units.tsv", ("cycle", "Gene"), _flagged_pairs(t, removed))
+        if detail.get("thresholds"):                    # the stratified mode has fences per gene, not per cycle
+            per_cycle = np.bincount(t.u_cycle, minlength=len(t.cycles))
+            _write_tsv(out_dir / "cycle_thresholds.tsv", ("cycle", "n_units", "thr_count", "thr_density"),
+                       threshold_rows(detail, {c: int(n) for c, n in zip(t.cycles, per_cycle)}))
     summary, hist = cycle_summaries(t, removed, keep)
     _write_tsv(out_dir / "cycle_summary.tsv", ("cycle", "direction", "n", "n_genes"), summary)
     _write_tsv(out_dir / "cycle_hist.tsv", ("cycle", "direction", "bin", "n"), hist)

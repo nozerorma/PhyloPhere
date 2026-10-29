@@ -143,7 +143,7 @@ def test_domino_zero_edges_and_empty_report_graph(tmp_path):
     assert direct.returncode==0,direct.stderr
     assert list((tmp_path/'modules').iterdir())==[]
     if not shutil.which('Rscript'):pytest.skip('Rscript required')
-    report=(ROOT/'subworkflows/ENRICHMENT/local/13.AMI_analysis.Rmd').read_text()
+    report=(ROOT/'subworkflows/ENRICHMENT/local/12.AMI_analysis.Rmd').read_text()
     function=report[report.index('build_tool_network <-'):report.index('# Per-gene flag table')]
     result=subprocess.run(['Rscript','-e',function+f'\nstopifnot(igraph::vcount(build_tool_network("{out}/network.sif","{out}/network_edge_scores.tsv"))==0)'],capture_output=True,text=True)
     assert result.returncode==0,result.stderr

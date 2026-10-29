@@ -18,7 +18,9 @@ scored rows (observed = labeling ``b_0``):
 * Gene removal: :func:`gene_removal` drops (labeling, gene) units by
   ``dubious`` (IQR outlier in distinct positions AND at least one train position) and
   ``extreme`` (density above a percentile), each calibrated within its own
-  labeling pool.
+  labeling pool. In ``stratified`` mode both are replaced by one rule on the count against the fences of
+  the unit's length stratum (:func:`stratified_fences`): ``extreme`` above the far fence, ``dubious`` above the
+  near fence with a train position.
 
 Pure Python, no numpy/pandas: the null workers import it too.
 """
@@ -30,8 +32,10 @@ import os
 from array import array
 from typing import Dict, Hashable, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
 
-__all__ = ["ctrain", "train_flags", "GeneUnit", "gene_unit_stats", "gene_removal", "load_gene_lengths"]
+__all__ = ["ctrain", "train_flags", "GeneUnit", "gene_unit_stats", "gene_removal", "load_gene_lengths",
+           "stratified_fences", "STRATIFIED"]
 
+STRATIFIED = "stratified"  # gene_filter_mode of the length-stratified fences
 Unit = Tuple[str, str]  # (labeling, gene)
 
 
@@ -116,11 +120,53 @@ def _percentile_linear(values: Sequence[float], q: float) -> float:
     return xs[lo] + (xs[hi] - xs[lo]) * (rank - lo)
 
 
+def stratified_fences(
+    genes: Sequence[str],
+    counts: Sequence[int],
+    gene_lengths: Mapping[str, float],
+    strata: int = 10,
+    k_far: float = 3.0,
+    k_near: float = 1.5,
+) -> List[Tuple[Optional[float], Optional[float]]]:
+    """(far fence, near fence) of every unit of one pool; (None, None) for a gene without a length.
+
+    The units with a length are ordered by (length, gene) and cut into ``strata`` strata of equal size, so a unit
+    is compared with units of its own length. The fence of a stratum is ``Q3 + k * scale`` with
+    ``scale = max(IQR of the stratum, IQR of all the units with a length)``: the global IQR keeps the fence from
+    collapsing onto Q3 where the counts of a stratum hardly vary.
+    """
+    fences: List[Tuple[Optional[float], Optional[float]]] = [(None, None)] * len(counts)
+    with_length = [i for i, g in enumerate(genes) if (gene_lengths.get(g) or 0) > 0]
+    if not with_length:
+        return fences
+    with_length.sort(key=lambda i: (gene_lengths[genes[i]], genes[i]))
+    n = len(with_length)
+    pool_iqr = (_percentile_linear([counts[i] for i in with_length], 75.0)
+                - _percentile_linear([counts[i] for i in with_length], 25.0))
+    members: List[List[int]] = [[] for _ in range(max(1, strata))]
+    for rank, i in enumerate(with_length):
+        members[rank * len(members) // n].append(i)
+    for idx in members:
+        if not idx:
+            continue
+        values = [counts[i] for i in idx]
+        q1, q3 = _percentile_linear(values, 25.0), _percentile_linear(values, 75.0)
+        scale = max(q3 - q1, pool_iqr)
+        fence = (q3 + k_far * scale, q3 + k_near * scale)
+        for i in idx:
+            fences[i] = fence
+    return fences
+
+
 def gene_unit_stats(
     units: Iterable[GeneUnit],
     gene_lengths: Mapping[str, float],
     iqr_multiplier: float = 3.0,
     extreme_percentile: float = 0.99,
+    mode: str = "both",
+    strata: int = 10,
+    k_far: float = 3.0,
+    k_near: float = 1.5,
 ) -> List[dict]:
     """Per-unit statistics and outlier flags, calibrated within each labeling.
 
@@ -129,6 +175,9 @@ def gene_unit_stats(
     position. ``extreme`` pool: units whose gene has a positive length; density
     ``n_caas / length * 100``; flagged when it exceeds the ``extreme_percentile`` quantile.
     Units without a length have ``length``, ``density`` and ``threshold_extreme`` as None.
+
+    With ``mode == "stratified"`` the thresholds are the fences of :func:`stratified_fences`: ``extreme`` is the
+    far fence (``threshold_extreme``) and ``dubious`` the near fence (``threshold_dubious``) with a train position.
     """
     units = list(units)
     pools: Dict[str, List[GeneUnit]] = {}
@@ -137,6 +186,23 @@ def gene_unit_stats(
 
     out: List[dict] = []
     for labeling, members in pools.items():
+        if (mode or "").lower() == STRATIFIED:
+            fences = stratified_fences([u.gene for u in members], [u.n_caas for u in members], gene_lengths,
+                                       strata, k_far, k_near)
+            for u, (far, near) in zip(members, fences):
+                length = gene_lengths.get(u.gene) if far is not None else None
+                out.append({
+                    "labeling": labeling, "Gene": u.gene,
+                    "n_caas": u.n_caas,
+                    "length": length,
+                    "density": u.n_caas / length * 100.0 if length else None,
+                    "threshold_dubious": near,
+                    "threshold_extreme": far,
+                    "has_clustered": u.has_clustered,
+                    "dubious": near is not None and u.n_caas > near and u.has_clustered,
+                    "extreme": far is not None and u.n_caas > far,
+                })
+            continue
         counts = [u.n_caas for u in members]
         q1, q3 = _percentile_linear(counts, 25.0), _percentile_linear(counts, 75.0)
         thr_dub = q3 + iqr_multiplier * (q3 - q1)
@@ -170,13 +236,22 @@ def gene_removal(
     mode: str = "dubious",
     iqr_multiplier: float = 3.0,
     extreme_percentile: float = 0.99,
+    thresholds: Optional[Dict[str, Tuple[float, Optional[float]]]] = None,
+    strata: int = 10,
+    k_far: float = 3.0,
+    k_near: float = 1.5,
 ) -> Dict[Unit, str]:
     """Units to remove, mapped to their category (``Dubious``, ``Extreme`` or ``Both``).
 
-    ``mode``: ``dubious``, ``extreme``, ``both`` or ``none`` (empty result).
+    ``mode``: ``dubious``, ``extreme``, ``both``, ``stratified`` or ``none`` (empty result).
+    ``stratified`` removes a unit whose count exceeds the far fence of its length stratum (``Extreme``), or the near
+    fence with a train position (``Dubious``); both is ``Both`` (see :func:`stratified_fences`; the fences vary with
+    the gene, so ``thresholds`` stays empty).
+    ``thresholds``, when given, is filled with (count threshold, density threshold) of every labeling; it does not
+    change the decisions.
     """
     mode = (mode or "none").lower()
-    if mode not in ("dubious", "extreme", "both"):
+    if mode not in ("dubious", "extreme", "both", STRATIFIED):
         return {}
     want_dub, want_ext = mode in ("dubious", "both"), mode in ("extreme", "both")
     # Same decision rule as gene_unit_stats, but the stream is held in compact per-pool columns
@@ -191,6 +266,14 @@ def gene_removal(
 
     removed: Dict[Unit, str] = {}
     for labeling, (genes, counts, flags) in pools.items():
+        if mode == STRATIFIED:
+            for g, n, fl, (far, near) in zip(genes, counts, flags, stratified_fences(genes, counts, gene_lengths, strata, k_far, k_near)):
+                if far is None:
+                    continue
+                ext, dub = n > far, n > near and bool(fl)
+                if dub or ext:
+                    removed[(labeling, g)] = "Both" if dub and ext else "Dubious" if dub else "Extreme"
+            continue
         q1, q3 = _percentile_linear(counts, 25.0), _percentile_linear(counts, 75.0)
         thr_dub = q3 + iqr_multiplier * (q3 - q1)
         dens = []
@@ -199,6 +282,8 @@ def gene_removal(
             dens.append(n / length * 100.0 if length and length > 0 else None)
         valid = [d for d in dens if d is not None]
         thr_ext = _percentile_linear(valid, extreme_percentile * 100.0) if valid else None
+        if thresholds is not None:
+            thresholds[labeling] = (thr_dub, thr_ext)
         for g, n, fl, d in zip(genes, counts, flags, dens):
             dub = want_dub and n > thr_dub and bool(fl)
             ext = want_ext and d is not None and d > thr_ext

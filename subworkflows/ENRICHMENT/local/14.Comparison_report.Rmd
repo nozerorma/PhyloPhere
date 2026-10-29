@@ -30,7 +30,7 @@ params:
   ami_module_desc_file:       NULL  # AMI's ami_networks/module_descriptions_all_lists.tsv (optional)
   ami_term_membership_file:   NULL  # AMI's ami_networks/term_threshold_membership.tsv (optional, recurrence table)
   # SCORING's own gene-level table (nominal/BH activity flags + FADE/RER
-  # significance), used by 12.FCS_general_report.Rmd,
+  # significance), used by 11.FCS_general_report.Rmd,
   # reused here for the Interesting Genes/Positions tables.
   fcs_stats_file: NULL
   gene_scores_file: NULL
@@ -225,7 +225,7 @@ if(!is.null(ami_df) && (!"provenance_verified" %in% names(ami_df) || any(!eviden
 ami_disp <- NULL
 
 # AMI term membership recurrence table (term_threshold_membership.tsv from
-# 13.AMI_analysis.Rmd's render_tool_section_nested()) - imported directly
+# 12.AMI_analysis.Rmd's render_tool_section_nested()) - imported directly
 # rather than re-derived, so the table shown here matches the AMI report exactly.
 has_ami_term_membership <- ami_bundle_ok
 ami_term_membership_df  <- if (has_ami_term_membership) readr::read_tsv(params$ami_term_membership_file, show_col_types = FALSE) else NULL
@@ -257,7 +257,7 @@ if(has_ami_term_membership) {
 }
 
 # Per-module leading-edge composition tables (fcs_leading_edge_composition.tsv
-# from 12.FCS_general_report.Rmd) - imported directly so the table shown here
+# from 11.FCS_general_report.Rmd) - imported directly so the table shown here
 # matches the FCS reports exactly.
 le_comp_files <- list.files(params$fcs_le_dir, pattern = "_leading_edge_composition\\.tsv$", full.names = TRUE)
 le_comp_by_mod <- list()
@@ -403,7 +403,7 @@ if(!is.null(position_char_cmp_df) && "fubar_selection" %in% names(position_char_
 
 
 # Per-gene attribute table: nominal/BH activity flags (from the canonical gene
-# evidence, same derivation as 12.FCS_general_report.Rmd) + the gene-level
+# evidence, same derivation as 11.FCS_general_report.Rmd) + the gene-level
 # flag_* columns fcs_stats.tsv already carries (gate/FADE/RER,
 # direction-aware).
 .nominal_cmp <- .05; .fdr_cmp <- .05
@@ -450,7 +450,7 @@ has_gene_candidates <- nrow(gene_attr_df)>0 || has_le || has_ami
 # FCS selection and formal significance are separate. Keep every C>0 term and every
 # formal q.perm hit (including any edge case where the input lacks C), with both labels.
 # fcs_leading_edge.tsv (`le`) is NOT itself restricted to significant terms
-# (12.FCS_general_report.Rmd's leading-edge export has every term), inner_join against
+# (11.FCS_general_report.Rmd's leading-edge export has every term), inner_join against
 # fcs_sig_terms is what restricts fcs_genes to genes belonging to a term each module itself
 # calls significant.
 if (has_multi && !"is_representative" %in% names(fcs_dir_mod)) fcs_dir_mod$is_representative <- NA
@@ -492,7 +492,7 @@ fcs_genes <- if (has_le && has_multi) {
 # "described" alone (not Too small/No enrichment) was never a significance
 # claim, just "STRING could summarise it". Expands each significant module's
 # FULL membership into one row per gene: `all_genes` (every member gene,
-# uncapped, describe_clusters() in 13.AMI_analysis.Rmd) when present, else
+# uncapped, describe_clusters() in 12.AMI_analysis.Rmd) when present, else
 # the older capped `genes` column (top-8 representatives) for
 # module_descriptions_all_lists.tsv files written before all_genes existed.
 # direction is only ever "Top"/"Bottom" here (DOMINO never runs on an
@@ -590,7 +590,7 @@ columns (`%fade_*`/`%rer_*`) in the imported leading-edge composition tables
 below and as evidence annotations in the Interesting Genes/Positions tables further
 down. A gene set is "significant" when `q.perm` (BH on the permulation p of the Wilcoxon-AUC
 test, per ranking and database) is below `r params$fdr_thr` - see
-[12.FCS_general_report.Rmd](12.FCS_general_report.Rmd)'s Methods section for the test, the
+[11.FCS_general_report.Rmd](11.FCS_general_report.Rmd)'s Methods section for the test, the
 separate Redlich rule and the grouping of overlapping sets (`cluster_id`) that
 this report's tables use. CAAS has the global, top and bottom rankings; RER has its signed
 global ranking only.
@@ -608,7 +608,7 @@ report_emit(report_table(report_db_dictionary()))
 # Per-module FCS selection {.tabset .tabset-fade}
 
 Leading-edge composition from each module's own FCS report
-([12.FCS_general_report.Rmd](12.FCS_general_report.Rmd)), imported directly so the
+([11.FCS_general_report.Rmd](11.FCS_general_report.Rmd)), imported directly so the
 tables shown here match the per-module reports exactly. For each set selected by C>0 (separate from formal BH significance), the **percentage of its leading-edge genes** carrying each attribute:
 nominal/BH activity flags and cross-module support. Rows follow the order of the source
 FCS report (C descending, checks descending, then q.perm/p.perm), already baked
@@ -648,7 +648,7 @@ for (dr in c("Global", "Top", "Bottom")) {
 
 ```{r permod_tabs_fallback, eval=has_multi && !has_le_comp, results='asis'}
 # Fallback: list the significant sets of each module when the imported leading-edge
-# composition tables are not available. Same order as 12.FCS_general_report.Rmd:
+# composition tables are not available. Same order as 11.FCS_general_report.Rmd:
 # C descending, checks descending, q.perm, p.perm; separate from formal BH significance.
 thr <- params$fdr_thr
 for (dr in c("global", "top", "bottom")) {
@@ -677,7 +677,7 @@ for (dr in c("global", "top", "bottom")) {
 
 `r if (!has_ami && !has_ami_term_membership) "> **No verified AMI descriptions available; consult method/view availability below.**"`
 
-DOMINO active modules ([informe AMI actual](`r paste0('../html_reports/13.AMI_analysis_',params$traitname,'.html')`)) aren't gene-set-ranked
+DOMINO active modules ([informe AMI actual](`r paste0('../html_reports/12.AMI_analysis_',params$traitname,'.html')`)) aren't gene-set-ranked
 like CAAS/RER FCS, so they don't fold into the FCS tables above. The recurrence table
 below shows each described term and which gene lists it was recovered under - imported
 directly from the AMI report so the table shown here matches that report exactly.

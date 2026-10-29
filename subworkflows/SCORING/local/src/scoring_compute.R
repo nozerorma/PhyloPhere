@@ -719,7 +719,7 @@ write_tsv(gene_out, "gene_scores.tsv")
 cat(sprintf("  gene_scores.tsv: %d rows\n", nrow(gene_out)))
 
 # ── FCS stats table ───────────────────────────────────────────────────────────
-# Read by 12.FCS_general_report.Rmd. Columns: gene; score_<ranking>, zero-floored downstream over the
+# Read by 11.FCS_general_report.Rmd. Columns: gene; score_<ranking>, zero-floored downstream over the
 # cleaned_background universe; flag_<name>, per-gene booleans. score_global, score_top and score_bottom
 # are the *_all gene scores (magnitude); the top and bottom ones use only the positions of that side.
 # The flags annotate the leading edge and never gate the FCS input.

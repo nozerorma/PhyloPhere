@@ -47,7 +47,7 @@ params:
   .note p { margin: 4px 0; }
 </style>
 
-<!-- 16.CAAS_significance_report.Rmd — Evidence (p, BH q, resolution) of the positive CAAS positions and genes of one trait. -->
+<!-- 15.CAAS_significance_report.Rmd — Evidence (p, BH q, resolution) of the positive CAAS positions and genes of one trait. -->
 <!-- PhyloPhere | subworkflows/CT_META_CAAS/local/ -->
 <!-- Author: Miguel Ramon (miguel.ramon@upf.edu) -->
 

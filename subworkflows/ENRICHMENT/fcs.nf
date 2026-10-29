@@ -9,7 +9,7 @@
  *  RERconverge::fastwilcoxGMTall, with permulation p and BH correction)
  *  over the GMT files of subworkflows/ENRICHMENT/dat.
  *
- *  The report processes render 12.FCS_general_report.Rmd against a generic stats TSV
+ *  The report processes render 11.FCS_general_report.Rmd against a generic stats TSV
  *  (gene, score_<ranking> and flag_<name> columns) and a universe file (the
  *  cleaned background for CAAS, genes without signal floored to 0). RER ranks only
  *  genes with a non-missing statistic, retaining measured zeros.
@@ -22,7 +22,7 @@
  *  cross-module corroboration flag on the leading edge of the CAAS and RER rankings.
  *
  *  Consumes:  stats TSV, universe file, permutations file, GMT directory
- *  Produces:  12.FCS_*.html, fcs_results/ (fcs_all_results.tsv, fcs_leading_edge.tsv,
+ *  Produces:  11.FCS_*.html, fcs_results/ (fcs_all_results.tsv, fcs_leading_edge.tsv,
  *             fcs_leading_edge_composition.tsv), fcs_enrich_merged.tsv
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
@@ -48,7 +48,7 @@ process SCORING_FCS_REPORT {
     path report_metadata     // fcs_report_metadata.json from FCS_CONCAT; staged beside enrich_file, which the report looks it up by
 
     output:
-    path "12.FCS_scoring_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "11.FCS_scoring_${params.traitname ?: 'unknown_trait'}.html", emit: report
     path "fcs_results/**",                       emit: fcs_results,      optional: true
     path "fcs_results/fcs_all_results.tsv",      emit: fcs_all_results,  optional: true
     path "fcs_results/fcs_leading_edge.tsv",     emit: fcs_leading_edge, optional: true
@@ -64,12 +64,12 @@ process SCORING_FCS_REPORT {
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     def enrich_file_arg = (enrich_file.name =~ /^NO_/) ? 'NULL' : "'${enrich_file}'"
-    def report_sources = ['12.FCS_general_report.Rmd','src/term_blocks.R','src/fcs_selection.R','src/evidence_flags.R','src/report_presentation.R'].collect { file("${local_dir}/${it}").text }.join('\n')
+    def report_sources = ['11.FCS_general_report.Rmd','src/term_blocks.R','src/fcs_selection.R','src/evidence_flags.R','src/report_presentation.R'].collect { file("${local_dir}/${it}").text }.join('\n')
     def report_hash = java.security.MessageDigest.getInstance('SHA-256').digest(report_sources.getBytes('UTF-8')).encodeHex().toString()
     def render = """
         # FCS reporting source SHA256: ${report_hash}
         rmarkdown::render(
-            '12.FCS_general_report.Rmd',
+            '11.FCS_general_report.Rmd',
             params = list(
                 stats_file    = '${fcs_stats}',
                 universe_file = '${universe}',
@@ -86,7 +86,7 @@ process SCORING_FCS_REPORT {
                 traitname     = '${traitname}',
                 enrich_file   = ${enrich_file_arg}
             ),
-            output_file = '12.FCS_scoring_${traitname}.html'
+            output_file = '11.FCS_scoring_${traitname}.html'
         )
     """
     if (params.use_singularity || params.use_apptainer) {
@@ -140,12 +140,12 @@ process RER_FCS_REPORT {
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     def enrich_file_arg = (enrich_file.name =~ /^NO_/) ? 'NULL' : "'${enrich_file}'"
-    def report_sources = ['12.FCS_general_report.Rmd','src/term_blocks.R','src/fcs_selection.R','src/evidence_flags.R','src/report_presentation.R'].collect { file("${local_dir}/${it}").text }.join('\n')
+    def report_sources = ['11.FCS_general_report.Rmd','src/term_blocks.R','src/fcs_selection.R','src/evidence_flags.R','src/report_presentation.R'].collect { file("${local_dir}/${it}").text }.join('\n')
     def report_hash = java.security.MessageDigest.getInstance('SHA-256').digest(report_sources.getBytes('UTF-8')).encodeHex().toString()
     def render = """
         # FCS reporting source SHA256: ${report_hash}
         rmarkdown::render(
-            '12.FCS_general_report.Rmd',
+            '11.FCS_general_report.Rmd',
             params = list(
                 stats_file    = '${fcs_stats}',
                 universe_file = '${universe}',
@@ -188,7 +188,7 @@ process RER_FCS_REPORT {
 // scoped per database, so the GMT set can be split across independent tasks and the
 // partial tables row-concatenated without any reconciliation: the result is exact.
 // fcs_compute.R (subworkflows/ENRICHMENT/local/src/) is the batchable entry point.
-// 12.FCS_general_report.Rmd only renders the merged table: the significance
+// 11.FCS_general_report.Rmd only renders the merged table: the significance
 // ranking and the GMT description join need the full cross-database
 // table, so they stay in the Rmd.
 process FCS_COMPUTE_BATCHED {

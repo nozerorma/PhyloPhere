@@ -219,13 +219,13 @@ class WorkflowMap {
             [ id: 'scoring',     name: 'CAAS Scoring',                    type: 'reporting', ran: ctx.scoring,
               filesDirs: ["${outdir}/scoring",
                           "${outdir}/scoring/gene_lists"],
-              htmlCandidates: ["${outdir}/html_reports/11.Scoring_report.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/10.Scoring_report.html"] ],
 
-            // CAAS_SIGNIFICANCE_REPORT (16.CAAS_significance_report.Rmd) runs after scoring:
+            // CAAS_SIGNIFICANCE_REPORT (15.CAAS_significance_report.Rmd) runs after scoring:
             // it joins the meta_caas table of ct_signif with position_scores.tsv (p.emp, p.adj_bh).
             [ id: 'ct_signif_sig', name: 'CT significance (post-scoring)', type: 'reporting', ran: ctx.ctSignifSig,
               filesDirs: ["${outdir}/meta_caas/significance"],
-              htmlCandidates: ["${outdir}/html_reports/16.CAAS_significance_report.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/15.CAAS_significance_report.html"] ],
 
             // ENRICHMENT (workflows/enrichment.nf) runs when --scoring and --enrichment are set.
             // FCS covers the CAAS ranking ('fcs') and the RER ranking ('scoring/rer'); FADE has
@@ -234,8 +234,8 @@ class WorkflowMap {
             [ id: 'fcs',         name: 'Functional enrichment (FCS)',     type: 'reporting', ran: ctx.fcs,
               filesDirs: ["${outdir}/fcs",
                           "${outdir}/scoring/rer"],
-              htmlCandidates: ["${outdir}/html_reports/12.FCS_scoring.html",
-                               "${outdir}/html_reports/12.FCS_rer.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/11.FCS_scoring.html",
+                               "${outdir}/html_reports/11.FCS_rer.html"] ],
 
             [ id: 'ami',         name: 'AMI (DOMINO active modules)',     type: 'reporting', ran: ctx.ami,
               filesDirs: ["${outdir}/ami",
@@ -247,9 +247,9 @@ class WorkflowMap {
                           "${outdir}/rerconverge/ami",
                           "${outdir}/selection/fade/top/ami",
                           "${outdir}/selection/fade/bottom/ami"],
-              htmlCandidates: ["${outdir}/html_reports/13.AMI_analysis.html",
-                               "${outdir}/html_reports/13.AMI_rer.html",
-                               "${outdir}/html_reports/13.AMI_fade.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/12.AMI_analysis.html",
+                               "${outdir}/html_reports/12.AMI_rer.html",
+                               "${outdir}/html_reports/12.AMI_fade.html"] ],
 
             [ id: 'posenrich', name: 'POSENRICH registry and level 2',   type: 'reporting', ran: ctx.posenrich,
               filesDirs: ["${outdir}/posenrich/registry",
@@ -257,12 +257,12 @@ class WorkflowMap {
                           "${outdir}/posenrich/universe",
                           "${outdir}/posenrich/within_gene",
                           "${outdir}/posenrich/proximity"],
-              htmlCandidates: ["${outdir}/html_reports/14.POSENRICH_report.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/13.POSENRICH_report.html"] ],
 
             [ id: 'compare',     name: 'Cross-module comparison',         type: 'reporting', ran: ctx.compare,
               filesDirs: ["${outdir}/compare",
                           "${outdir}/compare/compare_results"],
-              htmlCandidates: ["${outdir}/html_reports/15.Comparison_report.html"] ]
+              htmlCandidates: ["${outdir}/html_reports/14.Comparison_report.html"] ]
 
         ].collect { st -> st + [color: colors[st.type]] }
 

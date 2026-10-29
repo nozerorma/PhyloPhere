@@ -145,11 +145,11 @@ def test_posenrich_nextflow_smoke(tmp_path, null_source, level1):
                 'proximity/proximity_genomic_distances.tsv', 'proximity/proximity_genomic_summary.tsv',
                 'proximity/proximity_protein_hits.tsv', 'proximity/proximity_protein_by_gene.tsv'):
         assert (pos / rel).exists(), rel
-    # Report 14 is published in posenrich/ and html_reports/, and states level 1 when it did not run.
+    # Report 13 is published in posenrich/ and html_reports/, and states level 1 when it did not run.
     for folder in (pos, tmp_path / 'out' / 'html_reports'):
-        reports = list(folder.glob('14.POSENRICH_report_smoke.html'))
+        reports = list(folder.glob('13.POSENRICH_report_smoke.html'))
         assert reports, f'POSENRICH report not published in {folder}'
-    text = (pos / '14.POSENRICH_report_smoke.html').read_text()
+    text = (pos / '13.POSENRICH_report_smoke.html').read_text()
     assert 'Level 2: concentration within genes' in text
     assert ('Level 1: not available' in text) == (level1 == 'false')
     if level1 == 'true':
@@ -234,8 +234,8 @@ def test_enrichment_reads_optional_characterization(tmp_path, with_char):
     result = run_nextflow('.smoke_enrichment.nf', ENRICHMENT_MAIN, tmp_path, args)
     log = result.stdout + result.stderr
     assert result.returncode == 0, log[-5000:]
-    assert list((tmp_path / 'out' / 'html_reports').glob('15.Comparison_report_*.html'))
-    compare_tasks = [p.parent for p in (tmp_path / 'work').rglob('.command.sh') if '15.Comparison_report.Rmd' in p.read_text()]
+    assert list((tmp_path / 'out' / 'html_reports').glob('14.Comparison_report_*.html'))
+    compare_tasks = [p.parent for p in (tmp_path / 'work').rglob('.command.sh') if '14.Comparison_report.Rmd' in p.read_text()]
     assert len(compare_tasks) == 1
     staged = compare_tasks[0] / 'position_characterization.tsv'
     if with_char:

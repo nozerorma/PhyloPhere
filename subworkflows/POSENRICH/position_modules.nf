@@ -173,10 +173,10 @@ process POSENRICH_REPORT {
     path proximity,        stageAs: 'proximity'
 
     output:
-    path "14.POSENRICH_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "13.POSENRICH_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
 
     script:
-    def source_hash = modularSourceHash(['14.POSENRICH_report.Rmd']) + modularSourceHash(['../../ENRICHMENT/local/src/report_presentation.R'])
+    def source_hash = modularSourceHash(['13.POSENRICH_report.Rmd']) + modularSourceHash(['../../ENRICHMENT/local/src/report_presentation.R'])
     def local_dir = "${baseDir}/subworkflows/POSENRICH/local"
     def traitname = params.traitname ?: 'unknown_trait'
     def fdr = params.accumulation_fdr ?: 0.1
@@ -187,7 +187,7 @@ process POSENRICH_REPORT {
     cp ${baseDir}/subworkflows/ENRICHMENT/local/src/report_presentation.R src/
     Rscript -e "
         rmarkdown::render(
-            '14.POSENRICH_report.Rmd',
+            '13.POSENRICH_report.Rmd',
             params = list(
                 universe_dir         = 'universe',
                 registry_dir         = 'registry',
@@ -198,7 +198,7 @@ process POSENRICH_REPORT {
                 traitname            = '${traitname}',
                 fdr_threshold        = ${fdr}
             ),
-            output_file = '14.POSENRICH_report_${traitname}.html'
+            output_file = '13.POSENRICH_report_${traitname}.html'
         )
     "
     """

@@ -1,4 +1,4 @@
-# Render of the POSENRICH report (14.POSENRICH_report.Rmd) on a minimal pipeline fixture, with every component,
+# Render of the POSENRICH report (13.POSENRICH_report.Rmd) on a minimal pipeline fixture, with every component,
 # without level 1 and level 2, and with the held-out-cycle validation table.
 # Usage: Rscript tests/test_posenrich_report.R <repo> <scratch>
 a <- commandArgs(TRUE)
@@ -75,7 +75,7 @@ run_py('posenrich_proximity.py', c('--registry_dir', file.path(scratch, 'registr
 
 # 2. Render. The Rmd is rendered in place, as the process does in its work directory.
 suppressPackageStartupMessages(library(rmarkdown))
-rmd <- file.path(root, 'subworkflows/POSENRICH/local/14.POSENRICH_report.Rmd')
+rmd <- file.path(root, 'subworkflows/POSENRICH/local/13.POSENRICH_report.Rmd')
 render <- function(name, ...) {
   args <- modifyList(list(universe_dir = file.path(scratch, 'universe'), registry_dir = file.path(scratch, 'registry'),
                           characterization_dir = file.path(scratch, 'characterization'),

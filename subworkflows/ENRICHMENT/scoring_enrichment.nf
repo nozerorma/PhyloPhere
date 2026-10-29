@@ -7,12 +7,12 @@
  *  SCORING_AMI_REPORT, SCORING_COMPARE_REPORT: reports that sit on top of the SCORING
  *  gene lists and the FCS results.
  *
- *  SCORING_AMI_REPORT renders 13.AMI_analysis.Rmd: DOMINO active-module identification
+ *  SCORING_AMI_REPORT renders 12.AMI_analysis.Rmd: DOMINO active-module identification
  *  on the SCORING slice gene lists, with STRING used only for ID mapping and for the
  *  functional label of each module. FADE and RER enter with their own gene lists,
  *  background and DOMINO network. Ranked enrichment is in SCORING_FCS_REPORT (fcs.nf).
  *
- *  SCORING_COMPARE_REPORT renders 15.Comparison_report.Rmd: top versus bottom
+ *  SCORING_COMPARE_REPORT renders 14.Comparison_report.Rmd: top versus bottom
  *  comparison of the FCS outputs (CAAS and RER) with the AMI and gene/position-level
  *  evidence tables.
  *
@@ -73,7 +73,7 @@ process SCORING_AMI_REPORT {
     // CAAS inputs above keep those names, so stageAs gives the FADE and RER copies
     // distinct names to avoid a name collision when several tools run together.
     path fade_gene_lists
-    // The staged background has a '.universe' extension, not '.txt': 13.AMI_analysis.Rmd
+    // The staged background has a '.universe' extension, not '.txt': 12.AMI_analysis.Rmd
     // detects the CAAS gene lists as every *.txt in the task root (excluding the CAAS
     // background by name), so a FADE or RER background staged as *.txt would be read
     // as an extra CAAS gene list.
@@ -93,7 +93,7 @@ process SCORING_AMI_REPORT {
     val rer_ran
 
     output:
-    path "13.AMI_analysis_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "12.AMI_analysis_${params.traitname ?: 'unknown_trait'}.html", emit: report
     path "ami_results/**",                     emit: ami_results,             optional: true
     path "ami_summary/**",                     emit: ami_summary,             optional: true
     path "ami_plots/**",                       emit: ami_plots,               optional: true
@@ -110,12 +110,12 @@ process SCORING_AMI_REPORT {
     def net_score = params.domino_network_score_thr ?: 700
     def bg_name   = background.getName().replace("'", "\\'")
     def gs_arg    = (gene_scores.name =~ /^NO_GENE_SCORES/) ? 'NULL' : "'${gene_scores}'"
-    def ami_source_hash = ['13.AMI_analysis.Rmd', 'src/ami_evidence.R','src/report_presentation.R','src/term_blocks.R', 'src/prepare_ami_lists.py'].collect {
+    def ami_source_hash = ['12.AMI_analysis.Rmd', 'src/ami_evidence.R','src/report_presentation.R','src/term_blocks.R', 'src/prepare_ami_lists.py'].collect {
         file("${local_dir}/${it}").text
     }.join('\n').with { java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString() }
 
     // A tool that did not run gets NULL for all its parameters, so that
-    // 13.AMI_analysis.Rmd skips its section.
+    // 12.AMI_analysis.Rmd skips its section.
     def fade_ok    = fade_ran
     def rer_ok     = rer_ran
     def fade_bg_arg      = fade_ok ? "'${fade_background}'"          : 'NULL'
@@ -164,7 +164,7 @@ process SCORING_AMI_REPORT {
         # AMI report source SHA256: ${ami_source_hash}
         ${ami_rscript} -e "
             rmarkdown::render(
-                '13.AMI_analysis.Rmd',
+                '12.AMI_analysis.Rmd',
                 params = list(
                     gene_list_files     = list.files('caas_lists', pattern='[.]txt', full.names=TRUE),
                     background_file     = '${background}',
@@ -196,7 +196,7 @@ process SCORING_AMI_REPORT {
                     rer_domino_edge_scores_file = ${rer_edge_arg},
                     seed                     = '${params.seed ?: 1998}'
                 ),
-                output_file = '13.AMI_analysis_${traitname}.html'
+                output_file = '12.AMI_analysis_${traitname}.html'
             )
         "
     """
@@ -237,7 +237,7 @@ process SCORING_COMPARE_REPORT {
     // convergence section. NO_LEADING_EDGE sentinel when the module's report did not run.
     path caas_le,   stageAs: 'caas_leading_edge.tsv'
     path rer_le,    stageAs: 'rer_leading_edge.tsv'
-    // Leading-edge composition tables exported by each module's 12.FCS_general_report.Rmd.
+    // Leading-edge composition tables exported by each module's 11.FCS_general_report.Rmd.
     path caas_le_comp, stageAs: 'caas_leading_edge_composition.tsv'
     path rer_le_comp,  stageAs: 'rer_leading_edge_composition.tsv'
     // Optional inputs from the AMI module; NO_* sentinels when the module did not run.
@@ -264,7 +264,7 @@ process SCORING_COMPARE_REPORT {
     path canonical_metadata, stageAs: 'canonical_gene_metadata.json'
 
     output:
-    path "15.Comparison_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "14.Comparison_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
     path "compare_results/**", emit: compare_results, optional: true
 
     script:
@@ -284,7 +284,7 @@ process SCORING_COMPARE_REPORT {
     def fade_sites_top_arg    = (fade_sites_top.name =~ /^NO_/)    ? 'NULL' : "'${fade_sites_top}'"
     def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_/) ? 'NULL' : "'${fade_sites_bottom}'"
     def position_char_arg     = (position_char.name =~ /^NO_/)     ? 'NULL' : "'${position_char}'"
-    def compare_source_hash = ['15.Comparison_report.Rmd', 'src/fcs_selection.R', 'src/evidence_flags.R','src/report_presentation.R','src/ami_evidence.R'].collect {
+    def compare_source_hash = ['14.Comparison_report.Rmd', 'src/fcs_selection.R', 'src/evidence_flags.R','src/report_presentation.R','src/ami_evidence.R'].collect {
         file("${local_dir}/${it}").text
     }.join('\n').with { java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString() }
 
@@ -293,7 +293,7 @@ process SCORING_COMPARE_REPORT {
         # Comparison report source SHA256: ${compare_source_hash}
         ${compare_rscript} -e "
             rmarkdown::render(
-                '15.Comparison_report.Rmd',
+                '14.Comparison_report.Rmd',
                 params = list(
                     fcs_dir    = 'cmp_fcs',
                     fcs_le_dir = 'cmp_fcs_le',
@@ -317,7 +317,7 @@ process SCORING_COMPARE_REPORT {
                     position_characterization_file = ${position_char_arg},
                     seed               = '${params.seed ?: 1998}'
                 ),
-                output_file = '15.Comparison_report_${traitname}.html'
+                output_file = '14.Comparison_report_${traitname}.html'
             )
         "
     """

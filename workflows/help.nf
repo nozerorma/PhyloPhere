@@ -62,7 +62,7 @@ Module flag              Description
 --ct_postproc             Cluster/gene-level filtering + characterization report.
 --posenrich               POSENRICH: level 1 tests the share of the detections held by each
                           gene against the null cycles; the position registry, level 2 and
-                          report 14 need --scoring.
+                          report 13 need --scoring.
 --vep                     Annotate scored positions with PrimateAI-3D, COSMIC and Ensembl VEP.
                           On by default; requires --scoring (use --vep false otherwise).
 --fade                    HyPhy FADE directional (top/bottom) selection scan.
@@ -217,9 +217,12 @@ Usage:
 --filter_maxcaas                          <FLOAT 0-1>                          0.7   (filter mode)
 --caas_map_dir                              <"map_dir">                          ""    (trimmer MAP tables: trains in untrimmed columns, observed and null; required by --vep)
 --remove_caas_clusters                      <BOOLEAN>                            true  (discard spatial clusters)
---gene_filter_mode                          <"none|extreme|dubious|both">        "dubious"
+--gene_filter_mode                          <"none|extreme|dubious|both|stratified">  "dubious"
 --extreme_threshold                           <FLOAT 0-1>                          0.99
 --iqr_multiplier                                <FLOAT>                              3.0
+--gene_filter_strata                         <INTEGER>                            10    (stratified mode: gene-length strata)
+--gene_filter_k_far                           <FLOAT>                              3.0   (stratified mode: far fence, removes the gene)
+--gene_filter_k_near                          <FLOAT>                              1.5   (stratified mode: near fence, removes the gene only with a cluster train)
 '''
 }
 
@@ -235,12 +238,12 @@ is a test of whether a gene holds a larger share of the detections than it does 
 (calibrated with them). The position registry, its characterization, level 2 (concentration of the
 signal inside genes, calibrated with the null cycles) and the overlap and proximity components read SCORING's
 tables and need --scoring. Without --scoring only posenrich/universe and posenrich/accumulation are written; with
-it the run adds registry, characterization, within_gene and proximity, and report 14
-(14.POSENRICH_report_<trait>.html). Level 1 needs --ct_postproc or --accumulation_background_input.
+it the run adds registry, characterization, within_gene and proximity, and report 13
+(13.POSENRICH_report_<trait>.html). Level 1 needs --ct_postproc or --accumulation_background_input.
 
 Usage:
 --posenrich                          <true|false>                   false
---accumulation_fdr                   <FLOAT 0-1>                    0.1   (q threshold marked in report 14 for levels 1 and 2; q itself does not depend on it)
+--accumulation_fdr                   <FLOAT 0-1>                    0.1   (q threshold marked in report 13 for levels 1 and 2; q itself does not depend on it)
 --accumulation_caas_input            <"filtered_discovery.tsv">     null  (standalone entry: observed positives of U)
 --accumulation_background_input      <"background_file">            null  (standalone entry: gene list of U)
 --posenrich_background_file          <"background_file">            null  (tested positions, background.output)
@@ -388,10 +391,10 @@ Standalone mode (provide inputs directly):
 --scoring_vep_cosmic                                  <"cosmic_scores.tsv">                ""    (also the precomputed-VEP fallback of the comparison report, see enrichment.nf)
 --scoring_vep_ensembl                                <"ensembl_vep_mapped.tsv">          ""    (also the precomputed-VEP fallback of the comparison report, see enrichment.nf)
 --caas_null_dir                                          <"caas_permulation/">          ""    (caas_permulation/ directory of a prior run: the null of SCORING and POSENRICH)
---caas_perm_harvest_file, --caas_perm_manifest_file   <"permulation_harvest.tsv", "permulation_manifest.tsv">  ""  (null harvest and design panels of report 11)
+--caas_perm_harvest_file, --caas_perm_manifest_file   <"permulation_harvest.tsv", "permulation_manifest.tsv">  ""  (null harvest and design panels of report 10)
 
 Main outputs (scoring/): position_scores.tsv, gene_scores.tsv, fcs_stats*.tsv, gene_lists/,
-position_lists/ and report 11. Gene columns: gene_caas_score (+ _top, _bottom), caas_p.gen,
+position_lists/ and report 10. Gene columns: gene_caas_score (+ _top, _bottom), caas_p.gen,
 rer_min_pval, rer_acceleration, fade_max_bf_<direction>.
 """
 }
@@ -424,7 +427,7 @@ Usage:
 --caas_permulation_enrichment                    <true|false>             true
 
 DOMINO / STRING:
---string_species                    <NCBI taxon id>          9606   (taxon of the report 13 STRING labels; the DOMINO network is human)
+--string_species                    <NCBI taxon id>          9606   (taxon of the report 12 STRING labels; the DOMINO network is human)
 --string_db_dir                           <"dir">                  ""     (pre-downloaded STRING files, checked before any download)
 --string_cache_dir                          <"dir">                  ""     (download cache; blank = ~/.cache/phylophere/string)
 --ami_description_fdr                         <FLOAT 0-1>              0.10   (FDR of the descriptive STRING labels)

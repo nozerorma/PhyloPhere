@@ -116,10 +116,13 @@ class DisambiguationConfig(ModuleConfigBase):
     # Exploratory-mode (parameter sweep) threshold lists.
     minlen_values: str = "2,3,4,10"  # --minlen_values
     maxcaas_values: str = "0.6,0.7,0.8"  # --maxcaas_values
-    gene_filter_mode: str = "dubious"  # --gene_filter_mode (none|extreme|dubious|both)
+    gene_filter_mode: str = "dubious"  # --gene_filter_mode (none|extreme|dubious|both|stratified)
     remove_caas_clusters: bool = True  # --remove_caas_clusters (discard spatial clusters)
     extreme_threshold: str = "0.99"  # --extreme_threshold
     iqr_multiplier: str = "3.0"  # --iqr_multiplier
+    gene_filter_strata: str = "10"  # --gene_filter_strata (stratified mode)
+    gene_filter_k_far: str = "3.0"  # --gene_filter_k_far (stratified mode)
+    gene_filter_k_near: str = "1.5"  # --gene_filter_k_near (stratified mode)
 
     # Precomputed inputs (meta_caas_from, disambiguation_input, disambiguation_dir,
     # background_input) are derived from PrecomputedConfig.

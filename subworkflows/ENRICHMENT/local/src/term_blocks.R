@@ -2,7 +2,7 @@
 # term_blocks.R — Thematic blocks of enriched terms (FCS gene sets and AMI module terms).
 # PhyloPhere | subworkflows/ENRICHMENT/local/src/
 # =============================================================================
-# Sourced by: 12.FCS_general_report.Rmd and 13.AMI_analysis.Rmd. Defines functions only;
+# Sourced by: 11.FCS_general_report.Rmd and 12.AMI_analysis.Rmd. Defines functions only;
 # it needs no package.
 #
 # Terms are grouped after inference; p/q and calls are never modified. All terms remain

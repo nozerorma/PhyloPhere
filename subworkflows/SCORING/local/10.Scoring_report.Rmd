@@ -74,7 +74,7 @@ params:
   }
 </style>
 
-<!-- 11.Scoring_report.Rmd — Position-level and gene-level CAAS scores of one trait, with FADE and RERConverge evidence. -->
+<!-- 10.Scoring_report.Rmd — Position-level and gene-level CAAS scores of one trait, with FADE and RERConverge evidence. -->
 <!-- PhyloPhere | subworkflows/SCORING/local/ -->
 <!-- Author: Miguel Ramon (miguel.ramon@upf.edu) -->
 
@@ -376,11 +376,11 @@ Related enrichment and annotation reports from this run:
 .trait <- if (is.null(params$traitname) || !nzchar(params$traitname)) "unknown_trait" else params$traitname
 .companions <- tibble::tribble(
   ~Report,                              ~File,
-  "FCS - CAAS (this scoring run)",      sprintf("12.FCS_scoring_%s.html",    .trait),
-  "FCS - RERconverge (+ p.perm)",       sprintf("12.FCS_rer_%s.html",        .trait),
-  "AMI (DOMINO active modules)",        sprintf("13.AMI_analysis_%s.html", .trait),
-  "POSENRICH - universe, accumulation, within-gene concentration and proximity", sprintf("14.POSENRICH_report_%s.html", .trait),
-  "COMPARE - cross-module overview",    sprintf("15.Comparison_report_%s.html",.trait)
+  "FCS - CAAS (this scoring run)",      sprintf("11.FCS_scoring_%s.html",    .trait),
+  "FCS - RERconverge (+ p.perm)",       sprintf("11.FCS_rer_%s.html",        .trait),
+  "AMI (DOMINO active modules)",        sprintf("12.AMI_analysis_%s.html", .trait),
+  "POSENRICH - universe, accumulation, within-gene concentration and proximity", sprintf("13.POSENRICH_report_%s.html", .trait),
+  "COMPARE - cross-module overview",    sprintf("14.Comparison_report_%s.html",.trait)
 )
 cat(paste0("- [", .companions$Report, "](../html_reports/", .companions$File, ")", collapse = "\n"))
 cat("\n")

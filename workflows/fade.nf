@@ -293,7 +293,7 @@ workflow FADE {
         // group instead). Its standalone AMI report (DOMINO active modules) was
         // removed too — never produced usable output; there's no separate --ami
         // flag anymore. FADE's own gene lists/background per direction are always
-        // computed automatically and feed the unified 13.AMI_analysis.Rmd
+        // computed automatically and feed the unified 12.AMI_analysis.Rmd
         // (ENRICHMENT workflow) via gene_lists_bg_*/gene_lists_sig_* below.
         def run_top    = wanted_directions.contains('top')
         def run_bottom = wanted_directions.contains('bottom')
@@ -352,7 +352,7 @@ workflow FADE {
         sites_csv_top    = sites_csv_top_ch
         sites_csv_bottom = sites_csv_bottom_ch
         // FADE's own per-direction gene universe (background.txt) + its
-        // significant-gene list -- feeds the unified 13.AMI_analysis.Rmd's
+        // significant-gene list -- feeds the unified 12.AMI_analysis.Rmd's
         // FADE section (Top/Bottom tabs; Global = union of both, built in
         // enrichment.nf since it needs both directions at once).
         gene_lists_bg_top     = fade_gene_lists_bg_top_out     ?: Channel.empty()

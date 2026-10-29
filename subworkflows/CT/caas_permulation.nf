@@ -64,12 +64,12 @@ def caasTileArgs(gene_lengths) {
     return "--postproc-filter --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} ${params.remove_caas_clusters ? '' : '--keep-clusters'} ${map_arg}"
 }
 
-// CLI arguments that give merge_null_block.py the observed gene removal (dubious and extreme genes, each cycle against its
-// own units). Empty when the filters are off or the gene annotation file is a NO_* sentinel.
+// CLI arguments that give merge_null_block.py the observed gene removal (dubious and extreme genes, or the length-stratified
+// fences, each cycle against its own units). Empty when the filters are off or the gene annotation file is a NO_* sentinel.
 def caasRemovalArgs(gene_lengths) {
     if (!caasPostprocOn() || gene_lengths.name =~ /^NO_/) return ""
     def map_arg = params.caas_map_dir ? "--map-dir '${params.caas_map_dir}'" : ""
-    return "--gene-lengths ${gene_lengths} ${map_arg} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold}"
+    return "--gene-lengths ${gene_lengths} ${map_arg} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} --gene-strata ${params.gene_filter_strata} --gene-k-far ${params.gene_filter_k_far} --gene-k-near ${params.gene_filter_k_near}"
 }
 
 // ── 1. First N permulated labelings in cycle order, plus b_0, split into cycle blocks ─────────

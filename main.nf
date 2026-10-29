@@ -850,7 +850,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
 
             // RER's own gene universe + gene lists (significant/accelerating/
             // decelerating) and FADE's per-direction universe + significant
-            // gene lists -- feed the unified 13.AMI_analysis.Rmd's FADE/RER
+            // gene lists -- feed the unified 12.AMI_analysis.Rmd's FADE/RER
             // sections (see ENRICHMENT workflow). Only populated when the
             // respective tool actually ran this invocation --
             // OR (FADE, mirroring rer_continuous_file's precomputed-input

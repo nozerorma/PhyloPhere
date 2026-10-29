@@ -71,7 +71,7 @@ process CAAS_META_CAAS_REPORT {
 
 // ── Significance report ──────────────────────────────────────────────────────
 
-// Renders 16.CAAS_significance_report.Rmd; called from main.nf. It runs after SCORING, because it joins the
+// Renders 15.CAAS_significance_report.Rmd; called from main.nf. It runs after SCORING, because it joins the
 // p.emp and p.adj_bh of position_scores.tsv onto the CAAS table; the join logic is in
 // the Rmd. The p-values are informative and no threshold is applied. Not to be confused with
 // CAAS_META_CAAS_REPORT, which runs upstream of SCORING.
@@ -98,7 +98,7 @@ process CAAS_SIGNIFICANCE_REPORT {
     def local_dir = "${baseDir}/subworkflows/CT_META_CAAS/local"
     def outdir = "${params.outdir}/meta_caas/significance"
     def report_hash = java.security.MessageDigest.getInstance('SHA-256')
-        .digest((file("${local_dir}/16.CAAS_significance_report.Rmd").text + file("${baseDir}/subworkflows/ENRICHMENT/local/src/report_presentation.R").text).getBytes('UTF-8')).encodeHex().toString()
+        .digest((file("${local_dir}/15.CAAS_significance_report.Rmd").text + file("${baseDir}/subworkflows/ENRICHMENT/local/src/report_presentation.R").text).getBytes('UTF-8')).encodeHex().toString()
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -110,7 +110,7 @@ process CAAS_SIGNIFICANCE_REPORT {
         # Render R Markdown report
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                '16.CAAS_significance_report.Rmd',
+                '15.CAAS_significance_report.Rmd',
                 params = list(
                     meta_caas_input = '${meta_caas}',
                     position_scores_input = '${position_scores}',
@@ -122,7 +122,7 @@ process CAAS_SIGNIFICANCE_REPORT {
                     output_dir = '${outdir}',
                     seed = '${params.seed ?: 1998}'
                 ),
-                output_file = '16.CAAS_significance_report.html'
+                output_file = '15.CAAS_significance_report.html'
             )
         "
         """
@@ -136,7 +136,7 @@ process CAAS_SIGNIFICANCE_REPORT {
         # Render R Markdown report
         Rscript -e "
             rmarkdown::render(
-                '16.CAAS_significance_report.Rmd',
+                '15.CAAS_significance_report.Rmd',
                 params = list(
                     meta_caas_input = '${meta_caas}',
                     position_scores_input = '${position_scores}',
@@ -148,7 +148,7 @@ process CAAS_SIGNIFICANCE_REPORT {
                     output_dir = '${outdir}',
                     seed = '${params.seed ?: 1998}'
                 ),
-                output_file = '16.CAAS_significance_report.html'
+                output_file = '15.CAAS_significance_report.html'
             )
         "
         """

@@ -25,7 +25,7 @@ enrich <- data.frame(ranking = c("global", "top", "bottom", "custom"),
 for (scenario in c("significant", "no_significant_sets")) {
   wd <- file.path(scratch, scenario)
   dir.create(wd, recursive = TRUE, showWarnings = FALSE)
-  file.copy(file.path(local_dir, "12.FCS_general_report.Rmd"), wd, overwrite = TRUE)
+  file.copy(file.path(local_dir, "11.FCS_general_report.Rmd"), wd, overwrite = TRUE)
   dir.create(file.path(wd, "src"), showWarnings = FALSE)
   file.copy(file.path(local_dir, "src", c("fcs_enrich.R", "term_blocks.R", "fcs_selection.R", "evidence_flags.R", "report_presentation.R")),
             file.path(wd, "src"), overwrite = TRUE)
@@ -46,7 +46,7 @@ for (scenario in c("significant", "no_significant_sets")) {
   }
   readr::write_tsv(ev, file.path(wd, "enrich.tsv"))
   env <- new.env(parent = globalenv())
-  rmarkdown::render(file.path(wd, "12.FCS_general_report.Rmd"), quiet = TRUE, envir = env,
+  rmarkdown::render(file.path(wd, "11.FCS_general_report.Rmd"), quiet = TRUE, envir = env,
     params = list(stats_file = "stats.tsv", annot_file = "annot.tsv", universe_file = "background.txt",
       gmt_dir = file.path(wd, "gmts"), enrich_file = "enrich.tsv", score_source = "rer", num_g = 1),
     output_file = "report.html")

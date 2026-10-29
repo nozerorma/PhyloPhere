@@ -139,10 +139,11 @@ SPEC = ModuleTabSpec(
             name="gene_filter_mode",
             label="Gene filter mode",
             kind="choice",
-            choices=("none", "extreme", "dubious", "both"),
+            choices=("none", "extreme", "dubious", "both", "stratified"),
             importance="default",
             help=(
-                "none: no gene filter; extreme: drop genes with outlier CAAS counts; dubious: drop genes flagged by cluster IQR screening; both: apply both."
+                "none: no gene filter; extreme: drop genes with outlier CAAS counts; dubious: drop genes flagged by cluster IQR screening; both: apply both; "
+                "stratified: one rule that compares each gene with genes of its own length (see the stratified-mode fields below)."
             ),
         ),
         FieldSpec(
@@ -202,6 +203,27 @@ SPEC = ModuleTabSpec(
             importance="default",
             help="IQR multiplier for the cluster-based dubious-gene screen. Only used "
                  "when Gene filter mode is 'dubious' or 'both' (needs a cluster file).",
+        ),
+        FieldSpec(
+            name="gene_filter_strata",
+            label="Gene-length strata (stratified mode)",
+            importance="default",
+            help="Number of equal-size gene-length strata in which the outlier fences are computed, so that a gene "
+                 "is compared with genes of its own length. Only used when Gene filter mode is 'stratified'.",
+        ),
+        FieldSpec(
+            name="gene_filter_k_far",
+            label="Far-fence IQR multiplier (stratified mode)",
+            importance="default",
+            help="A gene whose CAAS count exceeds Q3 + k x IQR of its length stratum is removed. "
+                 "Only used when Gene filter mode is 'stratified'.",
+        ),
+        FieldSpec(
+            name="gene_filter_k_near",
+            label="Near-fence IQR multiplier (stratified mode)",
+            importance="default",
+            help="A gene above this lower fence is removed only when it also carries a cluster train "
+                 "(needs a cluster file). Only used when Gene filter mode is 'stratified'.",
         ),
     ),
 )

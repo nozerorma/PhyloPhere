@@ -9,6 +9,9 @@ permulation null (core.postproc):
 1. Extreme genes: density (distinct positions / gene length) above a percentile.
 2. Dubious genes: IQR outliers (Q3 + k*IQR) in distinct positions that also carry a
    cluster-train position.
+In stratified mode both are replaced by one rule on the distinct positions against the fences of the gene's length
+stratum (core.postproc.stratified_fences): Extreme above the far fence (k_far), Dubious above the near fence (k_near)
+with a cluster-train position.
 
 Thresholds are calibrated over the pooled rows (one unit per gene). Cluster positions are dropped only with --remove-clusters.
 
@@ -139,7 +142,7 @@ Examples:
                         help='Cluster filtering output (required for dubious gene detection)')
 
     parser.add_argument('-m', '--filter-mode',
-                        choices=['none', 'extreme', 'dubious', 'both'],
+                        choices=['none', 'extreme', 'dubious', 'both', 'stratified'],
                         default='both',
                         help='Filtering mode (default: both)')
     parser.add_argument('--remove-clusters', action='store_true', default=False,
@@ -148,6 +151,12 @@ Examples:
                         help='Density percentile for extreme genes (default: 0.99 = top 1%%)')
     parser.add_argument('--iqr-multiplier', type=float, default=3.0,
                         help='IQR multiplier for dubious gene threshold (default: 3.0)')
+    parser.add_argument('--strata', type=int, default=10,
+                        help='Stratified mode: number of equal-size gene-length strata (default: 10)')
+    parser.add_argument('--k-far', type=float, default=3.0,
+                        help='Stratified mode: IQR multiplier of the far fence, above which a gene is removed (default: 3.0)')
+    parser.add_argument('--k-near', type=float, default=1.5,
+                        help='Stratified mode: IQR multiplier of the near fence, above which a gene with a cluster train is removed (default: 1.5)')
 
     parser.add_argument('-o', '--output', required=True,
                         help='Filtered discovery output file')
@@ -165,9 +174,9 @@ Examples:
         print(f"Error: Gene ensembl file not found: {args.gene_ensembl_file}", file=sys.stderr)
         sys.exit(1)
 
-    needs_clusters = args.remove_clusters or args.filter_mode in ['dubious', 'both']
+    needs_clusters = args.remove_clusters or args.filter_mode in ['dubious', 'both', 'stratified']
     if needs_clusters and args.cluster_file is None:
-        print("Error: --cluster-file required when --remove-clusters is set or for 'dubious'/'both' filter modes", file=sys.stderr)
+        print("Error: --cluster-file required when --remove-clusters is set or for 'dubious'/'both'/'stratified' filter modes", file=sys.stderr)
         sys.exit(1)
     if needs_clusters and not Path(args.cluster_file).exists():
         print(f"Error: Cluster file not found: {args.cluster_file}", file=sys.stderr)
@@ -182,7 +191,7 @@ Examples:
         map_suffix=args.map_suffix,
         genes=discovery_df['Gene'].unique(),
     )
-    if not gene_lengths and args.filter_mode in ['extreme', 'both']:
+    if not gene_lengths and args.filter_mode in ['extreme', 'both', 'stratified']:
         print("Error: Could not load gene lengths from MAP directory or gene ensembl file", file=sys.stderr)
         sys.exit(1)
 
@@ -190,7 +199,8 @@ Examples:
     print(f"Loaded {len(discovery_df)} CAAS positions across {discovery_df['Gene'].nunique()} genes", file=sys.stderr)
 
     units = build_units(discovery_df, discarded)
-    removal = gene_removal(units, gene_lengths, args.filter_mode, args.iqr_multiplier, args.extreme_percentile)
+    removal = gene_removal(units, gene_lengths, args.filter_mode, args.iqr_multiplier, args.extreme_percentile,
+                           strata=args.strata, k_far=args.k_far, k_near=args.k_near)
     removed_genes_df = pd.DataFrame(
         sorted((gene, cat) for (_lab, gene), cat in removal.items()),
         columns=['Gene', 'category'])
@@ -211,7 +221,8 @@ Examples:
         removed_genes_df.to_csv(args.summary, sep='\t', index=False)
 
     if args.gene_stats_output:
-        stats = gene_unit_stats(units, gene_lengths, args.iqr_multiplier, args.extreme_percentile)
+        stats = gene_unit_stats(units, gene_lengths, args.iqr_multiplier, args.extreme_percentile,
+                                mode=args.filter_mode, strata=args.strata, k_far=args.k_far, k_near=args.k_near)
         print(f"Writing gene statistics: {args.gene_stats_output}", file=sys.stderr)
         gene_stats_table(stats, removal).to_csv(args.gene_stats_output, sep='\t', index=False)
 

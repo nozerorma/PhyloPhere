@@ -10,7 +10,7 @@
  *   - the position registry and its characterization, proximity and level 2 (concentration of the signal inside
  *     genes, calibrated with the null cycles) components (they need SCORING);
  *   - the Pfam and UCR tables the registry consumes, generated when none is supplied;
- *   - the report (14.POSENRICH_report).
+ *   - the report (13.POSENRICH_report).
  *
  * Data order: SCORING, POSENRICH, ENRICHMENT. ENRICHMENT reads position_characterization.tsv
  * as an optional input.

@@ -4,7 +4,7 @@ stopifnot(length(args)==2L)
 root <- normalizePath(args[1])
 work <- args[2]
 dir.create(work,recursive=TRUE,showWarnings=FALSE)
-file.copy(file.path(root,'subworkflows/ENRICHMENT/local/15.Comparison_report.Rmd'),work,overwrite=TRUE)
+file.copy(file.path(root,'subworkflows/ENRICHMENT/local/14.Comparison_report.Rmd'),work,overwrite=TRUE)
 dir.create(file.path(work,'src'),showWarnings=FALSE)
 file.copy(file.path(root,'subworkflows/ENRICHMENT/local/src',c('evidence_flags.R','fcs_selection.R','report_presentation.R','ami_evidence.R')),file.path(work,'src'),overwrite=TRUE)
 writeLines(c('Gene\tPosition\tside\tCAAS_score\tp.emp\tp.adj_bh\tcaas_nominal\tcaas_adjusted','G1\t0\ttop\t0.9\t0.01\t0.02\tTRUE\tTRUE','G1\t0\tbottom\t0.8\t0.01\t0.02\tTRUE\tTRUE','G2\t1\ttop\t0.7\t0.7\t0.7\tFALSE\tFALSE'),file.path(work,'scores.tsv'))
@@ -17,7 +17,7 @@ writeLines('gene,position,max_bf,target_aa',file.path(work,'fade_bottom.csv'))
 writeLines(c('Gene\tPosition\tpfam_domain\tpfam_clan\tucr_region\tposition_variability\tfubar_selection',
 'G1\t0\tDomain1;Domain2\tClan1\tcore\t0.1\tnegative'),file.path(work,'char.tsv'))
 env <- new.env()
-rmarkdown::render(file.path(work,'15.Comparison_report.Rmd'),output_dir=work,quiet=TRUE,envir=env,
+rmarkdown::render(file.path(work,'14.Comparison_report.Rmd'),output_dir=work,quiet=TRUE,envir=env,
  params=list(traitname='annotation_fixture',fcs_dir=file.path(work,'absent_fcs'),fcs_le_dir=file.path(work,'absent_le'),
  position_scores_file=file.path(work,'scores.tsv'),vep_ensembl_file=file.path(work,'vep.tsv'),
  fade_sites_top_file=file.path(work,'fade.csv'),fade_sites_bottom_file=file.path(work,'fade_bottom.csv'),position_characterization_file=file.path(work,'char.tsv')))
@@ -43,11 +43,11 @@ writeLines('VEP_REPORT_PASS: MANE preference, side-specific joins, Pfam overlap 
 # Sin position_characterization.tsv (POSENRICH no corrió) el informe renderiza y omite solo las columnas de la caracterización.
 work2 <- file.path(work, 'without_characterization')
 dir.create(file.path(work2, 'src'), recursive=TRUE, showWarnings=FALSE)
-file.copy(file.path(work, '15.Comparison_report.Rmd'), work2, overwrite=TRUE)
+file.copy(file.path(work, '14.Comparison_report.Rmd'), work2, overwrite=TRUE)
 file.copy(list.files(file.path(work, 'src'), full.names=TRUE), file.path(work2, 'src'), overwrite=TRUE)
 for (f in c('scores.tsv', 'vep.tsv', 'fade.csv', 'fade_bottom.csv')) file.copy(file.path(work, f), work2, overwrite=TRUE)
 env2 <- new.env()
-rmarkdown::render(file.path(work2, '15.Comparison_report.Rmd'), output_dir=work2, quiet=TRUE, envir=env2,
+rmarkdown::render(file.path(work2, '14.Comparison_report.Rmd'), output_dir=work2, quiet=TRUE, envir=env2,
  params=list(traitname='annotation_fixture', fcs_dir=file.path(work2, 'absent_fcs'), fcs_le_dir=file.path(work2, 'absent_le'),
  position_scores_file=file.path(work2, 'scores.tsv'), vep_ensembl_file=file.path(work2, 'vep.tsv'),
  fade_sites_top_file=file.path(work2, 'fade.csv'), fade_sites_bottom_file=file.path(work2, 'fade_bottom.csv'),

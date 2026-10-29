@@ -219,9 +219,12 @@ Removes spatial clusters of CAAS and outlier genes, cleans the gene background a
 | `filter_minlen` | 3 | Minimum alignment length of a cluster |
 | `filter_maxcaas` | 0.7 | Maximum CAAS density of a cluster window |
 | `remove_caas_clusters` | true | Discard clusters from the filtered discovery |
-| `gene_filter_mode` | dubious | Outlier genes to remove: `none`, `extreme`, `dubious`, `both` |
+| `gene_filter_mode` | dubious | Outlier genes to remove: `none`, `extreme`, `dubious`, `both` or `stratified` |
 | `extreme_threshold` | 0.99 | Quantile defining extreme genes |
 | `iqr_multiplier` | 3.0 | IQR multiplier defining dubious genes |
+| `gene_filter_strata` | 10 | `stratified` mode: number of equal-size gene-length strata; a gene is compared with genes of its own length |
+| `gene_filter_k_far` | 3.0 | `stratified` mode: IQR multiplier of the far fence (Q3 of the stratum + k x IQR); a gene above it is removed |
+| `gene_filter_k_near` | 1.5 | `stratified` mode: IQR multiplier of the near fence; a gene above it is removed only when it also carries a cluster train |
 | `caas_map_dir` | `vep_map_dir` or empty | Per-gene MAP tables (alignment column to protein residue) from the [Ortholog Characterizator](https://github.com/nozerorma/ortholog_characterizator.git) |
 | `minlen_values`, `maxcaas_values` | `2,3,4,10`; `0.6,0.7,0.8` | Sweep values in exploratory mode |
 | `disambiguation_input`, `disambiguation_dir`, `background_input` | empty | Standalone inputs |
@@ -267,7 +270,7 @@ HyPhy FADE tests directional substitution towards amino acids on the foreground 
 
 ### SCORING: `conf/scoring.config`
 
-Integrates CAAS, FADE and RERconverge into position and gene tables, calibrates CAAS against the null (empirical p, Benjamini-Hochberg q) and renders report 11 and the significance report 16.
+Integrates CAAS, FADE and RERconverge into position and gene tables, calibrates CAAS against the null (empirical p, Benjamini-Hochberg q) and renders report 10 and the significance report 15.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -301,7 +304,7 @@ Annotates scored positions with PrimateAI-3D pathogenicity, COSMIC missense coun
 
 ### ENRICHMENT: `conf/enrichment.config`
 
-FCS ranks gene sets by Wilcoxon AUC against the CAAS and RER rankings (report 12); AMI finds DOMINO active modules on STRING networks (13); the comparison report (15) contrasts both sides. Requires `--scoring`; only the RER FCS report runs without it.
+FCS ranks gene sets by Wilcoxon AUC against the CAAS and RER rankings (report 11); AMI finds DOMINO active modules on STRING networks (12); the comparison report (14) contrasts both sides. Requires `--scoring`; only the RER FCS report runs without it.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -319,18 +322,18 @@ FCS ranks gene sets by Wilcoxon AUC against the CAAS and RER rankings (report 12
 | `domino_slice_thr`, `domino_module_thr` | 0.3, 0.05 | DOMINO slice relevance and module significance |
 | `ami_max_blocks`, `ami_block_threshold` | 8, 0.2 | Blocks shown; Jaccard to merge terms into a block |
 | `ami_description_fdr` | 0.10 | FDR of the descriptive STRING labels |
-| `string_species` | 9606 | Taxon for report 13 labels (the network is human) |
+| `string_species` | 9606 | Taxon for report 12 labels (the network is human) |
 | `string_db_dir`, `string_cache_dir` | empty | Pre-downloaded STRING files; download cache |
 | `publish_domino_intermediates` | false | Keep network and module files |
 
 ### POSENRICH: `conf/posenrich.config`
 
-Describes how positive positions relate to genes and to sets of positions (Pfam domains and clans, ultraconserved regions, FUBAR and FADE sites, genomic windows, custom lists). Level 1 tests the share of detections per gene against the null; level 2 tests concentration inside genes; overlaps and proximity are descriptive (report 14). Level 1 needs `--ct_postproc`; the registry, level 2 and report need `--scoring`. See the [walkthrough](docs/WALKTHROUGH.md#12-posenrich) for the statistics and `--posenrich_holdout` for a calibration check.
+Describes how positive positions relate to genes and to sets of positions (Pfam domains and clans, ultraconserved regions, FUBAR and FADE sites, genomic windows, custom lists). Level 1 tests the share of detections per gene against the null; level 2 tests concentration inside genes; overlaps and proximity are descriptive (report 13). Level 1 needs `--ct_postproc`; the registry, level 2 and report need `--scoring`. See the [walkthrough](docs/WALKTHROUGH.md#12-posenrich) for the statistics and `--posenrich_holdout` for a calibration check.
 
 | Option | Default | Meaning |
 |---|---|---|
 | `posenrich` | false | Enable |
-| `accumulation_fdr` | 0.1 | q threshold marked in report 14 (does not change q) |
+| `accumulation_fdr` | 0.1 | q threshold marked in report 13 (does not change q) |
 | `posenrich_domains`, `posenrich_ucr` | true, true | Include Pfam and UCR layers; generated from `--alignment` when their tables are blank |
 | `domain_variability_file`, `ucr_positions_file` | empty | Precomputed Pfam and UCR tables (must have a `coordinate_space` column) |
 | `domain_ref_species`, `pfam_cache_dir` | Homo_sapiens, `~/.cache/phylophere/pfam` | Species scanned with hmmscan; Pfam-A cache (about 1.5 GB) |
