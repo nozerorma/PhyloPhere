@@ -47,6 +47,9 @@ params:
   # region + per-position variability, FUBAR selection call): position_characterization.tsv,
   # flattened for a direct Gene/Position join here. Optional; without it those columns are omitted.
   position_characterization_file: NULL
+  # Rows embedded per Interesting Genes/Positions widget (rows keep the table's own order);
+  # the complete table is always written to compare_results/*.tsv.
+  interesting_max_rows: 500
   seed:               "1998"
 ---
 
@@ -981,7 +984,18 @@ render_banded_table <- function(res_obj, height = NULL) {
 
   ordered_cols <- c(meta_cols, pond_cols, desc_cols, res_cols)
   df <- df[, ordered_cols, drop = FALSE]
+  # An embedded widget carries every row as JSON, so the full table would multiply the HTML size
+  # (hundreds of MB for ~30k rows); only the leading rows are embedded.
+  max_rows <- params$interesting_max_rows
+  if (!is.null(max_rows) && nrow(df) > max_rows) df <- utils::head(df, max_rows)
   report_table(df)
+}
+
+# One-line note shown above a capped widget; the TSV link next to it holds every row.
+cap_note <- function(n_total) {
+  max_rows <- params$interesting_max_rows
+  if (!is.null(max_rows) && n_total > max_rows)
+    cat(sprintf("_Showing the first %d of %d rows; the complete table is in the TSV._\n\n", max_rows, n_total))
 }
 
 .ami_desc_for <- function(dir_filter) {
@@ -1093,6 +1107,7 @@ for (dr in c("Global", "Top", "Bottom")) {
     cat("_No genes meet any criterion for this direction._\n\n")
     next
   }
+  cap_note(nrow(res$data))
   emit_widget(render_banded_table(res, height = if (nrow(res$data) > 15) "480px" else NULL))
 }
 ```
@@ -1359,6 +1374,7 @@ for (dr in c("Global", "Top", "Bottom")) {
     cat("_No positions meet any criterion for this direction._\n\n")
     next
   }
+  cap_note(nrow(res$data))
   emit_widget(render_banded_table(res, height = if (nrow(res$data) > 15) "480px" else NULL))
 }
 ```
