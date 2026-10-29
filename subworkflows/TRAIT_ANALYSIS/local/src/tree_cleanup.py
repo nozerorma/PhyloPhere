@@ -4,7 +4,7 @@
 
 """
 TreeCleanup: Renames or prunes the tips of a species tree so that every
-remaining tip carries the species name used in the alignment FASTA headers.
+remaining tip carries the species name used in the alignment record IDs.
 
 NCBI tax_ids are the shared key: a tip whose name is not among the alignment
 species is renamed to the alignment species that has the same tax_id (taxonomic
@@ -20,8 +20,7 @@ Inputs:     --tree          Newick species tree
                             canonical species and only the trait table is curated
             --tax-id        TSV/CSV with columns [tax_id, species] (other columns
                             ignored); tree-side and alignment-side names both
-                            appear under `species`. The sentinel NO_FILE, or a
-                            missing file, means no map
+                            appear under `species`. The sentinel NO_FILE means no map
             --output        Path for the curated Newick tree
             --report        Path for the per-tip report TSV
             --traits        Optional trait table (CSV/TSV). Its species are matched to
@@ -46,14 +45,16 @@ Outputs:    Curated Newick tree; TSV [original_name, curated_name, fate] with
 
 Canonical species are the tips of the curated tree. When several of them share a
 tax_id, the alphabetically first keeps it and each other one receives
-tax_id + i (probing past every tax_id of the map). Removals are reported, never fatal.
+tax_id + i (probing past every tax_id of the map). These synthetic ids are local to
+this curated species set, not stable NCBI identifiers. Unmatched species are
+reported and removed. Ambiguous matches, conflicting retained-species trait
+values and labels that collide after normalization are errors.
 """
 
 import argparse
 import csv
 import re
 import sys
-from pathlib import Path
 
 import dendropy
 
@@ -68,53 +69,74 @@ def normalize_label(label: str) -> str:
 
 def load_ali_sp_names(path: str) -> set:
     """Return the set of normalized species names listed in `path`, one per line."""
-    names = set()
+    names = {}
     with open(path) as fh:
-        for line in fh:
-            name = normalize_label(line)
-            if name:
-                names.add(name)
-    return names
+        for number, line in enumerate(fh, start=1):
+            original = line.strip()
+            name = normalize_label(original)
+            if not name:
+                continue
+            if name in names and names[name] != original:
+                raise ValueError(f"{path}: row {number}: species labels {names[name]!r} and "
+                                 f"{original!r} normalize to {name!r}")
+            names[name] = original
+    if not names:
+        raise ValueError(f"{path}: no alignment species names found")
+    return set(names)
 
 
 def load_tax_id_map(path: str):
-    """Return (name_to_taxid, taxid_to_names, name_to_family) from a TSV/CSV taxid file.
-
-    "NO_FILE" is the Nextflow sentinel for an absent optional file (the workflows
-    pass it when params.tax_id is unset). The sentinel, an empty path and a
-    missing file all give empty maps, so tips are then matched by exact name only,
-    with no translation between naming conventions.
-    """
-    if not path or path == "NO_FILE" or not Path(path).exists():
+    """Read a validated taxonomy CSV/TSV; NO_FILE or an empty path means no map."""
+    if not path or str(path) == "NO_FILE":
         return {}, {}, {}
 
-    sep = "\t" if path.endswith(".tsv") else ","
-    name_to_taxid: dict[str, str] = {}
-    taxid_to_names: dict[str, list[str]] = {}
-    name_to_family: dict[str, str] = {}
-
-    with open(path, newline="") as fh:
-        reader = csv.DictReader(fh, delimiter=sep)
-        for row in reader:
-            row = {k: v.strip() for k, v in row.items() if k}
-            taxid   = row.get("tax_id", "").strip()
-            species = normalize_label(row.get("species", ""))
-            if not taxid or not species:
-                continue
-            name_to_taxid[species] = taxid
-            taxid_to_names.setdefault(taxid, []).append(species)
-            name_to_family[species] = row.get("family", "")
-
+    header, rows, _ = read_table(path)
+    if not {"tax_id", "species"}.issubset(header):
+        raise ValueError(f"{path}: taxonomy requires 'tax_id' and 'species' columns")
+    name_to_taxid = {}
+    taxid_to_names = {}
+    name_to_family = {}
+    for number, values in enumerate(rows, start=2):
+        row = dict(zip(header, values))
+        taxid = row["tax_id"].strip()
+        species = normalize_label(row["species"])
+        family = row.get("family", "").strip()
+        if not species or not re.fullmatch(r"[1-9][0-9]*", taxid):
+            raise ValueError(f"{path}: row {number}: taxonomy needs a species name and "
+                             "a positive integer tax_id")
+        if species in name_to_taxid:
+            if name_to_taxid[species] != taxid:
+                raise ValueError(f"{path}: row {number}: conflicting tax_ids for {species!r}: "
+                                 f"{name_to_taxid[species]} and {taxid}")
+            previous_family = name_to_family[species]
+            if family and previous_family and family != previous_family:
+                raise ValueError(f"{path}: row {number}: conflicting families for {species!r}")
+            name_to_family[species] = previous_family or family
+            continue
+        name_to_taxid[species] = taxid
+        taxid_to_names.setdefault(taxid, []).append(species)
+        name_to_family[species] = family
     return name_to_taxid, taxid_to_names, name_to_family
 
 
 def read_table(path: str):
-    """Return (header, rows, delimiter) of a CSV/TSV trait table; rows are lists of strings."""
-    sep = "\t" if path.endswith((".tsv", ".txt")) else ","
-    with open(path, newline="") as fh:
-        reader = csv.reader(fh, delimiter=sep)
-        header = next(reader)
-        rows = [r for r in reader if r]
+    """Read a CSV/TSV with a unique nonempty header and consistent row widths."""
+    sep = "\t" if str(path).lower().endswith((".tsv", ".txt")) else ","
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        reader = csv.reader(fh, delimiter=sep, strict=True)
+        header = next(reader, None)
+        if not header or any(not col.strip() for col in header):
+            raise ValueError(f"{path}: missing or empty column header")
+        if len(set(header)) != len(header):
+            raise ValueError(f"{path}: duplicate column headers")
+        rows = []
+        for row in reader:
+            if not row or all(not value.strip() for value in row):
+                continue
+            if len(row) != len(header):
+                raise ValueError(f"{path}: row {reader.line_num}: expected {len(header)} "
+                                 f"columns, found {len(row)}")
+            rows.append(row)
     return header, rows, sep
 
 
@@ -155,9 +177,9 @@ def curate_traits(header, rows, sp_col, tips, name_to_taxid, resolved):
 
     Returns (kept_rows, decisions). Each decision is
     (original_name, curated_name, status, reason). A row is maintained when its name is a
-    tip, changed when its tax_id points to a tip, and removed otherwise or when another
-    row already stands for the same tip (the row whose name is the tip wins, else the
-    alphabetically first original name).
+    tip, changed when its tax_id uniquely points to a tip, and removed otherwise.
+    Identical duplicate values collapse to one row (exact name preferred). Conflicting
+    values and tax_ids that could identify several tips raise ValueError.
     """
     sp_i = header.index(sp_col)
     tid_i = header.index("tax_id") if "tax_id" in header else None
@@ -169,7 +191,14 @@ def curate_traits(header, rows, sp_col, tips, name_to_taxid, resolved):
 
     cand = []  # (row index, original name, target tip or None, status, reason)
     for k, row in enumerate(rows):
+        if len(row) != len(header):
+            raise ValueError(f"trait row {k + 2}: expected {len(header)} columns, found {len(row)}")
         name = normalize_label(row[sp_i])
+        if not name:
+            raise ValueError(f"trait row {k + 2}: species name is empty")
+        if tid_i is not None and row[tid_i].strip() and not re.fullmatch(
+                r"[1-9][0-9]*", row[tid_i].strip()):
+            raise ValueError(f"trait row {k + 2}: tax_id must be a positive integer or empty")
         if name in tips:
             cand.append((k, name, name, "maintained", "name matches a tree tip"))
             continue
@@ -178,12 +207,27 @@ def curate_traits(header, rows, sp_col, tips, name_to_taxid, resolved):
             cand.append((k, name, None, "removed",
                          "no overlap with the tree: the name is not a tip and has no tax_id"))
         elif tid in tip_by_id:
+            if len(tip_by_id[tid]) != 1:
+                raise ValueError(f"trait row {k + 2}: ambiguous tax_id {tid} for {name!r}; "
+                                 f"use an explicit canonical species name: {', '.join(tip_by_id[tid])}")
             target = tip_by_id[tid][0]
             cand.append((k, name, target, "changed",
                          f"renamed to {target} through the shared tax_id {tid}"))
         else:
             cand.append((k, name, None, "removed",
                          f"no overlap with the tree: no tip has the tax_id {tid}"))
+
+    # Compare all non-identity columns before choosing a representative row.
+    value_columns = [i for i in range(len(header)) if i not in (sp_i, tid_i)]
+    values_by_tip = {}
+    for k, name, target, _, _ in cand:
+        if target is None:
+            continue
+        values = tuple(rows[k][i] for i in value_columns)
+        if target in values_by_tip and values_by_tip[target][0] != values:
+            raise ValueError(f"conflicting trait values for {target!r} in rows "
+                             f"{values_by_tip[target][1] + 2} and {k + 2}")
+        values_by_tip[target] = (values, k)
 
     # One row per tip: the row named like the tip wins, then the alphabetically first name.
     winner: dict[str, int] = {}
@@ -218,6 +262,9 @@ def write_species_outputs(args, header, kept, decisions, tree_decisions, resolve
             w.writerow(header)
             w.writerows(kept)
 
+    if not args.species_table:
+        return sum(1 for real, local, _ in resolved.values() if real != local and local)
+
     with open(args.species_table, "w", newline="") as fh:
         fh.write("species\ttax_id\ttax_id_resolved\tnote\n")
         for sp in sorted(resolved):
@@ -236,7 +283,6 @@ def write_species_outputs(args, header, kept, decisions, tree_decisions, resolve
     lines = [("tree", *d) for d in tree_decisions] + [("trait", *d) for d in decisions]
     lines += [("tax_id", sp, sp, "changed", v[2]) for sp, v in synth]
     with open(args.species_report, "w") as fh:
-        n_removed = sum(1 for x in lines if x[0] != "tax_id" and x[3] == "removed")
         fh.write("# Species curation report\n")
         fh.write(f"# canonical species (curated tree tips): {len(resolved)}\n")
         fh.write(f"# trait rows: {len(decisions)}, kept: "
@@ -251,26 +297,8 @@ def write_species_outputs(args, header, kept, decisions, tree_decisions, resolve
     return len(synth)
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--tree",         required=True, help="Input newick tree")
-    parser.add_argument("--ali-sp-names", required=True, help="Alignment species names (flat list)")
-    parser.add_argument("--tax-id",       required=True, help="Taxid TSV/CSV mapping file")
-    parser.add_argument("--output",       required=True, help="Output curated newick tree")
-    parser.add_argument("--report",       required=True, help="Output TSV report")
-    parser.add_argument("--traits",         default=None, help="Trait table (CSV/TSV) to curate")
-    parser.add_argument("--sp-col",         default="species", help="Species column of --traits")
-    parser.add_argument("--traits-out",     default=None, help="Output curated trait table")
-    parser.add_argument("--species-table",  default=None, help="Output table of canonical species and tax_ids")
-    parser.add_argument("--species-report", default=None, help="Output text report of the curation")
-    parser.add_argument("--taxid-map",      default=None, help="Output curated tax_id map [tax_id, species]")
-    args = parser.parse_args()
-    if args.traits and not args.traits_out:
-        parser.error("--traits needs --traits-out")
-    if bool(args.species_table) != bool(args.species_report) or bool(args.species_table) != bool(args.taxid_map):
-        parser.error("--species-table, --species-report and --taxid-map go together")
-
+def curate_tree(args):
+    """Validate and curate all inputs before writing any output artifacts."""
     name_to_taxid, taxid_to_names, name_to_family = load_tax_id_map(args.tax_id)
 
     tree = dendropy.Tree.get(path=args.tree, schema="newick",
@@ -280,18 +308,27 @@ def main():
     else:
         ali_sp = load_ali_sp_names(args.ali_sp_names)
 
-    # tax_id → alignment species name (the alphabetically first species wins when several share a tax_id).
-    taxid_to_ali: dict[str, str] = {}
+    # Keep all candidates: a shared taxonomy ID alone cannot choose a species.
+    taxid_to_ali: dict[str, list[str]] = {}
     for sp in sorted(ali_sp):
         taxid = name_to_taxid.get(sp)
-        if taxid and taxid not in taxid_to_ali:
-            taxid_to_ali[taxid] = sp
+        if taxid:
+            taxid_to_ali.setdefault(taxid, []).append(sp)
 
     sample_labels = [taxon.label for taxon in list(tree.taxon_namespace)[:5]]
     print(f"[tree_cleanup] Input tips={len(tree.taxon_namespace)} sample={sample_labels}", flush=True)
 
     taxa = list(tree.taxon_namespace)
     labels = {id(t): normalize_label(t.label) for t in taxa}
+    originals = {}
+    for taxon in taxa:
+        label = labels[id(taxon)]
+        if not label:
+            raise ValueError("tree contains an empty species label")
+        if label in originals:
+            raise ValueError(f"tree labels {originals[label]!r} and {taxon.label!r} "
+                             f"normalize to the same species {label!r}")
+        originals[label] = taxon.label
     fate: dict[int, tuple[str, str, str]] = {}  # taxon -> (curated name, fate, reason)
     used: set[str] = set()
 
@@ -305,7 +342,11 @@ def main():
     for t in sorted((t for t in taxa if id(t) not in fate), key=lambda t: labels[id(t)]):
         tip = labels[id(t)]
         taxid = name_to_taxid.get(tip)
-        ali_name = taxid_to_ali.get(taxid) if taxid else None
+        candidates = taxid_to_ali.get(taxid, [])
+        if len(candidates) > 1:
+            raise ValueError(f"tree label {tip!r}: ambiguous tax_id {taxid}; "
+                             f"use an explicit alignment species name: {', '.join(candidates)}")
+        ali_name = candidates[0] if candidates else None
         if not ali_name:
             reason = (f"no alignment species with the tax_id {taxid}" if taxid
                       else "the name is not an alignment species and has no tax_id")
@@ -333,52 +374,72 @@ def main():
     kept = sum(1 for f in fate.values() if f[1] == "kept")
     renamed = sum(1 for f in fate.values() if f[1] == "renamed")
 
+    if kept + renamed == 0:
+        raise ValueError("no tree tips matched alignment species; check the species names "
+                         "and taxonomy coverage of both naming conventions")
+
+    tips = {f[0] for f in fate.values() if f[1] != "pruned"}
+    resolved = resolve_tip_taxids(sorted(tips), name_to_taxid, set(taxid_to_names))
+    header, rows, sep, kept_rows, decisions = None, [], ",", [], []
+    if args.traits:
+        header, rows, sep = read_table(args.traits)
+        if args.sp_col not in header:
+            raise ValueError(f"{args.traits}: column {args.sp_col!r} not found")
+        if not rows:
+            raise ValueError(f"{args.traits}: no trait data rows found")
+        try:
+            kept_rows, decisions = curate_traits(header, rows, args.sp_col, tips, name_to_taxid, resolved)
+        except ValueError as exc:
+            raise ValueError(f"{args.traits}: {exc}") from exc
+
     tree.prune_taxa(taxa_to_prune)
     tree.purge_taxon_namespace()
-
-    tree.write(
-        path=args.output,
-        schema="newick",
-        preserve_spaces=False,
-        unquoted_underscores=True,
-    )
-    print(f"[tree_cleanup] Wrote curated tree to {args.output}", flush=True)
-
+    tree.write(path=args.output, schema="newick", preserve_spaces=False,
+               unquoted_underscores=True)
     with open(args.report, "w", newline="") as fh:
         fh.write("original_name\tcurated_name\tfate\n")
         for row in report_rows:
             fh.write("\t".join(row) + "\n")
-
-    if args.species_table and kept + renamed > 0:
-        tips = {f[0] for f in fate.values() if f[1] != "pruned"}
-        resolved = resolve_tip_taxids(sorted(tips), name_to_taxid, set(taxid_to_names))
-        header, rows, sep, kept_rows, decisions = None, [], ",", [], []
-        if args.traits:
-            header, rows, sep = read_table(args.traits)
-            if args.sp_col not in header:
-                print(f"[tree_cleanup] ERROR: column '{args.sp_col}' not found in {args.traits}",
-                      file=sys.stderr)
-                sys.exit(1)
-            kept_rows, decisions = curate_traits(header, rows, args.sp_col, tips, name_to_taxid, resolved)
-        n_synth = write_species_outputs(args, header, kept_rows, decisions, tree_decisions, resolved, sep,
-                                        name_to_family)
-        n_rem = sum(1 for d in decisions if d[2] == "removed")
-        n_chg = sum(1 for d in decisions if d[2] == "changed")
-        print(f"[tree_cleanup] trait species: {len(rows)} -> {len(kept_rows)} "
-              f"(changed={n_chg}, removed={n_rem}); synthetic tax_ids={n_synth}", flush=True)
-        if n_rem:
-            print(f"[tree_cleanup] WARNING: {n_rem} trait species removed; reasons in "
-                  f"{args.species_report}", file=sys.stderr, flush=True)
+    n_synth = write_species_outputs(args, header, kept_rows, decisions, tree_decisions, resolved, sep,
+                                    name_to_family)
+    n_rem = sum(1 for d in decisions if d[2] == "removed")
+    n_chg = sum(1 for d in decisions if d[2] == "changed")
+    print(f"[tree_cleanup] trait species: {len(rows)} -> {len(kept_rows)} "
+          f"(changed={n_chg}, removed={n_rem}); synthetic tax_ids={n_synth}", flush=True)
+    if n_rem:
+        detail = f"; reasons in {args.species_report}" if args.species_report else ""
+        print(f"[tree_cleanup] WARNING: {n_rem} trait species removed{detail}",
+              file=sys.stderr, flush=True)
 
     pruned = len(taxa_to_prune)
     print(f"[tree_cleanup] kept={kept}  renamed={renamed}  pruned={pruned}", flush=True)
     print(f"[tree_cleanup] Output tree: {args.output}  ({kept + renamed} tips retained)", flush=True)
 
-    if kept + renamed == 0:
-        print("[tree_cleanup] ERROR: no tree tips matched alignment species — "
-              "check that tax_id file covers both tree and alignment naming conventions.",
-              file=sys.stderr)
-        sys.exit(1)
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--tree",         required=True, help="Input newick tree")
+    parser.add_argument("--ali-sp-names", required=True, help="Alignment species names (flat list)")
+    parser.add_argument("--tax-id",       required=True, help="Taxid TSV/CSV mapping file")
+    parser.add_argument("--output",       required=True, help="Output curated newick tree")
+    parser.add_argument("--report",       required=True, help="Output TSV report")
+    parser.add_argument("--traits",         default=None, help="Trait table (CSV/TSV) to curate")
+    parser.add_argument("--sp-col",         default="species", help="Species column of --traits")
+    parser.add_argument("--traits-out",     default=None, help="Output curated trait table")
+    parser.add_argument("--species-table",  default=None, help="Output table of canonical species and tax_ids")
+    parser.add_argument("--species-report", default=None, help="Output text report of the curation")
+    parser.add_argument("--taxid-map",      default=None, help="Output curated tax_id map [tax_id, species]")
+    args = parser.parse_args()
+    if args.traits and not args.traits_out:
+        parser.error("--traits needs --traits-out")
+    if bool(args.species_table) != bool(args.species_report) or bool(args.species_table) != bool(args.taxid_map):
+        parser.error("--species-table, --species-report and --taxid-map go together")
+
+    try:
+        curate_tree(args)
+    except (ValueError, OSError, csv.Error, dendropy.utility.error.DataParseError) as exc:
+        parser.exit(1, f"[tree_cleanup] ERROR: {exc}\n")
 
 
 if __name__ == "__main__":

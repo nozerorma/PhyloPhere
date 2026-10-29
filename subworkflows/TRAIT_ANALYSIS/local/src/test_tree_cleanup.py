@@ -39,7 +39,7 @@ def _decisions(rows, tips, name_to_taxid):
 def test_name_match_synonym_removal_and_duplicate():
     name_to_taxid = {"Tip_a": "1", "Syn_a": "1", "Tip_b": "2", "Orphan": "9"}
     rows = [
-        ["Syn_a", "1", "0.1"],    # synonym of Tip_a, listed before the tip itself
+        ["Syn_a", "1", "0.2"],    # identical synonym, listed before the tip itself
         ["Tip_a", "1", "0.2"],    # named like the tip: wins over the synonym
         ["Tip_b", "2", "0.3"],    # plain match
         ["Orphan", "9", "0.4"],   # tax_id with no tip

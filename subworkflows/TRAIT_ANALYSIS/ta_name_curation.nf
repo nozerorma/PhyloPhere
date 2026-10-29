@@ -5,7 +5,7 @@
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *  NAME_CURATION: curates the input species tree and the trait table so that both use
- *  the species names of the alignment FASTA headers, which they are joined on
+ *  the species record IDs of the alignments, which they are joined on
  *  downstream. Tips and trait species are translated through a shared NCBI tax_id
  *  (taxonomic synonyms, genus renames); tips with no counterpart in the alignments and
  *  trait species with no counterpart in the tree are removed. The curation is the one
@@ -16,11 +16,12 @@
  *
  *  Species names of the alignments come from:
  *    - params.ali_sp_names, a precomputed flat file (fast path), or
- *    - DERIVE_ALI_SP_NAMES, which scans every FASTA header of params.alignment
+ *    - DERIVE_ALI_SP_NAMES, which parses every alignment in params.ali_format
  *      (slow path: it reads every alignment file, minutes for thousands of genes).
  *  To avoid the slow path, generate the file once and set params.ali_sp_names:
  *
- *    grep -rh '^>' <alignment_dir> | sed 's/^>//' | sort -u > ali_sp_names.txt
+ *    python subworkflows/TRAIT_ANALYSIS/local/src/alignment_species.py \
+ *        --alignment <alignment_dir> --format fasta --output ali_sp_names.txt
  *
  *  Without alignment names (neither params.ali_sp_names nor params.alignment) every tree
  *  tip is a canonical species and only the trait table is curated.
@@ -54,15 +55,10 @@ process DERIVE_ALI_SP_NAMES {
 
     script:
     """
-    echo "[NAME_CURATION] Deriving species names by scanning alignment directory."
-    echo "[NAME_CURATION] WARNING: this scans all alignment files and may be slow."
-    grep -rh "^>" "${alignment_dir}" 2>/dev/null \
-        | sed 's/^>//' \
-        | tr -d '\\r' \
-        | sort -u \
-        > ali_sp_names.txt
-    n=\$(wc -l < ali_sp_names.txt | tr -d ' ')
-    echo "[NAME_CURATION] Found \${n} unique species names in alignment directory."
+    python3 "${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/alignment_species.py" \\
+        --alignment "${alignment_dir}" \\
+        --format "${params.ali_format ?: 'fasta'}" \\
+        --output ali_sp_names.txt
     """
 }
 
@@ -73,10 +69,10 @@ process TREE_CLEANUP {
     publishDir "${params.outdir}/name_curation", mode: 'copy', overwrite: true
 
     input:
-    path tree_file
-    path tax_id_file
-    path ali_sp_names_file
-    path trait_file
+    path tree_file, stageAs: 'tree/*'
+    path tax_id_file, stageAs: 'taxonomy/*'
+    path ali_sp_names_file, stageAs: 'species/*'
+    path trait_file, stageAs: 'traits/*'
 
     output:
     path "curated_tree.nwk",                 emit: curated_tree
@@ -89,16 +85,20 @@ process TREE_CLEANUP {
     script:
     // The curated trait table keeps the format (extension) of the input table. Without a trait
     // table (the NO_FILE sentinel) only the tree and the species tables are curated.
-    def with_traits = trait_file.name != 'NO_FILE'
-    def ext = trait_file.name.tokenize('.').last()
+    // TaskPath's name/getFileName can include the stageAs directory.
+    def trait_name = trait_file.toString().tokenize('/').last()
+    def with_traits = trait_name != 'NO_FILE'
+    def tax_arg = tax_id_file.toString().tokenize('/').last() == 'NO_FILE' ? 'NO_FILE' : tax_id_file
+    def species_arg = ali_sp_names_file.toString().tokenize('/').last() == 'NO_FILE' ? 'NO_FILE' : ali_sp_names_file
+    def ext = trait_name.tokenize('.').last()
     def trait_args = with_traits
         ? "--traits \"${trait_file}\" --sp-col \"${params.sp_colname}\" --traits-out \"curated_traits.${ext}\""
         : ""
     """
-    python3 ${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/tree_cleanup.py \\
+    python3 "${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/tree_cleanup.py" \\
         --tree          "${tree_file}" \\
-        --ali-sp-names  "${ali_sp_names_file}" \\
-        --tax-id        "${tax_id_file}" \\
+        --ali-sp-names  "${species_arg}" \\
+        --tax-id        "${tax_arg}" \\
         --output        curated_tree.nwk \\
         --report        name_curation_report.tsv \\
         ${trait_args} \\
@@ -128,7 +128,8 @@ workflow NAME_CURATION {
                 the alignment directory (${params.alignment}).
                 This reads every alignment file and may be very slow for large datasets.
                 To avoid this cost on future runs, generate the file once:
-                  grep -rh '^>' ${params.alignment} | sed 's/^>//' | sort -u > ali_sp_names.txt
+                  python "${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/alignment_species.py" \\
+                    --alignment "${params.alignment}" --format "${params.ali_format ?: 'fasta'}" --output ali_sp_names.txt
                 then set params.ali_sp_names in your config.
                 """.stripIndent()
             DERIVE_ALI_SP_NAMES(Channel.value(file(params.alignment, type: 'dir')))
