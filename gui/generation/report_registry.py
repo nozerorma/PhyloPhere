@@ -566,7 +566,7 @@ def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, us
         header_comment="CAAS_SIGNIFICANCE — 16.CAAS_significance_report.Rmd",
         repo_dir=repo_dir,
         local_dir="subworkflows/CT_META_CAAS/local",
-        pre_lines=[],
+        pre_lines=["mkdir -p src", f'cp "{repo_dir}/subworkflows/ENRICHMENT/local/src/report_presentation.R" src/'],
         render_block=render,
         output_file=output_file,
         publish_targets=[report.html_path.parent.parent / "meta_caas" / "significance", report.html_path.parent],

@@ -98,12 +98,14 @@ process CAAS_SIGNIFICANCE_REPORT {
     def local_dir = "${baseDir}/subworkflows/CT_META_CAAS/local"
     def outdir = "${params.outdir}/meta_caas/significance"
     def report_hash = java.security.MessageDigest.getInstance('SHA-256')
-        .digest(file("${local_dir}/16.CAAS_significance_report.Rmd").text.getBytes('UTF-8')).encodeHex().toString()
+        .digest((file("${local_dir}/16.CAAS_significance_report.Rmd").text + file("${baseDir}/subworkflows/ENRICHMENT/local/src/report_presentation.R").text).getBytes('UTF-8')).encodeHex().toString()
 
     if (params.use_singularity || params.use_apptainer) {
         """
         # Significance report source SHA256: ${report_hash}
         cp -R ${local_dir}/* .
+        mkdir -p src
+        cp ${baseDir}/subworkflows/ENRICHMENT/local/src/report_presentation.R src/
 
         # Render R Markdown report
         /usr/local/bin/_entrypoint.sh Rscript -e "
@@ -128,6 +130,8 @@ process CAAS_SIGNIFICANCE_REPORT {
         """
         # Significance report source SHA256: ${report_hash}
         cp -R ${local_dir}/* .
+        mkdir -p src
+        cp ${baseDir}/subworkflows/ENRICHMENT/local/src/report_presentation.R src/
 
         # Render R Markdown report
         Rscript -e "

@@ -1,12 +1,18 @@
 ---
-title: "CAAS — evidencia de posiciones y genes"
+title: "CAAS significance: evidence for positions and genes"
 subtitle: "`r paste0('Trait: ', params$traitname)`"
-date: "`r format(Sys.Date(), '%d %B %Y')`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
 output:
   html_document:
     theme: flatly
     toc: true
-    toc_float: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+    df_print: paged
+    fig_width: 10
+    fig_height: 5
     self_contained: true
     mathjax: null
     md_extensions: "-tex_math_dollars"
@@ -23,26 +29,66 @@ params:
   max_table_rows: 0 # Compatibility only: all positive-score rows are accessible.
 ---
 
+<style type="text/css">
+  body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  .main-container { max-width: 95% !important; padding-left: 40px !important; padding-right: 40px !important; margin-left: auto; margin-right: auto; }
+  .title { font-size: 38px; font-weight: bold; color: #2c3e50; }
+  .subtitle { font-size: 24px; font-weight: normal; color: #7f8c8d; margin-top: 10px; }
+  .author, .date { font-size: 16px; color: #7f8c8d; }
+  .kpi-row { display: flex; flex-wrap: wrap; gap: 14px; margin: 14px 0 22px 0; }
+  .kpi { flex: 1 1 190px; background: #f7f9fb; border: 1px solid #e3e8ee; border-left: 5px solid #4E79A7; border-radius: 6px; padding: 12px 16px; }
+  .kpi.bh { border-left-color: #E15759; }
+  .kpi.nom { border-left-color: #F28E2B; }
+  .kpi.gene { border-left-color: #59A14F; }
+  .kpi .v { font-size: 30px; font-weight: 700; color: #2c3e50; line-height: 1.1; }
+  .kpi .l { font-size: 13px; color: #5d6d7e; margin-top: 4px; }
+  .kpi .s { font-size: 12px; color: #95a5a6; margin-top: 2px; }
+  .note { background: #fdf6e7; border-left: 5px solid #EDC948; border-radius: 4px; padding: 10px 16px; margin: 14px 0; }
+  .note p { margin: 4px 0; }
+</style>
+
+<!-- 16.CAAS_significance_report.Rmd — Evidence (p, BH q, resolution) of the positive CAAS positions and genes of one trait. -->
+<!-- PhyloPhere | subworkflows/CT_META_CAAS/local/ -->
+<!-- Author: Miguel Ramon (miguel.ramon@upf.edu) -->
+
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE, fig.width=10, fig.height=4)
-suppressPackageStartupMessages({library(dplyr);library(tidyr);library(readr);library(ggplot2);library(DT)})
-emit_widget <- function(widget) {
-  rendered <- knitr::knit_print(widget)
-  knitr::knit_meta_add(attr(rendered,"knit_meta"))
-  cat(rendered,"\n\n")
-  invisible(NULL)
-}
-show_table <- function(x) {
-  if(!nrow(x)) {cat("_Sin filas con score positivo en esta vista._\n\n");return(invisible(NULL))}
-  emit_widget(DT::datatable(x,rownames=FALSE,filter="top",extensions="Buttons",
-    options=list(pageLength=25,lengthMenu=c(10,25,50,100),scrollX=TRUE,order=list(),
-                 dom="Blfrtip",buttons=list("copy","csv","excel"))))
-}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE, fig.width=10, fig.height=5, out.width="100%")
+suppressPackageStartupMessages({library(dplyr);library(tidyr);library(readr);library(ggplot2);library(ggrepel);library(scales);library(DT)})
+
+# Shared table helpers (lazy-mounted DataTables). The file sits next to the report in a process work directory
+# and in ENRICHMENT/local/src when the report is rendered in place.
+.helpers <- c("src/report_presentation.R","../../ENRICHMENT/local/src/report_presentation.R")
+.helpers <- .helpers[file.exists(.helpers)]
+if(!length(.helpers)) stop("report_presentation.R not found next to the report")
+source(.helpers[1])
+
+# Tableau_10 swatch, shared with the other reports of the pipeline.
+.tableau10 <- if(requireNamespace("paletteer",quietly=TRUE)) as.character(paletteer::paletteer_d("ggthemes::Tableau_10")) else
+  c("#4E79A7","#F28E2B","#E15759","#76B7B2","#59A14F","#EDC948","#B07AA1","#FF9DA7","#9C755F","#BAB0AC")
+theme_set(theme_minimal(base_size=13)+theme(
+  axis.title.y=element_text(margin=ggplot2::margin(l=20,r=20)),axis.title.x=element_text(margin=ggplot2::margin(t=12)),
+  plot.title=element_text(face="bold",hjust=0,margin=ggplot2::margin(b=6)),
+  plot.subtitle=element_text(colour="grey40",hjust=0,margin=ggplot2::margin(b=10)),
+  strip.text=element_text(face="bold"),legend.position="bottom"))
+
+# Evidence classes, from strongest to weakest, and their colours (also used by the tables and the exports).
+status_levels <- c("BH","Nominal","Evaluated; not significant","p available; q unavailable","p unavailable")
+status_colours <- c("BH"="#E15759","Nominal"="#F28E2B","Evaluated; not significant"="grey65",
+  "p available; q unavailable"="#BAB0AC","p unavailable"="grey88")
+ranking_labels <- c(global="Global",top="Top",bottom="Bottom")
+
+seed_val <- if(!is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998L
+set.seed(seed_val)
+plot_cap <- 20000L # points drawn per scatter; every point that is not "Evaluated; not significant" is always drawn
+
+fmt_int <- function(x) ifelse(is.na(x),"NA",format(round(x),big.mark=",",scientific=FALSE,trim=TRUE))
+fmt_p <- function(x) ifelse(is.finite(x),formatC(x,format="g",digits=3),"NA")
 file_ok <- function(f) !is.null(f) && length(f)==1L && !is.na(f) && !grepl("^NO_",basename(f)) && file.exists(f) && file.info(f)$size>0
 num <- function(d,n) if(n %in% names(d)) suppressWarnings(as.numeric(d[[n]])) else rep(NA_real_,nrow(d))
-call <- function(p,threshold) ifelse(is.finite(p),p<threshold,NA)
-status <- function(p,q) ifelse(!is.finite(p),"p no disponible",
-  ifelse(!is.finite(q),"p disponible; q no disponible",ifelse(q<fdr,"BH",ifelse(p<nominal,"Nominal","Evaluado; no significativo"))))
+below <- function(p,threshold) ifelse(is.finite(p),p<threshold,NA)
+status <- function(p,q) factor(ifelse(!is.finite(p),"p unavailable",
+  ifelse(!is.finite(q),"p available; q unavailable",ifelse(q<fdr,"BH",ifelse(p<nominal,"Nominal","Evaluated; not significant")))),
+  levels=status_levels)
 for(n in c("position_scores_input","gene_scores_input")) if(!file_ok(params[[n]])) stop("Missing canonical scoring input: ",n)
 pos <- read_tsv(params$position_scores_input,show_col_types=FALSE)
 genes <- read_tsv(params$gene_scores_input,show_col_types=FALSE)
@@ -86,7 +132,7 @@ metric <- function(n) {
   x <- suppressWarnings(as.numeric(nu$value[nu$metric==n & is.na(nu$cycles)]))
   if(length(x)) x[1] else NA_real_
 }
-N_position <- metric("N_cycles"); position_family <- metric("universe_size")
+N_position <- metric("N_cycles"); position_family <- metric("universe_size"); N_gene <- metadata_number("N")
 positive <- pos %>% filter(is.finite(CAAS_score),CAAS_score>0,side %in% c("top","bottom"))
 views_pos <- list()
 views_gene <- list()
@@ -96,7 +142,7 @@ for(rk in c("global","top","bottom")) {
   side_labels <- p %>% group_by(Gene,Position) %>% summarise(positive_sides=paste(sort(unique(side)),collapse=","),.groups="drop")
   p <- p %>% arrange(desc(CAAS_score),desc(n_hypotheses),Gene,Position,side) %>% distinct(Gene,Position,.keep_all=TRUE) %>%
     left_join(side_labels,by=c("Gene","Position")) %>%
-    mutate(nominal=call(p.emp,nominal),BH=call(p.adj_bh,fdr),evidence_status=status(p.emp,p.adj_bh)) %>%
+    mutate(nominal=below(p.emp,nominal),BH=below(p.adj_bh,fdr),evidence_status=status(p.emp,p.adj_bh)) %>%
     arrange(p.emp,desc(CAAS_score),Gene,Position)
   views_pos[[rk]] <- p
   g <- tibble(Gene=as.character(genes$Gene),score=num(genes,paste0("gene_caas_score",sf)),
@@ -110,7 +156,7 @@ for(rk in c("global","top","bottom")) {
   if(!is.null(ge)) {
     ix <- match(g$Gene,ge$gene[ge$ranking==rk]);g$N_valid <- num(ge[ge$ranking==rk,,drop=FALSE],"N_valid")[ix]
   }
-  g <- g %>% mutate(nominal=call(p.gen,nominal),BH=call(p.gen.adj,fdr),
+  g <- g %>% mutate(nominal=below(p.gen,nominal),BH=below(p.gen.adj,fdr),
     carries_position_BH=positions_BH>0,evidence_status=status(p.gen,p.gen.adj),
     min_resolvable_p=ifelse(is.finite(N_valid)&N_valid>0,1/(N_valid+1),NA_real_)) %>% arrange(p.gen,desc(score),Gene)
   views_gene[[rk]] <- g
@@ -124,8 +170,8 @@ for(rk in names(views_pos)) {
 summary_rows <- function(d,rk,unit,pcol,qcol,scol) {
   p <- d[[pcol]];q <- d[[qcol]]
   tibble(ranking=rk,unit=unit,positive_rows=nrow(d),p_available=sum(is.finite(p)),q_available=sum(is.finite(q)),
-    positive_without_p=sum(!is.finite(p)),nominal=sum(call(p,nominal) %in% TRUE),BH=sum(call(q,fdr) %in% TRUE),
-    genes_carrying_position_BH=if(unit=="genes")sum(d$carries_position_BH) else n_distinct(d$Gene[call(q,fdr) %in% TRUE]),
+    positive_without_p=sum(!is.finite(p)),nominal=sum(below(p,nominal) %in% TRUE),BH=sum(below(q,fdr) %in% TRUE),
+    genes_carrying_position_BH=if(unit=="genes")sum(d$carries_position_BH) else n_distinct(d$Gene[below(q,fdr) %in% TRUE]),
     score_median=if(nrow(d))median(d[[scol]]) else NA_real_)
 }
 summary <- bind_rows(lapply(names(views_pos),function(rk) bind_rows(
@@ -133,14 +179,51 @@ summary <- bind_rows(lapply(names(views_pos),function(rk) bind_rows(
   summary_rows(views_gene[[rk]],rk,"genes","p.gen","p.gen.adj","score"))))
 write_tsv(summary,file.path(out,"positive_evidence_summary.tsv"))
 write_tsv(full_gene_family,file.path(out,"original_gene_family_coverage.tsv"))
+resolution <- tibble(unit=c("Positions (family pooled over sides)","Genes (per ranking)"),
+  N_roster=c(N_position,N_gene),
+  roster_min_p=ifelse(is.finite(c(N_position,N_gene)),1/(c(N_position,N_gene)+1),NA_real_),
+  original_family_size=c(position_family,metadata_number("genes")))
+write_tsv(resolution,file.path(out,"null_resolution.tsv"))
+# Family sizes are counts; integers keep them undecorated in the table.
+resolution_view <- resolution %>% mutate(across(c(N_roster,original_family_size),~suppressWarnings(as.integer(round(.x)))))
 # Compatibility export now contains canonical, globally unique positive positions.
 write_tsv(views_pos$global,file.path(out,"meta_caas_significance.tsv"))
-plot_distribution <- function(d,score,p,q,title) {
-  dd <- bind_rows(tibble(variable="score",value=d[[score]]),tibble(variable="p",value=d[[p]]),tibble(variable="q (BH)",value=d[[q]])) %>% filter(is.finite(value))
-  if(nrow(dd)) print(ggplot(dd,aes(value))+geom_histogram(bins=35,fill="#4E79A7",colour="white")+
-    facet_wrap(~variable,scales="free")+theme_minimal()+labs(title=title,x=NULL,y="Filas de esta vista"))
-  else cat("_Distribuciones no disponibles._\n\n")
+
+# ── Plot helpers ──────────────────────────────────────────────────────────────
+
+# Draws every row that is not "Evaluated; not significant" and a random subsample of those, so the figure stays light.
+thin <- function(d) {
+  bulk <- d$evidence_status=="Evaluated; not significant"
+  if(sum(bulk)<=plot_cap) return(d)
+  bind_rows(d[!bulk,,drop=FALSE],d[bulk,,drop=FALSE][sample.int(sum(bulk),plot_cap),,drop=FALSE])
 }
+evidence_scatter <- function(d,score,p,label,floor_p,title) {
+  d <- d[is.finite(d[[p]]) & is.finite(d[[score]]),,drop=FALSE]
+  if(!nrow(d)) {cat("_No row of this view has an available p; the scatter is omitted._\n\n");return(invisible(NULL))}
+  d$y <- -log10(pmax(d[[p]],1e-300)); d$x <- d[[score]]
+  # Hits tie at the resolution floor, so ties are ordered by score; the few labels sit in the headroom above the points.
+  hits <- d %>% filter(evidence_status=="BH") %>% arrange(desc(y),desc(x)) %>% head(8)
+  g <- ggplot(thin(d),aes(x,y,colour=evidence_status))+
+    geom_hline(yintercept=-log10(nominal),linetype="dashed",colour="grey45")+
+    geom_point(alpha=.55,size=1.5)+
+    scale_colour_manual(values=status_colours,drop=FALSE,name=NULL)+
+    scale_y_continuous(expand=expansion(mult=c(.02,.22)))+
+    labs(title=title,subtitle=sprintf("Dashed line: nominal threshold p = %g. Dotted line: resolution floor 1/(N+1) of the null roster.",nominal),
+         x="CAAS score",y=expression(-log[10]~p))+guides(colour=guide_legend(override.aes=list(alpha=1,size=3)))
+  if(is.finite(floor_p)) g <- g+geom_hline(yintercept=-log10(floor_p),linetype="dotted",colour="grey25")
+  if(nrow(hits)) g <- g+geom_text_repel(data=hits,aes(label=.data[[label]]),size=3,colour="grey20",max.overlaps=Inf,min.segment.length=0,
+    nudge_y=.12*diff(range(d$y)),direction="x",segment.colour="grey60",seed=seed_val)
+  print(g)
+}
+evidence_histograms <- function(d,score,p,q,title) {
+  dd <- bind_rows(tibble(variable="Score",value=d[[score]]),tibble(variable="p",value=d[[p]]),tibble(variable="q (BH)",value=d[[q]])) %>%
+    filter(is.finite(value)) %>% mutate(variable=factor(variable,c("Score","p","q (BH)")))
+  if(!nrow(dd)) {cat("_Distributions are not available._\n\n");return(invisible(NULL))}
+  print(ggplot(dd,aes(value,fill=variable))+geom_histogram(bins=35,colour="white",show.legend=FALSE)+
+    facet_wrap(~variable,scales="free")+scale_fill_manual(values=c(Score=.tableau10[1],p=.tableau10[2],"q (BH)"=.tableau10[4]))+
+    labs(title=title,x=NULL,y="Rows of this view"))
+}
+kpi <- function(value,label,sub="",class="") sprintf('<div class="kpi %s"><div class="v">%s</div><div class="l">%s</div><div class="s">%s</div></div>',class,value,label,sub)
 ```
 <script>
 $(document).on('shown.bs.tab shown.bs.collapse', function () {
@@ -148,48 +231,77 @@ $(document).on('shown.bs.tab shown.bs.collapse', function () {
 });
 </script>
 
+# Overview
 
-<style>.main-container { max-width:95%; } </style>
-
-# Qué se muestra
-
-Solo posiciones y genes con **score observado > 0 en la vista correspondiente**.
-Global contiene una fila por posición biológica `(Gene, Position)`, con su máximo score
-entre lados; Top y Bottom usan el score de su propio lado. Las coordenadas son las del
-alineamiento recortado, base cero; la posición 0 es válida.
-
-El p posicional está agrupado entre lados y se muestra con su BH original: Top y Bottom
-no constituyen dos pruebas nuevas. Los genes tienen p y BH propios por ranking.
-**Filtrar score positivo solo cambia la presentación:** no se recalculan p/q ni sus
-familias BH. Una p ausente se muestra como no disponible y nunca como no significativa.
-Un gen BH significativo y un gen portador de una posición BH significativa son resultados
-estadísticos distintos; sus recuentos figuran por separado y corresponden a cada vista.
-
-# Cobertura, denominadores y resolución
-
-```{r coverage, results='asis'}
-cat(sprintf("Llamada nominal: p < %g; llamada BH: q < %g (metadatos de la evidencia).\n\n",nominal,fdr))
-show_table(summary)
-cat("**Familias originales de genes, antes del filtro de score:** los recuentos con p/q incluyen los genes con score cero.\n\n")
-show_table(full_gene_family)
-resolution <- tibble(unit=c("Posiciones (familia agrupada entre lados)","Genes (por ranking)"),
-  N_roster=c(N_position,metadata_number("N")),
-  roster_min_p=c(if(is.finite(N_position))1/(N_position+1) else NA_real_,if(is.finite(metadata_number("N")))1/(metadata_number("N")+1) else NA_real_),
-  original_family_size=c(position_family,metadata_number("genes")))
-write_tsv(resolution,file.path(out,"null_resolution.tsv"))
-show_table(resolution)
-cat("Los denominadores de los resúmenes son las filas positivas de su vista. El tamaño original de la familia posicional incluye posiciones del nulo sin detección observada. N_valid y la resolución real por gen se leen de gene_evidence.tsv; el suelo basado en el roster presupone todos los ciclos válidos. Una resolución no documentada queda como NA; no se deduce del mínimo p observado.\n\n")
+```{r overview, results='asis'}
+sp <- function(rk,u) summary[summary$ranking==rk & summary$unit==u,,drop=FALSE]
+cat('<div class="kpi-row">',
+  kpi(fmt_int(sp("global","positions")$positive_rows),"positive positions","score > 0, one row per (Gene, Position)"),
+  kpi(fmt_int(sp("global","positions")$BH),sprintf("positions with BH q < %g",fdr),sprintf("%s nominal at p < %g",fmt_int(sp("global","positions")$nominal),nominal),"bh"),
+  kpi(fmt_int(sp("global","positions")$genes_carrying_position_BH),"genes carrying a BH position","global ranking","bh"),
+  kpi(fmt_int(sp("global","genes")$positive_rows),"positive genes","gene score > 0","gene"),
+  kpi(fmt_int(sp("global","genes")$BH),sprintf("genes with BH q < %g",fdr),sprintf("%s nominal at p < %g",fmt_int(sp("global","genes")$nominal),nominal),"bh"),
+  '</div>\n\n',sep="\n")
+cat(sprintf("Calls follow the thresholds saved with the evidence: nominal p < %g and BH q < %g. Counts above refer to the Global view; Top and Bottom are in the tabs below.\n\n",nominal,fdr))
 ```
 
-# Posiciones {.tabset}
+The report shows only positions and genes whose **observed score is greater than 0 in the view concerned**. Global has one row per biological position `(Gene, Position)` with its maximum score over sides; Top and Bottom use the score of their own side. Coordinates are those of the trimmed alignment, zero-based, so position 0 is valid.
+
+<div class="note">
+**How to read the evidence.**
+
+- Position p-values are pooled over sides and shown with their original BH q. Top and Bottom are therefore not two new families of tests.
+- Genes have their own p and BH q for each ranking.
+- Keeping rows with a positive score only changes the presentation. p, q and the BH families are not recomputed, and a missing p is reported as unavailable, never as not significant.
+- A gene with BH significance and a gene that carries a BH-significant position are different statistical results; their counts are given separately.
+</div>
+
+## Evidence classes
+
+```{r classes, results='asis', fig.height=4}
+cls <- bind_rows(lapply(names(views_pos),function(rk) bind_rows(
+  count(views_pos[[rk]],evidence_status,.drop=FALSE) %>% mutate(unit="Positions",ranking=rk),
+  count(views_gene[[rk]],evidence_status,.drop=FALSE) %>% mutate(unit="Genes",ranking=rk)))) %>%
+  mutate(ranking=factor(ranking_labels[ranking],ranking_labels),unit=factor(unit,c("Positions","Genes")),
+         evidence_status=factor(evidence_status,status_levels))
+tot <- cls %>% group_by(unit,ranking) %>% summarise(total=sum(n),.groups="drop")
+lab <- cls %>% left_join(tot,by=c("unit","ranking")) %>% filter(n>0,n/total>=.06)
+print(ggplot(cls,aes(ranking,n,fill=evidence_status))+geom_col(position="fill",width=.7)+
+  geom_text(data=lab,aes(label=fmt_int(n)),position=position_fill(vjust=.5),size=3.4,colour="white")+
+  coord_flip()+facet_wrap(~unit,ncol=1)+scale_y_continuous(labels=percent)+
+  scale_fill_manual(values=status_colours,drop=FALSE,name=NULL)+
+  labs(title="Evidence class of the positive rows",subtitle="Share of each view; labels show counts for segments of at least 6%",x=NULL,y=NULL))
+```
+
+# Coverage, denominators and resolution
+
+```{r coverage, results='asis'}
+cat("**Positive rows per view, with p and q availability and calls.**\n\n")
+report_emit(report_table(summary))
+cat("**Original gene families, before the score filter.** Counts with p or q include genes of score zero.\n\n")
+report_emit(report_table(full_gene_family))
+cat("**Resolution of the null.** `roster_min_p` is the smallest p the roster can express, 1/(N+1), if every cycle were valid.\n\n")
+report_emit(report_table(resolution_view,sci_cols="roster_min_p"))
+cat("Summary denominators are the positive rows of each view. The original positional family also contains null positions that were never detected in the observed data. `N_valid` and the actual per-gene resolution come from `gene_evidence.tsv`; the roster floor assumes all cycles valid. An undocumented resolution stays NA and is never inferred from the smallest observed p.\n\n")
+```
+
+# Positions {.tabset}
 
 ```{r positions, results='asis'}
 for(rk in names(views_pos)) {
-  cat("\n## ",tools::toTitleCase(rk),"\n\n",sep="")
+  cat("\n## ",ranking_labels[[rk]],"\n\n",sep="")
   d <- views_pos[[rk]]
-  cat(sprintf("%d posiciones positivas; %d con p y %d con q disponibles.\n\n",nrow(d),sum(is.finite(d$p.emp)),sum(is.finite(d$p.adj_bh))))
-  plot_distribution(d,"CAAS_score","p.emp","p.adj_bh",paste("Posiciones",rk))
-  show_table(d)
+  cat(sprintf("%s positive positions: %s with p and %s with q available; %s nominal, %s BH in %s genes.\n\n",
+    fmt_int(nrow(d)),fmt_int(sum(is.finite(d$p.emp))),fmt_int(sum(is.finite(d$p.adj_bh))),fmt_int(sum(d$nominal %in% TRUE)),
+    fmt_int(sum(d$BH %in% TRUE)),fmt_int(n_distinct(d$Gene[d$BH %in% TRUE]))))
+  evidence_scatter(transform(d,label=paste0(Gene,":",Position)),"CAAS_score","p.emp","label",
+    if(is.finite(N_position)) 1/(N_position+1) else NA_real_,paste("Positions,",tolower(ranking_labels[[rk]]),"view"))
+  cat("\n\n")
+  evidence_histograms(d,"CAAS_score","p.emp","p.adj_bh",paste("Positions,",tolower(ranking_labels[[rk]]),"view"))
+  cat("\n\n")
+  front <- c("Gene","Position","side","positive_sides","CAAS_score","p.emp","p.adj_bh","evidence_status","nominal","BH")
+  report_emit(report_table(d %>% mutate(evidence_status=as.character(evidence_status)) %>% relocate(any_of(front)),
+    sci_cols=intersect(c("p.emp","p.adj_bh"),names(d))))
 }
 ```
 
@@ -197,18 +309,39 @@ for(rk in names(views_pos)) {
 
 ```{r genes, results='asis'}
 for(rk in names(views_gene)) {
-  cat("\n## ",tools::toTitleCase(rk),"\n\n",sep="")
+  cat("\n## ",ranking_labels[[rk]],"\n\n",sep="")
   d <- views_gene[[rk]]
-  cat(sprintf("%d genes positivos; %d genes BH; %d genes portadores de posiciones BH de esta misma vista.\n\n",nrow(d),sum(d$BH %in% TRUE),sum(d$carries_position_BH)))
-  plot_distribution(d,"score","p.gen","p.gen.adj",paste("Genes",rk))
-  show_table(d)
+  cat(sprintf("%s positive genes: %s BH and %s carrying positions that are BH in this same view.\n\n",
+    fmt_int(nrow(d)),fmt_int(sum(d$BH %in% TRUE)),fmt_int(sum(d$carries_position_BH))))
+  evidence_scatter(d,"score","p.gen","Gene",if(is.finite(N_gene)) 1/(N_gene+1) else NA_real_,paste("Genes,",tolower(ranking_labels[[rk]]),"ranking"))
+  cat("\n\n")
+  top_carriers <- d %>% filter(positions_BH>0) %>% arrange(desc(positions_BH),desc(score),Gene) %>% head(20) %>%
+    mutate(Gene=factor(Gene,rev(Gene)))
+  if(nrow(top_carriers)) {
+    print(ggplot(top_carriers,aes(positions_BH,Gene,fill=evidence_status))+geom_col(width=.7)+
+      scale_fill_manual(values=status_colours,drop=TRUE,name="Gene-level evidence")+
+      scale_x_continuous(breaks=function(x) {b <- pretty(x); b[b==round(b)]},expand=expansion(mult=c(0,.05)))+
+      labs(title=paste("Genes carrying the most BH positions,",tolower(ranking_labels[[rk]]),"view"),
+           subtitle="Bar colour is the evidence class of the gene itself, which is a separate test",x="Positions with BH q below threshold",y=NULL))
+    cat("\n\n")
+  } else cat("_No gene of this view carries a BH-significant position._\n\n")
+  evidence_histograms(d,"score","p.gen","p.gen.adj",paste("Genes,",tolower(ranking_labels[[rk]]),"ranking"))
+  cat("\n\n")
+  front <- c("Gene","score","p.gen","p.gen.adj","evidence_status","nominal","BH","carries_position_BH","positive_positions","positions_BH","positions_nominal","N_valid","min_resolvable_p")
+  report_emit(report_table(d %>% mutate(evidence_status=as.character(evidence_status)) %>% relocate(any_of(front)),
+    sci_cols=intersect(c("p.gen","p.gen.adj","min_resolvable_p"),names(d))))
 }
 ```
 
-# Tablas completas
+# Complete tables
 
-Las tablas paginadas contienen todas las filas positivas y permiten buscar, ordenar y
-exportar. Los TSV numéricos completos se publican bajo `meta_caas/significance/`, con
-nombres `positive_positions_{global,top,bottom}.tsv`, `positive_genes_{global,top,bottom}.tsv`,
-`positive_evidence_summary.tsv`, `original_gene_family_coverage.tsv` y `null_resolution.tsv`. Los resúmenes
-históricos por patrón se han retirado del informe activo.
+The paginated tables hold every positive row and can be searched, sorted and exported. The complete numeric TSV files are published under `meta_caas/significance/`:
+
+| File | Content |
+|---|---|
+| `positive_positions_{global,top,bottom}.tsv` | positive positions with p, q, calls and evidence class |
+| `positive_genes_{global,top,bottom}.tsv` | positive genes with p, q, position counts and resolution |
+| `positive_evidence_summary.tsv` | counts shown in the coverage table |
+| `original_gene_family_coverage.tsv` | gene families before the score filter |
+| `null_resolution.tsv` | roster size and smallest expressible p |
+| `meta_caas_significance.tsv` | globally unique positive positions, for compatibility |
