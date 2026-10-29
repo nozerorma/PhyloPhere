@@ -31,6 +31,20 @@ from PySide6.QtWidgets import (
 from gui.models.resources import ResourcesConfig
 from gui.widgets.resource_table.widget import ResourceOverrideTableWidget
 
+# Hints for the ceiling and SLURM executor fields. Ceilings are clamped per process by Nextflow (resourceLimits).
+_CPUS_TIP = "Ceiling on CPUs per process (--max_cpus). Larger requests are clamped to it, retries included."
+_MEMORY_TIP = "Ceiling on memory per process (--max_memory), e.g. 128.GB. Larger requests are clamped to it."
+_TIME_TIP = "Ceiling on time per process (--max_time), e.g. 960.h. Larger requests are clamped to it."
+_QUEUE_TIP = "Maximum SLURM jobs one Nextflow run keeps queued or running (queueSize). Default 8."
+_RATE_TIP = "Maximum job submissions per time window, as N/interval (submitRateLimit), e.g. 30/1min."
+_TIMEOUT_TIP = "Time Nextflow waits for a job's exit status before marking it failed (exitReadTimeout), e.g. 4h."
+
+
+def _tip(text: str, *widgets) -> None:
+    """Give a label and its input the same hover hint (tooltip)."""
+    for widget in widgets:
+        widget.setToolTip(text)
+
 
 class ResourcesTab(QWidget):
     changed = Signal()
@@ -74,16 +88,19 @@ class ResourcesTab(QWidget):
         cpus_field.textChanged.connect(lambda v: self._on_changed(cpus_attr, v))
         cpus_lbl = QLabel("Max CPUs (--max_cpus)")
         form.addRow(cpus_lbl, cpus_field)
+        _tip(_CPUS_TIP, cpus_lbl, cpus_field)
 
         mem_field = QLineEdit(getattr(self._config, mem_attr))
         mem_field.textChanged.connect(lambda v: self._on_changed(mem_attr, v))
         mem_lbl = QLabel("Max memory (--max_memory)")
         form.addRow(mem_lbl, mem_field)
+        _tip(_MEMORY_TIP, mem_lbl, mem_field)
 
         time_field = QLineEdit(getattr(self._config, time_attr))
         time_field.textChanged.connect(lambda v: self._on_changed(time_attr, v))
         time_lbl = QLabel("Max time (--max_time)")
         form.addRow(time_lbl, time_field)
+        _tip(_TIME_TIP, time_lbl, time_field)
 
         setattr(self, f"{prefix}_box", box)
         setattr(self, f"{prefix}_cpus_lbl", cpus_lbl)
@@ -112,16 +129,19 @@ class ResourcesTab(QWidget):
         queue_size_field.textChanged.connect(lambda v: self._on_changed("slurm_queue_size", v))
         queue_size_lbl = QLabel("Queue size (--slurm_queue_size)")
         form.addRow(queue_size_lbl, queue_size_field)
+        _tip(_QUEUE_TIP, queue_size_lbl, queue_size_field)
 
         rate_limit_field = QLineEdit(self._config.slurm_submit_rate_limit)
         rate_limit_field.textChanged.connect(lambda v: self._on_changed("slurm_submit_rate_limit", v))
         rate_limit_lbl = QLabel("Submit rate limit (--slurm_submit_rate_limit)")
         form.addRow(rate_limit_lbl, rate_limit_field)
+        _tip(_RATE_TIP, rate_limit_lbl, rate_limit_field)
 
         timeout_field = QLineEdit(self._config.slurm_exit_read_timeout)
         timeout_field.textChanged.connect(lambda v: self._on_changed("slurm_exit_read_timeout", v))
         timeout_lbl = QLabel("Exit read timeout (--slurm_exit_read_timeout)")
         form.addRow(timeout_lbl, timeout_field)
+        _tip(_TIMEOUT_TIP, timeout_lbl, timeout_field)
 
         self.slurm_executor_box = box
         self.slurm_executor_note = note

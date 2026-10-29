@@ -57,6 +57,7 @@ _IMPORTANCE_LABEL_STYLE = {
     "default": "",
     "optional": "QLabel { color: #6b7280; }",
 }
+_HINT_STYLE = "QLabel { color: #6b7280; font-size: 11px; padding: 0 0 4px 2px; }"
 _IMPORTANCE_TOOLTIP_PREFIX = {
     "required": "Required — the pipeline hard-fails without this.\n\n",
     "default": "Recommended default — change only if you understand the implications.\n\n",
@@ -150,6 +151,7 @@ class ModuleTabWidget(QWidget):
 
         self._field_widgets: dict[str, QWidget] = {}
         self._label_widgets: list[tuple[QLabel | QCheckBox, FieldSpec]] = []
+        self._hint_widgets: list[tuple[QLabel, FieldSpec]] = []
         for f in spec.essential_fields:
             self._add_field(self._essential_form, f)
         for f in spec.advanced_fields:
@@ -229,6 +231,14 @@ class ModuleTabWidget(QWidget):
             widget.setToolTip(tooltip)
         self._field_widgets[f.name] = widget
 
+        # Visible one-line hint under the field, so the guidance does not depend on hovering.
+        if f.help:
+            hint_lbl = QLabel(f.help)
+            hint_lbl.setWordWrap(True)
+            hint_lbl.setStyleSheet(_HINT_STYLE)
+            form.addRow(hint_lbl)
+            self._hint_widgets.append((hint_lbl, f))
+
     def retranslate(self, lang: str = "en") -> None:
         from gui.i18n import tr
         self.enable_toggle.setText(f"{tr('Enable', lang)} {tr(self._spec.title, lang)}")
@@ -257,6 +267,8 @@ class ModuleTabWidget(QWidget):
             tooltip = prefix + translated_help if prefix else translated_help
             if tooltip:
                 label_widget.setToolTip(tooltip)
+        for hint_lbl, f in self._hint_widgets:
+            hint_lbl.setText(tr(f.help, lang))
 
     def _set_field(self, name: str, value) -> None:
         setattr(self._config, name, value)

@@ -28,6 +28,8 @@ class AboutInfo:
     )
     version: str = "2.0"
     repo_url: str = "https://github.com/nozerorma/PhyloPhere"
+    readme_url: str = "https://github.com/nozerorma/PhyloPhere/blob/main/README.md"
+    walkthrough_url: str = "https://github.com/nozerorma/PhyloPhere/blob/main/docs/WALKTHROUGH.md"
     author: str = "Miguel Ramon Alonso"
     author_email: str = "miguel.ramon@upf.edu"
     institution: str = "Institute of Evolutionary Biology (IBE), UPF-CSIC"

@@ -35,6 +35,12 @@ from gui.widgets.common import remote_context
 from gui.widgets.common.path_field import PathField
 
 
+def _tip(text: str, *widgets) -> None:
+    """Give a label and its input the same hover hint (tooltip)."""
+    for widget in widgets:
+        widget.setToolTip(text)
+
+
 class GeneralTab(QWidget):
     changed = Signal()
 
@@ -58,6 +64,8 @@ class GeneralTab(QWidget):
         form = QFormLayout()
         self.project_name_label = QLabel("Project name")
         form.addRow(self.project_name_label, self.project_name_edit)
+        _tip("Display name for the window title. Does not change the project file or any run.",
+             self.project_name_label, self.project_name_edit)
         return form
 
     def _on_project_name_changed(self, value: str) -> None:
@@ -87,12 +95,16 @@ class GeneralTab(QWidget):
         self.repo_dir.textChanged.connect(self._on_repo_dir_changed)
         self.repo_dir_label = QLabel("Repo directory")
         form.addRow(self.repo_dir_label, self.repo_dir)
+        _tip("Path to the PhyloPhere checkout containing main.nf. Each run calls nextflow run on it.",
+             self.repo_dir_label, self.repo_dir)
 
         self.nextflow_plugins_dir = PathField(mode="dir")
         self.nextflow_plugins_dir.set_text(self._config.nextflow_plugins_dir)
         self.nextflow_plugins_dir.textChanged.connect(self._on_plugins_dir_changed)
         self.plugins_dir_label = QLabel("Nextflow plugins directory")
         form.addRow(self.plugins_dir_label, self.nextflow_plugins_dir)
+        _tip("Nextflow plugin directory, linked as plugins/ inside each run's private NXF_HOME.",
+             self.plugins_dir_label, self.nextflow_plugins_dir)
         self.plugins_dir_note = QLabel(
             "Symlinked into every run's NXF_HOME to avoid session/cache-database "
             "lock collisions between concurrent phenotype runs."
@@ -103,11 +115,14 @@ class GeneralTab(QWidget):
         self.seed.textChanged.connect(self._on_seed_changed)
         self.seed_label = QLabel("Random seed")
         form.addRow(self.seed_label, self.seed)
+        _tip("Random seed (--seed) for permutations and sampling. Also sets PYTHONHASHSEED. Default 1998.",
+             self.seed_label, self.seed)
 
         self.reporting = QCheckBox("Generate HTML trait-analysis reports (--reporting)")
         self.reporting.setChecked(self._config.reporting)
         self.reporting.toggled.connect(self._on_reporting_changed)
         form.addRow(self.reporting)
+        _tip("Generate HTML exploration and trait-analysis reports (--reporting).", self.reporting)
 
         return self.nextflow_box
 
@@ -131,12 +146,16 @@ class GeneralTab(QWidget):
         self.remote_host.textChanged.connect(self._on_remote_host_changed)
         self.remote_host_label = QLabel("Remote host")
         form.addRow(self.remote_host_label, self.remote_host)
+        _tip("SSH target (user@host) for browsing and path checks. Blank uses the local filesystem. Key login required.",
+             self.remote_host_label, self.remote_host)
 
         self.remote_root_dir = QLineEdit(self._config.remote_root_dir)
         self.remote_root_dir.setPlaceholderText("/scratch/username (blank = start browsing at /)")
         self.remote_root_dir.textChanged.connect(self._on_remote_root_dir_changed)
         self.remote_root_dir_label = QLabel("Remote root directory")
         form.addRow(self.remote_root_dir_label, self.remote_root_dir)
+        _tip("Directory where remote browsing starts when a path field is empty. Blank starts at /.",
+             self.remote_root_dir_label, self.remote_root_dir)
         layout.addLayout(form)
 
         return self.remote_box

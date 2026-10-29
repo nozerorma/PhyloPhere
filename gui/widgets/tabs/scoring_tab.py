@@ -30,37 +30,37 @@ SPEC = ModuleTabSpec(
     ),
     essential_fields=(
         Section("Empirical evidence (CAAS and RER)"),
-        FieldSpec(name="evidence_p_threshold", label="Nominal empirical p-value for activity", importance="default", help="Selects active CAAS genes/positions and RER genes. FCS keeps the full continuous ranking."),
-        FieldSpec(name="evidence_fdr_threshold", label="BH threshold for highlighting", importance="default", help="Highlights the BH-adjusted empirical subset in the same tables and AMI networks; no additional module run."),
+        FieldSpec(name="evidence_p_threshold", label="Nominal empirical p-value for activity", importance="default", help="Nominal p-value cutoff that selects active CAAS genes and positions and RER genes; FCS keeps the full ranking."),
+        FieldSpec(name="evidence_fdr_threshold", label="BH threshold for highlighting", importance="default", help="BH-adjusted cutoff that highlights the subset in report tables and AMI networks; does not add a module run."),
         FieldSpec(
-            name="gene_ensembl_file",
+            name="gene_ensembl_file", help="Gene annotation TSV (gene, coordinates, length, human_protein_id); blank is filled from BioMart only when auto-generation is on.",
             label="Gene-Ensembl mapping file",
             kind="path_file",
             importance="optional",
         ),
         FieldSpec(
-            name="auto_generate_ensembl",
+            name="auto_generate_ensembl", help="Build gene_ensembl_file from BioMart when it is blank; needs network access.",
             label="Auto-generate Ensembl mapping via BioMart if unset",
             kind="bool",
             importance="optional",
         ),
         FieldSpec(
-            name="ensembl_dataset",
+            name="ensembl_dataset", help="BioMart dataset for auto-generation; blank derives it from the reference species (Homo_sapiens gives hsapiens_gene_ensembl).",
             label="Ensembl BioMart dataset (optional)",
             importance="optional",
         ),
         FieldSpec(
-            name="scoring_hypotheses_pairs",
+            name="scoring_hypotheses_pairs", help="contrast_hypotheses_pairs.tsv of per-pair PSS weights; blank uses this run's contrast selection (standalone runs auto-discover it).",
             label="Contrast hypotheses pairs file for scoring (optional)",
             kind="path_file",
             importance="optional",
         ),
         Section("Evidence of the best positions"),
-        FieldSpec(name="caas_evidence_top_n", label="Evidence of the N best positions (0 = off)", importance="optional"),
+        FieldSpec(name="caas_evidence_top_n", help="Number of best positions in the evidence table written to scoring/evidence/; 0 = off.", label="Evidence of the N best positions (0 = off)", importance="optional"),
     ),
     advanced_fields=(
         Section("Genomic windows and position-level significance"),
-        FieldSpec(name="scoring_window_size_bp", label="Genomic window size (bp)", importance="optional"),
+        FieldSpec(name="scoring_window_size_bp", help="Genomic window size in bp used by the overlap reports; default 1000000.", label="Genomic window size (bp)", importance="optional"),
     ),
 )
 

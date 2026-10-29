@@ -57,6 +57,7 @@ SPEC = ModuleTabSpec(
             # subworkflows/CT_DISAMBIGUATION/local/src/asr/reconstruct.py.
             choices=("lg", "wag", "jtt", "dayhoff"),
             importance="default",
+            help="Empirical amino-acid substitution matrix for PAML codeml ancestral reconstruction: lg (default), wag, jtt or dayhoff.",
         ),
         FieldSpec(
             name="ct_disambig_asr_cache_dir",
@@ -64,13 +65,7 @@ SPEC = ModuleTabSpec(
             kind="path_dir",
             importance="optional",
             help=(
-                "This is the ASR result cache: a gene found here is read, a gene "
-                "missing from it is computed and written to it. Leaving it blank auto-"
-                "generates a working default (repo_dir/caches/.asr_cache, created "
-                "automatically; see gui/generation/templates/run_single.sh.j2's bash "
-                "fallback). Override only to reuse a cache from a previous run or "
-                "share one across runs — cache location has no effect on statistical "
-                "validity."
+                "ASR result cache: genes found there are read, others computed and stored. Blank uses repo_dir/caches/.asr_cache; reuse a cache to skip reconstruction."
             ),
         ),
         FieldSpec(
@@ -78,6 +73,7 @@ SPEC = ModuleTabSpec(
             label="Contrast hypotheses pairs file for the observed scoring (optional)",
             kind="path_file",
             importance="optional",
+            help="contrast_hypotheses_pairs.tsv weighting the observed scoring; blank uses this run's contrast selection, or auto-discovery in standalone runs.",
         ),
         Section("Post-processing mode (conf/ct_postproc.config)"),
         FieldSpec(
@@ -86,10 +82,7 @@ SPEC = ModuleTabSpec(
             kind="bool",
             importance="optional",
             help=(
-                "Grid-searches Cluster min length x Cluster max CAAS value across the "
-                "sweep ranges below (Advanced) instead of a single pass. Writes to "
-                "${OUTDIR}_exploratory/ and skips downstream modules — use this to "
-                "find good filter thresholds before committing to a production run."
+                "Sweeps cluster length and CAAS density thresholds (Advanced) to choose filters; writes to ${OUTDIR}_exploratory/ and skips downstream modules."
             ),
         ),
         FieldSpec(
@@ -98,9 +91,7 @@ SPEC = ModuleTabSpec(
             kind="bool",
             importance="optional",
             help=(
-                "Single filtering pass using the fixed Cluster min length / Cluster "
-                "max CAAS value thresholds below (Advanced). Writes to ${OUTDIR}_final/ "
-                "and runs downstream modules — this is the normal production path."
+                "Single filtering pass with the fixed cluster thresholds below; writes to ${OUTDIR}_final/ and runs downstream modules (normal production path)."
             ),
         ),
         FieldSpec(
@@ -109,24 +100,14 @@ SPEC = ModuleTabSpec(
             kind="bool",
             importance="optional",
             help=(
-                "Also generates a pair of scripts (…_strict) that repeat everything from post-processing on "
-                "(accumulation, scoring, enrichment) with only the hypotheses that have no conserved pair. They read the "
-                "strict tables the normal run writes under <outdir>/strict/ (CAAS tab) and the FADE and RER tables of "
-                "that run, and write to ${OUTDIR}_strict/. Run the normal scripts first. Needs a min divergent "
-                "fraction below 1."
+                "Also generates scripts that repeat the run from post-processing with only hypotheses without conserved pairs; run the normal scripts first. Needs a min divergent fraction below 1."
             ),
         ),
         FieldSpec(
             name="caas_map_dir",
             label="Per-gene MAP directory (optional)",
             kind="path_dir",
-            help="Directory of the trimmer's per-gene MAP tables. When set, cluster "
-                 "trains measure their span in untrimmed alignment columns (columns the "
-                 "trimmer removed cannot hold a CAAS), in the observed filter and in the "
-                 "permulation null alike; a gene without a MAP file keeps trimmed "
-                 "coordinates. VEP maps positions with the same tables and requires it. "
-                 "Cannot be generated in-house: see "
-                 "github.com/nozerorma/ortholog_characterizator.",
+            help="Per-gene MAP tables from the Ortholog Characterizator; cluster spans use untrimmed columns, and VEP needs them.",
             importance="optional",
         ),
     ),
@@ -136,11 +117,7 @@ SPEC = ModuleTabSpec(
             label="Posterior probability threshold",
             importance="default",
             help=(
-                "Residues with an ASR posterior below this value are dropped from the "
-                "recorded distribution of a node (the most probable residue is always "
-                "kept). The dropped mass is charged as worst case in the position "
-                "score, so a higher value can only lower scores. Statistical "
-                "parameter — changing it changes the scores, not just performance."
+                "Residues with an ASR posterior below this are dropped from a node; the dropped mass counts as worst case, so higher values only lower scores."
             ),
         ),
         Section("Post-processing filter thresholds (conf/ct_postproc.config)"),
@@ -165,11 +142,7 @@ SPEC = ModuleTabSpec(
             choices=("none", "extreme", "dubious", "both"),
             importance="default",
             help=(
-                "'extreme' drops genes whose CAAS count is a statistical outlier "
-                "(Extreme-gene quantile threshold, below). 'dubious' drops genes "
-                "flagged by cluster-based IQR screening (Dubious-gene IQR multiplier, "
-                "below; needs a cluster file). 'both' applies both filters; 'none' "
-                "disables gene-level filtering entirely."
+                "none: no gene filter; extreme: drop genes with outlier CAAS counts; dubious: drop genes flagged by cluster IQR screening; both: apply both."
             ),
         ),
         FieldSpec(
@@ -178,9 +151,7 @@ SPEC = ModuleTabSpec(
             kind="bool",
             importance="default",
             help=(
-                "Discard individual positions flagged as spatial CAAS clusters from the "
-                "discovery dataset. Decoupled from gene-level filtering: when enabled, "
-                "spatial clusters are removed even if Gene filter mode is set to 'none'."
+                "Discard positions in spatial CAAS clusters from the discovery, independent of the gene filter mode."
             ),
         ),
         Section("ASR diagnostics"),
@@ -189,9 +160,15 @@ SPEC = ModuleTabSpec(
             label="Run ASR diagnostics report",
             kind="bool",
             importance="optional",
+            help="Renders the ASR diagnostics report (9.ASR_diagnostics.html); default on.",
         ),
         Section("Performance and batching"),
-        FieldSpec(name="ct_disambig_max_tasks_per_child", label="Max tasks per worker child", importance="optional"),
+        FieldSpec(
+            name="ct_disambig_max_tasks_per_child",
+            label="Max tasks per worker child",
+            importance="optional",
+            help="Number of tasks a worker process runs before it is recycled; default 50.",
+        ),
         Section("Exploratory parameter sweep values (conf/ct_postproc.config)"),
         # Rated "optional" although borderline: these values shape only the
         # diagnostic sweep grid of Exploratory mode, not the production filter

@@ -40,6 +40,13 @@ from gui.widgets.common import remote_context
 from gui.widgets.common.path_field import PathField
 from gui.widgets.phenotype_table.widget import PhenotypeTableWidget
 
+
+def _tip(text: str, *widgets) -> None:
+    """Give a label and its input the same hover hint (tooltip)."""
+    for widget in widgets:
+        widget.setToolTip(text)
+
+
 class RuntimeTab(QWidget):
     changed = Signal()
 
@@ -69,11 +76,13 @@ class RuntimeTab(QWidget):
         self.resume.setChecked(self._config.resume)
         self.resume.toggled.connect(self._on_resume_changed)
         form.addRow(self.resume)
+        _tip("Adds -resume, so Nextflow reuses cached tasks from earlier runs in the same work directory.", self.resume)
 
         self.toy_mode = QCheckBox("Toy mode (--toy_mode)")
         self.toy_mode.setChecked(self._config.toy_mode)
         self.toy_mode.toggled.connect(self._on_toy_mode_changed)
         form.addRow(self.toy_mode)
+        _tip("Smoke test on a random subset of alignments (--toy_mode). Species are not subsampled.", self.toy_mode)
 
         self.remove_work = QCheckBox("Remove work/ after a successful run (--remove_work)")
         self.remove_work.setChecked(self._config.remove_work)
@@ -88,11 +97,15 @@ class RuntimeTab(QWidget):
         self.toy_n.textChanged.connect(self._on_toy_n_changed)
         self.toy_n_label = QLabel("Toy sample size (--toy_n)")
         form.addRow(self.toy_n_label, self.toy_n)
+        _tip("Alignments kept in toy mode (--toy_n). Positive integer, checked only when toy mode is on.",
+             self.toy_n_label, self.toy_n)
 
         self.toy_perms = QLineEdit(self._config.toy_perms)
         self.toy_perms.textChanged.connect(self._on_toy_perms_changed)
         self.toy_perms_label = QLabel("Toy permulation cycles (CAAS_FULL_PERMS)")
         form.addRow(self.toy_perms_label, self.toy_perms)
+        _tip("Permutation cycles harvested in a toy run (CAAS_FULL_PERMS). 0 replays only the real labeling.",
+             self.toy_perms_label, self.toy_perms)
 
         return self.top_box
 
@@ -106,6 +119,8 @@ class RuntimeTab(QWidget):
         self.runtime_type.currentTextChanged.connect(self._on_runtime_type_changed)
         self.runtime_type_label = QLabel("Runtime")
         form.addRow(self.runtime_type_label, self.runtime_type)
+        _tip("slurm submits one array task per phenotype row. local runs all rows in sequence in one process.",
+             self.runtime_type_label, self.runtime_type)
 
 
         self.script_base_name = QLineEdit(self._config.script_base_name)
@@ -113,6 +128,8 @@ class RuntimeTab(QWidget):
         self.script_base_name.textChanged.connect(self._on_script_base_name_changed)
         self.script_base_name_label = QLabel("Generated script name")
         form.addRow(self.script_base_name_label, self.script_base_name)
+        _tip("Replaces 'phenotypes' in generated script names. Blank keeps the default names.",
+             self.script_base_name_label, self.script_base_name)
 
         self.work_dir = PathField(mode="dir", required=True)
         self.work_dir.set_text(self._config.work_dir)
@@ -120,6 +137,8 @@ class RuntimeTab(QWidget):
         self.work_dir_label = QLabel("Work directory *")
         self.work_dir_label.setStyleSheet("QLabel { font-weight: 600; color: #b91c1c; }")
         form.addRow(self.work_dir_label, self.work_dir)
+        _tip("Base directory for the Nextflow work, run and NXF_HOME directories of each phenotype (WORK_BASE).",
+             self.work_dir_label, self.work_dir)
 
         self.results_dir = PathField(mode="dir", required=True)
         self.results_dir.set_text(self._config.results_dir)
@@ -127,31 +146,41 @@ class RuntimeTab(QWidget):
         self.results_dir_label = QLabel("Results directory *")
         self.results_dir_label.setStyleSheet("QLabel { font-weight: 600; color: #b91c1c; }")
         form.addRow(self.results_dir_label, self.results_dir)
+        _tip("Base directory for published per-phenotype results (CAAS_OUTBASE). Must be writable from compute nodes.",
+             self.results_dir_label, self.results_dir)
 
         self.sbatch_job_name = QLineEdit(self._config.sbatch_job_name)
         self.sbatch_job_name.textChanged.connect(self._on_sbatch_job_name_changed)
         self.job_name_label = QLabel("SBATCH job name")
         form.addRow(self.job_name_label, self.sbatch_job_name)
+        _tip("Name of the SBATCH array job (--job-name).", self.job_name_label, self.sbatch_job_name)
 
         self.sbatch_partition = QLineEdit(self._config.sbatch_partition)
         self.sbatch_partition.textChanged.connect(self._on_sbatch_partition_changed)
         self.partition_label = QLabel("SBATCH partition")
         form.addRow(self.partition_label, self.sbatch_partition)
+        _tip("SLURM partition (--partition). Blank uses the cluster default partition.",
+             self.partition_label, self.sbatch_partition)
 
         self.sbatch_time = QLineEdit(self._config.sbatch_time)
         self.sbatch_time.textChanged.connect(self._on_sbatch_time_changed)
         self.time_label = QLabel("SBATCH time (-t)")
         form.addRow(self.time_label, self.sbatch_time)
+        _tip("Wall-time request of each array task (-t), e.g. 144:00:00.", self.time_label, self.sbatch_time)
 
         self.sbatch_mail_user = QLineEdit(self._config.sbatch_mail_user)
         self.sbatch_mail_user.textChanged.connect(self._on_sbatch_mail_user_changed)
         self.mail_user_label = QLabel("SBATCH mail-user (blank = no email)")
         form.addRow(self.mail_user_label, self.sbatch_mail_user)
+        _tip("Address for START, END and FAIL emails (--mail-user). Blank sends no email.",
+             self.mail_user_label, self.sbatch_mail_user)
 
         self.sbatch_array_concurrency = QLineEdit(self._config.sbatch_array_concurrency)
         self.sbatch_array_concurrency.textChanged.connect(self._on_concurrency_changed)
         self.concurrency_label = QLabel("Array concurrency cap (blank = uncapped)")
         form.addRow(self.concurrency_label, self.sbatch_array_concurrency)
+        _tip("Maximum array tasks running at once (%N in --array). Blank leaves the array uncapped.",
+             self.concurrency_label, self.sbatch_array_concurrency)
 
         return self.exec_box
 
@@ -163,6 +192,7 @@ class RuntimeTab(QWidget):
         self.use_tower.setChecked(self._config.use_tower)
         self.use_tower.toggled.connect(self._on_use_tower_changed)
         form.addRow(self.use_tower)
+        _tip("Enable Seqera Platform monitoring (-with-tower). Needs token.tk or TOWER_ACCESS_TOKEN.", self.use_tower)
 
         token_row = QHBoxLayout()
         self.tower_token = QLineEdit()
@@ -175,6 +205,8 @@ class RuntimeTab(QWidget):
         token_row.addWidget(self.save_token_btn)
         self.token_label = QLabel("Access token")
         form.addRow(self.token_label, token_row)
+        _tip("Seqera access token. Save writes the gitignored token.tk in the repo directory, never the project file.",
+             self.token_label, self.tower_token)
 
         return self.tower_box
 
@@ -188,6 +220,8 @@ class RuntimeTab(QWidget):
         self.alignment_label = QLabel("Alignments (--alignment) *")
         self.alignment_label.setStyleSheet("QLabel { font-weight: 600; color: #b91c1c; }")
         form.addRow(self.alignment_label, self.alignment_dir)
+        _tip("Directory of alignments, or a .tar.gz archive (--alignment), shared by all phenotypes.",
+             self.alignment_label, self.alignment_dir)
 
         self.ali_format = QComboBox()
         self.ali_format.addItems(["fasta", "clustal", "phylip", "stockholm", "nexus"])
@@ -199,6 +233,7 @@ class RuntimeTab(QWidget):
             "fasta — the others are Biopython-supported but not exercised end-to-end here."
         )
         form.addRow(self.ali_format_label, self.ali_format)
+        self.ali_format_label.setToolTip(self.ali_format.toolTip())  # same hint as the input
 
         self.tree_file = PathField(mode="file", required=True)
         self.tree_file.set_text(self._config.tree_file)
@@ -206,6 +241,7 @@ class RuntimeTab(QWidget):
         self.tree_file_label = QLabel("Species tree (--tree) *")
         self.tree_file_label.setStyleSheet("QLabel { font-weight: 600; color: #b91c1c; }")
         form.addRow(self.tree_file_label, self.tree_file)
+        _tip("Species tree in Newick format (--tree), shared by all phenotypes.", self.tree_file_label, self.tree_file)
 
         self.trait_file = PathField(mode="file", required=True)
         self.trait_file.set_text(self._config.trait_file)
@@ -213,12 +249,16 @@ class RuntimeTab(QWidget):
         self.trait_file_label = QLabel("Trait file (--my_traits) *")
         self.trait_file_label.setStyleSheet("QLabel { font-weight: 600; color: #b91c1c; }")
         form.addRow(self.trait_file_label, self.trait_file)
+        _tip("Trait table (--my_traits). Its species column is named by Species column name below.",
+             self.trait_file_label, self.trait_file)
 
         self.prune_dir = PathField(mode="dir")
         self.prune_dir.set_text(self._config.prune_dir)
         self.prune_dir.textChanged.connect(self._on_prune_dir_changed)
         self.prune_dir_label = QLabel("Prune-list directory")
         form.addRow(self.prune_dir_label, self.prune_dir)
+        _tip("Directory joined with the PRUNE filenames of each phenotype row (PRUNE_DIR).",
+             self.prune_dir_label, self.prune_dir)
         self.prune_note = QLabel(
             "Pruning is per phenotype, not a separate toggle: a row with its PRUNE "
             "column filled in (joined with this directory) is pruned automatically; a row "
@@ -231,12 +271,16 @@ class RuntimeTab(QWidget):
         self.branch_trait.textChanged.connect(self._on_branch_trait_changed)
         self.branch_trait_label = QLabel("Branch trait")
         form.addRow(self.branch_trait_label, self.branch_trait)
+        _tip("Trait column that colors branches in the trait-analysis reports (--branch_trait). Blank for none.",
+             self.branch_trait_label, self.branch_trait)
 
         self.ali_sp_names = PathField(mode="file")
         self.ali_sp_names.set_text(self._config.ali_sp_names)
         self.ali_sp_names.textChanged.connect(self._on_ali_sp_names_changed)
         self.ali_sp_names_label = QLabel("Alignment species names (optional)")
         form.addRow(self.ali_sp_names_label, self.ali_sp_names)
+        _tip("Optional flat file listing the species names in the alignments. Speeds up startup.",
+             self.ali_sp_names_label, self.ali_sp_names)
 
         self.tax_id_file = PathField(mode="file")
         self.tax_id_file.set_text(self._config.tax_id_file)
@@ -248,36 +292,46 @@ class RuntimeTab(QWidget):
             "reported in tax_id_unresolved.tsv rather than guessed)."
         )
         form.addRow(self.tax_id_file_label, self.tax_id_file)
+        self.tax_id_file_label.setToolTip(self.tax_id_file.toolTip())  # same hint as the input
 
         self.sp_colname = QLineEdit(self._config.sp_colname)
         self.sp_colname.textChanged.connect(self._on_sp_colname_changed)
         self.sp_colname_label = QLabel("Species column name (--sp_colname)")
         form.addRow(self.sp_colname_label, self.sp_colname)
+        _tip("Column of the trait table that holds species names (--sp_colname).", self.sp_colname_label, self.sp_colname)
 
         self.clade_name = QLineEdit(self._config.clade_name)
         self.clade_name.textChanged.connect(self._on_clade_name_changed)
         self.clade_name_label = QLabel("Clade name (--clade_name)")
         form.addRow(self.clade_name_label, self.clade_name)
+        _tip("Focus clade name used in the reports (--clade_name).", self.clade_name_label, self.clade_name)
 
         self.clade_taxid = QLineEdit(self._config.clade_taxid)
         self.clade_taxid.textChanged.connect(self._on_clade_taxid_changed)
         self.clade_taxid_label = QLabel("Clade NCBI TaxID")
         form.addRow(self.clade_taxid_label, self.clade_taxid)
+        _tip("NCBI TaxID of the focus clade named above.", self.clade_taxid_label, self.clade_taxid)
 
         self.taxon_of_interest = QLineEdit(self._config.taxon_of_interest)
         self.taxon_of_interest.textChanged.connect(self._on_taxon_of_interest_changed)
         self.taxon_of_interest_label = QLabel("Taxonomic level of interest (--taxon_of_interest)")
         form.addRow(self.taxon_of_interest_label, self.taxon_of_interest)
+        _tip("Taxonomic rank of interest, e.g. family or order (--taxon_of_interest).",
+             self.taxon_of_interest_label, self.taxon_of_interest)
 
         self.ref_species_name = QLineEdit(self._config.ref_species_name)
         self.ref_species_name.textChanged.connect(self._on_ref_species_name_changed)
         self.ref_species_name_label = QLabel("Reference species name")
         form.addRow(self.ref_species_name_label, self.ref_species_name)
+        _tip("Reference species name as written in the alignments and annotations. Default Homo_sapiens.",
+             self.ref_species_name_label, self.ref_species_name)
 
         self.ref_species_taxid = QLineEdit(self._config.ref_species_taxid)
         self.ref_species_taxid.textChanged.connect(self._on_ref_species_taxid_changed)
         self.ref_species_taxid_label = QLabel("Reference species NCBI TaxID")
         form.addRow(self.ref_species_taxid_label, self.ref_species_taxid)
+        _tip("NCBI TaxID of the reference species. Also the default STRING species when that field is blank.",
+             self.ref_species_taxid_label, self.ref_species_taxid)
 
         return self.dataset_box
 

@@ -77,10 +77,18 @@ class AboutTab(QWidget):
             institution_label = tr("Institution", lang)
             license_label = tr("License", lang)
             built_on_label = tr("Built on", lang)
+            docs_label = tr("Documentation", lang)
+            readme_label = tr("README: install, modules, options, running", lang)
+            walkthrough_label = tr("Walkthrough: statistics, formulas and example outputs", lang)
             html = f"""
             <h2>{self._info.name} <span style="font-weight:normal">v{self._info.version}</span></h2>
             <p>{description_text}</p>
             <p><b>{repo_label}:</b> <a href="{self._info.repo_url}">{self._info.repo_url}</a></p>
+            <p><b>{docs_label}:</b></p>
+            <ul>
+              <li><a href="{self._info.readme_url}">{readme_label}</a></li>
+              <li><a href="{self._info.walkthrough_url}">{walkthrough_label}</a></li>
+            </ul>
             <p><b>{author_label}:</b> {self._info.author} (&lt;{self._info.author_email}&gt;)</p>
             <p><b>{institution_label}:</b> {self._info.institution}</p>
             <p><b>{license_label}:</b> {self._info.license_name}</p>

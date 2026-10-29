@@ -40,6 +40,21 @@ from PySide6.QtWidgets import (
 from gui.models.precomputed import PrecomputedConfig
 from gui.widgets.common.path_field import PathField
 
+# Hints for the single-checkbox stages, keyed by their config field (see _build_simple_section).
+_SIMPLE_TIPS = {
+    "use_disambiguation": "Use a finished Disambiguation output. Switches the Disambiguation stage off.",
+    "use_postproc": "Use finished post-processing tables. Disambiguation still runs unless its own box is checked.",
+    "use_rer": "Use finished RERconverge output. Switches the RER stage off.",
+    "use_fade": "Use finished FADE tables. Switches the FADE stage off.",
+    "use_vep": "Use finished VEP score tables. Switches the VEP stage off.",
+}
+
+
+def _tip(text: str, *widgets) -> None:
+    """Give a label and its input the same hover hint (tooltip)."""
+    for widget in widgets:
+        widget.setToolTip(text)
+
 
 class PrecomputedTab(QWidget):
     changed = Signal()
@@ -90,6 +105,8 @@ class PrecomputedTab(QWidget):
         base_form = QFormLayout()
         self.base_path_label = QLabel("Base path")
         base_form.addRow(self.base_path_label, self.base_path_field)
+        _tip("Directory of an earlier run's outputs, read as base_path/TRAIT/ for each phenotype.",
+             self.base_path_label, self.base_path_field)
         outer.addLayout(base_form)
 
         scroll = QScrollArea()
@@ -131,6 +148,7 @@ class PrecomputedTab(QWidget):
         self.use_ct.setChecked(self._config.use_ct)
         self.use_ct.toggled.connect(self._on_ct_toggled)
         layout.addWidget(self.use_ct)
+        self.use_ct.setToolTip("Use a finished CT/CAAS output. Also ticks Discovery and Resample and switches CAAS off.")
 
         form = QFormLayout()
         self.use_discovery = QCheckBox("Discovery")
@@ -140,7 +158,9 @@ class PrecomputedTab(QWidget):
         self.use_resample.setChecked(self._config.use_resample)
         self.use_resample.toggled.connect(lambda v: self._set_bool("use_resample", v))
         form.addRow("", self.use_discovery)
+        self.use_discovery.setToolTip("Use the CAAS discovery table from the base path (--discovery_from).")
         form.addRow("", self.use_resample)
+        self.use_resample.setToolTip("Use the CAAS resample table from the base path (--resample_from).")
         layout.addLayout(form)
 
         return box
@@ -154,6 +174,7 @@ class PrecomputedTab(QWidget):
         checkbox.toggled.connect(lambda v, n=field_name: self._on_checkbox(n, v, on_toggled))
         self._checkbox_labels.append((checkbox, f"Use precomputed {title} output"))
         layout.addWidget(checkbox)
+        _tip(_SIMPLE_TIPS[field_name], checkbox)
         setattr(self, f"_checkbox_{field_name}", checkbox)
         return box
 
