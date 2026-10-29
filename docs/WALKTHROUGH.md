@@ -2,7 +2,7 @@
 
 This document explains what each stage of PhyloPhere computes, which statistic it reports and how to read it. The [README](../README.md) covers installation, flags and execution. Here the focus is the logic: definitions, formulas, nulls and the limits of each inference.
 
-Notation: $K$ is the number of canonical contrast pairs of a trait, $N$ the number of null cycles, $D(x,y)$ the patristic distance between two species and "domain" one of the $K$ Voronoi cells of the canonical pairs. Source files are given as `path:line` so each statement can be checked against the code.
+Notation: $K$ is the number of canonical contrast pairs of a trait, $N$ the number of null cycles, $D(x,y)$ the patristic distance between two species and "domain" one of the $K$ Voronoi cells of the canonical pairs. Source files are given as `path:line` so each statement can be checked against the code. Figures come from one real run (malignant prevalence in primates, 10,000 null cycles) and use the styles of the HTML reports.
 
 **Contents**
 
@@ -48,6 +48,14 @@ Per-element significance is bounded by the resolution of the null. With $N$ cycl
 
 `NAME_CURATION` runs whenever a tree is given. It matches tree tips, trait rows and alignment headers through NCBI taxonomy identifiers (`--tax_id`, generated from the tree when blank), prunes unmatched tips and writes one curated tree and one curated trait table. Every later stage reads the curated files, so a species spelled differently in the three inputs is still one species. The step that creates the identifier map and the gene-to-Ensembl map (`bin/resolve_core_inputs.py`) runs before Nextflow starts and cannot be run from inside `main.nf`.
 
+![Trait by family](img/trait_by_family.png)
+
+*Trait values of the species by family, with the global median (dashed) and the per-family median (bars). Malignant prevalence in primates.*
+
+![Fan plot of the trait on the tree](img/trait_fan_plot.png)
+
+*Species tree with the trait as bars around the tips, grouped by family. Report 2.*
+
 ## 3. Contrast selection
 
 Convergence is meaningful only across independent lineages. Contrast selection chooses pairs of species, one with a high trait value and one with a low value, whose evolutionary paths do not overlap.
@@ -74,6 +82,18 @@ so the distance between any two pairs is at least the distance spanned inside a 
 
 Code: `subworkflows/CT/local/scripts/lean_contrast_selector.R:20-37, 187-250, 271-353`; `pss_core.R:202-262`.
 
+![Candidate pairs ranked by PSS](img/pss_ranking.png)
+
+*Candidate pairs ordered by phenotype shift score (A), PSS of the extracted canonical pairs (B) and trait difference against patristic distance (C). Report 4.*
+
+![Contrast hypotheses and Voronoi domains](img/contrast_hypotheses.png)
+
+*Species used across the 72 alternative hypotheses on the tree. Shaded areas are the three Voronoi domains; gold diamonds are the canonical pairs.*
+
+![Selected pairs on the trait distribution](img/selected_pairs_highlighted.png)
+
+*Trait values by family; filled points are members of the canonical pairs (H1) and open circles members of alternative hypotheses.*
+
 ## 4. The permulation null
 
 The null is a set of labelings with the same structure as the observed one, generated without the phenotype.
@@ -86,6 +106,22 @@ The null is a set of labelings with the same structure as the observed one, gene
 The observed labeling is written as the cycle `b_0` and replayed through exactly the same code as the null cycles, so the observed statistic is the $b_0$ slice of the replay. Cycles are processed in blocks (`--caas_cycle_block_size`, 500) against batches of genes (`--ct_core_batch_size`, 20), which keeps task memory independent of the number of cycles.
 
 Code: `subworkflows/CT/local/scripts/permulations.R:69-74, 328-353, 412-575`; `build_b0_labelings.py:41-49`; `subworkflows/CT/caas_permulation.nf`.
+
+![Null draws by tier](img/null_draw_tiers.png)
+
+*Outcome of the null draws: Tier 1 (all pairs independent), Tier 2 (one pair below Dunn 1) and rejected draws. Report 11.*
+
+![Capacity of the null traits](img/null_capacity.png)
+
+*Independent pairs that each sampled null trait can give. The red line marks the number of pairs of the observed run.*
+
+![Design comparability of the null cycles](img/null_design_comparability.png)
+
+*Mean patristic distance, PSS and trait difference of the canonical pairs of each null cycle (top), and positions detected per cycle against the distance of its pairs (bottom). Cycles with more distant pairs detect more, which is why the null is matched to the observed design.*
+
+![Saturation of the null](img/null_saturation.png)
+
+*Distinct null-positive positions of the universe seen as cycles accumulate.*
 
 ## 5. CAAS discovery
 
@@ -106,6 +142,10 @@ With tolerance and `--strict_conservation_output true`, the same replay also wri
 Columns are classified by pattern from the number of distinct residues: 1 (one residue on each side), 2 (one foreground, several background), 3 (several foreground, one background), 4 (several on both sides). Patterns 1 to 3 are admitted by default (`--patterns`). Gaps and missing data are capped by `--max_*_gaps_fraction` and `--max_*_miss_fraction`, converted to counts (default 0, no gaps allowed).
 
 Code: `subworkflows/CT/local/modules/caas_id.py:237-304`; `perm_replay.py:78-89`.
+
+![CAAS pattern distribution](img/caas_patterns.png)
+
+*Candidate CAAS by pattern class in the observed discovery. Report 7.*
 
 ## 6. Ancestral reconstruction and the path score
 
@@ -136,10 +176,6 @@ The label of a position comes from the number of changed domains (`agree_den`) a
 
 `derived_agreement` is `agree_num` / `agree_den`.
 
-![asr_path_score against derived_agreement per side, PEPC example](img/asr_score_vs_agreement.png)
-
-*Report 9 (`9.ASR_diagnostics`), PEPC C4 validation run: each tile counts positions by `asr_path_score` and `derived_agreement`, split by the side carrying the signal. High agreement with a low score marks positions whose reconstruction leaves the convergent origin uncertain.*
-
 Code: `subworkflows/CT_DISAMBIGUATION/local/src/convergence/path_scores.py:165-260`; `fop_pool.py:85-207`; `src/core/scores.py:58-72`.
 
 ## 7. Position scores, gene scores and p-values
@@ -164,6 +200,38 @@ The hypergeometric p-value of CAAStools (`pvalue`) is kept as a descriptive colu
 
 Code: `subworkflows/SCORING/local/src/scoring_compute.R:174-347`; `null_position_p.R:19-57`; `subworkflows/ENRICHMENT/local/src/gene_p.R:5-34`; `scoring_evidence.R:63-80`.
 
+![Detected positions against the null](img/detected_positions_vs_null.png)
+
+*Positions with a CAAS score of at least s, for the observed labeling (red) and the permulated cycles (median line and 95% band), globally and per side.*
+
+![Observed position scores](img/position_score_distribution.png)
+
+*Distribution of the observed CAAS scores of the positions, per side.*
+
+![Distribution of p.emp](img/position_pemp_distribution.png)
+
+*Distribution of the empirical p-values of the scored positions.*
+
+![Evidence classes](img/evidence_classes.png)
+
+*Share of positions and genes in each evidence class: BH, nominal, evaluated but not significant. Report 16.*
+
+![Position score against p](img/positions_score_vs_p.png)
+
+*CAAS score against -log10 p.emp for every scored position. The dotted line is the resolution floor 1/(N+1) of the null.*
+
+![Gene score against p](img/genes_score_vs_p.png)
+
+*Gene score (largest position score) against -log10 of the gene permulation p, with the same floor.*
+
+![Genes carrying BH positions](img/genes_with_bh_positions.png)
+
+*Genes with the most positions below the BH threshold; the bar color is the evidence class of the gene itself, a separate test.*
+
+![Gene score along the genome](img/gene_score_windows.png)
+
+*Maximum gene score in 0.1 Mb windows along the human chromosomes (bars: window mean; points: window maximum). Report 11.*
+
 ## 8. RERconverge
 
 RERconverge measures the evolutionary rate of each gene on each branch relative to the rest of the genome (relative evolutionary rate, RER), and correlates it with the trait across species. A gene accelerated in lineages with the phenotype has a positive association.
@@ -181,6 +249,18 @@ Continuous traits pass through `--rer_transform` first (`ha_logit`, `logit`, `ar
 
 Code: `subworkflows/RERCONVERGE/local/continuous_rer.R`, `binary_rer.R`, `rer_permulations.R:24-73`, `rer_batches.R:3-47`. The formulas above were read from the RERconverge version installed by `environment/install_env.sh` (commit `2bd328f`).
 
+![RERconverge volcano plot](img/rer_volcano.png)
+
+*Correlation of RER with the trait against the permulation p, per gene. Report 5.*
+
+![Distribution of rho](img/rer_rho_distribution.png)
+
+*Distribution of the correlation coefficient across genes.*
+
+![Parametric against permulation p](img/rer_parametric_vs_permulation.png)
+
+*Parametric p against the permulation p of each gene (left) and distribution of the permulation p (right). The red line marks the minimum the null can give.*
+
 ## 9. FADE
 
 FADE (HyPhy) tests, for each site and each amino acid, whether foreground branches substitute towards that residue more than expected. The posterior over the bias parameter on a 20-point grid (variational Bayes by default) is converted to a Bayes factor against the prior mass of positive bias. A site-residue pair is significant at BF $\ge$ `--fade_bf_threshold` (100). The gene summary is the maximum BF over sites and residues, and a gene is flagged when that maximum reaches the threshold.
@@ -196,6 +276,14 @@ Three controls define the comparison:
 FADE has no permulation null. Its evidence enters SCORING as the maximum BF and the significance flag, next to the CAAS and RER columns, not inside the CAAS score.
 
 Code: `subworkflows/FADE/local/src/FADE_phylophere.bf:721-783`; `fade_json_to_tables.py:52-90`.
+
+![Maximum Bayes factor per gene](img/fade_max_bf.png)
+
+*Distribution of the maximum Bayes factor per gene for the top direction; the dashed line is the threshold of 100. Report 6.*
+
+![Target amino acids of significant hits](img/fade_target_aa.png)
+
+*Number of significant site and amino acid combinations per target amino acid, top direction.*
 
 ## 10. Functional class scoring (FCS)
 
@@ -214,9 +302,21 @@ Significant sets are grouped by the Jaccard similarity of their leading edges (`
 
 Code: `subworkflows/ENRICHMENT/local/src/fcs_enrich.R:127-513`; `subworkflows/SCORING/local/src/scoring_compute.R:728-771`.
 
+![FCS of the CAAS global ranking](img/fcs_caas_global.png)
+
+*Representative gene sets of the global CAAS ranking. Columns: BH of the permulation p, and the analytic rule at levels 0.05, 0.10 and 0.15 (R05, R10, R15). A dot means the rule is passed and a cross that it is not; the color gives the sign of AUC - 0.5. Report 12.*
+
+![FCS of the RER ranking](img/fcs_rer_global.png)
+
+*The same display for the RER ranking.*
+
 ## 11. Active modules (AMI)
 
 AMI looks for connected subnetworks. DOMINO builds a STRING network on the background genes (edges with combined score above `--domino_network_score_thr`, 700), slices it, and reports modules whose gene lists are enriched in the analysis genes (`--domino_module_thr`, 0.05). Each module is labeled with STRING enrichment terms (`--ami_description_fdr`); labels are descriptive and carry their own FDR. One run is made per evidence line present: CAAS, FADE, RER. The network is built for human proteins (taxon 9606); `--string_species` changes only the labels of report 13.
+
+![DOMINO modules of the global CAAS list](img/ami_caas_network.png)
+
+*DOMINO modules of the global CAAS gene list on the STRING network (score of at least 700). Node size scales with -log10 of the gene p, colors are modules labeled with their enriched terms, and a gold border marks genes that also pass the empirical BH threshold. Report 13.*
 
 ## 12. POSENRICH
 
@@ -241,6 +341,26 @@ Eligible genes have members and non-members of $S$ in $U$, so the test condition
 `--posenrich_holdout K` lets $K$ null cycles play the observed one and writes the false-positive rate per term and collection (`holdout_fpr.tsv`), which checks the calibration of level 2 at the null size and term sets of your own run.
 
 Code: `subworkflows/POSENRICH/local/src/accumulation_test.py`, `posenrich_within_gene.py`.
+
+![Detectability across the universe](img/posenrich_universe.png)
+
+*Number of null cycles that score each position of the universe (log scale); the dashed line is the median.*
+
+![Coverage of the annotation layers](img/posenrich_coverage.png)
+
+*Positive positions per annotation layer, with the share of the annotated positions that are positive. Report 14.*
+
+![Level 1: observed share against null share](img/posenrich_level1_share.png)
+
+*Observed share of the positives of each gene against its mean share in the null cycles.*
+
+![Level 1: QQ plot](img/posenrich_level1_qq.png)
+
+*Observed against expected -log10 p of level 1.*
+
+![Proximity of the positives to site lists](img/posenrich_proximity.png)
+
+*Cumulative proportion of the positives by distance, in residues, to the closest member of each site list.*
 
 ## 13. VEP annotation
 
