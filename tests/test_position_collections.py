@@ -123,3 +123,30 @@ def test_saved_projects_with_retired_orthogroup_fields_load():
         config = from_dict({'modules': {section: dict(retired)}})
         dumped = to_dict(config)['modules']
         assert not set(retired) & set(dumped['posenrich']) and not set(retired) & set(dumped['enrichment'])
+
+
+def test_custom_position_sets_live_in_the_posenrich_section():
+    from gui.models.serialization import from_dict, to_dict
+    from gui.generation.render import render_batch
+    # A project saved with the field in the enrichment section moves it to the POSENRICH section.
+    old = from_dict({'modules': {'enrichment': {'posenrich_custom_file': '/data/old.tsv'}}})
+    dumped = to_dict(old)['modules']
+    assert dumped['posenrich']['posenrich_custom_file'] == '/data/old.tsv'
+    assert 'posenrich_custom_file' not in dumped['enrichment']
+    # The value in the POSENRICH section wins over a stale one in the enrichment section.
+    both = from_dict({'modules': {'posenrich': {'posenrich_custom_file': '/data/new.tsv'},
+                                  'enrichment': {'posenrich_custom_file': '/data/old.tsv'}}})
+    assert to_dict(both)['modules']['posenrich']['posenrich_custom_file'] == '/data/new.tsv'
+    assert 'export POSENRICH_CUSTOM_FILE="/data/new.tsv"' in render_batch(both)
+
+
+def test_custom_sets_field_is_on_the_posenrich_tab_only():
+    import pytest
+    pytest.importorskip('PySide6')
+    from gui.widgets.tabs import enrichment_tab, posenrich_tab
+
+    def names(spec):
+        fields = spec.essential_fields + spec.advanced_fields + spec.fallback_fields
+        return [getattr(item, 'name', None) for item in fields]
+    assert 'posenrich_custom_file' in names(posenrich_tab.SPEC)
+    assert 'posenrich_custom_file' not in names(enrichment_tab.SPEC)

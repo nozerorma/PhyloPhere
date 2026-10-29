@@ -78,7 +78,18 @@ def test_protein_distances_and_regions(tmp_path):
     assert site_sum['prop_within_0'] == repr(1 / 2)
     assert site_sum['prop_within_5'] == '1.0'
     assert site_sum['status'] == 'descriptive'
-    assert site_sum['control_status'] == 'not_validated'
+    assert 'control_status' not in site_sum
+
+    # Overlap by identity of the position; near = another position within the largest radius, with its closest member.
+    hits = {(r['collection_id'], r['term_id'], int(r['Position'])): r for r in read_tsv(out / 'proximity_protein_hits.tsv')}
+    assert hits[('custom', 'SITE', 2)]['relation'] == 'overlap' and hits[('custom', 'SITE', 2)]['distance_residues'] == '0'
+    near = hits[('custom', 'SITE', 0)]
+    assert near['relation'] == 'near' and near['distance_residues'] == '2'
+    assert near['nearest_site_position'] == '2' and near['nearest_site_residue'] == '12'
+    assert ('custom', 'SITE', 1) not in hits                      # no reference residue: no distance, no hit
+    by_gene = {(r['collection_id'], r['term_id'], r['Gene']): r for r in read_tsv(out / 'proximity_protein_by_gene.tsv')}
+    row = next(r for k, r in by_gene.items() if k[:2] == ('custom', 'SITE'))
+    assert (row['n_detections_measured'], row['n_overlaps'], row['n_near'], row['min_distance_residues']) == ('2', '1', '1', '0')
 
 
 def test_genomic_distances_separate_contract(tmp_path):
@@ -94,7 +105,7 @@ def test_genomic_distances_separate_contract(tmp_path):
     summary = {(r['collection_id'], r['term_id']): r
                for r in read_tsv(out / 'proximity_genomic_summary.tsv')}
     assert summary[('custom', 'SITE')]['median_distance'] == '2.5'
-    assert summary[('custom', 'SITE')]['control_status'] == 'not_validated'
+    assert 'control_status' not in summary[('custom', 'SITE')]
 
 
 def test_proximity_without_map_reports_coverage_not_infinite(tmp_path):
@@ -114,7 +125,7 @@ def test_proximity_without_map_reports_coverage_not_infinite(tmp_path):
     genomic = read_tsv(out / 'proximity_genomic_distances.tsv')
     assert genomic[0]['status'] == 'no_genomic_coordinate'
     manifest = json.loads((out / 'proximity_manifest.json').read_text())
-    assert manifest['control']['status'] == 'not_validated'
+    assert 'control' not in manifest
     assert 'misma proteina' in manifest['contracts']['protein']
     assert 'mismo gen y cromosoma' in manifest['contracts']['genomic']
     assert 'proximidad genómica y proteica no se mezclan' in manifest['limits']

@@ -1367,6 +1367,7 @@ print_gene_list_result <- function(res) {
   if (!is.null(res$display_df)) {
     print(knitr::kable(
       res$display_df,
+      format = "html",
       caption = sprintf("Module functional descriptions - %s", ami_list_label(res$list_name)),
       escape = FALSE
     ) %>% kableExtra::kable_styling(bootstrap_options = c("striped", "condensed"), full_width = TRUE))
@@ -1383,7 +1384,9 @@ print_gene_list_result <- function(res) {
 # element (no JavaScript), collapsed to a preview, so that long gene or term lists do not
 # stretch a table row. The input is always HTML-escaped first (short values come back
 # escaped and unwrapped), so a table can be passed to kable(escape = FALSE) without HTML
-# injection from gene symbols or term text.
+# injection from gene symbols or term text. kable() needs format = "html" explicitly: in R
+# Markdown it defaults to pipe tables, where escape = FALSE is ignored and pandoc shows the
+# markup as text.
 .html_escape <- function(x) {
   x <- gsub("&", "&amp;", x, fixed = TRUE)
   x <- gsub("<", "&lt;",  x, fixed = TRUE)
@@ -1431,7 +1434,7 @@ collapsible_table <- function(df) {
     `DOMINO p.adj` = if ("domino_p_adj" %in% names(df)) signif(domino_p_adj, 3) else NA
   ) %>% dplyr::select(dplyr::where(~ !all(is.na(.))))
 
-  print(knitr::kable(collapsible_table(disp), caption = caption, escape = FALSE) %>%
+  print(knitr::kable(collapsible_table(disp), format = "html", caption = caption, escape = FALSE) %>%
           kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE))
 }
 
@@ -1482,7 +1485,7 @@ collapsible_table <- function(df) {
                       .groups = "drop") %>%
     dplyr::arrange(dplyr::desc(`N lists`), term) %>%
     dplyr::rename(Term = term)
-  print(knitr::kable(collapsible_table(disp), caption = sprintf("Term -> gene-list membership - %s", title),
+  print(knitr::kable(collapsible_table(disp), format = "html", caption = sprintf("Term -> gene-list membership - %s", title),
                       escape = FALSE) %>%
           kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE))
   cat("\n\n")

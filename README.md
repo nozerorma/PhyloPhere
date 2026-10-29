@@ -183,19 +183,25 @@ least one cycle of the filtered permulation null, plus the observed positives. `
 once as `universe.tsv.gz` (one row per position, with `nd` and the observed flags per direction), and levels 1 and 2
 read the same table. Positions outside U are not treated as negatives.
 
-**Level 1, Accumulation (whole gene).** Does a gene hold more positive positions than its share of U predicts? For
-each direction (all, top, bottom) the count of a gene is compared with a hypergeometric draw of K positives from
-U (exact upper-tail p; Benjamini-Hochberg over the genes with at least one positive, applied in report 14). It treats the positions of U
-as equivalent and is not calibrated with the null cycles.
+**Level 1, Accumulation (whole gene).** Does a gene hold a larger share of the detections than it does in random
+cycles? The share of a gene is its number of positive positions divided by the total of positive positions in U; the
+same share is computed in each null cycle with that cycle's own total, and `p = (1 + cycles with a share at least the
+observed one) / (N + 1)` (floor `1/(N + 1)`; Benjamini-Hochberg over the genes with at least one positive). The null
+carries the unequal detectability of positions and the co-occurrence of detections within a gene; dividing by the
+total of each cycle removes the global excess of the observed data over a typical cycle. The null keeps the best
+side only, so the test covers detections on either side and the top and bottom counts are descriptive columns.
 
-**Level 2, concentration within genes (term ∩ gene).** Given what each gene already accumulates, does a term
-(domain, clan, region, site list) hold a larger share of the gene's detection weight than its share of the gene's
-positions? Each position weighs its CAAS score (0 if not detected); the statistic sums, over the genes with
-positions inside and outside the term, the residual of the term's weight against the proportional expectation,
-divided by the null standard deviation of that residual. It is calibrated against the same statistic on each of the
-null cycles (`p = (1 + exceedances) / (N + 1)`, floor `1/(N + 1)`), with BH per collection. Excluded genes
-are listed per term with their reason; nothing is imputed. Frequency and intensity are reported as two descriptive effect
-sizes without p-values.
+**Level 2, concentration within genes (term ∩ gene).** Within the genes that carry a term (domain, clan, region,
+site list), do the positive positions fall in the term more than in the rest of the same gene? For each gene with
+positions inside and outside the term, the residual is the number of positives inside the term minus the number
+expected if the positives of the gene were spread evenly over its positions; the statistic sums the residuals over the
+eligible genes. It is calibrated against the same statistic on each of the null cycles
+(`p = (1 + exceedances) / (N + 1)`, floor `1/(N + 1)`), with BH per collection. A term is tested only when it has
+members in at least `posenrich_min_genes` genes of U (2 by default; fixed by the annotation, not by the observed
+positives). Frequency and intensity are reported as two descriptive effect sizes without p-values.
+
+**Overlaps and proximity.** Lists of the positive positions that coincide with a member of a term (identity of the
+position) and of those within the largest radius of one, per detection and per gene; no p-value.
 
 > **Validation pending.** The level 2 statistic and its calibration have been checked against an independent dense
 > oracle, across block partitions, and with held-out null cycles on a real 500-cycle block. They have not been
@@ -213,13 +219,13 @@ Standalone level 1 uses `--accumulation_caas_input` (`filtered_discovery.tsv`), 
 
 | Path | Content |
 |---|---|
-| `accumulation/{all,top,bottom}/` | Level 1: `accumulation_<direction>_results.csv` (`Gene`, `ActualCount`, `PoolPositions`, `MeanNull`, `SD`, `PValue`; BH is applied in report 14) |
+| `accumulation/` | Level 1: `accumulation_results.tsv` (one gene per row: positions, positives and top/bottom counts, share, null share, `p`, `q`) and its manifest |
 | `universe/` | `universe.tsv.gz` and its manifest (|U|, gene list fingerprint, counts) |
 | `registry/` | `positions.tsv` (one row per position, annotation attributes as columns), `regions.tsv` (Pfam runs of columns), `sites.tsv` (custom sites), `collections.tsv`, `coverage.tsv`, `pending_mappings.tsv`, `manifest.json` |
 | `characterization/` | Raw characterization of the positives by layer (`position_characterization.tsv`, read by the comparison report) |
-| `within_gene/` | Level 2: `within_gene_results.tsv` (one term per row), `within_gene_by_gene.tsv`, manifest, and `holdout_fpr.tsv` in validation mode |
-| `proximity/` | Protein and genomic distances of the positives to sites and regions |
-| `14.POSENRICH_report_<trait>.html` | Report 14 (also in `html_reports/`): universe and coverage, characterization, level 1, level 2, proximity, methods and limits |
+| `within_gene/` | Level 2: `within_gene_results.tsv` (one term per row: statistic, `p`, `q`, effect sizes, `status`), `within_gene_by_gene.tsv`, manifest, and `holdout_fpr.tsv` in validation mode |
+| `proximity/` | Protein and genomic distances of the positives to sites and regions; `proximity_protein_hits.tsv` (overlaps by identity and near positions) and `proximity_protein_by_gene.tsv` |
+| `14.POSENRICH_report_<trait>.html` | Report 14 (also in `html_reports/`): universe and coverage, characterization, level 1, level 2, overlaps and proximity, methods and limits |
 
 The Pfam and UCR tables of the registry are generated here when none is supplied (`core_inputs/`). See
 [position collections](docs/POSITION_COLLECTIONS.md). The parameters are listed in
@@ -630,9 +636,9 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `domain_variability_file`, `ucr_positions_file` | `""` | Reuse supplied annotation tables (each needs an explicit `coordinate_space`; original PPGA tables are converted first with `bin/build_reference_tables.py project-ppga`). Blank generates enabled Pfam/UCR layers on the input alignments; see [position collections](docs/POSITION_COLLECTIONS.md). |
 | `pfam_cache_dir` / `domain_ref_species` | `""` / reference species | Local Pfam-A cache and reference species of the Pfam scan. |
 | `fubar_sites_file` | `""` | Optional upstream position annotation file (generated by `ortholog_characterizator`). |
-| `posenrich_custom_file` | `""` | Custom positional TSV: gene, zero-based CAAS Position, term, optional description; no header (the PP2A sets; its GUI field is on the Enrichment tab). |
+| `posenrich_custom_file` | `""` | Custom positional TSV: gene, zero-based CAAS Position, term, optional description; no header (custom position sets; GUI field "Custom position sets" on the POSENRICH tab). |
 | `posenrich_collections` | `""` | Collections of level 2 (comma-separated ids); blank uses those the registry marks as informative inside a protein. |
-| `posenrich_min_nonzero_cycles` | `30` | Null cycles with a nonzero residual a gene needs to enter the level 2 statistic of a term (stability rule of its standard deviation; heuristic). |
+| `posenrich_min_genes` | `2` | Genes of U a term needs members in to be tested by level 2. Fixed by the annotation and U, never by the observed positives. |
 | `posenrich_holdout` | `0` | Validation mode: this many null cycles play the observed one, and only `holdout_fpr.tsv` is written. `0` runs the observed data. |
 | `posenrich_within_gene_memory` | `""` | Memory of level 2, which reads one block of the null at a time; blank requests 16 GB. |
 | `posenrich_radios` | `0,5,10` | Descriptive protein-proximity radii (reference residues), fixed before any contrast. |

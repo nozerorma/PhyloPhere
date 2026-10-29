@@ -131,7 +131,7 @@ process POSENRICH_WITHIN_GENE {
     python3 ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_within_gene.py \\
         --universe universe.tsv.gz --observed '${observed}' --registry-dir registry \\
         --blocks blk_* --output-dir within_gene \\
-        --min-nonzero-cycles ${params.posenrich_min_nonzero_cycles} \\
+        --min-genes ${params.posenrich_min_genes} \\
         --holdout ${params.posenrich_holdout} ${collections_arg}
     """
 }
@@ -168,7 +168,7 @@ process POSENRICH_REPORT {
     path universe,         stageAs: 'universe'
     path registry,         stageAs: 'registry'
     path characterization, stageAs: 'characterization'
-    path accumulation,     stageAs: 'accumulation/*'    // accumulation_<direction>_results.csv, or the NO_ACCUMULATION sentinel
+    path accumulation,     stageAs: 'accumulation'      // accumulation_results.tsv (level 1), or the NO_ACCUMULATION sentinel
     path within_gene,      stageAs: 'within_gene'
     path proximity,        stageAs: 'proximity'
 

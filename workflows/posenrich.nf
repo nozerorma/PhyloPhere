@@ -169,10 +169,16 @@ workflow POSENRICH {
             )
         }
 
-        // Level 1: the exact test per gene and direction on the universe table.
+        // Levels 1 and 2 calibrate with the cycles of the null.
+        // The block directories of a prior null need type: 'dir' (files() matches regular files by default).
+        def prior_blocks = params.caas_null_dir ? files("${params.caas_null_dir}/blocks/*", type: 'dir').sort() : []
+        def blocks_v = (null_blocks_channel ?: Channel.empty())
+            .ifEmpty { prior_blocks ?: error("POSENRICH levels 1 and 2 require the block directories of the null: run CAAS permulation or pass --caas_null_dir with a blocks/ directory.") }
+
+        // Level 1: the share of detections of each gene against the null cycles, on the universe table.
         if (run_accumulation) {
             log.info "POSENRICH level 1: Accumulation"
-            accum_results = ACCUMULATION_TEST(Channel.of('top', 'bottom', 'all'), universe_out.universe).results
+            accum_results = ACCUMULATION_TEST(universe_out.universe, blocks_v).results
         }
 
         // The registry and its components read SCORING's tables.
@@ -218,11 +224,6 @@ workflow POSENRICH {
             def characterization_out = POSENRICH_CHARACTERIZE(registry_out.registry)
             def proximity_out        = POSENRICH_PROXIMITY(registry_out.registry)
 
-            // Level 2 needs the cycles of the null.
-            // The block directories of a prior null need type: 'dir' (files() matches regular files by default).
-            def prior_blocks = params.caas_null_dir ? files("${params.caas_null_dir}/blocks/*", type: 'dir').sort() : []
-            def blocks_v = (null_blocks_channel ?: Channel.empty())
-                .ifEmpty { prior_blocks ?: error("POSENRICH level 2 requires the block directories of the null: run CAAS permulation or pass --caas_null_dir with a blocks/ directory.") }
             def within_gene_out = POSENRICH_WITHIN_GENE(universe_out.universe, universe_out.manifest,
                                                         position_scores, registry_out.registry, blocks_v)
 

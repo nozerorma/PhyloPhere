@@ -56,7 +56,7 @@ Module flag              Description
 --ct_disambiguation       Classify CAAS as convergent/parallel/divergent via ASR.
 --ct_postproc             Cluster/gene-level filtering + characterization report.
 --posenrich               POSENRICH position-level enrichment: level 1 is the exact
-                          hypergeometric test of CAAS accumulation per gene; the position
+                          share-of-detections test of CAAS accumulation per gene; the position
                           registry and its components need --scoring.
 --vep                     Annotate CAAS positions with PrimateAI-3D / COSMIC.
 --fade                    HyPhy FADE directional (top/bottom) selection scan.
@@ -223,9 +223,9 @@ POSENRICH — Help
 =============================================
 Position-level enrichment of CAAS detections on the universe U of positions (the same U as
 SCORING). The universe table (universe.tsv.gz) is shared by both levels. Level 1 (Accumulation)
-is an exact hypergeometric test of whether a gene holds more CAAS positions than its share of U
-predicts; it runs once per direction (top/bottom/all). The position registry, its characterization, level 2 (concentration of the
-signal inside genes, calibrated with the null cycles) and the proximity components read SCORING's
+is a test of whether a gene holds a larger share of the detections than it does in the null cycles
+(calibrated with them). The position registry, its characterization, level 2 (concentration of the
+signal inside genes, calibrated with the null cycles) and the overlap and proximity components read SCORING's
 tables and need --scoring. Level 2 is not yet validated at scale (10,000 null cycles): its p and q are
 provisional. Outputs go to posenrich/ (accumulation, universe, registry, characterization, within_gene,
 proximity) and report 14 (14.POSENRICH_report_<trait>.html).
@@ -242,9 +242,9 @@ Usage:
 --domain_ref_species                 <"species">                    ref_species_name
 --fubar_sites_file                   (optional; cannot be generated in-house
                                       -- see github.com/nozerorma/ortholog_characterizator)
---posenrich_custom_file              (TSV: gene, zero-based CAAS position, term, description; no header)
+--posenrich_custom_file              (custom position sets; TSV: gene, zero-based CAAS position, term, description; no header)
 --posenrich_collections              <"id1,id2">                    "" (level 2 collections; blank = those informative inside a protein)
---posenrich_min_nonzero_cycles       <int>                          30 (null cycles with signal a gene needs to enter the level 2 statistic)
+--posenrich_min_genes                <int>                          2 (genes of U a term needs members in to be tested by level 2)
 --posenrich_holdout                  <int>                          0 (validation: null cycles played as the observed one; 0 = off)
 --posenrich_within_gene_memory       <"16 GB">                      "" (level 2 memory; blank = 16 GB)
 --posenrich_radios                   <LIST>                         0,5,10 (descriptive protein-proximity radii)

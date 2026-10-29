@@ -2,32 +2,33 @@
 # posenrich_within_gene.py — Level 2 of POSENRICH: concentration of signal inside genes, calibrated by the null cycles.
 # PhyloPhere | subworkflows/POSENRICH/local/src/
 
-"""Does a term hold more signal than the rest of the positions of the same genes?
+"""Does a term hold more positive positions than the rest of the positions of the same genes?
 
-Estimand (docs/POSENRICH_DISENO.md, section 6). Every position i of the universe U carries a weight w_i: its
-best-side CAAS score when it is a positive detection, 0 otherwise. For a term S and a gene g that has positions
-inside and outside S:
+Estimand (docs/POSENRICH_DISENO.md, section 6). For a term S and a gene g that has positions inside and outside S,
+let n_g be the positions of g in U, m_g those in S and k_g the positive positions of g. If the positives of g were
+spread evenly over its positions, k_g m_g / n_g of them would fall in S. The residual of the gene is
 
-    r_g = sum of w_i over S ∩ g  -  W_g * m_g / n_g
+    r_g = (positives of g in S)  -  k_g m_g / n_g
 
-with W_g the total weight of the gene, n_g its positions in U and m_g those in S. The statistic of the term is the
-sum of r_g / s_g over the eligible genes (s_g: standard deviation of r_g over the null cycles); the plain sum of
-r_g is a sensitivity. Observed and null cycles go through the same code with the margins of their own cycle, so
-detectability per position, co-occurrence of detections inside a gene and the gene filter of the null are in the null.
+and the statistic of the term is the sum of r_g over its eligible genes. Every gene is compared with itself, so
+what the gene accumulates (level 1) does not enter the term. Observed and null cycles go through the same code
+with the margins k_g of their own cycle, so detectability per position, co-occurrence of detections inside a gene
+and the gene filter of the null are in the null.
 
-Calibration: p = (1 + #{cycles with statistic >= observed}) / (N + 1), one-sided (concentration). A null cycle is
-normalized with the s_g of the other cycles (leave-one-cycle-out, from the same counters), as the observed vector is,
-because it does not enter its own s_g; with the s_g of all cycles a cycle would deflate its own statistic and the
-observed one would look extreme. Blocks of cycles
-are read twice and only additive counters cross blocks, so the result does not depend on how cycles are split:
-  pass 1  per (term, gene): number of cycles, sum and sum of squares of r_g, cycles with r_g != 0   -> s_g
-  pass 2  statistic of every cycle against the observed one                                         -> exceedances
+Calibration: p = (1 + #{cycles with statistic >= observed}) / (N + 1), one-sided (concentration). Blocks of cycles
+are read once and only the exceedance counts cross blocks, so the result does not depend on how cycles are split.
 
-Eligible genes: 0 < m_g < n_g (members and non-members in U) and a stable s_g (at least --min-nonzero-cycles null cycles
-with r_g != 0 and s_g > 0). The rest are listed with their reason, never imputed.
+Eligibility is fixed by the annotation, never by the observed positives. A gene is eligible for a term when it has
+members and non-members in U. A term is tested when it has members in at least --min-genes genes of U (default 2:
+a term in one gene is a test inside that gene, not a concentration across genes); the rest are listed with the
+reason and carry no p.
 
-Hold-out mode (--holdout K): K null cycles play the observed one, s_g and the exceedances come from the other
-cycles. The false-positive rate over all (term, cycle) pairs checks the procedure that is applied to the observed.
+Hold-out mode (--holdout K): K null cycles play the observed one and the exceedances come from the other cycles.
+The false-positive rate over all (term, cycle) pairs checks the procedure that is applied to the observed.
+
+Descriptive effect sizes (no p): frequency, the proportion of positives among the positions of the term against the
+same proportion in the rest of its eligible genes; intensity, the difference of mean score between the positives
+inside and outside the term.
 
 Inputs:
   --universe       universe.tsv.gz of posenrich_universe.py (gene, position)
@@ -64,10 +65,8 @@ import posenrich_members as pm  # noqa: E402
 from posenrich_universe import POS_BITS, pair_keys, sha256_file  # noqa: E402
 
 TIE_TOL = 1e-9                       # relative tolerance of ties between statistics
-ZERO_TOL = 1e-12                     # |r| below it counts as zero
-MIN_NONZERO_CYCLES = 30              # null cycles with r_g != 0 needed to estimate s_g (stability rule)
+MIN_GENES = 2                        # genes of U a term needs members in to be tested
 ALPHAS = (0.001, 0.01, 0.05)
-STATS = ('normalized', 'simple')
 
 
 # ── Inputs ────────────────────────────────────────────────────────────────────
@@ -105,8 +104,8 @@ def locate(U, genes, positions):
     return idx
 
 
-def load_observed_weights(path, U):
-    """Weight per position of U: best-side positive CAAS score, 0 elsewhere."""
+def load_observed_scores(path, U):
+    """Score per position of U: best-side positive CAAS score, 0 elsewhere (positive = score > 0)."""
     df = pd.read_csv(path, sep='\t', usecols=['Gene', 'Position', 'CAAS_score'], dtype=str, na_values=['NA'])
     df['score'] = pd.to_numeric(df['CAAS_score'], errors='coerce')
     df = df[np.isfinite(df['score']) & (df['score'] > 0)]
@@ -186,6 +185,7 @@ def block_cycles(block):
 
 def read_block(block, U):
     """(cycle names, CSR matrix cycles x positions of U with the null scores). One row per scored position and cycle."""
+    # the scores are only read for their sign: read_positives turns them into 0/1
     cycles = block_cycles(block)
     table = pq.read_table(Path(block) / 'positions.parquet', columns=['gene', 'cycle', 'position', 'all'])
     gene = pc.index_in(table['gene'].combine_chunks(), value_set=pa.array(U.genes, pa.string()))
@@ -206,43 +206,33 @@ def read_block(block, U):
     return cycles, W
 
 
-# ── Residuals and statistics ──────────────────────────────────────────────────
+def read_positives(block, U):
+    """(cycle names, CSR matrix cycles x positions of U with 1 where the null cycle scores the position)."""
+    cycles, W = read_block(block, U)
+    W.data = (W.data > 0).astype(np.float64)
+    W.eliminate_zeros()
+    return cycles, W
+
+
+# ── Residuals and statistic ───────────────────────────────────────────────────
 
 
 def residual_chunks(W, design, pair_idx, chunk):
     """Yield (start, stop, R) with R[c, j] = r of pair pair_idx[start + j] in row c of W (cycles x pairs, dense)."""
-    gene_weight = (W @ design.G).toarray()
+    gene_positives = (W @ design.G).toarray()
     ratio = design.pair_m / design.pair_n
     for a in range(0, len(pair_idx), chunk):
         sel = pair_idx[a:a + chunk]
         A = (W @ design.M[:, sel]).toarray()
-        yield a, a + len(sel), A - gene_weight[:, design.pair_gene[sel]] * ratio[sel]
+        yield a, a + len(sel), A - gene_positives[:, design.pair_gene[sel]] * ratio[sel]
 
 
-def loo_inverse_sd(R, s1, s2, n):
-    """1 / s of every pair computed without the cycle of each row: R is cycles x pairs, s1/s2/n the counters of the
-    pairs over all calibration cycles. Pairs whose leave-one-out variance is not positive scale to 0."""
-    var = ((s2 - R * R) - (s1 - R) ** 2 / (n - 1)) / (n - 2)
-    out = np.zeros_like(var)
-    np.divide(1.0, np.sqrt(var), out=out, where=var > 0)
-    return out
-
-
-def term_statistics(W, design, pair_idx, inv_s, pair_to_term, chunk, loo=None):
-    """(normalized, simple) statistics of every term for every row of W: arrays rows x terms.
-
-    loo = (s1, s2, n) of the pairs of pair_idx, when the rows of W are calibration cycles (leave-one-cycle-out s);
-    None for the observed vector or a held-out cycle, which use the s of all calibration cycles (inv_s).
-    """
-    n_terms = len(design.terms)
-    Tn = np.zeros((W.shape[0], n_terms))
-    Ts = np.zeros((W.shape[0], n_terms))
+def term_statistic(W, design, pair_idx, pair_to_term, chunk):
+    """Statistic of every term for every row of W: array rows x terms (sum of r over the eligible genes)."""
+    T = np.zeros((W.shape[0], len(design.terms)))
     for a, b, R in residual_chunks(W, design, pair_idx, chunk):
-        B = pair_to_term[a:b]
-        scale = inv_s[a:b] if loo is None else loo_inverse_sd(R, loo[0][a:b], loo[1][a:b], loo[2][a:b])
-        Tn += (R * scale) @ B
-        Ts += R @ B
-    return Tn, Ts
+        T += R @ pair_to_term[a:b]
+    return T
 
 
 def count_at_least(Tc, Tt):
@@ -273,16 +263,16 @@ def benjamini_hochberg(p):
 # ── Engine ────────────────────────────────────────────────────────────────────
 
 
-@dataclass
-class Fit:
-    n_cycles: np.ndarray
-    nonzero: np.ndarray
-    sd: np.ndarray
-    stable: np.ndarray           # structurally testable pair with a stable s_g
+def eligibility(design, min_genes):
+    """(testable term, eligible pair) masks. A term is tested when it has members in >= min_genes genes of U; a gene
+    is eligible for it when it also has non-members. Both depend on the annotation and U only."""
+    genes_per_term = np.bincount(design.pair_term, minlength=len(design.terms))
+    term_ok = genes_per_term >= min_genes
+    return term_ok, (design.pair_m < design.pair_n) & term_ok[design.pair_term]
 
 
-def run(U, design, blocks, observed_w, min_nonzero=MIN_NONZERO_CYCLES, holdout=0, holdout_seed=1, chunk=20000):
-    """Run both passes. Returns a dict with the fit, the target statistics, the exceedance counts and N."""
+def run(U, design, blocks, observed_score, min_genes=MIN_GENES, holdout=0, holdout_seed=1, chunk=20000):
+    """Count the null cycles whose statistic reaches the target (the observed vector or the held-out cycles)."""
     cycle_lists = [block_cycles(b) for b in blocks]
     all_cycles = sorted(c for cs in cycle_lists for c in cs)
     if len(all_cycles) != len(set(all_cycles)):
@@ -292,159 +282,115 @@ def run(U, design, blocks, observed_w, min_nonzero=MIN_NONZERO_CYCLES, holdout=0
         if holdout >= len(all_cycles):
             raise ValueError("--holdout must leave null cycles for the calibration")
         held = set(np.random.default_rng(holdout_seed).choice(all_cycles, size=holdout, replace=False).tolist())
-    structural = np.flatnonzero(design.pair_m < design.pair_n)
-
-    # pass 1: counters of r over the calibration cycles; the held-out cycles are kept as targets
-    n = np.zeros(design.n_pairs)
-    s1 = np.zeros(design.n_pairs)
-    s2 = np.zeros(design.n_pairs)
-    nz = np.zeros(design.n_pairs)
-    target_rows, target_names = [], []
-    n_rest = 0
-    for block in blocks:
-        cycles, W = read_block(block, U)
-        is_held = np.array([c in held for c in cycles])
-        if is_held.any():
-            target_rows.append(W[np.flatnonzero(is_held)])
-            target_names += [c for c, h in zip(cycles, is_held) if h]
-        Wr = W[np.flatnonzero(~is_held)]
-        n_rest += Wr.shape[0]
-        if Wr.shape[0] == 0 or len(structural) == 0:
-            continue
-        for a, b, R in residual_chunks(Wr, design, structural, chunk):
-            sel = structural[a:b]
-            n[sel] += R.shape[0]
-            s1[sel] += R.sum(axis=0)
-            s2[sel] += (R * R).sum(axis=0)
-            nz[sel] += (np.abs(R) > ZERO_TOL).sum(axis=0)
-    with np.errstate(invalid='ignore', divide='ignore'):
-        var = (s2 - s1 * s1 / n) / (n - 1)
-    sd = np.sqrt(np.clip(var, 0.0, None))
-    stable = np.zeros(design.n_pairs, dtype=bool)
-    stable[structural] = (nz[structural] >= min_nonzero) & (sd[structural] > 0)
-    fit = Fit(n, nz, sd, stable)
-
-    # targets: the observed vector, or the held-out cycles
-    if holdout:
-        Wt = sp.vstack(target_rows).tocsr()
-    else:
-        Wt = sp.csr_matrix(observed_w.reshape(1, -1))
-        target_names = ['observed']
-    eligible = np.flatnonzero(stable)
+    term_ok, eligible_pair = eligibility(design, min_genes)
+    eligible = np.flatnonzero(eligible_pair)
     pair_to_term = sp.csr_matrix((np.ones(len(eligible)), (np.arange(len(eligible)), design.pair_term[eligible])),
                                  shape=(len(eligible), len(design.terms)))
-    inv_s = 1.0 / sd[eligible]
-    loo = (s1[eligible], s2[eligible], n[eligible])
-    Tn_t, Ts_t = term_statistics(Wt, design, eligible, inv_s, pair_to_term, chunk)
 
-    # pass 2: exceedances of the calibration cycles over each target
-    ge = {s: np.zeros(Tn_t.shape, dtype=np.int64) for s in STATS}
+    # targets: the observed vector, or the held-out cycles (read first: they must be known to count exceedances)
+    if holdout:
+        rows, target_names = [], []
+        for block in blocks:
+            cycles, W = read_positives(block, U)
+            is_held = np.array([c in held for c in cycles])
+            if is_held.any():
+                rows.append(W[np.flatnonzero(is_held)])
+                target_names += [c for c, h in zip(cycles, is_held) if h]
+        Wt = sp.vstack(rows).tocsr()
+    else:
+        Wt = sp.csr_matrix((observed_score > 0).astype(np.float64).reshape(1, -1))
+        target_names = ['observed']
+    Tt = term_statistic(Wt, design, eligible, pair_to_term, chunk)
+
+    ge = np.zeros(Tt.shape, dtype=np.int64)
+    n_null = 0
     for block in blocks:
-        cycles, W = read_block(block, U)
+        cycles, W = read_positives(block, U)
         is_held = np.array([c in held for c in cycles])
         Wr = W[np.flatnonzero(~is_held)]
+        n_null += Wr.shape[0]
         if Wr.shape[0] == 0 or len(eligible) == 0:
             continue
-        Tn, Ts = term_statistics(Wr, design, eligible, inv_s, pair_to_term, chunk, loo=loo)
-        ge['normalized'] += count_at_least(Tn, Tn_t)
-        ge['simple'] += count_at_least(Ts, Ts_t)
-    return {'fit': fit, 'eligible': eligible, 'targets': target_names, 'T': {'normalized': Tn_t, 'simple': Ts_t},
-            'ge': ge, 'n_null': n_rest, 'n_cycles_total': len(all_cycles), 'held': sorted(held)}
+        ge += count_at_least(term_statistic(Wr, design, eligible, pair_to_term, chunk), Tt)
+    return {'eligible': eligible, 'term_ok': term_ok, 'targets': target_names, 'T': Tt, 'ge': ge,
+            'n_null': n_null, 'n_cycles_total': len(all_cycles), 'held': sorted(held)}
 
 
 # ── Outputs ───────────────────────────────────────────────────────────────────
 
 
-def term_p(counts, n_null, testable):
-    p = (1.0 + counts) / (n_null + 1.0)
-    return np.where(testable, p, np.nan)
-
-
-def results_tables(U, design, out, observed_w):
-    fit, eligible = out['fit'], out['eligible']
+def results_tables(U, design, out, observed_score):
+    eligible = out['eligible']
     n_terms = len(design.terms)
     eligible_pair = np.zeros(design.n_pairs, dtype=bool)
     eligible_pair[eligible] = True
     structural = design.pair_m < design.pair_n
+    term_ok = out['term_ok']
 
     # observed quantities per pair
-    wrow = sp.csr_matrix(observed_w.reshape(1, -1))
-    prow = sp.csr_matrix((observed_w > 0).astype(float).reshape(1, -1))
-    A = (wrow @ design.M).toarray().ravel()                      # weight of the members
-    pos_S = (prow @ design.M).toarray().ravel()                  # positives among the members
-    W_pair = (wrow @ design.G).toarray().ravel()[design.pair_gene]   # weight of the gene
-    pos_pair = (prow @ design.G).toarray().ravel()[design.pair_gene]  # positives of the gene
-    r_obs = A - W_pair * design.pair_m / design.pair_n
+    positive = (observed_score > 0).astype(np.float64)
+    pos_S = (sp.csr_matrix(positive.reshape(1, -1)) @ design.M).toarray().ravel()    # positives among the members
+    pos_pair = (positive @ design.G)[design.pair_gene]                                # positives of the gene
+    score_S = (sp.csr_matrix(observed_score.reshape(1, -1)) @ design.M).toarray().ravel()
+    score_pair = (observed_score @ design.G)[design.pair_gene]
+    expected = pos_pair * design.pair_m / design.pair_n
 
-    reason = np.where(~structural, 'no_nonmembers',
-                      np.where(~fit.stable, 'unstable_sd', ''))
+    reason = np.where(~structural, 'no_nonmembers', np.where(~term_ok[design.pair_term], 'term_below_min_genes', ''))
     by_gene = pd.DataFrame({
         'collection_id': design.terms['collection_id'].to_numpy()[design.pair_term],
         'term_id': design.terms['term_id'].to_numpy()[design.pair_term],
         'gene': np.asarray(U.genes, dtype=object)[design.pair_gene],
         'n_positions_gene': design.pair_n, 'n_members': design.pair_m,
-        'positives_gene': pos_pair, 'positives_members': pos_S,
-        'weight_gene': W_pair, 'weight_members': A,
-        'residual': np.where(structural, r_obs, np.nan),
-        'sd_null': np.where(structural, fit.sd, np.nan),
-        'cycles_nonzero': fit.nonzero.astype(np.int64),
+        'positives_gene': pos_pair, 'positives_members': pos_S, 'expected_members': expected,
+        'residual': np.where(structural, pos_S - expected, np.nan),
         'eligible': eligible_pair.astype(int), 'excluded_reason': reason})
 
-    p = {}
-    testable = np.zeros(n_terms, dtype=bool)
-    testable[np.unique(design.pair_term[eligible])] = True
-    for stat in STATS:
-        p[stat] = term_p(out['ge'][stat][0], out['n_null'], testable)
+    n_all = np.bincount(design.pair_term, minlength=n_terms)
+    n_elig = np.bincount(design.pair_term[eligible_pair], minlength=n_terms)
+    testable = n_elig > 0
+    p = np.where(testable, (1.0 + out['ge'][0]) / (out['n_null'] + 1.0), np.nan)
 
-    et = design.pair_term[eligible_pair]
     def per_term(values):
         return np.bincount(design.pair_term[eligible_pair], weights=values[eligible_pair], minlength=n_terms)
-    n_elig = np.bincount(et, minlength=n_terms)
-    n_all = np.bincount(design.pair_term, minlength=n_terms)
-    members = per_term(design.pair_m.astype(float))
-    n_pos = per_term(design.pair_n.astype(float))
-    ps, pg = per_term(pos_S), per_term(pos_pair)
-    ws, wg = per_term(A), per_term(W_pair)
+    members, n_pos = per_term(design.pair_m.astype(float)), per_term(design.pair_n.astype(float))
+    ps, pg, exp_S = per_term(pos_S), per_term(pos_pair), per_term(expected)
+    ss, sg = per_term(score_S), per_term(score_pair)
     with np.errstate(invalid='ignore', divide='ignore'):
         freq_in = ps / members
         freq_out = (pg - ps) / (n_pos - members)
-        mean_in = ws / ps
-        mean_out = (wg - ws) / (pg - ps)
+        mean_in = ss / ps
+        mean_out = (sg - ss) / (pg - ps)
     results = pd.DataFrame({
         'collection_id': design.terms['collection_id'], 'term_id': design.terms['term_id'],
         'n_genes_with_members_in_U': n_all, 'n_genes_eligible': n_elig, 'n_genes_excluded': n_all - n_elig,
         'n_members_eligible': members.astype(np.int64), 'positives_members_eligible': ps.astype(np.int64),
-        'stat_normalized': np.where(testable, out['T']['normalized'][0], np.nan),
-        'stat_simple': np.where(testable, out['T']['simple'][0], np.nan),
-        'p_normalized': p['normalized'], 'p_simple': p['simple'],
+        'expected_positives_members': np.where(testable, exp_S, np.nan),
+        'statistic': np.where(testable, out['T'][0], np.nan), 'p': p,
         'frequency_members': freq_in, 'frequency_rest': freq_out, 'frequency_difference': freq_in - freq_out,
         'mean_score_members': mean_in, 'mean_score_rest': mean_out, 'intensity_difference': mean_in - mean_out,
         'n_null_cycles': out['n_null']})
-    for stat in STATS:
-        results[f'q_{stat}'] = np.nan
-        for _, idx in results.groupby('collection_id').groups.items():
-            results.loc[idx, f'q_{stat}'] = benjamini_hochberg(results.loc[idx, f'p_{stat}'].to_numpy())
-    results['status'] = np.where(testable, 'tested', 'not_identifiable')
+    results['q'] = np.nan
+    for _, idx in results.groupby('collection_id').groups.items():
+        results.loc[idx, 'q'] = benjamini_hochberg(results.loc[idx, 'p'].to_numpy())
+    results['status'] = np.where(testable, 'tested', np.where(~term_ok, 'below_min_genes', 'not_identifiable'))
     return results, by_gene
 
 
 def holdout_table(design, out):
-    """False-positive rate over all (term, held-out cycle) pairs, by collection, statistic and alpha."""
-    fit, eligible = out['fit'], out['eligible']
+    """False-positive rate over all (term, held-out cycle) pairs, by collection and alpha."""
     testable = np.zeros(len(design.terms), dtype=bool)
-    testable[np.unique(design.pair_term[eligible])] = True
+    testable[np.unique(design.pair_term[out['eligible']])] = True
+    P = (1.0 + out['ge']) / (out['n_null'] + 1.0)
     rows = []
-    for stat in STATS:
-        P = (1.0 + out['ge'][stat]) / (out['n_null'] + 1.0)
-        for collection, idx in design.terms.groupby('collection_id').groups.items():
-            cols = np.asarray(idx)[testable[np.asarray(idx)]]
-            if len(cols) == 0:
-                continue
-            block = P[:, cols]
-            for alpha in ALPHAS:
-                rows.append({'collection_id': collection, 'statistic': stat, 'alpha': alpha,
-                             'n_terms_tested': len(cols), 'n_holdout_cycles': block.shape[0],
-                             'n_pairs': block.size, 'fpr': float((block <= alpha).mean())})
+    for collection, idx in design.terms.groupby('collection_id').groups.items():
+        cols = np.asarray(idx)[testable[np.asarray(idx)]]
+        if len(cols) == 0:
+            continue
+        block = P[:, cols]
+        for alpha in ALPHAS:
+            rows.append({'collection_id': collection, 'alpha': alpha, 'n_terms_tested': len(cols),
+                         'n_holdout_cycles': block.shape[0], 'n_pairs': block.size,
+                         'fpr': float((block <= alpha).mean())})
     return pd.DataFrame(rows)
 
 
@@ -487,7 +433,7 @@ def main(argv=None):
     ap.add_argument('--collections', default=None, help='comma-separated collection ids (default: informative_within_protein = 1)')
     ap.add_argument('--blocks', nargs='+', required=True)
     ap.add_argument('--output-dir', required=True)
-    ap.add_argument('--min-nonzero-cycles', type=int, default=MIN_NONZERO_CYCLES)
+    ap.add_argument('--min-genes', type=int, default=MIN_GENES, help='genes of U a term needs members in to be tested')
     ap.add_argument('--holdout', type=int, default=0)
     ap.add_argument('--holdout-seed', type=int, default=1)
     ap.add_argument('--pair-chunk', type=int, default=20000)
@@ -502,25 +448,25 @@ def main(argv=None):
     if members.empty:
         raise ValueError(f"no member of the collections {collections} lies in U")
     design = build_design(members, U)
-    observed_w = load_observed_weights(a.observed, U)
+    observed_score = load_observed_scores(a.observed, U)
     logging.info(f"U: {len(U.keys)} positions; {len(design.terms)} terms, {design.n_pairs} (term, gene) pairs; "
-                 f"{int((observed_w > 0).sum())} observed positives")
-    out = run(U, design, a.blocks, observed_w, a.min_nonzero_cycles, a.holdout, a.holdout_seed, a.pair_chunk)
+                 f"{int((observed_score > 0).sum())} observed positives")
+    out = run(U, design, a.blocks, observed_score, a.min_genes, a.holdout, a.holdout_seed, a.pair_chunk)
     logging.info(f"null cycles used: {out['n_null']} of {out['n_cycles_total']}; eligible pairs: {len(out['eligible'])}")
 
     os.makedirs(a.output_dir, exist_ok=True)
-    results, by_gene = results_tables(U, design, out, observed_w)
+    results, by_gene = results_tables(U, design, out, observed_score)
     if a.holdout:
         write_tsv(holdout_table(design, out), os.path.join(a.output_dir, 'holdout_fpr.tsv'))
     else:
         write_tsv(results, os.path.join(a.output_dir, 'within_gene_results.tsv'))
         write_tsv(by_gene, os.path.join(a.output_dir, 'within_gene_by_gene.tsv'))
-    manifest = {'component': 'within_gene', 'contract_version': 1,
+    manifest = {'component': 'within_gene', 'contract_version': 2,
                 'inputs': {k: {'path': os.path.abspath(v), 'sha256': sha256_file(v)}
                            for k, v in (('universe', a.universe), ('observed', a.observed),
                                         ('collections', os.path.join(a.registry_dir, 'collections.tsv')))},
                 'gene_list_check': gene_list_check(a.universe, a.registry_dir),
-                'parameters': {'collections': collections, 'min_nonzero_cycles': a.min_nonzero_cycles,
+                'parameters': {'collections': collections, 'min_genes': a.min_genes,
                                'holdout': a.holdout, 'holdout_seed': a.holdout_seed, 'tie_tol': TIE_TOL},
                 'counts': {'n_universe': int(len(U.keys)), 'n_terms': int(len(design.terms)),
                            'n_pairs': int(design.n_pairs), 'n_pairs_eligible': int(len(out['eligible'])),

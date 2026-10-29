@@ -198,8 +198,9 @@
       "posenrich_ucr": true,
       "ucr_positions_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/variability/ucr_positions.tsv",
       "fubar_sites_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/positive_selection/fubar_sites.tsv",
+      "posenrich_custom_file": "/homes/users/mramon/scratch/PhyloPhere_references/position/20261024/marine/pp2a/pp2a_custom.tsv",
       "posenrich_collections": "",
-      "posenrich_min_nonzero_cycles": "30",
+      "posenrich_min_genes": "2",
       "posenrich_holdout": "0",
       "posenrich_within_gene_memory": "",
       "posenrich_radios": "0,5,10"
@@ -229,8 +230,7 @@
       "scoring_ami": true,
       "scoring_string": true,
       "scoring_compare_fdr": "0.15",
-      "scoring_compare_top_n": "25",
-      "posenrich_custom_file": "/homes/users/mramon/scratch/PhyloPhere_references/position/20261024/marine/pp2a/pp2a_custom.tsv"
+      "scoring_compare_top_n": "25"
     }
   },
   "precomputed": {

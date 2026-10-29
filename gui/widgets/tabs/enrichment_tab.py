@@ -8,8 +8,7 @@
 EnrichmentTab: field specification of the Enrichment module (conf/enrichment.config).
 
 One tab covers gene-set enrichment (FCS, STRING/DOMINO, COMPARE). The position-wise
-POSENRICH parameters live in posenrich_tab.py (conf/posenrich.config); the PP2A position sets
-(posenrich_custom_file) stay here.
+POSENRICH parameters live in posenrich_tab.py (conf/posenrich.config).
 
 scoring_string (with its alias scoring_ami) is the single toggle for the
 DOMINO-based active-module identification (AMI) run, which workflows/enrichment.nf
@@ -48,20 +47,6 @@ SPEC = ModuleTabSpec(
                 "Custom GMT gene-set files. Leave blank to use the curated default "
                 "pathway sets in subworkflows/ENRICHMENT/dat/ (or auto-fetch if "
                 "enabled)."
-            ),
-        ),
-        Section("Position annotations — PP2A"),
-        FieldSpec(
-            name="posenrich_custom_file",
-            label="PP2A / custom position sets",
-            kind="path_file",
-            importance="optional",
-            help=(
-                "Validated position sets, including PP2A phosphosites. Select the "
-                "pp2a_custom.tsv for the alignment reference used by this run "
-                "(PPGA or marine). The neoplasia and marine templates supply the "
-                "corresponding cluster path. Reload the template to load it into "
-                "an existing form."
             ),
         ),
         Section("STRING DB Resources"),

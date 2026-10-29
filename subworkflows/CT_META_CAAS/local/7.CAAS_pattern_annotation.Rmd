@@ -184,10 +184,6 @@ caas_for_export <- discovery_df
 
 # ── Pattern distribution ──────────────────────────────────────────────────────
 
-# Contrast patterns present in the table.
-patterns_present <- unique(order(caas_for_export$pattern))
-cat(sprintf("Patterns detected: %s\n", paste(patterns_present, collapse = ", ")))
-
 pattern_summary <- caas_for_export %>%
   group_by(pattern) %>%
   summarize(

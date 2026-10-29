@@ -696,16 +696,7 @@ def _posenrich_find_slots(outdir: Listing) -> list[InputSlot]:
 def _posenrich_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
     output_file = f"14.POSENRICH_report_{report.traitname}.html"
-    # The report reads accumulation_<direction>_results.csv from one directory; the module publishes them per direction.
-    accumulation = s.get("accumulation")
-    pre_lines = ["mkdir -p accumulation_root", "mkdir -p src",
-                 f'cp "{repo_dir}/subworkflows/ENRICHMENT/local/src/report_presentation.R" src/']
-    if accumulation:
-        for direction in ("top", "bottom", "all"):
-            pre_lines.append(
-                f'[ -f "{accumulation}/{direction}/accumulation_{direction}_results.csv" ] && '
-                f'cp "{accumulation}/{direction}/accumulation_{direction}_results.csv" accumulation_root/ || true'
-            )
+    pre_lines = ["mkdir -p src", f'cp "{repo_dir}/subworkflows/ENRICHMENT/local/src/report_presentation.R" src/']
 
     def optional(key):
         return f"'{s[key]}'" if s.get(key) else "NULL"
@@ -716,7 +707,7 @@ def _posenrich_build_script(report: DetectedReport, repo_dir: Path, use_singular
             f"universe_dir         = '{s['universe']}'",
             f"registry_dir         = '{s['registry']}'",
             f"characterization_dir = '{s['characterization']}'",
-            "accumulation_dir     = 'accumulation_root'",
+            f"accumulation_dir     = {optional('accumulation')}",
             f"within_gene_dir      = {optional('within_gene')}",
             f"proximity_dir        = {optional('proximity')}",
             f"traitname            = '{report.traitname}'",

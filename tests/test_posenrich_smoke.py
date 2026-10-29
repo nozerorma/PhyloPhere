@@ -126,7 +126,7 @@ def test_posenrich_nextflow_smoke(tmp_path, null_source, level1):
     extra = ['--caas_null_dir', str(fixture / 'caas_permulation')] if null_source == 'prior' else []
     result = run_nextflow('.smoke_posenrich.nf', POSENRICH_MAIN, tmp_path, [
         '--fixture_dir', str(fixture), '--caas_map_dir', str(fixture / 'maps'), '--scoring', 'true',
-        '--null_source', null_source, '--level1', level1, '--traitname', 'smoke', '--posenrich_min_nonzero_cycles', '2', *extra,
+        '--null_source', null_source, '--level1', level1, '--traitname', 'smoke', '--posenrich_min_genes', '1', *extra,
         '--posenrich_domains', 'false', '--posenrich_ucr', 'false',
         '--posenrich_custom_file', str(fixture / 'custom.tsv')])
     log = result.stdout + result.stderr
@@ -142,7 +142,8 @@ def test_posenrich_nextflow_smoke(tmp_path, null_source, level1):
                 'within_gene/within_gene_results.tsv', 'within_gene/within_gene_by_gene.tsv',
                 'within_gene/within_gene_manifest.json',
                 'proximity/proximity_protein_distances.tsv', 'proximity/proximity_protein_summary.tsv',
-                'proximity/proximity_genomic_distances.tsv', 'proximity/proximity_genomic_summary.tsv'):
+                'proximity/proximity_genomic_distances.tsv', 'proximity/proximity_genomic_summary.tsv',
+                'proximity/proximity_protein_hits.tsv', 'proximity/proximity_protein_by_gene.tsv'):
         assert (pos / rel).exists(), rel
     # Report 14 is published in posenrich/ and html_reports/, and states level 1 when it did not run.
     for folder in (pos, tmp_path / 'out' / 'html_reports'):
@@ -152,18 +153,17 @@ def test_posenrich_nextflow_smoke(tmp_path, null_source, level1):
     assert 'Level 2: concentration within genes' in text
     assert ('Level 1: not available' in text) == (level1 == 'false')
     if level1 == 'true':
-        for direction in ('all', 'top', 'bottom'):
-            assert (pos / f'accumulation/{direction}/accumulation_{direction}_results.csv').exists()
         # Level 1 reads the universe table of level 2: the same positions.
-        acc = pd.read_csv(pos / 'accumulation/all/accumulation_all_results.csv')
+        acc = pd.read_csv(pos / 'accumulation/accumulation_results.tsv', sep='\t')
         universe = pd.read_csv(pos / 'universe/universe.tsv.gz', sep='\t')
-        assert acc['PoolPositions'].sum() == len(universe)
-        assert acc['ActualCount'].sum() == universe['observed_positive'].sum()
+        assert acc['n_positions'].sum() == len(universe)
+        assert acc['positives'].sum() == universe['observed_positive'].sum()
+        assert (pos / 'accumulation/accumulation_manifest.json').exists()
     # El motor usa los 40 ciclos de los dos bloques y la lista de genes del universo coincide con la del registro.
     manifest = json.loads((pos / 'within_gene/within_gene_manifest.json').read_text())
     assert manifest['counts']['n_null_cycles'] == N_CYCLES and manifest['counts']['n_blocks'] == 2
     assert manifest['gene_list_check']['status'] == 'match'
-    assert manifest['parameters']['min_nonzero_cycles'] == 2
+    assert manifest['parameters']['min_genes'] == 1
     # El registro no escribe ningún GMT.
     assert not (pos / 'registry/gmts').exists()
 

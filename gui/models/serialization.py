@@ -58,7 +58,7 @@ _POSENRICH_FIELDS = (
     "accumulation_fdr", "accumulation_caas_input", "accumulation_background_input",
     "posenrich_domains", "domain_variability_file", "domain_ref_species", "pfam_cache_dir",
     "posenrich_ucr", "ucr_positions_file", "fubar_sites_file",
-    "posenrich_radios", "position_registry_memory", "position_module_memory",
+    "posenrich_radios", "position_registry_memory", "position_module_memory", "posenrich_custom_file",
 )
 # Parameters of the position-set enrichment test, which no process reads.
 _RETIRED_POSENRICH_FIELDS = ("posenrich_min_size", "posenrich_max_size", "posenrich_batch_size", "posenrich_enabled",

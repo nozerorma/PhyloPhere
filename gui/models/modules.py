@@ -283,11 +283,11 @@ class PosenrichConfig(ModuleConfigBase):
     posenrich_ucr: bool = True  # --posenrich_ucr
     ucr_positions_file: str = ""  # --ucr_positions_file
     fubar_sites_file: str = ""  # --fubar_sites_file
-
+    posenrich_custom_file: str = ""  # --posenrich_custom_file (custom position sets: TSV in zero-based CAAS coordinates)
 
     # Level 2: concentration of the signal inside genes, calibrated with the null cycles.
     posenrich_collections: str = ""  # --posenrich_collections (blank: the collections informative inside a protein)
-    posenrich_min_nonzero_cycles: str = "30"  # --posenrich_min_nonzero_cycles
+    posenrich_min_genes: str = "2"  # --posenrich_min_genes (genes of U a term needs members in to be tested)
     posenrich_holdout: str = "0"  # --posenrich_holdout (validation mode: null cycles played as the observed one; 0 = off)
     posenrich_within_gene_memory: str = ""  # --posenrich_within_gene_memory (blank: 16 GB)
 
@@ -345,9 +345,6 @@ class EnrichmentConfig(ModuleConfigBase):
     scoring_compare_top_n: str = "20"  # --scoring_compare_top_n
     # Concordance null of the unpaired CAAS and RER gene scores in the COMPARE
     # report (a randomization null, not a joint permulation p).
-
-    # PP2A position sets (TSV in zero-based CAAS coordinates); the PP2A assay is kept apart from POSENRICH.
-    posenrich_custom_file: str = ""  # --posenrich_custom_file
 
 
 # ── Aggregate ─────────────────────────────────────────────────────────────────

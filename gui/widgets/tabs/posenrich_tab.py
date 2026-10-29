@@ -9,8 +9,7 @@ PosenrichTab: field specification of POSENRICH (conf/posenrich.config).
 
 The tab edits the posenrich section of the project (PosenrichConfig). Its enable switch is
 --posenrich, the gate of Accumulation (level 1: gene versus its share of the position universe)
-and of the position registry with its components (which need SCORING). The PP2A position sets
-(posenrich_custom_file) stay on the Enrichment tab.
+and of the position registry with its components (which need SCORING).
 
 Imported by: gui/widgets/main_window.py
 """
@@ -24,19 +23,19 @@ SPEC = ModuleTabSpec(
     title="POSENRICH",
     blurb=(
         "Position-wise analysis of the CAAS positions, after Scoring and before Enrichment. Level 1, Accumulation, "
-        "tests gene by gene whether CAAS positions accumulate on a gene more than its share of the position "
-        "universe U predicts (exact hypergeometric test per gene and direction, Benjamini-Hochberg over the genes "
-        "with observed CAAS); its output is published under posenrich/accumulation. Level 2 asks whether a term "
-        "(domain, clan, conserved region, site list) concentrates the detections inside each gene, beyond what the "
-        "gene already accumulates; its statistic is calibrated with the null cycles. The registry, "
-        "characterization and proximity components and report 14 follow; they need Scoring.\n\n"
+        "tests gene by gene whether a gene holds a larger share of the detections than it does in the null "
+        "cycles (Benjamini-Hochberg over the genes with observed CAAS); its output is published under "
+        "posenrich/accumulation. Level 2 asks whether a term (domain, clan, conserved region, site list) "
+        "concentrates the detections inside each gene more than the rest of the same gene; its statistic is "
+        "calibrated with the null cycles. The registry, characterization, overlap and proximity components and "
+        "report 14 follow; they need Scoring.\n\n"
         "ℹ️ Universe U: the positions CAAStools tested (in genes that survive post-processing) that score "
         "in at least one cycle of the filtered permulation null Scoring also uses, plus the observed CAAS "
-        "positions. Levels 1 and 2 read the same universe table. Level 1 treats the positions of U as "
-        "equivalent, which understates the variance of genes with many positions in U: read its results as a "
-        "ranking, not as a list of significant genes.\n\n"
+        "positions. Levels 1 and 2 read the same universe table and the cycles of the null. The null floor of p "
+        "is 1 / (cycles + 1): read the results as a ranking with a transparent error rate, not as a list of "
+        "significant genes.\n\n"
         "⚠️ Level 2 has not been validated at scale (10,000 null cycles, several term sets): treat its p and q "
-        "values as provisional. The proximity control is not validated either."
+        "values as provisional. Overlaps and proximity are descriptive, without p-values."
     ),
     disclaimer="no POSENRICH component runs (registry, characterization, level 2, proximity, Accumulation).",
     essential_fields=(
@@ -83,6 +82,21 @@ SPEC = ModuleTabSpec(
                  "just the alignment plus a public DB. See "
                  "github.com/nozerorma/ortholog_characterizator.",
         ),
+        Section("Custom position sets"),
+        FieldSpec(
+            name="posenrich_custom_file",
+            label="Custom position sets (CAAS coordinates)",
+            kind="path_file",
+            importance="optional",
+            help=(
+                "Any list of positions to characterize and test as terms: a TSV without header with gene, "
+                "zero-based CAAS position, term and an optional description. The positions must already be "
+                "validated in the CAAS coordinates of the alignment reference of this run; rows outside the MAP "
+                "are reported as pending, never as negatives. Level 2 tests every term with members and "
+                "non-members in a gene; terms with few members inside the universe U are reported as not "
+                "identifiable."
+            ),
+        ),
         Section("Level 2: concentration of the signal inside genes"),
         FieldSpec(
             name="posenrich_collections",
@@ -93,12 +107,12 @@ SPEC = ModuleTabSpec(
                  "informative inside a protein.",
         ),
         FieldSpec(
-            name="posenrich_min_nonzero_cycles",
-            label="Minimum null cycles with signal per gene",
-            placeholder="30",
+            name="posenrich_min_genes",
+            label="Minimum genes per term",
+            placeholder="2",
             importance="optional",
-            help="A gene enters the statistic of a term only when its residual is nonzero in at least this many null "
-                 "cycles (stability of its standard deviation). A heuristic rule, fixed before the observed results.",
+            help="A term is tested only when it has members in at least this many genes of the universe. Fixed by "
+                 "the annotation, not by the observed positives; a term in one gene is a test inside that gene.",
         ),
         FieldSpec(
             name="posenrich_holdout",

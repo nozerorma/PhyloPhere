@@ -62,16 +62,13 @@ run_py('posenrich_universe.py', c('--background-genes', file.path(scratch, 'bg.t
                                  '--observed', file.path(scratch, 'position_scores.tsv'),
                                  '--output-dir', file.path(scratch, 'universe')))
 universe_table <- file.path(scratch, 'universe/universe.tsv.gz')
-dir.create(file.path(scratch, 'accumulation'), showWarnings = FALSE)
-for (d in c('all', 'top', 'bottom'))
-  run_py('accumulation_test.py', c('--universe', universe_table, '--change-side', if (d == 'all') 'both' else d,
-                                   '--output', file.path(scratch, 'accumulation', sprintf('accumulation_%s_results.csv', d))))
+run_py('accumulation_test.py', c('--universe', universe_table, '--blocks', blk, '--output-dir', file.path(scratch, 'accumulation')))
 run_py('posenrich_within_gene.py', c('--universe', universe_table, '--observed', file.path(scratch, 'position_scores.tsv'),
                                      '--registry-dir', file.path(scratch, 'registry'), '--blocks', blk,
-                                     '--min-nonzero-cycles', '5', '--output-dir', file.path(scratch, 'within_gene')))
+                                     '--min-genes', '1', '--output-dir', file.path(scratch, 'within_gene')))
 run_py('posenrich_within_gene.py', c('--universe', universe_table, '--observed', file.path(scratch, 'position_scores.tsv'),
                                      '--registry-dir', file.path(scratch, 'registry'), '--blocks', blk,
-                                     '--min-nonzero-cycles', '5', '--holdout', '10',
+                                     '--min-genes', '1', '--holdout', '10',
                                      '--output-dir', file.path(scratch, 'within_gene_holdout')))
 run_py('posenrich_proximity.py', c('--registry_dir', file.path(scratch, 'registry'),
                                    '--output_dir', file.path(scratch, 'proximity')))
@@ -97,8 +94,8 @@ lacks <- function(html, ...) for (needle in c(...)) if (grepl(needle, html, fixe
 # 2a. Every component
 html <- render('full.html')
 has(html, 'POSENRICH: position-level enrichment', 'Universe and coverage', 'Level 1: accumulation per gene',
-    'Level 2: concentration within genes', 'Proximity (descriptive)', 'Methods and limits', 'TERM_A',
-    'Gene-list check', 'Genes above their share of U')
+    'Level 2: concentration within genes', 'Overlaps and proximity (descriptive)', 'Methods and limits', 'TERM_A',
+    'Gene-list check', 'Genes above the null share', 'Overlaps (exact identity)', 'Near positions')
 lacks(html, 'mathjax.rstudio.com', 'not available')
 # Numbers come from the tables: |U| = 12 positions, 12 observed positives
 u <- read.delim(gzfile(universe_table))
@@ -107,8 +104,8 @@ has(html, 'Positions in U')
 
 # 2b. Without level 1 and level 2: each says so and the rest renders
 html <- render('partial.html', accumulation_dir = file.path(scratch, 'none'), within_gene_dir = file.path(scratch, 'none'))
-has(html, 'Level 1: not available', 'Level 2: not available', 'ran without level 1', 'Proximity (descriptive)')
-lacks(html, 'Genes above their share of U')
+has(html, 'Level 1: not available', 'Level 2: not available', 'was not found: the module ran', 'Overlaps and proximity (descriptive)')
+lacks(html, 'Genes above the null share')
 
 # 2c. Validation mode: held-out table instead of term results
 html <- render('holdout.html', within_gene_dir = file.path(scratch, 'within_gene_holdout'))
@@ -117,5 +114,5 @@ has(html, 'False-positive rate with held-out cycles', 'validation mode', 'Rate m
 # 2d. A term that is not identifiable shows no p or q
 wg <- read.delim(file.path(scratch, 'within_gene/within_gene_results.tsv'))
 stopifnot(nrow(wg) > 0, 'TERM_A' %in% wg$term_id,
-          all(is.na(wg$p_normalized[wg$status == 'not_identifiable'])))
+          all(is.na(wg$p[wg$status != 'tested'])))
 cat('PASS: POSENRICH report renders with all components, without levels 1 and 2, and in validation mode\n')

@@ -19,12 +19,17 @@ Genomic proximity: distance in nucleotides to the nearest member of the term
 within the same gene and chromosome; 0 on coincidence. Window membership (1 Mb bins) stays in the
 registry members and is not re-measured here.
 
-The distance control is not validated: results are descriptive with an explicit
-state, and radii are fixed before any contrast.
+No p-value is inferred: results are descriptive and radii are fixed before any contrast.
+
+Protein hits list the detections that coincide with a member of a term (relation overlap, by identity of the
+position) or lie within the largest radius of one (relation near), with the member they are closest to; the
+by-gene table counts them per term and gene.
 
 Outputs (in --output_dir):
   proximity_protein_distances.tsv   one row per evaluated position x term (genes with sites)
   proximity_protein_summary.tsv     per collection/term: distribution summary + fixed radii
+  proximity_protein_hits.tsv        overlaps and near detections, one row per detection x term
+  proximity_protein_by_gene.tsv     per term and gene: members, detections, overlaps, near detections
   proximity_genomic_distances.tsv   one row per evaluated position x site term (same gene/chromosome)
   proximity_genomic_summary.tsv     per collection/term summary
   proximity_manifest.json           parameters, states and limits
@@ -51,6 +56,10 @@ PROTEIN_COLLECTIONS = ('pfam_domains', 'pfam_clans', 'ucr_core', 'ucr_flank',
                        'fubar_positive', 'fubar_purifying', 'fade_top_sig',
                        'fade_bottom_sig', 'custom')
 REGION_TYPES = {'pfam_domains', 'pfam_clans', 'ucr_core', 'ucr_flank'}
+HIT_COLUMNS = ['collection_id', 'term_id', 'Gene', 'Position', 'hg38_aa_pos', 'relation', 'distance_residues',
+               'nearest_site_position', 'nearest_site_residue', 'in_region', 'CAAS_score']
+BY_GENE_COLUMNS = ['collection_id', 'term_id', 'Gene', 'n_term_positions_in_gene', 'n_detections_measured',
+                   'n_overlaps', 'n_near', 'min_distance_residues']
 
 
 def parse_args():
@@ -69,11 +78,15 @@ def read_tsv(path):
         yield from csv.DictReader(stream, delimiter='\t')
 
 
-def nearest_distance(value, sorted_sites):
-    """Nearest site in logarithmic time, including gaps and disjoint regions."""
+def nearest_site(value, sorted_sites):
+    """(distance, site) of the nearest site in logarithmic time, including gaps and disjoint regions."""
     index = bisect_left(sorted_sites, value)
-    return min(abs(value - sorted_sites[i]) for i in (index - 1, index)
+    return min((abs(value - sorted_sites[i]), sorted_sites[i]) for i in (index - 1, index)
                if 0 <= i < len(sorted_sites))
+
+
+def nearest_distance(value, sorted_sites):
+    return nearest_site(value, sorted_sites)[0]
 
 
 class DistanceOutput:
@@ -89,7 +102,7 @@ class DistanceOutput:
         summary_columns = ['collection_id', 'term_id', 'n_positions_evaluated',
                            'n_positions_measured', 'coverage_proportion',
                            'median_distance', 'mean_distance', 'n_genes_with_sites']
-        summary_columns += [f'prop_within_{r}' for r in radios] + ['control_status', 'status']
+        summary_columns += [f'prop_within_{r}' for r in radios] + ['status']
         self.detail = self.writer(stack, output_dir, kind, 'distances', columns)
         self.summary = self.writer(stack, output_dir, kind, 'summary', summary_columns)
         self.rows_written = 0
@@ -134,7 +147,7 @@ class DistanceOutput:
                        median_distance=repr(median) if measured else 'NA',
                        mean_distance=repr(self.distance_sum / measured) if measured else 'NA',
                        n_genes_with_sites=len(self.genes),
-                       control_status='not_validated', status='descriptive')
+                       status='descriptive')
             for radius, count in zip(self.radios, self.within):
                 row[f'prop_within_{radius}'] = repr(count / measured) if measured else repr('NA')
             self.summary.writerow(row)
@@ -210,6 +223,9 @@ def main():
                                       'distance_residues', radios)
         genomic_rows = DistanceOutput(stack, args.output_dir, 'genomic', 'hg38_nt_coord',
                                       'distance_nt', radios)
+        near_radius = max(radios, default=0)
+        hits = DistanceOutput.writer(stack, args.output_dir, 'protein', 'hits', HIT_COLUMNS)
+        by_gene_out = DistanceOutput.writer(stack, args.output_dir, 'protein', 'by_gene', BY_GENE_COLUMNS)
         for (cid, term), by_gene in sorted(term_members.items()):
             is_region = region_type.get((cid, term)) == 'region'
             for gene in sorted(by_gene):
@@ -224,6 +240,10 @@ def main():
                 for chrom, nt in site_nt:
                     sites_by_chrom.setdefault(chrom, []).append(nt)
                 sites_by_chrom = {chrom: sorted(values) for chrom, values in sites_by_chrom.items()}
+                residue_position = {coords[(gene, p)]['residue']: p for p in sorted(site_positions)
+                                    if (gene, p) in coords}
+                n_detections = n_overlap = n_near = 0
+                closest = None
                 for pos, score in sorted(scores[gene].items()):
                     g = gene
                     info = coords.get((g, pos))
@@ -244,10 +264,23 @@ def main():
                                              'status': 'no_sites_with_reference'})
                     else:
                         in_region = 1 if (is_region and pos in site_positions) else 0
-                        if pos in site_positions:
-                            distance = 0
+                        identical = pos in site_positions
+                        if identical:
+                            distance, site_residue = 0, info['residue']
                         else:
-                            distance = nearest_distance(info['residue'], site_residues)
+                            distance, site_residue = nearest_site(info['residue'], site_residues)
+                        n_detections += 1
+                        closest = distance if closest is None else min(closest, distance)
+                        if identical or distance <= near_radius:
+                            n_overlap += identical
+                            n_near += not identical
+                            hits.writerow({'collection_id': cid, 'term_id': term, 'Gene': g, 'Position': pos,
+                                           'hg38_aa_pos': info['residue'],
+                                           'relation': 'overlap' if identical else 'near',
+                                           'distance_residues': distance,
+                                           'nearest_site_position': pos if identical else residue_position.get(site_residue, 'NA'),
+                                           'nearest_site_residue': site_residue, 'in_region': in_region,
+                                           'CAAS_score': score})
                         protein_rows.append({'collection_id': cid, 'term_id': term, 'Gene': g,
                                              'Position': pos, 'hg38_aa_pos': info['residue'],
                                              'distance_residues': distance,
@@ -280,6 +313,12 @@ def main():
                                                  'distance_nt': distance,
                                                  'CAAS_score': score, 'status': 'measured'})
 
+                by_gene_out.writerow({'collection_id': cid, 'term_id': term, 'Gene': gene,
+                                      'n_term_positions_in_gene': len(site_positions),
+                                      'n_detections_measured': n_detections, 'n_overlaps': n_overlap,
+                                      'n_near': n_near,
+                                      'min_distance_residues': 'NA' if closest is None else closest})
+
             protein_rows.finish_term(cid, term)
             genomic_rows.finish_term(cid, term)
 
@@ -292,10 +331,9 @@ def main():
                       'genomic': 'distancia en nt dentro del mismo gen y cromosoma; 0 en coincidencia'},
         'states': {'proximity': 'executed_descriptive' if protein_rows.rows_written else 'no_terms',
                    'characterization': 'not_executed (componente separado)'},
-        'control': {'status': 'not_validated',
-                    'reason': 'el control de AUC no se asume valido para distancias; '
-                              'no se infiere p en esta primera implementacion'},
-        'limits': ['radios descriptivos fijados antes del contraste',
+        'limits': ['sin p: las distancias son descriptivas',
+                   'radios descriptivos fijados antes del contraste',
+                   'overlap es identidad exacta de la posicion; near es una posicion distinta dentro del radio mayor',
                    'proteinas sin referencia comparable se informan como falta de cobertura, no distancia infinita',
                    'proximidad genómica y proteica no se mezclan',
                    'la distancia no se mide en columnas MSA con gaps',
