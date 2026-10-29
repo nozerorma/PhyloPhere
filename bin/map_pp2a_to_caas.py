@@ -85,7 +85,13 @@ def project(prepared,uniprot,reference,output):
     elif r['amino_acid'] and seq[pos]!=r['amino_acid']:reason='source_residue_mismatch'
     else:
      source_hits=[start for start in occurrences(seq,peptide) if start<=pos<start+len(peptide)]
-     if len(source_hits)!=1:reason='peptide_does_not_uniquely_cover_source_site'
+     offset=r.get('peptide_offset')
+     if offset:
+      at_offset=[start for start in source_hits if start+int(offset)-1==pos]
+      if source_hits and not at_offset:reason='peptide_offset_mismatch'
+      source_hits=at_offset
+     if reason:pass
+     elif len(source_hits)!=1:reason='peptide_does_not_uniquely_cover_source_site'
      elif gene not in target:reason='no_productive_human_reference'
      else:
       hits=occurrences(target[gene],peptide)
@@ -108,7 +114,7 @@ def project(prepared,uniprot,reference,output):
  manifest=dict(status='mapped_with_explicit_pending_records',counts=dict(counts),unique_hit_members=len(custom),
                unique_measured_members=len(coverage),coordinate_space='CAAS_0based',
                sources={str(p):sha(p) for p in [prepared/'site_candidates.tsv',prepared/'source_records.tsv.gz',uniprot,reference]},
-               validation='Explicit accession/isoform; source peptide covers source residue; exact peptide occurs once in productive reference; ambiguous sources excluded',
+               validation='Explicit accession/isoform; source peptide covers source residue (at its annotated offset when given); exact peptide occurs once in productive reference; ambiguous sources excluded',
                pending_policy='Pending records are unknown, never negative sites',
                coverage='Measured background exported separately; not included among hit terms',
                interpretation='Perturbation-associated sites, not proof of direct PP2A substrates. No new statistical cutoff or inference.')

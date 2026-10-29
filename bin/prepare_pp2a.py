@@ -30,7 +30,13 @@ SOURCES = [
 
 
 def parse_modifications(text):
-    """Parse candidates by accession; retain ambiguous groups and incomplete localization."""
+    """Parse candidates by accession; retain ambiguous groups and incomplete localization.
+
+    A localized site is a site even when other phosphorylations of the same peptide are not localized
+    (e.g. `2xPhospho [S183(100);T/S]`: S183 is reported, the remainder goes to the unresolved list).
+    Sites are ambiguous when the text names several proteins or several Phospho groups, or lists more
+    candidate positions than phosphorylations (the localization is split between them).
+    """
     matches = list(re.finditer(ACCESSION + r'(?=\s+\d+xPhospho)', text))
     candidates, unresolved = [], []
     for i, match in enumerate(matches):
@@ -38,9 +44,9 @@ def parse_modifications(text):
         groups = re.findall(r'(\d+)xPhospho\s*\[([^]]*)\]', segment)
         for count, content in groups:
             sites = list(SITE.finditer(content))
-            # More candidates than modifications, or several mappings of one peptide,
-            # must not be counted as independent, unambiguous site observations.
-            ambiguous = len(matches) > 1 or len(groups) > 1 or len(sites) != int(count)
+            # More candidate positions than modifications, or several mappings of one peptide,
+            # are not unambiguous site observations.
+            ambiguous = len(matches) > 1 or len(groups) > 1 or len(sites) > int(count)
             for site in sites:
                 candidates.append((match.group(), site[1], int(site[2]), site[3] or '',
                                    'ambiguous_mapping' if ambiguous else 'reported_site'))
@@ -57,7 +63,7 @@ def prepare(source_dir, output_dir):
     output_dir.mkdir(parents=True, exist_ok=True)
     counts, inputs = Counter(), []
     fields = ['record_id','study','pmid','cell_line','sheet','source_row','collection_role','condition',
-              'accession','amino_acid','protein_position','localization_percent','site_status','coordinate_space']
+              'accession','amino_acid','protein_position','peptide_offset','localization_percent','site_status','coordinate_space']
     with gzip.open(output_dir/'source_records.tsv.gz','wt',newline='') as raw, \
          open(output_dir/'site_candidates.tsv','w',newline='') as sites, \
          open(output_dir/'unresolved.tsv','w',newline='') as unresolved:
@@ -67,15 +73,16 @@ def prepare(source_dir, output_dir):
         for filename, study, pmid, cell, sheets in SOURCES:
             path = source_dir/filename
             inputs.append({'file': filename, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
-            # Kauko condition labels are vertically merged cells; inherit only within
-            # those actual merges, rather than forward-filling arbitrary blank rows.
-            book = openpyxl.load_workbook(path, read_only=study != 'Kauko', data_only=True)
+            book = openpyxl.load_workbook(path, read_only=True, data_only=True)
             for sheet_name, header_row, condition, role in sheets:
                 sheet = book[sheet_name]
                 if hasattr(sheet, 'reset_dimensions'):sheet.reset_dimensions()
                 rows = iter(sheet.iter_rows(values_only=True))
                 for _ in range(header_row):header = next(rows)
                 headers = [str(x).strip() if x is not None else f'blank_{i}' for i,x in enumerate(header)]
+                # Kauko: the Modulation cell (the siRNA target) is filled only on the first row of each block of
+                # rows and the label holds until the next one. A peptide repeats across blocks, never within one.
+                modulation = None
                 counts[f'{study}/{role}/sheets'] += 1
                 for row_number, values in enumerate(rows,header_row+1):
                     if not any(x is not None for x in values):continue
@@ -87,25 +94,27 @@ def prepare(source_dir, output_dir):
                                   source_row=row_number,collection_role=role,condition=condition,
                                   coordinate_space='UniProt_protein_1based;CAAS_mapping_pending')
                     if study == 'Kauko':
-                        modulation=d.get('Modulation')
                         if 'Modulation' in headers:
-                            col=headers.index('Modulation')+1
-                            for merged in sheet.merged_cells.ranges:
-                                if merged.min_col <= col <= merged.max_col and merged.min_row <= row_number <= merged.max_row:
-                                    modulation=sheet.cell(merged.min_row,col).value
-                                    break
+                            modulation = d.get('Modulation') or modulation
                             common['condition'] += ':'+str(modulation or 'unspecified')
                         accessions=re.findall(ACCESSION,str(d.get('Protein') or ''))
-                        positions=[d.get(key) for key in ('1. site','2. site','3. site','4.site')]
-                        candidates=[(acc,'',int(pos),'','reported_site' if len(accessions)==1 else 'ambiguous_mapping')
-                                    for acc in accessions for pos in positions if isinstance(pos,(int,float))]
-                        problems=[] if candidates else ['missing accession or numeric protein position']
+                        positions=[p for p in (d.get(key) for key in ('1. site','2. site','3. site','4.site')) if isinstance(p,(int,float))]
                         annotation=str(d.get('Peptide') or '')
+                        # `SEQ,[9] Phospho (S)`: offset of the phosphorylated residue in the peptide and its
+                        # residue, in the order of the site columns.
+                        phospho=re.findall(r'\[(\d+)\]\s*Phospho;?\s*(?:\(([STY])\))?',annotation)
+                        located=len(phospho)==len(positions)
+                        candidates=[(acc,phospho[i][1] if located else '',int(pos),'',
+                                     'reported_site' if len(accessions)==1 else 'ambiguous_mapping',
+                                     phospho[i][0] if located else '')
+                                    for acc in accessions for i,pos in enumerate(positions)]
+                        problems=[] if candidates else ['missing accession or numeric protein position']
                     else:
                         annotation=str(d.get('Modifications in Master Proteins') or '')
                         candidates,problems=parse_modifications(annotation)
-                    for acc, aa, pos, prob, status in candidates:
+                    for acc, aa, pos, prob, status, *offset in candidates:
                         sw.writerow(dict(common,accession=acc,amino_acid=aa,protein_position=pos,
+                                         peptide_offset=offset[0] if offset else '',
                                          localization_percent=prob,site_status=status))
                         counts[f'{study}/{role}/candidates']+=1
                         counts[f'{study}/{role}/{status}']+=1
@@ -116,9 +125,9 @@ def prepare(source_dir, output_dir):
         'interpretation':'Perturbation-associated phosphosites; not proof of direct PP2A substrates.',
         'thresholds':'Source sheets retained as supplied; no new p-value/FDR/localization cutoff.',
         'mapping':'Protein coordinates only. Validate accession/isoform and peptide against the actual reference before projecting to CAAS.',
-        'conditions':'Kauko modulation labels are retained literally or inherited only inside actual merged ranges. Blank, unmerged labels stay unspecified; inspect the original blocks before assigning them.',
+        'conditions':'Kauko modulation labels (siRNA target) mark the first row of each block of rows and are carried down to the next label; rows before the first label stay unspecified.',
         'background':'Only Sapkota supplies Entire Data here; it is a measured peptide background, not all S/T residues.',
-        'independence':'One source record may have several phosphosites or alternative mappings. Do not sum candidate rows as independent observations.'}
+        'independence':'One source record may have several phosphosites or alternative mappings. Sites of the same peptide share one measurement; peptides of different records are separate observations.'}
     (output_dir/'manifest.json').write_text(json.dumps(manifest,indent=2,ensure_ascii=False)+'\n')
     print(json.dumps(manifest['counts'],indent=2))
 

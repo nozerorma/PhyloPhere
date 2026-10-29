@@ -84,6 +84,42 @@ def test_pp2a_parser_keeps_ambiguity():
     sites,_=mod.parse_modifications('Q09666 1xPhospho [S3054(100)];1xPhospho [S3836(100)]')
     assert len(sites)==2 and all(s[-1]=='ambiguous_mapping' for s in sites)
     assert mod.parse_modifications('Q8NB15 1xPhospho [S/T]')[1]
+    # A localized site stays a site when another phosphorylation of the peptide is not localized.
+    sites,problems=mod.parse_modifications('Q9NYB9 2xPhospho [S183(100);T/S]')
+    assert [(s[1],s[2],s[-1]) for s in sites]==[('S',183,'reported_site')] and problems==['S183(100);T/S']
+    # More candidate positions than phosphorylations: the localization is split, so the sites stay ambiguous.
+    sites,_=mod.parse_modifications('Q00001 1xPhospho [S10(60);S12(40)]')
+    assert len(sites)==2 and all(s[-1]=='ambiguous_mapping' for s in sites)
+    # Several proteins sharing the peptide are not resolved either.
+    sites,_=mod.parse_modifications('P35611 1xPhospho [S726(100)];Q9UEY8 1xPhospho [S693(100)]')
+    assert len(sites)==2 and all(s[-1]=='ambiguous_mapping' for s in sites)
+
+
+def test_pp2a_kauko_label_holds_until_the_next_one(tmp_path):
+    import openpyxl
+    spec=importlib.util.spec_from_file_location('pp2a',ROOT/'bin/prepare_pp2a.py')
+    mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+    src=tmp_path/'src';src.mkdir()
+    header=['Peptide','Protein','logFC','adj.P.Val','1. site','2. site','3. site','4.site']
+    book=openpyxl.Workbook()
+    down=book.active;down.title='Dephosphorylated by PP2A act. '
+    down.append(['Reference: PMID 32071079']);down.append(header+['Modulation'])
+    # The label is written on the first row of each block only.
+    for accession,label in [('P12345','CIP2Ai'),('P12346',None),('P12347','SETi'),('P12348',None)]:
+        down.append(['AASK,[3] Phospho (S)',accession,-3.0,0.01,3,None,None,None,label])
+    up=book.create_sheet('Hyperphosphorylated by siPP2A-A')
+    up.append(['Reference: PMID 32071079']);up.append(header)
+    up.append(['AASK,[3] Phospho (S)','P12349',3.0,0.01,3,None,None,None])
+    book.save(src/'Kauko PP2A_phosphoproteome.xlsx')
+    mod.SOURCES=[mod.SOURCES[0]]
+    mod.prepare(src,tmp_path/'out')
+    rows=list(csv.DictReader((tmp_path/'out/site_candidates.tsv').open(),delimiter='\t'))
+    assert [(r['accession'],r['condition']) for r in rows]==[
+        ('P12345','activation_decreased:CIP2Ai'),('P12346','activation_decreased:CIP2Ai'),
+        ('P12347','activation_decreased:SETi'),('P12348','activation_decreased:SETi'),
+        ('P12349','PPP2R1A_depletion_increased')]
+    # The residue and the offset of the phosphorylated residue in the peptide come from the Peptide column.
+    assert {(r['amino_acid'],r['peptide_offset']) for r in rows}=={('S','3')}
 
 
 def test_pfam_producer_preserves_columns_through_gaps_and_unknown_residues(tmp_path, monkeypatch):

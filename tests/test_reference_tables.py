@@ -109,3 +109,23 @@ def test_direct_fubar_keeps_tested_sites_without_human_residue(tmp_path):
  assert result[0]=={'G':{4}}
  assert result[2][('G',4)]=='positive'
  assert len(result)==3
+
+
+def test_pp2a_peptide_offset_must_agree_with_the_site(tmp_path):
+ prepared=tmp_path/'prepared';prepared.mkdir()
+ fields=['record_id','study','pmid','cell_line','sheet','source_row','collection_role','condition','accession','amino_acid','protein_position','peptide_offset','localization_percent','site_status','coordinate_space']
+ rows=[]
+ for i,offset in enumerate(['2','3','']):
+  r=dict.fromkeys(fields,'');r.update(record_id=str(i),study='Stewart',pmid='1',accession='P12345',amino_acid='S',protein_position=3,peptide_offset=offset,site_status='reported_site',collection_role='hits',condition='c');rows.append(r)
+ with (prepared/'site_candidates.tsv').open('w') as f:
+  w=csv.DictWriter(f,fieldnames=fields,delimiter='\t');w.writeheader();w.writerows(rows)
+ with gzip.open(prepared/'source_records.tsv.gz','wt') as f:
+  w=csv.writer(f,delimiter='\t');w.writerow(['record_id','source_row_json'])
+  for r in rows:w.writerow([r['record_id'],json.dumps([['Annotated Sequence','[R].ASDF.[K]']])])
+ uni=tmp_path/'uni.fa';uni.write_text('>sp|P12345|TEST_HUMAN GN=G\nMASDFK\n')
+ ref=tmp_path/'ref.tsv';ref.write_text('gene\tprotein_position\tposition\tamino_acid\n'+''.join(f'G\t{i}\t{i}\t{a}\n' for i,a in enumerate('MASDFK',1)))
+ out=tmp_path/'out';project(prepared,uni,ref,out)
+ mapped={r['record_id'] for r in csv.DictReader((out/'mapped_sites.tsv').open(),delimiter='\t')}
+ pending={r['record_id']:r['mapping_status'] for r in csv.DictReader((out/'pending_sites.tsv').open(),delimiter='\t')}
+ # S is the 2nd residue of ASDF: offset 2 and no offset map; offset 3 contradicts the site.
+ assert mapped=={'0','2'} and pending=={'1':'peptide_offset_mismatch'}
