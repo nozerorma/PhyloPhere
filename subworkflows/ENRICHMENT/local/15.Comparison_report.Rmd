@@ -50,6 +50,7 @@ params:
   # Rows embedded per Interesting Genes/Positions widget (rows keep the table's own order);
   # the complete table is always written to compare_results/*.tsv.
   interesting_max_rows: 500
+  interesting_max_chars: 2000  # max characters per text cell embedded in those widgets
   seed:               "1998"
 ---
 
@@ -988,6 +989,13 @@ render_banded_table <- function(res_obj, height = NULL) {
   # (hundreds of MB for ~30k rows); only the leading rows are embedded.
   max_rows <- params$interesting_max_rows
   if (!is.null(max_rows) && nrow(df) > max_rows) df <- utils::head(df, max_rows)
+  # Long annotation strings (e.g. AMI descriptions, ~29 KB per gene) are embedded whole in the widget
+  # JSON even though the cell only shows a collapsed preview; cut them here, the TSV keeps the full text.
+  max_chars <- params$interesting_max_chars
+  if (!is.null(max_chars)) for (n in names(df)) if (is.character(df[[n]])) {
+    long <- !is.na(df[[n]]) & nchar(df[[n]]) > max_chars
+    df[[n]][long] <- paste0(substr(df[[n]][long], 1, max_chars), " ... [truncated, full text in TSV]")
+  }
   report_table(df)
 }
 

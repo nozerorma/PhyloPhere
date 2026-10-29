@@ -751,6 +751,9 @@ echo "Params file       : $PARAMS_JSON"
 echo "Resuming?         : $([ "$RESUME" = 1 ] && echo yes || echo 'no (clean run)')"
 echo "======================================================"
 
+# The flag describes this invocation, not an earlier run in the same output directory.
+# A resumed, cached skip republishes the flag through CHECK_MIN_CONTRASTS.
+rm -f -- "${RESULTS_BASE}/low_contrasts.skip"
 nextflow run "${REPO_DIR}/main.nf" "${NF_ENGINE[@]}"
 
 # remove_work: reached only when nextflow run exited 0 (set -e aborts earlier otherwise, so a failed run
