@@ -93,6 +93,10 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
         exit 1
     }
     CAAS_REUSE_OUTDIR="${PASS_SOURCE_OUTDIR}/strict"
+    # Post-processing depends on the conservation filter, so this pass computes its own: a "use precomputed
+    # Post-processing" box of the project (written for the normal run) does not apply and must not switch it off.
+    PRECOMP_USE_POSTPROC=false
+    RUN_CT_POSTPROC=true
     # FADE and RER are computed by the pass that runs the downstream modules (the complete pass, not the exploratory one),
     # so each is looked for among the normal runs on its own.
     FADE_SOURCE_OUTDIR=""
@@ -255,7 +259,7 @@ fi
 # The strict pass never reads CAAS-derived tables from outside <outdir>/strict/: a missing file stops the script instead of
 # letting the pass run on tables of another labeling.
 for _f in "${DISCOVERY_FROM:-}" "${META_CAAS_FROM:-}" "${SCORING_POSTPROC_INPUT:-}" "${SCORING_BACKGROUND_INPUT:-}"; do
-    [ -z "$_f" ] || [ -e "$_f" ] || { echo "[ERROR] strict pass: missing $_f (Post-processing of this pass is recomputed: do not reuse it)" >&2; exit 1; }
+    [ -z "$_f" ] || [ -e "$_f" ] || { echo "[ERROR] strict pass: missing $_f" >&2; exit 1; }
 done
 {% endif %}
 

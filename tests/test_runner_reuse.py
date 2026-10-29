@@ -83,3 +83,15 @@ def test_strict_pass_precomputed_caas_tables_come_from_strict_dir(tmp_path):
                          env=env, capture_output=True, text=True)
     assert run.returncode == 0, run.stdout + run.stderr
     assert all(line.startswith(str(strict) + '/') for line in run.stdout.splitlines()), run.stdout
+
+
+def test_strict_pass_ignores_precomputed_postproc_box():
+    """The strict pass recomputes Post-processing even when the project reuses it for the normal run."""
+    from gui.project_io import load_project
+    from gui.generation.render import render_single
+
+    project = load_project(ROOT / 'gui/templates/tier2_marine.json')
+    project.precomputed.use_postproc = True
+    script = render_single(project, postproc_mode='filter', reuse_exploratory=True, strict_pass=True)
+    assert script.index('PRECOMP_USE_POSTPROC=false') < script.index('if [ "${PRECOMP_USE_POSTPROC:-false}" = true ]')
+    assert script.index('RUN_CT_POSTPROC=true') < script.index('_RUN_CT_POSTPROC="${RUN_CT_POSTPROC:-')
