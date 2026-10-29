@@ -57,3 +57,29 @@ def test_runner_skip_flag_reflects_current_invocation(tmp_path, skipped):
     assert flag.exists() is skipped
     if skipped:
         assert flag.read_text() == 'current'
+
+
+def test_strict_pass_precomputed_caas_tables_come_from_strict_dir(tmp_path):
+    """Precomputed discovery in the strict pass must read <complete>/strict, never the complete tables."""
+    from gui.project_io import load_project
+    from gui.generation.render import render_single
+
+    project = load_project(ROOT / 'gui/templates/tier2_marine.json')
+    script = render_single(project, postproc_mode='filter', reuse_exploratory=True, strict_pass=True)
+    block = script[script.index('PRECOMP_OUTDIR="${PRECOMP_BASE_PATH:-}/${TRAIT}"'):script.index('if [ "${PRECOMP_USE_RER:-false}" = true ]')]
+    complete = tmp_path / 'complete'
+    strict = complete / 'strict'
+    (strict / 'meta_caas/meta_caas').mkdir(parents=True)
+    (strict / 'caastools').mkdir()
+    (strict / 'caas_permulation').mkdir()
+    (strict / 'caas_permulation/cycle_roster.txt').write_text('b_1\n')
+    (strict / 'caastools/discovery.tab').write_text('x\n')
+    (strict / 'meta_caas/meta_caas/meta_caas.tsv').write_text('x\n')
+    env = dict(os.environ, PRECOMP_BASE_PATH=str(tmp_path), TRAIT='nope', PASS_SOURCE_OUTDIR=str(complete),
+               CAAS_REUSE_OUTDIR=str(strict), FADE_SOURCE_OUTDIR='', RER_SOURCE_OUTDIR='',
+               PRECOMP_USE_DISCOVERY='true', RUN_FADE='false', RUN_RER='false')
+    check = '\nprintf "%s\\n" "$DISCOVERY_FROM" "$META_CAAS_FROM" "$BACKGROUND_INPUT" "$CAAS_NULL_DIR"\n'
+    run = subprocess.run(['bash', '-c', 'set -Eeuo pipefail\n' + block + check],
+                         env=env, capture_output=True, text=True)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert all(line.startswith(str(strict) + '/') for line in run.stdout.splitlines()), run.stdout

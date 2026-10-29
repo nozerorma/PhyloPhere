@@ -196,10 +196,14 @@ elif [ ! -d "$PRECOMP_OUTDIR" ] && [ -n "${TAG:-}${RUN_TAG:-}" ] && [ -d "${PREC
     PRECOMP_OUTDIR="${PRECOMP_BASE_PATH:-}/${TRAIT}${TAG:-}${RUN_TAG:-}"
 fi
 
+# Directory of the CAAS-derived tables (discovery, meta_caas, backgrounds, null, Disambiguation, Post-processing).
+PRECOMP_CAAS_OUTDIR="$PRECOMP_OUTDIR"
 {% if strict_pass %}
 # FADE and RER do not depend on conservation: the strict pass reads the tables of the run it derives from instead of
-# running them again (only when that run has them).
+# running them again (only when that run has them). Every CAAS-derived table does depend on it and comes from the
+# strict tables (<outdir>/strict/), never from the top level of the normal run.
 PRECOMP_OUTDIR="$PASS_SOURCE_OUTDIR"
+PRECOMP_CAAS_OUTDIR="$CAAS_REUSE_OUTDIR"
 if [ "${RUN_FADE:-false}" = true ] && [ -n "$FADE_SOURCE_OUTDIR" ]; then
     PRECOMP_USE_FADE=true
     RUN_FADE=false
@@ -210,43 +214,50 @@ if [ "${RUN_RER:-false}" = true ] && [ -n "$RER_SOURCE_OUTDIR" ]; then
 fi
 {% endif %}
 if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
-    DISCOVERY_FROM="${PRECOMP_OUTDIR}/caastools/discovery.tab"
+    DISCOVERY_FROM="${PRECOMP_CAAS_OUTDIR}/caastools/discovery.tab"
     # meta_caas/ is where CT_META_CAAS publishes.
-    META_CAAS_FROM="${PRECOMP_OUTDIR}/meta_caas/meta_caas/meta_caas.tsv"
-    BACKGROUND_INPUT="${PRECOMP_OUTDIR}/caastools/background_genes.output"
-    POSENRICH_BACKGROUND_FILE="${PRECOMP_OUTDIR}/caastools/background.output"
+    META_CAAS_FROM="${PRECOMP_CAAS_OUTDIR}/meta_caas/meta_caas/meta_caas.tsv"
+    BACKGROUND_INPUT="${PRECOMP_CAAS_OUTDIR}/caastools/background_genes.output"
+    POSENRICH_BACKGROUND_FILE="${PRECOMP_CAAS_OUTDIR}/caastools/background.output"
     # These exist only if the source run had --caas_permulation_enrichment on. The caas_permulation/ directory
     # (null_positions.parquet, blocks/, cycle_roster.txt, counts.json, cycle_summary.tsv, cycle_hist.tsv) is the
     # position-level null of SCORING and POSENRICH Accumulation. The reuse_exploratory branch above sets the same
     # variable; keep the two in sync.
-    CAAS_NULL_DIR="${PRECOMP_OUTDIR}/caas_permulation"
+    CAAS_NULL_DIR="${PRECOMP_CAAS_OUTDIR}/caas_permulation"
     [ -f "$CAAS_NULL_DIR/cycle_roster.txt" ] || {
         echo "[WARN] cycle_roster.txt missing in $CAAS_NULL_DIR: the position-level null cannot be used" >&2
         CAAS_NULL_DIR=""
     }
-    CAAS_PERM_MANIFEST_FILE="${PRECOMP_OUTDIR}/caastools/permulation_manifest.tsv"
-    CAAS_PERM_HARVEST_FILE="${PRECOMP_OUTDIR}/caastools/permulation_harvest.tsv"
+    CAAS_PERM_MANIFEST_FILE="${PRECOMP_CAAS_OUTDIR}/caastools/permulation_manifest.tsv"
+    CAAS_PERM_HARVEST_FILE="${PRECOMP_CAAS_OUTDIR}/caastools/permulation_harvest.tsv"
 fi
 if [ "${PRECOMP_USE_RESAMPLE:-false}" = true ]; then
-    RESAMPLE_FROM="${PRECOMP_OUTDIR}/caastools/resample.tab"
+    RESAMPLE_FROM="${PRECOMP_CAAS_OUTDIR}/caastools/resample.tab"
 fi
 
 if [ "${PRECOMP_USE_DISAMBIGUATION:-false}" = true ]; then
-    DISAMBIGUATION_INPUT="${PRECOMP_OUTDIR}/ct_disambiguation/caas_convergence_master.csv"
-    DISAMBIGUATION_DIR="${PRECOMP_OUTDIR}/ct_disambiguation"
+    DISAMBIGUATION_INPUT="${PRECOMP_CAAS_OUTDIR}/ct_disambiguation/caas_convergence_master.csv"
+    DISAMBIGUATION_DIR="${PRECOMP_CAAS_OUTDIR}/ct_disambiguation"
 fi
 
 if [ "${PRECOMP_USE_POSTPROC:-false}" = true ]; then
     # gene_filtering/ and cleaned_backgrounds/ exist only if the source run had
     # gene_filter_mode other than 'none' (the default).
-    _PP_CAAS="${PRECOMP_OUTDIR}/postproc/gene_filtering/filtered_discovery.tsv"
-    _PP_BACKGROUND="${PRECOMP_OUTDIR}/postproc/cleaned_backgrounds/cleaned_background_main.txt"
+    _PP_CAAS="${PRECOMP_CAAS_OUTDIR}/postproc/gene_filtering/filtered_discovery.tsv"
+    _PP_BACKGROUND="${PRECOMP_CAAS_OUTDIR}/postproc/cleaned_backgrounds/cleaned_background_main.txt"
     SCORING_POSTPROC_INPUT="$_PP_CAAS"
     SCORING_BACKGROUND_INPUT="$_PP_BACKGROUND"
     # A standalone Accumulation input given in the POSENRICH tab wins over the precomputed Post-processing output.
     [ -n "${ACCUMULATION_CAAS_INPUT:-}" ] || ACCUMULATION_CAAS_INPUT="$_PP_CAAS"
     [ -n "${ACCUMULATION_BACKGROUND_INPUT:-}" ] || ACCUMULATION_BACKGROUND_INPUT="$_PP_BACKGROUND"
 fi
+{% if strict_pass %}
+# The strict pass never reads CAAS-derived tables from outside <outdir>/strict/: a missing file stops the script instead of
+# letting the pass run on tables of another labeling.
+for _f in "${DISCOVERY_FROM:-}" "${META_CAAS_FROM:-}" "${SCORING_POSTPROC_INPUT:-}" "${SCORING_BACKGROUND_INPUT:-}"; do
+    [ -z "$_f" ] || [ -e "$_f" ] || { echo "[ERROR] strict pass: missing $_f (Post-processing of this pass is recomputed: do not reuse it)" >&2; exit 1; }
+done
+{% endif %}
 
 if [ "${PRECOMP_USE_RER:-false}" = true ]; then
     # The source run wrote <trait>.binary.* for a binary trait and <trait>.continuous.* otherwise.
