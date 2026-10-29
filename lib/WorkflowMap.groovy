@@ -153,8 +153,7 @@ class WorkflowMap {
               filesDirs: ["${outdir}/data_exploration"],
               htmlCandidates: ["${outdir}/html_reports/2.Phenotype_exploration_complete.html"] ],
 
-            // NOTE: directories.R (TRAIT_ANALYSIS) only ever creates 1.Traitfiles and
-            // 2.Permulation_traitfiles under 2.CT — there is no 3.Tree subdirectory.
+            // directories.R (TRAIT_ANALYSIS) creates 1.Traitfiles and 2.Permulation_traitfiles under 2.CT.
             [ id: 'contrast',    name: 'Contrast selection',              type: 'prepost',   ran: ctx.contrastSel,
               filesDirs: ["${outdir}/data_exploration/2.CT",
                           "${outdir}/data_exploration/2.CT/1.Traitfiles",
@@ -162,18 +161,14 @@ class WorkflowMap {
               htmlCandidates: ["${outdir}/html_reports/3.CI-composition.html",
                                 "${outdir}/html_reports/4.Independent_contrasts.html"] ],
 
-            // discovery/resample are only published when --publish_intermediates
-            // is set (default false, see conf/ct.config); caastools/ (from
-            // CT_CONCAT) is unconditional and is what actually drives the "ran"
-            // status below.
+            // discovery/ and resample/ are published only with --publish_intermediates
+            // (conf/ct.config); caastools/ is always written and drives the "ran" status.
             [ id: 'ct',          name: 'CT (convergence)',                type: 'processes', ran: ctx.ct,
               filesDirs: ["${outdir}/caastools", "${outdir}/discovery",
                           "${outdir}/resample"],
               htmlCandidates: [] ],
 
-            // NOTE: 7.CAAS_pattern_annotation.Rmd (CAAS_META_CAAS_REPORT) publishes
-            // under meta_caas/ (renamed from signification/ in f274b35) — there is
-            // no gene_lists subdirectory under it.
+            // 7.CAAS_pattern_annotation.Rmd (CAAS_META_CAAS_REPORT) publishes under meta_caas/.
             [ id: 'ct_signif',   name: 'CAAS Pattern Annotation',         type: 'reporting', ran: ctx.ctSignif,
               filesDirs: ["${outdir}/meta_caas",
                           "${outdir}/meta_caas/meta_caas"],
@@ -194,7 +189,7 @@ class WorkflowMap {
                           "${outdir}/postproc/cleaned_backgrounds"],
               htmlCandidates: ["${outdir}/html_reports/8.Characterization_report.html"] ],
 
-            [ id: 'ct_acc',      name: 'POSENRICH level 1: Accumulation',   type: 'processes', ran: ctx.ctAccum,
+            [ id: 'ct_acc',      name: 'POSENRICH level 1: accumulation',   type: 'processes', ran: ctx.ctAccum,
               filesDirs: ["${outdir}/posenrich/accumulation",
                           "${outdir}/posenrich/accumulation/top",
                           "${outdir}/posenrich/accumulation/bottom",
@@ -220,33 +215,22 @@ class WorkflowMap {
               htmlCandidates: ["${outdir}/html_reports/6.FADE_report_top.html",
                                "${outdir}/html_reports/6.FADE_report_bottom.html"] ],
 
-            // NOTE: scoring_compute.R writes the 9 STRING-ready slices flat as
-            // gene_lists/slice_*.tsv (no position/ or gene/ subdirectories, and no
-            // overlap/ directory — that was a stale reference to a since-removed
-            // layout).
+            // scoring_compute.R writes the ranked slices flat as gene_lists/slice_*.tsv.
             [ id: 'scoring',     name: 'CAAS Scoring',                    type: 'reporting', ran: ctx.scoring,
               filesDirs: ["${outdir}/scoring",
                           "${outdir}/scoring/gene_lists"],
               htmlCandidates: ["${outdir}/html_reports/11.Scoring_report.html"] ],
 
-            // CAAS_SIGNIFICANCE_REPORT (16.CAAS_significance_report.Rmd) — a
-            // DISTINCT, LATER stage than ct_signif above: it runs after scoring,
-            // joining ct_signif's already-published meta_caas table against
-            // scoring's position_scores.tsv (p.emp, p.adj_bh). See ctpp_meta_caas.nf's
-            // CAAS_SIGNIFICANCE_REPORT process and main.nf's post-SCORING call.
+            // CAAS_SIGNIFICANCE_REPORT (16.CAAS_significance_report.Rmd) runs after scoring:
+            // it joins the meta_caas table of ct_signif with position_scores.tsv (p.emp, p.adj_bh).
             [ id: 'ct_signif_sig', name: 'CT significance (post-scoring)', type: 'reporting', ran: ctx.ctSignifSig,
               filesDirs: ["${outdir}/meta_caas/significance"],
               htmlCandidates: ["${outdir}/html_reports/16.CAAS_significance_report.html"] ],
 
-            // The main ENRICHMENT workflow (workflows/enrichment.nf) runs downstream of
-            // --scoring when --enrichment is also set. It only ever runs per-module FCS
-            // for CAAS ('fcs') and RER ('scoring/rer'); FADE has no FCS ranking of its own
-            // (see subworkflows/ENRICHMENT/fcs.nf), so there is no 12.FCS_fade to look for. AMI is separate: the
-            // centralized DOMINO-based run (--scoring_ami) lives under ENRICHMENT and
-            // publishes to ami/*, while each of RER/FADE can *also* run
-            // its own AMI report directly from its own workflow file (--ami, a
-            // distinct flag — see workflows/rerconverge.nf, fade.nf),
-            // publishing under that module's own output tree instead of ami/.
+            // ENRICHMENT (workflows/enrichment.nf) runs when --scoring and --enrichment are set.
+            // FCS covers the CAAS ranking ('fcs') and the RER ranking ('scoring/rer'); FADE has
+            // no FCS ranking. The DOMINO-based AMI run (--scoring_ami) publishes to ami/*, and
+            // RER and FADE can also publish their own AMI report under their output trees.
             [ id: 'fcs',         name: 'Functional enrichment (FCS)',     type: 'reporting', ran: ctx.fcs,
               filesDirs: ["${outdir}/fcs",
                           "${outdir}/scoring/rer"],
@@ -259,8 +243,7 @@ class WorkflowMap {
                           "${outdir}/ami/ami_summary",
                           "${outdir}/ami/ami_plots",
                           "${outdir}/ami/ami_networks",
-                          // Per-module AMI (--ami, run from each module's own
-                          // workflow file rather than centralized ENRICHMENT/DOMINO).
+                          // Per-module AMI, run from the RER and FADE workflow files.
                           "${outdir}/rerconverge/ami",
                           "${outdir}/selection/fade/top/ami",
                           "${outdir}/selection/fade/bottom/ami"],
@@ -268,7 +251,7 @@ class WorkflowMap {
                                "${outdir}/html_reports/13.AMI_rer.html",
                                "${outdir}/html_reports/13.AMI_fade.html"] ],
 
-            [ id: 'posenrich', name: 'POSENRICH position-level enrichment',   type: 'reporting', ran: ctx.posenrich,
+            [ id: 'posenrich', name: 'POSENRICH registry and level 2',   type: 'reporting', ran: ctx.posenrich,
               filesDirs: ["${outdir}/posenrich/registry",
                           "${outdir}/posenrich/characterization",
                           "${outdir}/posenrich/universe",
@@ -284,8 +267,11 @@ class WorkflowMap {
         ].collect { st -> st + [color: colors[st.type]] }
 
         def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','ct_signif',
-                        'ct_disambig','asr_diagnostics','ct_postproc','ct_acc','vep','rer','fade',
-                        'scoring','ct_signif_sig','fcs','ami','posenrich','compare']
+                        'ct_disambig','asr_diagnostics','ct_postproc','rer','fade',
+                        'scoring','ct_signif_sig','vep','ct_acc','posenrich','fcs','ami','compare']
+        // Names and colors of the stages, shared with the Refresh Status script below.
+        def stageNames  = stages.collectEntries { [(it.id): it.name] }
+        def stageColors = stages.collectEntries { [(it.id): it.color] }
         def rows = []
         chainIds.eachWithIndex { sid, idx ->
             def st = stages.find { it.id == sid }
@@ -352,7 +338,7 @@ class WorkflowMap {
       ${logoDataUri ? "<img class=\"hero-logo\" src=\"${logoDataUri}\" alt=\"PhyloPhere logo\" />" : ""}
     </div>
     <h1>PhyloPhere workflow map</h1>
-    <div class="subtitle">Complete chain from prune/reporting to scoring (always shown). Gray = not run, colored = run.</div>
+    <div class="subtitle">Chain of stages in pipeline order, from pruning and reporting to enrichment (always shown). Gray = not run, colored = run.</div>
   </div>
 
   <div class="meta">
@@ -375,7 +361,7 @@ class WorkflowMap {
     &nbsp;&nbsp;|&nbsp;&nbsp;
     <span class="sw" style="background:${colors.prepost};"></span> Pre/postprocessing &amp; characterization (VEP)
     &nbsp;&nbsp;|&nbsp;&nbsp;
-    <span class="sw" style="background:${colors.processes};"></span> Analysis processes (CT, RER, FADE, disambiguation, accumulation)
+    <span class="sw" style="background:${colors.processes};"></span> Analysis processes (CT, RER, FADE, disambiguation, POSENRICH level 1)
     &nbsp;&nbsp;|&nbsp;&nbsp;
     <span class="sw" style="background:#B8B8B8;"></span> Not run
   </div>
@@ -410,29 +396,6 @@ class WorkflowMap {
       // list can't silently drift out of sync with it again.
       const canonicalDirs = ${JsonOutput.toJson(getCanonicalDirectories())};
 
-      // Map stage IDs to display stages
-      const stageMapping = {
-        'prune': 'prune',
-        'dataset_rep': 'dataset_rep',
-        'pheno_rep': 'pheno_rep',
-        'contrast': 'contrast',
-        'ct': 'ct',
-        'ct_signif': 'ct_signif',
-        'ct_disambig': 'ct_disambig',
-        'asr_diagnostics': 'asr_diagnostics',
-        'ct_postproc': 'ct_postproc',
-        'ct_acc': 'ct_acc',
-        'vep': 'vep',
-        'rer': 'rer',
-        'fade': 'fade',
-        'scoring': 'scoring',
-        'ct_signif_sig': 'ct_signif_sig',
-        'fcs': 'fcs',
-        'ami': 'ami',
-        'compare': 'compare',
-        'posenrich': 'posenrich'
-      };
-      
       let checkedStages = 0;
       const totalStages = Object.keys(canonicalDirs).length;
       
@@ -491,54 +454,15 @@ class WorkflowMap {
       });
     }
     
+    const stageNames = ${JsonOutput.toJson(stageNames)};
+    const stageColors = ${JsonOutput.toJson(stageColors)};
+
     function getStageNameFromId(stageId) {
-      const names = {
-        'prune': 'Data pruning',
-        'dataset_rep': 'Dataset reporting',
-        'pheno_rep': 'Phenotype reporting',
-        'contrast': 'Contrast selection',
-        'ct': 'CT (convergence)',
-        'ct_signif': 'CAAS Pattern Annotation',
-        'ct_disambig': 'CT disambiguation (convergence)',
-        'asr_diagnostics': 'ASR Diagnostics',
-        'ct_postproc': 'CT post-processing',
-        'ct_acc': 'POSENRICH level 1: Accumulation',
-        'vep': 'VEP characterization',
-        'rer': 'RERconverge (RER)',
-        'fade': 'FADE (selection)',
-        'scoring': 'CAAS Scoring',
-        'ct_signif_sig': 'CT significance (post-scoring)',
-        'fcs': 'Functional enrichment (FCS)',
-        'ami': 'AMI (DOMINO active modules)',
-        'compare': 'Cross-module comparison',
-        'posenrich': 'POSENRICH position registry'
-      };
-      return names[stageId] || stageId;
+      return stageNames[stageId] || stageId;
     }
 
     function getStageColor(stageId) {
-      const typeColors = {
-        'prune': '#0EA5E9',
-        'dataset_rep': '#7C3AED',
-        'pheno_rep': '#7C3AED',
-        'contrast': '#0EA5E9',
-        'ct': '#F97316',
-        'ct_signif': '#7C3AED',
-        'ct_disambig': '#F97316',
-        'asr_diagnostics': '#7C3AED',
-        'ct_postproc': '#0EA5E9',
-        'ct_acc': '#F97316',
-        'vep': '#0EA5E9',
-        'rer': '#F97316',
-        'fade': '#F97316',
-        'scoring': '#7C3AED',
-        'ct_signif_sig': '#7C3AED',
-        'fcs': '#7C3AED',
-        'ami': '#7C3AED',
-        'compare': '#7C3AED',
-        'posenrich': '#7C3AED'
-      };
-      return typeColors[stageId] || '#B8B8B8';
+      return stageColors[stageId] || '#B8B8B8';
     }
   </script>
 </body>

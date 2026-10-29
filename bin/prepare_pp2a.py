@@ -4,7 +4,7 @@
 Outputs retain original rows, study/condition, reported protein-site candidates,
 localization percentages and unresolved evidence. No new significance or localization
 cutoff is imposed. Candidate rows sharing a record are NOT independent observations.
-Requires openpyxl; original workbooks are read only. See docs/POSITION_COLLECTIONS.md.
+Requires openpyxl; original workbooks are read only.
 """
 import argparse
 import csv

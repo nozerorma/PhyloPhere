@@ -4,7 +4,7 @@
 
 """Does a term hold more positive positions than the rest of the positions of the same genes?
 
-Estimand (docs/POSENRICH_DISENO.md, section 6). For a term S and a gene g that has positions inside and outside S,
+Estimand. For a term S and a gene g that has positions inside and outside S,
 let n_g be the positions of g in U, m_g those in S and k_g the positive positions of g. If the positives of g were
 spread evenly over its positions, k_g m_g / n_g of them would fall in S. The residual of the gene is
 

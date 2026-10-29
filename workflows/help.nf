@@ -32,14 +32,18 @@ PHYLOPHERE Nextflow pipeline
 =============================================
 A complete set of phylogenetic comparative tools for Phenome-Genome studies:
 convergent amino acid substitution (CAAS) discovery, ancestral-state
-disambiguation, relative evolutionary rate (RERconverge), directional
-selection (HyPhy FADE), VEP-style annotation, composite scoring, and
-functional/network enrichment.
+scoring, relative evolutionary rate (RERconverge), directional selection
+(HyPhy FADE), composite scoring, variant annotation, position-level
+enrichment (POSENRICH) and functional/network enrichment.
 
 General usage:            > nextflow run main.nf [options]
 Module-specific help:     > nextflow run main.nf --help --<module_flag>
 
---remove_work                       <true|false>                   false  (the generated run script removes its work, run and private Nextflow home directories after a successful run; -resume is not available afterwards)
+General options:
+--remove_work             <true|false>  false  (the generated run script removes its work, run and
+                                         Nextflow home directories after a successful run; -resume
+                                         is not available afterwards)
+--toy_mode, --toy_n       Smoke test on a random subset of alignments (see --help --contrast_selection)
 
 Module flag              Description
 ------------------------  -------------------------------------------------
@@ -53,23 +57,26 @@ Module flag              Description
                           discovery replays the real labeling and the null
                           over the alignments and needs those labelings.
                           See: --help --ct_tool <discovery|resample>
---ct_disambiguation       Classify CAAS as convergent/parallel/divergent via ASR.
+--ct_disambiguation       Score each CAAS by ancestral state reconstruction (ASR) and
+                          label it convergent, divergent, single or no_change.
 --ct_postproc             Cluster/gene-level filtering + characterization report.
---posenrich               POSENRICH position-level enrichment: level 1 is the exact
-                          share-of-detections test of CAAS accumulation per gene; the position
-                          registry and its components need --scoring.
---vep                     Annotate CAAS positions with PrimateAI-3D / COSMIC.
+--posenrich               POSENRICH: level 1 tests the share of the detections held by each
+                          gene against the null cycles; the position registry, level 2 and
+                          report 14 need --scoring.
+--vep                     Annotate scored positions with PrimateAI-3D, COSMIC and Ensembl VEP.
+                          On by default; requires --scoring (use --vep false otherwise).
 --fade                    HyPhy FADE directional (top/bottom) selection scan.
 --rer_tool <steps>        RERconverge relative-evolutionary-rate analysis
-                          (comma-separated: build_trait,build_trees,build_matrix,continuous).
---scoring                 Composite position- and gene-level scoring across
-                          CAAS, FADE, RER and VEP signals.
---enrichment              FCS ranked enrichment, DOMINO/STRING network
-                          analysis.
+                          (comma-separated: build_trait,build_tree,build_matrix,continuous,binary).
+--scoring                 Position- and gene-level scores from CAAS, with FADE and RER
+                          evidence, calibrated against the CAAS null.
+--enrichment              FCS ranked enrichment, DOMINO/STRING network analysis and
+                          the comparison report. Needs --scoring; without it only the
+                          RER FCS report can run.
 
-Each module can also run standalone from a precomputed input of an upstream
-module — see the module-specific help (or the README's Configuration
-Reference) for the relevant "*_from" / "*_input" parameters.
+Stages after CT can start from files of a previous run: each module help lists its
+"*_from" / "*_input" options. ENRICHMENT and VEP always need --scoring in the same
+invocation. See the README for all options and docs/WALKTHROUGH.md for the statistics.
 '''
 }
 
@@ -178,8 +185,9 @@ def disambiguation_help() {
     return '''
 CT Disambiguation — Help
 =============================================
-Classifies each discovered CAAS as convergent, parallel or divergent using
-ancestral state reconstruction (ASR) relative to the phenotype tree topology.
+Scores each discovered CAAS with ancestral state reconstruction (ASR): how likely the
+shared residue arose independently in the contrast domains. Positions are labeled
+convergent, divergent, single or no_change.
 
 Usage:
 --meta_caas_from                <"meta_caas_output">          null  (a previous run's meta_caas.tsv: locates that run's outdir to reuse its permulation exports)
@@ -187,7 +195,7 @@ Usage:
 --ct_disambig_asr_cache_dir          <"cache_dir">                   null
 --ct_disambig_posterior_threshold      <FLOAT 0-1>                     0.1
 --ct_disambig_max_tasks_per_child       <INTEGER>                       50
---asr_diagnostics                        <true|false>                    true   (parallel ASR diagnostics report)
+--asr_diagnostics                        <true|false>                    true   (render the ASR diagnostics report, 9)
 '''
 }
 
@@ -226,13 +234,13 @@ SCORING). The universe table (universe.tsv.gz) is shared by both levels. Level 1
 is a test of whether a gene holds a larger share of the detections than it does in the null cycles
 (calibrated with them). The position registry, its characterization, level 2 (concentration of the
 signal inside genes, calibrated with the null cycles) and the overlap and proximity components read SCORING's
-tables and need --scoring. Level 2 is not yet validated at scale (10,000 null cycles): its p and q are
-provisional. Outputs go to posenrich/ (accumulation, universe, registry, characterization, within_gene,
-proximity) and report 14 (14.POSENRICH_report_<trait>.html).
+tables and need --scoring. Without --scoring only posenrich/universe and posenrich/accumulation are written; with
+it the run adds registry, characterization, within_gene and proximity, and report 14
+(14.POSENRICH_report_<trait>.html). Level 1 needs --ct_postproc or --accumulation_background_input.
 
 Usage:
 --posenrich                          <true|false>                   false
---accumulation_fdr                   <FLOAT 0-1>                    0.1   (BH threshold of the report tables of levels 1 and 2)
+--accumulation_fdr                   <FLOAT 0-1>                    0.1   (q threshold marked in report 14 for levels 1 and 2; q itself does not depend on it)
 --accumulation_caas_input            <"filtered_discovery.tsv">     null  (standalone entry: observed positives of U)
 --accumulation_background_input      <"background_file">            null  (standalone entry: gene list of U)
 --posenrich_background_file          <"background_file">            null  (tested positions, background.output)
@@ -258,9 +266,10 @@ def vep_help() {
     return '''
 VEP Characterization — Help
 =============================================
-Annotates filtered CAAS positions with PrimateAI-3D pathogenicity scores,
+Annotates the positions of SCORING with PrimateAI-3D pathogenicity scores,
 COSMIC somatic-mutation evidence, and/or Ensembl VEP consequence prediction
 (each source skipped independently if its param is empty/unset).
+Requires --scoring. Annotations are descriptive and do not change any score.
 
 VEP reads the per-gene MAP directory from --caas_map_dir (post-processing parameter).
 It has no in-house generation path: it maps each alignment codon
@@ -269,13 +278,13 @@ alignment-to-protein pipeline, not just the alignment plus a public DB.
 Generate it with: https://github.com/nozerorma/ortholog_characterizator
 
 Usage:
---vep_primateai_db                 <"primateai_db">          null
---cosmic_db                          <"cosmic_db">              null
---vep_ensembl                         <BOOLEAN>                 false (runs the official Ensembl VEP CLI, independent of the two DBs above)
+--vep_primateai_db                 <"primateai_db">          ""   (PrimateAI-3D hg38 table; not bundled)
+--cosmic_db                          <"cosmic_db">              ""   (COSMIC Mutant Census GRCh38 table; not bundled)
+--vep_ensembl                         <BOOLEAN>                 false (runs the official Ensembl VEP CLI, independent of the two DBs above; needs --gene_ensembl_file)
 --vep_mode                             <"mode">                   "auto"  (auto = database when vep_db_host is reachable, else offline cache; database; offline)
 --vep_db_host                           <"host">                   "ensembldb.ensembl.org"
 --vep_db_port                            <PORT>                    3306
---vep_cache_dir                        <"vep_cache_dir">          null  (offline mode; blank auto-populates ~/.cache/phylophere/vep/<species>_<assembly> via vep_install on first use)
+--vep_cache_dir                        <"vep_cache_dir">          ""    (offline mode; blank auto-populates ~/.cache/phylophere/vep/<species>_<assembly> via vep_install on first use)
 --vep_species                            <"species">                "homo_sapiens"
 --vep_assembly                             <"assembly">               "GRCh38"
 '''
@@ -304,6 +313,8 @@ Usage:
 --fade_chains, --fade_chain_length,
 --fade_burn_in, --fade_samples               (MCMC-only settings; ignored by Variational-Bayes)
 --fade_concentration                            <FLOAT>                  0.5
+--fade_min_genes_for_heatmap                       <INTEGER>                2     (minimum genes for the report heatmap)
+--lg_dat_path                                       <"model.dat">            derived from --fade_model
 --fade_universe_file                              <"gene_list">            null  (else falls back to cleaned background)
 --fade_tables_dir_top / --fade_tables_dir_bottom    <"dir/selection/fade/<direction>">   null  (scoring and report from the merged FADE tables of a prior run)
 '''
@@ -319,7 +330,7 @@ Computes Relative Evolutionary Rate — branch-length deviation correlated with
 the trait — auto-routing to continuous or binary correlation.
 
 Usage:
---rer_tool                    <"build_trait,build_trees,build_matrix,continuous">   ""
+--rer_tool                    <"build_trait,build_tree,build_matrix,continuous,binary">   ""
 --rer_trait_mode                 <"auto|continuous|binary">                          "auto"
 --rer_minsp                        <INTEGER>                                            15
 --winsorizeRER, --winsorizeTrait     <INTEGER>                                            3
@@ -332,7 +343,10 @@ Usage:
 --rer_universe_file                               <"gene_list">                                        null  (else falls back to cleaned background)
 --rer_continuous_file                               <"trait.continuous.output">                          null  (render report from precomputed RDS)
 --rer_binary_file                                    <"trait.binary.output">                              null  (same, for binary traits)
---rer_perms_file                                      <"trait.{continuous,binary}.perms.rds">                        null
+--rer_perms_file                                      <"perms.rds|corStat block dir">                  null  (standalone null)
+--rer_gene_scores                                       <"fcs_stats.tsv">                                   null  (SCORING gene table joined to the RER gene lists)
+--rer_top_n_labels                                       <INTEGER>                                            20    (genes labelled in plots)
+--gene_trees, --trait_out, --trees_out, --matrix_out   (RER input and intermediate objects; see conf/rerconverge.config)
 '''
 }
 
@@ -342,13 +356,17 @@ def scoring_help() {
     return """
 CAAS Scoring — Help
 =============================================
-Computes composite CAAS scores at position-level and gene-level, integrating
-CT, FADE, RER and VEP signals.
+Computes CAAS position and gene scores from CT_POSTPROC, calibrates them against the
+CAAS permulation null (empirical p, Benjamini-Hochberg q) and joins FADE and RER
+evidence. VEP runs after SCORING and annotates its positions.
 
 Usage:
 --scoring                   <true|false>            false
 --scoring_ami                <true|false>            true    (downstream DOMINO/AMI active module analysis)
---scoring_string             <true|false>            true    (legacy alias for --scoring_ami)
+--scoring_string             <true|false>            true    (read only when --scoring_ami is unset)
+--gene_stat                  <"max">                 max     (only supported gene statistic: largest positive position score)
+--auto_generate_ensembl      <true|false>            false   (build --gene_ensembl_file from BioMart; read by bin/resolve_core_inputs.py)
+--ensembl_dataset            <"dataset">             ""      (BioMart dataset; blank derives it from --ref_species_name)
 --scoring_compare_fdr          <FLOAT 0-1>             0.15
 --scoring_compare_top_n           <INTEGER>               20
 --evidence_p_threshold <FLOAT 0-1> 0.05 (nominal empirical activity)
@@ -359,19 +377,22 @@ Usage:
 
 Standalone mode (provide inputs directly):
 --scoring_postproc_input        <"filtered_discovery.tsv">        ""
---scoring_background_input        <"background.txt">                ""
+--scoring_background_input        <"cleaned_background_main.txt">   ""
+--scoring_hypotheses_pairs          <"contrast_hypotheses_pairs.tsv">  ""    (domain weights; found automatically in outdir/data_exploration/2.CT/1.Traitfiles/)
 --scoring_fade_summary_top          <"fade_summary_top.tsv">           ""
 --scoring_fade_summary_bottom          <"fade_summary_bottom.tsv">        ""
---scoring_fade_site_top                  <"fade_site_top.tsv">              ""
---scoring_fade_site_bottom                  <"fade_site_bottom.tsv">           ""
---scoring_rer_input                           <"rerconverge_summary.tsv">        ""
---scoring_vep_primateai                            <"vep_primateai.tsv">              ""    (also the precomputed-VEP fallback of the comparison report, see enrichment.nf)
---scoring_vep_cosmic                                  <"vep_cosmic.tsv">                  ""    (also the precomputed-VEP fallback of the comparison report, see enrichment.nf)
+--scoring_fade_site_top                  <"fade_site_bf_top.tsv">           ""
+--scoring_fade_site_bottom                  <"fade_site_bf_bottom.tsv">        ""
+--scoring_rer_input                           <"rerconverge_summary_<trait>.tsv">  ""
+--scoring_vep_primateai                            <"primateai_mapped.tsv">            ""    (also the precomputed-VEP fallback of the comparison report, see enrichment.nf)
+--scoring_vep_cosmic                                  <"cosmic_scores.tsv">                ""    (also the precomputed-VEP fallback of the comparison report, see enrichment.nf)
 --scoring_vep_ensembl                                <"ensembl_vep_mapped.tsv">          ""    (also the precomputed-VEP fallback of the comparison report, see enrichment.nf)
---caas_null_dir                                          <"caas_permulation/">          ""    (caas_permulation/ directory of a prior run: canonical SCORING null; its positive-position keys define the POSENRICH Accumulation universe when no live core is available)
+--caas_null_dir                                          <"caas_permulation/">          ""    (caas_permulation/ directory of a prior run: the null of SCORING and POSENRICH)
+--caas_perm_harvest_file, --caas_perm_manifest_file   <"permulation_harvest.tsv", "permulation_manifest.tsv">  ""  (null harvest and design panels of report 11)
 
-Position-level components: ASR, convergence, parallel, [FADE]
-Gene-level scores: gene_caas, [gene_rer], [gene_fade], gene_composite
+Main outputs (scoring/): position_scores.tsv, gene_scores.tsv, fcs_stats*.tsv, gene_lists/,
+position_lists/ and report 11. Gene columns: gene_caas_score (+ _top, _bottom), caas_p.gen,
+rer_min_pval, rer_acceleration, fade_max_bf_<direction>.
 """
 }
 
@@ -381,20 +402,21 @@ def enrichment_help() {
     return '''
 Enrichment (FCS / DOMINO-STRING) — Help
 =============================================
-Ranked gene-set enrichment (FCS, Wilcoxon-AUC on GMT gene sets) run
-separately for CAAS and RER rankings, an orthogonal cross-module Comparison
-report, optional DOMINO active-module detection + STRING functional
-enrichment. The comparison report reads the position characterization of POSENRICH when
-it is available.
+Ranked gene-set enrichment (FCS, Wilcoxon-AUC on GMT gene sets) for the CAAS and RER
+rankings, DOMINO active-module detection with STRING labels, and a cross-module
+Comparison report that reads the POSENRICH position characterization when it exists.
+Needs --scoring; without it only the RER FCS report can run (from RER output).
 
 Usage:
 --enrichment                        <true|false>          false
---gmt_dir                            <"gmt_dir">              null
+--fcs_enabled                         <true|false>             true   (CAAS and RER FCS reports; does not gate AMI)
+--gmt_dir                            <"gmt_dir">              <projectDir>/subworkflows/ENRICHMENT/dat
+--auto_fetch_gmt                      <true|false>             false  (GUI-generated scripts only: add current GO and WikiPathways sets)
 --fcs_min_genes                        <INTEGER>                10
 --fcs_max_genes                        <INTEGER>                0     (0 = no cap)
 --fcs_fdr                                <FLOAT 0-1>              0.15   (BH on the permulation p of each set, per ranking and database: q.perm)
---fcs_pperm_thr                            <FLOAT 0-1>              0.025  (raw permulation-p threshold of the Redlich rule)
---fcs_analytic_levels                        <LIST>                   0.05,0.1,0.15  (analytic rule of Redlich et al. 2024, column redlich_level: BH of the analytic p below each level and p.perm below --fcs_pperm_thr)
+--fcs_pperm_thr                            <FLOAT 0-1>              0.025  (raw permulation-p threshold of the Redlich et al. rule)
+--fcs_analytic_levels                        <LIST>                   0.05,0.1,0.15  (analytic rule of Redlich et al., column redlich_level: BH of the analytic p below each level and p.perm below --fcs_pperm_thr)
 --fcs_cluster_threshold                     <FLOAT 0-1>              0.2    (minimum Jaccard of the full gene sets inside a term block; complete linkage)
 --fcs_top_n                                  <INTEGER>                20
 --fcs_batch_size                             <INTEGER>                4 (GMT databases per task)
@@ -402,8 +424,13 @@ Usage:
 --caas_permulation_enrichment                    <true|false>             true
 
 DOMINO / STRING:
---string_species                    <NCBI taxon id>          9606
---string_db_dir                           <"string_cache_dir">     null
+--string_species                    <NCBI taxon id>          9606   (taxon of the report 13 STRING labels; the DOMINO network is human)
+--string_db_dir                           <"dir">                  ""     (pre-downloaded STRING files, checked before any download)
+--string_cache_dir                          <"dir">                  ""     (download cache; blank = ~/.cache/phylophere/string)
+--ami_description_fdr                         <FLOAT 0-1>              0.10   (FDR of the descriptive STRING labels)
+--ami_max_blocks                                <INTEGER>                8      (blocks shown in labels and summary)
+--ami_block_threshold                             <FLOAT 0-1>              0.2    (minimum Jaccard to merge terms into a block)
+--publish_domino_intermediates                      <true|false>             false
 --domino_network_score_thr                  <INTEGER>                700
 --domino_slice_thr                             <FLOAT 0-1>              0.3
 --domino_module_thr                              <FLOAT 0-1>              0.05
