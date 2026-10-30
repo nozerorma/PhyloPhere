@@ -36,16 +36,21 @@ for(source_type in c('caas','rer')) {
  }
  cat('PASS native AUC oracle:',source_type,'blocks 1,7,N\n')
 }
-# Physical gene slices, including absent genes, overlap rejection and ID contracts.
+# Physical gene slices as SCORING_EVIDENCE writes them (transpose, gene_p per batch, -log10 p slices), then the block assembly.
 for(G in c(1,7,400)) {
  dir<-tempfile('wp6_');dir.create(dir); batches<-caas_batches(genes,G)
- blocks<-split(seq_len(25),ceiling(seq_len(25)/7))
- for(b in names(blocks)) caas_transpose_block(raw[,blocks[[b]],drop=FALSE],batches,'global',b,dir)
- got<-unlist(lapply(seq_along(batches),function(k) caas_gene_p_batch(k,'global',names(blocks),dir,observed)))
+ blocks<-split(seq_len(25),ceiling(seq_len(25)/7)); bid<-names(blocks)
+ for(b in bid) caas_transpose_block(raw[,blocks[[b]],drop=FALSE],batches,'global',b,dir)
+ got<-unlist(lapply(seq_along(batches),function(k) {
+   parts<-lapply(bid,function(b) readRDS(caas_slice_path(dir,'global',k,b)))
+   S<-do.call(cbind,lapply(parts,function(p) p$values)); rows<-parts[[1]]$rows
+   g<-gene_p(S,observed[rows])
+   for(i in seq_along(bid)) saveRDS(list(rows=rows,cols=parts[[i]]$cols,values=g$nlog10_null[,parts[[i]]$cols,drop=FALSE]),caas_slice_path(dir,'global_gp',k,bid[i]))
+   g$nlog10_obs
+ }))
  same(unname(got),unname(gp$nlog10_obs))
- for(b in names(blocks)) same(caas_assemble_block(seq_along(batches),'global',b,dir,genes),gp$nlog10_null[,blocks[[b]],drop=FALSE])
- reject(caas_gene_p_batch(1,'global',rep(names(blocks)[1],2),dir,observed))
+ for(b in bid) same(caas_assemble_block(seq_along(batches),'global',b,dir,genes),gp$nlog10_null[,blocks[[b]],drop=FALSE])
  unlink(dir,recursive=TRUE)
 }
 reject(caas_transpose_block(matrix(1,2,2,dimnames=list(c('g','g'),c('b1','b2'))),list('g'),'global','1',tempdir()))
-cat('PASS exhaustive gene p, physical slices at 1/7/G, overlaps and IDs\n')
+cat('PASS exhaustive gene p, physical slices at 1/7/G and IDs\n')

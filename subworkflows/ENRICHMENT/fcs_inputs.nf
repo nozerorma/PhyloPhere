@@ -1,5 +1,4 @@
 #!/usr/bin/env nextflow
-include { FCS_COMPUTE_BLOCKS } from './fcs_blocks.nf'
 include { FCS_RER_BLOCKS } from './fcs_rer_blocks.nf'
 
 // Resolve live block directories, a saved block directory, or the compatibility RDS.
@@ -20,20 +19,6 @@ process FCS_PREPARE_BLOCKS {
     # resolver: ${hash}
     ${rs} ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_prepare_blocks.R ${source} ${params.gene_stat ?: 'max'} ${source == 'caas' ? (params.caas_cycle_block_size ?: 500) : (params.rer_perms_per_batch ?: 100)} ${source == 'caas' && params.caas_permulation_enrichment == false ? 'disabled' : 'enabled'}
     """
-}
-
-workflow FCS_CAAS {
-    take:
-    stats
-    universe
-    perms
-    live_blocks
-    main:
-    FCS_PREPARE_BLOCKS(live_blocks.ifEmpty { [] }, perms, 'caas')
-    def blocks = FCS_PREPARE_BLOCKS.out.blocks.flatten().map { f -> tuple(f.baseName, f) }
-    FCS_COMPUTE_BLOCKS(stats, universe, blocks)
-    emit:
-    enrich_file = FCS_COMPUTE_BLOCKS.out.enrich_file.mix(FCS_PREPARE_BLOCKS.out.empty)
 }
 
 workflow FCS_RER {

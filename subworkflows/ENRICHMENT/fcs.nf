@@ -1,10 +1,10 @@
 #!/usr/bin/env nextflow
-// fcs.nf — FCS (Functional Class Scoring) report and batched-statistics processes.
+// fcs.nf — FCS (Functional Class Scoring) report processes and the merge of the batched tables.
 // PhyloPhere | subworkflows/ENRICHMENT/
 
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  SCORING_FCS_REPORT, RER_FCS_REPORT, FCS_COMPUTE_BATCHED, FCS_CONCAT, FCS_COMPUTE:
+ *  SCORING_FCS_REPORT, RER_FCS_REPORT, FCS_CONCAT:
  *  rank-based, threshold-free gene-set enrichment (Wilcoxon-AUC through
  *  RERconverge::fastwilcoxGMTall, with permulation p and BH correction)
  *  over the GMT files of subworkflows/ENRICHMENT/dat.
@@ -181,66 +181,6 @@ process RER_FCS_REPORT {
     }
 }
 
-// ── Batched FCS statistics ───────────────────────────────────────────────────
-// fcs_run_all() over every GMT database is the expensive step behind both report
-// processes (Wilcoxon-AUC with permulation p for every
-// score_<ranking> column against every GMT). The BH correction of fcs_enrich.R is
-// scoped per database, so the GMT set can be split across independent tasks and the
-// partial tables row-concatenated without any reconciliation: the result is exact.
-// fcs_compute.R (subworkflows/ENRICHMENT/local/src/) is the batchable entry point.
-// 11.FCS_general_report.Rmd only renders the merged table: the significance
-// ranking and the GMT description join need the full cross-database
-// table, so they stay in the Rmd.
-process FCS_COMPUTE_BATCHED {
-    tag "$batchID (${batchSize} GMTs)"
-    label 'process_fcs_batched'
-
-    publishDir path: "${params.outdir}/fcs/batches",
-               mode: 'copy', overwrite: true,
-               enabled: params.publish_intermediates
-
-    input:
-    tuple val(batchID), val(batchSize), path(gmtFiles, stageAs: 'gmts/*')
-    path stats_file
-    path universe_file
-    path perms_file
-    val score_source
-
-    output:
-    path "fcs_enrich_partial.tsv", emit: partial
-
-    script:
-    def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
-    def sources = ['fcs_enrich.R', 'fcs_compute.R', 'evidence_flags.R'].collect {
-        file("${local_dir}/src/${it}").text
-    }.join('\n')
-    def source_hash = java.security.MessageDigest.getInstance('SHA-256')
-        .digest(sources.getBytes('UTF-8')).encodeHex().toString()
-    def num_g     = params.fcs_min_genes
-    def max_g     = params.fcs_max_genes ?: 0
-    def fdr_thr   = params.fcs_fdr
-    def pperm_thr = params.fcs_pperm_thr
-    def rscript_cmd = (params.use_singularity || params.use_apptainer) ?
-        "/usr/local/bin/_entrypoint.sh Rscript" : "Rscript"
-    """
-    # FCS sources SHA256: ${source_hash}
-    cp ${local_dir}/src/fcs_enrich.R ${local_dir}/src/fcs_compute.R ${local_dir}/src/evidence_flags.R .
-    ${rscript_cmd} fcs_compute.R \
-        --stats-file ${stats_file} \
-        --universe-file ${universe_file} \
-        --gmt-dir gmts \
-        --perms-file ${perms_file} \
-        --num-g ${num_g} \
-        --max-g ${max_g} \
-        --fdr-thr ${fdr_thr} \
-        --pperm-thr ${pperm_thr} \
-        --analytic-levels ${params.fcs_analytic_levels} \
-        --gene-stat ${params.gene_stat ?: 'max'} \
-        --score-source ${score_source} \
-        --output fcs_enrich_partial.tsv
-    """
-}
-
 process FCS_CONCAT {
     tag "Concatenating FCS batch outputs"
 
@@ -292,52 +232,19 @@ process FCS_CONCAT {
         }
     ' "\$ref" \$(printf '%s\\n' "\${files[@]}" | grep -vxF "\$ref" || true) > fcs_enrich_merged.tsv
 
-    # Calibrated runs carry the gene_stat that the null check verified upstream
-    # (calibration/metadata.json). The report reads this record to confirm gene_stat=max.
+    # The report restores these settings from this record: the parameters that FCS_OBSERVED and FCS_CLOSE used,
+    # which set sig_perm, q.perm and redlich_level of the table. Calibrated runs add the gene_stat that the null
+    # check verified upstream (calibration/metadata.json); the report confirms gene_stat=max with it.
+    gs=""
     if [ -s calibration_metadata.json ]; then
         gs=\$(sed -nE 's/.*"gene_stat": *"([^"]+)".*/\\1/p' calibration_metadata.json)
         [ -n "\$gs" ] || { echo "FCS_CONCAT: no gene_stat in calibration metadata" >&2; exit 1; }
-        printf '{\\n  "gene_stat": "%s"\\n}\\n' "\$gs" > fcs_report_metadata.json
     fi
+    {
+        printf '{\\n'
+        [ -z "\$gs" ] || printf '  "gene_stat": "%s",\\n' "\$gs"
+        printf '  "num_g": %s,\\n  "max_g": %s,\\n  "fdr_thr": %s,\\n  "pperm_thr": %s,\\n  "analytic_levels": "%s"\\n}\\n' \\
+            ${params.fcs_min_genes} ${params.fcs_max_genes ?: 0} ${params.fcs_fdr} ${params.fcs_pperm_thr} "${params.fcs_analytic_levels}"
+    } > fcs_report_metadata.json
     """
-}
-
-// ── FCS_COMPUTE: GMT-batched fcs_run_all() ───────────────────────────────────────
-// Takes the same stats, universe and permutations files as the report processes and
-// reads the GMT files of params.gmt_dir (the directory the reports use as gmt_dir).
-// score_source is set by the caller: 'caas' uses a zero floor; 'rer' excludes missing scores.
-workflow FCS_COMPUTE {
-    take:
-    stats_file
-    universe_file
-    perms_file
-    score_source
-
-    main:
-    def batchSize = (params.fcs_batch_size ?: 4) as int
-    def counter = 0
-    def gmt_dir_resolved = params.gmt_dir ?: "${baseDir}/subworkflows/ENRICHMENT/dat"
-    def batches = Channel.fromPath("${gmt_dir_resolved}/*.gmt")
-        .collate(batchSize)
-        .map { batch ->
-            def idx = ++counter
-            def batchID = String.format('fcs_batch_%03d', idx)
-            tuple(batchID, batch.size(), batch)
-        }
-
-    // The three inputs carry one item each but are queue channels once they cross a
-    // take: boundary. A process pairs its input channels positionally and stops when
-    // one runs out, so paired against the many-item batches channel each of them would
-    // end FCS_COMPUTE_BATCHED after its first batch (the same mechanism as in
-    // CAAS_CORE of subworkflows/CT/caas_permulation.nf). .collect().map { it[0] }
-    // turns each into a value channel that every batch can read.
-    def stats_file_bc    = stats_file.collect().map { it[0] }
-    def universe_file_bc = universe_file.collect().map { it[0] }
-    def perms_file_bc    = perms_file.collect().map { it[0] }
-
-    FCS_COMPUTE_BATCHED(batches, stats_file_bc, universe_file_bc, perms_file_bc, score_source)
-    FCS_CONCAT(FCS_COMPUTE_BATCHED.out.partial.collect(), [])
-
-    emit:
-    enrich_file = FCS_CONCAT.out.enrich
 }

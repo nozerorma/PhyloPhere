@@ -425,14 +425,14 @@ createDir(ami_networks_dir)
 # (the `domino` CLI discards it). This function reads the two TSVs of a gene list:
 # <list>_domino_modules.tsv (node, cluster) and <list>_domino_module_stats.tsv.
 # It returns NULL elements when either file is missing.
-load_domino_modules <- function(list_name, modules_dir, active_file, network_file) {
+load_domino_modules <- function(list_name, modules_dir, active_file, network_file, background_file = NULL) {
   mod_file   <- file.path(modules_dir, sprintf("%s_domino_modules.tsv", list_name))
   stats_file <- file.path(modules_dir, sprintf("%s_domino_module_stats.tsv", list_name))
   if (!file.exists(mod_file) || !file.exists(stats_file)) {
     return(list(clusters_df = NULL, module_stats = NULL))
   }
   provenance <- file.path(modules_dir,paste0(list_name,"_domino_provenance.json"))
-  check <- ami_module_provenance(provenance,active_file,network_file)
+  check <- ami_module_provenance(provenance,active_file,network_file,background_file)
   if (check$available && !isTRUE(all.equal(as.numeric(check$metadata$module_threshold),as.numeric(params$domino_module_threshold))))
     return(list(clusters_df=NULL,module_stats=NULL,reason="module threshold provenance differs"))
   if (check$available && !isTRUE(all.equal(as.numeric(check$metadata$slice_threshold),as.numeric(params$domino_slice_threshold))))
@@ -462,7 +462,7 @@ load_domino_modules <- function(list_name, modules_dir, active_file, network_fil
      any(abs(stats$p_adj-expected_q)>1e-10*pmax(abs(expected_q),1e-300))))
     stop("DOMINO raw p / Bonferroni values contradict provenance")
   if (any(!is.finite(stats$p_adj)) || any(stats$p_adj<0 | stats$p_adj>1) ||
-      any(stats$p_adj > params$domino_module_threshold))
+      any(stats$p_adj > params$domino_module_threshold * (1 + 1e-9)))
     stop("DOMINO modules do not satisfy the recorded module threshold")
   list(clusters_df=modules,module_stats=stats,reason="verified")
 }
@@ -515,7 +515,7 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, ma
   # reference n_genes before any nrow() > 0 guard, and arrange() cannot resolve a
   # missing column.
   if (is.null(clusters_df) || nrow(clusters_df) == 0) {
-    return(tibble(cluster = integer(), n_genes = integer(), genes = character(),
+    return(tibble(cluster = integer(), n_genes = integer(), n_nodes = integer(), genes = character(),
                   all_genes = character(), description = character()))
   }
   # bg_string_ids defaults to the CAAS background mapped in the parse_background chunk.
@@ -540,7 +540,7 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, ma
     all_gene_str <- paste(display_genes, collapse = ", ")
 
     if (length(cl_nodes) < min_cluster_genes) {
-      return(tibble(cluster = cl_id, n_genes = length(display_genes),
+      return(tibble(cluster = cl_id, n_genes = length(display_genes), n_nodes = length(cl_nodes),
                     genes = gene_str, all_genes = all_gene_str, description = "Too small"))
     }
     message(sprintf("[describe_clusters] Querying STRING enrichment for module %d (%d genes)...", cl_id, length(cl_nodes)))
@@ -566,18 +566,18 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, ma
       )
     }
     if (is.null(enrich) || "error" %in% names(enrich)) {
-      return(tibble(cluster=cl_id,n_genes=length(display_genes),genes=gene_str,all_genes=all_gene_str,description="Enrichment unavailable"))
+      return(tibble(cluster=cl_id,n_genes=length(display_genes),n_nodes=length(cl_nodes),genes=gene_str,all_genes=all_gene_str,description="Enrichment unavailable"))
     }
     # The existing descriptive cutoff is separate from gene/FCS/module significance.
     # Keep each source's adjusted values; do not recompute an API BH locally.
     if (nrow(enrich)>0) {
       if (!"fdr" %in% names(enrich)) {
-        return(tibble(cluster=cl_id,n_genes=length(display_genes),genes=gene_str,all_genes=all_gene_str,description="Enrichment unavailable"))
+        return(tibble(cluster=cl_id,n_genes=length(display_genes),n_nodes=length(cl_nodes),genes=gene_str,all_genes=all_gene_str,description="Enrichment unavailable"))
       }
       enrich <- enrich[is.finite(as.numeric(enrich$fdr)) & as.numeric(enrich$fdr)<=.description_fdr,,drop=FALSE]
     }
     if (nrow(enrich) == 0) {
-      return(tibble(cluster = cl_id, n_genes = length(display_genes),
+      return(tibble(cluster = cl_id, n_genes = length(display_genes), n_nodes = length(cl_nodes),
                     genes = gene_str, all_genes = all_gene_str, description = "No enrichment"))
     }
     # BH within a category gives many identical FDR values, so the order is completed with
@@ -597,7 +597,7 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, ma
       n_module_genes = lengths(sets), genes = vapply(sets, paste, "", collapse = ", "),
       block = bl$block, is_representative = bl$is_representative, shown = bl$block <= max_blocks,
       block_size = bl$block_size, block_min_jaccard = bl$block_min_jaccard)
-    tibble(cluster = cl_id, n_genes = length(display_genes),
+    tibble(cluster = cl_id, n_genes = length(display_genes), n_nodes = length(cl_nodes),
            genes = gene_str, all_genes = all_gene_str, description = paste(top, collapse = " / "))
   })
 
@@ -1135,7 +1135,8 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
   # between active genes in the network), which is what separates network-based module
   # discovery from plain set overlap.
   .network_file <- switch(prefix,caas=params$domino_network_sif,rer=params$rer_domino_network_sif,fade=params$fade_domino_network_sif)
-  .domino <- load_domino_modules(.list_name, modules_dir,.gf,.network_file)
+  .background_file <- switch(prefix,caas=bg_file,rer=params$rer_background_file,fade=params$fade_background_file)
+  .domino <- load_domino_modules(.list_name, modules_dir,.gf,.network_file,.background_file)
   if (is.null(.domino$clusters_df)) {
     res$skip_message <- paste0("> Modules unavailable: ",.domino$reason %||% "module files absent", ". Recompute from these exact seed lists; do not reuse historical modules.")
     return(res)
@@ -1255,7 +1256,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
         if (.dir_label == "top") {
           display_df <- .clust_desc_display %>%
             dplyr::select(
-              Module = cluster, Genes = n_genes,
+              Module = cluster, Genes = n_genes, `Module nodes` = n_nodes,
               `Representative genes` = genes, `Top enriched terms` = description,
               `CAAS nominal (%)` = caas_nominal_top, `CAAS BH (%)` = caas_adjusted_top,
               `fade_top (%)` = fade_top, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc
@@ -1263,7 +1264,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
         } else if (.dir_label == "bottom") {
           display_df <- .clust_desc_display %>%
             dplyr::select(
-              Module = cluster, Genes = n_genes,
+              Module = cluster, Genes = n_genes, `Module nodes` = n_nodes,
               `Representative genes` = genes, `Top enriched terms` = description,
               `CAAS bottom nominal (%)` = caas_nominal_bottom, `CAAS bottom BH (%)` = caas_adjusted_bottom,
               `fade_bottom (%)` = fade_bottom, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc
@@ -1271,7 +1272,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
         } else {
           display_df <- .clust_desc_display %>%
             dplyr::select(
-              Module = cluster, Genes = n_genes,
+              Module = cluster, Genes = n_genes, `Module nodes` = n_nodes,
               `Representative genes` = genes, `Top enriched terms` = description,
               `CAAS global nominal (%)` = caas_nominal, `CAAS global BH (%)` = caas_adjusted,
               `CAAS top nominal (%)` = caas_nominal_top, `CAAS top BH (%)` = caas_adjusted_top,
@@ -1281,7 +1282,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
         }
       } else {
         display_df <- .clust_desc_display %>%
-          dplyr::select(Module = cluster, Genes = n_genes,
+          dplyr::select(Module = cluster, Genes = n_genes, `Module nodes` = n_nodes,
                          `Representative genes` = genes, `Top enriched terms` = description)
       }
 
@@ -1304,7 +1305,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     .cl_labels <- .cl_labels[!.cl_labels %in% c("Too small", "No enrichment", "Enrichment unavailable")]
 
     .clusters_df_viz <- .clusters_df %>%
-      dplyr::filter(cluster %in% .clust_desc$cluster[.clust_desc$n_genes >= .min_cluster_genes])
+      dplyr::filter(cluster %in% .clust_desc$cluster[.clust_desc$n_nodes >= .min_cluster_genes])
   } else {
     .cl_labels <- NULL
     .clusters_df_viz <- .clusters_df
@@ -1427,7 +1428,7 @@ collapsible_table <- function(df) {
   }
 
   disp <- df %>% dplyr::transmute(
-    `Gene list` = gene_list, Module = cluster, Genes = n_genes,
+    `Gene list` = gene_list, Module = cluster, Genes = n_genes, `Module nodes` = if ("n_nodes" %in% names(df)) n_nodes else NA_integer_,
     `Representative genes` = genes,
     `Top enriched terms` = description,
     `DOMINO p` = if ("domino_p_value" %in% names(df)) signif(domino_p_value, 3) else NA,
@@ -1593,6 +1594,8 @@ Module finding + significance: **DOMINO** (Shamir-Lab) - Bonferroni-corrected hy
 Network plots additionally mark cross-tool corroboration by node **shape**: circle = none, square = FADE-significant, diamond = RER-positive, hexagon = RER-negative, star = FADE-significant overlapping either RER direction.
 
 Each direction uses nominal active genes. Gold borders mark active genes with BH-adjusted empirical significance; grey nodes are connectors. FADE uses its configured BF cutoff. Module significance is separate from individual-gene significance.
+
+`Genes` counts the active input genes of a module and `Module nodes` every DOMINO node, connectors included. The minimum size (3), the STRING description and the network plot use the nodes; the percentages of nominal and BH genes are over all the nodes of the module.
 
 Each view below shows its own module analysis. Term recurrence across methods and views is in a separate section; full module membership remains in the exports.
 

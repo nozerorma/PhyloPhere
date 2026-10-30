@@ -2,7 +2,7 @@
 # fcs_enrich.R — Functional class scoring (FCS) core: Wilcoxon-AUC test with permulation p.
 # PhyloPhere | subworkflows/ENRICHMENT/local/src/
 # =============================================================================
-# Sourced by: fcs_compute.R (FCS_COMPUTE_BATCHED process, fcs.nf) and 11.FCS_general_report.Rmd.
+# Sourced by: fcs_blocks.R (FCS_OBSERVED, FCS_NULL_BLOCK, FCS_CLOSE) and 11.FCS_general_report.Rmd.
 # Defines functions only.
 #
 # Tests the gene sets of GMT files against a gene ranking with the Wilcoxon-AUC test

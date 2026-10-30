@@ -45,6 +45,8 @@ def parse_args():
     p.add_argument("--slices", required=True, help="slices.txt (output of the `slicer` CLI)")
     p.add_argument("--gene-lists-dir", required=True,
                    help="directory of *.txt active-gene files, one per activity list")
+    p.add_argument("--background", default=None,
+                   help="gene background the network was built on; its gene-set hash is recorded in each certificate")
     p.add_argument("--output-dir", required=True)
     p.add_argument("--slice-threshold", type=float, default=0.3,
                    help="DOMINO's own default (src/runner.py) for retaining a slice as relevant")
@@ -172,6 +174,22 @@ def file_sha256(path):
     return h.hexdigest()
 
 
+def network_nodes(path):
+    """Genes of network.sif (node, interaction, node per line)."""
+    nodes = set()
+    with open(path) as handle:
+        for line in handle:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) == 3:
+                nodes.update((parts[0], parts[2]))
+    return nodes
+
+
+def read_seed_genes(path):
+    with open(path) as handle:
+        return {line.strip() for line in handle if line.strip()}
+
+
 def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -196,6 +214,10 @@ def main():
     shutil.copyfile(args.slices, os.path.join(inputs, 'slices.txt'))
     shutil.copytree(args.gene_lists_dir, os.path.join(inputs, 'lists'), dirs_exist_ok=True)
     network_sha = file_sha256(args.network)
+    nodes = network_nodes(args.network)
+    background_sha = None
+    if args.background and not os.path.basename(args.background).startswith("NO_"):
+        background_sha = gene_set_sha256(args.background)
     slices_sha = file_sha256(args.slices)
     for list_path in list_paths:
         list_name = os.path.splitext(os.path.basename(list_path))[0]
@@ -208,11 +230,18 @@ def main():
         print(f"[run_domino_modules] {list_name}: {len(rows_stats)} final modules "
               f"({sum(r['n_genes'] for r in rows_stats)} genes total)", file=sys.stderr)
 
+        seeds = read_seed_genes(list_path)
+        n_in_network = len(seeds & nodes)
+        print(f"[run_domino_modules] {list_name}: {n_in_network}/{len(seeds)} seed genes are nodes of the network "
+              f"({len(nodes)} nodes, the population of the module test)", file=sys.stderr)
         provenance = dict(producer_sha256=file_sha256(__file__), contract_version=2, p_value_scale="raw_upper_tail",
                           p_adjustment="Bonferroni_n_putative", n_putative=captured.get("n_putative", 0),
                           active_genes_sha256=gene_set_sha256(list_path), network_sha256=network_sha,
                           slices_sha256=slices_sha, slice_threshold=args.slice_threshold,
-                          module_threshold=args.module_threshold, final_modules=len(rows_stats))
+                          module_threshold=args.module_threshold, final_modules=len(rows_stats),
+                          n_seeds=len(seeds), n_seeds_in_network=n_in_network, n_network_nodes=len(nodes))
+        if background_sha is not None:
+            provenance["background_sha256"] = background_sha
         pd.DataFrame(rows_modules, columns=["node", "cluster"]).to_csv(
             os.path.join(args.output_dir, f"{list_name}_domino_modules.tsv"), sep="\t", index=False
         )

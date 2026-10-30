@@ -43,24 +43,13 @@ local({
   saveRDS(list(corStat = null), "perms.rds")
   readr::write_tsv(data.frame(gene = genes, score_global = scores), "stats.tsv")
   writeLines(universe, "universe.txt")
-  file.copy(file.path(src, c("fcs_compute.R", "fcs_enrich.R", "evidence_flags.R")), ".")
   reference <- fcs_run_all(list(global = RERconverge::getStat(res)), gmts, perms_file = "perms.rds")
   stopifnot(nrow(reference) == 3, !anyNA(reference$p.perm))
-  for (mode in c("rer", "caas")) {
-    output <- paste0(mode, ".tsv")
-    status <- system2(file.path(R.home("bin"), "Rscript"), c("fcs_compute.R",
-      "--stats-file stats.tsv --universe-file universe.txt --gmt-dir gmts --perms-file perms.rds",
-      "--score-source", mode, "--output", output), stdout = "cli.log", stderr = "cli.log")
-    if (status != 0) stop(paste(readLines("cli.log"), collapse = "\n"))
-    got <- read.delim(output)
-    expected <- if (mode == "rer") reference else fcs_run_all(list(global = caas), gmts, perms_file = "perms.rds")
-    compare(got, expected)
-  }
-
   # Execute the report's actual fallback expression, independently of HTML rendering.
   rmd <- readLines(file.path(src, "../11.FCS_general_report.Rmd"))
-  start <- grep('^if \\(!is.null\\(params\\$enrich_file\\)', rmd)
-  end <- grep('^# Gene-set descriptions need', rmd)
+  # The if/else of the run chunk: the last block that starts on enrich_file, up to the sourcing of fcs_selection.R.
+  start <- tail(grep('^if \\(!is.null\\(params\\$enrich_file\\)', rmd), 1)
+  end <- grep('^source\\(file.path\\(dirname\\(src\\), "fcs_selection.R"\\)\\)', rmd)
   fallback <- parse(text = rmd[start:(end - 1)])
   stats <- readr::read_tsv("stats.tsv", show_col_types = FALSE)
   score_cols <- "score_global"
@@ -77,19 +66,14 @@ local({
   stopifnot(identical(forced$alts$global, "two.sided"))
   same(forced$enrich$stat, signed_ref$stat)
   same(forced$enrich$pval, signed_ref$pval)
-  # The full CLI and report fallback also carry this source through to the test.
+  # The report fallback also carries the rer source through to the test.
   stats$score_global <- positive[stats$gene]
   readr::write_tsv(stats, "stats.tsv")
-  status <- system2(file.path(R.home("bin"), "Rscript"), c("fcs_compute.R",
-    "--stats-file stats.tsv --universe-file universe.txt --gmt-dir gmts --perms-file perms.rds",
-    "--score-source rer --output positive.tsv"), stdout = "cli.log", stderr = "cli.log")
-  if (status != 0) stop(paste(readLines("cli.log"), collapse = "\n"))
   expected <- fcs_run_all(list(global = positive), gmts, perms_file = "perms.rds", score_source = "rer")
-  compare(read.delim("positive.tsv"), expected)
   eval(fallback)
   compare(enrich, expected)
   stopifnot(anyNA(null), any(null == 0, na.rm = TRUE))
-  cat("PASS: native getStat membership, measured zeros, all-missing scores, CAAS unchanged, CLI and report fallback\n")
+  cat("PASS: native getStat membership, measured zeros, all-missing scores, CAAS unchanged and report fallback\n")
 
   marine <- commandArgs(TRUE)
   if (length(marine)) {

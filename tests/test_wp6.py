@@ -9,7 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 R = os.environ.get('RSCRIPT', shutil.which('Rscript') or '')
 
-@pytest.mark.parametrize('script', ['test_wp6_blocks.R', 'test_wp6_rer_batches.R', 'test_fcs_auc_contract.R', 'test_wp6_fcs_cli.R', 'test_wp6_rer_cli.R'])
+@pytest.mark.parametrize('script', ['test_wp6_blocks.R', 'test_wp6_rer_batches.R', 'test_fcs_auc_contract.R', 'test_wp6_rer_cli.R', 'test_fcs_calibration_provenance.R'])
 def test_r_contract(script, tmp_path):
     if not R:
         pytest.skip('Rscript required')

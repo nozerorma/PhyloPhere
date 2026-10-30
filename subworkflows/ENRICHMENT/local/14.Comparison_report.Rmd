@@ -460,10 +460,10 @@ fcs_sig_terms <- if (has_multi) {
     dplyr::mutate(description = dplyr::coalesce(description, pathway)) %>%
     dplyr::mutate(fcs_selected_C = selected_C %in% TRUE,
                   fcs_formal_sig = sig_RER %in% TRUE) %>%
-    dplyr::distinct(module, direction, database, pathway, description, cluster_id, q.perm,
+    dplyr::distinct(module, direction, effect_direction, database, pathway, description, cluster_id, q.perm,
                     fcs_selected_C, fcs_formal_sig, is_representative)
 } else {
-  tibble::tibble(module = character(), direction = character(), database = character(),
+  tibble::tibble(module = character(), direction = character(), effect_direction = character(), database = character(),
                  pathway = character(), description = character(), cluster_id = character(),
                  q.perm = numeric(), fcs_selected_C = logical(), fcs_formal_sig = logical(),
                  is_representative = logical())
@@ -849,7 +849,7 @@ if(has_multi) {
     for(rk in unique(terms$ranking[terms$module==mod])) {
       cat(sprintf("\n### %s {.tabset}\n\n",tools::toTitleCase(rk)))
       td <- terms %>% filter(module==mod,ranking==rk)
-      td$direction <- ifelse(grepl("negative",td$cluster_id),"negative",ifelse(grepl("positive",td$cluster_id),"positive",NA_character_))
+      td$direction <- td$effect_direction
       report_term_views(td,level=4L,signed=mod=="rer")
     }
   }

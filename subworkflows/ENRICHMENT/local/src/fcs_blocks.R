@@ -1,14 +1,10 @@
 #!/usr/bin/env Rscript
-# fcs_blocks.R — steps of the CAAS FCS on blocks of the null (WP6). One Rscript call per step; see caas_blocks.R.
+# fcs_blocks.R — steps of the CAAS FCS on the calibration of SCORING (-log10 p slices of SCORING_EVIDENCE). One Rscript call per step; see caas_blocks.R.
 # PhyloPhere | subworkflows/ENRICHMENT/local/src/
 # =============================================================================
-#   transpose   --matrices <blk>/matrices.rds --universe <file> --batch <G> --rank <global|top|bottom> --block <id> --out <dir>
-#               one slice per batch of the universe (rows of the batch, cycles of the block)
-#   gene_p      --batch <k> --rank <rk> --blocks <id,id,...> --slices <dir> --obs <table.tsv> --obs-col <col> --out <dir>
-#               GENE_P of batch k over every block; writes the -log10 p slices and obs_<rk>_<k>.tsv (gene, nlog10_obs)
-#   observed    --obs-dir <dir> --universe <file> --rankings <global,top,bottom> --gmt-dir <dir> --num-g --max-g --out <tsv>
+#   observed    --obs-dir <dir> --universe <file> [--metadata <calibration metadata.json>] --rankings <global,top,bottom> --gmt-dir <dir> --num-g --max-g --out <tsv>
 #               observed FCS rows of one GMT batch from the obs_<rk>_<k>.tsv files (p.perm not set)
-#   null_block  --observed <tsv> --slices <dir> --universe <file> --block <id> --batches <k,k,...> --rank <rk> --alt <greater|two.sided>
+#   null_block  --observed <tsv> --slices <dir> --universe <file> --block <id> --batch-size <G> --rank <rk> --alt <greater|two.sided>
 #               --gmt-dir <dir> --num-g --max-g --out <tsv>
 #               permulation counts of one block for the observed rows of one GMT batch
 #   close       --observed <tsv> --counts <tsv,tsv,...> --fdr-thr --pperm-thr --analytic-levels --out <tsv>
@@ -25,7 +21,6 @@ step <- args[1]
 src_dir <- dirname(normalizePath(sub("--file=", "", grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)[1])))
 suppressPackageStartupMessages({ library(readr); library(dplyr) })
 source(file.path(src_dir, "fcs_enrich.R"))
-source(file.path(src_dir, "gene_p.R"))
 source(file.path(src_dir, "caas_blocks.R"))
 
 # Counts of one block: the types are fixed so that an empty or all-NA file still reads as numbers.
@@ -50,7 +45,6 @@ write_observed <- function(tab, path) {
 read_universe <- function(path) {
   u <- unique(trimws(readLines(path))); u[nzchar(u)]
 }
-obs_col_name <- function(rk) c(global = "gene_caas_score", top = "gene_caas_score_top", bottom = "gene_caas_score_bottom")[[rk]]
 
 rer_rankings <- function() {
   tab <- read_tsv(get_arg('--obs'), show_col_types = FALSE)
@@ -89,32 +83,18 @@ switch(step,
     }
     write_tsv(counts, get_arg('--out'))
   },
-  transpose = {
-    m <- readRDS(get_arg("--matrices"))
-    rk <- get_arg("--rank", "global")
-    universe <- read_universe(get_arg("--universe"))
-    batches <- caas_batches(universe, as.integer(get_arg("--batch")))
-    if (!identical(as.character(m$gene_stat), get_arg('--gene-stat', 'max')))
-      stop('CAAS gene_stat mismatch; rebuild the null before calibrating rankings')
-    ranks <- if (rk == 'all') c('global','top','bottom') else rk
-    for (rank in ranks) caas_transpose_block(m$stat[[rank]], batches, rank, get_arg('--block'), get_arg('--out'))
-  },
-  gene_p = {
-    k <- as.integer(get_arg("--batch")); rk <- get_arg("--rank", "global")
-    blocks <- strsplit(get_arg("--blocks"), ",")[[1]]
-    obs_tab <- read_tsv(get_arg("--obs"), show_col_types = FALSE)
-    col <- get_arg("--obs-col", obs_col_name(rk))
-    if (!col %in% names(obs_tab)) stop('Missing observed score column: ', col)
-    fcs_check_gene_ids(obs_tab$gene, nrow(obs_tab), 'CAAS observed')
-    obs <- setNames(as.numeric(obs_tab[[col]]), obs_tab$gene)
-    out <- get_arg("--out"); dir.create(out, showWarnings = FALSE, recursive = TRUE)
-    slices <- get_arg("--slices")                         # the -log10 p slices are written beside the input slices
-    obs_k <- caas_gene_p_batch(k, rk, blocks, slices, obs)
-    write_tsv(tibble::tibble(gene = names(obs_k), nlog10_obs = as.numeric(obs_k)),
-              file.path(out, sprintf("obs_%s_%04d.tsv", rk, k)))
-  },
   observed = {
     dir <- get_arg("--obs-dir"); universe <- read_universe(get_arg("--universe"))
+    # The calibration was made on one universe: its slices cover exactly those genes in that order. A different universe
+    # (another file, order or content) would mix statistics of two gene families, so it is rejected here.
+    meta_path <- get_arg("--metadata", "")
+    if (nzchar(meta_path)) {
+      meta <- jsonlite::read_json(meta_path, simplifyVector = TRUE)
+      if (is.null(meta$universe_md5) || !identical(as.character(meta$universe_md5), unname(as.character(tools::md5sum(get_arg("--universe"))))))
+        stop("FCS universe differs from the universe of the calibration (universe_md5 of metadata.json): recalibrate on this universe")
+      if (!identical(as.integer(meta$genes), length(universe)))
+        stop("Calibration gene count (", meta$genes, ") differs from the genes of the FCS universe (", length(universe), ")")
+    }
     rks <- strsplit(get_arg("--rankings", "global"), ",")[[1]]
     rankings <- list()
     for (rk in rks) {
@@ -122,6 +102,7 @@ switch(step,
       if (length(files) == 0) next
       tab <- bind_rows(lapply(files, read_tsv, show_col_types = FALSE))
       fcs_check_gene_ids(tab$gene, nrow(tab), "observed gene-p batches")
+      if (!setequal(tab$gene, universe)) stop("Observed gene-p batches do not cover the FCS universe exactly (ranking ", rk, ")")
       vals <- setNames(rep(NA_real_, length(universe)), universe)
       vals[tab$gene] <- tab$nlog10_obs
       rankings[[rk]] <- fcs_build_vals(vals, universe)
@@ -136,7 +117,10 @@ switch(step,
     rk <- get_arg("--rank", "global")
     obs_rk <- obs[obs$ranking == rk, , drop = FALSE]
     universe <- read_universe(get_arg("--universe"))
-    batches <- as.integer(strsplit(get_arg("--batches"), ",")[[1]])
+    # The gene batches are those of the universe as read_universe() returns it, as in the calibration.
+    batch_size <- as.integer(get_arg("--batch-size"))
+    if (is.na(batch_size)) stop("null_block needs --batch-size")
+    batches <- seq_along(caas_batches(universe, batch_size))
     mats <- list(caas_assemble_block(batches, rk, get_arg("--block"), get_arg("--slices"), universe))
     gmts <- fcs_load_gmts(get_arg("--gmt-dir"))
     counts <- if (nrow(obs_rk) == 0) NULL else

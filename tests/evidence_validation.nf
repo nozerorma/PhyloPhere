@@ -1,7 +1,6 @@
 nextflow.enable.dsl=2
 include { SCORING_EVIDENCE } from './subworkflows/SCORING/scoring_evidence.nf'
 include { FCS_COMPUTE_CALIBRATED } from './subworkflows/ENRICHMENT/fcs_blocks.nf'
-include { FCS_CAAS as FCS_LEGACY } from './subworkflows/ENRICHMENT/fcs_inputs.nf'
 include { SCORING } from './workflows/scoring.nf'
 include { ENRICHMENT } from './workflows/enrichment.nf'
 workflow {
@@ -12,8 +11,6 @@ workflow {
     SCORING_EVIDENCE.out.gene_evidence.subscribe { println "EVIDENCE=${it}" }
     if(params.fcs_enabled) {
         FCS_COMPUTE_CALIBRATED(universe, SCORING_EVIDENCE.out.calibration)
-        FCS_LEGACY(Channel.value(file("${input}/stats.tsv")),universe,Channel.value(file("${input}/null.rds")),Channel.value([]))
         FCS_COMPUTE_CALIBRATED.out.enrich_file.subscribe { println "CALIBRATED_FCS=${it}" }
-        FCS_LEGACY.out.enrich_file.subscribe { println "LEGACY_FCS=${it}" }
     }
 }

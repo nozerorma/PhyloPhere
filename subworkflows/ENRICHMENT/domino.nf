@@ -91,6 +91,7 @@ process DOMINO_RUN_MODULES {
     path network_sif
     path slices_file
     path gene_lists
+    path background_file   // the background the network was built on; its hash goes into the certificate of every list
     val  slice_threshold
     val  module_threshold
     val  consumer_label   // 'caas' | 'fade' | 'rer'; only names the optional publishDir above
@@ -119,6 +120,7 @@ process DOMINO_RUN_MODULES {
         --gene-lists-dir domino_gene_lists \
         --slice-threshold ${slice_threshold} \
         --module-threshold ${module_threshold} \
+        --background ${background_file} \
         --threads ${task.cpus} \
         --output-dir domino_modules
     """
@@ -142,6 +144,7 @@ workflow DOMINO_MODULES {
         DOMINO_BUILD_NETWORK.out.network_sif,
         DOMINO_BUILD_NETWORK.out.slices,
         gene_list_files,
+        background_file,
         slice_threshold,
         module_threshold,
         consumer_label

@@ -42,7 +42,8 @@ render_ami <- function(wd, global_list, rich=FALSE, max_blocks=NULL) {
   jsonlite::write_json(list(contract_version=2L,p_value_scale='raw_upper_tail',p_adjustment='Bonferroni_n_putative',module_threshold=.05,slice_threshold=.3,n_putative=3L,final_modules=1L,
     active_genes_sha256=digest::digest(stamp,algo='sha256',serialize=FALSE),network_sha256=sha(file.path(wd,'network.sif')),
     producer_sha256=sha(file.path(wd,'src/run_domino_modules.py')),slices_sha256=sha(file.path(wd,'modules/inputs/slices.txt')),
-    modules_sha256=sha(file.path(wd,'modules/global_domino_modules.tsv')),stats_sha256=sha(file.path(wd,'modules/global_domino_module_stats.tsv'))),
+    modules_sha256=sha(file.path(wd,'modules/global_domino_modules.tsv')),stats_sha256=sha(file.path(wd,'modules/global_domino_module_stats.tsv')),
+    background_sha256=digest::digest(paste0(paste(sort(unique(trimws(readLines(file.path(wd,'background.txt'))))),collapse='\n'),'\n'),algo='sha256',serialize=FALSE)),
     file.path(wd,'modules/global_domino_provenance.json'),auto_unbox=TRUE)
   owd <- setwd(wd); on.exit(setwd(owd))
   pl <- list(background_file='background.txt',background_basename='background.txt',
@@ -60,13 +61,19 @@ render_ami(file.path(work,'nominal'),c('g1','g2','g3','g4','g5','g6'))
 ev <- read.delim(file.path(work,'nominal','ami_networks','caas_global_gene_evidence.tsv'))
 stopifnot(nrow(ev)==6L, all(ev$caas_nominal), sum(ev$caas_adjusted)==2L,
           !any(c('g7','g8') %in% ev$Gene), all(c('g1','g2') %in% ev$Gene[ev$caas_adjusted]))
+# The certificate carries the hash of the background of the network: the matching background is accepted by the render above,
+# and another one is refused with its reason.
+source(file.path(root,'subworkflows/ENRICHMENT/local/src/ami_evidence.R'))
+nom <- file.path(work,'nominal'); other <- file.path(nom,'other_background.txt'); writeLines(c('g1','g2'),other)
+chk <- ami_module_provenance(file.path(nom,'modules/global_domino_provenance.json'),file.path(nom,'global.txt'),file.path(nom,'network.sif'),other)
+stopifnot(!chk$available, grepl('background differs',chk$reason))
 # g1/g2 use custom corroboration shapes. Their BH borders must be visible in
 # the rendered image, rather than merely present in the exported evidence table.
 img <- png::readPNG(file.path(work,'nominal','ami_networks','caas_global_domino_network.png'))
 gold <- abs(img[,,1] - 217/255) < .04 & abs(img[,,2] - 154/255) < .04 & img[,,3] < .08
 stopifnot(sum(gold) > 500L)
 desc <- read.delim(file.path(work,'nominal','ami_networks','module_descriptions_all_lists.tsv'))
-stopifnot(nrow(desc)==1L, desc$n_genes==6L, !any(grepl('g7|g8',desc$genes)),
+stopifnot(nrow(desc)==1L, desc$n_genes==6L, desc$n_nodes==8L, !any(grepl('g7|g8',desc$genes)),
           file.exists(file.path(work,'nominal','12.AMI_analysis_fixture.html')))
 
 # Enriched module: term blocks. Alpha, Beta and Gamma annotate nested sets of the module genes

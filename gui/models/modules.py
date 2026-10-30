@@ -317,7 +317,7 @@ class EnrichmentConfig(ModuleConfigBase):
     fcs_analytic_levels: str = "0.05,0.1,0.15"  # --fcs_analytic_levels (comma-separated)
     fcs_cluster_threshold: str = "0.2"  # --fcs_cluster_threshold (minimum Jaccard inside a term block)
     fcs_top_n: str = "20"  # --fcs_top_n
-    fcs_batch_size: str = "4"  # --fcs_batch_size (GMTs per FCS_COMPUTE_BATCHED task)
+    fcs_batch_size: str = "4"  # --fcs_batch_size (GMTs per FCS task)
     fcs_block_batch_genes: str = "1000"
     # caas_permulation_enrichment (conf/enrichment.config) is a field of CaasConfig, not
     # of this class: it also gates whether CT's permulation core (CAAS_CORE) runs

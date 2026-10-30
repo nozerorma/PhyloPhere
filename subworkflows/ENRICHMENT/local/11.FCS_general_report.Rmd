@@ -41,9 +41,8 @@ params:
                               # fcs_results/fcs_leading_edge.tsv, which is unbounded).
   traitname:    "trait"
   perms_file:   "NO_FILE"
-  enrich_file:  NULL          # pre-computed, GMT-batch-merged fcs_run_all() output (see fcs_compute.R /
-                              # FCS_COMPUTE_BATCHED+FCS_CONCAT in fcs.nf). When NULL, falls back to running
-                              # fcs_run_all() here directly (unbatched path, e.g. ad-hoc/manual rendering)
+  enrich_file:  NULL          # pre-computed, GMT-batch-merged table (FCS_CONCAT in fcs.nf). When NULL, falls back to
+                              # running fcs_run_all() here directly (RER only; ad-hoc/manual rendering)
   annot_file:   "NO_FILE"     # optional cross-module annotation overlay (SCORING fcs_stats.tsv):
                               # supplies flag_* + CAAS nominal/BH evidence for the leading edge.
                               # When NO_FILE, annotation falls back to the stats file itself.
@@ -245,11 +244,10 @@ tibble::tibble(
 ```
 
 ```{r run, include=FALSE}
-# fcs_run_all() over every GMT database is the expensive step. The pipeline runs it as
-# independent tasks, one per subset of GMT files (fcs_compute.R, FCS_COMPUTE_BATCHED in
-# fcs.nf), and passes the row-concatenated result in enrich_file. The concatenation is
-# exact because the BH correction is scoped per database (see fcs_compute.R). Without
-# enrich_file (a manual render) fcs_run_all() runs here in a single pass.
+# The pipeline computes the table as independent tasks, one per subset of GMT files
+# (fcs_blocks.nf, fcs_rer_blocks.nf), and passes the row-concatenated result in enrich_file. The
+# concatenation is exact because the BH correction is scoped per database. Without
+# enrich_file (a manual render of RER) fcs_run_all() runs here in a single pass.
 if (!is.null(params$enrich_file) && nzchar(params$enrich_file) && file.exists(params$enrich_file)) {
   if (params$score_source == 'caas' &&
       (!file.exists(saved_metadata) || !identical(saved_params$gene_stat,"max")))
@@ -257,7 +255,7 @@ if (!is.null(params$enrich_file) && nzchar(params$enrich_file) && file.exists(pa
   enrich <- readr::read_tsv(params$enrich_file, show_col_types = FALSE,
                              col_types = fcs_enrich_col_types())
 } else {
-  if (params$score_source == 'caas') stop('CAAS FCS requires the calibrated enrich_file produced by FCS_CAAS')
+  if (params$score_source == 'caas') stop('CAAS FCS requires the calibrated enrich_file produced by FCS_COMPUTE_CALIBRATED')
   # One ranking vector per score_<ranking> column, with the source's missing-score policy.
   rankings <- list()
   for (sc in score_cols) {
@@ -297,16 +295,27 @@ attr_cols_all <- setdiff(names(attr_df), c("gene", "gene_stat", "flag_gene_stat"
 attr_df <- attr_df %>% select(-any_of(c("gene_stat", "flag_gene_stat")))
 
 # A ranking with negative scores is signed (tested two-sided).
-score_long <- stats %>%
-  dplyr::select(gene, dplyr::all_of(score_cols)) %>%
-  tidyr::pivot_longer(-gene, names_to = "ranking", values_to = "drv_score") %>%
-  dplyr::mutate(ranking = sub("^score_", "", ranking))
+# The driver score of a gene is the statistic its ranking holds. RER ranks by the score_<ranking> column itself.
+# CAAS ranks by -log10(p.gen) of the calibration (caas_p.gen, _top, _bottom): a gene with p.gen = 1 ties with the
+# genes without signal, whatever its raw score, and is not a driver.
+if (params$score_source == "caas") {
+  score_long <- dplyr::bind_rows(lapply(ranking_names_raw, function(rk) {
+    col <- paste0("caas_p.gen", if (rk == "global") "" else paste0("_", rk))
+    if (!col %in% names(stats)) stop("CAAS leading edge needs the calibrated column ", col, " in the stats file")
+    tibble::tibble(gene = stats$gene, ranking = rk, drv_score = -log10(as.numeric(stats[[col]])))
+  }))
+} else {
+  score_long <- stats %>%
+    dplyr::select(gene, dplyr::all_of(score_cols)) %>%
+    tidyr::pivot_longer(-gene, names_to = "ranking", values_to = "drv_score") %>%
+    dplyr::mutate(ranking = sub("^score_", "", ranking))
+}
 ranking_signed <- vapply(split(score_long$drv_score, score_long$ranking),
                          function(v) params$score_source == "rer" || any(v < 0, na.rm = TRUE), logical(1))
 
 # The leading edge keeps only the genes that drive each enrichment. In a magnitude ranking
-# these are the members with signal (score > 0); gene.vals of fastwilcoxGMT lists every
-# member in the universe, including zero-floored genes, and summarizing over those would
+# these are the members above the floor of the ranking (driver score > 0); gene.vals of fastwilcoxGMT lists every
+# member in the universe, including genes at the floor, and summarizing over those would
 # dilute the composition with non-drivers. In a signed ranking they are the members whose
 # score has the sign of the enrichment of the set (positive scores for a set enriched in
 # the upper tail, negative for one enriched in the lower tail).

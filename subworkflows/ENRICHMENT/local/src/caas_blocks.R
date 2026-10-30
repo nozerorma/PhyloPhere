@@ -1,4 +1,4 @@
-# caas_blocks.R — the CAAS null by blocks of cycles and batches of genes (WP6: transposition and GENE_P per batch).
+# caas_blocks.R — the CAAS null by blocks of cycles and batches of genes (transposition and assembly of the slices).
 # PhyloPhere | subworkflows/ENRICHMENT/local/src/
 #
 # Input: per block the matrices.rds of CAAS_CORE_MERGE (list(genes, cycles, gene_stat, stat = list(global, top, bottom))),
@@ -6,8 +6,6 @@
 # batch k = U[((k-1)G + 1) .. min(kG, |U|)]. Every step works on one block or one batch at a time.
 #
 #   caas_transpose_block()   block -> one slice per batch (rows of the batch, cycles of the block), zeros for absent genes
-#   caas_gene_p_batch()      batch -> reads the slices of every block, GENE_P (gene_p.R) on the full cycle set, writes the
-#                            -log10 p slices per block and the observed -log10 p of the batch
 #   caas_assemble_block()    block -> genes x cycles matrix of -log10 p, rows in U order (input of the FCS counts)
 #
 # Slices are RDS lists: list(rows = genes, cols = cycles, values = matrix). The null cycle order inside a block is the
@@ -35,28 +33,6 @@ caas_transpose_block <- function(stat_mat, batches, rk, block_id, dir) {
     saveRDS(list(rows = rows, cols = cols, values = vals), caas_slice_path(dir, rk, k, block_id))
   }
   invisible(length(batches))
-}
-
-# GENE_P of batch k of ranking rk. `block_ids` = the blocks of the null; `obs` = observed gene statistic over the batch
-# (named vector, the rows of the batch). Writes the -log10 p slices per block and returns the observed -log10 p.
-caas_gene_p_batch <- function(k, rk, block_ids, dir, obs, tie_tol = TIE_TOL_GENE_P) {
-  parts <- lapply(block_ids, function(b) readRDS(caas_slice_path(dir, rk, k, b)))
-  rows <- parts[[1]]$rows
-  if (anyDuplicated(block_ids) || !all(vapply(parts, function(p) identical(p$rows, rows) &&
-      identical(rownames(p$values), rows) && identical(colnames(p$values), p$cols), logical(1)))) stop('Inconsistent gene batch slices')
-  cycles <- unlist(lapply(parts, function(p) p$cols), use.names=FALSE)
-  if (anyDuplicated(cycles)) stop('Overlapping null cycles across blocks')
-  S <- do.call(cbind, lapply(parts, function(p) p$values))
-  cols <- unlist(lapply(parts, function(p) p$cols))
-  colnames(S) <- cols
-  obs_b <- obs[rows]; obs_b[is.na(obs_b)] <- 0
-  g <- gene_p(S, obs_b, tie_tol = tie_tol)
-  for (i in seq_along(block_ids)) {
-    sel <- match(parts[[i]]$cols, colnames(S))
-    out <- list(rows = rows, cols = parts[[i]]$cols, values = g$nlog10_null[, sel, drop = FALSE])
-    saveRDS(out, caas_slice_path(dir, paste0(rk, "_gp"), k, block_ids[i]))
-  }
-  setNames(g$nlog10_obs, rows)
 }
 
 # -log10 p matrix of one block (genes x cycles of the block), rows in the order of `universe`.

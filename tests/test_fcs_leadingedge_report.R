@@ -65,3 +65,27 @@ for (scenario in c("significant", "no_significant_sets")) {
   }
   cat("PASS FCS leading-edge report:", scenario, "\n")
 }
+
+# CAAS: the ranking holds -log10(p.gen) of the calibration, so a driver is a member with p.gen < 1; a raw score alone is not enough.
+wd <- file.path(scratch, "caas_calibrated")
+dir.create(wd, recursive = TRUE, showWarnings = FALSE)
+file.copy(file.path(local_dir, "11.FCS_general_report.Rmd"), wd, overwrite = TRUE)
+dir.create(file.path(wd, "src"), showWarnings = FALSE)
+file.copy(file.path(local_dir, "src", c("fcs_enrich.R", "term_blocks.R", "fcs_selection.R", "evidence_flags.R", "report_presentation.R")),
+          file.path(wd, "src"), overwrite = TRUE)
+dir.create(file.path(wd, "gmts"), showWarnings = FALSE)
+writeLines(paste(c("setA", "Test pathway", genes), collapse = "\t"), file.path(wd, "gmts/test.gmt"))
+writeLines(genes, file.path(wd, "background.txt"))
+cstats <- data.frame(gene = genes, score_global = c(4, 3, 2, 1), score_top = c(4, 3, 2, 1), score_bottom = 0,
+                     caas_p.gen = c(.01, 1, .05, 1), caas_p.gen_top = c(.01, 1, .05, 1), caas_p.gen_bottom = 1)
+readr::write_tsv(cstats, file.path(wd, "stats.tsv"))
+readr::write_tsv(enrich[enrich$ranking == "global", ], file.path(wd, "enrich.tsv"))
+writeLines('{"gene_stat": "max"}', file.path(wd, "fcs_report_metadata.json"))
+env <- new.env(parent = globalenv())
+rmarkdown::render(file.path(wd, "11.FCS_general_report.Rmd"), quiet = TRUE, envir = env,
+  params = list(stats_file = "stats.tsv", universe_file = "background.txt", gmt_dir = file.path(wd, "gmts"),
+                enrich_file = "enrich.tsv", score_source = "caas", num_g = 1),
+  output_file = "report.html")
+le <- readr::read_tsv(file.path(wd, "fcs_results/fcs_leading_edge.tsv"), show_col_types = FALSE)
+stopifnot(setequal(le$gene[le$ranking == "global"], c("g1", "g3")))
+cat("PASS FCS leading-edge report: caas_calibrated\n")

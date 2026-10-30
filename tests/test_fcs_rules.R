@@ -19,7 +19,8 @@ r <- fcs_classify_significance(d, fdr_thr = .15, p_perm_thr = .025)
 stopifnot(!"sig_top" %in% names(r),
           identical(r$redlich_level, c(.05, .10, .15, NA, NA, NA, .05, NA)),
           identical(r$sig_perm, c(TRUE, TRUE, TRUE, TRUE, FALSE, TRUE, TRUE, FALSE)),
-          identical(r$direction, c("positive", "positive", "positive", "positive", NA, "positive", "negative", NA)),
+          # direction is the sign of stat for every set, independently of the selection rules
+          identical(r$direction, c(rep("positive", 6), "negative", "negative")),
           is.na(r$q.perm[8]))
 
 # User-supplied levels work independently and are sorted to report the lowest
@@ -39,5 +40,14 @@ stopifnot(nrow(empty) == 0L, identical(names(empty), expected), !"sig_top" %in% 
 types <- fcs_enrich_col_types()$cols
 stopifnot("collector_logical" %in% class(types$sig_perm),
           "collector_double" %in% class(types$redlich_level))
+
+# CAAS flags: the calibrated columns win over the p column, and p is thresholded only with thresholds given.
+st <- data.frame(gene = c("a", "b", "c"), caas_p.gen = c(.04, .08, NA), caas_nominal = c(FALSE, TRUE, NA))
+fl <- fcs_evidence_flags(st)
+stopifnot(identical(fl$caas_nominal, c(FALSE, TRUE, NA)), all(is.na(fl$caas_adjusted)))
+bare <- data.frame(gene = c("a", "b"), caas_p.gen = c(.04, .08))
+stopifnot(all(is.na(fcs_evidence_flags(bare)$caas_nominal)),
+          identical(fcs_evidence_flags(bare, nominal = .05)$caas_nominal, c(TRUE, FALSE)),
+          identical(fcs_evidence_flags(bare, nominal = .01)$caas_nominal, c(FALSE, FALSE)))
 
 cat("PASS: independent significance rules, custom levels, legacy sig_top removal, signed stats, missing null, empty schema\n")
