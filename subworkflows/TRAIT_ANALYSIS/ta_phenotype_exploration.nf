@@ -17,11 +17,13 @@
 
 // ── Phenotype exploration report ─────────────────────────────────────────────
 
-def report_hash = java.security.MessageDigest.getInstance('SHA-256')
-    .digest((file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/2.Phenotype_exploration.Rmd").text + file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R").text).getBytes('UTF-8')).encodeHex().toString()
+def reportSourceKey() {
+    return java.security.MessageDigest.getInstance('SHA-256')
+        .digest((file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/2.Phenotype_exploration.Rmd").text + file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R").text).getBytes('UTF-8')).encodeHex().toString()
+}
 
 process PHENOTYPE_EXPLORATION {
-    ext report_source_hash: report_hash
+    ext report_source_hash: reportSourceKey()
     tag "phenotype_exploration"
     label 'process_reporting_phenotype'
     publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename -> filename.equals('data_exploration') || filename.startsWith('data_exploration/') ? filename : null }

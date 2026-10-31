@@ -20,7 +20,9 @@ def observedSourceHash(local_dir, reader, extra_dir=null) {
     return md.digest().encodeHex().toString()
 }
 
-def observed_source_hash = observedSourceHash("${baseDir}/subworkflows/CT_DISAMBIGUATION/local", "${baseDir}/subworkflows/CT/local/modules/design_io.py")
+def observedSourceKey() {
+    return observedSourceHash("${baseDir}/subworkflows/CT_DISAMBIGUATION/local", "${baseDir}/subworkflows/CT/local/modules/design_io.py")
+}
 def observedQuote(value) { "'" + value.toString().replace("'", "'\"'\"'") + "'" }
 
 // Nextflow hashes directory metadata, even in deep mode. Fingerprint nested
@@ -34,7 +36,7 @@ process CAAS_OBSERVED {
     label 'process_resample'
     // Hash regular file inputs by content; directory fingerprints arrive as values.
     cache 'deep'
-    ext observed_source_hash: observed_source_hash
+    ext observed_source_hash: observedSourceKey()
     publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, pattern: 'ct_disambiguation'
     publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: 'meta_caas'
 

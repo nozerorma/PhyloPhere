@@ -1,14 +1,17 @@
 // Report 9 describes completed observed scoring; it does not feed CT_POSTPROC.
 def shellQuote(value) { "'" + value.toString().replace("'", "'\"'\"'") + "'" }
 
-def diagnostics_source_hash = java.security.MessageDigest.getInstance('SHA-256').digest([
-    'subworkflows/ASR_DIAGNOSTICS/local/9.ASR_diagnostics.Rmd',
-    'subworkflows/ASR_DIAGNOSTICS/local/src/diagnostics_io.R',
-    'subworkflows/TRAIT_ANALYSIS/local/src/report_style.R'
-].collect { file("${baseDir}/${it}").text }.join('\n').getBytes('UTF-8')).encodeHex().toString()
+// Evaluated where the process directive needs it (a value cannot be a top-level statement under strict lint).
+def diagnosticsSourceKey() {
+    return java.security.MessageDigest.getInstance('SHA-256').digest([
+        'subworkflows/ASR_DIAGNOSTICS/local/9.ASR_diagnostics.Rmd',
+        'subworkflows/ASR_DIAGNOSTICS/local/src/diagnostics_io.R',
+        'subworkflows/TRAIT_ANALYSIS/local/src/report_style.R'
+    ].collect { file("${baseDir}/${it}").text }.join('\n').getBytes('UTF-8')).encodeHex().toString()
+}
 
 process ASR_DIAGNOSTICS_REPORT {
-    ext report_source_hash: diagnostics_source_hash
+    ext report_source_hash: diagnosticsSourceKey()
     cache 'deep'
     tag 'asr_diagnostics'
     label 'process_reporting'

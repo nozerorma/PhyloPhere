@@ -62,10 +62,12 @@ def asrInputHash(directory) {
 
 // Select the unique observed contract; archives may be flat or nested.
 def asrShellQuote(value) { "'" + value.toString().replace("'", "'\"'\"'") + "'" }
-def extraction_source_hash = java.security.MessageDigest.getInstance('SHA-256')
-    .digest(file("${baseDir}/subworkflows/ASR_DIAGNOSTICS/local/src/extract_diagnostics.py").bytes).encodeHex().toString()
+def extractionSourceKey() {
+    return java.security.MessageDigest.getInstance('SHA-256')
+        .digest(file("${baseDir}/subworkflows/ASR_DIAGNOSTICS/local/src/extract_diagnostics.py").bytes).encodeHex().toString()
+}
 process EXTRACT_DISAMBIG_DIR {
-    ext extractor_hash: extraction_source_hash
+    ext extractor_hash: extractionSourceKey()
     cache 'deep'
     input: path tarball
     output: path 'extracted', emit: dir

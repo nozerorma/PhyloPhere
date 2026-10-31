@@ -5,13 +5,17 @@ def shellQuote(value) { "'" + value.toString().replace("'", "'\"'\"'") + "'" }
 
 // Expose these fingerprints through task.ext so Nextflow includes them in
 // cache keys. Computing a digest only inside script: is insufficient.
-def pattern_report_hash = java.security.MessageDigest.getInstance('SHA-256')
-    .digest((file("${baseDir}/subworkflows/CT_META_CAAS/local/7.CAAS_pattern_annotation.Rmd").text + file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R").text).getBytes('UTF-8')).encodeHex().toString()
-def significance_report_hash = java.security.MessageDigest.getInstance('SHA-256')
-    .digest((file("${baseDir}/subworkflows/CT_META_CAAS/local/15.CAAS_significance_report.Rmd").text + file("${baseDir}/subworkflows/ENRICHMENT/local/src/report_presentation.R").text + file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R").text).getBytes('UTF-8')).encodeHex().toString()
+def patternReportKey() {
+    return java.security.MessageDigest.getInstance('SHA-256')
+        .digest((file("${baseDir}/subworkflows/CT_META_CAAS/local/7.CAAS_pattern_annotation.Rmd").text + file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R").text).getBytes('UTF-8')).encodeHex().toString()
+}
+def significanceReportKey() {
+    return java.security.MessageDigest.getInstance('SHA-256')
+        .digest((file("${baseDir}/subworkflows/CT_META_CAAS/local/15.CAAS_significance_report.Rmd").text + file("${baseDir}/subworkflows/ENRICHMENT/local/src/report_presentation.R").text + file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R").text).getBytes('UTF-8')).encodeHex().toString()
+}
 
 process CAAS_META_CAAS_REPORT {
-    ext report_source_hash: pattern_report_hash
+    ext report_source_hash: patternReportKey()
     label 'process_reporting'
     publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'
 
@@ -49,7 +53,7 @@ PHYLOPHERE_RENDER_R
 // Runs after SCORING. Producer p/q values and their original BH families are
 // preserved.
 process CAAS_SIGNIFICANCE_REPORT {
-    ext report_source_hash: significance_report_hash
+    ext report_source_hash: significanceReportKey()
     label 'process_reporting'
     publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: 'significance/**'
     publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'

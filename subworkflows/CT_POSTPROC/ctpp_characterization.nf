@@ -1,13 +1,15 @@
 #!/usr/bin/env nextflow
 // Report 8 consumes task artifacts directly; published directories are not inputs.
 include { ppQuote; ppHash } from './ctpp_clustfilter'
-def characterization_hash = ppHash([
-    file("${baseDir}/subworkflows/CT_POSTPROC/local/8.Characterization_report.Rmd"),
-    file("${baseDir}/subworkflows/CT_POSTPROC/local/src/report_io.R"),
-    file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R")])
+def characterizationKey() {
+    return ppHash([
+        file("${baseDir}/subworkflows/CT_POSTPROC/local/8.Characterization_report.Rmd"),
+        file("${baseDir}/subworkflows/CT_POSTPROC/local/src/report_io.R"),
+        file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R")])
+}
 
 process CT_POSTPROC_REPORT {
-    ext source_hash: characterization_hash
+    ext source_hash: characterizationKey()
     cache 'deep'
     tag 'caas_postproc_report'
     label 'process_reporting'

@@ -18,11 +18,13 @@
 
 // ── Contrast selection report ──────────────────────────────────────────────────
 
-def report_hash = java.security.MessageDigest.getInstance('SHA-256')
-    .digest((file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/4.Independent_contrasts.Rmd").text + file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R").text).getBytes('UTF-8')).encodeHex().toString()
+def reportSourceKey() {
+    return java.security.MessageDigest.getInstance('SHA-256')
+        .digest((file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/4.Independent_contrasts.Rmd").text + file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R").text).getBytes('UTF-8')).encodeHex().toString()
+}
 
 process CONTRAST_ALGORITHM {
-    ext report_source_hash: report_hash
+    ext report_source_hash: reportSourceKey()
     tag "CONTRAST_ALGORITHM"
     label 'process_contrast_selection'
     publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename -> filename.equals('data_exploration') || filename.startsWith('data_exploration/') ? filename : null }
