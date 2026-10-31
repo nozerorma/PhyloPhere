@@ -79,6 +79,21 @@ def resolve_fg_species(tables_dir, filename) {
     return (candidate && candidate.exists()) ? candidate : file('NO_FG_LIST')
 }
 
+// Tables of a prior --fade run for one direction (<outdir>/selection/fade/<direction>): the files that SCORING,
+// ENRICHMENT and the FADE report read, plus the optional run metadata and foreground list. A plain function (no
+// workflow calls), so the caller can invoke the report workflow of each direction outside a closure.
+def fade_precomp_tables(direction, tdir) {
+    def tables = ['summary': ['fade_summary_', 'tsv'], 'counts': ['fade_gene_counts_', 'tsv'], 'sites': ['fade_sites_', 'csv']].collectEntries { key, spec ->
+        def f = file("${tdir}/${spec[0]}${direction}.${spec[1]}")
+        if (!f.exists()) error "--fade_tables_dir_${direction}: ${f} does not exist (the directory of a prior --fade run: <outdir>/selection/fade/${direction})"
+        [(key): f]
+    }
+    def metadata = file("${tdir}/fade_run_metadata.json")
+    tables.metadata = metadata.isFile() ? metadata : file('NO_FADE_METADATA')
+    tables.species = resolve_fg_species(tdir, "${direction}_species.txt")
+    return tables
+}
+
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *  RUN PHYLOPHERE ANALYSIS: This section initiates the main Phylophere workflow.
@@ -399,16 +414,41 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 )
                 // The b_0 slice of a replay is the observed labeling. A discovery.tab given with --discovery_from
                 // is scored by CT_OBSERVED instead, so the two never write the same files.
-                if (core_replays && !params.discovery_from && (ran_discovery || run_ct_disambiguation)) {
-                    core_observed = CAAS_CORE_OBSERVED(core.b0_observed.collect(), perm_cfg_ch.collect().map { items -> items[0] })
-                    evidence_inputs = [discovery: core_observed.discovery, design: perm_cfg_ch, tree: perm_tree_ch]
+                if (core_replays && (ran_discovery || run_ct_disambiguation)) {
+                    if (!params.discovery_from) {
+                        core_observed = CAAS_CORE_OBSERVED(core.b0_observed.collect(), perm_cfg_ch.collect().map { items -> items[0] })
+                        evidence_inputs = [discovery: core_observed.discovery, design: perm_cfg_ch, tree: perm_tree_ch]
+                    }
                     if (strictOutputOn()) {
-                        // The observed tables of the hypotheses without conserved pairs, under <outdir>/strict/
+                        // The observed tables of the hypotheses without conserved pairs, under <outdir>/strict/. They
+                        // come from the b_0 replay also with --discovery_from, where only the files outside strict/
+                        // are written by CT_OBSERVED from the given discovery.tab.
                         CAAS_CORE_OBSERVED_STRICT(core.b0_observed_strict.collect(), perm_cfg_ch.collect().map { items -> items[0] })
                     }
                 }
                 ran_any = true
             }
+        }
+
+        // The positions CAAStools TESTED (background.output): the start of the universe of SCORING and POSENRICH.
+        // Sources, in order: the b_0 slice of this run's core, --posenrich_background_file, and the background.output
+        // published next to a --discovery_from discovery.tab (<outdir>/caastools/ holds both).
+        def tested_positions_ch = null
+        if (core_observed) {
+            tested_positions_ch = core_observed.background
+        } else {
+            def tested_positions_file = null
+            if (params.posenrich_background_file) {
+                tested_positions_file = file(params.posenrich_background_file)
+                if (!tested_positions_file.exists()) error "--posenrich_background_file not found: ${params.posenrich_background_file}"
+            } else if (params.discovery_from) {
+                def sibling = file(params.discovery_from).resolveSibling('background.output')
+                if (sibling.exists()) {
+                    tested_positions_file = sibling
+                    log.info "Tested positions: ${sibling} (next to --discovery_from)."
+                }
+            }
+            if (tested_positions_file) tested_positions_ch = Channel.value(tested_positions_file)
         }
 
         // The pattern-annotation report reads the observed discovery: the core's, or the one given with --discovery_from.
@@ -606,27 +646,19 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             // same selection/ root: <outdir>/selection/species_sets/<direction>_species.txt. Best-effort: falls
             // back to the NO_FG_LIST sentinel when the derived path doesn't resolve (e.g. the tables dir is
             // outside this layout).
-            [['top', params.fade_tables_dir_top], ['bottom', params.fade_tables_dir_bottom]].each { dir, tdir ->
-                if (!tdir) return
-                def tables = ['fade_summary_': 'tsv', 'fade_gene_counts_': 'tsv', 'fade_sites_': 'csv'].collectEntries { k, ext ->
-                    def f = file("${tdir}/${k}${dir}.${ext}")
-                    if (!f.exists()) error "--fade_tables_dir_${dir}: ${f} does not exist (the directory of a prior --fade run: <outdir>/selection/fade/${dir})"
-                    [(k): f]
-                }
-                def sites_ch = Channel.value(tables['fade_sites_'])
-                def fadeMetadata = file("${tdir}/fade_run_metadata.json")
-                def fadeMetadataCh = Channel.value(fadeMetadata.isFile() ? fadeMetadata : file('NO_FADE_METADATA'))
-                def rep = (dir == 'top')
-                    ? FADE_REPORT_PRECOMP_TOP(Channel.value('top'), Channel.value(tables['fade_gene_counts_']), sites_ch, resolve_fg_species(tdir, 'top_species.txt'), fadeMetadataCh)
-                    : FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), Channel.value(tables['fade_gene_counts_']), sites_ch, resolve_fg_species(tdir, 'bottom_species.txt'), fadeMetadataCh)
-                def out = [summary_tsv: Channel.value(tables['fade_summary_']), sites_csv: sites_ch, report: rep.report]
-                if (dir == 'top') {
-                    fade_precomp_top_out      = out
-                    fade_precomp_sites_top_ch = sites_ch
-                } else {
-                    fade_precomp_bot_out      = out
-                    fade_precomp_sites_bot_ch = sites_ch
-                }
+            if (params.fade_tables_dir_top) {
+                def tt = fade_precomp_tables('top', params.fade_tables_dir_top)
+                def sites_top = Channel.value(tt.sites)
+                def rep_top = FADE_REPORT_PRECOMP_TOP(Channel.value('top'), Channel.value(tt.counts), sites_top, Channel.value(tt.species), Channel.value(tt.metadata))
+                fade_precomp_top_out      = [summary_tsv: Channel.value(tt.summary), sites_csv: sites_top, report: rep_top.report]
+                fade_precomp_sites_top_ch = sites_top
+            }
+            if (params.fade_tables_dir_bottom) {
+                def tb = fade_precomp_tables('bottom', params.fade_tables_dir_bottom)
+                def sites_bottom = Channel.value(tb.sites)
+                def rep_bottom = FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), Channel.value(tb.counts), sites_bottom, Channel.value(tb.species), Channel.value(tb.metadata))
+                fade_precomp_bot_out      = [summary_tsv: Channel.value(tb.summary), sites_csv: sites_bottom, report: rep_bottom.report]
+                fade_precomp_sites_bot_ch = sites_bottom
             }
             ran_any = true
         }
@@ -729,7 +761,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 scoring_hyp_pairs_ch,          // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
                 scoring_perm_manifest_ch,      // permulation_manifest.tsv — design of the null cycles (report panel)
                 scoring_perm_harvest_ch,       // permulation_harvest.tsv — what the null harvest tried and discarded (report tab)
-                core_observed ? core_observed.background : null,  // background.output: limits the null to the tested positions (scoring.nf falls back to --posenrich_background_file)
+                tested_positions_ch,  // background.output: limits the null to the tested positions
                 scoring_caas_cycle_roster_ch   // cycle_roster.txt — N of the null, cycles with no detection included (scoring.nf falls back to --caas_cycle_roster_file)
             )
             ran_any = true
@@ -800,10 +832,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 postproc_results ? postproc_results.filtered_discovery : Channel.empty(),
                 pp_cleaned_bg ?: Channel.empty(),
                 // background.output = the positions CAAStools actually TESTED, the start of the universe U
-                // (the same U as SCORING): live CT output when discovery ran, else the precomputed param.
-                core_observed
-                    ? core_observed.background
-                    : (params.posenrich_background_file ? Channel.fromPath(params.posenrich_background_file) : Channel.empty()),
+                // (the same U as SCORING), resolved once above.
+                tested_positions_ch ?: Channel.empty(),
                 // The filtered null SCORING uses (null_positions.parquet); level 1 falls back to --caas_null_dir.
                 scoring_null_positions_ch ?: Channel.empty(),
                 scoring_null_blocks_ch ?: Channel.empty(),         // the blocks of cycles level 2 calibrates with (else those of --caas_null_dir)
