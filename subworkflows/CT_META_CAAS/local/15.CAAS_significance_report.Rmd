@@ -17,7 +17,6 @@ output:
     mathjax: null
     md_extensions: "-tex_math_dollars"
 params:
-  meta_caas_input: NULL # Retained for old callers; the report uses canonical scoring tables.
   position_scores_input: NULL
   gene_scores_input: NULL
   gene_metadata_input: NULL

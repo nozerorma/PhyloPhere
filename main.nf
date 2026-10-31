@@ -747,7 +747,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 scoring_fade_top_ch,
                 scoring_fade_bot_ch,
                 scoring_rer_ch,
-                null,  // genomic_info — resolved from params.gene_ensembl_file in scoring.nf
                 scoring_fade_site_top_ch,
                 scoring_fade_site_bot_ch,
                 pp_cleaned_bg,         // cleaned_background_main.txt — FCS universe
@@ -793,10 +792,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                               taxid_map_ch)
             }
 
-            // Canonical positive-score position/gene evidence, downstream of SCORING. The report reads the SCORING
-            // tables only: the process still declares a meta_caas input, which it does not read, so it gets the sentinel.
+            // Canonical positive-score position/gene evidence, downstream of SCORING. The report reads the SCORING tables only.
             CAAS_SIGNIFICANCE_REPORT(
-                    Channel.value(file('NO_META_CAAS')),
                     SCORING.out.position_scores,
                     SCORING.out.gene_scores,
                     SCORING.out.gene_evidence_metadata,

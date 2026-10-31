@@ -78,7 +78,7 @@ workflow {
         (ran_discovery || run_ct_disambiguation ? Channel.value(file("${params.caas_null_dir}/null_positions.parquet")) : Channel.empty())
     def live_blocks = !run_caas_permulation ? null :
         (ran_discovery || run_ct_disambiguation ? Channel.value([file("${params.caas_null_dir}/blocks/blk_1")]) : Channel.empty())
-    SCORING(Channel.value(file(params.scoring_postproc_input)), null, null, null, null, null, null,
+    SCORING(Channel.value(file(params.scoring_postproc_input)), null, null, null, null, null,
         Channel.value(file(params.scoring_background_input)), null, null,
         live_positions, live_blocks, null, null, null, null, null, null, null, null, null)
     PREPARE_SEEDS(SCORING.out.gene_lists)

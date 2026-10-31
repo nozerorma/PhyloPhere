@@ -54,7 +54,7 @@ workflow {
  def bg = Channel.value(file('genes.txt'))
  def obs = Channel.value(file('observed.tsv'))
  def tested = Channel.value(file('tested'))
- def sc = SCORING(obs,null,null,null,null,null,null,bg,null,null,null,null,null,null,null,null,null,null,null,tested,null)
+ def sc = SCORING(obs,null,null,null,null,null,bg,null,null,null,null,null,null,null,null,null,null,null,tested,null)
  POSENRICH(true,obs,bg,tested,Channel.value(file('prior/null_positions.parquet')),
            Channel.value([file('prior/blocks/blk_000001')]),sc.position_scores,sc.postproc,sc.null_universe_summary,
            Channel.empty(),Channel.empty())

@@ -27,7 +27,6 @@ workflow SCORING {
         fade_summary_top_ch      // Channel<path> or null — fade_summary_top.tsv
         fade_summary_bottom_ch   // Channel<path> or null — fade_summary_bottom.tsv
         rer_summary_ch           // Channel<path> or null — rerconverge_summary_{trait}.tsv
-        genomic_info_ch          // Channel<path> or null — gene genomic coords TSV  (optional)
         fade_site_top_ch         // Channel<path> or null — fade_site_bf_top.tsv     (optional)
         fade_site_bot_ch         // Channel<path> or null — fade_site_bf_bottom.tsv  (optional)
         cleaned_background_ch    // Channel<path> or null — cleaned_background_main.txt (FCS universe)
@@ -79,7 +78,8 @@ workflow SCORING {
         def resolved_rer = (rer_summary_ch ?: Channel.empty())
             .ifEmpty { optional_input(params.scoring_rer_input,'NO_RER') }.collect().map { assert it.size()==1 : 'Expected one RER summary'; it[0] }
 
-        def resolved_genomic_info = (genomic_info_ch ?: Channel.empty())
+        // Gene coordinates come only from params.gene_ensembl_file (no channel input).
+        def resolved_genomic_info = Channel.empty()
             .ifEmpty {
                 def gi = params.gene_ensembl_file ?: ''
                 gi ? file(gi,checkIfExists:true) : file('NO_GENOMIC_INFO')
@@ -283,7 +283,6 @@ workflow SCORING {
         gene_scores      = evidence_out.gene_scores
         fcs_stats        = evidence_out.fcs_stats
         fcs_stats_rer    = compute_out.fcs_stats_rer
-        fcs_stats_fade   = compute_out.fcs_stats_fade
         gene_lists       = evidence_out.gene_lists
         position_lists   = evidence_out.position_lists
         // WP10 POSENRICH modular: the registry consumes the evaluated positions and
@@ -295,5 +294,4 @@ workflow SCORING {
         gene_evidence_metadata = evidence_out.metadata
         gene_evidence    = evidence_out.gene_evidence
         calibration      = evidence_out.calibration
-        caas_perms       = caas_perms_resolved
 }

@@ -47,7 +47,7 @@ PHYLOPHERE_RENDER_R
 }
 
 // Runs after SCORING. Producer p/q values and their original BH families are
-// preserved. meta_caas remains an unused compatibility input for existing callers.
+// preserved.
 process CAAS_SIGNIFICANCE_REPORT {
     ext report_source_hash: significance_report_hash
     label 'process_reporting'
@@ -55,7 +55,6 @@ process CAAS_SIGNIFICANCE_REPORT {
     publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'
 
     input:
-    path meta_caas, stageAs: 'inputs/meta/*'
     path position_scores, stageAs: 'inputs/positions/*'
     path gene_scores, stageAs: 'inputs/genes/*'
     path gene_metadata, stageAs: 'inputs/metadata/*'
@@ -72,7 +71,7 @@ process CAAS_SIGNIFICANCE_REPORT {
     def presentation = "${baseDir}/subworkflows/ENRICHMENT/local/src/report_presentation.R"
     def style = "${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R"
     def report_params = groovy.json.JsonOutput.toJson([
-        meta_caas_input: meta_caas.toString(), position_scores_input: position_scores.toString(),
+        position_scores_input: position_scores.toString(),
         gene_scores_input: gene_scores.toString(), gene_metadata_input: gene_metadata.toString(),
         gene_evidence_input: gene_evidence.toString(), null_universe_input: null_universe.toString(),
         traitname: (params.traitname ?: 'trait').toString(), seed: (params.seed != null ? params.seed : 1998).toString()

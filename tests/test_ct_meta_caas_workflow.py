@@ -45,7 +45,7 @@ process OTHER {
 workflow {
  def d = file(params.discovery_from)
  if (params.significance) {
-  CAAS_SIGNIFICANCE_REPORT(d,d,d,d,d,d)
+  CAAS_SIGNIFICANCE_REPORT(d,d,d,d,d)
  } else {
   CT_META_CAAS(params.live ? Channel.value(d) : null, params.live ? Channel.value(file(params.background_input)) : null)
  }

@@ -56,7 +56,7 @@ def project(tmp_path):
     (tmp_path/'audit.config').write_text("process.executor='local'\nprocess.cpus=1\nexecutor.queueSize=1\ntrace.overwrite=true\nprocess.beforeScript='export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VROOM_THREADS=1'\n")
     (tmp_path/'main.nf').write_text('''include { SCORING } from './workflows/scoring'
 workflow {
- SCORING(Channel.value(file('observed.tsv')),null,null,null,null,null,null,Channel.value(file('genes.txt')),
+ SCORING(Channel.value(file('observed.tsv')),null,null,null,null,null,Channel.value(file('genes.txt')),
          null,null,null,null,null,null,null,null,null,null,null,Channel.value(file('tested')),null)
 }
 ''')
