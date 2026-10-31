@@ -55,6 +55,12 @@ def caasPostprocOn() {
 
 // True when the core also writes the strict tables: params.strict_conservation_output, and a discovery that tolerates
 // conserved pairs (min_divergent_fraction < 1); with fraction 1 the strict rows are all the rows.
+// Publish prefix of a core process from its name: the strict aliases publish under <outdir>/strict/. It is not read
+// from ext because the aliases share the ext map declared inside the process, so a value set for one reached the other.
+def strictPrefix(processName) {
+    return processName.toString().endsWith('_STRICT') ? '/strict' : ''
+}
+
 def strictOutputOn() {
     return (params.strict_conservation_output as boolean) && ((params.min_divergent_fraction ?: 0.5) as double) < 1.0
 }
@@ -380,11 +386,11 @@ process CAAS_CORE_OBSERVED {
     ext scoring_source_hash: { coreScoringSourceKey() }
     tag "caas_core_observed"
     label 'process_low'
-    // ext.publish_prefix is empty for this process and "/strict" for its strict alias (CAAS_CORE_OBSERVED_STRICT), which
+    // The publish prefix is empty for this process and "/strict" for its strict alias (CAAS_CORE_OBSERVED_STRICT), which
     // writes the same files from the strict b_0 directories.
-    publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}/caastools" }, mode: 'copy', overwrite: true, pattern: '{discovery.tab,background.output,background_genes.output}'
-    publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}/meta_caas" }, mode: 'copy', overwrite: true, pattern: 'meta_caas'
-    publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}" }, mode: 'copy', overwrite: true, pattern: 'ct_disambiguation'
+    publishDir path: { "${params.outdir}${strictPrefix(task.process)}/caastools" }, mode: 'copy', overwrite: true, pattern: '{discovery.tab,background.output,background_genes.output}'
+    publishDir path: { "${params.outdir}${strictPrefix(task.process)}/meta_caas" }, mode: 'copy', overwrite: true, pattern: 'meta_caas'
+    publishDir path: { "${params.outdir}${strictPrefix(task.process)}" }, mode: 'copy', overwrite: true, pattern: 'ct_disambiguation'
 
     input:
     path b0Observed, stageAs: 'b0obs_*'   // the batches' b0_observed directories
@@ -422,9 +428,9 @@ process CAAS_CORE_MERGE {
     cache 'deep'
     tag "caas_core_merge|${block}"
     label 'process_medium'
-    // ext.publish_prefix is "/strict" for the strict alias (CAAS_CORE_MERGE_STRICT)
+    // The publish prefix is "/strict" for the strict alias (CAAS_CORE_MERGE_STRICT)
     // the output directory is named after the block: caas_permulation/b0/ and caas_permulation/blocks/<block>/
-    publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}/caas_permulation${block == 'b0' ? '' : '/blocks'}" }, mode: 'copy', overwrite: true
+    publishDir path: { "${params.outdir}${strictPrefix(task.process)}/caas_permulation${block == 'b0' ? '' : '/blocks'}" }, mode: 'copy', overwrite: true
 
     input:
     tuple val(block), path(tiles, stageAs: 'tile_*'), path(block_dir, stageAs: 'block_input')   // the block's tile tables and its directory of SUBSET_RESAMPLE_PERMS (staged under a name other than the output's)
@@ -470,8 +476,8 @@ process CAAS_CORE_MERGE {
 process CAAS_CORE_MERGE_REDUCE {
     tag "caas_core_merge_reduce"
     label 'process_medium'
-    // ext.publish_prefix is "/strict" for the strict alias (CAAS_CORE_MERGE_REDUCE_STRICT)
-    publishDir path: { "${params.outdir}${task.ext.publish_prefix ?: ''}/caas_permulation" }, mode: 'copy', overwrite: true,
+    // The publish prefix is "/strict" for the strict alias (CAAS_CORE_MERGE_REDUCE_STRICT)
+    publishDir path: { "${params.outdir}${strictPrefix(task.process)}/caas_permulation" }, mode: 'copy', overwrite: true,
                pattern: '{null_metadata.json,caas_perms.rds,perm_pos_sample.tsv,perm_pos_quantiles.tsv,cycle_roster.txt,removed_units.tsv,cycle_summary.tsv,cycle_hist.tsv,null_positions.parquet,counts.json}'
 
     input:

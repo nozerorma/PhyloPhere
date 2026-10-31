@@ -131,14 +131,16 @@ Author:         Miguel Ramon (miguel.ramon@upf.edu)
     // The map functions are in subworkflows/common/workflow_map.nf (included above).
     // `params` is read into a local variable first: inside the hook closure the script binding
     // can be gone when the session shuts down, which made `params.outdir` fail on a null object.
+    // `workflow` gets the same treatment (its `success` failed the same way).
     def run_params = params
+    def run_workflow = workflow
     workflow.onComplete {
         try {
             // Resolve to an absolute canonical path so the file is always written
             // to the correct location regardless of JVM working directory at hook time.
-            def outdirRaw = run_params.outdir ? run_params.outdir.toString() : "${workflow.projectDir}/out"
+            def outdirRaw = run_params.outdir ? run_params.outdir.toString() : "${run_workflow.projectDir}/out"
             def outdirAbs = new File(outdirRaw).canonicalPath
-            def ctx = buildCtx(outdirAbs, run_params, workflow)
+            def ctx = buildCtx(outdirAbs, run_params, run_workflow)
             def outdirFile = new File(outdirAbs)
             if (!outdirFile.exists()) outdirFile.mkdirs()
             def html = buildWorkflowMapHtml(ctx)
@@ -151,7 +153,7 @@ Author:         Miguel Ramon (miguel.ramon@upf.edu)
             // Explicit completion marker so users can quickly verify final HTML generation.
             def markerTarget = new File(outdirFile, 'workflow_html.done')
             // status mirrors workflow.success; the map is written either way, so a failed run stays inspectable.
-            markerTarget.text = """status=${workflow.success ? 'ok' : 'failed'}
+            markerTarget.text = """status=${run_workflow.success ? 'ok' : 'failed'}
 workflow_map=${mapTarget.absolutePath}
 generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
 """

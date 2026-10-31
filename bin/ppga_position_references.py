@@ -38,11 +38,12 @@ def index_files(directory, suffixes):
 
 
 class References:
-    def __init__(self, base):
+    def __init__(self, base, need_entropy=True):
         self.base = base
+        self.need_entropy = need_entropy
         self.alignments = index_files(base/'PROT/bmge', ('.fa', '.fasta', '.faa', '.fas'))
         self.maps = index_files(base/'MAP', ('.map.tsv',))
-        self.entropy = index_files(base/'PROT_VAR_RAW', ('.prot.entropy.tsv', '.entropy.tsv'))
+        self.entropy = index_files(base/'PROT_VAR_RAW', ('.prot.entropy.tsv', '.entropy.tsv')) if need_entropy else {}
         self.validated = set()
 
     @lru_cache(maxsize=8)
@@ -69,17 +70,18 @@ class References:
             selected[col] = row
         if sorted(selected) != list(range(width)):
             raise ValueError(f'{gene}: MAP does not cover every productive alignment column')
-        if gene not in self.entropy:
-            raise ValueError(f'{gene}: missing producer entropy table')
         entropy = {}
-        with self.entropy[gene].open() as f:
-            for row in csv.DictReader(f, delimiter='\t'):
-                pos = int(row['position'])
-                if pos in entropy:
-                    raise ValueError(f'{gene}: duplicate entropy position')
-                entropy[pos] = {k: float(row[k]) for k in ('variability', 'g')}
-        if sorted(entropy) != list(range(1, width + 1)):
-            raise ValueError(f'{gene}: entropy does not index the productive alignment')
+        if self.need_entropy:  # only UCR and Pfam use the entropy table
+            if gene not in self.entropy:
+                raise ValueError(f'{gene}: missing producer entropy table')
+            with self.entropy[gene].open() as f:
+                for row in csv.DictReader(f, delimiter='\t'):
+                    pos = int(row['position'])
+                    if pos in entropy:
+                        raise ValueError(f'{gene}: duplicate entropy position')
+                    entropy[pos] = {k: float(row[k]) for k in ('variability', 'g')}
+            if sorted(entropy) != list(range(1, width + 1)):
+                raise ValueError(f'{gene}: entropy does not index the productive alignment')
         self.validated.add(gene)
         return selected, refs[0] if refs else None, entropy
 
@@ -88,10 +90,11 @@ def project_ppga(base, output):
     base, output = Path(base), Path(output)
     if output.exists():
         raise ValueError('output directory already exists; choose a new reference version')
-    refs = References(base)
-    sources = [('ucr', base/'reports/variability/ucr_positions.tsv'),
-               ('fubar', base/'reports/positive_selection/fubar_sites.tsv')]
+    ucr = base/'reports/variability/ucr_positions.tsv'
     domains = base/'reports/variability/domain_variability.tsv'
+    # Sources absent from the bundle are skipped; FUBAR is always projected.
+    sources = ([('ucr', ucr)] if ucr.exists() else []) + [('fubar', base/'reports/positive_selection/fubar_sites.tsv')]
+    refs = References(base, need_entropy=ucr.exists() or domains.exists())
     domtbl = base/'HMMSCAN/hmmscan.domtblout'
     if domains.exists():
         sources.insert(0, ('pfam', domains))

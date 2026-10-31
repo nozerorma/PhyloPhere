@@ -231,7 +231,7 @@ def build_positions(active_genes, map_cache, discovery_keys, score_keys, extra_k
             status = 'map_only_not_in_discovery'
         else:
             status = 'no_map'
-        cause = '' if e['in_map'] else 'no_map'
+        cause = ''  # set from the final status in main()
         out.append({'Gene': gene, 'Position': pos, 'evaluation_status': status,
                     'exclusion_cause': cause, 'in_map': e['in_map'],
                     'in_discovery': e['in_discovery'],
@@ -695,6 +695,11 @@ def main():
     positions['in_tested_universe'] = [int(k in tested_keys) for k in zip(positions.Gene, positions.Position)]
     positions['reference_status'] = [map_cache[g]['reference_status'] if g in map_cache else 'missing_map' for g in positions.Gene]
     positions.loc[(positions.in_tested_universe == 1) & (positions.in_discovery == 0), 'evaluation_status'] = 'tested_no_detection'
+    if um:
+        # With a declared universe, a position that is neither detected nor in it was not tested; it keeps no MAP-based label.
+        outside = ((positions.in_tested_universe == 0) & (positions.in_discovery == 0)
+                   & (positions.in_scores_positive == 0))
+        positions.loc[outside, 'evaluation_status'] = 'outside_tested_universe'
     custom_by_key = {}
     for member in coll['members']:
         custom_by_key.setdefault((member['gene'], member['position']), set()).add(member['term_id'])
@@ -714,6 +719,9 @@ def main():
         is_unevaluable = (positions['in_discovery'].astype(bool) & ~positions['in_scores_positive'].astype(bool)
                           & not_known)
         positions.loc[is_unevaluable, 'evaluation_status'] = 'not_evaluable'
+    # exclusion_cause only names why a position was not evaluated: empty for every evaluated one.
+    positions['exclusion_cause'] = positions['evaluation_status'].map(
+        {'outside_tested_universe': 'outside_tested_universe', 'no_map': 'no_map'}).fillna('')
     regions_df = build_regions_df(coll['_regions'])
     sites_df = build_members_df(coll['members'])
     summary = membership_summary(positions, regions_df, sites_df)

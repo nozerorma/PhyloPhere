@@ -173,7 +173,7 @@
               htmlCandidates: [] ],
 
             // CAAS_core publishes the permutation null (caas_permulation/) and, with
-            // --strict_conservation_output, the strict analysis under strict/ (publish_prefix /strict).
+            // --strict_conservation_output, the strict analysis under strict/ (prefix /strict).
             [ id: 'caas_null',   name: 'CAAS null (permulation)',         type: 'processes',
               filesDirs: ["${outdir}/caas_permulation"],
               htmlCandidates: [] ],

@@ -116,7 +116,7 @@ def test_registry_states_members_coverage_manifest(tmp_path):
     assert positions[('G1', 2)]['evaluation_status'] == 'detected_positive'
     # In discovery but without positive score: evaluated without detection, not a zero score.
     assert positions[('G1', 3)]['evaluation_status'] == 'evaluated_no_detection'
-    assert positions[('G1', 3)]['exclusion_cause'] == 'no_map'
+    assert positions[('G1', 3)]['exclusion_cause'] == ''
     # MAP column without CT detection: evaluation unknown, not a negative.
     assert positions[('G1', 1)]['evaluation_status'] == 'map_only_not_in_discovery'
     # Coordinates come from explicit MAP headers, never from row counting.
@@ -208,7 +208,7 @@ def test_registry_without_map_scores_or_null(tmp_path):
     positions = read_tsv(out / 'positions.tsv')
     assert len(positions) == 1
     assert positions[0]['evaluation_status'] == 'detected_positive'
-    assert positions[0]['exclusion_cause'] == 'no_map'
+    assert positions[0]['exclusion_cause'] == ''
     assert positions[0]['hg38_nt_coord'] == 'NA'
     evidence = read_tsv(out / 'position_evidence.tsv')
     assert evidence[0]['evidence_status'] == 'p_unavailable'
