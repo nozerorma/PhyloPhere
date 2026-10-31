@@ -40,6 +40,7 @@ nextflow.enable.dsl = 2
  */
 
 include {HELP} from './workflows/help.nf'
+include { buildCtx; buildWorkflowMapHtml } from './subworkflows/common/workflow_map.nf'
 include {CT} from './workflows/ct.nf'
 include {listAlignmentFiles; sampleAlignmentFiles} from './subworkflows/CT/ct_alignment_files.nf'
 include {RER_MAIN} from './workflows/rerconverge.nf'
@@ -122,7 +123,7 @@ Author:         Miguel Ramon (miguel.ramon@upf.edu)
 """
 
     // Post-completion: write workflow_map.html again after all publishDir copies are done.
-    // WorkflowMap lives in lib/WorkflowMap.groovy (compiled and loaded by Nextflow).
+    // The map functions are in subworkflows/common/workflow_map.nf (included above).
     // `params` is read into a local variable first: inside the hook closure the script binding
     // can be gone when the session shuts down, which made `params.outdir` fail on a null object.
     def run_params = params
@@ -132,10 +133,10 @@ Author:         Miguel Ramon (miguel.ramon@upf.edu)
             // to the correct location regardless of JVM working directory at hook time.
             def outdirRaw = run_params.outdir ? run_params.outdir.toString() : "${workflow.projectDir}/out"
             def outdirAbs = new File(outdirRaw).canonicalPath
-            def ctx = WorkflowMap.buildCtx(outdirAbs, run_params, workflow)
+            def ctx = buildCtx(outdirAbs, run_params, workflow)
             def outdirFile = new File(outdirAbs)
             if (!outdirFile.exists()) outdirFile.mkdirs()
-            def html = WorkflowMap.buildWorkflowMapHtml(ctx)
+            def html = buildWorkflowMapHtml(ctx)
 
             // Primary artifact name
             def mapTarget = new File(outdirFile, 'workflow_map.html')
