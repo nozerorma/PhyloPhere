@@ -231,6 +231,18 @@ def universe_digest(gene, positions):
     return hashlib.sha256(f"{gene}\t{','.join(map(str, ordered)) if ordered else 'NULL'}".encode()).hexdigest()
 
 
+def scientific_identity(scientific):
+    """Settings that observed and null must share. weights_sha256 is not one of them: it hashes a fop_pairs.tsv, which is
+    the b_0 file on the observed side and the PSS weights of each block's cycles on the null side, so the two never
+    coincide. What they share is whether the PSS design is weighted at all; the weights themselves follow from the tree and
+    the taxid map, which are compared."""
+    if not isinstance(scientific, dict):
+        return None
+    ident = {k: v for k, v in scientific.items() if k not in ('weights_sha256', 'weighted')}
+    ident['weighted'] = scientific.get('weights_sha256') is not None
+    return ident
+
+
 def validate_null(blocks, roster, null, counts, output=None, observed_contract=None, tested=None):
     import re
     if not roster or len(set(roster))!=len(roster) or any(not re.fullmatch(r'b_[1-9][0-9]*',c) for c in roster):
@@ -267,7 +279,10 @@ def validate_null(blocks, roster, null, counts, output=None, observed_contract=N
             if not isinstance(prov,dict) or prov.get('version')!=1:
                 raise ValueError('Unverifiable legacy null scientific/filter provenance; regenerate observed and null artifacts')
             for key in ('scientific','cluster','gene_filter','strict'):
-                if prov.get(key)!=observed_contract.get(key) or prov.get(key) is None:
+                used_key, expected_key = prov.get(key), observed_contract.get(key)
+                if key == 'scientific':
+                    used_key, expected_key = scientific_identity(used_key), scientific_identity(expected_key)
+                if used_key!=expected_key or used_key is None:
                     raise ValueError(f'Observed/null {key} mismatch')
             for key in ('maps','lengths','length_sources','alignments'):
                 for gene in set(prov.get(key,{})) & set(observed_contract.get(key,{})):

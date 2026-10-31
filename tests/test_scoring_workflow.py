@@ -87,6 +87,36 @@ def test_wrong_observed_null_settings_fail(project):
     r=command(project,ok=False)
     assert 'scientific mismatch' in r.stdout+r.stderr+(project/'run.log').read_text()
 
+def set_weights(project,observed,block):
+    """Record weights_sha256 in the observed contract and in the null block (re-sealing the block checksums)."""
+    import hashlib
+    p=project/'observed.tsv.scoring.json';m=json.loads(p.read_text());m['scientific']['weights_sha256']=observed;p.write_text(json.dumps(m))
+    blk=project/'prior/blocks/blk_000001';c=json.loads((blk/'counts.json').read_text())
+    c['scoring_provenance']['scientific']['weights_sha256']=block;(blk/'counts.json').write_text(json.dumps(c))
+    (blk/'scoring_artifacts.json').write_text(json.dumps(dict(version=1,files={n:hashlib.md5((blk/n).read_bytes()).hexdigest() for n in ['matrices.rds','positions.parquet','cycles.txt','counts.json']})))
+
+
+def test_weighted_null_uses_its_own_weight_files(project):
+    # b_0 and each block hash different fop_pairs.tsv files; both are weighted, so the null is compatible.
+    set_weights(project,'a'*64,'b'*64)
+    command(project)
+
+
+def test_weighted_observed_with_unweighted_null_fails(project):
+    set_weights(project,'a'*64,None)
+    r=command(project,ok=False)
+    assert 'scientific mismatch' in r.stdout+r.stderr+(project/'run.log').read_text()
+
+
+def test_scientific_identity_ignores_weight_file_hash():
+    base=dict(model='LG',tree_sha256='t',posterior_threshold=.8,taxid_sha256=None)
+    ident=null.scientific_identity
+    assert ident(dict(base,weights_sha256='a'))==ident(dict(base,weights_sha256='b',weighted=True))
+    assert ident(dict(base,weights_sha256='a'))!=ident(dict(base,weights_sha256=None))
+    assert ident(dict(base,weights_sha256='a'))!=ident(dict(base,weights_sha256='a',model='WAG'))
+    assert ident(None) is None
+
+
 @pytest.mark.parametrize('mode',['absent','silent','empty_observed'])
 def test_missing_and_valid_empty_evidence(project,mode):
     if mode=='absent':
