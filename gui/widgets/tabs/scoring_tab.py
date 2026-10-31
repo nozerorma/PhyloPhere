@@ -57,6 +57,7 @@ SPEC = ModuleTabSpec(
         ),
         Section("Evidence of the best positions"),
         FieldSpec(name="caas_evidence_top_n", help="Number of best positions in the evidence table written to scoring/evidence/; 0 = off.", label="Evidence of the N best positions (0 = off)", importance="optional"),
+        FieldSpec(name="caas_evidence_discovery", kind="path_file", help="discovery.tab of the observed labeling, for the evidence table when the observed tables are given. Blank when the Reuse box provides it.", label="Observed discovery.tab (evidence)", importance="optional"),
     ),
     advanced_fields=(
         Section("Genomic windows and position-level significance"),

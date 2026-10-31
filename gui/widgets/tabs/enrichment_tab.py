@@ -190,6 +190,12 @@ SPEC = ModuleTabSpec(
             help="FDR cutoff of the cross-tool COMPARE report; default 0.15.",
         ),
         FieldSpec(
+            name="ami_description_fdr",
+            label="FDR of the descriptive STRING labels",
+            importance="optional",
+            help="FDR cutoff of the descriptive STRING labels of the AMI modules, separate from the gene and module tests; default 0.10.",
+        ),
+        FieldSpec(
             name="scoring_compare_top_n",
             label="COMPARE report top-N",
             importance="optional",

@@ -101,6 +101,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "caas_export_single": _bool_str(caas.caas_export_single),
         "caas_perms_postproc": _bool_str(caas.caas_perms_postproc),
         "strict_conservation_output": _bool_str(caas.strict_conservation_output),
+        "ct_allow_relaxed_null": _bool_str(caas.ct_allow_relaxed_null),
         "disambiguation": _bool_str(disambiguation_enabled),
         "ct_postproc": _bool_str(ct_postproc_enabled),
         "run_postproc_exploratory": _bool_str(getattr(disambig, 'run_postproc_exploratory', True)),

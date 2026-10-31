@@ -82,6 +82,16 @@ SPEC = ModuleTabSpec(
             help="Minimum number of non-overlapping (exclusive) species required on FG or BG to call a CAAS (default: 2).",
         ),
         FieldSpec(
+            name="ct_allow_relaxed_null",
+            label="Allow relaxed null (unmatched designs)",
+            kind="bool",
+            importance="optional",
+            help=(
+                "Permits unmatched PSS/FOP designs and the Tier-2 fallback in the null. Off by default; "
+                "the choice is recorded in the provenance."
+            ),
+        ),
+        FieldSpec(
             name="strict_conservation_output",
             label="Also write the strict tables (no conserved pair)",
             kind="bool",

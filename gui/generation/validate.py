@@ -190,6 +190,16 @@ def validate(project: ProjectConfig) -> list[str]:
         # with vep_install on first use (subworkflows/VEP/ensembl_vep.nf).
 
     # ── Scoring ───────────────────────────────────────────────────────────────
+    # filter_min_positions is emitted as a bare JSON number, so only a positive integer (or blank) is accepted.
+    fmp = project.modules.disambiguation.filter_min_positions.strip()
+    if fmp and not (fmp.isdigit() and int(fmp) > 0):
+        errors.append(f"Post-processing: minimum candidates per interval must be a positive integer or blank (got {fmp!r}).")
+    # Enrichment reads the SCORING outputs (FCS, AMI and comparison inputs); main.nf rejects the combination.
+    if project.modules.enrichment.enabled and not scoring.enabled:
+        errors.append(
+            "Enrichment requires Scoring: its FCS, AMI and comparison inputs come from the Scoring outputs. "
+            "Enable Scoring or disable Enrichment."
+        )
     if scoring.enabled:
         # gene_ensembl_file is not required, as in the Disambiguation section: left
         # blank, it is generated from the alignment gene list by an Ensembl BioMart

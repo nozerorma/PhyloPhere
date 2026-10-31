@@ -128,6 +128,12 @@ SPEC = ModuleTabSpec(
                  "ignored when Exploratory Sweep is selected instead.",
         ),
         FieldSpec(
+            name="filter_min_positions",
+            label="Minimum candidates per interval (filter mode)",
+            importance="optional",
+            help="Positive integer. Blank keeps the legacy gene-count gate of the minimum cluster length.",
+        ),
+        FieldSpec(
             name="filter_maxcaas",
             label="Cluster max CAAS value (filter mode)",
             importance="default",

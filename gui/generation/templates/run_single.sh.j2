@@ -509,7 +509,8 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "min_divergent_fraction": "${MIN_DIVERGENT_FRACTION:-0.5}",
   "min_non_overlapping": "${MIN_NON_OVERLAPPING:-2}",
   "strict_conservation_output": {{ run_defaults.strict_conservation_output }},
-  "caas_evidence_discovery": "${CAAS_EVIDENCE_DISCOVERY:-}",
+  "ct_allow_relaxed_null": {{ run_defaults.ct_allow_relaxed_null }},
+  "caas_evidence_discovery": "${CAAS_EVIDENCE_DISCOVERY:-${CAAS_EVIDENCE_DISCOVERY_USER:-}}",
   "max_bg_gaps_fraction": "${MAX_BG_GAPS_FRACTION:-0.0}",
   "max_fg_gaps_fraction": "${MAX_FG_GAPS_FRACTION:-0.0}",
   "max_gaps_fraction": "${MAX_GAPS_FRACTION:-0.0}",
@@ -541,6 +542,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
 
   "caas_postproc_mode": "$POSTPROC_MODE",
   "filter_minlen": "$POSTPROC_MINLEN",
+  "filter_min_positions": ${POSTPROC_MIN_POSITIONS:-null},
   "filter_maxcaas": "$POSTPROC_MAXCAAS",
   "gene_filter_mode": "$POSTPROC_GENE_FILTER_MODE",
   "remove_caas_clusters": ${POSTPROC_REMOVE_CLUSTERS:-true},
@@ -653,6 +655,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "ami_block_threshold": "${AMI_BLOCK_THRESHOLD:-0.2}",
   "publish_domino_intermediates": {{ run_defaults.publish_domino_intermediates }},
   "scoring_compare_fdr": "${SCORING_COMPARE_FDR:-0.15}",
+  "ami_description_fdr": "${AMI_DESCRIPTION_FDR:-0.10}",
   "scoring_compare_top_n": "${SCORING_COMPARE_TOP_N:-20}",
 
   "posenrich": $_RUN_POSENRICH,

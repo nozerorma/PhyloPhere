@@ -65,6 +65,7 @@ class CaasConfig(ModuleConfigBase):
     caas_cycle_block_size: str = "500"  # --caas_cycle_block_size (permulation cycles per block; a task replays one batch of genes against one block)
     min_divergent_fraction: str = "0.5"  # --min_divergent_fraction
     min_non_overlapping: str = "2"  # --min_non_overlapping
+    ct_allow_relaxed_null: bool = False  # --ct_allow_relaxed_null (permit unmatched PSS/FOP designs and the Tier-2 fallback in the null; in provenance)
     strict_conservation_output: bool = True  # --strict_conservation_output (strict tables of the hypotheses without conserved pairs; active when min_divergent_fraction < 1)
     max_bg_gaps_fraction: str = "0.0"  # --max_bg_gaps_fraction
     max_fg_gaps_fraction: str = "0.0"  # --max_fg_gaps_fraction
@@ -109,6 +110,8 @@ class DisambiguationConfig(ModuleConfigBase):
     # Filter-mode (single run) thresholds.
     filter_minlen: str = "3"  # --filter_minlen
     filter_maxcaas: str = "0.7"  # --filter_maxcaas
+    # Blank keeps the legacy gene-count gate (filter_minlen); a positive integer sets the candidates per interval.
+    filter_min_positions: str = ""  # --filter_min_positions
     # Directory of the trimmer's per-gene MAP tables (--caas_map_dir). Post-processing
     # uses it to place clusters in untrimmed alignment columns, for the observed and the null
     # sets; VEP reads it from here as well.
@@ -252,6 +255,7 @@ class ScoringConfig(ModuleConfigBase):
 
     # Advanced parameters (conf/scoring.config)
     scoring_window_size_bp: str = "1000000"  # --scoring_window_size_bp
+    caas_evidence_discovery: str = ""  # --caas_evidence_discovery (discovery.tab of the observed labeling; blank = from the reuse box)
     caas_evidence_top_n: str = "0"  # --caas_evidence_top_n (evidence table of the N best positions after SCORING; 0 = off)
     scoring_hypotheses_pairs: str = ""  # --scoring_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for SCORING)
 
@@ -341,6 +345,7 @@ class EnrichmentConfig(ModuleConfigBase):
     scoring_ami: bool = True  # --scoring_ami
     scoring_string: bool = True  # --scoring_string
     scoring_compare_fdr: str = "0.15"  # --scoring_compare_fdr
+    ami_description_fdr: str = "0.10"  # --ami_description_fdr (FDR of the descriptive STRING labels)
     scoring_compare_top_n: str = "20"  # --scoring_compare_top_n
     # Concordance null of the unpaired CAAS and RER gene scores in the COMPARE
     # report (a randomization null, not a joint permulation p).

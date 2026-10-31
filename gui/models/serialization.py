@@ -48,7 +48,7 @@ _RETIRED_FIELDS = {
     "caas": ("ct_discovery_batch_size", "export_groups", "export_perm_discovery"),
     "disambiguation": ("ct_disambig_asr_mode", "ct_disambig_batch_size"),
     "scoring": ("scoring_weight_caas", "scoring_weight_rer", "scoring_weight_fade", "scoring_rer_direction", "scoring_stress", "scoring_stress_top_n",
-                "scoring_stress_rank_metric", "scoring_ami", "scoring_string", "scoring_compare_fdr", "scoring_compare_top_n"),
+                "scoring_stress_rank_metric"),
     "enrichment": ("posenrich_eggnog", "cosmic_db", "fcs_fdr_wilcoxon", "fcs_fdr_lachenbruch"),
     "posenrich": ("posenrich_ranking", "eggnog_taxid", "auto_fetch_eggnog", "egg_members_file", "egg_annotations_file"),
     "fade": ("fade_min_genes_for_heatmap",),
