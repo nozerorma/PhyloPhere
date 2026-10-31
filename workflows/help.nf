@@ -44,6 +44,20 @@ General options:
                                          Nextflow home directories after a successful run; -resume
                                          is not available afterwards)
 --toy_mode, --toy_n       Smoke test on a random subset of alignments (see --help --contrast_selection)
+--seed                    <INTEGER>  1998  (random seed of the subsampling, the permulations and every Python task)
+
+Common inputs:
+--outdir                  <"dir">  <projectDir>/out  (reports and results)
+--my_traits, --traitname  <"traits.csv">, <"column_name">  (trait table and the trait column analysed)
+--tree                    <"nwtree_file">  (species tree; --my_traits and --tree are curated against the alignments by NAME_CURATION)
+--alignment, --ali_format <"input_dir|.tar.gz">, <"fasta">  (alignments and their format)
+--tax_id                  <"taxid_map">  ""  (taxid-to-species map; blank: the generated run scripts build it from the tree with
+                                         bin/resolve_core_inputs.py before the pipeline starts, it cannot be built inside main.nf)
+--gene_ensembl_file       <"gene_map">  ""  (gene ID to gene name; blank: built by BioMart only with --auto_generate_ensembl)
+--ref_species_name, --ref_species_taxid  "Homo_sapiens", "9606"  (reference species of the annotations, STRING and BioMart)
+--clade_name, --taxon_of_interest        "primates", "family"  (clade and rank shown in the reports)
+--ali_sp_names            <"species_file">  ""  (precomputed species names of the alignments; skips scanning them at start)
+A path given to --tree or --my_traits that does not exist stops the run.
 
 Module flag              Description
 ------------------------  -------------------------------------------------
@@ -70,9 +84,9 @@ Module flag              Description
                           (comma-separated: build_trait,build_tree,build_matrix,continuous,binary).
 --scoring                 Position- and gene-level scores from CAAS, with FADE and RER
                           evidence, calibrated against the CAAS null.
---enrichment              FCS ranked enrichment, DOMINO/STRING network analysis and
-                          the comparison report. Needs --scoring; without it only the
-                          RER FCS report can run.
+--enrichment              FCS ranked enrichment (report 11), DOMINO/STRING network analysis
+                          (12) and the comparison report (14). Requires --scoring; the
+                          run stops with an error otherwise.
 
 Stages after CT can start from files of a previous run: each module help lists its
 "*_from" / "*_input" options. ENRICHMENT and VEP always need --scoring in the same
@@ -99,6 +113,11 @@ labeling is replayed (no null).
 Usage:
 --alignment                <"input_dir">                null
 --caas_config               <"caas_config_file">         null
+--resample_from             <"resample_dir">             ""     (labelings of a previous resample stage; also looked for next to --discovery_from, next to --background_input and in <outdir>/caastools)
+--discovery_from            <"discovery.tab">            ""     (score the discovery.tab of a previous run with the same code as the b_0 slice instead of replaying the observed labeling; needs the design files of the same contrast selection)
+--multi_hypothesis          <true|false>                 true   (discover across every generated non-replacement contrast hypothesis)
+--ct_allow_relaxed_null     <true|false>                 false  (permit unmatched PSS/FOP designs and the Tier-2 fallback in the null; recorded in the provenance)
+--caas_perms_postproc       <true|false>                 true   (apply the cluster and gene filters of post-processing to the null, so that its blocks follow filtered_discovery.tsv; needs --gene_ensembl_file)
 --ali_format                <"fasta">                    "fasta"
 --patterns                  <"1,2,3,4">                  "1,2,3"
 --min_divergent_fraction    <FLOAT 0-1>                  0.5
@@ -118,6 +137,7 @@ Usage:
 --publish_intermediates     <true|false>                 false
 
 NOTE: fractions are resolved to floor(n_pairs * fraction) at runtime.
+With the observed discovery, report 7 (pattern annotation) is written.
 '''
 }
 
@@ -174,6 +194,9 @@ Usage:
 --prune_data                        <true|false>                   false  (requires --reporting)
 --prune_list                         <"species_list">               null
 --prune_list_secondary                 <"species_list">               null
+--secondary_trait                      <"column_name">                ""     (second trait column shown in the reports)
+--branch_trait                         <"column_name">                ""     (trait column that colours the branches of the trait reports)
+--n_trait, --c_trait                   <"column_name">                ""     (sample size and case count columns of a count trait, for the Jeffreys intervals)
 --toy_mode                           <true|false>                    false  (smoke test on a random subset of alignments; species are never subsampled)
 --toy_n                               <INTEGER>                      1000   (alignments kept in --toy_mode: the first N of a shuffle seeded by --seed; an empty value or 0 falls back to 50)
 '''
@@ -190,9 +213,9 @@ shared residue arose independently in the contrast domains. Positions are labele
 convergent, divergent, single or no_change.
 
 Usage:
---meta_caas_from                <"meta_caas_output">          null  (a previous run's meta_caas.tsv: locates that run's outdir to reuse its permulation exports)
 --ct_disambig_asr_model             <"lg">                          "lg"
---ct_disambig_asr_cache_dir          <"cache_dir">                   null
+--ct_disambig_asr_cache_dir          <"cache_dir">                   <projectDir>/caches/.asr_cache  (created if absent)
+--ct_disambig_hypotheses_pairs       <"contrast_hypotheses_pairs.tsv"> ""   (PSS weights of the FOP pooling; the one of this run's contrast selection, else found in <outdir>/data_exploration/2.CT/1.Traitfiles/, else equal weights)
 --ct_disambig_posterior_threshold      <FLOAT 0-1>                     0.1
 --ct_disambig_max_tasks_per_child       <INTEGER>                       50
 --asr_diagnostics                        <true|false>                    true   (render the ASR diagnostics report, 9)
@@ -204,7 +227,7 @@ def postproc_help() {
 CT Post-processing — Help
 =============================================
 Cluster/gene-level filtering of disambiguated CAAS, background cleanup, and
-the Characterization report.
+the Characterization report (8).
 
 Usage:
 --disambiguation_input        <"caas_convergence_master.csv">   null  (standalone entry)
@@ -392,7 +415,7 @@ Standalone mode (provide inputs directly):
 --caas_perm_harvest_file, --caas_perm_manifest_file   <"permulation_harvest.tsv", "permulation_manifest.tsv">  ""  (null harvest and design panels of report 10)
 
 Main outputs (scoring/): position_scores.tsv, gene_scores.tsv, fcs_stats*.tsv, gene_lists/,
-position_lists/ and report 10. Gene columns: gene_caas_score (+ _top, _bottom), caas_p.gen,
+position_lists/, report 10 and, after it, the significance report 15 (meta_caas/). Gene columns: gene_caas_score (+ _top, _bottom), caas_p.gen,
 rer_min_pval, rer_acceleration, fade_max_bf_<direction>.
 """
 }
@@ -448,8 +471,8 @@ workflow HELP {
         // general overview first, then append detail for every module that WOULD run
         // given the current params — i.e. help for the run you are about to launch.
         // To see only the overview, explicitly disable the modules you don't need
-        // (e.g. --ct_tool "" --ct_disambiguation false --ct_postproc false
-        // --posenrich false --vep false --help).
+        // (e.g. --ct_disambiguation false --ct_postproc false --posenrich false --vep false --help;
+        // an empty --ct_tool on the command line reads as true, so it is set to "" in a -params-file).
         log.info general_help()
 
         if (params.contrast_selection)   log.info contrast_selection_help()

@@ -208,7 +208,6 @@ Reconstructs ancestral states with PAML codeml and scores each position by how l
 | `ct_disambig_posterior_threshold` | 0.1 | Residues below this posterior are dropped from a node and charged as worst case |
 | `ct_disambig_max_tasks_per_child` | 50 | Worker recycling cap |
 | `asr_diagnostics` | true | Render report 9 |
-| `meta_caas_from` | empty | Standalone: `meta_caas.tsv` of a previous run |
 
 Observed scoring validates complete paired designs, discovery keys and supplied PSS metadata before starting workers. An explicitly requested missing weights file is an error; weights beside the selected design take precedence over historical output directories. Missing alignments, failed ASR and scoring failures stop the run. Empty discovery produces header-only master/meta tables without ASR workers. Gene IDs retain embedded dots, and `ali_format` is honored.
 
