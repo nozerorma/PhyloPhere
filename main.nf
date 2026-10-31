@@ -144,7 +144,8 @@ Author:         Miguel Ramon (miguel.ramon@upf.edu)
 
             // Explicit completion marker so users can quickly verify final HTML generation.
             def markerTarget = new File(outdirFile, 'workflow_html.done')
-            markerTarget.text = """status=ok
+            // status mirrors workflow.success; the map is written either way, so a failed run stays inspectable.
+            markerTarget.text = """status=${workflow.success ? 'ok' : 'failed'}
 workflow_map=${mapTarget.absolutePath}
 generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
 """

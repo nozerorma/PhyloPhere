@@ -26,23 +26,9 @@ class WorkflowMap {
         return s
     }
 
-    static String resolveFirstExisting(List<String> candidates) {
-        if (!candidates) return null
-        for (def c : candidates) {
-            if (new File(c).exists()) return c
-        }
-        return candidates[0]
-    }
-
     static String normalizePath(String p) {
         if (p == null) return null
         return p.toString().replace('\\', '/')
-    }
-
-    static String readTextIfExists(String path) {
-        if (!path) return null
-        def f = new File(path)
-        return f.exists() ? f.getText('UTF-8') : null
     }
 
     static String imageDataUriIfExists(String path) {
@@ -83,28 +69,28 @@ class WorkflowMap {
         def borderColor = ran ? '#1F2937' : '#9CA3AF'
 
         def filesDirs = (st.filesDirs ?: []) as List
-        if (!filesDirs && st.filesDir) filesDirs = [st.filesDir]
 
         def htmlCandidates = (st.htmlCandidates ?: []) as List
         def htmlRows = htmlCandidates ? htmlCandidates.collect { ht ->
             def file = new File(ht.toString())
-            def exists = file.exists()
-            def targetPath = ht.toString()
-            if (!exists) {
+            def matches = file.exists() ? [file.absolutePath] : []
+            if (!matches) {
+                // Per-trait reports carry a suffix (e.g. 14.Comparison_report_<trait>.html): list every match, sorted.
                 def parent = file.parentFile
-                if (parent && parent.exists()) {
-                    def base = file.name.replace(".html", "")
-                    def matching = parent.listFiles().find { it.name.startsWith(base) && it.name.endsWith(".html") }
-                    if (matching) {
-                        exists = true
-                        targetPath = matching.absolutePath
-                    }
+                def base = file.name.replace(".html", "")
+                if (parent?.isDirectory()) {
+                    matches = (parent.listFiles() ?: []).findAll { it.name.startsWith(base) && it.name.endsWith(".html") }
+                        .collect { it.absolutePath }.sort()
                 }
             }
-            def label  = exists ? 'available' : 'MISSING'
-            def href   = relativeFromOutdir(outdir, targetPath)
-            def text   = relativeFromOutdir(outdir, targetPath)
-            return "<div class=\"link-row\">→ html: <a href=\"${href}\">${htmlEscape(text)}</a> <span class=\"status ${exists ? 'ok' : 'missing'}\">${label}</span></div>"
+            if (!matches) {
+                def href = relativeFromOutdir(outdir, ht.toString())
+                return "<div class=\"link-row\">→ html: <a href=\"${href}\">${htmlEscape(href)}</a> <span class=\"status missing\">MISSING</span></div>"
+            }
+            return matches.collect { mp ->
+                def href = relativeFromOutdir(outdir, mp)
+                "<div class=\"link-row\">→ html: <a href=\"${href}\">${htmlEscape(href)}</a> <span class=\"status ok\">available</span></div>"
+            }.join('\n')
         }.join('\n') : ''
 
         def filesRows = filesDirs ? filesDirs.collect { fd ->
@@ -397,12 +383,14 @@ class WorkflowMap {
       const canonicalDirs = ${JsonOutput.toJson(getCanonicalDirectories())};
 
       let checkedStages = 0;
+      let anyUnreachable = false;
       const totalStages = Object.keys(canonicalDirs).length;
       
       // Check each stage's directories
       Object.entries(canonicalDirs).forEach(([stageId, dirPaths]) => {
         let stageCompleted = false;
         let checkedPaths = 0;
+        let unreachable = 0;
         
         dirPaths.forEach(dirPath => {
           const fullPath = baseDir + '/' + dirPath;
@@ -415,15 +403,20 @@ class WorkflowMap {
               }
             })
             .catch(() => {
-              // Directory doesn't exist or can't access
+              // Network-level failure (browsers block fetch on file://): the path is unknown, not missing.
+              unreachable++;
+              anyUnreachable = true;
             })
             .finally(() => {
               checkedPaths++;
               if (checkedPaths === dirPaths.length) {
-                updateStageDisplay(stageId, stageCompleted);
+                // Keep the server-side status when no path of the stage could be checked.
+                if (stageCompleted || unreachable === 0) updateStageDisplay(stageId, stageCompleted);
                 checkedStages++;
                 if (checkedStages === totalStages) {
-                  document.getElementById('refresh-status').textContent = 'Refreshed at ' + new Date().toLocaleTimeString();
+                  document.getElementById('refresh-status').textContent = anyUnreachable
+                    ? 'Some paths could not be checked; serve the output directory over HTTP to refresh.'
+                    : 'Refreshed at ' + new Date().toLocaleTimeString();
                 }
               }
             });
