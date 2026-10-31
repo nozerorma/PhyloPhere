@@ -190,6 +190,12 @@ def validate(project: ProjectConfig) -> list[str]:
         # with vep_install on first use (subworkflows/VEP/ensembl_vep.nf).
 
     # ── Scoring ───────────────────────────────────────────────────────────────
+    # The checkbox is disabled in the Runtime tab; a project file that still carries it on would emit use_apptainer.
+    if project.runtime.use_apptainer:
+        errors.append(
+            "Apptainer is not operational: the available container image predates the current environment "
+            "(no pyarrow, hyphy, paml, domino or R report stack). Uncheck it and use the conda environment."
+        )
     # filter_min_positions is emitted as a bare JSON number, so only a positive integer (or blank) is accepted.
     fmp = project.modules.disambiguation.filter_min_positions.strip()
     if fmp and not (fmp.isdigit() and int(fmp) > 0):

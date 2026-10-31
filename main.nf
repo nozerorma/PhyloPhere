@@ -104,6 +104,11 @@ def fade_precomp_tables(direction, tdir) {
 workflow {
     if (params.gene_stat != "max") error "Only --gene_stat max is supported; rebuild legacy gene scores/null matrices."
 
+    if (params.use_apptainer || params.use_singularity) {
+        log.warn "The container profiles are not operational: their image (miralnso/phylophere:latest, June 2025) lacks " +
+                 "pyarrow, hyphy, paml, domino and the R report stack, so most modules will fail. Use the conda environment."
+    }
+
     if (params.posenrich && !params.help) validatePositionReferences()
 
     def version = "2.0.0"
