@@ -191,7 +191,7 @@ process CAAS_UNIVERSE {
 // Output: null_tables/ (the tile's tables, with the name of its block) and, for the b_0 tile, b0_observed/ (per gene
 // with b_0 hits: its discovery rows, its tested positions and its master rows).
 process CAAS_CORE_BATCHED {
-    ext scoring_source_hash: coreScoringSourceKey()
+    ext scoring_source_hash: { coreScoringSourceKey() }
     tag "$batchID (${batchSize} genes) ${block.name}"
     label 'process_resample'
 
@@ -377,7 +377,7 @@ workflow CAAS_CORE {
 // where the rest of the pipeline reads them: caastools/, meta_caas/meta_caas/ and
 // ct_disambiguation/.
 process CAAS_CORE_OBSERVED {
-    ext scoring_source_hash: coreScoringSourceKey()
+    ext scoring_source_hash: { coreScoringSourceKey() }
     tag "caas_core_observed"
     label 'process_low'
     // ext.publish_prefix is empty for this process and "/strict" for its strict alias (CAAS_CORE_OBSERVED_STRICT), which
@@ -418,7 +418,7 @@ process CAAS_CORE_OBSERVED {
 // is computed. Observed and null gene scores both use max; FCS calibrates the
 // same statistic on both sides. Position-level null products are unchanged.
 process CAAS_CORE_MERGE {
-    ext scoring_source_hash: coreScoringSourceKey()
+    ext scoring_source_hash: { coreScoringSourceKey() }
     cache 'deep'
     tag "caas_core_merge|${block}"
     label 'process_medium'

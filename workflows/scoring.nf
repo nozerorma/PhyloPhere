@@ -1,6 +1,17 @@
 #!/usr/bin/env nextflow
 include { scoringHash } from '../subworkflows/SCORING/scoring_contract'
 
+// A file input, or the sentinel file when the value is blank (functions, not closures, for the linter).
+def optionalInput(value, sentinel) {
+    return value ? file(value,checkIfExists:true) : file(sentinel)
+}
+
+// Digest of the listed sources (paths relative to subworkflows/) plus the scoring contract.
+def scoringSourcesHash(List names) {
+    def scoreDir = "${baseDir}/subworkflows/SCORING"
+    return scoringHash(names.collect { file("${baseDir}/subworkflows/${it}") } + [file("${scoreDir}/scoring_contract.nf")])
+}
+
 /*
  * PHYLOPHERE: CAAS Scoring Workflow
  *
@@ -47,12 +58,9 @@ workflow SCORING {
     main:
         assert params.traitname : "SCORING requires --traitname"
 
-        def optional_input = { value, sentinel -> value ? file(value,checkIfExists:true) : file(sentinel) }
-        def score_dir = "${baseDir}/subworkflows/SCORING"
-        def hash_sources = { names -> scoringHash(names.collect { file("${baseDir}/subworkflows/${it}") } + [file("${score_dir}/scoring_contract.nf")]) }
-        def compute_hash = hash_sources(['SCORING/local/src/scoring_compute.R','SCORING/local/src/scoring_io.R','SCORING/local/src/scoring_input.py','SCORING/local/src/observed_core_scores.py','SCORING/local/src/aa_grouping.R','SCORING/local/src/null_position_p.R','CT_DISAMBIGUATION/local/src/core/scores.py'])
-        def evidence_hash = hash_sources(['SCORING/local/src/scoring_evidence.R','SCORING/local/src/scoring_io.R','SCORING/local/src/caas_block_contract.R','ENRICHMENT/local/src/fcs_prepare_blocks.R','ENRICHMENT/local/src/gene_p.R','ENRICHMENT/local/src/caas_blocks.R'])
-        def report_hash = hash_sources(['SCORING/local/10.Scoring_report.Rmd','SCORING/local/src/scoring_io.R','SCORING/local/src/report_evidence.R','TRAIT_ANALYSIS/local/src/report_style.R'])
+        def compute_hash = scoringSourcesHash(['SCORING/local/src/scoring_compute.R','SCORING/local/src/scoring_io.R','SCORING/local/src/scoring_input.py','SCORING/local/src/observed_core_scores.py','SCORING/local/src/aa_grouping.R','SCORING/local/src/null_position_p.R','CT_DISAMBIGUATION/local/src/core/scores.py'])
+        def evidence_hash = scoringSourcesHash(['SCORING/local/src/scoring_evidence.R','SCORING/local/src/scoring_io.R','SCORING/local/src/caas_block_contract.R','ENRICHMENT/local/src/fcs_prepare_blocks.R','ENRICHMENT/local/src/gene_p.R','ENRICHMENT/local/src/caas_blocks.R'])
+        def report_hash = scoringSourcesHash(['SCORING/local/10.Scoring_report.Rmd','SCORING/local/src/scoring_io.R','SCORING/local/src/report_evidence.R','TRAIT_ANALYSIS/local/src/report_style.R'])
 
         // ── Resolve each input with .ifEmpty{} fallbacks ───────────────────
 
@@ -70,13 +78,13 @@ workflow SCORING {
         }
 
         def resolved_fade_top = (fade_summary_top_ch ?: Channel.empty())
-            .ifEmpty { optional_input(params.scoring_fade_summary_top,'NO_FADE_TOP') }.collect().map { assert it.size()==1 : 'Expected one FADE top summary'; it[0] }
+            .ifEmpty { optionalInput(params.scoring_fade_summary_top,'NO_FADE_TOP') }.collect().map { assert it.size()==1 : 'Expected one FADE top summary'; it[0] }
 
         def resolved_fade_bottom = (fade_summary_bottom_ch ?: Channel.empty())
-            .ifEmpty { optional_input(params.scoring_fade_summary_bottom,'NO_FADE_BOTTOM') }.collect().map { assert it.size()==1 : 'Expected one FADE bottom summary'; it[0] }
+            .ifEmpty { optionalInput(params.scoring_fade_summary_bottom,'NO_FADE_BOTTOM') }.collect().map { assert it.size()==1 : 'Expected one FADE bottom summary'; it[0] }
 
         def resolved_rer = (rer_summary_ch ?: Channel.empty())
-            .ifEmpty { optional_input(params.scoring_rer_input,'NO_RER') }.collect().map { assert it.size()==1 : 'Expected one RER summary'; it[0] }
+            .ifEmpty { optionalInput(params.scoring_rer_input,'NO_RER') }.collect().map { assert it.size()==1 : 'Expected one RER summary'; it[0] }
 
         // Gene coordinates come only from params.gene_ensembl_file (no channel input).
         def resolved_genomic_info = Channel.empty()
@@ -92,12 +100,12 @@ workflow SCORING {
         // .map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] } unwraps the single-element list .collect() produces back to
         // a scalar path, since both processes call `.name` directly on this input.
         def resolved_fade_site_top_ch = (fade_site_top_ch ?: Channel.empty())
-            .ifEmpty { optional_input(params.scoring_fade_site_top,'NO_FADE_SITE_TOP.txt') }
+            .ifEmpty { optionalInput(params.scoring_fade_site_top,'NO_FADE_SITE_TOP.txt') }
             .collect()
             .map { assert it.size()==1 : "Expected one FADE top site table"; it[0] }
 
         def resolved_fade_site_bot_ch = (fade_site_bot_ch ?: Channel.empty())
-            .ifEmpty { optional_input(params.scoring_fade_site_bottom,'NO_FADE_SITE_BOT.txt') }
+            .ifEmpty { optionalInput(params.scoring_fade_site_bottom,'NO_FADE_SITE_BOT.txt') }
             .collect()
             .map { assert it.size()==1 : "Expected one FADE bottom site table"; it[0] }
 
@@ -164,7 +172,7 @@ workflow SCORING {
         // (resolved_background) limits the null to the genes of the run. Each falls back to a NO_* sentinel: the universe is
         // then every null-positive position, and the log says so.
         def resolved_tested_pos = (tested_positions_ch ?: Channel.empty())
-            .ifEmpty { optional_input(params.posenrich_background_file,'NO_TESTED_POSITIONS') }
+            .ifEmpty { optionalInput(params.posenrich_background_file,'NO_TESTED_POSITIONS') }
             .collect()
             .map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] }
 

@@ -23,7 +23,7 @@ def reportSourceKey() {
 }
 
 process PHENOTYPE_EXPLORATION {
-    ext report_source_hash: reportSourceKey()
+    ext report_source_hash: { reportSourceKey() }
     tag "phenotype_exploration"
     label 'process_reporting_phenotype'
     publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename -> filename.equals('data_exploration') || filename.startsWith('data_exploration/') ? filename : null }

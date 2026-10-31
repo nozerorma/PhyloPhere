@@ -52,6 +52,11 @@ include { CAAS_PERMS_PREP } from '../subworkflows/CT/caas_permulation'
 
 // ── Workflow ─────────────────────────────────────────────────────────────────
 
+// Boolean reading of a flag given as true/false, 1/0 or yes/no (a function, not a closure, for the linter).
+def enabledFlag(v) {
+    return v == true || v?.toString()?.toLowerCase() in ['true','1','yes']
+}
+
 workflow CT {
     take:
         trait_file_in
@@ -75,13 +80,12 @@ workflow CT {
         def toolsToRun = params.ct_tool.split(',').collect { it.trim() }.findAll { it }.unique()
         if (!toolsToRun || toolsToRun.any { !(it in ['resample', 'discovery']) })
             error "Unknown ct_tool stage; supported stages are resample and discovery."
-        def enabled = { v -> v == true || v?.toString()?.toLowerCase() in ['true','1','yes'] }
         def savedNull = params.containsKey('caas_null_dir') && params.caas_null_dir
         def observedInput = params.discovery_from ||
             (params.containsKey('disambiguation_input') && params.disambiguation_input)
         def needsCore = toolsToRun.contains('discovery') ||
-            (enabled(params.ct_disambiguation) && observedInput) ||
-            (enabled(params.enrichment) && enabled(params.caas_permulation_enrichment) && !savedNull)
+            (enabledFlag(params.ct_disambiguation) && observedInput) ||
+            (enabledFlag(params.enrichment) && enabledFlag(params.caas_permulation_enrichment) && !savedNull)
         def align_tuple = Channel.empty()
         if (needsCore) {
             def allFiles = listAlignmentFiles(params.alignment)

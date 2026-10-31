@@ -27,13 +27,18 @@ def fadeSpecies(path) {
 
 def fadeJson(value) { selectionQuote(groovy.json.JsonOutput.toJson(value)) }
 
+// The parameter when it is set (null when absent in Nextflow), else the fallback. A function, not a closure,
+// so the linter resolves it; the params.fade_* reads stay literal for the contract test that lists readers.
+def paramOr(value, fallback) {
+    return value != null ? value : fallback
+}
+
 def fadeSettings() {
-    def get = { name, fallback -> params.containsKey(name) && params[name] != null ? params[name] : fallback }
-    def s = [model:get('fade_model','LG'), method:get('fade_method','Variational-Bayes'),
-        background_scope:get('fade_background_scope','all'),internal_nodes:get('fade_internal_nodes','all_descendants'),
-        bf_threshold:get('fade_bf_threshold',100), grid:get('fade_grid',20), concentration:get('fade_concentration',0.5),
-        chains:get('fade_chains',5),chain_length:get('fade_chain_length',2000000),burn_in:get('fade_burn_in',1000000),
-        samples:get('fade_samples',1000),traitname:get('traitname','unknown_trait')]
+    def s = [model:paramOr(params.fade_model,'LG'), method:paramOr(params.fade_method,'Variational-Bayes'),
+        background_scope:paramOr(params.fade_background_scope,'all'),internal_nodes:paramOr(params.fade_internal_nodes,'all_descendants'),
+        bf_threshold:paramOr(params.fade_bf_threshold,100), grid:paramOr(params.fade_grid,20), concentration:paramOr(params.fade_concentration,0.5),
+        chains:paramOr(params.fade_chains,5),chain_length:paramOr(params.fade_chain_length,2000000),burn_in:paramOr(params.fade_burn_in,1000000),
+        samples:paramOr(params.fade_samples,1000),traitname:paramOr(params.traitname,'unknown_trait')]
     assert s.model in ['LG','WAG','JTT','JC69','mtMet','mtVer','gcpREV','HIVBm','HIVWm','GTR'] : "Unsupported FADE model: ${s.model}; Dayhoff is not provided by this HyPhy interface"
     assert s.method in ['Variational-Bayes','Collapsed-Gibbs','Metropolis-Hastings'] : 'Invalid FADE method'
     assert s.background_scope in ['all','opposite'] : 'Invalid FADE background scope'

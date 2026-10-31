@@ -1,6 +1,11 @@
 #!/usr/bin/env nextflow
 include { selectionQuote; selectionHash } from '../SELECTION/selection_contract'
 include { fadeJson } from './fade_contract'
+
+// Space-separated, quoted file list for the command line (a function, not a closure, for the linter).
+def fadeArgs(paths) {
+    return (paths instanceof List ? paths : [paths]).collect { selectionQuote(it) }.join(' ')
+}
 process FADE_TABLES {
     tag "${direction}"
     label 'process_low'
@@ -23,13 +28,12 @@ process FADE_TABLES {
     path 'fade_audit.tsv', emit: audit
     script:
     def py=(params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python' : 'python'
-    def args={ paths -> (paths instanceof List ? paths : [paths]).collect { selectionQuote(it) }.join(' ') }
     """
     echo '${source_hash}' > code.sha256
     printf '%s\\n' ${fadeJson(expected)} > expected.json
     printf '%s\\n' ${fadeJson(settings)} > settings.json
     ${py} -B ${selectionQuote("${baseDir}/subworkflows/FADE/local/src/fade_merge_tables.py")} \\
-        --direction ${direction} --genes ${args(genes)} --sites ${args(sites)} --audits ${args(audits)} \\
+        --direction ${direction} --genes ${fadeArgs(genes)} --sites ${fadeArgs(sites)} --audits ${fadeArgs(audits)} \\
         --expected expected.json --settings settings.json
     """
 }

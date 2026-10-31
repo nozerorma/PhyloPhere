@@ -25,7 +25,7 @@ def reportSourceKey() {
 }
 
 process DATASET_EXPLORATION {
-    ext report_source_hash: reportSourceKey()
+    ext report_source_hash: { reportSourceKey() }
     tag "dataset_exploration"
     label 'process_reporting_dataset'
     publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename -> filename.equals('data_exploration') || filename.startsWith('data_exploration/') ? filename : null }

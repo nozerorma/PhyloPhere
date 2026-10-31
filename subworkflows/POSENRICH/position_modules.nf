@@ -10,6 +10,12 @@ def modularSourceHash(List names) {
         .digest(sources.getBytes('UTF-8')).encodeHex().toString()
 }
 
+// Command-line fragment for an optional source; NO_* sentinels and dangling paths mean absent.
+// A function rather than a closure so the linter resolves it.
+def optionalFlag(flag, source) {
+    return source.name.startsWith('NO_') ? '' : "--${flag} '${source}'"
+}
+
 process POSITION_REGISTRY {
     cache 'deep'
     label 'process_registry'
@@ -39,23 +45,22 @@ process POSITION_REGISTRY {
 
     script:
     def source_hash = modularSourceHash(['src/posenrich_registry.py', 'src/position_sources.py', 'src/posenrich_universe.py', 'src/posenrich_members.py'])
-    // NO_* sentinels and dangling paths mean absent; the registry tolerates every absent source.
-    def optional = { flag, source -> source.name.startsWith('NO_') ? '' : "--${flag} '${source}'" }
+    // The registry tolerates every absent source (see optionalFlag).
     """
     # POSENRICH sources SHA256: ${source_hash}
     python3 ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_registry.py \\
-        ${optional('position_scores', position_scores)} \\
-        ${optional('postproc', postproc)} \\
-        ${optional('null_universe', null_universe)} \\
-        ${optional('map_dir', map_dir)} \\
-        ${optional('cleaned_background', background)} \\
-        ${optional('gene_ensembl_file', gene_ensembl)} \\
-        ${optional('domain_variability_file', domain_file)} \\
-        ${optional('ucr_positions_file', ucr_file)} \\
-        ${optional('fubar_sites_file', fubar_file)} \\
-        ${optional('fade_sites_top_file', fade_top)} \\
-        ${optional('fade_sites_bottom_file', fade_bottom)} \\
-        ${optional('custom_marker_file', custom_file)} \\
+        ${optionalFlag('position_scores', position_scores)} \\
+        ${optionalFlag('postproc', postproc)} \\
+        ${optionalFlag('null_universe', null_universe)} \\
+        ${optionalFlag('map_dir', map_dir)} \\
+        ${optionalFlag('cleaned_background', background)} \\
+        ${optionalFlag('gene_ensembl_file', gene_ensembl)} \\
+        ${optionalFlag('domain_variability_file', domain_file)} \\
+        ${optionalFlag('ucr_positions_file', ucr_file)} \\
+        ${optionalFlag('fubar_sites_file', fubar_file)} \\
+        ${optionalFlag('fade_sites_top_file', fade_top)} \\
+        ${optionalFlag('fade_sites_bottom_file', fade_bottom)} \\
+        ${optionalFlag('custom_marker_file', custom_file)} \\
         --window_size_bp ${params.scoring_window_size_bp ?: 1000000} \\
         --universe '${universe}' --universe-manifest '${universe_manifest}' --position-calibration '${position_calibration}' \\
         --output_dir registry

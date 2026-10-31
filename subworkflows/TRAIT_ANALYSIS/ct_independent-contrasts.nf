@@ -24,7 +24,7 @@ def reportSourceKey() {
 }
 
 process CONTRAST_ALGORITHM {
-    ext report_source_hash: reportSourceKey()
+    ext report_source_hash: { reportSourceKey() }
     tag "CONTRAST_ALGORITHM"
     label 'process_contrast_selection'
     publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename -> filename.equals('data_exploration') || filename.startsWith('data_exploration/') ? filename : null }

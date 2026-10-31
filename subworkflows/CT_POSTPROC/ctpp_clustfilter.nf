@@ -42,7 +42,7 @@ def clusterFileSuffix(minlen, maxcaas) {
 }
 
 process CAAS_PREPARE_POSTPROC_INPUT {
-    ext source_hash: ppSourceKey()
+    ext source_hash: { ppSourceKey() }
     cache 'deep'
     tag 'prepare_postproc_input'
     publishDir "${params.outdir}/postproc/preprocessed", mode: 'copy', overwrite: true
@@ -71,7 +71,7 @@ process CAAS_PREPARE_POSTPROC_INPUT {
 }
 
 process CT_FILTER {
-    ext source_hash: ppSourceKey()
+    ext source_hash: { ppSourceKey() }
     cache 'deep'
     tag "${mode}:${minlen}:${maxcaas}"
     publishDir path: params.caas_postproc_mode == 'exploratory' ? "${params.outdir}/postproc/filter_exploratory/minlen${minlen}_maxcaas${maxcaas}" : "${params.outdir}/postproc/filter_selected", mode: 'copy', overwrite: true
@@ -94,7 +94,7 @@ process CT_FILTER {
 }
 
 process CT_FILTER_SUMMARY {
-    ext source_hash: ppSourceKey()
+    ext source_hash: { ppSourceKey() }
     cache 'deep'
     tag 'filter_summary'
     publishDir "${params.outdir}/postproc/summary_statistics", mode: 'copy', overwrite: true, pattern: 'filter_summary.tsv'
@@ -111,7 +111,7 @@ process CT_FILTER_SUMMARY {
 }
 
 process CAAS_FILTER_GENES {
-    ext source_hash: ppSourceKey()
+    ext source_hash: { ppSourceKey() }
     cache 'deep'
     tag "gene_filter:${params.gene_filter_mode}"
     label 'CT_FILTER'
@@ -144,7 +144,7 @@ process CAAS_FILTER_GENES {
 }
 
 process CAAS_BACKGROUND_CLEANUP {
-    ext source_hash: ppSourceKey()
+    ext source_hash: { ppSourceKey() }
     cache 'deep'
     tag 'bg_cleanup'
     label 'CT_FILTER'

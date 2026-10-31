@@ -11,7 +11,7 @@ def diagnosticsSourceKey() {
 }
 
 process ASR_DIAGNOSTICS_REPORT {
-    ext report_source_hash: diagnosticsSourceKey()
+    ext report_source_hash: { diagnosticsSourceKey() }
     cache 'deep'
     tag 'asr_diagnostics'
     label 'process_reporting'

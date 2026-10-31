@@ -23,7 +23,7 @@ def reportSourceKey() {
 }
 
 process CI_COMPOSITION_REPORT {
-    ext report_source_hash: reportSourceKey()
+    ext report_source_hash: { reportSourceKey() }
     tag "CI_COMPOSITION_REPORT"
     label 'process_contrast_selection'
     publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename -> filename.equals('data_exploration') || filename.startsWith('data_exploration/') ? filename : null }

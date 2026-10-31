@@ -15,7 +15,7 @@ def significanceReportKey() {
 }
 
 process CAAS_META_CAAS_REPORT {
-    ext report_source_hash: patternReportKey()
+    ext report_source_hash: { patternReportKey() }
     label 'process_reporting'
     publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'
 
@@ -53,7 +53,7 @@ PHYLOPHERE_RENDER_R
 // Runs after SCORING. Producer p/q values and their original BH families are
 // preserved.
 process CAAS_SIGNIFICANCE_REPORT {
-    ext report_source_hash: significanceReportKey()
+    ext report_source_hash: { significanceReportKey() }
     label 'process_reporting'
     publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: 'significance/**'
     publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'

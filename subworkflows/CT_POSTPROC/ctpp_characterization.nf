@@ -9,7 +9,7 @@ def characterizationKey() {
 }
 
 process CT_POSTPROC_REPORT {
-    ext source_hash: characterizationKey()
+    ext source_hash: { characterizationKey() }
     cache 'deep'
     tag 'caas_postproc_report'
     label 'process_reporting'

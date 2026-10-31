@@ -67,7 +67,7 @@ def extractionSourceKey() {
         .digest(file("${baseDir}/subworkflows/ASR_DIAGNOSTICS/local/src/extract_diagnostics.py").bytes).encodeHex().toString()
 }
 process EXTRACT_DISAMBIG_DIR {
-    ext extractor_hash: extractionSourceKey()
+    ext extractor_hash: { extractionSourceKey() }
     cache 'deep'
     input: path tarball
     output: path 'extracted', emit: dir
