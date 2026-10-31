@@ -11,7 +11,7 @@ pytestmark=pytest.mark.skipif(not shutil.which('nextflow'),reason='Run in phylop
 
 @pytest.fixture
 def project(tmp_path):
-    for name in ['FADE','SELECTION']:
+    for name in ['FADE','SELECTION','common']:
         shutil.copytree(ROOT/'subworkflows'/name,tmp_path/'subworkflows'/name,ignore=shutil.ignore_patterns('__pycache__'))
     style=tmp_path/'subworkflows/TRAIT_ANALYSIS/local/src';style.mkdir(parents=True)
     shutil.copy2(ROOT/'subworkflows/TRAIT_ANALYSIS/local/src/report_style.R',style/'report_style.R')

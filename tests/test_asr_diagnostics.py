@@ -72,7 +72,8 @@ def test_contract_and_full_renders(tmp_path):
 def project(tmp_path):
     assert shutil.which('nextflow') and shutil.which('Rscript'), 'Use conda run -n phylophere'
     project = tmp_path / 'project with spaces'
-    for rel in [Path('workflows/asr_diagnostics.nf'), Path('subworkflows/ASR_DIAGNOSTICS/asr_diagnostics.nf'), STYLE]:
+    for rel in [Path('workflows/asr_diagnostics.nf'), Path('subworkflows/ASR_DIAGNOSTICS/asr_diagnostics.nf'), STYLE,
+                Path('subworkflows/common/content_hash.nf')]:
         dest = project / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(ROOT / rel, dest)

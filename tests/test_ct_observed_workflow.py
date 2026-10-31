@@ -18,7 +18,7 @@ def project(tmp_path):
     p=tmp_path/"project's directory";p.mkdir()
     shutil.copytree(LOCAL,p/'subworkflows/CT_DISAMBIGUATION/local',ignore=shutil.ignore_patterns('__pycache__'))
     for name in ['subworkflows/CT_DISAMBIGUATION/ct_observed.nf','subworkflows/CT/caas_permulation.nf',
-                 'subworkflows/CT/local/modules/design_io.py','workflows/ct_observed.nf']:
+                 'subworkflows/CT/local/modules/design_io.py','workflows/ct_observed.nf','subworkflows/common/content_hash.nf']:
         target=p/name;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy(ROOT/name,target)
     (p/"design's file.tab").write_text('A\t1\t1\nB\t0\t1\n')
     (p/"discovery's file.tab").write_text('gene\tposition\ttrait\tcaas\tpattern\n')

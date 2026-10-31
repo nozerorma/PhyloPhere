@@ -184,7 +184,7 @@ def project(tmp_path):
                       'subworkflows/ASR_DIAGNOSTICS','subworkflows/CT/local/modules']:
         shutil.copytree(ROOT/directory,project/directory,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
     for rel in ['workflows/ct_postproc.nf','workflows/asr_diagnostics.nf','conf/ct_postproc.config',
-                'subworkflows/TRAIT_ANALYSIS/local/src/report_style.R']:
+                'subworkflows/TRAIT_ANALYSIS/local/src/report_style.R','subworkflows/common/content_hash.nf']:
         dest=project/rel;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy(ROOT/rel,dest)
     master,stamp=observed(project/'observed')
     (project/'lengths.tsv').write_text('gene\tlength\tchr\tstart\tend\n001.2\t100\t1\t1\t300\nother\t80\t1\t400\t640\n')
