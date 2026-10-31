@@ -22,7 +22,7 @@ def fadeBatch(rows, id) {
     def manifest=rows.collect { row ->
         [row[0],row[1],"fastas/${row[2].name}","trees/${row[3].name}","species/${row[4].name}",row[5]!=null ? "species/${row[5].name}" : 'NO_FILE'].join('\t')
     }.join('\n')+'\n'
-    tuple(id,manifest,fastas,trees,species,selectionHash([*fastas,*trees,*species]))
+    tuple(id,manifest,fastas,trees,species,selectionHash(fastas + trees + species))
 }
 
 def split_gene_lists(ch) {
@@ -82,12 +82,18 @@ workflow FADE {
     def allGenes=genes.collect().ifEmpty([]).map { paths -> paths.sort { it.toString() } }
     def allSites=sites.collect().ifEmpty([]).map { paths -> paths.sort { it.toString() } }
     def allAudits=audits.collect().ifEmpty([]).map { paths -> paths.sort { it.toString() } }
-    def report_top_ch=Channel.empty(), report_bottom_ch=Channel.empty()
-    def summary_top_ch=Channel.empty(), summary_bottom_ch=Channel.empty()
-    def site_top_ch=Channel.empty(), site_bottom_ch=Channel.empty()
-    def csv_top_ch=Channel.empty(), csv_bottom_ch=Channel.empty()
-    def bg_top_ch=Channel.empty(), bg_bottom_ch=Channel.empty()
-    def sig_top_ch=Channel.empty(), sig_bottom_ch=Channel.empty()
+    def report_top_ch=Channel.empty()
+    def report_bottom_ch=Channel.empty()
+    def summary_top_ch=Channel.empty()
+    def summary_bottom_ch=Channel.empty()
+    def site_top_ch=Channel.empty()
+    def site_bottom_ch=Channel.empty()
+    def csv_top_ch=Channel.empty()
+    def csv_bottom_ch=Channel.empty()
+    def bg_top_ch=Channel.empty()
+    def bg_bottom_ch=Channel.empty()
+    def sig_top_ch=Channel.empty()
+    def sig_bottom_ch=Channel.empty()
     if (wanted.contains('top')) {
         def tables=FADE_TABLES_TOP('top',allGenes,allSites,allAudits,expected,settings,merge_hash)
         summary_top_ch=tables.summary_tsv;site_top_ch=tables.site_tsv;csv_top_ch=tables.sites_csv

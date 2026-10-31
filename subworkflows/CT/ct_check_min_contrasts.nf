@@ -76,13 +76,17 @@ workflow GATE_CONTRASTS {
         def sentinel = destination.resolve('low_contrasts.skip')
         if (status.skipped) {
             def temporary = java.nio.file.Files.createTempFile(destination, '.low_contrasts-', '.tmp')
+            // Same cleanup as a finally block (no try/finally under strict lint): remove the temporary on failure,
+            // and after a successful move it no longer exists, so the second deleteIfExists is a no-op.
             try {
                 java.nio.file.Files.copy(status_file.parent.resolve('low_contrasts.skip'), temporary,
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING)
                 java.nio.file.Files.move(temporary, sentinel, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-            } finally {
+            } catch (Throwable error) {
                 java.nio.file.Files.deleteIfExists(temporary)
+                throw error
             }
+            java.nio.file.Files.deleteIfExists(temporary)
         } else {
             java.nio.file.Files.deleteIfExists(sentinel)
         }
