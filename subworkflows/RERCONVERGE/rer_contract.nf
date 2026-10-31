@@ -1,4 +1,5 @@
 #!/usr/bin/env nextflow
+include { fingerprintRoot } from '../common/content_hash.nf'
 
 def rerQuote(value) { "'" + value.toString().replace("'", "'\"'\"'") + "'" }
 
@@ -9,21 +10,7 @@ def rerHash(paths) {
         if (original.name != 'NO_FILE') p = original.toRealPath()
         if (p.name == 'NO_FILE' && !p.exists()) { md.update('NO_FILE'.bytes); return }
         assert p.exists() : "RER input not found: ${p}"
-        def files = [p]
-        // Directory iteration below uses a stable relative-name/content sequence.
-        if (p.isDirectory()) {
-            files=[]
-            p.toFile().eachFileRecurse(groovy.io.FileType.FILES) { files << it.toPath() }
-        }
-        files.sort { it.toString() }.each { f ->
-            md.update((p.isDirectory() ? p.relativize(f).toString() : p.name).getBytes('UTF-8'))
-            md.update((byte)0)
-            f.toFile().withInputStream { stream ->
-                byte[] b = new byte[1048576]; int n
-                while ((n=stream.read(b)) != -1) md.update(b,0,n)
-            }
-            md.update((byte)0)
-        }
+        fingerprintRoot(md, p, true)
     }
     md.digest().encodeHex().toString()
 }

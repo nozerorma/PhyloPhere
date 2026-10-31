@@ -45,23 +45,17 @@
 
 include { ASR_DIAGNOSTICS_REPORT } from '../subworkflows/ASR_DIAGNOSTICS/asr_diagnostics'
 
+include { fingerprintRoots } from '../subworkflows/common/content_hash.nf'
+
 // Nextflow deep caching does not hash files inside a directory. Only these two
 // scientific inputs are consumed by the report; stream them to bound memory.
 def asrInputHash(directory) {
-    def md = java.security.MessageDigest.getInstance('SHA-256')
-    ['caas_convergence_master.csv', 'observed_scoring.json'].each { name ->
+    def sources = ['caas_convergence_master.csv', 'observed_scoring.json'].collect { name ->
         def source = directory.resolve(name)
         assert source.isFile() : "[asr_diagnostics] Required observed input not found: ${source}"
-        md.update(name.getBytes('UTF-8'))
-        md.update((byte)0)
-        source.toFile().withInputStream { stream ->
-            byte[] buffer = new byte[1048576]
-            int n
-            while ((n = stream.read(buffer)) != -1) md.update(buffer, 0, n)
-        }
-        md.update((byte)0)
+        source
     }
-    return md.digest().encodeHex().toString()
+    return fingerprintRoots(sources, true)
 }
 
 // ── Archive input ────────────────────────────────────────────────────────────

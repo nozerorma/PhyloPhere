@@ -1,4 +1,5 @@
 #!/usr/bin/env nextflow
+include { fingerprintRoots } from '../common/content_hash.nf'
 
 // All scientific file inputs are staged. task.ext makes the copied implementation
 // fingerprint part of the task cache key, including shared readers and rate tables.
@@ -25,25 +26,7 @@ def observedQuote(value) { "'" + value.toString().replace("'", "'\"'\"'") + "'" 
 // Nextflow hashes directory metadata, even in deep mode. Fingerprint nested
 // scientific inputs explicitly while retaining their original staged layout.
 def observedInputHash(path) {
-    def root = file(path).toFile()
-    def md = java.security.MessageDigest.getInstance('SHA-256')
-    def files = []
-    if (root.isDirectory()) {
-        root.eachFileRecurse(groovy.io.FileType.FILES) { files << it }
-    } else if (root.isFile()) {
-        files << root
-    }
-    files.sort { it.path }.each { f ->
-        md.update((root.isDirectory() ? root.toPath().relativize(f.toPath()).toString() : f.name).getBytes('UTF-8'))
-        md.update((byte)0)
-        f.withInputStream { stream ->
-            byte[] buffer = new byte[1048576]
-            int n
-            while ((n = stream.read(buffer)) != -1) md.update(buffer, 0, n)
-        }
-        md.update((byte)0)
-    }
-    return md.digest().encodeHex().toString()
+    return fingerprintRoots([file(path)], true)
 }
 
 process CAAS_OBSERVED {

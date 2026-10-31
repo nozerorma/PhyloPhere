@@ -1,21 +1,16 @@
 #!/usr/bin/env nextflow
+include { fingerprintEntry } from '../common/content_hash.nf'
 // Quality masks use every CT candidate, including diagnostic side=none rows.
 def ppQuote(value) { "'" + value.toString().replace("'", "'\"'\"'") + "'" }
 
 def ppHash(paths) {
+    // Directories are listed with files(), which skips hidden files; the existing cache keys depend on that listing.
     def md = java.security.MessageDigest.getInstance('SHA-256')
     paths.each { source ->
         assert source.exists() : "Missing postproc input: ${source}"
-        def files = source.isDirectory() ? files("${source}/**/*", type: 'file').sort { it.toString() } : [source]
-        files.each { f ->
-            md.update((source.isDirectory() ? source.relativize(f).toString() : f.name).getBytes('UTF-8'))
-            md.update((byte)0)
-            f.toFile().withInputStream { stream ->
-                byte[] buffer = new byte[1048576]
-                int n
-                while ((n = stream.read(buffer)) != -1) md.update(buffer, 0, n)
-            }
-            md.update((byte)0)
+        def entries = source.isDirectory() ? files("${source}/**/*", type: 'file').sort { it.toString() } : [source]
+        entries.each { f ->
+            fingerprintEntry(md, source.isDirectory() ? source.relativize(f).toString() : f.name, f, true)
         }
     }
     md.digest().encodeHex().toString()

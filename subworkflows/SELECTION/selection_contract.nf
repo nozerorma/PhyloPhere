@@ -1,21 +1,11 @@
 #!/usr/bin/env nextflow
+include { fingerprintRoots } from '../common/content_hash.nf'
 
 def selectionQuote(value) { "'" + value.toString().replace("'", "'\"'\"'") + "'" }
 
 def selectionHash(sources) {
-    def md = java.security.MessageDigest.getInstance('SHA-256')
-    sources.each { source ->
-        assert source.isFile() : "SELECTION_PREP: file not found: ${source}"
-        md.update(source.name.getBytes('UTF-8'))
-        md.update((byte)0)
-        source.toFile().withInputStream { stream ->
-            byte[] buffer = new byte[1048576]
-            int n
-            while ((n = stream.read(buffer)) != -1) md.update(buffer, 0, n)
-        }
-        md.update((byte)0)
-    }
-    md.digest().encodeHex().toString()
+    sources.each { source -> assert source.isFile() : "SELECTION_PREP: file not found: ${source}" }
+    return fingerprintRoots(sources, true)
 }
 
 def selectionSingle(files, label) {
