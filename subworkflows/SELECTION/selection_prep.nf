@@ -165,8 +165,6 @@ workflow SELECTION_PREP {
                              // (candidate_species.tab, species\tcontrast_group\tpair) from
                              // 3.CI-composition.Rmd; or null → falls back to canonical outdir path
         tree_input         // Channel<path> or null → falls back to params.tree
-        pp_top_ch          // Legacy input, unused (kept for backwards-compatible signature)
-        pp_bottom_ch       // Legacy input, unused (kept for backwards-compatible signature)
         ct_discovery_input // Optional CT discovery table for toy_mode gene reuse
 
     main:

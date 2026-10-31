@@ -62,12 +62,12 @@ workflow {
     def missing_id = 0
     def absent = { missing_id++; Channel.value(file("NO_FILE_${missing_id}")) }
     ENRICHMENT(
-        absent(), absent(), absent(), absent(), absent(),
+        absent(), absent(), absent(), absent(),
         Channel.value(file(params.fixture_background)),
-        absent(), absent(), absent(), absent(), absent(),
+        absent(), absent(),
         Channel.value(file(params.fixture_scores)),
         absent(), absent(), absent(), absent(), absent(),
-        absent(), absent(), absent(), absent(), absent(), absent(), absent(),
+        absent(), absent(), absent(), absent(), absent(), absent(),
         params.fixture_char ? Channel.value(file(params.fixture_char)) : Channel.empty()
     )
 }

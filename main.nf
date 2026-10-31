@@ -168,14 +168,19 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // again. The curated channels are value channels (every input of NAME_CURATION is one), so any number of stages can read them.
         // It runs whenever --tree is given; the trait table is curated too when --my_traits is given,
         // and otherwise (runs on precomputed inputs) the trait channel stays null.
+        // A path that was given and does not exist is an error here: skipping it would leave the curated
+        // channels null and surface later as a misleading "requires --my_traits and --tree".
+        if (params.tree && !file(params.tree).exists()) error "--tree not found: ${params.tree}"
+        if (params.my_traits && !file(params.my_traits).exists()) error "--my_traits not found: ${params.my_traits}"
+
         def curated_trait_ch = null
         def curated_tree_ch = null
         def curated_taxid_map_ch = null
-        if (params.tree && file(params.tree).exists()) {
+        if (params.tree) {
             def curation_tax_id_ch = params.tax_id
                 ? Channel.value(file(params.tax_id))
                 : Channel.value(file('NO_FILE'))
-            def has_traits = params.my_traits && file(params.my_traits).exists()
+            def has_traits = params.my_traits as boolean
             def curation = NAME_CURATION(Channel.value(file(params.tree)), curation_tax_id_ch,
                                          Channel.value(has_traits ? file(params.my_traits) : file('NO_FILE')))
             curated_trait_ch = has_traits ? curation.curated_traits : null
@@ -264,7 +269,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         }
         def meta_caas_results = null
         def observed_results = null   // master_csv and results_dir (ct_disambiguation/) of the observed labeling
-        def observed_meta = null      // CT_OBSERVED outputs, when a discovery.tab was scored there
         def postproc_results = null
 
         // Track which sub-tools actually ran so we can pass null (not Channel.empty())
@@ -289,6 +293,22 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         // Otherwise an incomplete standalone replay can supply empty live channels
         // that mask --caas_null_dir in SCORING. Live discovery/disambiguation still wins.
         def run_caas_permulation  = run_ct_disambiguation || ran_discovery || (toBool(params.enrichment) && toBool(params.caas_permulation_enrichment) && !params.caas_null_dir)
+
+        // Preconditions of the downstream modules, checked together before any of them is wired. They use the
+        // predicates above (what this run will produce), not the bare toggles, whose defaults are true.
+        if (params.vep && !params.scoring) {
+            error "VEP requires --scoring: it is fed directly by position_scores.tsv (use --vep false otherwise)."
+        }
+        if (params.enrichment && !params.scoring) {
+            error "ENRICHMENT requires --scoring: its FCS, AMI and comparison inputs come from the SCORING outputs."
+        }
+        def evidence_top_n = (params.caas_evidence_top_n ?: 0) as int
+        if (evidence_top_n > 0 && !params.scoring) {
+            error "caas_evidence_top_n > 0 explains the best positions of position_scores.tsv: it needs --scoring."
+        }
+        if (params.scoring && !run_ct_postproc && !params.scoring_postproc_input) {
+            error "SCORING needs post-processing output: --ct_postproc with discovery (or --discovery_from) and --ct_disambiguation, or --disambiguation_input, or --scoring_postproc_input."
+        }
 
         // Stable channel references for CT_POSTPROC outputs used by multiple consumers.
         // Populated inside the ct_postproc block when --ct_postproc is enabled.
@@ -438,7 +458,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 assert discovery_file_obj.exists() : "Error: discovery_from file not found: ${params.discovery_from}"
                 def observed_run = CT_OBSERVED(Channel.value(discovery_file_obj), trait_for_observed, tree_for_observed, hyp_pairs_for_observed, taxid_map_ch)
                 observed_results = [master_csv: observed_run.master_csv, results_dir: observed_run.results_dir]
-                observed_meta = observed_run
                 evidence_inputs = [discovery: Channel.value(discovery_file_obj), design: observed_run.design, tree: observed_run.tree]
                 ran_any = true
             }
@@ -554,12 +573,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 ? core_observed.discovery
                 : Channel.empty()
 
-            // gene_set mode sources its directional gene lists from the
-            // the fade precomputed-summary params (resolved inside
-            // SELECTION_PREP); the empty channels here keep the take: signature.
-            def sel_pp_top_ch    = Channel.empty()
-            def sel_pp_bottom_ch = Channel.empty()
-
             // Run alignment prep ONCE for FADE.
             // SELECTION_PREP outputs value channels for species/tree files
             // (can be safely consumed by multiple downstream operators) and
@@ -567,28 +580,17 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             SELECTION_PREP(
                 species_source_ch,
                 tree_source_ch,
-                sel_pp_top_ch,
-                sel_pp_bottom_ch,
                 ct_discovery_source_ch
             )
 
-            // Fork each per-gene fasta channel into independent copies for
-            // FADE  so they don't compete on the same queue channel.
-            def prep_top_fanout    = SELECTION_PREP.out.filtered_fasta_top_ch
-                .multiMap { it -> fade: it}
-            def prep_bottom_fanout = SELECTION_PREP.out.filtered_fasta_bottom_ch
-                .multiMap { it -> fade: it}
-
-            if (params.fade) {
-                FADE(
-                    prep_top_fanout.fade,
-                    prep_bottom_fanout.fade,
-                    SELECTION_PREP.out.tree_ch,
-                    SELECTION_PREP.out.top_species,
-                    SELECTION_PREP.out.bottom_species
-                )
-                ran_any = true
-            }
+            FADE(
+                SELECTION_PREP.out.filtered_fasta_top_ch,
+                SELECTION_PREP.out.filtered_fasta_bottom_ch,
+                SELECTION_PREP.out.tree_ch,
+                SELECTION_PREP.out.top_species,
+                SELECTION_PREP.out.bottom_species
+            )
+            ran_any = true
         }
 
         // Precomputed-FADE-input path: the tables of a prior --fade run (<outdir>/selection/fade/<direction>:
@@ -638,14 +640,10 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             def rer_traitfile_ch = curated_trait_ch ?: Channel.empty()
             RER_MAIN(
                 rer_traitfile_ch,
-                Channel.empty(),
-                Channel.empty(),
                 taxid_map_ch
             )
             ran_any = true
         }
-
-        println "DEBUG: params.traitname = '${params.traitname}'"
 
         // CAAS permulation-excess null → canonical matrix blocks + the
         // positions the null scores, per block of cycles (feeds the counters of p.emp).
@@ -657,15 +655,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
 
         // RER permutations: consumed by SCORING and by ENRICHMENT's centralized RER FCS
         def scoring_rer_perms_ch     = (params.rer_tool || params.rer_continuous_file || params.rer_binary_file) ? RER_MAIN.out.perms : null
-        def evidence_top_n = (params.caas_evidence_top_n ?: 0) as int
-        if (evidence_top_n > 0 && !params.scoring) {
-            error "caas_evidence_top_n > 0 explains the best positions of position_scores.tsv: it needs --scoring."
-        }
         if (params.scoring) {
-            if (!params.ct_postproc && !params.scoring_postproc_input) {
-                error "SCORING requires CT post-processing output (--ct_postproc) or --scoring_postproc_input."
-            }
-
             // Wire upstream outputs into SCORING. Pass null (not Channel.empty())
             // when a module didn't run so if(channel) guards detect absence correctly.
             def scoring_postproc_ch      = postproc_results
@@ -770,26 +760,17 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                               taxid_map_ch)
             }
 
-            // Canonical positive-score position/gene evidence, downstream of SCORING.
-            // meta_caas is a compatibility input; it no longer defines report rows.
-            if (params.scoring) {
-                def signif_caas_upstream = scoring_postproc_ch
-                if (!signif_caas_upstream && core_observed) {
-                    signif_caas_upstream = core_observed.meta_caas
-                } else if (!signif_caas_upstream && observed_meta) {
-                    signif_caas_upstream = observed_meta.meta_caas
-                }
-
-                CAAS_SIGNIFICANCE_REPORT(
-                        signif_caas_upstream ?: Channel.value(file('NO_META_CAAS')),
-                        SCORING.out.position_scores,
-                        SCORING.out.gene_scores,
-                        SCORING.out.gene_evidence_metadata,
-                        SCORING.out.gene_evidence,
-                        SCORING.out.null_universe_summary.ifEmpty { file('NO_NULL_UNIVERSE') }
-                    )
-                ran_any = true
-            }
+            // Canonical positive-score position/gene evidence, downstream of SCORING. The report reads the SCORING
+            // tables only: the process still declares a meta_caas input, which it does not read, so it gets the sentinel.
+            CAAS_SIGNIFICANCE_REPORT(
+                    Channel.value(file('NO_META_CAAS')),
+                    SCORING.out.position_scores,
+                    SCORING.out.gene_scores,
+                    SCORING.out.gene_evidence_metadata,
+                    SCORING.out.gene_evidence,
+                    SCORING.out.null_universe_summary.ifEmpty { file('NO_NULL_UNIVERSE') }
+                )
+            ran_any = true
 
             // VEP after SCORING: fed directly by position_scores.tsv.
             if (params.vep) {
@@ -803,11 +784,9 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         def posenrich_out = null
         if (params.posenrich) {
             if (run_accumulation) {
-                if (!params.ct_postproc && !params.accumulation_background_input) {
-                    error "POSENRICH Accumulation requires CT post-processing output (--ct_postproc) or a standalone background file (--accumulation_background_input)."
-                }
-                if (!params.ct_postproc && !params.accumulation_caas_input) {
-                    error "POSENRICH Accumulation requires CT post-processing output (--ct_postproc) or a standalone CAAS file (--accumulation_caas_input)."
+                // run_accumulation already guarantees post-processing or --accumulation_background_input.
+                if (!run_ct_postproc && !params.accumulation_caas_input) {
+                    error "POSENRICH Accumulation requires CT post-processing output in this run (--ct_postproc with discovery and --ct_disambiguation, or --disambiguation_input) or a standalone CAAS file (--accumulation_caas_input)."
                 }
                 // The universe U is defined by the permuted null, which has no cycle when only b_0 is replayed
                 // (--caas_full_perms 0). Written without `?:`: Groovy reads a numeric 0 as false.
@@ -838,14 +817,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         }
 
         if (params.scoring && params.enrichment) {
-            // The null SCORING resolved, so ENRICHMENT's FCS p.perm uses the same matrices as the scoring report.
-            def caas_perms_for_enrich = params.scoring ? SCORING.out.caas_perms : scoring_caas_perms_ch
-            def fcs_stats_ch = params.scoring ? SCORING.out.fcs_stats : Channel.empty()
-            def fcs_stats_rer_ch = params.scoring ? SCORING.out.fcs_stats_rer : Channel.empty()
-            def fcs_stats_fade_ch = params.scoring ? SCORING.out.fcs_stats_fade : Channel.empty()
-            def gene_lists_ch = params.scoring ? SCORING.out.gene_lists : Channel.empty()
-            def gene_scores_ch = params.scoring ? SCORING.out.gene_scores : Channel.empty()
-            def position_scores_ch = params.scoring ? SCORING.out.position_scores : Channel.empty()
             def scoring_vep_pai_ch     = params.vep ? VEP.out.primateai_tsv   : null
             def scoring_vep_cosmic_ch  = params.vep ? VEP.out.cosmic_tsv      : null
             def scoring_vep_ensembl_ch = params.vep ? VEP.out.ensembl_vep_tsv : null
@@ -895,18 +866,14 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             }
 
             ENRICHMENT(
-                fcs_stats_ch,
-                fcs_stats_rer_ch,
-                fcs_stats_fade_ch,
-                gene_lists_ch,
-                gene_scores_ch,
+                SCORING.out.fcs_stats,
+                SCORING.out.fcs_stats_rer,
+                SCORING.out.gene_lists,
+                SCORING.out.gene_scores,
                 pp_cleaned_bg,
                 scoring_rer_perms_ch,
-                caas_perms_for_enrich,
-                (scoring_null_blocks_ch ?: (params.caas_null_dir ? Channel.value([file(params.caas_null_dir)]) : Channel.value([]))),
-                (params.scoring ? SCORING.out.calibration : Channel.empty()),
-                scoring_caas_pos_sample_ch,
-                position_scores_ch,
+                SCORING.out.calibration,
+                SCORING.out.position_scores,
                 scoring_vep_pai_ch,
                 scoring_vep_cosmic_ch,
                 scoring_vep_ensembl_ch,
@@ -918,18 +885,12 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 fade_gene_lists_bg_bottom_ch,
                 fade_gene_lists_sig_top_ch,
                 fade_gene_lists_sig_bottom_ch,
-                taxid_map_ch,
                 posenrich_out ? posenrich_out.position_char : Channel.empty()
             )
         }
 
-        // Standalone VEP is retired: VEP strictly depends on SCORING and is fed by position_scores.tsv.
-        if (params.vep && !params.scoring) {
-            error "VEP requires --scoring: standalone VEP has been retired. VEP depends on SCORING and is fed directly by position_scores.tsv."
-        }
-
         if (!ran_any) {
-            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_disambiguation, --ct_postproc, --enrichment, --posenrich, --fade, --scoring, or --rer_tool."
+            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_disambiguation, --ct_postproc, --posenrich, --fade, --scoring, --vep or --enrichment."
         }
     }
 }

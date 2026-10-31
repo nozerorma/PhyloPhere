@@ -33,7 +33,7 @@ workflow {
     if (params.toy_mode && !params.discovery) {
         file('ct_sample.txt').text = sampleAlignmentFiles(listAlignmentFiles(params.alignment), params.toy_n, params.seed).collect { it.baseName }.join('\\n')
     }
-    def prep = SELECTION_PREP(species, trees, Channel.empty(), Channel.empty(), discovery)
+    def prep = SELECTION_PREP(species, trees, discovery)
     prep.prep_audit.map { it.name }.collectFile(name:'audit_files.txt', storeDir:params.outdir, newLine:true)
     prep.filtered_fasta_top_ch.map { gid, f -> "${gid}\\t${f.text.replace('\\n', '|')}" }.collectFile(name:'top.tsv', storeDir:params.outdir, newLine:true)
     prep.filtered_fasta_bottom_ch.map { gid, f -> "${gid}\\t${f.text.replace('\\n', '|')}" }.collectFile(name:'bottom.tsv', storeDir:params.outdir, newLine:true)

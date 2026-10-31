@@ -21,7 +21,7 @@ def project(tmp_path):
     (tmp_path/'main.nf').write_text('''include { RER_MAIN } from './workflows/rerconverge'
 workflow {
     def traits = params.multiple ? Channel.of(file('traits.tsv'),file('traits.tsv')) : Channel.value(file('traits.tsv'))
-    RER_MAIN(traits,Channel.empty(),Channel.empty(),Channel.empty())
+    RER_MAIN(traits,Channel.empty())
     RER_MAIN.out.summary_tsv.map { it.name }.collectFile(name:'summary_files.txt',storeDir:params.outdir,newLine:true)
     RER_MAIN.out.perms.map { it.name }.collectFile(name:'null_files.txt',storeDir:params.outdir,newLine:true)
 }

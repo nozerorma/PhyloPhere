@@ -15,8 +15,6 @@ include { FCS_RER as FCS_COMPUTE } from '../subworkflows/ENRICHMENT/fcs_inputs.n
 workflow RER_MAIN {
     take:
     traitfile_input
-    pp_top_ch       // retained public signature; unused by RER
-    pp_bottom_ch
     taxid_map_input
 
     main:

@@ -121,15 +121,11 @@ workflow ENRICHMENT {
     take:
         fcs_stats
         fcs_stats_rer
-        fcs_stats_fade
         gene_lists
         gene_scores
         cleaned_background_ch
         rer_perms_ch
-        caas_perms_ch
-        caas_blocks_ch
         gene_calibration
-        caas_pos_sample_ch
         position_scores
         vep_primateai_ch     // optional: PrimateAI-3D score TSV (null when --vep not run)
         vep_cosmic_ch        // optional: COSMIC Mutant Census score TSV (null when --vep not run)
@@ -142,7 +138,6 @@ workflow ENRICHMENT {
         fade_gene_lists_bg_bottom_ch  // FADE bottom direction's own background.txt
         fade_gene_lists_sig_top_ch    // fade_top_significant.txt
         fade_gene_lists_sig_bottom_ch // fade_bottom_significant.txt
-        taxid_map_ch                  // tax_id map (curated by NAME_CURATION), or NO_FILE
         posenrich_position_char_ch    // optional: position_characterization.tsv of POSENRICH (null or empty when --posenrich did not run)
 
     main:
@@ -172,11 +167,6 @@ workflow ENRICHMENT {
         def rer_universe_ch  = params.rer_universe_file
             ? Channel.value(file(params.rer_universe_file))
             : (rer_ran ? rer_bg_r : fcs_universe_ch)
-
-        def caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
-            .ifEmpty { file('NO_FILE') }
-            .collect()
-            .map { it[0] }
 
         def rer_perms_resolved = (rer_perms_ch ?: Channel.empty())
             .ifEmpty { file(params.rer_perms_file ?: 'NO_FILE') }
