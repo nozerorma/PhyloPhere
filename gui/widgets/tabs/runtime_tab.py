@@ -84,6 +84,12 @@ class RuntimeTab(QWidget):
         form.addRow(self.toy_mode)
         _tip("Smoke test on a random subset of alignments (--toy_mode). Species are not subsampled.", self.toy_mode)
 
+        self.use_apptainer = QCheckBox("Apptainer container (--use_apptainer)")
+        self.use_apptainer.setChecked(self._config.use_apptainer)
+        self.use_apptainer.toggled.connect(self._on_use_apptainer_changed)
+        form.addRow(self.use_apptainer)
+        _tip("Runs the pipeline from the local Apptainer image. Leave off to keep the profile of the run.", self.use_apptainer)
+
         self.remove_work = QCheckBox("Remove work/ after a successful run (--remove_work)")
         self.remove_work.setChecked(self._config.remove_work)
         self.remove_work.setToolTip(
@@ -345,6 +351,10 @@ class RuntimeTab(QWidget):
 
     def _on_toy_mode_changed(self, value: bool) -> None:
         self._config.toy_mode = value
+        self.changed.emit()
+
+    def _on_use_apptainer_changed(self, value: bool) -> None:
+        self._config.use_apptainer = value
         self.changed.emit()
 
     def _on_remove_work_changed(self, value: bool) -> None:

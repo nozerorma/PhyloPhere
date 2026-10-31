@@ -48,6 +48,8 @@ class RuntimeConfig:
     # --- Top toggles ---
     resume: bool = True  # -resume
     toy_mode: bool = False  # --toy_mode
+    # Emitted to params.json only when on: the apptainer profile sets it otherwise, and a false value would override it.
+    use_apptainer: bool = False  # --use_apptainer
     remove_work: bool = False  # --remove_work: the run script removes the work/ directory after a successful run
     toy_n: str = "1000"  # --toy_n
     toy_perms: str = "100"  # permulation cycles of a toy run (CAAS_FULL_PERMS; the generated script sets MAX_TRIES from it)

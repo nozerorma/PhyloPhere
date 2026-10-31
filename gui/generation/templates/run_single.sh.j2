@@ -484,6 +484,9 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
 
   "reporting": $_RUN_REPORTING,
   "toy_mode": $_TOY_MODE,
+{% if run_defaults.use_apptainer == "true" %}
+  "use_apptainer": true,
+{% endif %}
   "toy_n": "$TOY_N",
   "remove_work": $_REMOVE_WORK,
 

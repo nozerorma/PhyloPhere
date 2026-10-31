@@ -96,6 +96,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "reporting": _bool_str(project.general.reporting),
         "tower": _bool_str(project.runtime.use_tower),
         "toy_mode": _bool_str(project.runtime.toy_mode),
+        "use_apptainer": _bool_str(project.runtime.use_apptainer),
         "caas": _bool_str(caas_enabled),
         "caas_permulation_enrichment": _bool_str(caas.caas_permulation_enrichment),
         "caas_export_single": _bool_str(caas.caas_export_single),

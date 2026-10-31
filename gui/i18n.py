@@ -1365,14 +1365,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Prior di concentrazione di Dirichlet',
         'de': 'Dirichlet-Konzentrations-Prior',
     },
-    'Min genes for report heatmaps': {
-        'en': 'Min genes for report heatmaps',
-        'es': 'Genes mínimos para mapas de calor del informe',
-        'ca': "Gens mínims per als mapes de calor de l'informe",
-        'fr': 'Gènes minimum pour les cartes de chaleur du rapport',
-        'it': 'Geni minimi per le heatmap del report',
-        'de': 'Minimale Gene für Bericht-Heatmaps',
-    },
     'FADE tested-gene universe file': {
         'en': 'FADE tested-gene universe file',
         'es': 'Archivo del universo de genes probados FADE',
@@ -2040,14 +2032,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "fr": "Nom du script généré",
         "it": "Nome dello script generato",
         "de": "Generierter Skriptname",
-    },
-    "Clade NCBI TaxID": {
-        "en": "Clade NCBI TaxID",
-        "es": "TaxID NCBI del clado",
-        "ca": "TaxID NCBI del clad",
-        "fr": "TaxID NCBI du clade",
-        "it": "TaxID NCBI del clade",
-        "de": "NCBI-TaxID des Kladus",
     },
     "Reference species name": {
         "en": "Reference species name",
