@@ -10,7 +10,7 @@
 
 import java.util.UUID
 import java.util.Base64
-import groovy.json.JsonOutput
+import java.time.OffsetDateTime
 
 class WorkflowMap {
 
@@ -61,6 +61,37 @@ class WorkflowMap {
         return targetPath
     }
 
+    // ── Evidence of a run ──────────────────────────────────────────────────────
+
+    // Html report files may carry a trait suffix (e.g. 14.Comparison_report_<trait>.html).
+    // An exact match wins; otherwise every file of the same directory with the same prefix.
+    static List<String> htmlMatches(File file) {
+        if (file.isFile()) return [file.absolutePath]
+        def parent = file.parentFile
+        if (!parent?.isDirectory()) return []
+        def base = file.name.replace('.html', '')
+        return (parent.listFiles() ?: []).findAll { it.name.startsWith(base) && it.name.endsWith('.html') }
+            .collect { it.absolutePath }.sort()
+    }
+
+    // True when the target is a file, or a directory holding a file, modified at or after sinceMs.
+    // Publishing with mode 'copy' rewrites the file on every run, cached or not, so its mtime
+    // tells whether this run produced it (directories alone can be left over from an earlier run).
+    static boolean hasFileSince(File target, long sinceMs) {
+        if (!target.exists()) return false
+        if (target.isFile()) return target.lastModified() >= sinceMs
+        return (target.listFiles() ?: []).any { hasFileSince(it, sinceMs) }
+    }
+
+    static boolean stageRan(String outdir, List<String> evidence, long sinceMs) {
+        return evidence.any { rel ->
+            def target = new File(outdir, rel)
+            rel.endsWith('.html')
+                ? htmlMatches(target).any { new File(it).lastModified() >= sinceMs }
+                : hasFileSince(target, sinceMs)
+        }
+    }
+
     // ── Stage card ─────────────────────────────────────────────────────────────
 
     static String stageCard(String outdir, Map st) {
@@ -72,17 +103,7 @@ class WorkflowMap {
 
         def htmlCandidates = (st.htmlCandidates ?: []) as List
         def htmlRows = htmlCandidates ? htmlCandidates.collect { ht ->
-            def file = new File(ht.toString())
-            def matches = file.exists() ? [file.absolutePath] : []
-            if (!matches) {
-                // Per-trait reports carry a suffix (e.g. 14.Comparison_report_<trait>.html): list every match, sorted.
-                def parent = file.parentFile
-                def base = file.name.replace(".html", "")
-                if (parent?.isDirectory()) {
-                    matches = (parent.listFiles() ?: []).findAll { it.name.startsWith(base) && it.name.endsWith(".html") }
-                        .collect { it.absolutePath }.sort()
-                }
-            }
+            def matches = htmlMatches(new File(ht.toString()))
             if (!matches) {
                 def href = relativeFromOutdir(outdir, ht.toString())
                 return "<div class=\"link-row\">→ html: <a href=\"${href}\">${htmlEscape(href)}</a> <span class=\"status missing\">MISSING</span></div>"
@@ -98,8 +119,8 @@ class WorkflowMap {
             def label  = exists ? 'available' : 'MISSING'
             def href   = relativeFromOutdir(outdir, fd.toString())
             def text   = relativeFromOutdir(outdir, fd.toString())
-            return "<div class=\"link-row\">\u2192 files: <a href=\"${href}\">${htmlEscape(text)}</a> <span class=\"status ${exists ? 'ok' : 'missing'}\">${label}</span></div>"
-        }.join('\n') : '<div class="link-row">\u2192 files: <span class="status missing">MISSING</span></div>'
+            return "<div class=\"link-row\">→ files: <a href=\"${href}\">${htmlEscape(text)}</a> <span class=\"status ${exists ? 'ok' : 'missing'}\">${label}</span></div>"
+        }.join('\n') : '<div class="link-row">→ files: <span class="status missing">MISSING</span></div>'
 
         return """
     <div class=\"stage\" style=\"border-color:${borderColor};\">
@@ -126,21 +147,23 @@ class WorkflowMap {
             processes : '#F97316'    // CT / RER / disambiguation / accumulation / selection tools
         ]
 
+        // One row per stage: the card links (filesDirs, htmlCandidates). Run status comes from
+        // stageEvidence(), the single table of evidence paths.
         def stages = [
-            [ id: 'prune',       name: 'Data pruning',                    type: 'prepost',   ran: ctx.prune,
+            [ id: 'prune',       name: 'Data pruning',                    type: 'prepost',
               filesDirs: ["${outdir}/data_exploration/0.Data-pruning"],
               htmlCandidates: ["${outdir}/html_reports/2.Phenotype_exploration_pruned.html"] ],
 
-            [ id: 'dataset_rep', name: 'Dataset reporting',               type: 'reporting', ran: ctx.datasetReport,
+            [ id: 'dataset_rep', name: 'Dataset reporting',               type: 'reporting',
               filesDirs: ["${outdir}/data_exploration"],
               htmlCandidates: ["${outdir}/html_reports/1.Dataset_exploration.html"] ],
 
-            [ id: 'pheno_rep',   name: 'Phenotype reporting',             type: 'reporting', ran: ctx.phenotypeRep,
+            [ id: 'pheno_rep',   name: 'Phenotype reporting',             type: 'reporting',
               filesDirs: ["${outdir}/data_exploration"],
               htmlCandidates: ["${outdir}/html_reports/2.Phenotype_exploration_complete.html"] ],
 
             // directories.R (TRAIT_ANALYSIS) creates 1.Traitfiles and 2.Permulation_traitfiles under 2.CT.
-            [ id: 'contrast',    name: 'Contrast selection',              type: 'prepost',   ran: ctx.contrastSel,
+            [ id: 'contrast',    name: 'Contrast selection',              type: 'prepost',
               filesDirs: ["${outdir}/data_exploration/2.CT",
                           "${outdir}/data_exploration/2.CT/1.Traitfiles",
                           "${outdir}/data_exploration/2.CT/2.Permulation_traitfiles"],
@@ -149,50 +172,62 @@ class WorkflowMap {
 
             // discovery/ and resample/ are published only with --publish_intermediates
             // (conf/ct.config); caastools/ is always written and drives the "ran" status.
-            [ id: 'ct',          name: 'CT (convergence)',                type: 'processes', ran: ctx.ct,
+            [ id: 'ct',          name: 'CT (convergence)',                type: 'processes',
               filesDirs: ["${outdir}/caastools", "${outdir}/discovery",
                           "${outdir}/resample"],
               htmlCandidates: [] ],
 
+            // CAAS_core publishes the permutation null (caas_permulation/) and, with
+            // --strict_conservation_output, the strict analysis under strict/ (publish_prefix /strict).
+            [ id: 'caas_null',   name: 'CAAS null (permulation)',         type: 'processes',
+              filesDirs: ["${outdir}/caas_permulation"],
+              htmlCandidates: [] ],
+
+            [ id: 'strict',      name: 'Strict conservation output',      type: 'processes',
+              filesDirs: ["${outdir}/strict"],
+              htmlCandidates: [] ],
+
             // 7.CAAS_pattern_annotation.Rmd (CAAS_META_CAAS_REPORT) publishes under meta_caas/.
-            [ id: 'ct_signif',   name: 'CAAS Pattern Annotation',         type: 'reporting', ran: ctx.ctSignif,
+            [ id: 'ct_signif',   name: 'CAAS Pattern Annotation',         type: 'reporting',
               filesDirs: ["${outdir}/meta_caas",
                           "${outdir}/meta_caas/meta_caas"],
               htmlCandidates: ["${outdir}/html_reports/7.CAAS_pattern_annotation.html"] ],
 
-            [ id: 'ct_disambig', name: 'CT disambiguation (convergence)', type: 'processes', ran: ctx.ctDisambig,
+            [ id: 'ct_disambig', name: 'CT disambiguation (convergence)', type: 'processes',
               filesDirs: ["${outdir}/ct_disambiguation"],
               htmlCandidates: [] ],
 
-            [ id: 'asr_diagnostics', name: 'ASR Diagnostics',              type: 'reporting', ran: ctx.asrDiagnostics,
+            [ id: 'asr_diagnostics', name: 'ASR Diagnostics',              type: 'reporting',
               filesDirs: ["${outdir}/asr_diagnostics"],
               htmlCandidates: ["${outdir}/html_reports/9.ASR_diagnostics.html"] ],
 
-            [ id: 'ct_postproc', name: 'CT post-processing',              type: 'prepost',   ran: ctx.ctPostproc,
+            [ id: 'ct_postproc', name: 'CT post-processing',              type: 'prepost',
               filesDirs: ["${outdir}/postproc",
                           "${outdir}/postproc/preprocessed",
                           "${outdir}/postproc/gene_filtering",
                           "${outdir}/postproc/cleaned_backgrounds"],
               htmlCandidates: ["${outdir}/html_reports/8.Characterization_report.html"] ],
 
-            [ id: 'ct_acc',      name: 'POSENRICH level 1: accumulation',   type: 'processes', ran: ctx.ctAccum,
+            [ id: 'ct_acc',      name: 'POSENRICH level 1: accumulation',   type: 'processes',
               filesDirs: ["${outdir}/posenrich/accumulation",
                           "${outdir}/posenrich/accumulation/top",
                           "${outdir}/posenrich/accumulation/bottom",
                           "${outdir}/posenrich/accumulation/all"],
               htmlCandidates: [] ],
 
-            [ id: 'vep',         name: 'VEP characterization',            type: 'prepost',   ran: ctx.vep,
+            [ id: 'vep',         name: 'VEP characterization',            type: 'prepost',
               filesDirs: ["${outdir}/vep"],
               htmlCandidates: [] ],
 
-            [ id: 'rer',         name: 'RERconverge (RER)',               type: 'processes', ran: ctx.rer,
+            // rerconverge/ also holds the per-module AMI, so the RER evidence is rer_results only.
+            [ id: 'rer',         name: 'RERconverge (RER)',               type: 'processes',
               filesDirs: ["${outdir}/rerconverge",
                           "${outdir}/rerconverge/rer_results",
                           "${outdir}/rerconverge/gene_lists"],
               htmlCandidates: ["${outdir}/html_reports/5.RERconverge_report.html"] ],
 
-            [ id: 'fade',        name: 'FADE (selection)',                type: 'processes', ran: ctx.fade,
+            // FADE report files are the evidence: selection/fade/top and bottom also hold AMI output.
+            [ id: 'fade',        name: 'FADE (selection)',                type: 'processes',
               filesDirs: ["${outdir}/selection/fade",
                           "${outdir}/selection/fade/top",
                           "${outdir}/selection/fade/bottom",
@@ -202,14 +237,14 @@ class WorkflowMap {
                                "${outdir}/html_reports/6.FADE_report_bottom.html"] ],
 
             // scoring_compute.R writes the ranked slices flat as gene_lists/slice_*.tsv.
-            [ id: 'scoring',     name: 'CAAS Scoring',                    type: 'reporting', ran: ctx.scoring,
+            [ id: 'scoring',     name: 'CAAS Scoring',                    type: 'reporting',
               filesDirs: ["${outdir}/scoring",
                           "${outdir}/scoring/gene_lists"],
               htmlCandidates: ["${outdir}/html_reports/10.Scoring_report.html"] ],
 
             // CAAS_SIGNIFICANCE_REPORT (15.CAAS_significance_report.Rmd) runs after scoring:
             // it joins the meta_caas table of ct_signif with position_scores.tsv (p.emp, p.adj_bh).
-            [ id: 'ct_signif_sig', name: 'CT significance (post-scoring)', type: 'reporting', ran: ctx.ctSignifSig,
+            [ id: 'ct_signif_sig', name: 'CT significance (post-scoring)', type: 'reporting',
               filesDirs: ["${outdir}/meta_caas/significance"],
               htmlCandidates: ["${outdir}/html_reports/15.CAAS_significance_report.html"] ],
 
@@ -217,13 +252,13 @@ class WorkflowMap {
             // FCS covers the CAAS ranking ('fcs') and the RER ranking ('scoring/rer'); FADE has
             // no FCS ranking. The DOMINO-based AMI run (--scoring_ami) publishes to ami/*, and
             // RER and FADE can also publish their own AMI report under their output trees.
-            [ id: 'fcs',         name: 'Functional enrichment (FCS)',     type: 'reporting', ran: ctx.fcs,
+            [ id: 'fcs',         name: 'Functional enrichment (FCS)',     type: 'reporting',
               filesDirs: ["${outdir}/fcs",
                           "${outdir}/scoring/rer"],
               htmlCandidates: ["${outdir}/html_reports/11.FCS_scoring.html",
                                "${outdir}/html_reports/11.FCS_rer.html"] ],
 
-            [ id: 'ami',         name: 'AMI (DOMINO active modules)',     type: 'reporting', ran: ctx.ami,
+            [ id: 'ami',         name: 'AMI (DOMINO active modules)',     type: 'reporting',
               filesDirs: ["${outdir}/ami",
                           "${outdir}/ami/ami_results",
                           "${outdir}/ami/ami_summary",
@@ -237,7 +272,7 @@ class WorkflowMap {
                                "${outdir}/html_reports/12.AMI_rer.html",
                                "${outdir}/html_reports/12.AMI_fade.html"] ],
 
-            [ id: 'posenrich', name: 'POSENRICH registry and level 2',   type: 'reporting', ran: ctx.posenrich,
+            [ id: 'posenrich', name: 'POSENRICH registry and level 2',   type: 'reporting',
               filesDirs: ["${outdir}/posenrich/registry",
                           "${outdir}/posenrich/characterization",
                           "${outdir}/posenrich/universe",
@@ -245,24 +280,21 @@ class WorkflowMap {
                           "${outdir}/posenrich/proximity"],
               htmlCandidates: ["${outdir}/html_reports/13.POSENRICH_report.html"] ],
 
-            [ id: 'compare',     name: 'Cross-module comparison',         type: 'reporting', ran: ctx.compare,
+            [ id: 'compare',     name: 'Cross-module comparison',         type: 'reporting',
               filesDirs: ["${outdir}/compare",
                           "${outdir}/compare/compare_results"],
               htmlCandidates: ["${outdir}/html_reports/14.Comparison_report.html"] ]
 
-        ].collect { st -> st + [color: colors[st.type]] }
+        ].collect { st -> st + [color: colors[st.type], ran: ctx.ran[st.id] ?: false] }
 
-        def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','ct_signif',
+        def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','caas_null','strict','ct_signif',
                         'ct_disambig','asr_diagnostics','ct_postproc','rer','fade',
                         'scoring','ct_signif_sig','vep','ct_acc','posenrich','fcs','ami','compare']
-        // Names and colors of the stages, shared with the Refresh Status script below.
-        def stageNames  = stages.collectEntries { [(it.id): it.name] }
-        def stageColors = stages.collectEntries { [(it.id): it.color] }
         def rows = []
         chainIds.eachWithIndex { sid, idx ->
             def st = stages.find { it.id == sid }
             rows << stageCard(outdir, st)
-            if (idx < chainIds.size() - 1) rows << '<div class="arrow">\u2193</div>'
+            if (idx < chainIds.size() - 1) rows << '<div class="arrow">↓</div>'
         }
 
         def configSources = [
@@ -364,156 +396,50 @@ class WorkflowMap {
   <div class="footer">
     Generated automatically as final run artifact: <code>${htmlEscape(outdir)}/workflow_map.html</code>
     <br/>
-    <button onclick="refreshStatus()" style="margin-top:8px; padding:4px 12px; border:1px solid #D1D5DB; border-radius:6px; background:#F9FAFB; cursor:pointer;">Refresh Status</button>
-    <span id="refresh-status" style="margin-left:8px; font-style:italic; color:#6B7280;"></span>
+    Stage status reflects this run: a stage is "ran" when its evidence files were written after the run started.
   </div>
-
-  <script>
-    function refreshStatus() {
-      document.getElementById('refresh-status').textContent = 'Refreshing...';
-      
-      // Get the current HTML file's directory (baseDir)
-      const currentPath = window.location.pathname;
-      const baseDir = currentPath.substring(0, currentPath.lastIndexOf('/'));
-      
-      // Canonical directories for each stage — generated straight from
-      // getCanonicalDirectories() (single source of truth shared with the
-      // Groovy-side scan) rather than a hand-duplicated literal, so this
-      // list can't silently drift out of sync with it again.
-      const canonicalDirs = ${JsonOutput.toJson(getCanonicalDirectories())};
-
-      let checkedStages = 0;
-      let anyUnreachable = false;
-      const totalStages = Object.keys(canonicalDirs).length;
-      
-      // Check each stage's directories
-      Object.entries(canonicalDirs).forEach(([stageId, dirPaths]) => {
-        let stageCompleted = false;
-        let checkedPaths = 0;
-        let unreachable = 0;
-        
-        dirPaths.forEach(dirPath => {
-          const fullPath = baseDir + '/' + dirPath;
-          
-          // Try to detect directory existence (limited by browser security)
-          fetch(fullPath + '/')
-            .then(response => {
-              if (response.ok || response.status === 403) {
-                stageCompleted = true;
-              }
-            })
-            .catch(() => {
-              // Network-level failure (browsers block fetch on file://): the path is unknown, not missing.
-              unreachable++;
-              anyUnreachable = true;
-            })
-            .finally(() => {
-              checkedPaths++;
-              if (checkedPaths === dirPaths.length) {
-                // Keep the server-side status when no path of the stage could be checked.
-                if (stageCompleted || unreachable === 0) updateStageDisplay(stageId, stageCompleted);
-                checkedStages++;
-                if (checkedStages === totalStages) {
-                  document.getElementById('refresh-status').textContent = anyUnreachable
-                    ? 'Some paths could not be checked; serve the output directory over HTTP to refresh.'
-                    : 'Refreshed at ' + new Date().toLocaleTimeString();
-                }
-              }
-            });
-        });
-      });
-    }
-    
-    function updateStageDisplay(stageId, completed) {
-      const stages = document.querySelectorAll('.stage');
-      stages.forEach(stage => {
-        const stageHead = stage.querySelector('.stage-head');
-        if (stageHead && stageHead.textContent.includes(getStageNameFromId(stageId))) {
-          const pill = stage.querySelector('.pill');
-          const stageElement = stage;
-          
-          if (completed) {
-            pill.className = 'pill pill-ran';
-            pill.textContent = 'ran';
-            stageElement.style.borderColor = '#1F2937';
-            stageHead.style.background = getStageColor(stageId);
-          } else {
-            pill.className = 'pill pill-skip';
-            pill.textContent = 'not run';
-            stageElement.style.borderColor = '#9CA3AF';
-            stageHead.style.background = '#B8B8B8';
-          }
-        }
-      });
-    }
-    
-    const stageNames = ${JsonOutput.toJson(stageNames)};
-    const stageColors = ${JsonOutput.toJson(stageColors)};
-
-    function getStageNameFromId(stageId) {
-      return stageNames[stageId] || stageId;
-    }
-
-    function getStageColor(stageId) {
-      return stageColors[stageId] || '#B8B8B8';
-    }
-  </script>
 </body>
 </html>
 """.stripIndent()
     }
 
-    // ── Dynamic directory scanning ─────────────────────────────────────────────
+    // ── Run status ─────────────────────────────────────────────────────────────
 
-    static Map getCanonicalDirectories() {
+    // Status of every stage. sinceMs is the start of this run (epoch milliseconds); 0 counts any file,
+    // which is what a standalone call without workflow metadata gets.
+    static Map scanRunStatus(String outdir, long sinceMs) {
+        return stageEvidence().collectEntries { id, evidence ->
+            [(id): stageRan(outdir, evidence, sinceMs)]
+        }
+    }
+
+    static Map stageEvidence() {
         return [
-            prune        : ['data_exploration/0.Data-pruning'],
-            dataset_rep  : ['data_exploration'],
-            pheno_rep    : ['data_exploration'],
-            contrast     : ['data_exploration/2.CT', 'data_exploration/2.CT/1.Traitfiles'],
-            ct           : ['caastools', 'discovery'],
-            ct_signif    : ['meta_caas', 'meta_caas/meta_caas'],
-            ct_disambig  : ['ct_disambiguation'],
-            asr_diagnostics : ['asr_diagnostics'],
-            ct_postproc  : ['postproc', 'postproc/preprocessed'],
-            ct_acc       : ['posenrich/accumulation'],
-            vep          : ['vep'],
-            rer          : ['rerconverge', 'rerconverge/rer_results'],
-            fade         : ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
-            scoring      : ['scoring'],
+            prune: ['data_exploration/0.Data-pruning'],
+            dataset_rep: ['html_reports/1.Dataset_exploration.html'],
+            pheno_rep: ['html_reports/2.Phenotype_exploration_complete.html'],
+            contrast: ['data_exploration/2.CT/1.Traitfiles'],
+            ct: ['caastools'],
+            caas_null: ['caas_permulation'],
+            strict: ['strict'],
+            ct_signif: ['meta_caas/meta_caas'],
+            ct_disambig: ['ct_disambiguation'],
+            asr_diagnostics: ['asr_diagnostics'],
+            ct_postproc: ['postproc'],
+            ct_acc: ['posenrich/accumulation'],
+            vep: ['vep'],
+            rer: ['rerconverge/rer_results'],
+            fade: ['html_reports/6.FADE_report_top.html', 'html_reports/6.FADE_report_bottom.html'],
+            scoring: ['scoring/gene_lists'],
             ct_signif_sig: ['meta_caas/significance'],
-            fcs          : ['fcs', 'scoring/rer'],
-            ami          : ['ami', 'rerconverge/ami',
-                            'selection/fade/top/ami', 'selection/fade/bottom/ami'],
-            compare      : ['compare'],
-            // POSENRICH component directories; level 1 has its own stage (ct_acc).
-            posenrich    : ['posenrich/registry', 'posenrich/characterization',
-                            'posenrich/universe', 'posenrich/within_gene', 'posenrich/proximity']
+            fcs: ['fcs'],
+            ami: ['ami'],
+            posenrich: ['posenrich/registry'],
+            compare: ['compare', 'html_reports/14.Comparison_report.html']
         ]
     }
 
-    static boolean checkStageCompletion(String baseDir, String stageId) {
-        def canonicalDirs = getCanonicalDirectories()
-        def requiredDirs = canonicalDirs[stageId]
-        if (!requiredDirs) return false
-        
-        return requiredDirs.any { dirPath ->
-            new File(baseDir, dirPath).exists()
-        }
-    }
-
-    static Map scanWorkflowDirectory(String baseDir) {
-        def canonicalDirs = getCanonicalDirectories()
-        def results = [:]
-        
-        canonicalDirs.each { stageId, dirPaths ->
-            results[stageId] = checkStageCompletion(baseDir, stageId)
-        }
-        
-        return results
-    }
-
-    // ── Convenience: build ctx map from dynamic scanning or workflow context ───
+    // ── Convenience: build ctx map from the output directory and workflow metadata ─
     // Can be called with just a directory path for standalone operation,
     // or with params + workflow for backward compatibility.
     // Explicit overloads are used instead of default parameters to avoid
@@ -531,10 +457,11 @@ class WorkflowMap {
     static Map buildCtx(baseDir, paramsMap, workflowMeta) {
         def outdir = baseDir?.toString() ?:
                     (paramsMap?.outdir ? paramsMap.outdir.toString() : "${workflowMeta?.projectDir}/out")
-        
-        // Dynamic scanning of workflow completion status
-        def scanResults = scanWorkflowDirectory(outdir)
-        
+
+        // workflow.start is an OffsetDateTime in Nextflow; without it every file counts.
+        def start = workflowMeta?.start
+        long sinceMs = start instanceof OffsetDateTime ? start.toInstant().toEpochMilli() : 0L
+
         [
             outdir        : outdir,
             launchDir     : workflowMeta?.launchDir?.toString() ?: outdir,
@@ -543,25 +470,8 @@ class WorkflowMap {
             runName       : workflowMeta?.runName ?: 'dynamic-scan',
             sessionId     : workflowMeta?.sessionId?.toString() ?: UUID.randomUUID().toString(),
             commandLine   : workflowMeta?.commandLine ?: 'dynamic generation',
-            prune         : scanResults.prune ?: false,
-            datasetReport : scanResults.dataset_rep ?: false,
-            phenotypeRep  : scanResults.pheno_rep ?: false,
-            contrastSel   : scanResults.contrast ?: false,
-            ct            : scanResults.ct ?: false,
-            ctSignif      : scanResults.ct_signif ?: false,
-            ctDisambig    : scanResults.ct_disambig ?: false,
-            asrDiagnostics : scanResults.asr_diagnostics ?: false,
-            ctPostproc    : scanResults.ct_postproc ?: false,
-            ctAccum       : scanResults.ct_acc ?: false,
-            vep           : scanResults.vep ?: false,
-            rer           : scanResults.rer ?: false,
-            fade          : scanResults.fade ?: false,
-            scoring       : scanResults.scoring ?: false,
-            ctSignifSig   : scanResults.ct_signif_sig ?: false,
-            fcs           : scanResults.fcs ?: false,
-            ami           : scanResults.ami ?: false,
-            compare       : scanResults.compare ?: false,
-            posenrich     : scanResults.posenrich ?: false
+            sinceMs       : sinceMs,
+            ran           : scanRunStatus(outdir, sinceMs)
         ]
     }
 }
