@@ -166,11 +166,15 @@ def write_matrices(directory: Path, genes: Sequence[str], cycles: Sequence[str],
 
 
 def position_table(t: BlockTables, keep: np.ndarray) -> pa.Table:
-    """The scored positions of the kept units: gene, cycle, position and the best-side score ``all``."""
-    best = np.fmax(t.s_top[keep], t.s_bottom[keep])
+    """The scored positions of the kept units: gene, cycle, position, the score of each side (``top``, ``bottom``; NaN
+    where that side does not score the position) and the best-side score ``all``, their maximum. The per-side
+    accumulation test reads the sides; the other consumers read ``all``."""
+    top, bottom = t.s_top[keep], t.s_bottom[keep]
+    best = np.fmax(top, bottom)
     genes = pa.array(np.asarray(t.genes, dtype=object)[t.s_gene[keep]] if len(t.genes) else [], pa.string())
     cycles = pa.array(np.asarray(t.cycles, dtype=object)[t.s_cycle[keep]] if len(t.cycles) else [], pa.string())
     return pa.table({"gene": genes, "cycle": cycles, "position": pa.array(t.s_position[keep].astype(np.int32)),
+                     "top": pa.array(top, pa.float64()), "bottom": pa.array(bottom, pa.float64()),
                      "all": pa.array(best)})
 
 

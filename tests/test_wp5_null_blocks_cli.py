@@ -117,6 +117,31 @@ def test_the_rds_has_a_column_for_every_cycle_of_the_roster_and_the_gene_statist
     assert out.split() == ["max", "global", "top", "bottom", "b_1", "b_2", "b_3", "b_4", "G1", "G2", "G3", "3"]
 
 
+def test_the_position_table_carries_both_sides_and_the_accumulation_reader_accepts_it(tmp_path):
+    import numpy as np
+    sys.path.insert(0, str(PIPELINE / "subworkflows/POSENRICH/local/src"))
+    from posenrich_within_gene import load_universe, read_block
+    # one position scored by the top side only, one by the bottom side only, one more in a second gene
+    tile = _tile(tmp_path / "t", {("G1", "b_1"): [(3, 0.5, "top"), (4, 0.7, "bottom")], ("G2", "b_1"): [(3, 0.4, "top")]})
+    r, blk = _merge(tmp_path, [tile], _labelings(tmp_path / "l.tab", ["b_1", "b_2"]), "blk")
+    assert r.returncode == 0, r.stderr[-400:]
+    table = pq.read_table(blk / "positions.parquet")
+    assert table.column_names == ["gene", "cycle", "position", "top", "bottom", "all"]
+    rows = {(x["gene"], x["position"]): x for x in table.to_pylist()}
+    assert rows[("G1", 3)]["top"] == 0.5 and np.isnan(rows[("G1", 3)]["bottom"]) and rows[("G1", 3)]["all"] == 0.5
+    assert rows[("G1", 4)]["bottom"] == 0.7 and np.isnan(rows[("G1", 4)]["top"]) and rows[("G1", 4)]["all"] == 0.7
+    # the reader that stopped the PEPC run with "Canonical null position sides are required"
+    universe = tmp_path / "universe.tsv"
+    universe.write_text("gene\tposition\nG1\t3\nG1\t4\nG2\t3\n")
+    U = load_universe(universe)
+    mass = {}
+    for side in ("all", "top", "bottom"):
+        cycles, W = read_block(blk, U, side=side)
+        assert cycles == ["b_1", "b_2"]
+        mass[side] = W.toarray()[0].tolist()
+    assert mass["top"] == [0.5, 0.0, 0.4] and mass["bottom"] == [0.0, 0.7, 0.0] and mass["all"] == [0.5, 0.7, 0.4]
+
+
 def test_a_roster_that_misses_a_cycle_with_units_stops_the_build(tmp_path):
     tile = _tile(tmp_path / "t", {("G1", "b_1"): [(3, 0.5, "top")]})
     r, blk = _merge(tmp_path, [tile], _labelings(tmp_path / "l.tab", ["b_1"]), "blk")
