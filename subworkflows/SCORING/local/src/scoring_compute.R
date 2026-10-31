@@ -48,6 +48,7 @@ suppressPackageStartupMessages({
   library(tidyr)
   library(readr)
 })
+source("scoring_io.R")
 source("aa_grouping.R")   # derived_groupings(), staged next to this script by scoring_compute.nf
 source("null_position_p.R")   # null_position_p(), null_universe_summary(), staged next to this script by scoring_compute.nf
 
@@ -75,7 +76,7 @@ null_base_file       <- parse_arg("--null_base")         # null_universe_base.ts
 cycle_roster_file    <- parse_arg("--cycle_roster")      # cycle_roster.txt: every replayed cycle (N of the null); NO_FILE otherwise
 # Rule of the position score: the CAAS score (mean over the domains of the PSS-weighted mean over their species), defined only when positive (core.scores.SCORE_RULE). The observed scores (observed_core_scores.py)
 # and the null (counts.json of the null, score_rule; checked by null_position_stats.py) must use the same rule.
-score_aggregation <- "caas_pos_species_pss"
+score_aggregation <- "caas_pos_species_pss_v4"
 # Rows reach this script already pooled over hypotheses by CT_DISAMBIGUATION (one row per Gene,
 # Position and side, hypothesis NA), so scoring never pools hypotheses itself.
 nominal_threshold <- as.numeric(parse_arg("--nominal_threshold", "0.05"))
@@ -101,13 +102,6 @@ TIE_TOL <- 1e-12
 # The position-level permulation p (p.emp, its BH family and the universe summary) is computed from the
 # counters of the null by null_position_p.R.
 
-# Correlation over the complete pairs; NA when fewer than 3 remain.
-safe_cor <- function(x, y, method = "pearson") {
-  ok <- complete.cases(x, y)
-  if (sum(ok) < 3) return(NA_real_)
-  suppressWarnings(cor(x[ok], y[ok], method = method))
-}
-
 cat("═══════════════════════════════════════════════════════════════\n")
 cat("  CAAS Scoring - Compute\n")
 cat("═══════════════════════════════════════════════════════════════\n\n")
@@ -117,7 +111,8 @@ stopifnot(file_exists(postproc_file))
 stopifnot("--core_positions and --core_genes (observed_core_scores.py) are required" =
             file_exists(core_positions_file) && file_exists(core_genes_file))
 cat("Loading postproc:", postproc_file, "\n")
-df <- read_tsv(postproc_file, show_col_types = FALSE)
+df <- scoring_read(postproc_file, quote='"')
+scoring_keys(df,c("Gene","Position","side"),"CT")
 # filtered_discovery.tsv carries the canonical lowercase column names of CT_DISAMBIGUATION
 # (asr_path_score, side, ...), used as they are; position_scores.tsv keeps the same schema.
 cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
@@ -211,9 +206,10 @@ pos_scores <- df %>%
   )
 
 # CAAS_score = asr_path_score of the (Gene, Position, side) row, computed by core.scores.
-core_pos <- read_tsv(core_positions_file, show_col_types = FALSE,
-                     col_types = cols(Gene = col_character(), Position = col_integer(),
-                                      side = col_character(), CAAS_score = col_double()))
+core_pos <- scoring_read(core_positions_file)
+scoring_keys(core_pos,c('Gene','Position','side'),'core position')
+core_pos$CAAS_score <- scoring_number(core_pos$CAAS_score,'core score',0,1,missing=TRUE)
+
 .pk  <- function(g, p, sd) paste(g, p, sd, sep = "\r")
 .hit <- match(.pk(pos_scores$Gene, pos_scores$Position, pos_scores$side),
               .pk(core_pos$Gene, core_pos$Position, core_pos$side))
@@ -295,15 +291,9 @@ pos_scores$null_unseen <- NA          # nd == 0: the null never produced the pos
 pos_scores$p.adj_bh  <- NA_real_
 has_null_counters <- file_exists(null_counters_file) && file_exists(null_base_file) &&
   file_exists(cycle_roster_file)
-# A null in which no cycle has a row (N = 0, or no permuted cycle re-detected any position) has no cycle to count:
-# (k + 1) / (N + 1) would read 1 for every position, a value rather than the absence of one. p.emp and p.adj_bh stay NA,
-# as when no null is given.
 if (has_null_counters) {
-  .null_base <- read_tsv(null_base_file, show_col_types = FALSE, col_types = "cddc") %>% mutate(cycles = suppressWarnings(as.integer(cycles)))
-  if (!isTRUE(.null_base$value[.null_base$metric == "N_cycles_present_in_null" & is.na(.null_base$cycles)][1] > 0)) {
-    cat("  the null has no row: no null cycle, so p.emp and p.adj_bh stay NA\n")
-    has_null_counters <- FALSE
-  }
+  .null_base <- scoring_read(null_base_file)
+  .null_base$cycles <- suppressWarnings(as.integer(.null_base$cycles))
 }
 if (has_null_counters) {
   cat("Loading the counters of the position-level null (p.emp):", null_counters_file, "\n")
@@ -312,7 +302,7 @@ if (has_null_counters) {
   if (anyDuplicated(.roster)) stop("Duplicate null cycle IDs in cycle_roster.txt")
   N_emp <- length(.roster)
   cat(sprintf("  N = %d cycles (source: cycle_roster.txt)\n", N_emp))
-  .counters <- read_tsv(null_counters_file, show_col_types = FALSE, col_types = cols(Gene = col_character(), Position = col_integer(), .default = col_integer()))
+  .counters <- scoring_read(null_counters_file)
   .fit <- NULL  # legacy staging input is no longer used
 
   # observed pooled statistic = best side per (Gene, Position) (== .pos_undirected)
@@ -324,47 +314,43 @@ if (has_null_counters) {
   .n_u <- .null_base$value[.null_base$metric == "null_positive_positions_in_universe" & is.na(.null_base$cycles)][1]
   .universe_note <- .null_base$note[.null_base$metric == "null_positive_positions_in_universe" & is.na(.null_base$cycles)][1]
   cat(sprintf("  universe: %s; %d null-positive positions in U\n", .universe_note, as.integer(.n_u)))
-  .res <- null_position_p(obs_max, .counters, .fit, .n_u, N_emp)
+  .family <- .null_base$value[.null_base$metric == 'tested_positions_family'][1]
+  if(length(.family)!=1 || !is.finite(.family)) stop('Missing fixed tested-position BH family; regenerate null counters')
+  .res <- null_position_p(obs_max, .counters, .fit, .n_u, N_emp, n_family=.family)
 
   pos_scores <- pos_scores %>%
     select(-p.emp, -nd, -null_unseen, -p.adj_bh) %>%
     left_join(.res$pos, by = c("Gene", "Position"))
   cat(sprintf("  null adequacy: %d of %d observed positive positions never scored by the null (%.1f%%); kept at p = 1/(N+1)\n",
               .res$n_unseen, .res$n_obs, if (.res$n_obs > 0) 100 * .res$n_unseen / .res$n_obs else 0))
-  write_tsv(null_universe_summary(.null_base, .res$n_obs, .res$n_unseen), "null_universe_summary.tsv")
+  scoring_write(null_universe_summary(.null_base, .res$n_obs, .res$n_unseen), "null_universe_summary.tsv")
   cat("  null_universe_summary.tsv written\n")
 } else if (!file_exists(null_counters_file)) {
   cat("  no --null_counters provided, skipping p.emp\n")
 }
 
 # ── 2h. Position-level multiple testing: p.adj_bh ─────────────────────────────
-# p.adj_bh: BH over the permutation family, one test per (Gene, Position) (the side rows of a position share one pooled
-# p.emp and enter BH once). The family is the positional universe U of section 2f-ter: the positions the null scores in
-# >= 1 cycle inside the tested set, plus every observed position with a p.emp (the ones the null never scored included,
-# at p = 1/(N+1)). p.emp's statistic is "max-side CAAS_score if detected, -Inf otherwise", so a null-detectable position
-# the observed data did not detect is a tested position with p = 1; restricting BH to observed-detected positions would
-# select on the statistic itself. Positions detected neither by the null nor by the observed data are left out, so m
-# counts only columns the finite null sample happened to reach. p.adj_bh is computed with p.emp in null_position_p.R.
+# One pooled test per (Gene, Position). BH uses all declared tested positions of
+# the cleaned gene background, including positions detected by neither labeling.
+# Observed non-detections contribute p=1 without materializing them.
 
 # ── 2i. FADE (gene-level - see section 4d) ────────────────────────────────────
 # FADE is read at gene level here (max Bayes Factor per gene across sites); significance is BF >= fade_bf_threshold.
 # fade_top and fade_bottom hold the FADE results of the top and the bottom direction.
 has_fade_top    <- file_exists(fade_top_file)
 has_fade_bottom <- file_exists(fade_bottom_file)
-has_fade        <- has_fade_top || has_fade_bottom
 
 .load_fade_summary <- function(path, out_col) {
-  df <- read_tsv(path, show_col_types = FALSE)
+  df <- scoring_read(path)
   # Standardise column names to lowercase for checking
+  if(anyDuplicated(tolower(names(df)))) stop('Duplicate case-normalized FADE columns')
   names(df) <- tolower(names(df))
-  if (!"gene" %in% names(df)) {
-    names(df)[1] <- "gene"
-  }
+  scoring_keys(df,'gene','FADE gene')
   bf_col <- intersect(c("max_bf", "max_site_bf", "bayes_factor", "bf"), names(df))[1]
   if (is.na(bf_col)) {
-    df[[out_col]] <- 0
+    stop('Missing FADE Bayes factor column')
   } else {
-    df[[out_col]] <- as.numeric(df[[bf_col]])
+    df[[out_col]] <- scoring_number(df[[bf_col]],'FADE BF',0,Inf,positive_inf=TRUE)
   }
   df %>%
     select(Gene = gene, !!out_col := !!sym(out_col)) %>%
@@ -387,66 +373,7 @@ if (has_fade_bottom) {
   fade_bottom_df <- tibble(Gene = character(), fade_max_bf_bottom = numeric())
 }
 
-# ── 2j. FADE site-level (position-level BF) ───────────────────────────────────
-# Per-site max BF from FADE_JSON_TO_CSV (parse_fade_json_sites.R): comma-delimited, with columns gene,
-# position (0-based, as in position_scores.tsv), max_bf and target_aa. A 1-based `site` column, when
-# the file has one instead of `position`, is shifted by one.
-has_fade_site_top <- file_exists(fade_site_top_file)
-has_fade_site_bot <- file_exists(fade_site_bot_file)
-
-.load_fade_sites <- function(path) {
-  # The file is comma-delimited (write.csv in parse_fade_json_sites.R); read_tsv() would parse each
-  # line as a single column.
-  df <- read_csv(path, show_col_types = FALSE)
-  names(df) <- tolower(names(df))
-  
-  if (!"gene" %in% names(df)) names(df)[1] <- "gene"
-  if ("site" %in% names(df)) {
-    df$position <- as.integer(df$site) - 1L
-  } else if ("position" %in% names(df)) {
-    df$position <- as.integer(df$position)
-  } else {
-    df$position <- as.integer(df[[2]]) - 1L
-  }
-  
-  bf_col <- intersect(c("max_site_bf", "max_bf", "bayes_factor", "bf"), names(df))[1]
-  if (is.na(bf_col)) {
-    df$max_site_bf <- 0
-  } else {
-    df$max_site_bf <- as.numeric(df[[bf_col]])
-  }
-  
-  aa_col <- intersect(c("top_target_aa", "target_aa", "aa"), names(df))[1]
-  if (!is.na(aa_col)) {
-    df$top_target_aa <- as.character(df[[aa_col]])
-  } else {
-    df$top_target_aa <- NA_character_
-  }
-  
-  bias_col <- intersect(c("fade_biased", "biased"), names(df))[1]
-  if (!is.na(bias_col)) {
-    df$fade_biased <- as.logical(df[[bias_col]])
-  } else {
-    df$fade_biased <- df$max_site_bf >= fade_bf_threshold
-  }
-  
-  df %>%
-    select(Gene = gene, Position = position, max_site_bf, top_target_aa, fade_biased)
-}
-
-if (has_fade_site_top) {
-  fade_site_top_df <- .load_fade_sites(fade_site_top_file)
-  cat(sprintf("  FADE site top: %d positions loaded\n", nrow(fade_site_top_df)))
-} else {
-  fade_site_top_df <- tibble(Gene = character(), Position = integer(), max_site_bf = numeric(), top_target_aa = character(), fade_biased = logical())
-}
-
-if (has_fade_site_bot) {
-  fade_site_bot_df <- .load_fade_sites(fade_site_bot_file)
-  cat(sprintf("  FADE site bot: %d positions loaded\n", nrow(fade_site_bot_df)))
-} else {
-  fade_site_bot_df <- tibble(Gene = character(), Position = integer(), max_site_bf = numeric(), top_target_aa = character(), fade_biased = logical())
-}
+# Site tables are report annotations; they do not enter gene scoring.
 
 # All positions are retained; the directional splits (top, bottom) are applied per analysis after scoring.
 
@@ -454,7 +381,7 @@ if (has_fade_site_bot) {
 
 cat("\n─── Gene-level scoring ────────────────────────────────────────\n")
 
-# ── 4a. Gene CAAS Scores: size-adjusted max of CAAS_score per gene ────────────
+# ── 4a. Gene CAAS Scores: raw max of CAAS_score per gene ────────────
 # Three scores computed from different position subsets:
 #   gene_caas_score - all positions (full pool)
 #   gene_caas_score_top - positions with side == "top"
@@ -463,8 +390,9 @@ cat("\n─── Gene-level scoring ──────────────�
 # The scores (raw maximum, a "both" position counted
 # once in the undirected score) come from core.scores via observed_core_scores.py; NA when
 # the gene has no scored position in the direction. n_positions* are descriptors.
-core_gene <- read_tsv(core_genes_file, show_col_types = FALSE,
-                      col_types = cols(Gene = col_character(), .default = col_double()))
+core_gene <- scoring_read(core_genes_file)
+scoring_keys(core_gene,'Gene','core gene')
+
 .core_gene <- function(col, g) core_gene[[col]][match(g, core_gene$Gene)]
 .pos_undirected <- pos_scores %>%
   filter(!is.na(CAAS_score)) %>%
@@ -504,30 +432,24 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
 has_rer <- file_exists(rer_file)
 if (has_rer) {
   cat("Loading RER summary:", rer_file, "\n")
-  rer <- read_tsv(rer_file, show_col_types = FALSE)
+  rer <- scoring_read(rer_file)
   
   # Normalize names to lowercase for case-insensitivity
+  if(anyDuplicated(tolower(names(rer)))) stop('Duplicate case-normalized RER columns')
   names(rer) <- tolower(names(rer))
-  if (!"gene" %in% names(rer)) {
-    names(rer)[1] <- "gene"
-  }
+  scoring_keys(rer,'gene','RER gene')
+  if(!all(c('rho','p') %in% names(rer))) stop('RER summary requires gene, Rho and P')
+  rer$rho <- scoring_number(rer$rho,'RER Rho',-1,1,missing=TRUE)
+  rer$p <- scoring_number(rer$p,'RER P',0,1,missing=TRUE)
 
   # Empirical evidence only; missing p.perm stays unavailable.
   if (!"p.perm" %in% names(rer)) rer$p.perm <- NA_real_
   pval_col <- "p.perm"
   cat(sprintf("  Using %s for rer_min_pval\n", pval_col))
 
-  # Find Rho case-insensitively
-  rho_col <- intersect(c("rho", "r", "stat"), names(rer))[1]
-  if (is.na(rho_col)) {
-    rho_col <- names(rer)[grepl("rho", names(rer))][1]
-    if (is.na(rho_col)) {
-      rer$rho <- 0.0
-      rho_col <- "rho"
-    }
-  }
-  cat(sprintf("  Using %s for rer_rho\n", rho_col))
-
+  rho_col <- 'rho'
+  rer$p.perm <- scoring_number(rer$p.perm,'RER p.perm',0,1,missing=TRUE)
+  if(any(!is.na(rer$p.perm) & (is.na(rer$rho) | is.na(rer$p) | rer$p.perm==0))) stop('RER empirical evidence without valid association')
   # rer_significant is the nominal call (p.perm <= 0.05, not corrected for multiple testing), which RER gene lists
   # and the AMI flags use. rer_perm_padj is its BH adjustment over all genes (Saputra et al. 2021 correct the
   # permulation p-values before calling genes) and rer_significant_fdr the call on it. With few permulations the
@@ -540,6 +462,11 @@ if (has_rer) {
     rer$rer_perm_padj <- NA_real_
   }
 
+  if('p.perm.adj' %in% names(rer)) {
+    q <- scoring_number(rer$p.perm.adj,'RER empirical BH',0,1,missing=TRUE)
+    if(!isTRUE(all.equal(q,p.adjust(rer$p.perm,'BH'),check.attributes=FALSE))) stop('RER empirical BH family disagrees with summary')
+  }
+
   # rer_P is the parametric P of the correlation (RERconverge's getStat takes sign(Rho) * -log10(P) as the gene statistic).
   rer$rer_P <- if ("p" %in% names(rer)) as.numeric(rer[["p"]]) else NA_real_
 
@@ -547,7 +474,7 @@ if (has_rer) {
     mutate(
       rer_min_pval     = as.numeric(.data[[pval_col]]),
       rer_significant  = rer_min_pval < nominal_threshold,
-      rer_significant_fdr = !is.na(rer_perm_padj) & rer_perm_padj < fdr_threshold,
+      rer_significant_fdr = ifelse(is.na(rer_perm_padj), NA, rer_perm_padj < fdr_threshold),
       rer_rho          = as.numeric(.data[[rho_col]]),
       rer_acceleration = case_when(
         is.na(rer_rho) ~ NA_character_,
@@ -626,56 +553,8 @@ if (nrow(gene_fade) > 0) {
   gene_scores$fade_significant_bottom <- NA
 }
 
-# ── 5. Correlation analysis (gene-level) ──────────────────────────────────────
-
-cat("\n─── Correlation analysis ──────────────────────────────────────\n")
-
-# Correlations use gene_caas_score as the primary axis. RER and FADE
-# are represented by their native significance (RER p / FADE BF),
-# not numeric score axes, so they are not included here.
-score_cols <- c("gene_caas_score")
-
-if (length(score_cols) >= 2) {
-  corr_mat <- gene_scores %>%
-    select(all_of(score_cols)) %>%
-    drop_na()
-
-  if (nrow(corr_mat) < 3) {
-    corr_results <- tibble(
-      score_a = character(), score_b = character(),
-      pearson_r = numeric(), spearman_r = numeric(), n_genes = integer()
-    )
-    cat("  Not enough genes with all scores populated, skipping correlations\n")
-  } else {
-
-  corr_results <- expand.grid(
-    score_a = score_cols, score_b = score_cols,
-    stringsAsFactors = FALSE
-  ) %>%
-    filter(score_a < score_b) %>%
-    rowwise() %>%
-    mutate(
-      pearson_r  = safe_cor(corr_mat[[score_a]], corr_mat[[score_b]], method = "pearson"),
-      spearman_r = safe_cor(corr_mat[[score_a]], corr_mat[[score_b]], method = "spearman"),
-      n_genes    = sum(complete.cases(corr_mat[[score_a]], corr_mat[[score_b]]))
-    ) %>%
-    ungroup()
-  }
-
-  cat("  Pairwise correlations:\n")
-  for (i in seq_len(nrow(corr_results))) {
-    cat(sprintf("    %s vs %s: Pearson=%.3f, Spearman=%.3f (n=%d)\n",
-                corr_results$score_a[i], corr_results$score_b[i],
-                corr_results$pearson_r[i], corr_results$spearman_r[i],
-                corr_results$n_genes[i]))
-  }
-} else {
-  corr_results <- tibble(
-    score_a = character(), score_b = character(),
-    pearson_r = numeric(), spearman_r = numeric(), n_genes = integer()
-  )
-  cat("  Only one gene score available, skipping correlations\n")
-}
+# Correlation table is retained as a public header-only compatibility output.
+corr_results <- tibble(score_a=character(),score_b=character(),pearson_r=numeric(),spearman_r=numeric(),n_genes=integer())
 
 # ── 6. Write outputs ──────────────────────────────────────────────────────────
 
@@ -700,7 +579,7 @@ pos_out <- pos_scores %>%
          any_of(c("nd", "null_unseen"))) %>%
   arrange(desc(CAAS_score))
 
-write_tsv(pos_out, "position_scores.tsv")
+scoring_write(pos_out, "position_scores.tsv")
 cat(sprintf("  position_scores.tsv: %d rows\n", nrow(pos_out)))
 
 # Gene scores
@@ -715,7 +594,7 @@ gene_out <- gene_scores %>%
   ) %>%
   arrange(desc(gene_caas_score))
 
-write_tsv(gene_out, "gene_scores.tsv")
+scoring_write(gene_out, "gene_scores.tsv")
 cat(sprintf("  gene_scores.tsv: %d rows\n", nrow(gene_out)))
 
 # ── FCS stats table ───────────────────────────────────────────────────────────
@@ -726,7 +605,6 @@ cat(sprintf("  gene_scores.tsv: %d rows\n", nrow(gene_out)))
 .has  <- function(d, c) c %in% names(d)
 .col  <- function(d, c, default = NA) if (.has(d, c)) d[[c]] else rep(default, nrow(d))
 .istrue <- function(x) !is.na(x) & x %in% c(TRUE, "TRUE", "True", "true", 1, "1")
-.rer_dir <- tolower(as.character(.col(gene_scores, "rer_acceleration")))
 
 # The CAAS rankings are the gene scores: gene_caas_score, gene_caas_score_top and gene_caas_score_bottom.
 nullable_flag <- function(x) ifelse(is.na(x),NA,.istrue(x))
@@ -740,16 +618,16 @@ fcs_stats <- tibble(
   score_bottom     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_bottom"))),
   flag_fade_top    = nullable_flag(.col(gene_scores, "fade_significant_top")),
   flag_fade_bottom = nullable_flag(.col(gene_scores, "fade_significant_bottom")),
-  flag_rer_acc = ifelse(is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs),.rer_nom_fcs<.05 & .rer_rho_fcs>0,NA),
-  flag_rer_decc = ifelse(is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs),.rer_nom_fcs<.05 & .rer_rho_fcs<0,NA),
-  flag_rer_acc_adjusted = ifelse(is.finite(.rer_q_fcs) & is.finite(.rer_rho_fcs),.rer_q_fcs<.05 & .rer_rho_fcs>0,NA),
-  flag_rer_decc_adjusted = ifelse(is.finite(.rer_q_fcs) & is.finite(.rer_rho_fcs),.rer_q_fcs<.05 & .rer_rho_fcs<0,NA),
-  fade_available_top = is.finite(.col(gene_scores,"fade_max_bf_top")),
-  fade_available_bottom = is.finite(.col(gene_scores,"fade_max_bf_bottom")),
+  flag_rer_acc = ifelse(is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs),.rer_nom_fcs<nominal_threshold & .rer_rho_fcs>0,NA),
+  flag_rer_decc = ifelse(is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs),.rer_nom_fcs<nominal_threshold & .rer_rho_fcs<0,NA),
+  flag_rer_acc_adjusted = ifelse(is.finite(.rer_q_fcs) & is.finite(.rer_rho_fcs),.rer_q_fcs<fdr_threshold & .rer_rho_fcs>0,NA),
+  flag_rer_decc_adjusted = ifelse(is.finite(.rer_q_fcs) & is.finite(.rer_rho_fcs),.rer_q_fcs<fdr_threshold & .rer_rho_fcs<0,NA),
+  fade_available_top = !is.na(.col(gene_scores,"fade_max_bf_top")),
+  fade_available_bottom = !is.na(.col(gene_scores,"fade_max_bf_bottom")),
   rer_available = is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs)
 ) %>%
   mutate(flag_fade = flag_fade_top | flag_fade_bottom)
-write_tsv(fcs_stats, "fcs_stats.tsv")
+scoring_write(fcs_stats, "fcs_stats.tsv")
 cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom)\n",
             nrow(fcs_stats), sum(!is.na(fcs_stats$score_top)),
             sum(!is.na(fcs_stats$score_bottom))))
@@ -766,15 +644,15 @@ if (has_rer) {
   # one its permulations (corStat) carry for the null.
   .rp <- suppressWarnings(as.numeric(.col(gene_scores, "rer_P")))
   .rr <- suppressWarnings(as.numeric(.col(gene_scores, "rer_rho")))
-  write_tsv(tibble(
+  scoring_write(tibble(
     gene         = gene_scores$Gene,
-    score_global = sign(.rr) * -log10(.rp)
+    score_global = ifelse(is.finite(.rr) & is.finite(.rp), sign(.rr) * -log10(.rp), NA_real_)
   ), "fcs_stats_rer.tsv")
   cat("  fcs_stats_rer.tsv written (RER global ranking)\n")
 }
 
 if (.nonempty("fade_max_bf_top") || .nonempty("fade_max_bf_bottom")) {
-  write_tsv(tibble(
+  scoring_write(tibble(
     gene         = gene_scores$Gene,
     score_top    = suppressWarnings(as.numeric(.col(gene_scores, "fade_max_bf_top"))),
     score_bottom = suppressWarnings(as.numeric(.col(gene_scores, "fade_max_bf_bottom")))
@@ -783,7 +661,7 @@ if (.nonempty("fade_max_bf_top") || .nonempty("fade_max_bf_bottom")) {
 }
 
 # Correlations
-write_tsv(corr_results, "gene_correlations.tsv")
+scoring_write(corr_results, "gene_correlations.tsv")
 
 
 cat("Base scoring complete; calibrated evidence and activity lists are materialized next.\n")

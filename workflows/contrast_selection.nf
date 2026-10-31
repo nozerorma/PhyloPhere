@@ -48,11 +48,11 @@
 
 include { DATASET_EXPLORATION } from '../subworkflows/TRAIT_ANALYSIS/ta_dataset_exploration'
 include { PHENOTYPE_EXPLORATION } from '../subworkflows/TRAIT_ANALYSIS/ta_phenotype_exploration'
-include { DATASET_PRUNE } from '../subworkflows/TRAIT_ANALYSIS/ta_data_prune'
+include { PRUNE_DATASET as DATASET_PRUNE } from '../subworkflows/TRAIT_ANALYSIS/ta_data_prune'
 include { REPORTING } from './reporting'
 include { CI_COMPOSITION_REPORT } from '../subworkflows/TRAIT_ANALYSIS/ct_ci'
 include { CONTRAST_ALGORITHM } from '../subworkflows/TRAIT_ANALYSIS/ct_independent-contrasts'
-include { CHECK_MIN_CONTRASTS } from '../subworkflows/CT/ct_check_min_contrasts'
+include { GATE_CONTRASTS as CHECK_MIN_CONTRASTS } from '../subworkflows/CT/ct_check_min_contrasts'
 
 // ── Workflow ─────────────────────────────────────────────────────────────────
 
@@ -62,6 +62,11 @@ workflow CONTRAST_SELECTION {
         curated_tree_ch    // value channel: tree curated by NAME_CURATION (main.nf)
 
     main:
+    // Reject invalid thresholds before scheduling expensive exploration/model fits.
+    def minimum = params.min_contrasts != null ? params.min_contrasts.toString() : '3'
+    if (!(minimum ==~ /[0-9]+/) || minimum.toBigInteger() < 1 || minimum.toBigInteger() > Integer.MAX_VALUE)
+        error "min_contrasts must be a positive integer."
+
     // The names are settled by NAME_CURATION, run once by main.nf: the contrast pairs are
     // selected on the curated tree and trait table, so every species has an alignment and
     // carries the name the alignments use.

@@ -1,7 +1,11 @@
 #!/usr/bin/env nextflow
 // Global sliding UCR: the same Valdar/sliding implementation consumed by the
 // positional collections. Explicit zero-based productive alignment coordinates.
+
+include { scoringHash } from '../SCORING/scoring_contract.nf'
+
 process COMPUTE_UCR_POSITIONS {
+    cache 'deep'
     tag "auto-generate ucr_positions_file"
     label 'process_medium'
     publishDir "${params.outdir}/core_inputs", mode: 'copy', overwrite: true
@@ -14,7 +18,9 @@ process COMPUTE_UCR_POSITIONS {
     path "ucr_positions.tsv.gz.manifest.json", emit: manifest, optional: true
 
     script:
+    def source_hash = scoringHash(['build_reference_tables.py','compute_variability.py','detect_ucr.py'].collect { file("${baseDir}/bin/${it}") })
     """
+    # Sources: ${source_hash}
     python3 ${baseDir}/bin/build_reference_tables.py alignment-ucr \\
         --alignment-dir "${alignment_dir}" \\
         --output ucr_positions.tsv.gz --cpus ${task.cpus}

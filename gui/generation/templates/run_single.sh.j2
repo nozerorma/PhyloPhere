@@ -411,7 +411,7 @@ fi
 # `?: "default"` line, whereas an absent key lets the config default apply. Hence the
 # bash fallbacks below: for a parameter whose config default is "" by design
 # (e.g. gene_ensembl_file, secondary_trait), the ${VAR:-} fallback is intended; for one
-# whose config default is a real value (e.g. lg_dat_path, gene_trees), the real default
+# whose config default is a real value (e.g. gene_trees), the real default
 # is written into the bash fallback, so that a blank GUI field does not turn it into "".
 #
 # Booleans are unquoted true/false (JSON literals). Strings use shell $VAR expansion
@@ -448,9 +448,6 @@ if [[ -z "${GMT_DIR:-}" ]]; then
     GMT_DIR="$(echo "$_GMT_RESOLVED" | grep '^GMT_DIR=' | cut -d= -f2-)"
 fi
 
-# Lowercase FADE model name, from which the default substitution-matrix path is derived.
-_FADE_MODEL_NORM="${FADE_MODEL:-LG}"
-_FADE_MODEL_LOWER="$(echo "$_FADE_MODEL_NORM" | tr '[:upper:]' '[:lower:]')"
 
 
 PARAMS_JSON="$RUN_DIR/params.json"
@@ -553,8 +550,9 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "remove_caas_clusters": ${POSTPROC_REMOVE_CLUSTERS:-true},
   "minlen_values": "${POSTPROC_MINLEN_VALUES:-2,3,4,10}",
   "maxcaas_values": "${POSTPROC_MAXCAAS_VALUES:-0.6,0.7,0.8}",
-  "extreme_threshold": "${POSTPROC_EXTREME_THRESHOLD:-0.99}",
-  "iqr_multiplier": "${POSTPROC_IQR_MULTIPLIER:-3.0}",
+  "gene_filter_strata": "${POSTPROC_GENE_FILTER_STRATA:-10}",
+  "gene_filter_k_far": "${POSTPROC_GENE_FILTER_K_FAR:-3.0}",
+  "gene_filter_k_near": "${POSTPROC_GENE_FILTER_K_NEAR:-1.5}",
   "gene_ensembl_file": "${GENE_ENSEMBL_FILE:-}",
   "auto_generate_ensembl": ${AUTO_GENERATE_ENSEMBL:-false},
   "ensembl_dataset": "${ENSEMBL_DATASET:-}",
@@ -598,7 +596,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "fade_samples": "${FADE_SAMPLES:-1000}",
   "fade_concentration": "${FADE_CONCENTRATION:-0.5}",
   "fade_min_genes_for_heatmap": "${FADE_MIN_GENES_FOR_HEATMAP:-2}",
-  "lg_dat_path": "${LG_DAT_PATH:-$REPO_DIR/subworkflows/SELECTION/local/dat/${_FADE_MODEL_LOWER}.dat}",
   "fade_universe_file": "${FADE_UNIVERSE_FILE:-}",
   "fade_tables_dir_top": "${FADE_TABLES_DIR_TOP:-}",
   "fade_tables_dir_bottom": "${FADE_TABLES_DIR_BOTTOM:-}",

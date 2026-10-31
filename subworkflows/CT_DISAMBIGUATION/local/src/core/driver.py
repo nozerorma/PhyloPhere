@@ -89,6 +89,8 @@ def load_gene_context(
     posterior_threshold: float,
     ensembl_genes: Optional[Set[str]] = None,
     threads: int = 1,
+    alignment_path=None,
+    alignment_format="auto",
 ) -> Optional[Dict[str, Any]]:
     """Load alignment, tree and ASR posteriors of one gene ONCE, for every labeling that will be scored on it.
 
@@ -100,14 +102,14 @@ def load_gene_context(
     The tree is rebuilt from the PAML tree so that node ids align with the posteriors.
     Returns a context dict, or None if the alignment or the ASR is unavailable.
     """
-    alignment_path = find_gene_alignment(Path(alignment_dir), gene, ensembl_genes)
+    alignment_path = Path(alignment_path) if alignment_path else find_gene_alignment(Path(alignment_dir), gene, ensembl_genes)
     if not alignment_path:
         return None
 
     alignment_data = load_alignment_and_mappings(
         alignment_path,
         Path(taxid_mapping_path) if taxid_mapping_path else None,
-        gene_name=gene,
+        gene_name=gene, alignment_format=alignment_format,
     )
     tree_data = load_and_match_tree(
         Path(tree_file), alignment_data,
@@ -123,24 +125,16 @@ def load_gene_context(
         output_dir=Path(asr_cache_dir),
         threads=threads,
     )
-    try:
+    from src.asr.cache import prepare_config
+    asr_config = prepare_config(asr_config, alignment_data, tree_data)
+    with _gene_cache_lock(str(asr_config.output_dir), gene):
         node_posteriors, state = _read_cached(gene, asr_config, alignment_data)
         if node_posteriors is None:
-            with _gene_cache_lock(asr_cache_dir, gene):
-                # another process may have finished the entry while this one waited for the lock
-                node_posteriors, state = _read_cached(gene, asr_config, alignment_data)
-                if node_posteriors is None:
-                    logger.info(f"[asr] {gene}: not in {asr_cache_dir}, computing it")
-                    with codeml_slot():
-                        node_posteriors = run_asr_pipeline(
-                            gene, asr_config, skip_if_exists=(state != "corrupt"),
-                            alignment_data=alignment_data, tree_data=tree_data,
-                        )
-    except Exception as exc:  # noqa: BLE001 — codeml / parse failure for this one gene
-        logger.warning(f"[asr] ASR unavailable for {gene} ({exc}); the gene is left out")
-        return None
-    if not node_posteriors:
-        return None
+            with codeml_slot():
+                node_posteriors = run_asr_pipeline(gene, asr_config, skip_if_exists=False,
+                                                  alignment_data=alignment_data, tree_data=tree_data)
+    if not node_posteriors or not node_posteriors.posteriors_node:
+        raise RuntimeError(f'ASR unavailable for {gene}')
 
     rst_file = getattr(node_posteriors, "rst_file", None)
     paml_tree_file = getattr(node_posteriors, "tree_file", None)
@@ -160,7 +154,7 @@ def load_gene_context(
                 _tip_taxid(lbl) for lbl in extract_tip_labels(tree_data.root)
             }
         except Exception as e:
-            logger.warning(f"[perms] {gene}: could not rebuild tree_data from PAML tree: {e}")
+            raise RuntimeError(f"{gene}: could not rebuild tree_data from PAML tree") from e
 
     seq_by_id, seq_by_species = build_alignment_lookup(
         alignment_data.alignment, alignment_data.taxid_to_species
@@ -192,7 +186,7 @@ def score_labelings(
 ) -> List[Tuple[str, List[Any]]]:
     """Score every labeling of `tags` that has discovery entries: [(tag, per-position records)].
 
-    A labeling whose scoring raises is skipped (logged at debug).
+    A labeling whose scoring raises stops the run.
     """
     alignment_data = ctx["alignment_data"]
     tree_data = ctx["tree_data"]
@@ -250,8 +244,7 @@ def score_labelings(
             if scored:
                 results.append((cyc, scored))
         except Exception as e:
-            logger.debug(f"[perms] {gene} cycle {cyc} failed: {e}")
-            continue
+            raise RuntimeError(f'{gene}: cycle {cyc} could not be scored') from e
     return results
 
 
@@ -297,7 +290,7 @@ def pool_labelings(
     `fop_pairs[base cycle]`; without it each labeling is its own single-hypothesis cycle, and its design the pairs of
     its own labeling in `labelings`.
 
-    With `strict` the records whose discovery row has conserved pairs (`.conserved`) are left out before pooling,
+    With `strict` the records whose discovery row has residue-type overlap (`.conserved`) are left out before pooling,
     and a position left with no record is not detected. The design is the same, so the hypotheses that are left
     out count as hypotheses that do not detect the position, as in a discovery run without conservation.
     """

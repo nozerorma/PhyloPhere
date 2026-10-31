@@ -6,16 +6,21 @@ script <- sub('^--file=', '', grep('^--file=',commandArgs(),value=TRUE)[1])
 src <- dirname(normalizePath(script))
 source(file.path(src,'../../../ENRICHMENT/local/src/gene_p.R'))
 source(file.path(src,'../../../ENRICHMENT/local/src/caas_blocks.R'))
-read <- function(p) read.delim(p,check.names=FALSE,stringsAsFactors=FALSE)
-write <- function(x,p) write.table(x,p,sep='\t',row.names=FALSE,quote=FALSE,na='NA')
+source(file.path(src,'scoring_io.R'))
+read <- scoring_read
+write <- scoring_write
 if (!identical(arg('--gene-stat','max'), 'max')) stop('Only gene_stat=max is supported')
 nom <- as.numeric(arg('--nominal','0.05')); fdr <- as.numeric(arg('--fdr','0.05'))
 stopifnot(is.finite(nom), nom>0,nom<=1,is.finite(fdr),fdr>0,fdr<=1)
 genes <- read(arg('--genes')); positions <- read(arg('--positions')); stats <- read(arg('--stats'))
-u <- if(file.exists(arg('--universe'))) trimws(readLines(arg('--universe'))) else stats$gene; u<-u[nzchar(u)&!u%in%c('gene','Gene')]
+has_universe <- file.exists(arg('--universe'))
+u <- if(has_universe) scoring_genes(arg('--universe')) else character()
 if(anyDuplicated(u)) stop('Duplicate genes in calibration universe')
-if(anyDuplicated(genes$Gene)||anyDuplicated(stats$gene))stop('Duplicate observed genes')
+scoring_keys(genes,'Gene','observed gene');scoring_keys(stats,'gene','observed statistic')
+scoring_keys(positions,c('Gene','Position','side'),'observed position')
+if(!setequal(genes$Gene,stats$gene))stop('Gene/statistic coverage mismatch')
 files <- sort(list.files(arg('--blocks'),pattern='\\.rds$',full.names=TRUE))
+if(length(files) && !has_universe)stop('Calibrated gene evidence requires explicit tested gene universe')
 dir.create('calibration',showWarnings=FALSE);dir.create('gene_lists',showWarnings=FALSE);dir.create('position_lists',showWarnings=FALSE)
 batch_size<-as.integer(arg('--batch','1000'));stopifnot(batch_size>=1)
 ranks<-c('global','top','bottom'); obs_cols<-c(global='score_global',top='score_top',bottom='score_bottom')
@@ -50,6 +55,13 @@ if(length(missing)) {
  for(n in intersect(c('score_global','score_top','score_bottom'),names(extra)))extra[[n]]<-0
  stats<-rbind(stats,extra)
 }
+for(n in intersect(c('n_positions','n_positions_top','n_positions_bottom','gene_caas_score','gene_caas_score_top','gene_caas_score_bottom'),names(genes))) {
+ i<-genes$Gene %in% u & is.na(genes[[n]]);genes[[n]][i]<-0
+}
+for(n in c('score_global','score_top','score_bottom')) {
+ stats[[n]]<-scoring_number(stats[[n]],n,0,1,missing=TRUE)
+ i<-stats$gene %in% u & is.na(stats[[n]]);stats[[n]][i]<-0
+}
 all_evidence<-list()
 for(rk in ranks) {
  obs<-setNames(rep(0,length(u)),u); ix<-match(u,stats$gene);v<-as.numeric(stats[[obs_cols[[rk]]]][ix]);obs[!is.na(v)]<-v[!is.na(v)]
@@ -66,16 +78,17 @@ for(rk in ranks) {
    cy<-block_cycles[[i]];saveRDS(list(rows=rows,cols=cy,values=g$nlog10_null[,cy,drop=FALSE]),caas_slice_path('calibration',paste0(rk,'_gp'),k,block_ids[i]))
   }
  }
- q<-p.adjust(p,'BH');tab<-data.frame(gene=u,ranking=rep(rk,length(u)),statistic=unname(obs),gene_stat=rep(arg('--gene-stat','max'),length(u)),p.gen=unname(p),p.gen.adj=unname(q),nominal=!is.na(p)&p<nom,adjusted=!is.na(q)&q<fdr,N_roster=rep(N,length(u)),N_valid=unname(valid),family_id=rep(paste0('CAAS:',rk),length(u)),contract_version=rep(1L,length(u)))
+ q<-p.adjust(p,'BH');tab<-data.frame(gene=u,ranking=rep(rk,length(u)),statistic=unname(obs),available=!is.na(p),gene_stat=rep(arg('--gene-stat','max'),length(u)),p.gen=unname(p),p.gen.adj=unname(q),nominal=!is.na(p)&p<nom,adjusted=!is.na(q)&q<fdr,N_roster=rep(N,length(u)),N_valid=unname(valid),family_id=rep(paste0('CAAS:',rk),length(u)),contract_version=rep(1L,length(u)))
  all_evidence[[rk]]<-tab
  suffix<-if(rk=='global')'' else paste0('_',rk)
- for(nm in c('p.gen','p.gen.adj','nominal','adjusted'))genes[[paste0('caas_',nm,suffix)]]<-tab[[nm]][match(genes$Gene,u)]
- for(nm in c('p.gen','p.gen.adj','nominal','adjusted'))stats[[paste0('caas_',nm,suffix)]]<-tab[[nm]][match(stats$gene,u)]
+ for(nm in c('p.gen','p.gen.adj','nominal','adjusted','available'))genes[[paste0('caas_',nm,suffix)]]<-tab[[nm]][match(genes$Gene,u)]
+ for(nm in c('p.gen','p.gen.adj','nominal','adjusted','available'))stats[[paste0('caas_',nm,suffix)]]<-tab[[nm]][match(stats$gene,u)]
  # Header + tab-separated rows: prepare_ami_lists.py reads these columns by name (base write() cannot write a data.frame).
- active<-tab[tab$nominal,,drop=FALSE];write.table(data.frame(Gene=active$gene,active[,-1,drop=FALSE]),file.path('gene_lists',paste0('active_',rk,'.tsv')),sep='\t',quote=FALSE,row.names=FALSE)
+ active<-tab[tab$nominal,,drop=FALSE];write(data.frame(Gene=active$gene,active[,-1,drop=FALSE]),file.path('gene_lists',paste0('active_',rk,'.tsv')))
 }
 write(do.call(rbind,all_evidence),'gene_evidence.tsv')
 # Existing position p-values and BH already use the pooled unique-position family.
+positions$caas_available<-!is.na(positions$p.emp)
 positions$caas_nominal<-!is.na(positions$p.emp)&positions$p.emp<nom
 positions$caas_adjusted<-!is.na(positions$p.adj_bh)&positions$p.adj_bh<fdr
 for(rk in ranks) {
@@ -85,6 +98,6 @@ for(rk in ranks) {
 }
 for(n in c("rer_min_pval","rer_perm_padj")) if(n %in% names(genes)) stats[[if(n=="rer_min_pval")"rer_p.emp" else "rer_p.adj"]] <- genes[[n]][match(stats$gene,genes$Gene)]
 write(genes,'gene_scores.tsv');write(positions,'position_scores.tsv');write(stats,'fcs_stats.tsv')
-jsonlite::write_json(list(contract_version=1L,available=available,N=N,genes=length(u),blocks=block_ids,nominal_threshold=nom,fdr_threshold=fdr,gene_stat=arg('--gene-stat','max')), 'calibration/metadata.json',auto_unbox=TRUE,pretty=TRUE)
+jsonlite::write_json(list(table_md5=as.list(tools::md5sum(c('gene_scores.tsv','position_scores.tsv','fcs_stats.tsv','gene_evidence.tsv'))),universe_md5=unname(tools::md5sum(arg('--universe'))),null_md5=as.list(setNames(unname(tools::md5sum(files)),block_ids)),contract_version=2L,available=available,N=N,genes=length(u),blocks=block_ids,nominal_threshold=nom,fdr_threshold=fdr,gene_stat=arg('--gene-stat','max')), 'calibration/metadata.json',auto_unbox=TRUE,pretty=TRUE)
 file.copy('calibration/metadata.json','gene_evidence_metadata.json',overwrite=TRUE)
 if(!available)write(data.frame(ranking=character(),database=character(),pathway=character(),stat=numeric(),pval=numeric(),p.adj=numeric(),p.perm=numeric(),q.perm=numeric(),num.genes=integer(),gene.vals=character(),sig_perm=logical(),direction=character(),redlich_level=character()),'calibration/empty.tsv')

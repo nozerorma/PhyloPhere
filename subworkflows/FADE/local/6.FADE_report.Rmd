@@ -1,6 +1,6 @@
 ---
 title: "FADE — Directional Selection Analysis"
-subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
+subtitle: "`r paste0('Trait: ', if (!is.null(params$metadata_file)) jsonlite::fromJSON(params$metadata_file)$settings$traitname else params$traitname)`"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 author: "PhyloPhere pipeline"
 output:
@@ -24,6 +24,7 @@ params:
   min_genes_hmap: 3
   output_dir:     "."
   fg_list_file:   NULL
+  metadata_file:  NULL
 ---
 
 <style type="text/css">
@@ -77,19 +78,21 @@ suppressPackageStartupMessages({
   library(DT)
 })
 
-# Tableau_10 colors, shared with the other reports
-.tableau10 <- as.character(paletteer_d("ggthemes::Tableau_10"))
+source('report_style.R')
+set_report_style()
+.tableau10 <- report_palette(10)
+metadata <- if (!is.null(params$metadata_file)) jsonlite::fromJSON(params$metadata_file) else NULL
+known_settings <- !is.null(metadata)
+if (known_settings) {
+  stopifnot(isTRUE(metadata$complete), metadata$direction == params$direction)
+  trait_label <- metadata$settings$traitname
+  bf_thr <- metadata$settings$bf_threshold
+} else {
+  trait_label <- params$traitname
+  bf_thr <- NA_real_
+}
+cutoff_text <- if (known_settings) paste0('BF ≥ ', bf_thr) else 'the original cutoff (not recorded)'
 
-theme_set(
-  theme_bw(base_size = 13) +
-  theme(
-    axis.title.y  = element_text(margin = ggplot2::margin(l = 20, r = 20)),
-    axis.title.x  = element_text(margin = ggplot2::margin(t = 12)),
-    axis.text.x   = element_text(margin = ggplot2::margin(t = 5)),
-    plot.title    = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
-    plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
-  )
-)
 ```
 
 ---
@@ -97,15 +100,14 @@ theme_set(
 ## Overview
 
 This report summarises the results of **FADE** (FUBAR Approach to Directional
-Evolution; Kosakovsky Pond _et al._ 2021) applied to **`r params$direction`**
-foreground branches associated with the phenotype **`r params$traitname`**.
+Evolution) applied to **`r params$direction`**
+foreground branches associated with the phenotype **`r trait_label`**.
 
 FADE quantifies, for each site in each protein alignment, whether the
 **foreground branches** show a statistically elevated substitution bias towards
 a particular amino acid, relative to the background rate modelled on the full
 tree.  Evidence is measured by the **Bayes Factor (BF)** for each site × target
-amino-acid combination.  A BF ≥ `r params$bf_threshold` is considered strong
-evidence of directional selection at that site.
+amino-acid combination.  Hits in these tables met **`r cutoff_text`**. Gene maxima describe site evidence; they are not calibrated gene-level significance tests.
 
 ---
 
@@ -113,7 +115,7 @@ evidence of directional selection at that site.
 
 ```{r analysis-setup-fade, echo=FALSE}
 has_fg <- !is.null(params$fg_list_file) &&
-          nchar(params$fg_list_file %||% "") > 0 &&
+          nchar(params$fg_list_file) > 0 &&
           file.exists(params$fg_list_file)
 
 if (has_fg) {
@@ -123,7 +125,7 @@ if (has_fg) {
               params$direction, length(fg_sp)))
   knitr::kable(
     data.frame(Foreground_species = fg_sp),
-    caption = "Species labeled as foreground branches in FADE"
+    caption = "Foreground species pool; per-gene retention is audited"
   )
 } else {
   cat("> Foreground species list not provided to this report.\n\n")
@@ -137,17 +139,31 @@ if (has_fg) {
 # ── Merged FADE tables of this direction (written by FADE_TABLES) ───────────────
 # gene_counts_file: one row per gene (n_sites_tested, n_sig_site_aa, max_bf, top_target_aa, top_site and the sigcount_<AA> columns),
 # by decreasing n_sig_site_aa and max_bf. sites_file: one row per significant site (gene, position 0-based, max_bf, target_aa).
-bf_thr <- params$bf_threshold
 
-gene_summary <- read.delim(params$gene_counts_file, stringsAsFactors = FALSE)
-sig_sites <- read.csv(params$sites_file, stringsAsFactors = FALSE) %>%
+gene_summary <- read.delim(params$gene_counts_file, stringsAsFactors = FALSE,
+                           colClasses = c(gene='character'), na.strings=character())
+sig_sites <- read.csv(params$sites_file, stringsAsFactors = FALSE, colClasses=c(gene='character'), na.strings=character()) %>%
   mutate(site = position + 1L) %>%          # 1-based FADE site index
   select(gene, site, position, max_bf, target_aa)
 
+if (known_settings) {
+  stopifnot(nrow(gene_summary) == metadata$tested)
+  check_hash <- function(path, expected) {
+    stopifnot(identical(digest::digest(file=path, algo='sha256'), expected))
+  }
+  check_hash(params$gene_counts_file, metadata$output_sha256[[paste0('fade_gene_counts_',params$direction,'.tsv')]])
+  check_hash(params$sites_file, metadata$output_sha256[[paste0('fade_sites_',params$direction,'.csv')]])
+  if (has_fg && !is.null(metadata$foreground_sha256)) check_hash(params$fg_list_file, metadata$foreground_sha256)
+}
+if (known_settings) {
+  cat(sprintf('Coverage: %d expected gene/direction runs; %d tested; %d biological exclusions.\n',
+              metadata$expected, metadata$tested, metadata$excluded))
+} else {
+  cat('Original settings and completion audit were not recorded. These legacy tables do not establish full run coverage.\n')
+}
 if (nrow(gene_summary) == 0) {
   message("No FADE results for the ", params$direction, " direction ",
-          "(genes may all have failed or no genes were selected).")
-  knitr::knit_exit()
+          "(no eligible genes or an empty input universe).")
 }
 
 cat(sprintf(
@@ -165,8 +181,8 @@ cat(sprintf(
 sig_genes <- gene_summary %>% filter(n_sig_site_aa > 0)
 
 cat(sprintf(
-  "✓ Gene-level summary created: %d genes tested, %d with ≥1 site (BF ≥ %g)\n",
-  nrow(gene_summary), nrow(sig_genes), bf_thr
+  "✓ Gene-level summary created: %d genes tested, %d with ≥1 site meeting %s\n",
+  nrow(gene_summary), nrow(sig_genes), cutoff_text
 ))
 ```
 
@@ -174,7 +190,7 @@ cat(sprintf(
 DT::datatable(
   gene_summary %>%
     select(gene, n_sites_tested, n_sig_site_aa, max_bf, top_target_aa, top_site) %>%
-    mutate(max_bf = round(max_bf, 2)) %>%
+    mutate(max_bf = ifelse(is.infinite(max_bf), 'Inf', as.character(round(max_bf, 2)))) %>%
     rename(
       Gene              = gene,
       `Sites tested`    = n_sites_tested,
@@ -188,8 +204,8 @@ DT::datatable(
   options   = list(pageLength = 25, scrollX = TRUE),
   caption   = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
-    sprintf("Gene-level FADE summary | BF threshold = %g | Direction: %s",
-            bf_thr, toupper(params$direction))
+    sprintf("Gene-level FADE summary | %s | Direction: %s",
+            cutoff_text, toupper(params$direction))
   )
 )
 ```
@@ -200,8 +216,8 @@ DT::datatable(
 
 ```{r sig-sites-table}
 if (nrow(sig_sites) == 0) {
-  cat(sprintf("No sites cleared BF ≥ %g in the %s direction.\n",
-              bf_thr, toupper(params$direction)))
+  cat(sprintf("No sites met %s in the %s direction.\n",
+              cutoff_text, toupper(params$direction)))
 } else {
   DT::datatable(
     sig_sites %>%
@@ -209,7 +225,7 @@ if (nrow(sig_sites) == 0) {
         Gene            = gene,
         `Site (1-based)` = site,
         `Position (0-based)` = position,
-        `Max BF`        = round(max_bf, 2),
+        `Max BF`        = ifelse(is.infinite(max_bf), 'Inf', as.character(round(max_bf, 2))),
         `Target AA`     = target_aa
       ),
     filter   = "top",
@@ -217,8 +233,8 @@ if (nrow(sig_sites) == 0) {
     options  = list(pageLength = 25, scrollX = TRUE),
     caption  = htmltools::tags$caption(
       style = "caption-side: top; text-align: left; font-weight: bold;",
-      sprintf("All significant FADE sites | BF ≥ %g | Direction: %s | %d sites across %d genes",
-              bf_thr, toupper(params$direction),
+      sprintf("All significant FADE sites | %s | Direction: %s | %d sites across %d genes",
+              cutoff_text, toupper(params$direction),
               nrow(sig_sites), length(unique(sig_sites$gene)))
     )
   )
@@ -232,19 +248,22 @@ if (nrow(sig_sites) == 0) {
 ### Distribution of maximum Bayes Factors across genes
 
 ```{r bf-distribution, fig.height=5}
-ggplot(gene_summary, aes(x = max_bf)) +
+finite_genes <- gene_summary %>% filter(is.finite(max_bf), max_bf > 0)
+cat(sprintf('%d infinite and %d zero gene maxima are retained in the table and omitted from the log histogram.\n',
+            sum(is.infinite(gene_summary$max_bf)), sum(gene_summary$max_bf == 0)))
+if (nrow(finite_genes) > 0) {
+ggplot(finite_genes, aes(x = max_bf)) +
   geom_histogram(bins = 50, fill = .tableau10[1], colour = "white", alpha = 0.85) +
-  geom_vline(xintercept = bf_thr, colour = "#d7191c", linetype = "dashed", linewidth = 0.8) +
-  annotate("text", x = bf_thr * 1.05, y = Inf, vjust = 1.5,
-           label = paste("BF =", bf_thr), colour = "#d7191c", size = 3.5) +
+  {if (known_settings) geom_vline(xintercept = bf_thr, colour = .tableau10[2], linetype = 'dashed', linewidth = 0.8)} +
   scale_x_log10(labels = scales::comma) +
   labs(
     title    = paste("Max Bayes Factor per gene —", toupper(params$direction), "direction"),
-    subtitle = params$traitname,
+    subtitle = trait_label,
     x        = "Max Bayes Factor (log10 scale)",
     y        = "Number of genes"
   ) +
-  theme_bw(base_size = 13)
+  report_theme(base_size = 13)
+} else cat('No finite, positive maxima to display.\n')
 ```
 
 ### Target amino-acid frequency among significant site × AA hits
@@ -271,7 +290,7 @@ if (nrow(sig_genes) == 0) {
       x = "Target amino acid",
       y = "Number of significant site × AA combinations"
     ) +
-    theme_bw(base_size = 16)
+    report_theme(base_size = 16)
 }
 ```
 
@@ -282,18 +301,21 @@ if (nrow(sig_genes) == 0) {
 
 **Tool:** FADE (FUBAR Approach to Directional Evolution) via HyPhy ≥ 2.5.
 
-**Branch labelling:** Foreground branches correspond to species in the
-**`r params$direction`** contrast group of the caastools traitfile for trait
-`r params$traitname`. Background branches are the remaining species.
-For a `r params$direction` analysis, contrast_group
-`r ifelse(params$direction == "top", "= 1 (high-trait extreme)", "= 0 (low-trait extreme after FG/BG flip)")` species were labelled as foreground.
+**Branch labelling:** The foreground comes from the global pre-Dunn candidate pool (or the supplied species file), direction **`r params$direction`**. Per-gene taxa are reconciled without changing alignment columns. A rooted reference tree is required.
 
-**Statistical cutoff:** Bayes Factor ≥ `r params$bf_threshold` was used as the
-evidence threshold for directional selection at a site, following the convention
-of Kosakovsky Pond _et al._ 2021 (_HyPhy 2.5_, MBE).
+```{r recorded-methods, results='asis'}
+if (known_settings) {
+  st <- metadata$settings
+  cat(sprintf('**Background scope:** `%s`. In `all`, all other retained branches provide background; in `opposite`, only foreground plus opposite-pool taxa are retained.\n\n', st$background_scope))
+  cat(sprintf('**Internal foreground branches:** `%s`. `all_descendants` includes the stem of each all-foreground clade; `none` labels terminal branches only.\n\n', st$internal_nodes))
+  cat(sprintf('**Substitution model:** `%s`; **inference method:** `%s`; **grid:** %d; **Dirichlet concentration:** %g.\n\n', st$model, st$method, st$grid, st$concentration))
+  cat(sprintf('**Original evidence cutoff:** BF ≥ %g.\n\n', st$bf_threshold))
+} else {
+  cat('Model, branch settings and original cutoff are unknown for these legacy inputs.\n')
+}
+```
 
-**Substitution model used for background rate:** `r params$traitname` (see
-pipeline parameters for `fade_model`).
+FADE evidence is evaluated per site and target amino acid. A gene with a hit has at least one such combination meeting the cutoff. The maximum across sites is descriptive and does not correct for gene length or multiple comparisons. See the [HyPhy method documentation](https://www.hyphy.org/methods/selection-methods/#fade).
 
 ---
 

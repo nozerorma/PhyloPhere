@@ -31,59 +31,67 @@ process CHECK_MIN_CONTRASTS {
     tag "CHECK_MIN_CONTRASTS"
     label 'process_discovery'   // lightest available label; trivially fast
 
-    // The sentinel exists only when the threshold is not met, so a launch script can detect a
-    // skipped run without parsing logs.
-    publishDir path: "${params.outdir}", mode: 'copy', overwrite: true,
-               pattern: "low_contrasts.skip"
-
     input:
     path traitfile
     path permulation_traitfile
     path trait_dir, stageAs: 'trait_dir_in'
 
     output:
+    path "gate_status.json", emit: status
     path "traitfile_ok.tab",             emit: traitfile_out,             optional: true
     path "permulation_traitfile_ok.tab", emit: permulation_traitfile_out, optional: true
     path "traitfiles_ok_dir",            emit: trait_dir_out,             optional: true
     path "low_contrasts.skip",           emit: skip_flag,                 optional: true
 
     script:
-    def min_n   = params.min_contrasts ?: 3
-    def tname   = params.traitname     ?: 'unknown'
+    def arguments = groovy.json.JsonOutput.toJson([
+        traitfile: traitfile.toString(), permulation_traitfile: permulation_traitfile.toString(),
+        trait_dir: trait_dir.toString(), min_contrasts: params.min_contrasts != null ? params.min_contrasts : 3,
+        traitname: params.traitname ?: 'unknown', multi_hypothesis: params.multi_hypothesis == true
+    ])
     """
-    n_fg=\$(awk '\$2 == 1 { count++ } END { print count+0 }' ${traitfile})
-
-    if [ "\$n_fg" -lt ${min_n} ]; then
-        printf "trait=${tname}\\tn_contrasts=\${n_fg}\\tmin_required=${min_n}\\n" \\
-            > low_contrasts.skip
-        echo "WARNING [CHECK_MIN_CONTRASTS]: Only \${n_fg} foreground contrast(s)" \\
-             "in traitfile for trait '${tname}'." \\
-             "Minimum ${min_n} required — CT pipeline will be skipped." >&2
-    else
-        cp ${traitfile}             traitfile_ok.tab
-        cp ${permulation_traitfile} permulation_traitfile_ok.tab
-        mkdir -p traitfiles_ok_dir
-        # params.multi_hypothesis chooses between all the traitfile_H*.tab hypotheses and the canonical one (H1)
-        if [ "${params.multi_hypothesis}" = "true" ] && [ -d "${trait_dir}" ]; then
-            cp ${trait_dir}/traitfile_H*.tab traitfiles_ok_dir/ 2>/dev/null || cp ${traitfile} traitfiles_ok_dir/traitfile_H1.tab
-        else
-            if [ -f "${trait_dir}/traitfile_H1.tab" ]; then
-                cp ${trait_dir}/traitfile_H1.tab traitfiles_ok_dir/traitfile_H1.tab
-            else
-                cp ${traitfile} traitfiles_ok_dir/traitfile_H1.tab
-            fi
-        fi
-        # The per-pair PSS weights (contrast_hypotheses_pairs.tsv, written by
-        # 4.Independent_contrasts.Rmd) travel with the passing traitfiles: traitfiles_ok_dir
-        # is the source of the domain-pool weights of SCORING (scoring_hyp_pairs_ch in main.nf).
-        # The copy is allowed to fail when the files do not exist.
-        if [ -d "${trait_dir}" ]; then
-            cp ${trait_dir}/contrast_hypotheses_pairs.tsv traitfiles_ok_dir/ 2>/dev/null || true
-            cp ${trait_dir}/contrast_hypotheses_summary.tsv traitfiles_ok_dir/ 2>/dev/null || true
-        fi
-        echo "OK [CHECK_MIN_CONTRASTS]: \${n_fg} foreground contrasts found" \\
-             "for trait '${tname}' — proceeding with CT pipeline."
-    fi
+    cp "${baseDir}/subworkflows/CT/local/scripts/check_contrasts.py" .
+    cat > gate_inputs.json <<'PHYLOPHERE_GATE_INPUTS'
+${arguments}
+PHYLOPHERE_GATE_INPUTS
+    python check_contrasts.py gate_inputs.json
     """
+}
 
+// Reconcile on the Nextflow head, including cache hits. Optional publishDir
+// outputs cannot remove an old sentinel, and publication can race main.nf's exit.
+// Every public output depends on this reconciliation completing first.
+workflow GATE_CONTRASTS {
+    take:
+    traitfile
+    permulation_traitfile
+    trait_dir
+
+    main:
+    result = CHECK_MIN_CONTRASTS(traitfile, permulation_traitfile, trait_dir)
+    reconciled = result.status.map { status_file ->
+        def status = new groovy.json.JsonSlurper().parse(status_file.toFile())
+        def destination = file(params.outdir).toAbsolutePath()
+        java.nio.file.Files.createDirectories(destination)
+        def sentinel = destination.resolve('low_contrasts.skip')
+        if (status.skipped) {
+            def temporary = java.nio.file.Files.createTempFile(destination, '.low_contrasts-', '.tmp')
+            try {
+                java.nio.file.Files.copy(status_file.parent.resolve('low_contrasts.skip'), temporary,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                java.nio.file.Files.move(temporary, sentinel, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            } finally {
+                java.nio.file.Files.deleteIfExists(temporary)
+            }
+        } else {
+            java.nio.file.Files.deleteIfExists(sentinel)
+        }
+        true
+    }
+
+    emit:
+    traitfile_out = result.traitfile_out.combine(reconciled).map { path, ready -> path }
+    permulation_traitfile_out = result.permulation_traitfile_out.combine(reconciled).map { path, ready -> path }
+    trait_dir_out = result.trait_dir_out.combine(reconciled).map { path, ready -> path }
+    skip_flag = result.skip_flag.combine(reconciled).map { path, ready -> path }
 }

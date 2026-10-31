@@ -34,7 +34,7 @@ GENE_STATS = ("max",)
 
 # Rule of the position score. It is stamped on the null (counts.json, score_rule) so that
 # null_position_stats.py refuses a null scored with another rule. "caas_pos_species_pss": the CAAS score (mean over the domains of the PSS-weighted mean, over the species of the domain, of their hypothesis scores), defined only when positive.
-SCORE_RULE = "caas_pos_species_pss"
+SCORE_RULE = "caas_pos_species_pss_v4"
 
 # Absolute; scores lie in [0, 1]. Rounding noise of a weighted mean is ~1e-16, and real
 # differences between position scores are orders of magnitude larger.

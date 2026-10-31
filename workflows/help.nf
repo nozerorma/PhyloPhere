@@ -214,15 +214,14 @@ Usage:
 --minlen_values                       <"2,3,4,10">                        (exploratory mode)
 --maxcaas_values                        <"0.6,0.7,0.8">                     (exploratory mode)
 --filter_minlen                          <INTEGER>                            3     (filter mode)
+--filter_min_positions        <INTEGER>                      null (minimum candidates per interval; unset preserves legacy count gate per gene)
 --filter_maxcaas                          <FLOAT 0-1>                          0.7   (filter mode)
 --caas_map_dir                              <"map_dir">                          ""    (trimmer MAP tables: trains in untrimmed columns, observed and null; required by --vep)
 --remove_caas_clusters                      <BOOLEAN>                            true  (discard spatial clusters)
---gene_filter_mode                          <"none|extreme|dubious|both|stratified">  "dubious"
---extreme_threshold                           <FLOAT 0-1>                          0.99
---iqr_multiplier                                <FLOAT>                              3.0
---gene_filter_strata                         <INTEGER>                            10    (stratified mode: gene-length strata)
---gene_filter_k_far                           <FLOAT>                              3.0   (stratified mode: far fence, removes the gene)
---gene_filter_k_near                          <FLOAT>                              1.5   (stratified mode: near fence, removes the gene only with a cluster train)
+--gene_filter_mode                          <"none|stratified">                   "stratified"
+--gene_filter_strata                         <INTEGER>                            10    (gene-length strata)
+--gene_filter_k_far                           <FLOAT>                              3.0   (far fence: a gene above it is removed)
+--gene_filter_k_near                          <FLOAT>                              1.5   (near fence: a gene above it is removed only with a cluster train)
 '''
 }
 
@@ -234,8 +233,8 @@ POSENRICH — Help
 =============================================
 Position-level enrichment of CAAS detections on the universe U of positions (the same U as
 SCORING). The universe table (universe.tsv.gz) is shared by both levels. Level 1 (Accumulation)
-is a test of whether a gene holds a larger share of the detections than it does in the null cycles
-(calibrated with them). The position registry, its characterization, level 2 (concentration of the
+is an exact hypergeometric test of whether a gene holds more CAAS positions than its share of U
+predicts; it runs once per direction (top/bottom/all). The position registry, its characterization, level 2 (concentration of the
 signal inside genes, calibrated with the null cycles) and the overlap and proximity components read SCORING's
 tables and need --scoring. Without --scoring only posenrich/universe and posenrich/accumulation are written; with
 it the run adds registry, characterization, within_gene and proximity, and report 13
@@ -299,8 +298,8 @@ def fade_help() {
     return '''
 FADE (directional selection) — Help
 =============================================
-Runs HyPhy FADE, a Bayesian branch-site model, to detect accelerated or
-decelerated amino-acid selection on phenotype-extreme branches.
+Runs HyPhy FADE to test directional substitution bias towards amino acids
+on foreground branches in a rooted tree. Technical failures stop complete output.
 
 Usage:
 --fade_direction                         <"top"|"bottom"|"both">   "both"  (which foreground direction(s) to run)
@@ -309,15 +308,14 @@ Usage:
 --fade_species_file                      <"path">                  null    (optional user-supplied fg/bg species file, candidate_species.tab format: species<TAB>contrast_group[<TAB>pair]; contrast_group==1 -> top, ==0 -> bottom; bypasses contrast selection for FADE when set. Requires --tree when used standalone.)
 --selection_prep_batch_size          <INTEGER>                500
 --fade_batch_size                      <INTEGER>                200
---fade_bf_threshold                      <INTEGER>                100  (Bayes Factor cutoff)
---fade_model                               <"LG">                    "LG"
+--fade_bf_threshold                      <FLOAT>                100  (Bayes Factor cutoff)
+--fade_model                               <"LG|WAG|JTT|...">       "LG" (HyPhy built-in model; Dayhoff is unsupported)
 --fade_method                                <"Variational-Bayes|Collapsed-Gibbs|Metropolis-Hastings">  "Variational-Bayes"
 --fade_grid                                    <INTEGER>                20
 --fade_chains, --fade_chain_length,
 --fade_burn_in, --fade_samples               (MCMC-only settings; ignored by Variational-Bayes)
 --fade_concentration                            <FLOAT>                  0.5
---fade_min_genes_for_heatmap                       <INTEGER>                2     (minimum genes for the report heatmap)
---lg_dat_path                                       <"model.dat">            derived from --fade_model
+--fade_min_genes_for_heatmap                       <INTEGER>                2     (legacy compatibility option; no effect)
 --fade_universe_file                              <"gene_list">            null  (else falls back to cleaned background)
 --fade_tables_dir_top / --fade_tables_dir_bottom    <"dir/selection/fade/<direction>">   null  (scoring and report from the merged FADE tables of a prior run)
 '''
@@ -344,8 +342,8 @@ Usage:
 --rer_min_pos                               <INTEGER>                                            2
 --rer_transform                                 <"auto|ha_logit|logit|arcsin|log10|none">            "ha_logit"
 --rer_universe_file                               <"gene_list">                                        null  (else falls back to cleaned background)
---rer_continuous_file                               <"trait.continuous.output">                          null  (render report from precomputed RDS)
---rer_binary_file                                    <"trait.binary.output">                              null  (same, for binary traits)
+--rer_continuous_file                               <"trait.continuous.output">                          null  (validated tables + report from one precomputed RDS)
+--rer_binary_file                                    <"trait.binary.output">                              null  (same, for binary traits; mutually exclusive with continuous file)
 --rer_perms_file                                      <"perms.rds|corStat block dir">                  null  (standalone null)
 --rer_gene_scores                                       <"fcs_stats.tsv">                                   null  (SCORING gene table joined to the RER gene lists)
 --rer_top_n_labels                                       <INTEGER>                                            20    (genes labelled in plots)

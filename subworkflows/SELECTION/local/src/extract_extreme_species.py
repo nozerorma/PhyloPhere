@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Extract top/bottom extreme species lists from trait_stats.csv.
+Extract disjoint top/bottom pools from candidate species TSV or legacy trait_stats CSV.
 
 Expected input columns:
   - species
@@ -17,66 +17,51 @@ import sys
 
 
 def load_species_sets(path: str):
-    top_species = set()
-    bottom_species = set()
-
-    # Sniff format: try traitfile.tab (tab-delimited, no header or header species/contrast_group/pair)
-    with open(path, newline="") as fh:
-        first_line = fh.readline()
-        fh.seek(0)
-        
-        # Check if tab-delimited traitfile (2 or 3 columns)
-        if "\t" in first_line:
-            reader = csv.reader(fh, delimiter="\t")
-            for row in reader:
-                if not row or len(row) < 2:
-                    continue
-                sp = row[0].strip()
-                grp = row[1].strip()
-                if sp.lower() in {"species", "taxa", "tip"}:
-                    continue
-                if grp == "1":
-                    top_species.add(sp)
-                elif grp == "0":
-                    bottom_species.add(sp)
-            if top_species and bottom_species:
-                return top_species, bottom_species
-
-        # Otherwise parse as CSV with DictReader (trait_stats.csv)
-        fh.seek(0)
-        reader = csv.DictReader(fh)
-        fieldnames = [f.strip() for f in (reader.fieldnames or [])]
-        reader.fieldnames = fieldnames
-
-        if "species" in fieldnames and "global_label" in fieldnames:
-            seen_labels = {}
-            for row in reader:
-                species = (row.get("species") or "").strip()
-                global_label = (row.get("global_label") or "").strip().lower()
-                if not species or not global_label:
-                    continue
-                if global_label not in {"high_extreme", "low_extreme"}:
-                    continue
-                if species in seen_labels and seen_labels[species] != global_label:
-                    raise ValueError(
-                        f"Species '{species}' has conflicting global_label values "
-                        f"('{seen_labels[species]}' and '{global_label}') in '{path}'"
-                    )
-                seen_labels[species] = global_label
-                if global_label == "high_extreme":
-                    top_species.add(species)
-                elif global_label == "low_extreme":
-                    bottom_species.add(species)
-
-    if not top_species:
-        raise ValueError(
-            f"No top species found in '{path}' (expected contrast_group==1 or global_label==high_extreme)"
-        )
-    if not bottom_species:
-        raise ValueError(
-            f"No bottom species found in '{path}' (expected contrast_group==0 or global_label==low_extreme)"
-        )
-
+    """Read a disjoint global pool, not a paired CT design; pair is ignored."""
+    top_species, bottom_species, seen = set(), set(), {}
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        lines = [line for line in fh if line.strip()]
+    if not lines:
+        raise ValueError(f"Empty species input: {path}")
+    is_tsv = "\t" in lines[0]
+    if is_tsv:
+        rows = list(csv.reader(lines, delimiter="\t"))
+        if (len(rows[0]) in {2, 3} and rows[0][0] in {"species", "taxa", "tip"}
+                and rows[0][1] in {"contrast_group", "group"}):
+            rows = rows[1:]
+        parsed = []
+        for row in rows:
+            if len(row) not in {2, 3} or row[1] not in {"0", "1"}:
+                raise ValueError(f"Invalid species/group row in {path}: {row!r}")
+            parsed.append((row[0], row[1]))
+    else:
+        reader = csv.DictReader(lines)
+        fields = [f.strip() for f in (reader.fieldnames or [])]
+        if len(fields) != len(set(fields)) or not {"species", "global_label"} <= set(fields):
+            raise ValueError(f"Expected species/global_label CSV or species/contrast_group TSV: {path}")
+        reader.fieldnames = fields
+        parsed = []
+        for row in reader:
+            if None in row or any(v is None for v in row.values()):
+                raise ValueError(f"Invalid CSV row in {path}: {row!r}")
+            label = row["global_label"].strip().lower()
+            # Non-extreme rows are valid in the legacy trait_stats CSV.
+            if label not in {"high_extreme", "low_extreme", "intermediate", "normal", "non_extreme", "", "na"}:
+                raise ValueError(f"Invalid global_label in {path}: {label!r}")
+            parsed.append((row["species"], label))
+    for species, group in parsed:
+        if (not species or species != species.strip() or "," in species
+                or any(c.isspace() for c in species)):
+            raise ValueError(f"Invalid species identifier in {path}: {species!r}")
+        if species in seen:
+            raise ValueError(f"Duplicate or conflicting species in {path}: {species!r}")
+        seen[species] = group
+        if group in {"1", "high_extreme"}:
+            top_species.add(species)
+        elif group in {"0", "low_extreme"}:
+            bottom_species.add(species)
+    if not top_species or not bottom_species:
+        raise ValueError(f"Both top and bottom species are required: {path}")
     return top_species, bottom_species
 
 
@@ -91,9 +76,9 @@ def write_species(path: str, species: set, label: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract top/bottom extreme species from trait_stats.csv"
+        description="Extract disjoint top/bottom species pools"
     )
-    parser.add_argument("--stats-file", required=True, help="Input trait_stats.csv file")
+    parser.add_argument("--stats-file", required=True, help="Candidate species TSV (pair ignored) or legacy trait_stats CSV")
     parser.add_argument("--out-top", required=True, help="Output top species list")
     parser.add_argument(
         "--out-bottom", required=True, help="Output bottom species list"

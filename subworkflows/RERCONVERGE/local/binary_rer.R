@@ -33,15 +33,25 @@ library(RERconverge)
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
 source(file.path(dirname(normalizePath(script_file)), "rer_permulations.R"))
 source(file.path(dirname(normalizePath(script_file)), "rer_batches.R"))
-batch_seed <- if (length(args) >= 12) as.integer(args[12]) else 1998L
+source(file.path(dirname(normalizePath(script_file)), "rer_contract.R"))
+batch_seed <- rer_integer(if (length(args) >= 12) args[12] else 1998L, "batch seed")
 set.seed(batch_seed)
 
 
 # ── Load trait vector ─────────────────────────────────────────────────────────
 
 traitPath <- args[1]
-load(traitPath)   # loads object: trait_vector  (named 0/1 numeric vector)
+trait <- rer_trait(traitPath)
+trait_vector <- trait$values
+if (!setequal(unique(trait_vector),c(0,1))) stop("Binary trait must contain both 0 and 1")
 
+geneTrees <- readRDS(args[2])
+traitRERw <- readRDS(args[4])
+rer_check_matrix(traitRERw, geneTrees, names(trait_vector))
+if (!all(geneTrees$masterTree$tip.label %in% names(trait_vector)))
+  stop("Master-tree taxa lack binary phenotype; rebuild trees on complete-case trait species")
+trait_vector <- trait_vector[geneTrees$masterTree$tip.label]
+if (!setequal(unique(trait_vector),c(0,1))) stop("Retained binary taxa require foreground and background")
 fg_sp <- names(trait_vector[!is.na(trait_vector) & trait_vector == 1])
 bg_sp <- names(trait_vector[!is.na(trait_vector) & trait_vector == 0])
 message(sprintf(
@@ -63,13 +73,14 @@ geneTrees <- readRDS(args[2])
 #   "ancestral" only the inferred transition branch
 #   "terminal"  only the terminal branches of the foreground species
 rer_clade <- args[9]
+if (!rer_clade %in% c("all","terminal","ancestral")) stop("Invalid binary clade")
 message(sprintf("[RER_BIN] Building foreground paths (clade = '%s') ...", rer_clade))
 fg_paths <- foreground2Paths(fg_sp, geneTrees, clade = rer_clade)
 saveRDS(fg_paths, args[3])
 message(sprintf("[RER_BIN] Foreground paths computed for %d branches.", length(fg_paths)))
 
 # ── Load RER matrix ───────────────────────────────────────────────────────────
-traitRERw <- readRDS(args[4])
+# Matrix identity was checked before intersecting the phenotype with retained taxa.
 
 # ── Dimension check ───────────────────────────────────────────────────────────
 
@@ -92,11 +103,11 @@ if (length(fg_paths) != ncol(traitRERw)) {
 # weights) and the weighted one (fractional weights). winsorizeRER pulls the most
 # extreme RER values toward the next most extreme one before correlating, which limits
 # the leverage of outlier branches; 0 or NA gives NULL (no winsorization).
-winR_raw <- as.numeric(args[8])
+winR_raw <- rer_integer(args[8], "winsorizeRER")
 winR     <- if (!is.na(winR_raw) && winR_raw > 0) winR_raw else NULL
 
-min_sp  <- as.integer(args[6])
-min_pos <- as.integer(args[7])
+min_sp  <- rer_integer(args[6], "min.sp", 3)
+min_pos <- rer_integer(args[7], "min.pos", 1)
 
 message(sprintf(
   "[RER_BIN] Running correlateWithBinaryPhenotype (min.sp=%d, min.pos=%d, winsorizeRER=%s) ...",
@@ -110,9 +121,12 @@ res <- rer_score_paths(
   min.pos = min_pos,
   winR    = winR
 )
+res <- rer_results(res)
 message(sprintf("[RER_BIN] Correlation done: %d genes tested.", nrow(res)))
 attr(res, "rer_settings") <- list(mode = "binary", min.sp = min_sp, min.pos = min_pos,
-                                   winR = winR, clade = rer_clade)
+                                   winR = winR, clade = rer_clade,
+                                   matrix_contract = attr(traitRERw,"rer_contract"),
+                                   trait_metadata = trait$metadata)
 
 # ── Permulation null (CC) ─────────────────────────────────────────────────────
 
@@ -123,8 +137,8 @@ attr(res, "rer_settings") <- list(mode = "binary", min.sp = min_sp, min.pos = mi
 #
 # rer_perms_binary scores these histories with the observed correlation settings.
 # categoricalPermulations is required; the legacy CC simulator needs an outgroup.
-num_batches     <- as.integer(args[10])
-perms_per_batch <- as.integer(args[11])
+num_batches     <- rer_integer(args[10], "perm batches")
+perms_per_batch <- rer_integer(args[11], "perms per batch", 1)
 
 if (num_batches > 0 && perms_per_batch > 0) {
   message(sprintf(
@@ -159,5 +173,7 @@ attr(res, "rer_type") <- "binary"
 attr(res, "fg_sp")    <- fg_sp
 attr(res, "clade")    <- rer_clade
 
+attr(res, "rer_input_hashes") <- lapply(args[c(1,2,4)], rer_file_hash)
+invisible(rer_results(res))
 saveRDS(res, args[5])
 message("[RER_BIN] Results saved to: ", args[5])

@@ -92,17 +92,6 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="fade_burn_in", help="MCMC steps discarded from the start of each chain; used only by the MCMC inference methods, default 1000000.", label="MCMC burn-in", importance="default"),
         FieldSpec(name="fade_samples", help="Posterior samples kept from the MCMC run; used only by the MCMC inference methods, default 1000.", label="MCMC samples", importance="default"),
         FieldSpec(name="fade_concentration", help="Dirichlet concentration prior of the FADE model; default 0.5.", label="Dirichlet concentration prior", importance="default"),
-        FieldSpec(
-            name="lg_dat_path",
-            label="Substitution matrix path (optional)",
-            kind="path_file",
-            importance="optional",
-            help=(
-                "Path to substitution matrix (.dat) file. When left blank, "
-                "automatically resolves to the matching model file in "
-                "subworkflows/SELECTION/local/dat/."
-            ),
-        ),
         Section("Batching and performance"),
         FieldSpec(name="selection_prep_batch_size", help="Genes per alignment-preparation task; default 500. Smaller values give more, shorter Nextflow tasks.", label="Alignment-prep genes per task", importance="optional"),
         FieldSpec(name="fade_batch_size", help="Genes per FADE Nextflow task; default 200. Smaller values give more, shorter tasks.", label="FADE genes per task", importance="optional"),

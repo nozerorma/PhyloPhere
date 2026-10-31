@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / 'subworkflows/POSENRICH/local/src'
 sys.path.insert(0, str(SRC))
+from posenrich_fixtures import reference, annotation
 import posenrich_members as pm  # noqa: E402
 REGISTRY = SRC / 'posenrich_registry.py'
 
@@ -22,14 +23,14 @@ SCORES_TSV = ('Gene\tPosition\tCAAS_score\tside\tp.emp\tp.adj_bh\tp.emp_fact\tp.
               'G1\t0\t0.9\ttop\t0.01\t0.2\t0.001\t0.05\t11\tFALSE\tTRUE\tFALSE\n'
               'G1\t0\t0.8\tbottom\t0.01\t0.2\t0.001\t0.05\t11\tFALSE\tTRUE\tFALSE\n'
               'G1\t2\t0.5\ttop\t0.2\t0.9\t0.01\t0.2\t3\tFALSE\tFALSE\tFALSE\n'
-              'OUT\t5\t0.7\ttop\t0.04\t0.3\t0.004\t0.1\t2\tFALSE\tTRUE\tFALSE\n')
+              '')
 
 DISCOVERY_TSV = ('Gene\tPosition\tcaas\tconvergence_type\ttag_support\tcaas_support\tparticipating_hypotheses\tn_hypotheses\tn_species\tside\tasr_path_score\n'
                  'G1\t0\tF/L\tconvergent\tCAAS_x:1\tFFF/FLL:1\tH1\t1\t2.0\ttop\t0.9\n'
                  'G1\t0\tF/L\tconvergent\tCAAS_x:1\tFFF/FLL:1\tH1\t1\t2.0\tbottom\t0.8\n'
                  'G1\t2\tF/L\tconvergent\tCAAS_x:1\tFFF/FLL:1\tH1\t1\t2.0\ttop\t0.5\n'
-                 'G1\t3\tF/L\tconvergent\tCAAS_x:1\tFFF/FLL:1\tH1\t1\t2.0\ttop\t0.0\n'
-                 'OUT\t7\tF/L\tconvergent\tCAAS_x:1\tFFF/FLL:1\tH1\t1\t2.0\ttop\t0.6\n')
+                 'G1\t3\tF/L\tconvergent\tCAAS_x:1\tFFF/FLL:1\tH1\t1\t2.0\tnone\t0.0\n'
+                 '')
 
 NULL_UNIVERSE_TSV = ('metric\tcycles\tvalue\tnote\n'
                      'N_cycles\tNA\t100\tcycle_roster.txt\n'
@@ -48,10 +49,10 @@ UCR_TSV = ('gene\tposition\tregion_type\tmethod\tvariability\tcoordinate_space\n
            'G1\t99\tcore\tsliding\t0.3\traw_alignment_1based\n'
            'G1\t4\tcore\tabsolute\t0.1\traw_alignment_1based\n')
 
-FUBAR_TSV = ('gene\thg38_aa_pos\tis_pos_hit\tis_neg_hit\n'
-             'G1\t10\t1\t0\n'
-             'G1\t12\t0\t1\n'
-             'G1\t77\t0\t0\n')
+FUBAR_TSV = ('gene\thg38_aa_pos\tis_pos_hit\tis_neg_hit\tcoordinate_space\n'
+             'G1\t10\t1\t0\treference_protein_1based\n'
+             'G1\t12\t0\t1\treference_protein_1based\n'
+             'G1\t77\t0\t0\treference_protein_1based\n')
 
 FADE_TOP_CSV = 'gene,position,max_bf,target_aa\nG1,0,100,S\nG1,5,100,T\n'
 FADE_BOTTOM_CSV = 'gene,position,max_bf,target_aa\nG1,2,150,T\n'
@@ -79,6 +80,9 @@ def make_fixture(tmp_path):
         'fade_bottom': write(tmp_path / 'fade_bottom.csv', FADE_BOTTOM_CSV),
         'custom': write(tmp_path / 'custom.tsv', CUSTOM_TSV),
     }
+    identity = reference(maps/'G1.map.tsv','G1')
+    annotation(files['domains'], ['G1'], identities={'G1':identity})
+    annotation(files['fubar'], ['G1'], identities={'G1':identity}, coverage='listed_tested_positions')
     return files, str(maps)
 
 
@@ -127,7 +131,7 @@ def test_registry_states_members_coverage_manifest(tmp_path):
     assert {r['side'] for r in g10} == {'top', 'bottom'}
     # p.emp is the pooled max-over-sides p: one shared test, not two directional ones.
     assert len({r['p.emp'] for r in g10}) == 1
-    assert all(r['p_shared'] == 'TRUE' for r in evidence)
+    assert all(r['p_shared'] == ('NA' if r['side']=='none' else 'TRUE') for r in evidence)
     assert all(r['N_cycles'] == '100' for r in evidence)
     assert sum(r['evidence_status'] == 'evaluated' for r in evidence) == 3
     no_score = next(r for r in evidence if r['Position'] == '3')
@@ -155,7 +159,7 @@ def test_registry_states_members_coverage_manifest(tmp_path):
 
     collections = {(r['collection_id'], r['term_id']): r for r in read_tsv(out / 'collections.tsv')}
     assert collections[('genomic_windows', 'chr1_1M')]['informative_within_protein'] == '0'
-    assert collections[('pfam_domains', 'PF1')]['informative_within_protein'] == '1'
+    assert collections[('pfam_domains', 'PF1')]['informative_within_protein'] == '0'
     assert collections[('genomic_windows', 'chr1_1M')]['analyses'] == 'proximity_genomic'
     assert collections[('custom', 'PP2A')]['status'] == 'included'
     assert collections[('pfam_domains', 'PF1')]['source_sha256'] != 'NA'
@@ -179,13 +183,13 @@ def test_registry_states_members_coverage_manifest(tmp_path):
     assert all(r['note'] for r in pending)
 
     manifest = json.loads((out / 'manifest.json').read_text())
-    assert manifest['contract_version'] == 2
+    assert manifest['contract_version'] == 3
     assert manifest['positions']['by_status']['detected_positive'] == 2
     assert manifest['positions']['by_status']['evaluated_no_detection'] == 1
     assert manifest['evidence']['p_available'] == 3
     assert manifest['evidence']['null_cycles'] == 100
-    assert manifest['audited_losses']['score_rows_outside_universe'] == 1
-    assert manifest['audited_losses']['discovery_rows_outside_universe'] == 1
+    assert manifest['audited_losses']['score_rows_outside_universe'] == 0
+    assert manifest['audited_losses']['discovery_rows_outside_universe'] == 0
     by_id = {c['collection_id']: c for c in manifest['collections']}
     assert by_id['custom']['status'] == 'included'
     assert by_id['ucr_core']['n_members'] == 1
@@ -239,12 +243,7 @@ def test_registry_custom_pending_rows_and_malformed_file(tmp_path):
     result = subprocess.run([sys.executable, str(REGISTRY), '--map_dir', str(maps),
                              '--cleaned_background', bg, '--custom_marker_file', bad,
                              '--output_dir', str(out2)], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    collections = read_tsv(out2 / 'collections.tsv')
-    assert all(r['status'] == 'incompatible' for r in collections if r['collection_id'] == 'custom')
-    manifest = json.loads((out2 / 'manifest.json').read_text())
-    custom = [c for c in manifest['collections'] if c['collection_id'] == 'custom'][0]
-    assert custom['status'] == 'incompatible' and 'note' in custom
+    assert result.returncode != 0
 
 
 def test_registry_sentinels_and_empty_inputs(tmp_path):
@@ -259,19 +258,13 @@ def test_registry_sentinels_and_empty_inputs(tmp_path):
     assert manifest['positions']['total'] == 0
 
 
-def test_discovery_missing_and_zero_keep_distinct_states(tmp_path):
+def test_discovery_missing_score_rejected(tmp_path):
+    import pytest
     files, maps = make_fixture(tmp_path)
     with open(files['postproc'], 'a') as f:
         f.write('G1\t1\tF/L\tconvergent\tCAAS_x:1\tFFF/FLL:1\tH1\t1\t2.0\ttop\tNA\n')
-    out = run_registry(tmp_path, files, maps)
-    positions = {r['Position']: r for r in read_tsv(out / 'positions.tsv')}
-    assert positions['1']['evaluation_status'] == 'not_evaluable'
-    assert positions['3']['evaluation_status'] == 'evaluated_no_detection'
-    evidence = {r['Position']: r for r in read_tsv(out / 'position_evidence.tsv')}
-    assert evidence['1']['CAAS_score'] == evidence['3']['CAAS_score'] == 'NA'
-    assert evidence['3']['p.emp'] == 'NA'
-    manifest = json.loads((out / 'manifest.json').read_text())
-    assert manifest['evidence']['complete_evaluable_universe'] is False
+    with pytest.raises(AssertionError, match='convert|score'):
+        run_registry(tmp_path, files, maps)
 
 
 def test_registry_rejects_inconsistent_shared_p(tmp_path):
@@ -361,3 +354,55 @@ def test_window_size_comes_from_the_argument(tmp_path):
     expanded = {(r.collection_id, r.term_id, r.Gene, int(r.Position))
                 for r in pm.read_members(out, ['genomic_windows']).itertuples(index=False)}
     assert expanded == {m for m in old_members(files, maps, 2000) if m[0] == 'genomic_windows'}
+
+
+def test_literal_gene_ids_and_unverified_map_do_not_transfer_references(tmp_path):
+    import pytest
+    from position_sources import build_map_cache
+    maps=tmp_path/'maps';maps.mkdir()
+    for g in ('001','NA','G.v1','"Q"'):
+        (maps/(g+'.map.tsv')).write_text(MAP_TSV)
+    cache=build_map_cache(str(maps),{'001','NA','G.v1','"Q"'})
+    assert set(cache)=={'001','NA','G.v1','"Q"'}
+    assert all(c['reference_status']=='unverified_reference' and c['strand']=='NA' and not c['residue_to_col'] and not c['col_to_genomic'] for c in cache.values())
+    p=maps/'G.v1.map.tsv';p.write_text(p.read_text().replace('3\tselected\t2','3\tselected\t1'))
+    with pytest.raises(ValueError,match='Repeated'):
+        build_map_cache(str(maps),{'G.v1'})
+
+
+def test_fubar_conflicts_fail_before_becoming_negatives(tmp_path):
+    import pytest
+    from position_sources import collect_fubar_members
+    p=tmp_path/'fubar.tsv'
+    p.write_text('gene\thg38_aa_pos\tis_pos_hit\tis_neg_hit\tcoordinate_space\talignment_position\nG\t1\t1\t0\tCAAS_0based\t0\nG\t1\t0\t0\tCAAS_0based\t0\n')
+    with pytest.raises(ValueError,match='Conflicting FUBAR duplicate'):
+        collect_fubar_members(str(p),{}, {'G'})
+
+
+def test_protein_mapping_identity_is_checked(tmp_path):
+    import pytest
+    files,maps=make_fixture(tmp_path)
+    proteins=tmp_path/'proteins.tsv';proteins.write_text('gene\thuman_protein_id\nG1\tENSP000001.2\n')
+    with pytest.raises(AssertionError,match='Protein mapping differs'):
+        run_registry(tmp_path,files,maps,['--gene_ensembl_file',str(proteins)])
+    proteins.write_text('gene\thuman_protein_id\nG1\tNA\n')
+    out=run_registry(tmp_path,files,maps,['--gene_ensembl_file',str(proteins)])
+    positions=read_tsv(out/'positions.tsv')
+    assert all(r['reference_status']=='unmapped_protein_id' for r in positions)
+    assert all(r['hg38_nt_coord']=='NA' and r['hg38_aa_pos']=='NA' for r in positions)
+
+
+def test_annotation_alignment_must_match_caas_provenance(tmp_path):
+    import pytest
+    from types import SimpleNamespace
+    from posenrich_registry import annotation_contracts
+    source=tmp_path/'ucr.tsv';source.write_text('gene\tposition\nG\t0\n')
+    annotation(source,['G'])
+    sidecar=Path(str(source)+'.manifest.json');meta=json.loads(sidecar.read_text())
+    meta.update(coverage='all_productive_alignment_columns',alignments={'G.fa':'f'*64})
+    sidecar.write_text(json.dumps(meta))
+    args=SimpleNamespace(domain_variability_file=None,ucr_positions_file=str(source),fubar_sites_file=None,fade_sites_top_file=None,fade_sites_bottom_file=None,custom_marker_file=None)
+    positions=pd.DataFrame({'Gene':['G'],'Position':[0],'in_tested_universe':[1]})
+    um={'inputs':{'background_positions':{'sha256':'t'},'background_genes':{'sha256':'b'}},'null':{'observed_contract':{'alignments':{'G':'a'*64}}}}
+    with pytest.raises(ValueError,match='differs from CAAS provenance'):
+        annotation_contracts(args,positions,{},um)

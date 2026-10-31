@@ -227,7 +227,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             } else {
                 def trait_file_in = null
                 def permulation_trait_file_in = null
-                def tree_file_in = null
+                def tree_file_in = curated_tree_ch
                 ct_results = CT (trait_file_in, permulation_trait_file_in, tree_file_in, curated_trait_ch)
             }
             ran_any = true
@@ -464,7 +464,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                           (f && f.exists()) ? f : file('NO_HYP_PAIRS')
                       }
                 : null
-            postproc_results = CT_POSTPROC(disambiguation_ch, background_genes_ch, disambiguation_dir_ch, postproc_hyp_pairs_ch)
+            postproc_results = CT_POSTPROC(disambiguation_ch, background_genes_ch, disambiguation_dir_ch, postproc_hyp_pairs_ch, taxid_map_ch)
             ran_any = true
 
             // Capture postproc outputs as reusable references.
@@ -612,9 +612,11 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     [(k): f]
                 }
                 def sites_ch = Channel.value(tables['fade_sites_'])
+                def fadeMetadata = file("${tdir}/fade_run_metadata.json")
+                def fadeMetadataCh = Channel.value(fadeMetadata.isFile() ? fadeMetadata : file('NO_FADE_METADATA'))
                 def rep = (dir == 'top')
-                    ? FADE_REPORT_PRECOMP_TOP(Channel.value('top'), Channel.value(tables['fade_gene_counts_']), sites_ch, resolve_fg_species(tdir, 'top_species.txt'))
-                    : FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), Channel.value(tables['fade_gene_counts_']), sites_ch, resolve_fg_species(tdir, 'bottom_species.txt'))
+                    ? FADE_REPORT_PRECOMP_TOP(Channel.value('top'), Channel.value(tables['fade_gene_counts_']), sites_ch, resolve_fg_species(tdir, 'top_species.txt'), fadeMetadataCh)
+                    : FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), Channel.value(tables['fade_gene_counts_']), sites_ch, resolve_fg_species(tdir, 'bottom_species.txt'), fadeMetadataCh)
                 def out = [summary_tsv: Channel.value(tables['fade_summary_']), sites_csv: sites_ch, report: rep.report]
                 if (dir == 'top') {
                     fade_precomp_top_out      = out

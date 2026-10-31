@@ -130,7 +130,7 @@ class ReplayContext:
         # (foreground, background) of every labeling, in the order of the file: what the scoring takes its design from
         self.labelings: Dict[str, Tuple[List[str], List[str]]] = {
             t: (cfg.trait2fg[t], cfg.trait2bg[t]) for t in cfg.alltraits if t in cfg.trait2fg and t in cfg.trait2bg}
-        self.fop_pairs = read_pss(fop_pairs_file) if fop_pairs_file and Path(fop_pairs_file).exists() else None
+        self.fop_pairs = read_pss(fop_pairs_file, labelings=self.labelings) if fop_pairs_file else None
 
     def slice_alignment(self, alignment_path: str):
         """The alignment as `ct perm-replay` slices it: the columns with at most the allowed share of gaps."""
@@ -164,7 +164,7 @@ def entry_from_fields(fields_: List[str]) -> CAASPosition:
         caas=caas,
         trait1_aa=trait1,
         trait0_aa=trait0,
-        is_conserved_meta=fields_[5] in ("TRUE", "True", "1") if meta else False,
+        is_conserved_meta=bool(set(trait1) & set(trait0)),
         conserved_pair=cp,
     )
 
@@ -198,11 +198,12 @@ def stream_gene(
     posterior_threshold: float,
     strict: bool = False,
     reduce: Callable[[str, List[Any]], Any] = _keep_records,
+    reduce_strict: Optional[Callable[[str, List[Any]], Any]] = None,
 ) -> Optional[Tuple[List[Tuple[str, Any]], List[Tuple[str, Any]]]]:
     """Replay every labeling of `replay` over one alignment and score the cycles that have a detection.
 
     Returns (pooled, strict_pooled): [(cycle or base cycle, reduce(cycle, per-position records))] in cycle-tag order,
-    the second list empty unless `strict`. `reduce` turns the pooled records of a cycle into what the caller keeps (the
+    the second list empty unless `strict`; the strict cycles go through `reduce_strict` (default: `reduce`). `reduce` turns the pooled records of a cycle into what the caller keeps (the
     slimmed records by default); a cycle for which it returns None is dropped. ([], []) when no labeling detects
     anything, and None when the gene's ASR context could not be loaded (`load_ctx` is called once, at the first cycle
     with a detection, so a gene without any does not pay for it).
@@ -273,7 +274,7 @@ def stream_gene(
                         pooled.append((cyc, kept))
                 if strict:
                     for cyc, recs in pool_labelings(results, replay.fop_pairs, replay.labelings, strict=True):
-                        kept = reduce(cyc, _slim(recs))
+                        kept = (reduce_strict or reduce)(cyc, _slim(recs))
                         if kept is not None:
                             pooled_strict.append((cyc, kept))
             t_score += time.perf_counter() - t0

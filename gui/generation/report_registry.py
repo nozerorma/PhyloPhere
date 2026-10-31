@@ -274,7 +274,7 @@ def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
         # The genomic-coordinates file is params.gene_ensembl_file (resolved from
         # there in scoring.nf), the same file as the gene Ensembl slot of CT_POSTPROC.
         _slot("genomic_info", "Gene genomic coordinates TSV", False,
-              _first_match(outdir, "postproc/postproc_inputs/*", "**/*genomic_info*.tsv", "**/*genomic*coords*.tsv")),
+              _first_match(outdir, "postproc/postproc_inputs/gene_annotation.tsv", "postproc/postproc_inputs/*", "**/*genomic_info*.tsv", "**/*genomic*coords*.tsv")),
         _slot("null_summary", "Null summary per cycle TSV", False,
               _first_match(outdir, "caas_permulation/cycle_summary.tsv", "**/cycle_summary.tsv")),
         _slot("null_hist", "Null score histogram per cycle TSV", False,
@@ -325,7 +325,9 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
         header_comment="SCORING — 10.Scoring_report.Rmd",
         repo_dir=repo_dir,
         local_dir="subworkflows/SCORING/local",
-        pre_lines=[],
+        pre_lines=[
+            f'cp "{repo_dir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R" src/report_style.R',
+        ],
         render_block=render,
         output_file=output_file,
         publish_targets=[report.html_path.parent.parent / "scoring", report.html_path.parent],
@@ -346,7 +348,7 @@ def _rer_find_slots(outdir: Listing) -> list[InputSlot]:
     rer_dir = outdir / "rerconverge" / "rer_results"
     return [
         _slot("continuous_rds", "RERconverge continuous output RDS", True,
-              _first_match(rer_dir, "*.continuous.output")),
+              _first_match(rer_dir, "rer_inputs/validated_rer.output", "*.continuous.output", "*.binary.output")),
     ]
 
 
@@ -368,7 +370,7 @@ def _rer_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
         header_comment="RERCONVERGE — 5.RERconverge_report.Rmd",
         repo_dir=repo_dir,
         local_dir="subworkflows/RERCONVERGE/local",
-        pre_lines=[],
+        pre_lines=['cp "$REPO_DIR/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R" .'],
         render_block=render,
         output_file=output_file,
         publish_targets=[report.html_path.parent.parent / "rerconverge" / "rer_results", report.html_path.parent],
@@ -383,47 +385,47 @@ def _make_fade_spec(direction: str) -> ReportSpec:
     def find_slots(outdir: Listing) -> list[InputSlot]:
         # fade_tables.nf publishes the merged tables in selection/fade/<direction>/.
         fade_dir = outdir / "selection" / "fade" / direction
-        counts = _first_match(fade_dir, f"fade_gene_counts_{direction}.tsv")
-        sites = _first_match(fade_dir, f"fade_sites_{direction}.csv")
+        counts = _first_match(fade_dir, "fade_inputs/gene_counts.tsv", f"fade_gene_counts_{direction}.tsv")
+        sites = _first_match(fade_dir, "fade_inputs/sites.csv", f"fade_sites_{direction}.csv")
         return [
             _slot("gene_counts_file", f"FADE gene table ({direction})", True, counts,
                   note="" if counts else f"fade_gene_counts_{direction}.tsv not found"),
             _slot("sites_file", f"FADE significant-site table ({direction})", True, sites,
                   note="" if sites else f"fade_sites_{direction}.csv not found"),
+            _slot("metadata_file", "Original FADE settings", False,
+                  _first_match(fade_dir, "fade_inputs/settings.json", "fade_run_metadata.json")),
             # selection_utils.nf publishes the <direction>_species.txt files in the
             # shared selection/species_sets/, not inside fade_dir.
             _slot("fg_list_file", "Foreground species list", False,
+                  _first_match(fade_dir, "fade_inputs/foreground.txt") or
                   _first_match(outdir / "selection" / "species_sets", f"{direction}_species.txt")),
         ]
 
     def build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
-        s = {slot.key: slot.path for slot in report.slots}
+        import shlex
+        q = shlex.quote
+        slots = {slot.key: slot.path for slot in report.slots}
         output_file = f"6.FADE_report_{direction}.html"
-        pre_lines: list[str] = []
-        render = _render_call(
-            "6.FADE_report.Rmd",
-            [
-                f"gene_counts_file = {_r_arg(s['gene_counts_file'])}",
-                f"sites_file       = {_r_arg(s['sites_file'])}",
-                f"direction       = '{direction}'",
-                f"traitname       = '{report.traitname}'",
-                "bf_threshold    = 100",
-                "min_genes_hmap  = 3",
-                "output_dir      = '.'",
-                f"fg_list_file    = {_r_arg(s['fg_list_file'])}",
-            ],
-            output_file,
-        )
-        return _wrap_script(
-            header_comment=f"FADE ({direction}) — 6.FADE_report.Rmd",
-            repo_dir=repo_dir,
-            local_dir="subworkflows/FADE/local",
-            pre_lines=pre_lines,
-            render_block=render,
-            output_file=output_file,
-            publish_targets=[report.html_path.parent.parent / "selection" / "fade" / direction, report.html_path.parent],
-            use_singularity=use_singularity,
-        )
+        args = [direction, str(slots['gene_counts_file']), str(slots['sites_file']),
+                str(slots['fg_list_file']) if slots['fg_list_file'] else 'NO_FG_LIST',
+                str(slots['metadata_file']) if slots['metadata_file'] else 'NO_FADE_METADATA']
+        targets = [report.html_path.parent.parent / 'selection' / 'fade' / direction, report.html_path.parent]
+        copies = []
+        for target in targets:
+            copies += [f'mkdir -p {q(str(target))}',
+                       f'if [ -f {q(str(target / output_file))} ]; then cp {q(str(target / output_file))} {q(str(target / (output_file + ".bak")))}; fi',
+                       f'cp {q(output_file)} {q(str(target))}/']
+        return f"""#!/usr/bin/env bash
+# FADE report 6: original saved inputs and settings; no inference is rerun.
+set -euo pipefail
+WORKDIR=$(mktemp -d)
+trap 'rm -rf "$WORKDIR"' EXIT
+cd "$WORKDIR"
+cp {q(str(repo_dir / 'subworkflows/FADE/local/6.FADE_report.Rmd'))} .
+cp {q(str(repo_dir / 'subworkflows/TRAIT_ANALYSIS/local/src/report_style.R'))} .
+{_entrypoint_prefix(use_singularity)}Rscript {q(str(repo_dir / 'subworkflows/FADE/local/src/render_fade.R'))} {' '.join(q(arg) for arg in args)}
+{chr(10).join(copies)}
+"""
 
     return ReportSpec(
         id=f"fade_{direction}",
@@ -438,53 +440,51 @@ def _make_fade_spec(direction: str) -> ReportSpec:
 
 
 def _postproc_find_slots(outdir: Listing) -> list[InputSlot]:
-    postproc = outdir / "postproc"
-    return [
-        _slot("discovery_file", "Discovery CSV (post-disambiguation)", True,
-              _first_match(outdir, "ct_disambiguation/caas_convergence_master.csv", "**/*discovery*master*.csv")),
-        _slot("filter_summary", "Filter summary TSV", True,
-              _first_match(postproc, "summary_statistics/filter_summary.tsv")),
-        _slot("gene_ensembl_file", "Gene Ensembl length file", True,
-              _first_match(outdir, "postproc/postproc_inputs/*", "**/*gene_ensembl*", "**/*ensembl*length*")),
-        _slot("gene_stats_file", "Gene stats file", True,
-              _first_match(postproc, "gene_filtering/gene_stats.tsv")),
-    ]
+    inputs = outdir / "postproc" / "postproc_inputs"
+    names = {
+        "discovery_file": "postproc_disambiguation_input.tsv",
+        "filtered_discovery_file": "filtered_discovery.tsv",
+        "filter_summary_file": "filter_summary.tsv",
+        "selected_cluster_file": "selected_clusters.tsv",
+        "gene_ensembl_file": "gene_annotation.tsv",
+        "gene_stats_file": "gene_stats.tsv",
+        "removed_genes_file": "removed_genes_summary.tsv",
+        "quality_universe_file": "quality_universe.json",
+        "configuration_file": "postproc_settings.json",
+    }
+    return [_slot(key, filename, True, _first_match(inputs, filename)) for key, filename in names.items()] + [
+        _slot("filter_dir", "Cluster sweep artifacts", True, _first_match(inputs, "clusters"))]
 
 
 def _postproc_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
-    s = {slot.key: slot.path for slot in report.slots}
-    postproc = report.html_path.parent.parent / "postproc"
-    output_file = "8.Characterization_report.html"
-    render = _render_call(
-        "8.Characterization_report.Rmd",
-        [
-            f"discovery_file = '{s['discovery_file']}'",
-            f"filter_summary_file = '{s['filter_summary']}'",
-            f"filter_dir = '{postproc}'",
-            f"gene_ensembl_file = '{s['gene_ensembl_file']}'",
-            f"gene_stats_file = '{s['gene_stats_file']}'",
-            "processing_mode = 'filter'",
-            "output_dir = '.'",
-            "extreme_threshold = 3",
-            "iqr_multiplier = 1.5",
-            "alpha_threshold = 0.05",
-            "gene_filter_mode = 'strict'",
-            "seed = '1998'",
-        ],
-        output_file,
-    )
-    return _wrap_script(
-        header_comment="CT_POSTPROC — 8.Characterization_report.Rmd",
-        repo_dir=repo_dir,
-        local_dir="subworkflows/CT_POSTPROC/local",
-        pre_lines=[
-            'find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true',
-        ],
-        render_block=render,
-        output_file=output_file,
-        publish_targets=[postproc, report.html_path.parent],
-        use_singularity=use_singularity,
-    )
+    import json
+    import shlex
+    payload = {slot.key: str(slot.path) for slot in report.slots}
+    payload["output_dir"] = "."
+    q = shlex.quote
+    target = report.html_path.parent
+    return f"""#!/usr/bin/env bash
+# CT_POSTPROC report 8: use original settings and exact saved inputs.
+set -euo pipefail
+WORKDIR=$(mktemp -d)
+trap 'rm -rf "$WORKDIR"' EXIT
+cd "$WORKDIR"
+cp -R {q(str(repo_dir / 'subworkflows/CT_POSTPROC/local'))}/. .
+cp {q(str(repo_dir / 'subworkflows/TRAIT_ANALYSIS/local/src/report_style.R'))} src/
+cat > report_params.json <<'PHYLOPHERE_PARAMS'
+{json.dumps(payload)}
+PHYLOPHERE_PARAMS
+{_entrypoint_prefix(use_singularity)}Rscript - <<'PHYLOPHERE_RENDER'
+rmarkdown::render('8.Characterization_report.Rmd',
+    params=jsonlite::read_json('report_params.json',simplifyVector=TRUE),
+    output_file='8.Characterization_report.html',envir=new.env())
+PHYLOPHERE_RENDER
+mkdir -p {q(str(target))}
+if [ -f {q(str(target / '8.Characterization_report.html'))} ]; then
+  cp {q(str(target / '8.Characterization_report.html'))} {q(str(target / '8.Characterization_report.html.bak'))}
+fi
+cp 8.Characterization_report.html {q(str(target))}/
+"""
 
 
 # ── CT_META_CAAS ──────────────────────────────────────────────────────────────
@@ -519,7 +519,7 @@ def _meta_caas_build_script(report: DetectedReport, repo_dir: Path, use_singular
         header_comment="CT_META_CAAS — 7.CAAS_pattern_annotation.Rmd",
         repo_dir=repo_dir,
         local_dir="subworkflows/CT_META_CAAS/local",
-        pre_lines=[],
+        pre_lines=["mkdir -p src", f'cp "{repo_dir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R" src/'],
         render_block=render,
         output_file=output_file,
         # Publishes under meta_caas/ only; a signification/ tree already present in
@@ -566,7 +566,7 @@ def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, us
         header_comment="CAAS_SIGNIFICANCE — 15.CAAS_significance_report.Rmd",
         repo_dir=repo_dir,
         local_dir="subworkflows/CT_META_CAAS/local",
-        pre_lines=["mkdir -p src", f'cp "{repo_dir}/subworkflows/ENRICHMENT/local/src/report_presentation.R" src/'],
+        pre_lines=["mkdir -p src", f'cp "{repo_dir}/subworkflows/ENRICHMENT/local/src/report_presentation.R" src/', f'cp "{repo_dir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R" src/'],
         render_block=render,
         output_file=output_file,
         publish_targets=[report.html_path.parent.parent / "meta_caas" / "significance", report.html_path.parent],
@@ -603,7 +603,7 @@ def _asr_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
         header_comment="ASR_DIAGNOSTICS — 9.ASR_diagnostics.Rmd",
         repo_dir=repo_dir,
         local_dir="subworkflows/ASR_DIAGNOSTICS/local",
-        pre_lines=[],
+        pre_lines=["mkdir -p src", f'cp "{repo_dir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R" src/'],
         render_block=render,
         output_file=output_file,
         publish_targets=[report.html_path.parent.parent / "asr_diagnostics", report.html_path.parent],
@@ -696,7 +696,16 @@ def _posenrich_find_slots(outdir: Listing) -> list[InputSlot]:
 def _posenrich_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
     output_file = f"13.POSENRICH_report_{report.traitname}.html"
-    pre_lines = ["mkdir -p src", f'cp "{repo_dir}/subworkflows/ENRICHMENT/local/src/report_presentation.R" src/']
+    # The report reads accumulation_<direction>_results.csv from one directory; the module publishes them per direction.
+    accumulation = s.get("accumulation")
+    pre_lines = ["mkdir -p accumulation_root", "mkdir -p src",
+                 f'cp "{repo_dir}/subworkflows/ENRICHMENT/local/src/report_presentation.R" src/']
+    if accumulation:
+        for direction in ("top", "bottom", "all"):
+            pre_lines.append(
+                f'[ -f "{accumulation}/{direction}/accumulation_{direction}_results.csv" ] && '
+                f'cp "{accumulation}/{direction}/accumulation_{direction}_results.csv" accumulation_root/ || true'
+            )
 
     def optional(key):
         return f"'{s[key]}'" if s.get(key) else "NULL"
@@ -707,7 +716,7 @@ def _posenrich_build_script(report: DetectedReport, repo_dir: Path, use_singular
             f"universe_dir         = '{s['universe']}'",
             f"registry_dir         = '{s['registry']}'",
             f"characterization_dir = '{s['characterization']}'",
-            f"accumulation_dir     = {optional('accumulation')}",
+            "accumulation_dir     = 'accumulation_root'",
             f"within_gene_dir      = {optional('within_gene')}",
             f"proximity_dir        = {optional('proximity')}",
             f"traitname            = '{report.traitname}'",

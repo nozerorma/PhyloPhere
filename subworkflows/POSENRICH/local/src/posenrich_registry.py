@@ -6,7 +6,7 @@
 
 Attributes, regions and sites are stored in compact form, one table each.
 
-Inputs (all optional except --output_dir; NO_* sentinels and missing paths mean absent):
+Inputs (NO_* sentinels mean absent; supplied missing paths fail):
   --position_scores        SCORING's position_scores.tsv (one row per Gene, Position, side
                            with CAAS_score > 0; p.emp shared between sides, p.adj_bh, nd, ...)
   --postproc               filtered_discovery.tsv: positions evaluated by CT (a row may
@@ -21,7 +21,7 @@ Inputs (all optional except --output_dir; NO_* sentinels and missing paths mean 
   --window_size_bp         genomic window size (scoring_window_size_bp, 1,000,000 by default)
 
 Outputs (in --output_dir):
-  positions.tsv            one row per (Gene, Position) of the universe: evaluation status,
+  positions.tsv            one diagnostic row per (Gene, Position), with explicit in_tested_universe:
                            coordinates (raw codon column, reference residue, genomic), MAP and the
                            single-valued annotation attributes (ucr_core, ucr_flank, ucr_region,
                            ucr_variability, fubar_call, fade_top_sig, fade_bottom_sig, window)
@@ -49,6 +49,7 @@ import hashlib
 import json
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -56,8 +57,10 @@ import pandas as pd
 import position_sources as ps
 import posenrich_members as pm
 import posenrich_universe as pu
+from posenrich_contract import (read_table, observed_table, verify_universe, finish_manifest,
+                               inventory, identifier, position)
 
-CONTRACT_VERSION = 2
+CONTRACT_VERSION = 3
 
 # collection_id -> (term_type, coordinate_space, analyses, informative_within_protein, source key)
 COLLECTION_META = {
@@ -78,7 +81,7 @@ COLLECTION_META = {
 LAYER_DESCRIPTIONS = {
     'ucr_core': 'Ultra-conserved core positions',
     'ucr_flank': 'UCR flanking positions',
-    'fubar_positive': 'FUBAR positive-selection sites (FDR)',
+    'fubar_positive': 'FUBAR positive-selection calls (source threshold)',
     'fubar_purifying': 'FUBAR purifying-selection sites',
     'fade_top_sig': 'FADE directional selection sites, top (BF >= threshold)',
     'fade_bottom_sig': 'FADE directional selection sites, bottom (BF >= threshold)',
@@ -104,6 +107,9 @@ def parse_args():
     p.add_argument('--window_size_bp', type=int, default=1_000_000,
                    help='Genomic window size in bp (scoring_window_size_bp)')
     p.add_argument('--output_dir', required=True)
+    p.add_argument('--universe', default=None)
+    p.add_argument('--universe-manifest', default=None)
+    p.add_argument('--position-calibration', default=None)
     return p.parse_args()
 
 
@@ -111,7 +117,10 @@ def clean_optional(value):
     """NO_* sentinel, 'None' or empty means absent; resolve .gz siblings."""
     if value is None or value == '' or os.path.basename(str(value)).startswith('NO_'):
         return None
-    return ps.resolve_path(str(value))
+    resolved = ps.resolve_path(str(value))
+    if resolved is None:
+        raise ValueError(f'Supplied input is missing: {value}')
+    return resolved
 
 
 def sha256_file(path):
@@ -123,7 +132,7 @@ def sha256_file(path):
 
 
 def read_tsv(path):
-    return pd.read_csv(path, sep='\t', dtype=str, keep_default_na=False)
+    return read_table(path)
 
 
 def write_tsv(df, path):
@@ -136,34 +145,16 @@ def load_position_keys(path, active_genes):
     Returns (keys, n_rows, n_outside_universe). Only CAAS_score > 0 rows exist in
     this table by contract.
     """
-    keys, n_rows, n_out = set(), 0, 0
     if not path:
-        return keys, n_rows, n_out
-    for chunk in pd.read_csv(path, sep='\t', usecols=['Gene', 'Position'], dtype=str,
-                             chunksize=500_000):
-        for gene, pos in chunk.itertuples(index=False):
-            n_rows += 1
-            if gene not in active_genes:
-                n_out += 1
-                continue
-            keys.add((gene, int(pos)))
-    return keys, n_rows, n_out
+        return set(), 0, 0
+    df = observed_table(path)
+    if not df.Gene.isin(active_genes).all():
+        raise ValueError('Position scores contain genes outside cleaned background')
+    return set(zip(df.Gene, df.Position)), len(df), 0
 
 
 def load_discovery_keys(path, active_genes):
-    """(gene, position) keys of filtered_discovery.tsv (evaluated by CT)."""
-    keys, n_rows, n_out = set(), 0, 0
-    if not path:
-        return keys, n_rows, n_out
-    for chunk in pd.read_csv(path, sep='\t', usecols=['Gene', 'Position'], dtype=str,
-                             chunksize=500_000):
-        for gene, pos in chunk.itertuples(index=False):
-            n_rows += 1
-            if gene not in active_genes:
-                n_out += 1
-                continue
-            keys.add((gene, int(pos)))
-    return keys, n_rows, n_out
+    return load_position_keys(path, active_genes)
 
 
 def load_null_universe(path):
@@ -262,61 +253,52 @@ def build_evidence(position_scores_path, active_genes, n_cycles, postproc_path=N
     """
     cols = ['Gene', 'Position', 'side', 'CAAS_score', 'p.emp', 'p.adj_bh', 'nd', 'null_unseen', 'caas_nominal', 'caas_adjusted']
     extra = ['p_shared', 'N_cycles', 'evidence_status', 'score_status', 'raw_asr_path_score']
-    df = read_tsv(position_scores_path) if position_scores_path else pd.DataFrame(columns=cols)
-    df = df.reindex(columns=cols).fillna('NA')
-    df = df[df['Gene'].isin(active_genes)].copy()
-    df['Position'] = df['Position'].astype(int)
-    if df.duplicated(['Gene', 'Position', 'side']).any():
-        raise ValueError('duplicate position score side; one row per Gene/Position/side required')
-    scores = pd.to_numeric(df['CAAS_score'], errors='coerce')
-    if ((scores <= 0) | ~scores.notna()).any():
-        raise ValueError('position_scores must contain canonical positive CAAS scores')
+    df = observed_table(position_scores_path) if position_scores_path else pd.DataFrame(columns=cols)
+    df = df.reindex(columns=cols, fill_value='NA')
+    if not df.Gene.isin(active_genes).all():
+        raise ValueError('Observed score gene outside cleaned background')
     for key, sub in df.groupby(['Gene', 'Position']):
-        for col in ('p.emp', 'p.adj_bh'):
+        for col in ('p.emp', 'p.adj_bh', 'nd', 'null_unseen', 'caas_nominal', 'caas_adjusted'):
             if sub[col].nunique() > 1:
                 raise ValueError(f'inconsistent shared {col} for {key}')
+    for row in df.to_dict('records'):
+        for c in ('p.emp', 'p.adj_bh'):
+            if row[c] not in ('', 'NA'):
+                v = float(row[c])
+                if not np.isfinite(v) or not 0 <= v <= 1:
+                    raise ValueError('Invalid empirical p/q')
+        if (row['p.emp'] in ('', 'NA')) != (row['p.adj_bh'] in ('', 'NA')):
+            raise ValueError('Inconsistent empirical p/q availability')
+        if row['nd'] not in ('', 'NA') and (not row['nd'].isdigit() or (n_cycles is not None and int(row['nd']) > n_cycles)):
+            raise ValueError('Invalid positional detection denominator')
     df['score_status'] = 'canonical_positive'
     df['raw_asr_path_score'] = 'NA'
     rows = df.to_dict('records')
-    by_key = {(row['Gene'], int(row['Position']), row['side']): row for row in rows}
+    by_key = {(r['Gene'], int(r['Position']), r['side']): r for r in rows}
     if postproc_path:
-        discovery = read_tsv(postproc_path)
-        discovery = discovery[discovery['Gene'].isin(active_genes)]
-        if discovery.duplicated(['Gene', 'Position', 'side']).any():
-            raise ValueError('duplicate discovery side; cannot resolve canonical score')
+        discovery = observed_table(postproc_path)
+        if not discovery.Gene.isin(active_genes).all():
+            raise ValueError('Discovery gene outside cleaned background')
+        positive_keys = set()
         for original in discovery.to_dict('records'):
-            key = (original['Gene'], int(original['Position']), original['side'])
-            raw = original.get('asr_path_score', 'NA')
-            number = pd.to_numeric(raw, errors='coerce')
-            if key in by_key:
-                row = by_key[key]
-                if pd.notna(number) and number > 0 and abs(float(row['CAAS_score']) - number) > 1e-12:
-                    raise ValueError(f'discovery and canonical score disagree for {key}')
-                row['raw_asr_path_score'] = raw
-                continue
-            row = {c: 'NA' for c in cols}
-            row.update(Gene=key[0], Position=key[1], side=key[2], raw_asr_path_score=raw)
-            if original['side'] not in ('top', 'bottom') or pd.isna(number):
-                row['score_status'] = 'not_evaluable'
-            elif number <= 0:
-                row['score_status'] = 'evaluated_no_canonical_score'
+            key = original['Gene'], int(original['Position']), original['side']
+            raw = original['asr_path_score']
+            if original['side'] in ('top', 'bottom'):
+                positive_keys.add(key)
+                if key not in by_key or abs(float(by_key[key]['CAAS_score']) - float(raw)) > 1e-12:
+                    raise ValueError(f'Discovery and canonical SCORING scores disagree for {key}')
+                by_key[key]['raw_asr_path_score'] = raw
             else:
-                # Same identity rule as core.scores.position_score, only for positive sides.
-                row['CAAS_score'] = repr(float(number))
-                row['score_status'] = 'canonical_positive_from_discovery'
-            rows.append(row)
+                row = {c: 'NA' for c in cols}
+                row.update(Gene=key[0], Position=key[1], side=key[2], raw_asr_path_score=raw,
+                           score_status='evaluated_no_canonical_score')
+                rows.append(row)
+        if positive_keys != set(by_key):
+            raise ValueError('SCORING contains detections absent from discovery')
     for row in rows:
-        row['p_shared'] = 'TRUE'
+        row['p_shared'] = 'TRUE' if row['side'] in ('top','bottom') else 'NA'
         row['N_cycles'] = 'NA' if n_cycles is None else str(int(n_cycles))
         row['evidence_status'] = 'evaluated' if row['p.emp'] not in ('NA', '') else 'p_unavailable'
-    # A shared p is copied to any additional side of the same biological position.
-    shared = {(row['Gene'], int(row['Position'])): {c: row[c] for c in cols[4:]}
-              for row in rows if row['p.emp'] not in ('NA', '')}
-    for row in rows:
-        values = shared.get((row['Gene'], int(row['Position'])))
-        if values:
-            row.update(values)
-            row['evidence_status'] = 'evaluated'
     return pd.DataFrame(rows, columns=cols + extra).sort_values(['Gene', 'Position', 'side'])
 
 
@@ -337,14 +319,10 @@ def collect_all_members(args, map_cache, active_genes, pending):
         args.fade_sites_bottom_file, map_cache, active_genes, pending=pending)
     result['genomic_windows'] = ps.collect_genomic_windows(map_cache, window_size=args.window_size_bp)
     result['members'] = []
-    custom_error = None
-    try:
-        result['custom'], m = ps.collect_custom_members(
-            args.custom_marker_file, map_cache, active_genes, strict=False, pending=pending)
-        result['members'] += m
-    except ValueError as e:
-        custom_error = str(e)
-    result['_custom_error'] = custom_error
+    result['custom'], m = ps.collect_custom_members(
+        args.custom_marker_file, map_cache, active_genes, strict=False, pending=pending)
+    result['members'] += m
+    result['_custom_error'] = None
     return result
 
 
@@ -355,6 +333,9 @@ def attribute_keys(coll):
         for gene, columns in cols.items():
             keys.update((gene, c) for c in columns)
     keys.update(coll['_fubar_char'])
+    keys.update((m['gene'], m['position']) for m in coll['members'])
+    for region in coll['_regions']:
+        keys.update((region['gene'], c) for c in range(region['start'], region['end'] + 1))
     return keys
 
 
@@ -363,7 +344,7 @@ def add_attribute_columns(positions, coll, map_cache, window_size):
     core, flank = coll['ucr_core_cols'], coll['ucr_flank_cols']
     region, variability, fubar = coll['_ucr_region_char'], coll['_ucr_variability_char'], coll['_fubar_char']
     fade_top, fade_bottom = coll['fade_top_cols'], coll['fade_bottom_cols']
-    out = {name: [] for name in pm.ATTRIBUTE_COLUMNS}
+    out = {name: [] for name in pm.ATTRIBUTE_COLUMNS if name != 'custom_terms'}
     for gene, pos in zip(positions['Gene'], positions['Position']):
         key = (gene, pos)
         out['ucr_core'].append('1' if pos in core.get(gene, ()) else '0')
@@ -554,6 +535,75 @@ def build_coverage_df(positions, summary, collections_df, null_universe, univers
                                        'denominator_definition', 'source', 'limitation'])
 
 
+def annotation_contracts(args, positions, map_cache, universe_meta):
+    """Declare coverage independently of hits; unverified sources remain descriptive."""
+    metadata, rows = {}, []
+    for key in sorted({m[4] for m in COLLECTION_META.values()} - {'map_dir'}):
+        path = getattr(args, key)
+        if not path:
+            continue
+        sidecar = Path(str(path)+'.manifest.json')
+        meta = json.loads(sidecar.read_text()) if sidecar.is_file() else {}
+        if meta and meta.get('table_sha256') != sha256_file(path):
+            raise ValueError(f'Annotation snapshot checksum mismatch: {path}')
+        provenance = bool((meta.get('source_uri') and meta.get('version')) or meta.get('projection_version'))
+        bound = False
+        if universe_meta:
+            inputs = universe_meta['inputs']
+            bound = (meta.get('tested_sha256') == inputs['background_positions']['sha256'] and
+                     meta.get('background_sha256') == inputs['background_genes']['sha256'])
+        # Bind declared annotation alignments to CAAS provenance, even without --alignment.
+        declared_alignments = {}
+        for name, checksum in meta.get('alignments', {}).items():
+            suffix = next((s for s in ('.fasta','.faa','.fas','.fa') if name.lower().endswith(s)), None)
+            if suffix is None:
+                raise ValueError('Unknown annotation alignment suffix')
+            gene = name[:-len(suffix)]
+            if gene in declared_alignments:
+                raise ValueError('Ambiguous annotation alignment identity')
+            declared_alignments[gene] = checksum
+        expected_alignments = universe_meta['null']['observed_contract'].get('alignments', {}) if universe_meta else {}
+        scope = set(meta.get('coverage_genes', [])) & set(positions.Gene)
+        for gene in set(declared_alignments) & set(positions.Gene):
+            if expected_alignments.get(gene) and expected_alignments[gene] != declared_alignments[gene]:
+                raise ValueError(f'Annotation alignment differs from CAAS provenance: {gene}')
+        bound = bound or bool(scope and all(expected_alignments.get(g) and
+                       expected_alignments[g] == declared_alignments.get(g) for g in scope))
+        verified = provenance and bound and bool(meta.get('coverage'))
+        metadata[key] = dict(status='verified' if verified else 'unverified_source', metadata=meta,
+                             manifest_sha256=sha256_file(sidecar) if sidecar.is_file() else None)
+        if not verified:
+            continue
+        cids = [cid for cid, spec in COLLECTION_META.items() if spec[4] == key]
+        scope = set(meta.get('coverage_genes', []))
+        for g in scope:
+            identifier(g)
+        coverage = meta['coverage']
+        if coverage not in ('listed_tested_positions', 'tested_positions_in_declared_genes', 'all_productive_alignment_columns'):
+            raise ValueError(f'Unknown annotation coverage contract: {coverage}')
+        for gene, sub in positions.groupby('Gene', sort=False):
+            if scope and gene not in scope:
+                continue
+            if coverage == 'listed_tested_positions':
+                if key != 'fubar_sites_file':
+                    raise ValueError('Only complete FUBAR tested rows support listed_tested_positions')
+                cols = sub.loc[sub.fubar_call != '', 'Position'].astype(int).tolist()
+            elif not scope:
+                raise ValueError('Explicit coverage_genes required, including genes with no hits')
+            else:
+                cols = sub.loc[sub.in_tested_universe == 1, 'Position'].astype(int).tolist()
+                if 'coverage_positions' in meta:
+                    declared = {position(v) for v in meta['coverage_positions'].get(gene, [])}
+                    cols = [c for c in cols if c in declared]
+                elif key == 'domain_variability_file':
+                    declared = set(map_cache.get(gene, {}).get('residue_to_col', {}).values())
+                    cols = [c for c in cols if c in declared]
+            for cid in cids:
+                for lo, hi in ps.column_runs(sorted(set(cols))):
+                    rows.append(dict(collection_id=cid, Gene=gene, start=lo, end=hi))
+    return metadata, pd.DataFrame(rows, columns=['collection_id','Gene','start','end'])
+
+
 def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -562,7 +612,7 @@ def main():
     if args.map_dir and not os.path.isdir(args.map_dir):
         print(f"WARNING: --map_dir is not a directory (skipping coordinate mapping): {args.map_dir}",
               file=sys.stderr)
-        args.map_dir = None
+        raise ValueError('MAP input must be a directory')
 
     sources = {}
     for key in SOURCE_KEYS:
@@ -572,21 +622,44 @@ def main():
             sources[key + '_sha256'] = 'NA'
             continue
         sources[key] = path
-        sources[key + '_sha256'] = sha256_file(path) if os.path.isfile(path) else 'NA(directory)'
+        sources[key + '_sha256'] = inventory(path)
 
     universe_genes = ps.load_universe_genes(args.cleaned_background)
     map_cache = ps.build_map_cache(args.map_dir, universe_genes)
+    if args.gene_ensembl_file:
+        proteins = read_table(args.gene_ensembl_file, quoted=False)
+        if not {'gene','human_protein_id'} <= set(proteins) or proteins.gene.duplicated().any():
+            raise ValueError('Malformed/duplicate gene-protein mapping')
+        identities = dict(zip(proteins.gene, proteins.human_protein_id))
+        for gene, row in map_cache.items():
+            protein = identities.get(gene)
+            if protein in ('NA','',None):
+                row.update(reference_status='unmapped_protein_id', col_to_genomic={}, residue_to_col={}, strand='NA')
+            if row['reference_identity'] and protein not in ('NA','',None) and not ps.vr.same_id(protein, row['reference_identity']['protein_id']):
+                raise ValueError(f'Protein mapping differs from verified reference: {gene}')
     active_genes = set(universe_genes) if universe_genes is not None else set(map_cache.keys())
 
     discovery_keys, n_disc_rows, n_disc_out = load_discovery_keys(args.postproc, active_genes)
     score_keys, n_score_rows, n_score_out = load_position_keys(args.position_scores, active_genes)
     null_universe = load_null_universe(args.null_universe)
     n_cycles = null_universe.get('N_cycles')
+    um = verify_universe(args.universe, args.universe_manifest) if args.universe else None
+    if um:
+        if set(um['genes']) != active_genes:
+            raise ValueError('Registry/universe background mismatch')
+        if n_cycles is not None and n_cycles != um['null']['N']:
+            raise ValueError('SCORING/POSENRICH cycle denominator mismatch')
+        n_cycles = um['null']['N']
+        expected_maps = um['null']['observed_contract'].get('maps', {})
+        for gene, row in map_cache.items():
+            expected = expected_maps.get(gene)
+            if expected and sha256_file(Path(args.map_dir)/row['map_file']) != expected:
+                raise ValueError(f'MAP differs from the one used for CAAS: {gene}')
     gene_check = gene_list_check(active_genes, null_universe)
     if gene_check['status'] == 'mismatch':
-        print(f"WARNING: the registry gene list ({gene_check['registry_n_genes']} genes) differs from the one SCORING's "
+        raise ValueError(f"the registry gene list ({gene_check['registry_n_genes']} genes) differs from the one SCORING's "
               f"universe received ({gene_check['scoring_n_genes']} genes): |U| and every position p are defined on different "
-              f"gene lists.", file=sys.stderr)
+              f"gene lists.")
 
     pending = []
     coll = collect_all_members(args, map_cache, active_genes, pending)
@@ -594,6 +667,38 @@ def main():
     positions = build_positions(active_genes, map_cache, discovery_keys, score_keys, attribute_keys(coll))
     positions = add_attribute_columns(positions, coll, map_cache, args.window_size_bp)
     evidence = build_evidence(args.position_scores, active_genes, n_cycles, args.postproc)
+    tested_keys = set()
+    if um:
+        ut = read_table(args.universe)
+        tested_keys = set(zip(ut.gene, ut.position.astype(int)))
+        if 'tested_positions_family' in null_universe and null_universe['tested_positions_family'] != len(tested_keys):
+            raise ValueError('SCORING/POSENRICH tested-family mismatch')
+        calibration_path = args.position_calibration or Path(args.universe).parent/'position_calibration.tsv'
+        if sha256_file(calibration_path) != um['outputs'].get('position_calibration.tsv'):
+            raise ValueError('Unverified positional calibration audit')
+        calibration = read_table(calibration_path)
+        calibrated = {(r['Gene'],int(r['Position'])):r for r in calibration.to_dict('records')}
+        positive_evidence = evidence[evidence.CAAS_score != 'NA']
+        if set(zip(positive_evidence.Gene,positive_evidence.Position)) != set(calibrated):
+            raise ValueError('SCORING and POSENRICH positive-position populations differ')
+        for row in positive_evidence.to_dict('records'):
+            expected = calibrated[row['Gene'],int(row['Position'])]
+            for name in ('p.emp','p.adj_bh','nd'):
+                if row[name] in ('NA','') or not np.isclose(float(row[name]),float(expected[name]),rtol=1e-10,atol=1e-12):
+                    raise ValueError(f'SCORING/POSENRICH {name} mismatch for {(row["Gene"],row["Position"])}')
+        if not (score_keys | discovery_keys) <= tested_keys:
+            raise ValueError('Registry observed positions outside tested universe')
+        missing = tested_keys - set(zip(positions.Gene, positions.Position))
+        if missing:
+            positions = pd.concat([positions, add_attribute_columns(
+                build_positions(active_genes, {}, set(), set(), missing), coll, {}, args.window_size_bp)], ignore_index=True)
+    positions['in_tested_universe'] = [int(k in tested_keys) for k in zip(positions.Gene, positions.Position)]
+    positions['reference_status'] = [map_cache[g]['reference_status'] if g in map_cache else 'missing_map' for g in positions.Gene]
+    positions.loc[(positions.in_tested_universe == 1) & (positions.in_discovery == 0), 'evaluation_status'] = 'tested_no_detection'
+    custom_by_key = {}
+    for member in coll['members']:
+        custom_by_key.setdefault((member['gene'], member['position']), set()).add(member['term_id'])
+    positions['custom_terms'] = [';'.join(sorted(custom_by_key.get((g,p), ()))) for g,p in zip(positions.Gene,positions.Position)]
     if not evidence.empty:
         positive = evidence[evidence['CAAS_score'] != 'NA']
         positive_keys = set(zip(positive['Gene'], positive['Position'].astype(int)))
@@ -613,6 +718,13 @@ def main():
     sites_df = build_members_df(coll['members'])
     summary = membership_summary(positions, regions_df, sites_df)
     collections_df = build_collections_df(coll, summary['terms'], sources)
+    annotation_meta, annotation_coverage = annotation_contracts(args, positions, map_cache, um)
+    for i, row in collections_df.iterrows():
+        key = COLLECTION_META[row.collection_id][4]
+        if key != 'map_dir' and annotation_meta.get(key, {}).get('status') != 'verified':
+            collections_df.loc[i, 'informative_within_protein'] = 0
+            collections_df.loc[i, 'analyses'] = 'characterization;proximity_protein'
+    write_tsv(annotation_coverage, Path(args.output_dir)/'annotation_coverage.tsv')
     coverage_df = build_coverage_df(positions, summary, collections_df, null_universe, active_genes)
     pending_df = pd.DataFrame(pending, columns=['source', 'record_id', 'gene', 'raw_position', 'reason']) \
         if pending else pd.DataFrame(columns=['source', 'record_id', 'gene', 'raw_position', 'reason'])
@@ -670,9 +782,11 @@ def main():
             'score_rows': n_score_rows,
         },
     }
-    with open(os.path.join(args.output_dir, 'manifest.json'), 'w') as f:
-        json.dump(manifest, f, indent=2, sort_keys=True)
-        f.write('\n')
+    manifest['universe']['universe_sha256'] = sha256_file(args.universe) if args.universe else None
+    manifest['annotations'] = annotation_meta
+    manifest['references'] = {g: {k:v for k,v in row.items() if k in ('reference_status','reference_identity','map_file')}
+                              for g,row in map_cache.items()}
+    finish_manifest(args.output_dir, 'manifest.json', manifest)
 
     print(f"registry: {len(positions)} positions ({len(active_genes)} genes), "
           f"{len(regions_df)} region records, {len(sites_df)} site rows, {len(collections_df)} terms, "

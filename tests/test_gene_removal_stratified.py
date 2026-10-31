@@ -56,7 +56,7 @@ def test_the_stats_and_the_removal_agree_and_the_fences_are_per_gene():
     counts["g06"] = 60
     units = [GeneUnit("b_0", g, n, g == "g05") for g, n in counts.items()]
     removed = gene_removal(units, lengths, mode="stratified")
-    stats = gene_unit_stats(units, lengths, mode="stratified")
+    stats = gene_unit_stats(units, lengths)
     flagged = {s["Gene"]: ("Both" if s["extreme"] and s["dubious"] else "Dubious" if s["dubious"] else "Extreme")
                for s in stats if s["extreme"] or s["dubious"]}
     assert flagged == {g: cat for (_lab, g), cat in removed.items()}
@@ -73,12 +73,22 @@ def test_the_removal_does_not_depend_on_the_length_of_a_gene_by_itself():
     assert sum(g in removed for g in longest) <= 4
 
 
-def test_the_other_modes_are_unchanged_by_the_stratified_arguments():
+def test_none_removes_nothing_and_the_retired_modes_are_errors():
     lengths, counts = _pool()
     counts["g05"] = 60
     units = [GeneUnit("b_0", g, n, g == "g05") for g, n in counts.items()]
-    base = gene_removal(units, lengths, mode="both")
-    assert gene_removal(units, lengths, mode="both", strata=3, k_far=9.0, k_near=9.0) == base
+    assert gene_removal(units, lengths, mode="none") == {}
+    for retired in ("extreme", "dubious", "both"):                           # a retired setting must not switch the filter off silently
+        with pytest.raises(ValueError):
+            gene_removal(units, lengths, mode=retired)
+
+
+def test_the_filter_cli_rejects_the_retired_modes_and_options(tmp_path):
+    base = [sys.executable, str(FILTER), "-i", str(tmp_path / "d.tsv"), "-o", str(tmp_path / "o.tsv")]
+    pd.DataFrame({"Gene": ["g"], "Position": [1]}).to_csv(tmp_path / "d.tsv", sep="\t", index=False)
+    for extra in (["-m", "both"], ["-m", "dubious"], ["--iqr-multiplier", "3"], ["--extreme-percentile", "0.99"]):
+        r = subprocess.run(base + extra, capture_output=True, text=True)
+        assert r.returncode == 2 and "error" in r.stderr, extra
 
 
 def test_filter_caas_genes_in_stratified_mode(tmp_path):
@@ -87,8 +97,10 @@ def test_filter_caas_genes_in_stratified_mode(tmp_path):
     rows = [(g, pos) for g, n in counts.items() for pos in range(n)]
     pd.DataFrame(rows, columns=["Gene", "Position"]).to_csv(tmp_path / "discovery.tsv", sep="\t", index=False)
     pd.DataFrame({"gene": list(lengths), "length": list(lengths.values())}).to_csv(tmp_path / "lengths.tsv", sep="\t", index=False)
-    pd.DataFrame({"Gene": ["g05", "g05", "g05"], "Position": [0, 1, 2], "clustering_flag": ["Discarded"] * 3}).to_csv(
-        tmp_path / "clusters.tsv", sep="\t", index=False)
+    # The production cluster artifact covers every distinct candidate position.
+    clusters = pd.DataFrame(rows, columns=["Gene", "Position"])
+    clusters["clustering_flag"] = ["Discarded" if g == "g05" and p < 3 else "Good" for g,p in rows]
+    clusters.to_csv(tmp_path / "clusters.tsv", sep="\t", index=False)
     r = subprocess.run([sys.executable, str(FILTER), "-i", str(tmp_path / "discovery.tsv"), "-l", str(tmp_path / "lengths.tsv"),
                         "-c", str(tmp_path / "clusters.tsv"), "-m", "stratified", "--strata", "10", "--k-far", "3", "--k-near", "1.5",
                         "-o", str(tmp_path / "out.tsv"), "-s", str(tmp_path / "removed.tsv"), "-g", str(tmp_path / "stats.tsv")],

@@ -20,7 +20,11 @@ caas_block_index <- function(files, roster = NULL, universe = character(), gene_
     }
     dirs <- c("global", "top", "bottom")
     if (!identical(names(b$stat), dirs)) stop("Missing CAAS rankings")
-    for (d in dirs) check_matrix(b$stat[[d]])
+    for (d in dirs) {
+      check_matrix(b$stat[[d]])
+      if(any(b$stat[[d]]<0 | b$stat[[d]]>1)) stop('Invalid CAAS score domain')
+    }
+    if(!isTRUE(all.equal(as.numeric(b$stat$global),pmax(as.numeric(b$stat$top),as.numeric(b$stat$bottom)),tolerance=1e-12))) stop('CAAS global score differs from best direction')
     if (!is.null(b$parts)) {
       if (!all(c("max", "n") %in% names(b$parts))) stop("Missing CAAS parts")
       for (part in b$parts) for (d in dirs) check_matrix(part[[d]])

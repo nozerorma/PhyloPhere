@@ -1,362 +1,118 @@
 #!/usr/bin/env nextflow
+// FADE: one audited contract for individual genes and batches. Inputs come from
+// SELECTION_PREP; zero-based alignment coordinates are retained for downstream.
+include { FADE_RUN; FADE_BATCHED } from '../subworkflows/FADE/fade_run'
+include { FADE_TABLES as FADE_TABLES_TOP; FADE_TABLES as FADE_TABLES_BOTTOM } from '../subworkflows/FADE/fade_tables'
+include { FADE_REPORT as FADE_REPORT_TOP; FADE_REPORT as FADE_REPORT_BOTTOM } from '../subworkflows/FADE/fade_report'
+include { FADE_GENE_LISTS as FADE_GENE_LISTS_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_BOTTOM } from '../subworkflows/FADE/fade_gene_lists'
+include { fadeSources; fadeSettings; fadeSpecies } from '../subworkflows/FADE/fade_contract'
+include { selectionHash; selectionSingle; selectionPositive } from '../subworkflows/SELECTION/selection_contract'
 
-/*
-#
-#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
-#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
-#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
-#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#
-# PHYLOPHERE: FADE Workflow
-#
-# Tests foreground branches (defined by trait_stats.csv extremes) for
-# directional amino-acid selection using HyPhy FADE.
-#
-# Direction(s) tested is controlled by --fade_direction ('top' | 'bottom' |
-# 'both', default 'both'):
-#   top    → global_label == high_extreme species as foreground
-#   bottom → global_label == low_extreme species as foreground
-#
-# What counts as HyPhy's implicit background set is controlled by
-# --fade_background_scope ('all' | 'opposite', default 'all'):
-#   all      → every non-foreground branch (HyPhy's own default behavior)
-#   opposite → tree/alignment pruned to foreground + the opposite extreme
-#              group only, excluding "middle" (non-extreme) species. With
-#              --fade_direction both, this produces two runs that test each
-#              extreme group against the other (top-vs-bottom, bottom-vs-top).
-#
-# Alignment preparation (PHYLIP→FASTA conversion, tree-filtering, and species
-# extraction) is handled upstream by SELECTION_PREP (called once in main.nf)
-#
-# Author: Miguel Ramon (miguel.ramon@upf.edu)
-# File: workflows/fade.nf
-*/
-
-include { ANNOTATE_TREE_FG; ANNOTATE_TREE_FG_BATCHED } from '../subworkflows/SELECTION/selection_utils.nf'
-include { FADE_RUN; FADE_BATCHED  } from '../subworkflows/FADE/fade_run.nf'
-include { FADE_TABLES as FADE_TABLES_TOP; FADE_TABLES as FADE_TABLES_BOTTOM } from '../subworkflows/FADE/fade_tables.nf'
-include { FADE_REPORT as FADE_REPORT_TOP    } from '../subworkflows/FADE/fade_report.nf'
-include { FADE_REPORT as FADE_REPORT_BOTTOM } from '../subworkflows/FADE/fade_report.nf'
-include { FADE_GENE_LISTS as FADE_GENE_LISTS_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_BOTTOM } from '../subworkflows/FADE/fade_gene_lists.nf'
-
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Render a list of TSV row strings into a heredoc-safe manifest block.
- */
-def createBatchManifestText(List<String> rows) {
-    return rows
-        .collect { row -> row.replaceFirst(/^\s+/, '') }
-        .join(System.lineSeparator()) + System.lineSeparator()
+def fadeBatch(rows, id) {
+    rows.each { row ->
+        assert row[0] && row[0] == row[0].trim() && !(row[0] =~ /[\t\r\n\/\\]/).find() : 'Invalid FADE gene identifier'
+        assert [row[2],row[3],row[4],row[5]].findAll { it!=null }.every { !(it.name =~ /[\t\r\n]/).find() } : 'Invalid FADE input filename'
+    }
+    def fastas=rows.collect { it[2] }.unique()
+    def trees=rows.collect { it[3] }.unique()
+    def species=rows.collectMany { [it[4],it[5]] }.findAll { it!=null }.unique()
+    [fastas,trees,species].each { paths ->
+        assert paths.collect { it.name }.unique(false).size()==paths.size() : 'FADE staging filename collision'
+    }
+    def manifest=rows.collect { row ->
+        [row[0],row[1],"fastas/${row[2].name}","trees/${row[3].name}","species/${row[4].name}",row[5]!=null ? "species/${row[5].name}" : 'NO_FILE'].join('\t')
+    }.join('\n')+'\n'
+    tuple(id,manifest,fastas,trees,species,selectionHash([*fastas,*trees,*species]))
 }
 
-/**
- * Batch the (gene_id, direction, fasta, fg_species, tree, bg_species) rows of one
- * direction into ANNOTATE_TREE_FG_BATCHED inputs of `batch_size` genes each.
- */
-def make_annotate_batches(branch_ch, dir, batch_size) {
-    def batchCounter = 0
-    return branch_ch
-        .toSortedList({ a, b -> a[0] <=> b[0] })
-        .flatMap()
-        .collate(batch_size)
-        .map { batch ->
-            def batchID = String.format('annotate_batch_%s_%05d', dir, ++batchCounter)
-            // row[5] (bg_species_file) is legitimately NO_FILE whenever
-            // fade_background_scope == 'all' -- only rows 2/3/4 (fasta,
-            // fg species, tree) are required to be real files.
-            def validRows = batch.findAll { row ->
-                row[2]?.name != 'NO_FILE' && row[3]?.name != 'NO_FILE' && row[4]?.name != 'NO_FILE'
-            }
-            if (!validRows) return null
-            def manifestText = createBatchManifestText(
-                validRows.collect { row -> "${row[0]}\t${row[1]}\t${row[2].name}\t${row[4].name}\t${row[3].name}\t${row[5].name}" }
-            )
-            // Tree, FG list, and BG list are shared within a direction
-            // batch; deduplicate to avoid Nextflow stageAs filename collisions.
-            def uniqTrees = validRows.collect { row -> row[4] }.unique { it.name }
-            def uniqSpecies = validRows.collect { row -> row[3] }.unique { it.name }
-            def uniqBgSpecies = validRows.collect { row -> row[5] }.unique { it.name }
-            tuple(batchID, validRows.size(), manifestText,
-                  validRows.collect { row -> row[2] },   // fastas
-                  uniqTrees,                          // trees
-                  uniqSpecies,                        // fg species files
-                  uniqBgSpecies)                      // bg species files
-        }
-        .filter { it != null }
+def split_gene_lists(ch) {
+    [bg:ch.flatten().filter { it.name=='background.txt' }.collect(),interest:ch.flatten().filter { it.name!='background.txt' }.collect()]
 }
-
-/**
- * Group (gene_id, direction, filtered_fasta, annotated_tree) rows by gene_id so
- * both directions ('top' and 'bottom') of a gene are placed consecutively in the
- * same batch, allowing run_hyphy_fade_batch.sh to reuse the baseline model fit
- * across directions of the same gene.
- */
-def make_fade_batches(fade_input_ch, dir_label, batch_size) {
-    def batchCounter = 0
-    return fade_input_ch
-        .groupTuple(by: 0)
-        .toSortedList({ a, b -> a[0] <=> b[0] })
-        .flatMap()
-        .collate(batch_size)
-        .map { geneBatch ->
-            def batchID = String.format('fade_batch_%s_%05d', dir_label, ++batchCounter)
-            def rows = []
-            geneBatch.each { item ->
-                def gid   = item[0]
-                def dirs  = item[1]
-                def fas   = item[2]
-                def trees = item[3]
-                def indices = (0..<dirs.size()).toSorted { i, j ->
-                    def order = ['top': 0, 'bottom': 1]
-                    // getOrDefault: the Elvis operator would read the 0 of 'top' as false
-                    order.getOrDefault(dirs[i], 2) <=> order.getOrDefault(dirs[j], 2)
-                }
-                indices.each { idx ->
-                    rows << [gid, dirs[idx], fas[idx], trees[idx]]
-                }
-            }
-            def manifestText = createBatchManifestText(
-                rows.collect { row -> "${row[0]}\t${row[1]}\t${row[2].name}\t${row[3].name}" }
-            )
-            def uniqFastas = rows.collect { row -> row[2] }.unique { it.name }
-            def uniqTrees  = rows.collect { row -> row[3] }.unique { it.name }
-            tuple(batchID, dir_label, geneBatch.size(), manifestText,
-                  uniqFastas,   // filtered fastas (deduplicated when shared between top & bottom)
-                  uniqTrees)    // annotated trees
-        }
-}
-
-/**
- * Split a FADE_GENE_LISTS `gene_lists` channel into the direction's background
- * universe (background.txt) and its interest lists (every other file).
- */
-def split_gene_lists(gene_lists_ch) {
-    return [
-        bg:       gene_lists_ch.flatten().filter { it.name == 'background.txt' }.collect(),
-        interest: gene_lists_ch.flatten().filter { it.name != 'background.txt' }.collect()
-    ]
-}
-
-
-// ─── Workflow ─────────────────────────────────────────────────────────────────
 
 workflow FADE {
-
     take:
-        // Pre-processed alignment channels from SELECTION_PREP (called once in main.nf).
-        // Each channel emits (gene_id, filtered_fasta) tuples — no direction label yet;
-        // direction is introduced inside this workflow for ANNOTATE_TREE_FG.
-        fasta_top_ch      // (gene_id, fasta) for top-direction genes
-        fasta_bottom_ch   // (gene_id, fasta) for bottom-direction genes
-        // Shared reference files (value channels — can be broadcast to every gene)
-        tree_ch           // path to phenotype-pruned species tree
-        top_species_ch    // path to top_species.txt
-        bottom_species_ch // path to bottom_species.txt
+    fasta_top_ch
+    fasta_bottom_ch
+    tree_ch
+    top_species_ch
+    bottom_species_ch
 
     main:
-
-        assert params.fade_direction in ['top', 'bottom', 'both'] :
-            "fade_direction must be 'top', 'bottom', or 'both' (got: ${params.fade_direction})"
-        assert params.fade_background_scope in ['all', 'opposite'] :
-            "fade_background_scope must be 'all' or 'opposite' (got: ${params.fade_background_scope})"
-
-        // ── Model dat file ───────────────────────────────────────────────────
-        def model_name = (params.fade_model ?: 'LG').toLowerCase()
-        def model_dat_file = params.lg_dat_path ?: "${projectDir}/subworkflows/SELECTION/local/dat/${model_name}.dat"
-        def lg_dat_ch = Channel.value(file(model_dat_file))
-
-        // ── Background-scope species file per direction ─────────────────────
-        // 'opposite' restricts background to the other extreme group only
-        // (ANNOTATE_TREE_FG prunes non-fg/bg species out entirely); 'all'
-        // (default) passes the NO_FILE sentinel, reproducing HyPhy's own
-        // implicit background-is-everything-else behavior unchanged.
-        def no_bg_file   = Channel.value(file('NO_FILE'))
-        def top_bg_ch    = (params.fade_background_scope == 'opposite') ? bottom_species_ch : no_bg_file
-        def bottom_bg_ch = (params.fade_background_scope == 'opposite') ? top_species_ch    : no_bg_file
-
-        // ── Annotate tree with {Foreground} labels ───────────────────────────
-        // Introduce direction labels and combine with the species/tree files.
-        // ANNOTATE_TREE_FG also prunes the tree and FASTA to mutual taxa,
-        // preventing HyPhy tip-count / sequence-count mismatches.
-        //
-        // Input tuple: (gene_id, direction, fasta, fg_species_file, tree, bg_species_file)
-        def top_annotate_ch = fasta_top_ch
-            .map    { gid, fa -> tuple(gid, 'top', fa) }
-            .combine(top_species_ch)
-            .combine(tree_ch)
-            .combine(top_bg_ch)
-
-        def bottom_annotate_ch = fasta_bottom_ch
-            .map    { gid, fa -> tuple(gid, 'bottom', fa) }
-            .combine(bottom_species_ch)
-            .combine(tree_ch)
-            .combine(bottom_bg_ch)
-
-        // ── Direction gating (--fade_direction) ──────────────────────────────
-        // A single upstream filter starves every downstream _TOP/_BOTTOM branch
-        // for a skipped direction (no tasks scheduled) without restructuring
-        // any of the branch{}/process-call wiring below, mirroring how
-        // POSENRICH Accumulation's 'all' direction is handled as a filter, not a new
-        // contrast scheme.
-        def wanted_directions = (params.fade_direction == 'both')
-            ? ['top', 'bottom']
-            : [params.fade_direction]
-
-        def annotate_input_ch = top_annotate_ch.mix(bottom_annotate_ch)
-            .filter { row -> wanted_directions.contains(row[1]) }
-            // → (gene_id, direction, fasta, fg_species_file, tree, bg_species_file)
-
-        def annotBatchSize = (params.fade_batch_size ?: 1) as int
-        def annotated_ch
-        def filtered_fasta_ch
-
-        if (annotBatchSize > 1) {
-            // ── Batched annotation mode ──────────────────────────────────────
-            def annotate_branched = annotate_input_ch.branch {
-                top:    it[1] == 'top'
-                bottom: it[1] == 'bottom'
-            }
-
-            def batches_ch = make_annotate_batches(annotate_branched.top,    'top',    annotBatchSize)
-                .mix(make_annotate_batches(annotate_branched.bottom, 'bottom', annotBatchSize))
-
-            def batched_out = ANNOTATE_TREE_FG_BATCHED(batches_ch)
-            
-            // Reconstruct (gene_id, direction, file) tuples from output filenames
-            annotated_ch = batched_out.annotated_trees
-                .flatten()
-                .map { f ->
-                    def m = (f.name =~ /^(.+)_(top|bottom)_fg\.nwk$/)
-                    tuple(m[0][1], m[0][2], f)
-                }
-
-            if (params.fade_background_scope == 'opposite') {
-                filtered_fasta_ch = batched_out.filtered_fastas
-                    .flatten()
-                    .map { f ->
-                        def m = (f.name =~ /^(.+)_(top|bottom)\.fa$/)
-                        tuple(m[0][1], m[0][2], f)
-                    }
-            } else {
-                // In 'all' mode, SELECTION_PREP already pruned the FASTA to tree species;
-                // reuse it directly without writing 32,266 duplicate FASTA copies.
-                filtered_fasta_ch = annotate_input_ch.map { row -> tuple(row[0], row[1], row[2]) }
-            }
-        } else {
-            // ── Single-gene annotation mode ──────────────────────────────────
-            def annotate_result = ANNOTATE_TREE_FG(annotate_input_ch)
-            annotated_ch = annotate_result.annotated_tree
-            if (params.fade_background_scope == 'opposite') {
-                filtered_fasta_ch = annotate_result.filtered_fasta
-            } else {
-                filtered_fasta_ch = annotate_input_ch.map { row -> tuple(row[0], row[1], row[2]) }
-            }
+    assert params.fade_direction in ['top','bottom','both'] : 'Invalid fade_direction'
+    def wanted=params.fade_direction=='both' ? ['top','bottom'] : [params.fade_direction]
+    def settings=fadeSettings()
+    def source_hash=fadeSources('run')
+    def merge_hash=fadeSources('merge')
+    def batchSize=selectionPositive(params.fade_batch_size!=null ? params.fade_batch_size : 1,'fade_batch_size')
+    def tree=tree_ch.collect().map { selectionSingle(it,'FADE tree') }
+    def top=top_species_ch.collect().map { selectionSingle(it,'FADE top species') }
+    def bottom=bottom_species_ch.collect().map { selectionSingle(it,'FADE bottom species') }
+    def pools=top.combine(bottom).map { fg,bg ->
+        assert fadeSpecies(fg).intersect(fadeSpecies(bg)).isEmpty() : 'FADE species pools overlap'
+        [fg,bg]
+    }
+    def topRows=fasta_top_ch.map { gid,f -> tuple(gid,'top',f) }
+    def bottomRows=fasta_bottom_ch.map { gid,f -> tuple(gid,'bottom',f) }
+    def rows=topRows.mix(bottomRows).filter { wanted.contains(it[1]) }.combine(tree).combine(pools)
+        .map { gid,d,f,t,fg,bg -> tuple(gid,d,f,t,d=='top' ? fg : bg,settings.background_scope=='opposite' ? (d=='top' ? bg : fg) : null) }
+    def expected=rows.map { gid,d,f,t,fg,bg -> [gid,d] }.collect(flat:false).ifEmpty([]).map { keys ->
+        assert keys.unique(false).size()==keys.size() : 'Duplicate FADE gene/direction inputs'
+        keys.sort { a,b -> a[0]<=>b[0] ?: a[1]<=>b[1] }
+    }
+    def genes
+    def sites
+    def audits
+    if (batchSize>1) {
+        def batches=rows.groupTuple(by:0).toSortedList { a,b -> a[0]<=>b[0] }.flatMap().collate(batchSize).map { batch ->
+            def flat=[]
+            batch.each { g -> (0..<g[1].size()).each { i -> flat << [g[0],g[1][i],g[2][i],g[3][i],g[4][i],g[5][i]] } }
+            flat.sort { a,b -> a[0]<=>b[0] ?: a[1]<=>b[1] }
+            fadeBatch(flat,'batch_'+java.security.MessageDigest.getInstance('SHA-256').digest(flat.collect { it[0]+':'+it[1] }.join('\n').bytes).encodeHex().toString().take(16))
         }
-
-        // ── Join filtered FASTA + annotated tree, then run FADE ─────────────
-        //  filtered_fasta_ch : (gene_id, direction, filtered_fasta)
-        //  annotated_ch      : (gene_id, direction, annotated_tree)
-        //  join by [0,1]     → (gene_id, direction, filtered_fasta, annotated_tree)
-        def fade_input_ch = filtered_fasta_ch.join(annotated_ch, by: [0, 1])
-
-        def fadeBatchSize = (params.fade_batch_size ?: 1) as int
-        def fade_genes_ch = null
-        def fade_sites_ch = null
-        if (fadeBatchSize > 1) {
-            // ── Batched mode (groups top + bottom of each gene into the same batch) ──
-            def batches_ch = make_fade_batches(fade_input_ch, params.fade_direction, fadeBatchSize)
-
-            def batched_out = FADE_BATCHED(batches_ch, lg_dat_ch)
-            fade_genes_ch = batched_out.genes
-            fade_sites_ch = batched_out.sites
-        } else {
-            // ── Single-gene mode (default) ────────────────────────────────
-            def run_out = FADE_RUN(fade_input_ch, lg_dat_ch)
-            fade_genes_ch = run_out.genes
-            fade_sites_ch = run_out.sites
+        def result=FADE_BATCHED(batches,settings,source_hash)
+        genes=result.genes;sites=result.sites;audits=result.audits.flatten()
+    } else {
+        def single=rows.map { row ->
+            def b=fadeBatch([row],'single')
+            tuple(row[0],row[1],b[1],b[2],b[3],b[4],b[5])
         }
-
-        // ── Tables and reports per direction ─────────────────────────────────
-        // Every task writes the gene and site tables of its runs (FADE_BATCHED: both directions of its genes); FADE_TABLES keeps the
-        // rows of one direction and publishes the merged tables, which SCORING, ENRICHMENT and the report read.
-        def all_genes_ch = fade_genes_ch.collect().ifEmpty([])
-        def all_sites_ch = fade_sites_ch.collect().ifEmpty([])
-
-        // ── Gene list extraction per direction (always automatic) ─────────
-        // FADE no longer runs its own FCS ranking (see fcs.nf/scoring_enrichment.nf —
-        // its max-of-many-sites statistic proved unreliable for gene-set enrichment;
-        // FADE now contributes as cross-module corroboration + a posenrich position
-        // group instead). Its standalone AMI report (DOMINO active modules) was
-        // removed too — never produced usable output; there's no separate --ami
-        // flag anymore. FADE's own gene lists/background per direction are always
-        // computed automatically and feed the unified 12.AMI_analysis.Rmd
-        // (ENRICHMENT workflow) via gene_lists_bg_*/gene_lists_sig_* below.
-        def run_top    = wanted_directions.contains('top')
-        def run_bottom = wanted_directions.contains('bottom')
-
-        def report_top_ch                  = Channel.empty()
-        def summary_top_ch                 = Channel.empty()
-        def site_tsv_top_ch                = Channel.empty()
-        def sites_csv_top_ch               = Channel.empty()
-        def fade_gene_lists_bg_top_out     = Channel.empty()
-        def fade_gene_lists_sig_top_out    = Channel.empty()
-
-        if (run_top) {
-            def tables_top   = FADE_TABLES_TOP(Channel.value('top'), all_genes_ch, all_sites_ch)
-            def fg_top_ch    = top_species_ch.ifEmpty { file('NO_FG_LIST') }
-            def rep_top      = FADE_REPORT_TOP(Channel.value('top'), tables_top.gene_counts_tsv, tables_top.sites_csv, fg_top_ch)
-            report_top_ch    = rep_top.report
-            summary_top_ch   = tables_top.summary_tsv
-            site_tsv_top_ch  = tables_top.site_tsv
-            sites_csv_top_ch = tables_top.sites_csv
-
-            def top_lists_out = FADE_GENE_LISTS_TOP(Channel.value('top'), summary_top_ch)
-            def top_lists    = split_gene_lists(top_lists_out.gene_lists)
-            fade_gene_lists_bg_top_out  = top_lists.bg
-            fade_gene_lists_sig_top_out = top_lists.interest
-        }
-
-        def report_bottom_ch                  = Channel.empty()
-        def summary_bottom_ch                 = Channel.empty()
-        def site_tsv_bottom_ch                = Channel.empty()
-        def sites_csv_bottom_ch               = Channel.empty()
-        def fade_gene_lists_bg_bottom_out     = Channel.empty()
-        def fade_gene_lists_sig_bottom_out    = Channel.empty()
-
-        if (run_bottom) {
-            def tables_bottom   = FADE_TABLES_BOTTOM(Channel.value('bottom'), all_genes_ch, all_sites_ch)
-            def fg_bottom_ch    = bottom_species_ch.ifEmpty { file('NO_FG_LIST') }
-            def rep_bottom      = FADE_REPORT_BOTTOM(Channel.value('bottom'), tables_bottom.gene_counts_tsv, tables_bottom.sites_csv, fg_bottom_ch)
-            report_bottom_ch    = rep_bottom.report
-            summary_bottom_ch   = tables_bottom.summary_tsv
-            site_tsv_bottom_ch  = tables_bottom.site_tsv
-            sites_csv_bottom_ch = tables_bottom.sites_csv
-
-            def bottom_lists_out = FADE_GENE_LISTS_BOTTOM(Channel.value('bottom'), summary_bottom_ch)
-            def bottom_lists    = split_gene_lists(bottom_lists_out.gene_lists)
-            fade_gene_lists_bg_bottom_out  = bottom_lists.bg
-            fade_gene_lists_sig_bottom_out = bottom_lists.interest
-        }
-
+        def result=FADE_RUN(single,settings,source_hash)
+        genes=result.genes;sites=result.sites;audits=result.audits.flatten()
+    }
+    def allGenes=genes.collect().ifEmpty([]).map { paths -> paths.sort { it.toString() } }
+    def allSites=sites.collect().ifEmpty([]).map { paths -> paths.sort { it.toString() } }
+    def allAudits=audits.collect().ifEmpty([]).map { paths -> paths.sort { it.toString() } }
+    def report_top_ch=Channel.empty(), report_bottom_ch=Channel.empty()
+    def summary_top_ch=Channel.empty(), summary_bottom_ch=Channel.empty()
+    def site_top_ch=Channel.empty(), site_bottom_ch=Channel.empty()
+    def csv_top_ch=Channel.empty(), csv_bottom_ch=Channel.empty()
+    def bg_top_ch=Channel.empty(), bg_bottom_ch=Channel.empty()
+    def sig_top_ch=Channel.empty(), sig_bottom_ch=Channel.empty()
+    if (wanted.contains('top')) {
+        def tables=FADE_TABLES_TOP('top',allGenes,allSites,allAudits,expected,settings,merge_hash)
+        summary_top_ch=tables.summary_tsv;site_top_ch=tables.site_tsv;csv_top_ch=tables.sites_csv
+        report_top_ch=FADE_REPORT_TOP('top',tables.gene_counts_tsv,tables.sites_csv,top,tables.metadata).report
+        def lists=split_gene_lists(FADE_GENE_LISTS_TOP('top',tables.summary_tsv).gene_lists)
+        bg_top_ch=lists.bg;sig_top_ch=lists.interest
+    }
+    if (wanted.contains('bottom')) {
+        def tables=FADE_TABLES_BOTTOM('bottom',allGenes,allSites,allAudits,expected,settings,merge_hash)
+        summary_bottom_ch=tables.summary_tsv;site_bottom_ch=tables.site_tsv;csv_bottom_ch=tables.sites_csv
+        report_bottom_ch=FADE_REPORT_BOTTOM('bottom',tables.gene_counts_tsv,tables.sites_csv,bottom,tables.metadata).report
+        def lists=split_gene_lists(FADE_GENE_LISTS_BOTTOM('bottom',tables.summary_tsv).gene_lists)
+        bg_bottom_ch=lists.bg;sig_bottom_ch=lists.interest
+    }
     emit:
-        report_top     = report_top_ch
-        report_bottom  = report_bottom_ch
-        summary_top    = summary_top_ch
-        summary_bottom = summary_bottom_ch
-        site_tsv_top    = site_tsv_top_ch
-        site_tsv_bottom = site_tsv_bottom_ch
-        sites_csv_top    = sites_csv_top_ch
-        sites_csv_bottom = sites_csv_bottom_ch
-        // FADE's own per-direction gene universe (background.txt) + its
-        // significant-gene list -- feeds the unified 12.AMI_analysis.Rmd's
-        // FADE section (Top/Bottom tabs; Global = union of both, built in
-        // enrichment.nf since it needs both directions at once).
-        gene_lists_bg_top     = fade_gene_lists_bg_top_out     ?: Channel.empty()
-        gene_lists_bg_bottom  = fade_gene_lists_bg_bottom_out  ?: Channel.empty()
-        gene_lists_sig_top    = fade_gene_lists_sig_top_out    ?: Channel.empty()
-        gene_lists_sig_bottom = fade_gene_lists_sig_bottom_out ?: Channel.empty()
+    report_top=report_top_ch
+    report_bottom=report_bottom_ch
+    summary_top=summary_top_ch
+    summary_bottom=summary_bottom_ch
+    site_tsv_top=site_top_ch
+    site_tsv_bottom=site_bottom_ch
+    sites_csv_top=csv_top_ch
+    sites_csv_bottom=csv_bottom_ch
+    gene_lists_bg_top=bg_top_ch
+    gene_lists_bg_bottom=bg_bottom_ch
+    gene_lists_sig_top=sig_top_ch
+    gene_lists_sig_bottom=sig_bottom_ch
 }

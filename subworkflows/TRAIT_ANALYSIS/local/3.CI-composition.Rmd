@@ -107,6 +107,9 @@ if (exists("params")) {
 
 # Call the setup function from commons.R
 source("./src/commons.R")
+source("./src/selection_algorithm.R")
+source("./src/contrast_inputs.R", local = TRUE)
+validate_contrast_inputs(trait_df, trait, n_trait, c_trait, params)
 setup_rmd()
 
 # PSS engine (Fabio Barteri's phyloq, vendored); ct_ci.nf copies it into src/.
@@ -182,39 +185,19 @@ if (use_count_data) {
   debug_log("compute_CI: Jeffreys CI method (n_trait = %s, c_trait = %s)", n_trait, c_trait)
   library(binom)
 
-  # One bound of the interval (column 5 lower, 6 upper of binom.confint), NA for invalid counts.
-  safe_binom_bound <- function(k, n, bound_col) {
-    if (is.na(k) || is.na(n) || n <= 0 || k < 0 || k > n) {
-      return(NA_real_)
-    }
-    res <- tryCatch(
-      binom::binom.confint(k, n, method = "bayes", priors = c(0.5, 0.5), conf.level = 0.95),
-      error = function(e) NULL
-    )
-    if (is.null(res)) return(NA_real_)
-    return(res[[bound_col]])
-  }
-
+  # Compute both bounds once, with explicit Jeffreys prior shapes. Count domains
+  # were validated before analysis; numerical failures must remain visible.
+  intervals <- binom::binom.confint(trait_df[[c_trait]], trait_df[[n_trait]],
+    methods = "bayes", prior.shape1 = 0.5, prior.shape2 = 0.5, conf.level = 0.95)
   g_med <- median(trait_df[[trait]], na.rm = TRUE)
-
-  trait_ci <- trait_df %>%
-    group_by(species) %>%
-    dplyr::rename(n_population = .data[[n_trait]],
-                  n_cases      = .data[[c_trait]],
-                  trait        = .data[[trait]]) %>%
-    dplyr::mutate(
-      trait_ci_lb = safe_binom_bound(n_cases, n_population, 5),
-      trait_ci_ub = safe_binom_bound(n_cases, n_population, 6),
-      trait_ci = ifelse(is.na(trait_ci_lb) | is.na(trait_ci_ub),
-                        NA_character_,
-                        paste0("[", round(trait_ci_lb, 2), "-", round(trait_ci_ub, 2), "]")),
-      category = dplyr::case_when(
-        trait > g_med ~ "top",
-        trait < g_med ~ "bottom",
-        TRUE ~ "intermediate"
-      )
-    ) %>%
-    ungroup()
+  trait_ci <- trait_df
+  names(trait_ci)[match(c(n_trait, c_trait, trait), names(trait_ci))] <-
+    c("n_population", "n_cases", "trait")
+  trait_ci$trait_ci_lb <- intervals$lower
+  trait_ci$trait_ci_ub <- intervals$upper
+  trait_ci$trait_ci <- paste0("[", round(intervals$lower, 2), "-", round(intervals$upper, 2), "]")
+  trait_ci$category <- ifelse(trait_ci$trait > g_med, "top",
+    ifelse(trait_ci$trait < g_med, "bottom", "intermediate"))
 
   cat("Jeffreys Bayesian 95% Credible Intervals computed for count data.\n")
 
@@ -272,7 +255,7 @@ trait_ci <- trait_ci %>%
   dplyr::distinct(species, .keep_all = TRUE)
 
 write.csv(trait_ci, file.path(ci_dir, "trait_CI.csv"),
-          quote = FALSE, row.names = FALSE)
+          quote = TRUE, row.names = FALSE)
 
 head(trait_ci)
 ```
@@ -287,133 +270,45 @@ A pair is an eligible contrast candidate when it passes the trait-type non-overl
 # Table of all ordered species pairs (species1, species2) with the trait values, the
 # categories, the intervals, the PSS score and `trait_overlap`. A pair with
 # trait_overlap == FALSE is a candidate contrast: species1 has the higher trait value.
-create_pairwise_data <- function(ci_data) {
-  ci_subset <- ci_data %>%
-    dplyr::distinct(species, .keep_all = TRUE) %>%
-    dplyr::select(species, n_population, n_cases, trait,
-                  trait_ci_lb, trait_ci_ub, category)
-
-  pss_df <- data.frame(species1 = character(), species2 = character(),
-                       pss_score = numeric(), S_score = numeric(), stringsAsFactors = FALSE)
-  pss_top_pairs <- character(0)
-
-  # Phylogenetic Shift Score (PSS), computed for every trait type with the engine of
-  # src/pss_core.R (fit BM and OU, select by AIC: OU if AIC_OU + 2 < AIC_BM, else BM;
-  # score every species pair as S * normDelta / normPatristic). pss_score is the pair
-  # divergence signal that ranks the candidates; for a continuous trait the top
-  # `pss_top_pct` of pairs is also a gate (below). When the fit fails, no score is
-  # stored and the selection falls back to the type gate and patristic-distance ranking.
-  .force <- if (exists("perm_strategy", inherits = TRUE) &&
-                tolower(perm_strategy) %in% c("bm", "ou")) toupper(perm_strategy) else NULL
-  .pct   <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.05
-  if (exists("tree") && !is.null(tree) && length(tree$tip.label) >= 2) {
-    tryCatch({
-      .pss <- phylogenetic_shift_score(
-        data = as.data.frame(ci_subset[, c("species", "trait")]),
-        tree = tree, trait = "trait", species_col = "species",
-        verbose = FALSE, force_model = .force
-      )
-      sc <- .pss$scores
-      sc_S <- if (identical(.pss$selected_model, "BM")) sc$Sbm else sc$Sou
-      pss_df <- rbind(
-        data.frame(species1 = sc$Species1, species2 = sc$Species2,
-                   pss_score = round(sc$FinalScore, 6), S_score = round(sc_S, 6),
-                   stringsAsFactors = FALSE),
-        data.frame(species1 = sc$Species2, species2 = sc$Species1,
-                   pss_score = round(sc$FinalScore, 6), S_score = round(sc_S, 6),
-                   stringsAsFactors = FALSE)
-      )
-      if (exists("ci_dir", inherits = TRUE) && dir.exists(ci_dir)) {
-        write.table(.pss$model_fit, file.path(ci_dir, "evo_model.tsv"),
-                    sep = "\t", row.names = FALSE, quote = FALSE)
-      }
-      debug_log("PSS: model=%s (AIC BM=%.2f OU=%.2f), %d scored pairs",
-                .pss$selected_model, sc$AIC_BM[1], sc$AIC_OU[1], nrow(sc))
-    }, error = function(e) {
-      debug_log("PSS calculation failed: %s", conditionMessage(e))
-    })
-  }
-  have_pss <- nrow(pss_df) > 0
-
-  # All ordered species pairs, with the data of each member.
-  pairwise <- expand.grid(species1 = ci_subset$species,
-                          species2 = ci_subset$species,
-                          stringsAsFactors = FALSE)
-
-  pairwise <- pairwise %>%
-    left_join(ci_subset %>% rename_with(~paste0(.x, "1"), .cols = -species),
-              by = c("species1" = "species")) %>%
-    left_join(ci_subset %>% rename_with(~paste0(.x, "2"), .cols = -species),
-              by = c("species2" = "species"))
-
-  if (nrow(pss_df) > 0) {
-    pairwise <- pairwise %>%
-      left_join(pss_df, by = c("species1", "species2"))
-  } else {
-    pairwise$pss_score <- NA_real_
-    pairwise$S_score <- NA_real_
-  }
-
-  # Candidate eligibility (trait_overlap == FALSE):
-  #   count      -> the Jeffreys intervals do not overlap. This is the gate; PSS only
-  #                 ranks the survivors (4.Independent_contrasts.Rmd).
-  #   ordinal    -> one species at the top coded level, the other at the bottom.
-  #   continuous -> there is no separate significance test, so the top `pss_top_pct`
-  #                 of the hi>lo pairs by PSS is the gate. A pss_top_pct outside (0, 1)
-  #                 disables it: every hi>lo pair is kept and PSS only ranks.
-  # When the PSS fit failed for a continuous trait, every hi>lo pair is kept and the
-  # patristic-distance ranking takes over.
-  pairwise <- pairwise %>%
-    mutate(
-      trait_diff = trait1 - trait2,
-      .type_nonoverlap = if (use_count_data) {
-        !ci_overlap(trait_ci_lb1, trait_ci_ub1, trait_ci_lb2, trait_ci_ub2)
-      } else if (isTRUE(is_ordinal)) {
-        (category1 %in% c("top", "bottom")) &
-          (category2 %in% c("top", "bottom")) &
-          (category1 != category2)
-      } else {
-        TRUE
-      }
-    )
-
-  .stage1 <- which(pairwise$.type_nonoverlap & pairwise$trait_diff > 0 &
-                   !is.na(pairwise$trait_diff))
-  pairwise$trait_overlap <- TRUE
-  if (length(.stage1) > 0) {
-    .pct  <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.05
-    .continuous_pss_gate <- !use_count_data && !isTRUE(is_ordinal) &&
-      isTRUE(have_pss) && any(is.finite(pairwise$pss_score[.stage1])) &&
-      is.finite(.pct) && .pct > 0 && .pct < 1
-    if (.continuous_pss_gate) {
-      .keep <- min(max(1L, ceiling(length(.stage1) * .pct)), length(.stage1))
-      .ord  <- .stage1[order(pairwise$pss_score[.stage1], decreasing = TRUE)]
-      pairwise$trait_overlap[.ord[seq_len(.keep)]] <- FALSE
-      debug_log("Continuous PSS gate: %d pairs -> top %.1f%% -> %d candidates",
-                length(.stage1), 100 * .pct, .keep)
-    } else {
-      pairwise$trait_overlap[.stage1] <- FALSE
-      debug_log("Type gate: %d candidate pairs (PSS ranks, does not gate)", length(.stage1))
-    }
-  }
-  # Centre gate (pair_center_gate): a candidate must have its members on opposite sides of the median or mean of the trait.
-  if (pair_center_gate != "none") {
-    .ctr <- if (pair_center_gate == "median") stats::median(ci_subset$trait, na.rm = TRUE) else mean(ci_subset$trait, na.rm = TRUE)
-    .cross <- !is.na(pairwise$trait1) & !is.na(pairwise$trait2) &
-      pmax(pairwise$trait1, pairwise$trait2) >= .ctr & pmin(pairwise$trait1, pairwise$trait2) <= .ctr
-    pairwise$trait_overlap <- pairwise$trait_overlap | !.cross
-    debug_log("Centre gate (%s = %.4g): %d candidate pairs left", pair_center_gate, .ctr, sum(!pairwise$trait_overlap, na.rm = TRUE))
-  }
-  pairwise$diff_value  <- pairwise$trait_diff
-  pairwise$overlap_use <- pairwise$trait_overlap
-  pairwise$.type_nonoverlap <- NULL
-
-  return(pairwise)
+force_model <- if (tolower(perm_strategy) %in% c("bm", "ou")) toupper(perm_strategy) else NULL
+provenance <- contrast_provenance(trait_df, pruned_tree, trait, n_trait, c_trait,
+  pss_top_pct, is_ordinal, pair_center_gate, force_model, seed_val)
+observed <- prepare_observed_contrasts(trait_ci, pruned_tree, pss_top_pct,
+  is_ordinal, pair_center_gate, force_model)
+observed$provenance <- provenance
+observed$trait_ci <- trait_ci
+saveRDS(observed, file.path(ci_dir, "observed_selection.rds"))
+if (!is.null(observed$ctx$fits)) {
+  write.table(model_fit_table(observed$ctx$fits, trait, observed$ctx$selected_model),
+    file.path(ci_dir, "evo_model.tsv"), sep = "\t", row.names = FALSE, quote = FALSE)
 }
 
-pairwise_data <- create_pairwise_data(trait_ci)
+# Keep the historical quadratic table as a diagnostic export. Selection reads
+# the compact, provenance-checked bundle above, never this rounded CSV.
+ci_subset <- trait_ci %>%
+  dplyr::select(species, n_population, n_cases, trait, trait_ci_lb, trait_ci_ub, category)
+pairwise_data <- expand.grid(species1 = ci_subset$species, species2 = ci_subset$species,
+  stringsAsFactors = FALSE) %>%
+  left_join(ci_subset %>% rename_with(~paste0(.x, "1"), .cols = -species), by = c("species1" = "species")) %>%
+  left_join(ci_subset %>% rename_with(~paste0(.x, "2"), .cols = -species), by = c("species2" = "species"))
+sc <- observed$scores
+pss_df <- data.frame(species1 = character(), species2 = character(), pss_score = numeric(), S_score = numeric())
+if (!is.null(sc)) {
+  score_s <- if (observed$ctx$selected_model == "BM") sc$Sbm else sc$Sou
+  pss_df <- rbind(data.frame(species1 = sc$Species1, species2 = sc$Species2,
+      pss_score = sc$FinalScore, S_score = score_s),
+    data.frame(species1 = sc$Species2, species2 = sc$Species1,
+      pss_score = sc$FinalScore, S_score = score_s))
+}
+pairwise_data <- left_join(pairwise_data, pss_df, by = c("species1", "species2"))
+candidates <- observed$candidates$cand_df
+eligible <- if (is.null(candidates)) character() else paste(candidates$species1, candidates$species2, sep = "\t")
+pairwise_data$trait_overlap <- !paste(pairwise_data$species1, pairwise_data$species2, sep = "\t") %in% eligible
+pairwise_data$trait_diff <- pairwise_data$trait1 - pairwise_data$trait2
+pairwise_data$diff_value <- pairwise_data$trait_diff
+pairwise_data$overlap_use <- pairwise_data$trait_overlap
 
-# pairwise_data is written whole (pairwise_data.csv, read by 4.Independent_contrasts.Rmd);
+# pairwise_data.csv remains available as a diagnostic export;
 # the plots use a copy without the rows that have NA trait values.
 pairwise_data_viz <- pairwise_data %>%
   dplyr::filter(!is.na(trait1), !is.na(trait2), !is.na(diff_value), !is.na(overlap_use))
@@ -444,15 +339,14 @@ if (!has_heatmap_extremes) {
 }
 
 write.csv(pairwise_data, file.path(ci_dir, "pairwise_data.csv"),
-          quote = FALSE, row.names = FALSE)
+          quote = TRUE, row.names = FALSE)
 
 # ── Candidate species for FADE ────────────────────────────────────────────────
 
-# Union of the members of every candidate pair, taken before the independence selection
-# (modified Dunn index) of 4.Independent_contrasts.Rmd. FADE tests selection on the
-# foreground branches and does not need mutually independent pairs, so it uses this full
-# pool. Written without header as species<TAB>contrast_group<TAB>pair (1 = top, 0 = bottom;
-# `pair` is a running index), the format that EXTRACT_EXTREME_SPECIES in SELECTION_PREP reads.
+# FADE uses a global partition of candidate members: above/below the median
+# for count/continuous traits, extreme coded levels for ordinal traits. These
+# labels are separate from pair-local high/low roles. Intermediate/median species
+# remain excluded, preserving the existing FADE grouping contract.
 .nonoverlap  <- pairwise_data %>%
   dplyr::filter(trait_overlap == FALSE, !is.na(species1), !is.na(species2))
 .cand_species <- unique(c(.nonoverlap$species1, .nonoverlap$species2))
@@ -468,6 +362,16 @@ if (!is.null(candidate_species) && nrow(candidate_species) > 0) {
 } else {
   candidate_species <- data.frame(species = character(), contrast_group = integer(), pair = integer())
 }
+candidate_species_audit <- trait_ci %>%
+  transmute(species, category, is_candidate_member = species %in% .cand_species,
+    exported = species %in% candidate_species$species,
+    exclusion_reason = case_when(
+      !is_candidate_member ~ "not_in_candidate_pairs",
+      category == "intermediate" ~ if (is_ordinal) "intermediate_ordinal_level" else "equal_to_global_median",
+      TRUE ~ NA_character_))
+write.table(candidate_species_audit, file.path(ci_dir, "candidate_species_audit.tsv"),
+  quote = TRUE, row.names = FALSE, sep = "\t")
+cat("FADE groups use the global trait partition; median/intermediate exclusions are recorded in candidate_species_audit.tsv.\n")
 write.table(candidate_species, file.path(ci_dir, "candidate_species.tab"),
             quote = FALSE, row.names = FALSE, col.names = FALSE, sep = "\t")
 debug_log("candidate_species: %d foreground, %d background (pre-Dunn pool)",
@@ -605,7 +509,7 @@ create_heatmap <- function(pairwise_data, species_labels,
       labels = function(y) unname(label_lookup[as.character(y)]),
       expand = c(0, 0)
     ) +
-    theme_minimal(base_size = 16) +
+    report_theme(base_size = 16) +
     theme(
       axis.text.x = element_text(
         size = heatmap_dims$axis_label_size,
@@ -659,7 +563,7 @@ if (has_heatmap_extremes) {
 
   # Label table, kept for inspection.
   write.csv(species_labels, file.path(ci_dir, "my_labels_colored.csv"), 
-            quote = FALSE, row.names = FALSE)
+            quote = TRUE, row.names = FALSE)
 
   overlap_heatmap <- create_heatmap(pairwise_data_viz_extreme, species_labels, highlight_nonoverlap = TRUE)
   heatmap_dims <- attr(overlap_heatmap, "heatmap_dims")
@@ -709,7 +613,7 @@ trait_ci_polished <- trait_ci %>%
 
 write.csv(trait_ci_polished, 
           file.path(ci_dir, "trait_CI_polished.csv"), 
-          quote = FALSE, row.names = FALSE)
+          quote = TRUE, row.names = FALSE)
 
 # Pairwise table rebuilt from the trait table: absolute difference and the two intervals.
 trait_diff <- trait_ci %>%
@@ -747,15 +651,15 @@ pairwise_data_end_polished <- pairwise_data_full %>%
 
 write.csv(pairwise_data_end_polished,
           file.path(ci_dir, "pairwise_data_end_polished.csv"),
-          quote = FALSE, row.names = FALSE)
+          quote = TRUE, row.names = FALSE)
 
-# Candidate pairs only, each pair once (species1 < species2).
+# Candidates already have a single high-to-low orientation; do not filter by name.
 pairwise_nonoverlap <- pairwise_data_end_polished %>%
   dplyr::left_join(
     pairwise_data %>% dplyr::select(species1, species2, overlap_use),
     by = c("species1", "species2")
   ) %>%
-  dplyr::filter(!overlap_use, species1 < species2) %>%
+  dplyr::filter(!overlap_use) %>%
   dplyr::select(-overlap_use)
 
 pairwise_nonoverlap

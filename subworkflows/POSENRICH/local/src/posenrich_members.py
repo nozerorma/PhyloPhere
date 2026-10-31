@@ -22,6 +22,7 @@ memberships of every collection at once unless it asks for them.
 
 import numpy as np
 import pandas as pd
+from posenrich_contract import read_table
 
 MEMBER_COLUMNS = ['collection_id', 'term_id', 'term_label', 'Gene', 'Position']
 COVERAGE_COLLECTIONS = ('fubar_tested', 'genomic_windows')   # describe coverage, not annotation
@@ -37,7 +38,7 @@ ATTRIBUTE_COLLECTIONS = {
     'fade_bottom_sig': ('fade_bottom_sig', lambda c: c == '1', 'fade_bottom_sig'),
     'genomic_windows': ('window', lambda c: c != '', None),
 }
-ATTRIBUTE_COLUMNS = ['ucr_core', 'ucr_flank', 'ucr_region', 'ucr_variability', 'fubar_call',
+ATTRIBUTE_COLUMNS = ['ucr_core', 'custom_terms', 'ucr_flank', 'ucr_region', 'ucr_variability', 'fubar_call',
                      'fade_top_sig', 'fade_bottom_sig', 'window']
 REGION_COLUMNS = ['collection_id', 'term_id', 'term_label', 'Gene', 'start', 'end',
                   'source_record_id', 'mapping_status', 'detail']
@@ -108,10 +109,10 @@ def read_tables(registry_dir, collections=None):
     positions = None
     if need_attr:
         usecols = ['Gene', 'Position'] + ATTRIBUTE_COLUMNS
-        positions = pd.read_csv(os.path.join(registry_dir, 'positions.tsv'), sep='\t', dtype=str,
-                                keep_default_na=False, usecols=lambda c: c in usecols)
-    regions = pd.read_csv(os.path.join(registry_dir, 'regions.tsv'), sep='\t', dtype=str, keep_default_na=False)
-    sites = pd.read_csv(os.path.join(registry_dir, 'sites.tsv'), sep='\t', dtype=str, keep_default_na=False)
+        positions = read_table(os.path.join(registry_dir, 'positions.tsv'))
+        positions = positions[[c for c in usecols if c in positions]]
+    regions = read_table(os.path.join(registry_dir, 'regions.tsv'))
+    sites = read_table(os.path.join(registry_dir, 'sites.tsv'))
     return positions, regions, sites
 
 

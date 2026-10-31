@@ -38,6 +38,7 @@ import os
 
 import pandas as pd
 
+from posenrich_contract import read_table, verify_registry, finish_manifest
 import posenrich_members as pm
 
 REGISTRY_FILES = ['positions.tsv', 'position_evidence.tsv', 'regions.tsv', 'sites.tsv',
@@ -56,7 +57,8 @@ def parse_args():
 
 
 def read_tsv(path, usecols=None):
-    return pd.read_csv(path, sep='\t', dtype=str, keep_default_na=False, usecols=usecols)
+    df = read_table(path)
+    return df[usecols] if usecols else df
 
 
 def write_tsv(df, path):
@@ -121,15 +123,15 @@ def build_position_characterization(positions, evidence, pfam_members):
 
     layers = {}
     status_by_key = {}
-    attributes = ['ucr_region', 'ucr_variability', 'fubar_call', 'fade_top_sig', 'fade_bottom_sig']
+    attributes = ['ucr_region', 'ucr_variability', 'fubar_call', 'fade_top_sig', 'fade_bottom_sig', 'custom_terms']
     for row in positions[['Gene', 'Position', 'evaluation_status'] + attributes].itertuples(index=False):
         key = (row.Gene, int(row.Position))
         status_by_key[key] = row.evaluation_status
-        if row.ucr_region or row.fubar_call or row.fade_top_sig == '1' or row.fade_bottom_sig == '1':
+        if row.ucr_region or row.fubar_call or row.fade_top_sig == '1' or row.fade_bottom_sig == '1' or row.custom_terms:
             layers[key] = {'ucr_region': row.ucr_region, 'variability': row.ucr_variability,
                            'fubar_call': row.fubar_call, 'fade_top': int(row.fade_top_sig == '1'),
-                           'fade_bottom': int(row.fade_bottom_sig == '1')}
-    empty = {'ucr_region': '', 'variability': '', 'fubar_call': '', 'fade_top': 0, 'fade_bottom': 0}
+                           'fade_bottom': int(row.fade_bottom_sig == '1'), 'custom_terms': row.custom_terms}
+    empty = {'ucr_region': '', 'variability': '', 'fubar_call': '', 'fade_top': 0, 'fade_bottom': 0, 'custom_terms': ''}
 
     keys = set(layers) | set(names) | set(scores)
     rows = []
@@ -147,6 +149,7 @@ def build_position_characterization(positions, evidence, pfam_members):
             'fubar_selection': layer['fubar_call'],
             'fade_top_sig': layer['fade_top'],
             'fade_bottom_sig': layer['fade_bottom'],
+            'custom_terms': layer['custom_terms'],
             'CAAS_score': 'NA' if sc is None or sc['score'] is None else repr(sc['score']),
             'sides': '' if sc is None else ';'.join(sorted(sc['sides'])),
             'p.emp': 'NA' if sc is None else sc['p.emp'],
@@ -157,18 +160,18 @@ def build_position_characterization(positions, evidence, pfam_members):
     return pd.DataFrame(rows, columns=['Gene', 'Position', 'evaluation_status', 'pfam_domain',
                                        'pfam_clan', 'ucr_region', 'position_variability',
                                        'fubar_selection', 'fade_top_sig', 'fade_bottom_sig',
-                                       'CAAS_score', 'sides', 'p.emp', 'p.adj_bh',
+                                       'custom_terms', 'CAAS_score', 'sides', 'p.emp', 'p.adj_bh',
                                        'caas_nominal', 'caas_adjusted'])
 
 
-def build_collection_summary(collections, member_frames, evidence, coverage):
+def build_collection_summary(collections, member_frames, evidence, coverage, tested_keys=None):
     """Per collection/term: sizes and exact crosses with the ranking (no inference)."""
     scores = position_scores_by_key(evidence)
     if isinstance(member_frames, pd.DataFrame):
         member_frames = [member_frames]
     # One pass over memberships, rather than scanning the entire registry for
     # every term. Keep only counters and distinct genes, not per-term row copies.
-    totals = {(r.collection_id, r.term_id): [0, set(), 0, 0, 0, 0]
+    totals = {(r.collection_id, r.term_id): [0, set(), 0, 0, 0, 0, 0]
               for r in collections.itertuples(index=False) if r.status == 'included'}
     for members in member_frames:
         for collection, term, gene, position in zip(
@@ -178,6 +181,7 @@ def build_collection_summary(collections, member_frames, evidence, coverage):
                 continue
             counts[0] += 1
             counts[1].add(gene)
+            counts[6] += tested_keys is not None and (gene, int(position)) in tested_keys
             score = scores.get((gene, int(position)))
             if score is not None:
                 counts[2] += score['score'] is not None
@@ -192,10 +196,11 @@ def build_collection_summary(collections, member_frames, evidence, coverage):
     for crow in collections.itertuples(index=False):
         if crow.status != 'included':
             continue
-        n_members, genes, n_evaluated, n_no_score, n_nominal, n_adjusted = totals[
+        n_members, genes, n_positive, n_no_score, n_nominal, n_adjusted, n_tested = totals[
             (crow.collection_id, crow.term_id)]
-        n_positive = n_evaluated
-        prop = (n_positive / n_evaluated) if n_evaluated else 'NA'
+        n_evaluated = n_tested if tested_keys is not None else 'NA'
+        n_no_score = n_tested - n_positive if tested_keys is not None else 'NA'
+        prop = n_positive / n_tested if n_tested else 'NA'
         rows.append({'collection_id': crow.collection_id, 'term_id': crow.term_id,
                      'term_type': crow.term_type, 'n_members': n_members,
                      'n_genes': len(genes),
@@ -205,7 +210,7 @@ def build_collection_summary(collections, member_frames, evidence, coverage):
                      'n_members_adjusted': n_adjusted,
                      'prop_positive_of_evaluated': prop,
                      'positions_annotable_universe': n_annotable,
-                     'denominator_definition': 'n_members_evaluated: miembros con score canónico positivo; no es el universo completo evaluado'})
+                     'denominator_definition': 'n_members_evaluated: miembros del universo probado declarado; NA sin universo'})
     return pd.DataFrame(rows, columns=['collection_id', 'term_id', 'term_type', 'n_members',
                                        'n_genes', 'n_members_evaluated', 'n_members_without_canonical_score',
                                        'n_members_positive',
@@ -287,8 +292,9 @@ def main():
     if missing:
         raise SystemExit(f'registry incomplete, missing: {missing}')
 
+    verify_registry(args.registry_dir)
     positions = read_tsv(os.path.join(args.registry_dir, 'positions.tsv'),
-                         usecols=['Gene', 'Position', 'evaluation_status'] + pm.ATTRIBUTE_COLUMNS)
+                         usecols=['Gene', 'Position', 'evaluation_status', 'in_tested_universe'] + pm.ATTRIBUTE_COLUMNS)
     evidence = read_tsv(os.path.join(args.registry_dir, 'position_evidence.tsv'))
     regions = read_tsv(os.path.join(args.registry_dir, 'regions.tsv'))
     sites = read_tsv(os.path.join(args.registry_dir, 'sites.tsv'))
@@ -304,8 +310,11 @@ def main():
                      ignore_index=True) if len(regions) else pd.DataFrame(columns=pm.MEMBER_COLUMNS)
     pos_char = build_position_characterization(positions, evidence, pfam)
     del pfam
+    tested_keys = (set(zip(positions.loc[positions.in_tested_universe == '1','Gene'],
+                           positions.loc[positions.in_tested_universe == '1','Position'].astype(int)))
+                   if manifest['universe'].get('universe_sha256') else None)
     coll_summary = build_collection_summary(
-        collections, (frame for _, frame in pm.iter_members(positions, regions, sites)), evidence, coverage)
+        collections, (frame for _, frame in pm.iter_members(positions, regions, sites)), evidence, coverage, tested_keys)
     ranking = build_ranking_summary(evidence, n_cycles)
     universe = build_universe_summary(positions, coverage)
 
@@ -332,9 +341,7 @@ def main():
                    'p.emp compartido entre lados: no son dos pruebas direccionales',
                    'UCR/FUBAR/FADE no son validacion externa independiente'],
     }
-    with open(os.path.join(args.output_dir, 'characterization_manifest.json'), 'w') as f:
-        json.dump(out_manifest, f, indent=2, sort_keys=True)
-        f.write('\n')
+    finish_manifest(args.output_dir, 'characterization_manifest.json', out_manifest)
     print(f"characterization: {len(pos_char)} characterized positions, "
           f"{len(coll_summary)} terms, {len(ranking)} rankings -> {args.output_dir}")
 

@@ -28,7 +28,7 @@ CALLED BY: ct
 
 
 from modules.perm_replay_io import *
-from modules.caas_id import STANDARD_AAS, check_pattern, _pair_sort_key, process_position
+from modules.caas_id import STANDARD_AAS, residue_overlap, check_pattern, _pair_sort_key, process_position
 from modules.pindex import load_cfg
 from modules.alimport import *
 
@@ -56,8 +56,7 @@ _CHUNK_MEM_BUDGET_MB = float(os.environ.get("CT_PERM_REPLAY_CHUNK_MEM_MB", "512"
 
 # Ambiguity codes count as gaps (no resolved amino acid), exactly as
 # caas_id.process_position() does; "-" is the literal gap.
-_AMBIGUOUS_AAS = frozenset({"X", "B", "Z", "J", "U"})
-_GAP_SYMBOLS = frozenset({"-"}) | _AMBIGUOUS_AAS
+_GAP_SYMBOLS = GAP_SYMBOLS
 _VEC_GAP_SYMBOLS = _GAP_SYMBOLS
 
 
@@ -149,7 +148,7 @@ class VectorizedPermReplay:
             if j is None:
                 continue
             present[j] = True
-            aa = val.split("@")[0].upper()
+            aa = normalize_residue(val.split("@")[0])
             if aa != "-":
                 ndvec[j] = 1.0
             if aa in _GAP_SYMBOLS:
@@ -511,8 +510,8 @@ def _reconstruct_hit(cfg, pos_dict, trait, max_conserved, min_non_overlapping=2)
     """
     fg = _ungapped_sorted(cfg, cfg.trait2fg.get(trait, ()), pos_dict, trait)
     bg = _ungapped_sorted(cfg, cfg.trait2bg.get(trait, ()), pos_dict, trait)
-    fg_aas = "".join(pos_dict[sp].split("@")[0] for sp in fg)
-    bg_aas = "".join(pos_dict[sp].split("@")[0] for sp in bg)
+    fg_aas = "".join(normalize_residue(pos_dict[sp].split("@")[0]) for sp in fg)
+    bg_aas = "".join(normalize_residue(pos_dict[sp].split("@")[0]) for sp in bg)
     is_match, pattern, substitution, conserved_pairs = check_pattern(
         fg_aas, bg_aas,
         max_conserved=max_conserved, multiconfig=cfg,
@@ -520,14 +519,17 @@ def _reconstruct_hit(cfg, pos_dict, trait, max_conserved, min_non_overlapping=2)
         min_non_overlapping=min_non_overlapping
     )
     return dict(fg=fg, bg=bg, is_match=is_match, pattern=pattern, substitution=substitution,
-                conserved_pairs=conserved_pairs)
+                conserved_pairs=conserved_pairs, shared_residue_count=residue_overlap(fg_aas, bg_aas))
 
 
-def _conserved_fields(conserved_pairs):
+def _conserved_fields(conserved_pairs, shared_residue_count=None):
     """[is_conserved_meta, conserved_pair] of a row, from check_pattern's '{count}:{pair ids}'."""
     oc = conserved_pairs.split(":")[0] if conserved_pairs else "0"
     pl = conserved_pairs.split(":")[1] if conserved_pairs and ":" in conserved_pairs else ""
-    return ["TRUE" if int(oc) > 0 else "FALSE", f"{oc}:{pl}"]
+    overlap = int(oc) if shared_residue_count is None else shared_residue_count
+    # Preserve strict residue-overlap eligibility; the pair count/IDs are now
+    # separately accurate even when the sides have asymmetric gaps.
+    return ["TRUE" if overlap > 0 else "FALSE", f"{oc}:{pl}", str(overlap)]
 
 
 def _hits_by_position(positions, genename):
@@ -562,7 +564,7 @@ def perm_discovery_rows(cfg, genename, positions, hits, max_conserved, min_non_o
             hit = _reconstruct_hit(cfg, pos_dict, trait, max_conserved, min_non_overlapping=min_non_overlapping)
             fields = [trait, genename, str(posnum), hit["substitution"], hit["pattern"]]
             if max_conserved > 0:
-                fields.extend(_conserved_fields(hit["conserved_pairs"]))
+                fields.extend(_conserved_fields(hit["conserved_pairs"], hit["shared_residue_count"]))
             yield trait, posnum, fields, bool(hit["is_match"])
 
 
@@ -668,7 +670,7 @@ def _b0_discovery_rows(design_cfg, labeling_cfg, sliced_object, genename, positi
                       str(z.trait2miss_fg.get(trait, 0)), str(z.trait2miss_bg.get(trait, 0)),
                       ",".join(fg) if fg else "NA", ",".join(bg) if bg else "NA", ",".join(ms) if ms else "NA"]
             if max_conserved > 0:
-                fields.extend(_conserved_fields(hit["conserved_pairs"]))
+                fields.extend(_conserved_fields(hit["conserved_pairs"], hit["shared_residue_count"]))
             rows.append(((int(posnum), trait_rank[trait]), fields))
 
     if disagreements:
@@ -683,14 +685,14 @@ def _write_b0_discovery(path, rows, max_conserved):
     """A header and the rows, and no file at all when there is no row."""
     if not rows:
         return
-    header = _B0_DISCOVERY_HEADER + (["is_conserved_meta", "conserved_pair"] if max_conserved > 0 else [])
+    header = _B0_DISCOVERY_HEADER + (["is_conserved_meta", "conserved_pair", "shared_residue_count"] if max_conserved > 0 else [])
     with open(path, "w") as out:
         out.write("\t".join(header) + "\n")
         for fields in rows:
             out.write("\t".join(fields) + "\n")
 
 
-def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, miss_pair=False, max_conserved=0, min_non_overlapping=2, export_groups=None, export_perm_discovery=None, export_b0_background=None, export_b0_discovery=None):
+def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, miss_pair=False, max_conserved=0, min_non_overlapping=2, export_groups=None, export_perm_discovery=None, export_b0_background=None, export_b0_discovery=None, export_b0_universe=None, universe_max_pairs=12, export_b0_universe_strict=None):
     """
     Replay the labelings of one file over one alignment and write the requested exports.
 
@@ -701,16 +703,19 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
       export_groups           the foreground and background groups of every labeling that has a hit
       export_b0_discovery     the discovery.tab rows of the b_0 labeling(s), written only when there is a row
       export_b0_background    '<gene>\t<positions tested by b_0 | NULL>'
+      export_b0_universe      '<gene>\t<positions of the positional universe | NULL>': the positions tested by b_0 that
+                              pass the CT test under some orientation of the pairs of some b_0 hypothesis
+                              (modules.universe), judged with the thresholds of this call
 
     """
-    if not (export_groups or export_perm_discovery or export_b0_discovery or export_b0_background):
-        raise ValueError("perm-replay needs at least one export (perm discovery, groups, b_0 discovery or b_0 background)")
+    if not (export_groups or export_perm_discovery or export_b0_discovery or export_b0_background or export_b0_universe or export_b0_universe_strict):
+        raise ValueError("perm-replay needs at least one export (perm discovery, groups, b_0 discovery, b_0 background or b_0 universe)")
     if not hasattr(resampled_traits, "cycles"):
         raise ValueError("perm-replay takes the labelings of one file (simtrait_revive), not a directory")
     the_genename = sliced_object.genename
 
     # positions tested by the b_0 labelings (see VectorizedPermReplay.count), one line per gene
-    bg_sink = set() if export_b0_background else None
+    bg_sink = set() if (export_b0_background or export_b0_universe or export_b0_universe_strict) else None
 
     groups_handle = None
     if export_groups:
@@ -728,7 +733,7 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
             "pattern"
         ]
         if max_conserved > 0:
-            header_fields.extend(["is_conserved_meta", "conserved_pair"])
+            header_fields.extend(["is_conserved_meta", "conserved_pair", "shared_residue_count"])
         perm_discovery_handle.write("\t".join(header_fields) + "\n")
 
     collect_hits = perm_discovery_handle is not None or groups_handle is not None or bool(export_b0_discovery)
@@ -780,3 +785,19 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
         tested = ",".join(sorted(bg_sink, key=int)) if bg_sink else "NULL"
         with open(export_b0_background, "w") as bkg:
             bkg.write(f"{the_genename}\t{tested}\n")
+
+    # The strict universe is the same test with no conserved pair allowed (max_conserved 0), whatever the run tolerates.
+    for path, conserved in ((export_b0_universe, max_conserved), (export_b0_universe_strict, 0)):
+        if not path:
+            continue
+        from modules.universe import eligible_positions
+        eligible = eligible_positions(
+            resampled_traits, sliced_object, positions, the_genename,
+            dict(maxgaps_fg=max_fg_gaps, maxgaps_bg=max_bg_gaps, maxgaps_all=max_overall_gaps,
+                 maxmiss_fg=max_fg_miss, maxmiss_bg=max_bg_miss, maxmiss_all=max_overall_miss,
+                 max_conserved=conserved, admitted_patterns=the_admitted_patterns,
+                 miss_pair=miss_pair, min_non_overlapping=min_non_overlapping),
+            max_pairs=universe_max_pairs)
+        universe = bg_sink & eligible
+        with open(path, "w") as out:
+            out.write(f"{the_genename}\t{','.join(sorted(universe, key=int)) if universe else 'NULL'}\n")

@@ -28,6 +28,7 @@
 // ── Scoring report ─────────────────────────────────────────────────────────────
 
 process SCORING_REPORT {
+    cache 'deep'
     tag "scoring_report|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
 
@@ -39,6 +40,7 @@ process SCORING_REPORT {
                pattern: '*.html'
 
     input:
+    val source_hash
     path position_scores
     path gene_scores
     path gene_correlations
@@ -67,9 +69,7 @@ process SCORING_REPORT {
     def local_dir      = "${baseDir}/subworkflows/SCORING/local"
     def outdir         = "." // Derived TSVs are task outputs, published by Nextflow.
     def traitname      = params.traitname ?: 'unknown_trait'
-    def report_hash = ['10.Scoring_report.Rmd','src/report_evidence.R'].collect { file("${local_dir}/${it}").text }.join('\n').with {
-        java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString()
-    }
+    def style_file = file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R")
     // Optional inputs: a sentinel file becomes the R literal NULL, a real file its quoted name
     def fs_top_arg = (fade_site_top_file.name =~ /^NO_FADE_SITE_TOP/) ? 'NULL' : "'${fade_site_top_file}'"
     def fs_bot_arg = (fade_site_bot_file.name =~ /^NO_FADE_SITE_BOT/) ? 'NULL' : "'${fade_site_bot_file}'"
@@ -89,8 +89,9 @@ process SCORING_REPORT {
 
     if (params.use_singularity || params.use_apptainer) {
         """
-        # Scoring report source SHA256: ${report_hash}
+        # Scoring report source SHA256: ${source_hash}
         cp -R ${local_dir}/* .
+        cp ${style_file} src/report_style.R
 
         REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
@@ -126,8 +127,9 @@ process SCORING_REPORT {
         """
     } else {
         """
-        # Scoring report source SHA256: ${report_hash}
+        # Scoring report source SHA256: ${source_hash}
         cp -R ${local_dir}/* .
+        cp ${style_file} src/report_style.R
 
         REPORT_CORES=${task.cpus} Rscript -e "
             rmarkdown::render(

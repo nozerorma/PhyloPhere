@@ -47,16 +47,6 @@ debug_stage <- function(label, expr) {
 
 # ── Parameters ────────────────────────────────────────────────────────────────
 
-# get_arg() reads positional command-line arguments and warns on every call. No report
-# uses it; parameters come from the YAML `params` (params$trait_file, params$seed).
-get_arg <- function(args, idx, default = NULL) {
-  warning("get_arg() is deprecated. Use params$ from YAML header instead.")
-  if (length(args) >= idx && nzchar(args[idx])) {
-    return(args[idx])
-  }
-  default
-}
-
 # The calling report passes `params` through rmarkdown::render(); the required ones stop the run when absent.
 trait_path <- if (exists("params") && !is.null(params$trait_file)) params$trait_file else stop("trait_file parameter required")
 tree_path <- if (exists("params") && !is.null(params$tree_file)) params$tree_file else stop("tree_file parameter required")
@@ -73,6 +63,7 @@ debug_log("seed_val = %s", ifelse(nzchar(seed_val), seed_val, "<empty>"))
 # Sets the chunk defaults (silent chunks, no echo), fixes the knitr root directory to the
 # working directory and seeds the RNG when a seed was given.
 setup_rmd <- function() {
+  set_report_style()
   knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE)
   knitr::opts_knit$set(root.dir =getwd()) # the working directory that holds src/
   if (nzchar(seed_val)) {
@@ -90,27 +81,17 @@ debug_log("objDir = %s", objDir)
 source(file.path(objDir, "io_utils.R"))
 source(file.path(objDir, "directories.R"))
 source(file.path(objDir, "palettes.R"))
+source(file.path(objDir, "report_style.R"))
 source(file.path(objDir, "plotting_fun.R"))
 
 # ── Trait table ───────────────────────────────────────────────────────────────
 
-# The trait file is read as tab-separated when it ends in .tsv and as comma-separated otherwise.
+# TSV/TXT are tab-separated; other extensions are CSV, matching NAME_CURATION.
 # It needs a species column (named by sp_colname) and the taxon_of_interest and trait columns.
 
 print(paste0("Loading trait data from: ", trait_path))
 
-if (endsWith(trait_path, ".csv")) {
-  sep_char <- ","
-} else if (endsWith(trait_path, ".tsv")) {
-  sep_char <- "\t"
-} else {
-  sep_char <- ","
-}
-
-trait_df <- read.csv(trait_path, sep = sep_char, stringsAsFactors = FALSE)
-trait_df[] <- lapply(trait_df, function(col) {
-  if (is.character(col)) trimws(col) else col
-})
+trait_df <- read_trait_table(trait_path)
 debug_log("trait_df rows = %d, cols = %d", nrow(trait_df), ncol(trait_df))
 debug_log("trait_df columns: %s", paste(names(trait_df), collapse = ", "))
 
@@ -184,6 +165,13 @@ if (!trait %in% names(trait_df)) {
 # Detects the optional count columns (n_trait, c_trait) and the sample-size column.
 source(file.path(objDir, "sample_size.R"))
 
+# Validate numeric input before phylo.R removes missing phenotypes/counts.
+source(file.path(objDir, "stats.R"))
+source(file.path(objDir, "branch_cache.R"))
+for (column in unique(c(trait, if (has.n) n_trait, if (has.c) c_trait))) {
+  trait_df[[column]] <- numeric_trait_values(trait_df[[column]], column)
+}
+
 # Match the trait table to the tree tips.
 source(file.path(objDir, "phylo.R"))
 
@@ -249,5 +237,6 @@ max_contrasts <- if (exists("params") && !is.null(params$max_contrasts) && nzcha
 }
 debug_log("max_contrasts = %s", ifelse(is.finite(max_contrasts), as.character(max_contrasts), "<dynamic>"))
 
-# stats.R relies on the variables defined above, so it is sourced last.
-source(file.path(objDir, "stats.R"))
+for (column in unique(c(if (has.secondary) secondary_trait, if (has.branch) branch_trait))) {
+  trait_df[[column]] <- numeric_trait_values(trait_df[[column]], column)
+}

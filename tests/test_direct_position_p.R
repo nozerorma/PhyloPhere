@@ -9,9 +9,9 @@ y<-null_position_p(obs,transform(ctr,c1=-100),data.frame(garbage=NA),5,9)
 stopifnot(identical(x,y))
 empty<-null_position_p(obs[FALSE,],ctr[FALSE,],NULL,5,9)
 stopifnot(nrow(empty$pos)==0,empty$n_family==5)
-# Guarded coordinate mismatch remains unavailable, not a discovery.
+# Unseen positions retain exact add-one p regardless of observation count.
 z<-null_position_p(data.frame(Gene=letters[1:10],Position=0,.obs=1),data.frame(Gene=letters[1:10],Position=0,k_emp=0,nd=0),NULL,0,9)
-stopifnot(all(is.na(z$pos$p.emp)),all(is.na(z$pos$p.adj_bh)))
+stopifnot(all(z$pos$p.emp==.1),all(z$pos$p.adj_bh==.1))
 # The gene list the universe received passes through to the summary (value = number of genes, note = digest).
 base<-data.frame(metric=c('N_cycles','N_cycles_present_in_null','null_positive_positions_all','null_positive_positions_in_universe','gene_list_sha256'),
                  cycles=NA_integer_,value=c(10,10,100,50,2),note=c('roster','','','note','abc123'),stringsAsFactors=FALSE)

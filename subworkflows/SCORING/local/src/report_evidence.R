@@ -18,7 +18,7 @@ scoring_overlap <- function(d, nominal=.05, fdr=.05) {
         calls <- lapply(sides,function(x) col(paste0('fade_significant_',x)))
         # Global FADE is the union of measured sides. A side with no source data
         # stays unavailable; it does not erase evidence from the other side.
-        side_measured <- Map(function(b,c) is.finite(b) & !is.na(c), bf, calls)
+        side_measured <- Map(function(b,c) !is.na(b) & !is.na(c), bf, calls)
         other <- Reduce(`|`,lapply(calls,function(x)x %in% TRUE))
         measured <- other | Reduce(`&`, side_measured)
       }

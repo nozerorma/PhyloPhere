@@ -19,16 +19,20 @@
 
 // ── Dataset exploration report ───────────────────────────────────────────────
 
+def report_hash = java.security.MessageDigest.getInstance('SHA-256')
+    .digest((file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/1.Dataset_exploration.Rmd").text + file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R").text).getBytes('UTF-8')).encodeHex().toString()
+
 process DATASET_EXPLORATION {
+    ext report_source_hash: report_hash
     tag "dataset_exploration"
     label 'process_reporting_dataset'
     publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename -> filename.equals('data_exploration') || filename.startsWith('data_exploration/') ? filename : null }
     publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'
 
     input:
-    path trait_file
-    path tree_file
-    path prune_results_dir
+    path trait_file, stageAs: 'inputs/traits/*'
+    path tree_file, stageAs: 'inputs/tree/*'
+    path prune_results_dir, stageAs: 'incoming/pruning/*'
 
     output:
     path "data_exploration", emit: results_dir
@@ -57,17 +61,18 @@ process DATASET_EXPLORATION {
     def trait_type = params.trait_type ?: ''
     def prune_dir = prune_results_dir ?: ''
 
-    // The two branches are identical except that the container one runs Rscript through the image entrypoint.
-    if (params.use_singularity | params.use_apptainer) {
-        """
-        cp -R ${local_dir}/* .
-        if [ -n "${prune_dir}" ] && [ -d "${prune_dir}" ] && [ "${prune_dir}" != "data_exploration" ]; then
-          cp -R "${prune_dir}"/* data_exploration
+    def rscript = (params.use_singularity || params.use_apptainer)
+        ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
+    """
+        echo '${task.ext.report_source_hash}' > report_source.sha256
+        cp -R "${local_dir}/." .
+        mkdir -p data_exploration
+        if [ -d "${prune_dir}" ]; then
+          cp -R "${prune_dir}/." data_exploration/
         fi
         mkdir -p data_exploration/1.Data-exploration/1.Species_distribution
-        cp '${trait_file}' data_exploration/1.Data-exploration/1.Species_distribution/original_trait_file.tsv
         cp '${tree_file}' data_exploration/1.Data-exploration/1.Species_distribution/original_tree_file.nwk
-        /usr/local/bin/_entrypoint.sh Rscript -e "
+        ${rscript} -e "
             rmarkdown::render(
                 '1.Dataset_exploration.Rmd',
                 params = list(
@@ -91,40 +96,5 @@ process DATASET_EXPLORATION {
                 envir = new.env()
             )
         "
-        """
-    } else {
-        """
-        cp -R ${local_dir}/* .
-        if [ -n "${prune_dir}" ] && [ -d "${prune_dir}" ] && [ "${prune_dir}" != "data_exploration" ]; then
-          cp -R "${prune_dir}"/* data_exploration
-        fi
-        mkdir -p data_exploration/1.Data-exploration/1.Species_distribution
-        cp '${trait_file}' data_exploration/1.Data-exploration/1.Species_distribution/original_trait_file.tsv
-        cp '${tree_file}' data_exploration/1.Data-exploration/1.Species_distribution/original_tree_file.nwk
-        Rscript -e "
-            rmarkdown::render(
-                '1.Dataset_exploration.Rmd',
-                params = list(
-                    trait_file = '${trait_file}',
-                    tree_file = '${tree_file}',
-                    output_dir = 'data_exploration',
-                    seed = '${seed}',
-                    clade_name = '${clade}',
-                    taxon_of_interest = '${taxon}',
-                    sp_colname = '${sp_colname}',
-                    traitname = '${trait}',
-                    n_trait = '${n_trait}',
-                    c_trait = '${c_trait}',
-                    secondary_trait = '${secondary_trait}',
-                    branch_trait = '${branch_trait}',
-                    trait_type = '${trait_type}',
-                    pss_top_pct = '${pss_top_pct}',
-                    perm_strategy = '${perm_strategy}'
-                ),
-                output_file = '1.Dataset_exploration.html',
-                envir = new.env()
-            )
-        "
-        """
-    }
+    """
 }

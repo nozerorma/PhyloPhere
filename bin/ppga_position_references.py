@@ -30,7 +30,7 @@ def index_files(directory, suffixes):
     for p in sorted(directory.iterdir()):
         if not p.is_file() or not any(p.name.endswith(s) for s in suffixes):
             continue
-        gene = p.name.split('.')[0]
+        gene = next(p.name[:-len(s)] for s in sorted(suffixes,key=len,reverse=True) if p.name.endswith(s))
         if gene in result:
             raise ValueError(f'{gene}: ambiguous files in {directory}')
         result[gene] = p
@@ -131,7 +131,7 @@ def project_ppga(base, output):
                 if kind == 'ucr' and row['method'] != 'sliding':
                     counts['other_methods_not_used_by_collections'] += 1
                     continue
-                gene = row['gene'].split('.')[0]
+                gene = row['gene']
                 sites, reference, entropy = refs.gene(gene)
                 if kind == 'ucr':
                     col = int(row['position']) - 1

@@ -21,7 +21,7 @@ Files are named ``<gene>[.<version>].<species><tail>`` and a gene is found by th
 from __future__ import annotations
 
 import csv
-import os
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 __all__ = ["read_map", "column_map", "index_files", "find_file", "gene_columns", "map_untrimmed_length"]
@@ -55,16 +55,29 @@ def column_map(path: str) -> Dict[int, int]:
     return {p - 1: c for p, c in read_map(path)[1].items()}
 
 
-def index_files(directory: str, tail: str) -> Dict[str, Optional[str]]:
+def index_files(directory: str, tail: str, genes=None) -> Dict[str, Optional[str]]:
     """Gene key (file name before the first '.') -> path, for the files ending in ``tail``.
 
+    With ``genes``, match complete known IDs (including internal dots), then
+    optional reference-species suffixes, preferring the longest complete ID.
+    Without a gene universe the historical first-token lookup is retained.
     A key that several files share maps to None.
     """
     out: Dict[str, Optional[str]] = {}
-    for name in os.listdir(directory):
-        if name.endswith(tail):
-            key = name[: -len(tail)].split(".")[0]
-            out[key] = None if key in out else os.path.join(directory, name)
+    known = set(genes) if genes is not None else None
+    for path in sorted(Path(directory).rglob('*')):
+        name = path.name
+        if path.is_file() and name.endswith(tail):
+            stem = name[:-len(tail)]
+            if known is None:
+                key = stem.split('.')[0]
+            else:
+                parts = stem.split('.')
+                matches = ['.'.join(parts[:i]) for i in range(1,len(parts)+1) if '.'.join(parts[:i]) in known]
+                if not matches:
+                    continue
+                key = max(matches, key=len)
+            out[key] = None if key in out else str(path)
     return out
 
 

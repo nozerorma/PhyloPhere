@@ -6,7 +6,7 @@
  * Position-level enrichment of CAAS detections on the universe U of positions
  * (the same U as SCORING):
  *   - the universe table (universe.tsv.gz), the one universe of levels 1 and 2;
- *   - level 1: Accumulation, an exact hypergeometric test per gene and direction, on that table;
+ *   - level 1: Accumulation, separate hypergeometric and empirical count tests per gene and direction;
  *   - the position registry and its characterization, proximity and level 2 (concentration of the signal inside
  *     genes, calibrated with the null cycles) components (they need SCORING);
  *   - the Pfam and UCR tables the registry consumes, generated when none is supplied;
@@ -27,8 +27,7 @@ def precomputedOrSentinel(String param_name, String param_value, String sentinel
     if (!param_value) return file(sentinel)
     if (file(param_value).exists()) return file(param_value)
     if (!param_value.endsWith('.gz') && file("${param_value}.gz").exists()) return file("${param_value}.gz")
-    log.warn "${param_name} is set to '${param_value}', which does not exist: the table is treated as absent"
-    return file(sentinel)
+    error "Supplied ${param_name} does not exist: ${param_value}"
 }
 
 // The standalone cleaned background (--accumulation_background_input: a file or a directory holding
@@ -150,41 +149,52 @@ workflow POSENRICH {
         // The universe U: one table for level 1 and level 2. Its observed positives come from filtered_discovery.tsv
         // (the one SCORING reads when it runs), so level 1 does not depend on SCORING.
         def accum_results = Channel.empty()
+        def accum_manifests = Channel.empty()
         def universe_out = null
+        def background_v = (background_channel ?: Channel.empty())
+            .ifEmpty { standaloneBackground() ?: error('POSENRICH requires the cleaned background') }
+            .collect().map { if (it.size()!=1) error('POSENRICH requires exactly one background'); it[0] }
+        def prior_blocks = params.caas_null_dir ? files("${params.caas_null_dir}/blocks/*", type: 'dir').sort() : []
+        def blocks_v = (null_blocks_channel ?: Channel.empty())
+            .ifEmpty { prior_blocks ?: error('POSENRICH requires canonical null blocks') }
+            .collect(flat: false).map { if (it.size()!=1) error('Expected one list of null blocks'); it[0] }
+        // The null positions of this run, else those of --caas_null_dir; one check for the table and the files beside it.
+        def null_positions_v = (null_positions_channel ?: Channel.empty())
+            .ifEmpty { params.caas_null_dir ? file("${params.caas_null_dir}/null_positions.parquet", checkIfExists: true) : error("POSENRICH requires null_positions.parquet: run CAAS permulation or pass --caas_null_dir.") }
+            .collect().map { if (it.size()!=1) error('POSENRICH requires exactly one input table'); it[0] }
+        def observed_v = null
         if (run_accumulation || params.scoring) {
-            def observed_v = (params.scoring ? (postproc ?: Channel.empty()) : (caas_channel ?: Channel.empty()))
+            observed_v = (params.scoring ? (postproc ?: Channel.empty()) : (caas_channel ?: Channel.empty()))
                 .ifEmpty { params.accumulation_caas_input ? file(params.accumulation_caas_input, checkIfExists: true) : error("POSENRICH requires the observed CAAS (filtered_discovery.tsv): run CT post-processing or pass --accumulation_caas_input.") }
-                .collect().map { it[0] }
+                .collect().map { if (it.size()!=1) error('POSENRICH requires exactly one input table'); it[0] }
             universe_out = POSENRICH_UNIVERSE(
-                (background_channel ?: Channel.empty())
-                    .ifEmpty { standaloneBackground() ?: error("POSENRICH requires the cleaned background (cleaned_background_main.txt): run CT post-processing or pass --accumulation_background_input.") }
-                    .collect().map { it[0] },
+                background_v,
                 (tested_positions_channel ?: Channel.empty())
                     .ifEmpty { error "POSENRICH requires the tested positions (caastools background.output): run CAAS discovery or pass --posenrich_background_file." }
-                    .collect().map { it[0] },
-                (null_positions_channel ?: Channel.empty())
-                    .ifEmpty { params.caas_null_dir ? file("${params.caas_null_dir}/null_positions.parquet") : error("POSENRICH requires null_positions.parquet: run CAAS permulation or pass --caas_null_dir.") }
-                    .collect().map { it[0] },
-                observed_v
+                    .collect().map { if (it.size()!=1) error('POSENRICH requires exactly one input table'); it[0] },
+                null_positions_v,
+                observed_v,
+                observed_v.map { file("${it}.scoring.json", checkIfExists:true) },
+                null_positions_v.map { file("${it.parent}/cycle_roster.txt", checkIfExists:true) },
+                null_positions_v.map { file("${it.parent}/counts.json", checkIfExists:true) },
+                blocks_v
             )
         }
 
-        // Levels 1 and 2 calibrate with the cycles of the null.
-        // The block directories of a prior null need type: 'dir' (files() matches regular files by default).
-        def prior_blocks = params.caas_null_dir ? files("${params.caas_null_dir}/blocks/*", type: 'dir').sort() : []
-        def blocks_v = (null_blocks_channel ?: Channel.empty())
-            .ifEmpty { prior_blocks ?: error("POSENRICH levels 1 and 2 require the block directories of the null: run CAAS permulation or pass --caas_null_dir with a blocks/ directory.") }
-
-        // Level 1: the share of detections of each gene against the null cycles, on the universe table.
+        // Level 1: the exact test per gene and direction on the universe table.
         if (run_accumulation) {
             log.info "POSENRICH level 1: Accumulation"
-            accum_results = ACCUMULATION_TEST(universe_out.universe, blocks_v).results
+            accum_results = ACCUMULATION_TEST(Channel.of('top', 'bottom', 'all'), universe_out.universe.collect().map { it[0] }, universe_out.manifest.collect().map { it[0] }, blocks_v).results
+            accum_manifests = ACCUMULATION_TEST.out.manifests
         }
 
         // The registry and its components read SCORING's tables.
         def position_char_ch = Channel.empty()
         def report_ch = Channel.empty()
         if (params.scoring) {
+            def scores_v = (position_scores ?: Channel.empty()).collect().map {
+                if (it.size()!=1) error('POSENRICH requires exactly one SCORING position table'); it[0]
+            }
             // Supplied tables take priority. Enabled layers with blank files are
             // generated once on the productive alignment columns.
             def domain_annotations_ch = Channel.value(file('NO_ANNOT_DOMAIN'))
@@ -209,26 +219,35 @@ workflow POSENRICH {
             def fade_bot_ch = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_BOTTOM') }
 
             def registry_out = POSITION_REGISTRY(
-                position_scores,
-                (postproc ?: Channel.empty()).ifEmpty { file('NO_POSTPROC') },
+                scores_v,
+                observed_v,
                 (null_universe ?: Channel.empty()).ifEmpty { file('NO_NULL_UNIVERSE') },
                 Channel.value(precomputedOrSentinel('caas_map_dir', params.caas_map_dir, 'NO_ANNOT_MAP')),
-                (background_channel ?: Channel.empty()).ifEmpty { file('NO_BACKGROUND') }.collect().map { it[0] },
+                background_v,
                 Channel.value(precomputedOrSentinel('gene_ensembl_file', params.gene_ensembl_file, 'NO_ANNOT_ENSEMBL')),
                 domain_annotations_ch,
                 ucr_annotations_ch,
                 Channel.value(precomputedOrSentinel('fubar_sites_file', params.fubar_sites_file, 'NO_ANNOT_FUBAR')),
                 fade_top_ch, fade_bot_ch,
-                Channel.value(precomputedOrSentinel('posenrich_custom_file', params.posenrich_custom_file, 'NO_ANNOT_CUSTOM'))
+                Channel.value(precomputedOrSentinel('posenrich_custom_file', params.posenrich_custom_file, 'NO_ANNOT_CUSTOM')),
+                universe_out.universe, universe_out.manifest,
+                domain_annotations_ch.combine(ucr_annotations_ch)
+                    .combine(Channel.value(precomputedOrSentinel('fubar_sites_file', params.fubar_sites_file, 'NO_ANNOT_FUBAR')))
+                    .combine(Channel.value(precomputedOrSentinel('posenrich_custom_file', params.posenrich_custom_file, 'NO_ANNOT_CUSTOM')))
+                    .combine(fade_top_ch).combine(fade_bot_ch)
+                    .map { items -> items.withIndex().collect { p, i ->
+                        def m = file("${p}.manifest.json")
+                        m.exists() ? m : file("NO_SOURCE_MANIFEST_${i}")
+                    } }, universe_out.calibration
             )
             def characterization_out = POSENRICH_CHARACTERIZE(registry_out.registry)
             def proximity_out        = POSENRICH_PROXIMITY(registry_out.registry)
 
             def within_gene_out = POSENRICH_WITHIN_GENE(universe_out.universe, universe_out.manifest,
-                                                        position_scores, registry_out.registry, blocks_v)
+                                                        scores_v, registry_out.registry, blocks_v)
 
             // The report closes the module. Level 1 is a sentinel when it does not run (the report states it).
-            def accumulation_v = accum_results.collect().ifEmpty { [file('NO_ACCUMULATION')] }
+            def accumulation_v = accum_results.mix(accum_manifests).collect().ifEmpty { [file('NO_ACCUMULATION')] }
             def report_out = POSENRICH_REPORT(universe_out.universe_dir, registry_out.registry,
                                               characterization_out.characterization, accumulation_v,
                                               within_gene_out.within_gene, proximity_out.proximity)

@@ -88,16 +88,18 @@ def master_row(record: Dict[str, Any], fields: Sequence[str]) -> Dict[str, str]:
 
 
 def write_master_csv(
-    rows: Iterable[Tuple[str, Any, Dict[str, str]]], path: Path, fields: Sequence[str]
+    rows: Iterable[Tuple[str, Any, Dict[str, str]]], path: Path, fields: Sequence[str], *, already_sorted=False
 ) -> int:
     """Write (gene, msa_pos, row) triples sorted by gene then msa_pos (stable: production order within
     a position is kept). Returns the number of rows written; an empty input writes just the header.
     A path ending in .gz is written compressed."""
-    ordered = sorted(rows, key=lambda t: (t[0], -1 if t[1] is None else t[1]))
+    ordered = rows if already_sorted else sorted(rows, key=lambda t: (t[0], -1 if t[1] is None else t[1]))
     opener = gzip.open if str(path).endswith(".gz") else open
+    count = 0
     with opener(path, "wt", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(fields), extrasaction="ignore")
         writer.writeheader()
         for _gene, _pos, row in ordered:
             writer.writerow(row)
-    return len(ordered)
+            count += 1
+    return count

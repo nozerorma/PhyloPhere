@@ -103,38 +103,11 @@ mammals_palette <- c(
   "Dermoptera"       = "#5F5F5F"   # Dark gray
 )
 
-# ── Alternative names for the palettes above ──────────────────────────────────
-
-primate_family_colors <- primates_palette
-dark_family_palette <- dark_primates_palette
-mammal_order_colors <- mammals_palette
-
 # ── Fallback ──────────────────────────────────────────────────────────────────
 
 # Tableau 20 colors, assigned to taxa that have no entry in the clade palette
 # (resolve_taxa_palette() in plotting_fun.R picks one per taxon name).
-fallback_palette <- c(
-  "Category1"  = "#4E79A7",  # Blue
-  "Category2"  = "#F28E2B",  # Orange
-  "Category3"  = "#E15759",  # Vermillion
-  "Category4"  = "#76B7B2",  # Bluish_green
-  "Category5"  = "#59A14F",  # Green
-  "Category6"  = "#EDC948",  # Yellow
-  "Category7"  = "#B07AA1",  # Reddish_purple
-  "Category8"  = "#FF9DA7",  # Pink
-  "Category9"  = "#9C755F",  # Brown
-  "Category10" = "#BAB0AC",  # Gray
-  "Category11" = "#8CD17D",  # Light green
-  "Category12" = "#B6992D",  # Olive
-  "Category13" = "#499894",  # Teal
-  "Category14" = "#86BCB6",  # Sage
-  "Category15" = "#F1CE63",  # Gold
-  "Category16" = "#FABFD2",  # Light pink
-  "Category17" = "#D4A6C8",  # Lilac
-  "Category18" = "#D7D7D7",  # Light gray
-  "Category19" = "#9D7660",  # Tan
-  "Category20" = "#A0CBE8"   # Sky blue
-)
+fallback_palette <- setNames(as.character(paletteer_d("ggthemes::Tableau_20")), paste0("Category", seq_len(20)))
 
 debug_log("palettes loaded: primates=%d, primates_dark=%d, mammals=%d",
           length(primates_palette), length(dark_primates_palette), length(mammals_palette))

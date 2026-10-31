@@ -16,7 +16,12 @@ from __future__ import annotations
 from collections import Counter
 from typing import Dict, List, Tuple
 
+import sys
+from pathlib import Path
 import pandas as pd
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CT_DISAMBIGUATION/local"))
+from src.core.ct_io import strict_io
+from src.utils.io_utils import _scan_alignment_dir, read_alignment
 
 # ── Extant-species residue tally (alignment-based) ────────────────────────────
 # Counts, per (Gene, Position), the contrast species of the hypotheses that call the position
@@ -36,38 +41,48 @@ SPECIES_TALLY_COLUMNS = (
 
 _TALLY_EMPTY = {c: "" for c in SPECIES_TALLY_COLUMNS}
 
-_GAP_CHARS = set("-.")
+_VALID_AA = set("ACDEFGHIKLMNPQRSTVWY")
 
 
 def _read_hyp_pairs(path) -> Dict[str, List[Tuple[str, str]]]:
-    """{hypothesis: [(top_species, bottom_species), ...]} from contrast_hypotheses_pairs.tsv.
-
-    {} when the file is absent, unreadable or lacks hypothesis_id / species1 / species2.
-    """
-    if not path:
+    """Read complete independent pairs and validate the shared CT design contract."""
+    if path is None:
         return {}
-    try:
-        pairs = pd.read_csv(path, sep="\t", dtype=str)
-    except (OSError, ValueError, pd.errors.EmptyDataError):
-        return {}
-    if not {"hypothesis_id", "species1", "species2"} <= set(pairs.columns):
-        return {}
-    out: Dict[str, List[Tuple[str, str]]] = {}
-    for h, a, b in zip(pairs["hypothesis_id"], pairs["species1"], pairs["species2"]):
-        out.setdefault(str(h).strip(), []).append((str(a).strip(), str(b).strip()))
+    pairs = pd.read_csv(path, sep='\t', dtype=str, keep_default_na=False)
+    required = {'hypothesis_id', 'pair', 'species1', 'species2'}
+    if not required <= set(pairs):
+        raise ValueError(f'Missing paired-design columns: {path}')
+    out = {}
+    for h, frame in pairs.groupby('hypothesis_id', sort=False):
+        if not h.startswith('H') or not h[1:].isdigit() or int(h[1:]) < 1:
+            raise ValueError(f'Invalid hypothesis: {h}')
+        design, seen = {}, set()
+        for row in frame.to_dict('records'):
+            pair = strict_io.integer(row['pair'], 'pair', 1)
+            a, b = row['species1'], row['species2']
+            if (pair in design or a == b or any(not x or x != x.strip() or ',' in x or any(c.isspace() for c in x) for x in [a,b])
+                    or a in seen or b in seen):
+                raise ValueError(f'Invalid or duplicate contrast pair in {h}')
+            design[pair] = (a, b)
+            seen.update([a,b])
+            if 'pss_score' in row:
+                import math
+                weight = float(row['pss_score'])
+                if not math.isfinite(weight) or weight < 0:
+                    raise ValueError('Invalid PSS weight')
+        if set(design) != set(range(1, len(design)+1)):
+            raise ValueError('Pair IDs must be contiguous')
+        out[h] = [design[i] for i in sorted(design)]
+    if not out or {int(h[1:]) for h in out} != set(range(1,len(out)+1)) or len({len(v) for v in out.values()}) != 1:
+        raise ValueError('Empty, incomplete or unequal-size hypothesis design')
     return out
 
 
-def _index_alignment_dir(alignment_dir) -> Dict[str, str]:
-    """gene symbol -> alignment file path. Flat directory; the gene is the file name up to the
-    first '.'."""
-    import glob
-    import os
-    out: Dict[str, str] = {}
-    for f in glob.glob(os.path.join(str(alignment_dir), "*")):
-        if os.path.isfile(f):
-            out.setdefault(os.path.basename(f).split(".")[0], f)
-    return out
+def _index_alignment_dir(alignment_dir):
+    directory = Path(alignment_dir)
+    if not directory.is_dir():
+        raise ValueError(f'Alignment directory not found: {directory}')
+    return _scan_alignment_dir.__wrapped__(directory)
 
 
 def _fmt_counts(counts: Counter) -> str:
@@ -83,7 +98,10 @@ def _fmt_conserved(per_hyp: List[Tuple[int, int]]) -> str:
     if not per_hyp:
         return ""
     ks = [k for k, _ in per_hyp]
-    n = max(n for _, n in per_hyp)
+    ns = [n for _, n in per_hyp]
+    if len(set(ns)) > 1:
+        return ";".join(f"{k}/{n}" for k, n in per_hyp)
+    n = ns[0]
     return f"{min(ks)}/{n}" if min(ks) == max(ks) else f"{min(ks)}-{max(ks)}/{n}"
 
 
@@ -103,14 +121,14 @@ def tally_position(seqs: Dict[str, str], idx: int, hyps: List[str],
             bot_sp.add(b)
             ra = seqs[a][idx].upper() if a in seqs else "-"
             rb = seqs[b][idx].upper() if b in seqs else "-"
-            if ra in _GAP_CHARS or rb in _GAP_CHARS:
+            if ra not in _VALID_AA or rb not in _VALID_AA:
                 continue
             n += 1
             k += ra == rb
         if n:
             per_hyp.append((k, n))
-    top_c = Counter(seqs[s][idx].upper() for s in top_sp if s in seqs and seqs[s][idx] not in _GAP_CHARS)
-    bot_c = Counter(seqs[s][idx].upper() for s in bot_sp if s in seqs and seqs[s][idx] not in _GAP_CHARS)
+    top_c = Counter(seqs[s][idx].upper() for s in top_sp if s in seqs and seqs[s][idx].upper() in _VALID_AA)
+    bot_c = Counter(seqs[s][idx].upper() for s in bot_sp if s in seqs and seqs[s][idx].upper() in _VALID_AA)
     return {
         "top_species_residues": _fmt_counts(top_c),
         "bottom_species_residues": _fmt_counts(bot_c),
@@ -129,6 +147,7 @@ def add_species_tally(
     gene_col: str = "Gene",
     position_col: str = "Position",
     hyp_col: str = "participating_hypotheses",
+    taxid_mapping=None,
 ) -> pd.DataFrame:
     """Add ``SPECIES_TALLY_COLUMNS`` to ``df``.
 
@@ -136,9 +155,9 @@ def add_species_tally(
     of ``participating_hypotheses`` over its rows (all hypotheses of the design when the column
     is absent).
 
-    Safe to call without inputs: when the alignment directory or the pairs file is missing, the
-    gene file is absent, the column is out of range or Bio.AlignIO is unavailable, the row keeps
-    "" in these columns, so the output schema is stable.
+    Optional absent inputs leave empty descriptors. Supplied invalid designs,
+    missing/ambiguous alignments, missing species and out-of-range positions fail;
+    unknown residues do not contribute to species or conserved-pair counts.
     """
     out = df.copy()
     for c in SPECIES_TALLY_COLUMNS:
@@ -150,11 +169,12 @@ def add_species_tally(
     if gene_col not in out.columns or position_col not in out.columns:
         return out
 
-    try:
-        from Bio import AlignIO
-    except ImportError:
-        return out
-
+    mapping = {}
+    if taxid_mapping:
+        from src.phylo.species_mapping import read_taxid_mapping
+        mapping = read_taxid_mapping(Path(taxid_mapping))
+        if len(set(mapping.values())) != len(mapping):
+            raise ValueError('Ambiguous taxon mapping')
     files = _index_alignment_dir(alignment_dir)
     if not files:
         return out
@@ -164,27 +184,35 @@ def add_species_tally(
     by_gene: Dict[str, Dict[object, set]] = {}
     for gene, pos, hs in zip(out[gene_col], out[position_col],
                              out[hyp_col] if hyp_col in out.columns else [""] * len(out)):
-        found = {x.strip() for x in str(hs).split(",") if x.strip() in hyp_pairs}
+        found = {x.strip() for x in str(hs).split(',') if x.strip() and x.strip() != 'nan'}
+        if found - hyp_pairs.keys():
+            raise ValueError(f'Unknown participating hypotheses: {found - hyp_pairs.keys()}')
+        # Empty provenance on diagnostic rows means all design hypotheses.
         by_gene.setdefault(gene, {}).setdefault(pos, set()).update(found or hyp_pairs)
 
     results: Dict[Tuple[str, object], Dict[str, str]] = {}
     for gene, positions in by_gene.items():
         path = files.get(str(gene))
         if path is None:
-            continue
-        try:
-            aln = AlignIO.read(path, ali_format)
-        except Exception:
-            continue
+            raise FileNotFoundError(f'Alignment missing for {gene}')
+        aln = read_alignment(path, ali_format)
         seqs = {rec.id: str(rec.seq) for rec in aln}
+        if len(seqs) != len(aln):
+            raise ValueError(f'Duplicate alignment species: {gene}')
+        required_species = {sp for hs in positions.values() for h in hs for pair in hyp_pairs[h] for sp in pair}
+        for species, taxid in mapping.items():
+            if str(taxid) in seqs:
+                if species in seqs and seqs[species] != seqs[str(taxid)]:
+                    raise ValueError(f'Conflicting species mapping: {species}')
+                seqs[species] = seqs[str(taxid)]
+        if required_species - seqs.keys():
+            raise ValueError(f'Contrast species missing from alignment {gene}: {required_species - seqs.keys()}')
         aln_len = aln.get_alignment_length()
         for pos, hs in positions.items():
-            try:
-                idx = int(pos)
-            except (TypeError, ValueError):
-                continue
-            if 0 <= idx < aln_len:
-                results[(gene, pos)] = tally_position(seqs, idx, sorted(hs, key=order.get), hyp_pairs)
+            idx = int(pos)
+            if not 0 <= idx < aln_len:
+                raise ValueError(f'Position outside alignment: {gene}:{idx}')
+            results[(gene, pos)] = tally_position(seqs, idx, sorted(hs, key=order.get), hyp_pairs)
 
     keys = list(zip(out[gene_col], out[position_col]))
     for c in SPECIES_TALLY_COLUMNS:

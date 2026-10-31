@@ -1,220 +1,97 @@
 #!/usr/bin/env nextflow
-
-/*
-#
-#
-#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
-#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
-#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
-#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#
-#
-# PHYLOPHERE: A Nextflow pipeline including a complete set
-# of phylogenetic comparative tools and analyses for Phenome-Genome studies
-#
-# Github: https://github.com/nozerorma/caastools/nf-phylophere
-#
-# Author:         Miguel Ramon (miguel.ramon@upf.edu)
-#
-# File: rerconverge.nf
-#
-*/
-
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
- * Unlock the secrets of evolutionary relationships with Phylly! 🌳🔍 This Nextflow pipeline
- * packs a powerful punch, offering a comprehensive suite of phylogenetic comparative tools
- * and analyses. Dive into the world of evolutionary biology like never before and elevate
- * your research to new heights! 🚀🧬 #Phylly #EvolutionaryInsights #NextflowPipeline
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- */
-
-// Import local modules/subworkflows
-include { RER_TRAIT }          from '../subworkflows/RERCONVERGE/rer_trait'
-include { RER_TREES }          from '../subworkflows/RERCONVERGE/rer_trees'
-include { RER_MATRIX }         from '../subworkflows/RERCONVERGE/rer_matrix'
-include { RER_CONT }           from '../subworkflows/RERCONVERGE/rer_cont'
-include { RER_BIN }            from '../subworkflows/RERCONVERGE/rer_bin'
-include { RER_REPORT as RER_REPORT_CONT; RER_REPORT as RER_REPORT_BIN } from '../subworkflows/RERCONVERGE/rer_report.nf'
-include { RER_GENE_LISTS }    from '../subworkflows/RERCONVERGE/rer_gene_lists.nf'
+include { RER_TRAIT } from '../subworkflows/RERCONVERGE/rer_trait'
+include { RER_TREES } from '../subworkflows/RERCONVERGE/rer_trees'
+include { RER_MATRIX } from '../subworkflows/RERCONVERGE/rer_matrix'
+include { RER_TRAIT_MODE } from '../subworkflows/RERCONVERGE/rer_trait_mode'
+include { RER_CONT } from '../subworkflows/RERCONVERGE/rer_cont'
+include { RER_BIN } from '../subworkflows/RERCONVERGE/rer_bin'
+include { RER_TABLES } from '../subworkflows/RERCONVERGE/rer_tables'
+include { RER_REPORT } from '../subworkflows/RERCONVERGE/rer_report'
+include { RER_GENE_LISTS } from '../subworkflows/RERCONVERGE/rer_gene_lists'
+include { rerSingle; rerRequired; rerStage } from '../subworkflows/RERCONVERGE/rer_contract'
 include { RER_FCS_REPORT } from '../subworkflows/ENRICHMENT/fcs.nf'
 include { FCS_RER as FCS_COMPUTE } from '../subworkflows/ENRICHMENT/fcs_inputs.nf'
 
-// Main workflow
 workflow RER_MAIN {
-
     take:
-        traitfile_input   // Channel<path> or null → falls back to params.my_traits
-        // Kept for backwards-compatible signature; currently unused.
-        pp_top_ch
-        pp_bottom_ch
-        taxid_map_input   // value channel: tax_id map (curated by NAME_CURATION, or params.tax_id) or the NO_FILE sentinel
+    traitfile_input
+    pp_top_ch       // retained public signature; unused by RER
+    pp_bottom_ch
+    taxid_map_input
 
     main:
+    def toolString = params.rer_tool ? params.rer_tool.toString().trim() : ''
+    def steps = toolString && toolString != 'false' ? toolString.split(',').collect { it.trim() } : []
+    assert steps.every { it in ['build_trait','build_tree','build_matrix','continuous','binary'] } : 'Unknown RER step'
+    assert steps.unique(false).size()==steps.size() : 'Duplicate RER steps'
+    assert (params.rer_trait_mode ?: 'auto') in ['auto','binary','continuous'] : 'Invalid rer_trait_mode'
+    assert params.traitname && !(params.traitname.toString() =~ /[\/\t\r\n]/).find() : 'Invalid RER traitname'
+    def correlation = steps.contains('continuous') || steps.contains('binary')
+    assert !(params.rer_continuous_file && params.rer_binary_file) : 'Choose exactly one precomputed RER result'
+    assert !(correlation && (params.rer_continuous_file || params.rer_binary_file)) : 'Cannot combine new and precomputed RER results'
+    assert !(correlation && params.rer_perms_file) : 'New RER inference produces its own null; remove rer_perms_file'
 
-        // ── Resolve traitfile ────────────────────────────────────────────────
-        def my_traitfile_ch = (traitfile_input ?: Channel.empty())
-            .ifEmpty {
-                assert params.my_traits : "RER_MAIN requires --my_traits"
-                file(params.my_traits)
-            }
+    def raw = Channel.empty()
+    if (steps.contains('build_trait') || steps.contains('build_tree')) {
+        raw = rerSingle((traitfile_input ?: Channel.empty()).ifEmpty {
+            assert params.my_traits : 'RER requires my_traits'
+            file(params.my_traits)
+        }, 'trait table')
+    }
+    def trait = Channel.empty()
+    if (steps.contains('build_trait')) trait = RER_TRAIT(raw,rerStage('trait')).polished
+    else if (steps.contains('build_matrix') || correlation) trait = rerRequired(params.trait_out,'trait_out')
 
-        // ── Resolve gene trees (always full set) ─────────────────────────────
-        def effective_gene_trees_ch = Channel.value(file(params.gene_trees))
-
-        // ── Conditionally run RER steps ──────────────────────────────────────
-        def trait_out_ch    = params.trait_out  ? Channel.value(file(params.trait_out))  : Channel.empty()
-        def masterTrees_out = params.trees_out  ? Channel.value(file(params.trees_out))  : Channel.empty()
-        def matrix_out_ch   = params.matrix_out ? Channel.value(file(params.matrix_out)) : Channel.empty()
-
-        // trait_type_ch: string channel ("binary" or "continuous") resolved after
-        // build_trait, or defaulting to params.rer_trait_mode when skipping build_trait.
-        def trait_type_ch = Channel.empty()
-
-        // Track RER_REPORT output for downstream consumers (e.g. SCORING).
-        // Populated when 'continuous' or 'binary' tool is run; empty otherwise.
-        def rer_report_out = null
-        def rer_perms_out  = null
-        // RER's own gene universe (background.txt) + gene lists (significant/
-        // accelerating/decelerating) for the unified 12.AMI_analysis.Rmd RER
-        // section. Always computed automatically whenever RER itself produced
-        // a report; empty otherwise.
-        def rer_gene_lists_bg_out       = null
-        def rer_gene_lists_interest_out = null
-
-        def rerToolStr = params.rer_tool ? params.rer_tool.toString().trim() : ""
-        if (rerToolStr && rerToolStr != 'false') {
-            def toolsToRun = rerToolStr.split(',')
-
-            if (toolsToRun.contains('build_trait')) {
-                def trait_result = RER_TRAIT(my_traitfile_ch)
-                trait_out_ch   = trait_result.polished
-                trait_type_ch  = trait_result.trait_type.map { f -> f.text.trim() }
-                trait_type_ch.view { t -> "[RER] Auto-detected trait type: ${t}" }
-            }
-
-            if (toolsToRun.contains('build_tree')) {
-                def trees_out = RER_TREES(my_traitfile_ch, effective_gene_trees_ch, taxid_map_input)
-                masterTrees_out = trees_out[0]
-            }
-
-            if (toolsToRun.contains('build_matrix')) {
-                matrix_out_ch = RER_MATRIX(trait_out_ch, masterTrees_out)
-            }
-
-            // ── Auto-route: continuous vs binary ─────────────────────────────
-            // When rer_tool contains 'continuous' or 'binary', the resolved trait
-            // type (from build_trait auto-detection or params.rer_trait_mode)
-            // determines which correlation process runs.
-            // Override auto-detection by setting params.rer_trait_mode = 'continuous'
-            // or 'binary' explicitly.
-            if (toolsToRun.contains('continuous') || toolsToRun.contains('binary')) {
-
-                // Resolve effective type: explicit param overrides auto-detection.
-                // If build_trait was skipped (trait_type_ch is empty) and no explicit
-                // mode is set, default to 'continuous' for backwards compatibility.
-                def effective_type_ch = (params.rer_trait_mode && params.rer_trait_mode != 'auto')
-                    ? Channel.value(params.rer_trait_mode)
-                    : trait_type_ch.ifEmpty { 'continuous' }
-
-                // Combine trait file with its type string for branching
-                def routed_trait = trait_out_ch
-                    .combine(effective_type_ch)
-
-                routed_trait.branch {
-                    continuous: it[1] == 'continuous'
-                    binary:     it[1] == 'binary'
-                }.set { trait_branched }
-
-                def cont_trait_ch = trait_branched.continuous.map { polished, _type -> polished }
-                def bin_trait_ch  = trait_branched.binary.map     { polished, _type -> polished }
-
-                // Both processes are declared; only the branch that received data
-                // will produce output — the other stays idle (empty input channel).
-                def rer_cont_result = RER_CONT(cont_trait_ch, masterTrees_out, matrix_out_ch)
-                def rer_bin_result  = RER_BIN(bin_trait_ch,  masterTrees_out, matrix_out_ch)
-
-                def cont_report = RER_REPORT_CONT(rer_cont_result.continuous_output)
-                def bin_report  = RER_REPORT_BIN(rer_bin_result.binary_output)
-
-                // Merge summary TSV outputs (only the active branch will emit)
-                rer_report_out = cont_report.summary_tsv.mix(bin_report.summary_tsv)
-                rer_perms_out  = rer_cont_result.perms_output.mix(rer_bin_result.perms_output)
-            }
+    def trees = Channel.empty()
+    if (steps.contains('build_tree')) {
+        def taxid = (taxid_map_input ?: Channel.empty()).toList().map { xs ->
+            assert xs.size() <= 1 : 'RER: expected at most one TaxID table'
+            def f = xs ? xs[0] : file('NO_FILE')
+            assert f.name=='NO_FILE' || f.isFile() : 'RER: TaxID table not found'
+            f
         }
+        trees = RER_TREES(raw,rerRequired(params.gene_trees,'gene_trees'),taxid,rerStage('trees')).master_tree
+    } else if (steps.contains('build_matrix') || correlation) trees = rerRequired(params.trees_out,'trees_out')
 
-        // Check if we have precomputed continuous RDS files but still want to run report/downstream
-        // A binary trait yields <trait>.binary.output, a continuous one <trait>.continuous.output;
-        // each precomputed RDS goes to the report process of its own type.
-        def rerToolList = rerToolStr ? rerToolStr.split(',') : []
-        if (params.rer_continuous_file && !rerToolList.contains('continuous')) {
-            def cont_report = RER_REPORT_CONT(Channel.value(file(params.rer_continuous_file)))
-            rer_report_out = cont_report.summary_tsv
+    def matrix = Channel.empty()
+    if (steps.contains('build_matrix')) matrix = RER_MATRIX(trait,trees,rerStage('matrix')).matrix
+    else if (correlation) matrix = rerRequired(params.matrix_out,'matrix_out')
+
+    def results = Channel.empty()
+    def nulls = Channel.empty()
+    if (correlation) {
+        def mode = RER_TRAIT_MODE(trait,rerStage('mode')).mode.map { it.text.trim() }
+        def routed = trait.combine(mode).branch {
+            continuous: it[1]=='continuous'
+            binary: it[1]=='binary'
         }
-        if (params.rer_binary_file && !rerToolList.contains('binary')) {
-            def bin_report = RER_REPORT_BIN(Channel.value(file(params.rer_binary_file)))
-            rer_report_out = bin_report.summary_tsv
-        }
-        if ((params.rer_continuous_file || params.rer_binary_file) && params.rer_perms_file) {
-            rer_perms_out = Channel.value(file(params.rer_perms_file))
-        }
-
-        // ── Gene list extraction (always automatic — no --ami flag anymore) ──
-        // Cheap (just an R script producing .txt files), so it always runs
-        // whenever RER itself produced a report; feeds the unified
-        // 12.AMI_analysis.Rmd (ENRICHMENT workflow)'s RER section directly.
-        // Safe to call unconditionally even when RER didn't run this
-        // invocation: RER_GENE_LISTS' input channel is then empty, so
-        // Nextflow never actually executes it.
-        def effective_report = rer_report_out ?: Channel.empty()
-        def effective_perms  = rer_perms_out  ?: (params.rer_perms_file  ? Channel.value(file(params.rer_perms_file))  : Channel.empty())
-        def perms_file_ch    = effective_perms.ifEmpty(file('NO_FILE'))
-
-        // Optional cross-module annotation source (CAAS gates, FADE, accum,
-        // CAAS directional scores) from a scoring gene-scores TSV. Mirrors the
-        // rer_perms_file pattern; NO_FILE when unset → only RER columns appear.
-        def gene_scores_ch = params.rer_gene_scores ? Channel.value(file(params.rer_gene_scores)) : Channel.value(file('NO_FILE'))
-        def rer_lists = RER_GENE_LISTS(effective_report, gene_scores_ch)
-
-        // Separate background from gene lists for the FCS/AMI report processes
-        def rer_bg_ch = rer_lists.gene_lists
-            .flatten()
-            .filter { it.name == 'background.txt' }
-            .collect()
-        def rer_interest_ch = rer_lists.gene_lists
-            .flatten()
-            .filter { it.name != 'background.txt' }
-            .collect()
-        rer_gene_lists_bg_out       = rer_bg_ch
-        rer_gene_lists_interest_out = rer_interest_ch
-
-        // FCS report itself remains opt-in (--enrichment), skipped when SCORING
-        // runs: it renders the annotated, centralized RER FCS (with p.perm +
-        // cross-module flags). Avoids per-tool + centralized duplication.
-        if (params.enrichment && !params.scoring) {
-            def rer_fcs_compute = FCS_COMPUTE(rer_lists.fcs_stats, rer_bg_ch, perms_file_ch)
-            RER_FCS_REPORT(
-                Channel.value('rerconverge'),
-                rer_lists.fcs_stats,
-                rer_bg_ch,
-                Channel.value("11.FCS_rer_${params.traitname}"),
-                perms_file_ch,
-                Channel.value(file('NO_FILE')),  // annot_file: in-branch report uses its own stats (+ optional rer_gene_scores join)
-                rer_fcs_compute.enrich_file
-            )
-        }
-
+        def cont = RER_CONT(routed.continuous.map { f,t -> f },trees,matrix,rerStage('continuous'))
+        def bin = RER_BIN(routed.binary.map { f,t -> f },trees,matrix,rerStage('binary'))
+        results = cont.continuous_output.mix(bin.binary_output)
+        nulls = cont.perms_output.mix(bin.perms_output)
+    } else if (params.rer_continuous_file || params.rer_binary_file) {
+        results = rerRequired(params.rer_continuous_file ?: params.rer_binary_file,'precomputed result')
+    }
+    if (!correlation && params.rer_perms_file) nulls = rerRequired(params.rer_perms_file,'rer_perms_file')
+    def null_input = nulls.ifEmpty(file('NO_FILE'))
+    def tables = RER_TABLES(results,null_input,rerStage('tables'))
+    RER_REPORT(tables.validated,rerStage('report'))
+    def gene_scores = params.rer_gene_scores ? rerRequired(params.rer_gene_scores,'rer_gene_scores') : Channel.value(file('NO_FILE'))
+    def lists = RER_GENE_LISTS(tables.summary_tsv,gene_scores,rerStage('lists'))
+    def background = lists.gene_lists.flatten().filter { it.name=='background.txt' }.collect()
+    def interest = lists.gene_lists.flatten().filter { it.name!='background.txt' }.collect()
+    // Release the null only after its association, roster and checksums were validated.
+    def verified_null = nulls.combine(tables.summary_tsv).map { p,s -> p }
+    if (params.enrichment && !params.scoring) {
+        def fcs_null = verified_null.ifEmpty(file('NO_FILE'))
+        def fcs = FCS_COMPUTE(lists.fcs_stats,background,fcs_null)
+        RER_FCS_REPORT(Channel.value('rerconverge'),lists.fcs_stats,background,
+            Channel.value("11.FCS_rer_${params.traitname}"),fcs_null,
+            Channel.value(file('NO_FILE')),fcs.enrich_file)
+    }
     emit:
-        summary_tsv = rer_report_out ?: Channel.empty()
-        // Permulation null matrix (corStat RDS) for downstream FCS p.perm in SCORING.
-        perms = (rer_perms_out ?: (params.rer_perms_file ? Channel.value(file(params.rer_perms_file)) : Channel.empty()))
-        // RER's own gene universe/background.txt (verified to match the
-        // manually-published universes/rer_background_*.txt exactly on real
-        // cluster data) + its 3 gene lists (significant/accelerating/
-        // decelerating) -- feeds the unified 12.AMI_analysis.Rmd's RER section.
-        gene_lists_bg       = rer_gene_lists_bg_out       ?: Channel.empty()
-        gene_lists_interest = rer_gene_lists_interest_out ?: Channel.empty()
+    summary_tsv = tables.summary_tsv
+    perms = verified_null
+    gene_lists_bg = background
+    gene_lists_interest = interest
 }

@@ -191,7 +191,7 @@ class ASRReconstructor:
         # BioPython's writers sometimes have issues, so we write it manually
         self._write_sequential_phylip(alignment, aln_file)
         # For tree, use the BioPython tree writing function
-        phylo_write(tree, tree_file, "newick")
+        phylo_write(tree, tree_file, "newick", format_branch_length="%1.17g")
 
         # PAML requires a blank line after the tree
         with open(tree_file, "a") as f:
@@ -224,8 +224,12 @@ class ASRReconstructor:
                 env=env,
             )
 
+            (gene_dir / 'codeml.stdout.log').write_text(result.stdout)
+            (gene_dir / 'codeml.stderr.log').write_text(result.stderr)
             # Check for .rst file (PAML may return exit code 1 even if successful)
             rst_file = gene_dir / "rst"
+            if result.returncode not in (0, 1):
+                raise RuntimeError(f'PAML failed for {gene}: exit code {result.returncode}')
             if rst_file.exists():
                 logger.info(f"  ✓ PAML completed (exit code {result.returncode})")
                 rst_size = rst_file.stat().st_size
@@ -285,7 +289,9 @@ class ASRReconstructor:
         rate_file_path = None
         aa_rate_file = model_cfg.get("aa_rate_file")
         if aa_rate_file:
-            rate_file_path = self._resolve_rate_file(aa_rate_file)
+            source_rate_file = self._resolve_rate_file(aa_rate_file)
+            shutil.copyfile(source_rate_file, output_dir / aa_rate_file)
+            rate_file_path = Path(aa_rate_file)
             logger.info(f"Using amino acid rate file: {rate_file_path}")
         logger.info(
             f"Using substitution model '{model_key}' (PAML model={model_cfg['paml_model']})"
@@ -295,7 +301,7 @@ class ASRReconstructor:
         # Note: files will be written as alignment_paml.phy and tree_paml.nwk
         content = f"""seqfile = alignment_paml.phy
 treefile = tree_paml.nwk
-outfile = rst
+outfile = paml.out
 
 noisy = 9  * 0,1,2,3,9: how much rubbish on the screen
 verbose = 1  * 0: concise; 1: detailed, 2: too much

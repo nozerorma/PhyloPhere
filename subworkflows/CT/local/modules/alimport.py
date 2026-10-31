@@ -38,6 +38,17 @@ slice()                     Filters the alignment and returns the
 
 from Bio import AlignIO
 import functools
+from pathlib import Path
+
+STANDARD_AAS = frozenset("ACDEFGHIKLMNPQRSTVWY")
+GAP_SYMBOLS = frozenset("-XBZJUO*?.")
+
+def normalize_residue(value):
+    aa = value.upper()
+    if aa not in STANDARD_AAS and aa not in GAP_SYMBOLS:
+        raise ValueError(f"Unsupported amino-acid symbol: {value!r}")
+    return aa
+
 
 
 # FUNCTION import_position()
@@ -47,7 +58,7 @@ def import_position(position, imported_alignment):
     position_dictionary = {}
 
     for record in imported_alignment:
-        position_dictionary[record.id] = record.seq[position] + "@" + str(position)
+        position_dictionary[record.id] = normalize_residue(record.seq[position]) + "@" + str(position)
     
     return position_dictionary
 
@@ -74,7 +85,7 @@ def filter_position(imported_position, changes_threshold, max_gaps_ratio):
     outflag = True
 
     # Filter per gaps
-    gaps_ratio = seq.count("-")/float(len(seq))
+    gaps_ratio = sum(aa in GAP_SYMBOLS for aa in seq)/float(len(seq))
 
     if gaps_ratio > max_gaps_ratio:
         outflag = False
@@ -95,7 +106,10 @@ def slice(alignment_file, alignment_format, column_threshold, max_gaps = 0.5):
     
     z = slice_object()
     imported_alignment = AlignIO.read(alignment_file, alignment_format)
-    z.genename = alignment_file.split("/")[-1].split(".")[0]
+    z.genename = Path(alignment_file).stem
+    ids = [record.id for record in imported_alignment]
+    if len(set(ids)) != len(ids):
+        raise ValueError(f"Duplicate species in alignment: {alignment_file}")
 
     # SPECIES IN THE ALIGNMENT
 

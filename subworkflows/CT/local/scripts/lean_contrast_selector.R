@@ -63,18 +63,19 @@ overall_dunn_int <- function(Dm, pi1, pi2, K) {
 
 # ── PSS engine ────────────────────────────────────────────────────────────────
 
-# PSS scoring comes from the vendored phyloq engine (pss_core.R): analytical_s() and
-# calculate_pairwise_scores(). If they are not loaded yet, pss_core.R is looked for in
-# src/ and in the working directory, then at a fixed absolute path of the development
-# checkout.
+# Resolve the source-file sibling, with staged working-directory fallbacks. Never borrow
+# another checkout's engine: observed and null must use the same implementation.
 if (!exists("calculate_pairwise_scores", mode = "function")) {
+  .source_files <- Filter(Negate(is.null), lapply(sys.frames(), function(frame) frame$ofile))
+  .source_file <- if (length(.source_files)) tail(.source_files, 1)[[1]] else NULL
   .pss_core_paths <- c(
+    if (!is.null(.source_file)) file.path(dirname(.source_file), "pss_core.R"),
     file.path(getwd(), "src", "pss_core.R"),
-    file.path(getwd(), "pss_core.R"),
-    "/home/miguel/IBE-UPF/PhD/PhyloPhere/subworkflows/CT/local/scripts/pss_core.R"
+    file.path(getwd(), "pss_core.R")
   )
   .hit <- .pss_core_paths[file.exists(.pss_core_paths)]
-  if (length(.hit)) source(.hit[1])
+  if (!length(.hit)) stop("Cannot locate sibling pss_core.R")
+  source(.hit[1])
 }
 
 # ── Shared selection core ─────────────────────────────────────────────────────
@@ -249,6 +250,9 @@ greedy_dunn_select <- function(ranked, D, target = Inf, enforce_dunn = TRUE) {
     }
   }
 
+  # Report the final set, not the admission-time index (the seed used to stay Inf).
+  selected$Dunn_index <- vapply(seq_along(members), function(k)
+    mod_dunn_lean(D, members, k), numeric(1))
   list(selected = selected, members = members)
 }
 
@@ -272,7 +276,9 @@ lean_candidate_df <- function(trait_vec, D, target_pairs,
                               tree = NULL, cov_bm = NULL, cov_ou = NULL,
                               selected_model = "OU", ci_lb = NULL, ci_ub = NULL,
                               top_pct = 0.01, ordinal = NULL, n_vec = NULL,
-                              center_gate = "none") {
+                              center_gate = "none", scores = NULL) {
+  if (length(top_pct) != 1L || !is.finite(top_pct) || top_pct < 0 || top_pct > 1)
+    stop("top_pct must be a finite fraction from 0 to 1 (0 disables the gate).")
   center_gate <- tolower(as.character(center_gate)[1])
   if (is.na(center_gate) || !nzchar(center_gate)) center_gate <- "none"
   if (!center_gate %in% c("none", "median", "mean")) {
@@ -296,7 +302,7 @@ lean_candidate_df <- function(trait_vec, D, target_pairs,
   }
   tr <- if (length(sp) < length(tree$tip.label)) ape::drop.tip(tree, setdiff(tree$tip.label, sp)) else tree
   tr_sp <- tr$tip.label
-  sc <- calculate_pairwise_scores(trait_vec[tr_sp], tr,
+  sc <- if (!is.null(scores)) scores else calculate_pairwise_scores(trait_vec[tr_sp], tr,
                                   cov_bm[tr_sp, tr_sp, drop = FALSE],
                                   cov_ou[tr_sp, tr_sp, drop = FALSE], selected_model)
   hi_is_1 <- sc$TraitValue1 >= sc$TraitValue2
@@ -323,8 +329,9 @@ lean_candidate_df <- function(trait_vec, D, target_pairs,
                                    reason = "no pair passes the trait-type gate"))
   s1 <- which(type_mask)
   if (!use_ci && !isTRUE(ordinal)) {
-    n_keep <- min(max(1L, ceiling(length(s1) * top_pct)), length(s1))
-    keep_i <- s1[order(pss[s1], decreasing = TRUE)][seq_len(n_keep)]
+    n_keep <- if (top_pct == 0) length(s1) else max(1L, ceiling(length(s1) * top_pct))
+    # Full precision for the percentile key; names settle exact score ties.
+    keep_i <- s1[order(-pss[s1], c_hi[s1], c_lo[s1], method = "radix")][seq_len(n_keep)]
   } else {
     keep_i <- s1
   }
@@ -437,8 +444,9 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
                              tree = NULL, cov_bm = NULL, cov_ou = NULL,
                              selected_model = "OU", ci_lb = NULL, ci_ub = NULL,
                              top_pct = 0.01, ordinal = NULL, n_vec = NULL,
-                             max_fop = 100L, seed, canon_pairs = NULL, center_gate = "none") {
-  cc <- lean_candidate_df(trait_vec, D, target_pairs, tree, cov_bm, cov_ou,
+                             max_fop = 100L, seed, canon_pairs = NULL, center_gate = "none",
+                             candidate_result = NULL) {
+  cc <- if (!is.null(candidate_result)) candidate_result else lean_candidate_df(trait_vec, D, target_pairs, tree, cov_bm, cov_ou,
                           selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec, center_gate)
   cand_df <- cc$cand_df
   if (is.null(cand_df) || nrow(cand_df) < 1) return(list(hypotheses = list(), K = 0L))

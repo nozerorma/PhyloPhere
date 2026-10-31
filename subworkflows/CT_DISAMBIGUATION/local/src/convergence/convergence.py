@@ -239,12 +239,8 @@ def extract_tip_residue(tip_records: List[Dict[str, Any]]) -> Optional[str]:
         >>> extract_tip_residue(tips)
         'A'
     """
-    # Drop missing, gap and unknown residues
-    residues = [
-        tip["residue"]
-        for tip in tip_records
-        if tip.get("residue") not in {None, "-", "X"}
-    ]
+    from src.utils.amino import normalize_amino_list
+    residues = normalize_amino_list([tip.get('residue') for tip in tip_records])
 
     if not residues:
         return None

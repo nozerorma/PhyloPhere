@@ -13,6 +13,7 @@ least one domain changed on it; a position where no side does is reported as a s
 The observed rows (`ConvergenceResult`) and the null rows (`PositionAxes`) are built from these summaries,
 so the participation rule, the float casts and the agreement ratio exist once.
 """
+import math
 from typing import Any, Dict, List, Optional
 
 SIDES = ("top", "bottom")
@@ -32,6 +33,8 @@ def pooled_sides(pooled: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if int(d.get("n_participating", 0) or 0) <= 0:
             continue
         score = float(d.get("asr_path_score", 0.0) or 0.0)
+        if not math.isfinite(score) or not 0 <= score <= 1:
+            raise ValueError('Pooled scores must be finite and in [0,1]')
         if score <= 0.0:
             continue
         den = int(d.get("agree_den", 0) or 0)

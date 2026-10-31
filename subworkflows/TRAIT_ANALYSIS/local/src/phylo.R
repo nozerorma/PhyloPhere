@@ -35,19 +35,7 @@ if (file.exists(pruned_tree_path) && file.exists(pruned_trait_path)) {
   debug_log("Found existing pruned tree and trait files in 0.Data-pruning. Loading them...")
   trait_df_ori <- trait_df # Table before pruning
   
-  if (endsWith(pruned_trait_path, ".csv")) {
-    p_sep <- ","
-  } else if (endsWith(pruned_trait_path, ".tsv")) {
-    p_sep <- "\t"
-  } else {
-    p_sep <- "\t"
-  }
-  
-  trait_df <- read.csv(pruned_trait_path, sep = p_sep, stringsAsFactors = FALSE)
-  trait_df[] <- lapply(trait_df, function(col) {
-    if (is.character(col)) trimws(col) else col
-  })
-  
+  trait_df <- read_trait_table(pruned_trait_path)
   pruned_tree <- ape::read.tree(file = pruned_tree_path)
   debug_log("Loaded pruned tree tips = %d, pruned trait rows = %d", length(pruned_tree$tip.label), nrow(trait_df))
 } else {
@@ -73,6 +61,11 @@ if (file.exists(pruned_tree_path) && file.exists(pruned_trait_path)) {
   }
 }
 
+# Pruned archives also preserve raw fields; restore configured numeric columns.
+for (column in unique(c(trait, if (has.n) n_trait, if (has.c) c_trait))) {
+  trait_df[[column]] <- numeric_trait_values(trait_df[[column]], column)
+}
+
 # ── Missing phenotypes ────────────────────────────────────────────────────────
 
 # Drop species with NA in the primary trait (or in n_trait / c_trait when count
@@ -96,6 +89,10 @@ if (exists("trait") && trait %in% names(trait_df)) {
       pruned_tree <- ape::drop.tip(pruned_tree, intersect(pruned_tree$tip.label, na_sp))
     }
   }
+}
+
+if (nrow(trait_df) == 0 || is.null(pruned_tree)) {
+  stop("No species with usable phenotype/count data remain after matching and pruning.")
 }
 
 # ── Clade MRCAs ───────────────────────────────────────────────────────────────
@@ -135,8 +132,6 @@ find_taxon_mrca <- function(tree, df) {
     return(path)
   }
   
-  tip_labels <- tree$tip.label
-  all_nodes <- c(1:length(tip_labels), unique(tree$edge[,1]))
   
   unique_taxa <- unique(df$taxa)
   unique_taxa <- unique_taxa[!is.na(unique_taxa)]

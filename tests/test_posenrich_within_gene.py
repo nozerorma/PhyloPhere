@@ -79,6 +79,8 @@ def write_inputs(tmp_path, d, partitions):
         extra = pd.DataFrame({'gene': ['X', d.gene[0]], 'cycle': [d.cycles[cyc[0]]] * 2,
                               'position': np.array([0, 999], dtype=np.int32), 'all': [0.9, 0.9]})
         frame = pd.concat([frame, extra], ignore_index=True)
+        frame['top'] = frame['all']
+        frame['bottom'] = np.nan
         frame.to_parquet(block / 'positions.parquet', index=False)
         (block / 'cycles.txt').write_text('\n'.join(d.cycles[i] for i in cyc) + '\n')
         blocks.append(str(block))
@@ -168,7 +170,7 @@ def test_exclusions_are_fixed_by_the_annotation(tmp_path):
     results, by_gene = wg.results_tables(U, design, out, score)
     # ALLG0 covers every position of one gene: below the minimum of genes, no p, whatever the observed positives
     row = results[results.term_id == 'ALLG0'].iloc[0]
-    assert row.status == 'below_min_genes' and np.isnan(row.p) and row.n_genes_with_members_in_U == 1
+    assert row.status == 'not_identifiable' and np.isnan(row.p) and row.n_genes_with_members_in_U == 1
     allg0 = by_gene[(by_gene.term_id == 'ALLG0') & (by_gene.gene == 'G0')].iloc[0]
     assert allg0.excluded_reason == 'no_nonmembers' and allg0.eligible == 0
     assert set(by_gene.excluded_reason) <= {'no_nonmembers', 'term_below_min_genes', ''}
@@ -220,21 +222,32 @@ def test_duplicate_null_rows_are_rejected(tmp_path):
         wg.read_block(blocks[0], U)
 
 
-def test_command_line_writes_tables_and_manifest(tmp_path):
+def test_cli_requires_verified_universe(tmp_path):
     d = Data(seed=1)
-    blocks = write_inputs(tmp_path, d, partitions(len(d.cycles), 3))
-    out = tmp_path / 'out'
-    wg.main(['--universe', str(tmp_path / 'universe.tsv.gz'), '--observed', str(tmp_path / 'observed.tsv'),
-             '--registry-dir', str(tmp_path / 'registry'),
-             '--blocks', *blocks, '--output-dir', str(out), '--min-genes', '2'])
-    results = pd.read_csv(out / 'within_gene_results.tsv', sep='\t')
-    assert {'statistic', 'p', 'q', 'frequency_difference', 'intensity_difference'} <= set(results.columns)
-    assert not any(c.endswith('_normalized') or c.endswith('_simple') for c in results.columns)
-    assert len(pd.read_csv(out / 'within_gene_by_gene.tsv', sep='\t')) > 0
-    manifest = json.loads((out / 'within_gene_manifest.json').read_text())
-    assert manifest['counts']['n_null_cycles'] == len(d.cycles) and manifest['counts']['n_blocks'] == 3
-    assert manifest['parameters']['min_genes'] == 2
-    wg.main(['--universe', str(tmp_path / 'universe.tsv.gz'), '--observed', str(tmp_path / 'observed.tsv'),
-             '--registry-dir', str(tmp_path / 'registry'), '--collections', 'colA', '--blocks', *blocks,
-             '--output-dir', str(tmp_path / 'hold'), '--holdout', '10'])
-    assert (tmp_path / 'hold' / 'holdout_fpr.tsv').is_file()
+    blocks = write_inputs(tmp_path, d, partitions(len(d.cycles),3))
+    with pytest.raises((ValueError, FileNotFoundError)):
+        wg.main(['--universe', str(tmp_path/'universe.tsv.gz'), '--observed',str(tmp_path/'observed.tsv'),
+                 '--registry-dir',str(tmp_path/'registry'), '--blocks',*blocks,'--output-dir',str(tmp_path/'out')])
+
+
+def test_source_coverage_changes_centering_and_eligible_genes():
+    U=wg.Universe(['G','H'],wg.pair_keys([0,0,0,1,1],[0,1,2,0,1]),np.array([3,2]))
+    members=pd.DataFrame({'collection_id':['C','C'],'term_id':['T','T'],'uidx':[0,3]})
+    # H has no nonmembers in source coverage; it must not satisfy min_genes=2.
+    design=wg.build_design(members,U,coverage={'C':np.array([0,1,3])})
+    term_ok,pairs=wg.eligibility(design,2)
+    assert not term_ok.any() and not pairs.any()
+    term_ok,pairs=wg.eligibility(design,1)
+    assert term_ok.all() and pairs.tolist()==[True,False]
+    positive=np.array([1.,0.,1.,1.,0.])
+    import scipy.sparse as sp
+    T=wg.term_statistic(sp.csr_matrix(positive.reshape(1,-1)),design,np.flatnonzero(pairs),sp.csr_matrix([[1.]]),20000)
+    assert T[0,0]==pytest.approx(.5)  # G: 1 - 1*(1/2); its uncovered detection at 2 contributes nothing.
+
+
+def test_missing_null_is_not_a_negative_result():
+    U=wg.Universe(['G'],wg.pair_keys([0,0],[0,1]),np.array([2]))
+    members=pd.DataFrame({'collection_id':['C'],'term_id':['T'],'uidx':[0]})
+    design=wg.build_design(members,U)
+    with pytest.raises(ValueError,match='Null blocks'):
+        wg.run(U,design,[],np.array([1.,0.]),min_genes=1)

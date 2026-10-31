@@ -13,7 +13,6 @@ import hashlib
 import json
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
-from functools import lru_cache
 from pathlib import Path
 
 
@@ -29,19 +28,6 @@ def write_manifest(output, sources, counts, **extra):
               sources={str(p):sha(p) for p in sources},table_sha256=sha(output),**extra)
     Path(str(output)+'.manifest.json').write_text(json.dumps(data,indent=2)+'\n')
 
-
-@lru_cache(maxsize=8)
-def map_gene(map_dir,gene):
-    paths=list(Path(map_dir).glob(gene+'.*.map.tsv'))
-    if not paths: paths=list(Path(map_dir).glob(gene+'.map.tsv'))
-    if len(paths)!=1:raise ValueError(f'{gene}: expected exactly one MAP, found {len(paths)}')
-    raw={};by_site={}
-    for r in csv.DictReader(paths[0].open(),delimiter='\t'):
-        if r['status']!='selected':continue
-        col=int(r['prot_ali_col'])-1
-        if col in by_site:raise ValueError(f'{gene}: duplicate MAP column')
-        by_site[col]=r;raw[int(r['ori_codon_col'])]=col
-    return raw,by_site
 
 
 def project_ppga(base, output):
@@ -60,7 +46,7 @@ def ucr_gene(path):
     # The regular producer serializes these values with six decimal places.
     rows=[dict(position=i+1,C_trident=round(r[3],6),variability=round(r[4],6),g=round(r[2],6))
           for i,r in enumerate(per_col)]
-    gene=Path(path).name.split('.')[0];records=[]
+    gene=Path(path).stem;records=[]
     for u in detect_sliding(gene,rows,10,.85,.3,5):
         for pos in range(u['flank_start'],u['flank_end']+1):
             region='flank_up' if pos<u['start_pos'] else 'flank_down' if pos>u['end_pos'] else 'core'
@@ -83,7 +69,9 @@ def marine_ucr(alignment_dir,output,chunk,chunks,cpus):
             counts['genes_scanned']+=1;counts['positions']=counts['positions']+len(records)
     write_manifest(output,[],counts,alignment_dir=str(alignment_dir.resolve()),alignments=fingerprints,
                    method='sliding',window_size=10,window_threshold=.85,window_max_pos_gap=.3,flank_size=5,
-                   valdar_exponents=[1.,1.,1.])
+                   valdar_exponents=[1.,1.,1.], source_uri='productive alignments: '+str(alignment_dir.resolve()),
+                   version='Valdar/sliding-v1', coverage='all_productive_alignment_columns',
+                   coverage_genes=[Path(name).stem for name in fingerprints])
     print(dict(counts),flush=True)
 
 

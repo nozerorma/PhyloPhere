@@ -44,7 +44,7 @@ def test_characterization_layers_and_summaries(tmp_path):
     coll = {(r['collection_id'], r['term_id']): r for r in read_tsv(out / 'collection_summary.tsv')}
     assert coll[('ucr_core', 'global')]['n_members'] == '1'
     assert coll[('ucr_core', 'global')]['n_members_positive'] == '1'
-    assert coll[('ucr_core', 'global')]['prop_positive_of_evaluated'] == '1.0'
+    assert coll[('ucr_core', 'global')]['prop_positive_of_evaluated'] == 'NA'
     assert coll[('custom', 'PP2A')]['n_members_nominal'] == '1'
     assert coll[('custom', 'PP2A')]['n_members_adjusted'] == '0'
     # Coverage collection: every FUBAR-tested position, not only hits.
@@ -136,13 +136,13 @@ def test_summary_preserves_membership_counts_and_collection_order():
                 'caas_nominal', 'caas_adjusted', 'evidence_status'])
     coverage = pd.DataFrame([['universe', 'n_positions_annotable', '9']],
                             columns=['scope', 'metric', 'value'])
-    result = module.build_collection_summary(collections, members, evidence, coverage)
+    result = module.build_collection_summary(collections, members, evidence, coverage, {('G1',0),('G1',1),('G2',2)})
     assert list(zip(result.collection_id, result.term_id)) == [
         ('B', 'same'), ('A', 'same'), ('A', 'empty')]
     assert result.n_members.tolist() == [1, 4, 0]
     assert result.n_genes.tolist() == [1, 2, 0]
-    assert result.n_members_evaluated.tolist() == [0, 2, 0]
-    assert result.n_members_without_canonical_score.tolist() == [0, 1, 0]
+    assert result.n_members_evaluated.tolist() == [1, 4, 0]
+    assert result.n_members_without_canonical_score.tolist() == [1, 2, 0]
     assert result.n_members_nominal.tolist() == [0, 2, 0]
     assert result.n_members_adjusted.tolist() == [0, 0, 0]
-    assert result.prop_positive_of_evaluated.tolist() == ['NA', 1.0, 'NA']
+    assert result.prop_positive_of_evaluated.tolist() == [0.0, 0.5, 'NA']

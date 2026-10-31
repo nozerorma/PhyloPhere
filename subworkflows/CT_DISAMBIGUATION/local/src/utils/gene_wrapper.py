@@ -204,10 +204,15 @@ def _replay_gene_task(task: Tuple[str, str, Optional[Dict[int, int]]]):
         def load_ctx():
             return load_gene_context(
                 gene, st["alignment_dir"], st["tree_file"], st["taxid_mapping_path"],
-                st["asr_model"], st["asr_cache_dir"], st["posterior_threshold"], None)
+                st["asr_model"], st["asr_cache_dir"], st["posterior_threshold"], None,
+                alignment_path=alignment_path, alignment_format=st["settings"].ali_format)
 
-        reducer = CycleReducer(st["postproc_filter"], st["remove_clusters"], st["clust_minlen"], st["clust_maxcaas"], train_columns)
-        streamed = stream_gene(gene, alignment_path, replay, load_ctx, st["posterior_threshold"], st["strict_output"], reduce=reducer)
+        reducer = CycleReducer(st["postproc_filter"], st["remove_clusters"], st["clust_minlen"], st["clust_maxcaas"], train_columns, st.get("clust_min_positions"),
+                               universe=st["universe"][gene])
+        # the strict pooling is scored over the strict universe (no conserved pair allowed)
+        strict_reducer = CycleReducer(st["postproc_filter"], st["remove_clusters"], st["clust_minlen"], st["clust_maxcaas"], train_columns, st.get("clust_min_positions"),
+                                      universe=st["universe_strict"][gene]) if st["strict_output"] else None
+        streamed = stream_gene(gene, alignment_path, replay, load_ctx, st["posterior_threshold"], st["strict_output"], reduce=reducer, reduce_strict=strict_reducer)
         if streamed is None:
             return (gene, None, None, None)
         pooled, pooled_strict = streamed
@@ -267,6 +272,9 @@ def process_all_genes_perms(
     train_map_dir: Optional[str] = None,
     train_map_suffix: str = ".map.tsv",
     strict_output: bool = False,
+    clust_min_positions: Optional[int] = None,
+    universe: Optional[Dict[str, Tuple[int, ...]]] = None,
+    universe_strict: Optional[Dict[str, Tuple[int, ...]]] = None,
 ) -> Path:
     """Replay of the labelings of a tile over each gene, written as the tile tables of the null.
 
@@ -282,7 +290,17 @@ def process_all_genes_perms(
         discovery row has conserved pairs; the replay, ASR and scoring are shared with the tables above.
     With `postproc_filter` the cluster trains of each cycle are flagged and, with `remove_clusters`, their rows are left
     out of the scores; the gene-removal thresholds and the reference pools are the merge's.
+
+    `universe` ({gene: positions of the positional universe}, src.core.universe) is required and must cover every gene:
+    only its positions are scored, before the gene maximum of each cycle is taken, and its identity per gene is part of
+    the tile provenance (meta.json) so a null cannot be reused with another universe. With `strict_output` the strict
+    pooling is scored over `universe_strict` (the same test with no conserved pair allowed) and records that one.
     """
+    if universe is None or (strict_output and universe_strict is None):
+        raise ValueError("[perms] the positional universe is required: the null scores only its positions")
+    missing_universe = [g for g in genes if g not in universe or (strict_output and g not in universe_strict)]
+    if missing_universe:
+        raise ValueError(f"[perms] genes without a positional universe, e.g. {sorted(missing_universe)[:5]}")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -307,13 +325,19 @@ def process_all_genes_perms(
 
     # FOP mirror: with a fop_pairs_file the labelings are "<base>~H<m>" hypotheses; the replay domain-pools them back
     # to one record per base cycle with the per-(hypothesis, domain) PSS weights of that file.
-    fop_mirror = bool(fop_pairs_file and Path(fop_pairs_file).exists())
+    fop_mirror = bool(fop_pairs_file)
     if fop_mirror:
         logger.info(f"[perms] FOP mirror ON: design pairs of {fop_pairs_file}")
 
     cycle_tags = _cycle_tags(resample_dir, cycles)
     if not cycle_tags:
         raise RuntimeError("[perms] no usable cycles (check the resample dir)")
+    # Validate in the parent: initializer exceptions otherwise cause Pool to
+    # respawn failing workers indefinitely.
+    validated_replay = ReplayContext(replay, str(resample_dir), cycle_tags,
+                                     fop_pairs_file if fop_mirror else None)
+    del validated_replay
+    effective_workers = min(effective_workers, max(1, len(genes)))
     logger.info(
         f"[perms] replaying {len(cycle_tags)} cycles over {len(genes)} genes "
         f"with {effective_workers} workers"
@@ -331,7 +355,7 @@ def process_all_genes_perms(
     genes_without_map: List[str] = []
     if postproc_filter and train_map_dir:
         from src.core.columns import index_files
-        train_map_index = index_files(train_map_dir, train_map_suffix)
+        train_map_index = index_files(train_map_dir, train_map_suffix, genes)
         logger.info(f"[perms] cluster trains in untrimmed coordinates: {len(train_map_index)} MAP files in {train_map_dir}")
 
     # The genes are dispatched in the order given: the caller lists the largest first (longest processing time
@@ -346,7 +370,9 @@ def process_all_genes_perms(
         "alignment_dir": alignment_dir, "tree_file": tree_file, "taxid_mapping_path": taxid_mapping_path,
         "asr_model": asr_model, "asr_cache_dir": asr_cache_dir, "posterior_threshold": posterior_threshold,
         "postproc_filter": postproc_filter, "remove_clusters": remove_clusters,
-        "clust_minlen": clust_minlen, "clust_maxcaas": clust_maxcaas, "strict_output": strict_output,
+        "clust_min_positions": clust_min_positions, "clust_minlen": clust_minlen, "clust_maxcaas": clust_maxcaas, "strict_output": strict_output,
+        "universe": {g: universe[g] for g in genes},
+        "universe_strict": {g: universe_strict[g] for g in genes} if strict_output else None,
     }
 
     cycles_seen: Set[str] = set()
@@ -357,15 +383,13 @@ def process_all_genes_perms(
         initializer=_init_replay_worker, initargs=(worker_config,),
     )
     n_genes = 0
-    n_failed = 0
     n_units = 0
     try:
         # chunksize=1: each item is the replay of one gene (seconds to minutes of work), not the many-cheap-tasks
         # shape chunksize>1 is meant for.
         for _gene, status, tables, strict_tables in safe_imap_unordered(pool, _replay_gene_task, tasks, chunksize=1):
             if status is None:
-                n_failed += 1
-                continue
+                raise RuntimeError(f'Null replay failed for {_gene}; incomplete nulls cannot be published')
             if not status:
                 continue
             parts.append(tables)
@@ -374,28 +398,39 @@ def process_all_genes_perms(
             cycles_seen.update(tables[0]["cycle"].to_pylist())
             n_units += status
             n_genes += 1
-    finally:
+    except BaseException:
+        pool.terminate()
+        raise
+    else:
         pool.close()
+    finally:
         pool.join()
 
-    meta = {"by_labeling": not fop_mirror, "strict": False}
+    from src.core.scoring_provenance import scientific, digest
+    from src.core.universe import digest as universe_digest
+    meta = {"by_labeling": not fop_mirror, "strict": False,
+            "scientific": scientific(tree_file,asr_model,posterior_threshold,taxid_mapping_path,fop_pairs_file),
+            "cluster": dict(enabled=postproc_filter,remove=remove_clusters,minlen=clust_minlen,maxcaas=clust_maxcaas,min_positions=clust_min_positions),
+            "alignments": {g:digest(gene_alignments[g]) for g in genes},
+            "universe": {g: universe_digest(g, universe[g]) for g in genes},
+            "maps": {g: digest(train_map_index.get(g)) if train_map_index else None for g in genes}}
+
     write_tables(output_dir / "null_tables", *concat_tables(parts), meta=meta)
     if strict_output:
-        write_tables(output_dir / "null_tables_strict", *concat_tables(strict_parts), meta={**meta, "strict": True})
+        strict_meta = {**meta, "strict": True,
+                       "universe": {g: universe_digest(g, universe_strict[g]) for g in genes}}
+        write_tables(output_dir / "null_tables_strict", *concat_tables(strict_parts), meta=strict_meta)
         logger.info(f"[perms] strict pooling: {len(strict_parts)} genes -> null_tables_strict/")
 
     logger.info(
         f"[perms] replay done: {n_genes} genes, {n_units} (gene, cycle) units "
         f"across {len(cycles_seen)} cycles -> null_tables/"
     )
-    if n_failed:
-        logger.warning(f"[perms] {n_failed} genes could not be replayed (alignment or ASR unavailable) and are left out "
-                       "of the null, as they are left out of the observed")
     if n_genes < len(genes):
         logger.info(
             f"[perms] {n_genes}/{len(genes)} genes with per-cycle CAAS — "
             f"{len(genes) - n_genes} contributed nothing (no CAAS survived any replayed "
-            f"labeling, or the alignment / ASR failed for that gene)."
+            f"labeling, all alignments and ASR contexts were valid)."
         )
     if train_map_index is not None and genes_without_map:
         logger.warning(f"[perms] {len(genes_without_map)} genes have no MAP file and keep trimmed-coordinate "

@@ -13,6 +13,7 @@ Records that cannot be projected go to the `pending` list when one is given, nev
 """
 
 import csv
+import json
 import glob
 import gzip
 import os
@@ -20,6 +21,10 @@ import re
 import sys
 
 import pandas as pd
+from pathlib import Path
+from posenrich_contract import read_table, identifier, position
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]/'VEP/local/src'))
+import vep_common as vr
 
 
 # ── Input handling ──────────────────────────────────────────────────────────────────────
@@ -53,84 +58,66 @@ def load_universe_genes(cleaned_background_path):
     """Set of genes of the universe file (one per line), or None when absent."""
     if not cleaned_background_path or not os.path.exists(cleaned_background_path):
         return None
-    genes = set()
-    with open(cleaned_background_path, 'r') as f:
-        for line in f:
-            g = line.strip()
-            if g:
-                genes.add(g)
-    print(f"Loaded {len(genes)} active genes from universe filter.")
-    return genes
+    from posenrich_universe import load_universe_genes as load_genes
+    return set(load_genes(cleaned_background_path))
 
 
-def parse_map_file(path):
-    """Read explicit named coordinates; never infer residue numbers by counting rows."""
-    selected_cols, col_to_genomic, residue_to_col, raw_to_col = [], {}, {}, {}
-    coords, seen_cols = [], set()
-    with open(path) as f:
-        reader = csv.DictReader(f, delimiter='\t')
-        required = {'status', 'prot_ali_col', 'ori_codon_col', 'hg38_aa_pos', 'hg38_nt_coord'}
-        if not required.issubset(reader.fieldnames or []):
-            raise ValueError(f"MAP missing columns: {sorted(required - set(reader.fieldnames or []))}")
-        for row in reader:
-            if row['status'] != 'selected':
-                continue
-            col = int(row['prot_ali_col']) - 1
-            if col < 0 or col in seen_cols:
-                raise ValueError('MAP has invalid or repeated trimmed columns')
-            selected_cols.append(col)
-            seen_cols.add(col)
-            raw_to_col[int(row['ori_codon_col'])] = col
-            residue = row['hg38_aa_pos']
-            if residue not in ('NA', '', '-'):
-                residue = int(residue)
-                if residue in residue_to_col:
-                    raise ValueError('MAP has repeated reference residues')
+def parse_map_file(path, gene=None):
+    """Validate alignment columns independently of verified biological coordinates."""
+    path = Path(path)
+    mapping = vr.load_map(path)
+    gene = gene if gene is not None else path.name.removesuffix('.map.tsv')
+    reference = vr.load_reference(path, gene, mapping)
+    raw_to_col, raw_seen = {}, set()
+    rows = read_table(path)
+    if 'ori_codon_col' not in rows:
+        raise ValueError('MAP missing ori_codon_col')
+    for row in rows.to_dict('records'):
+        raw = row['ori_codon_col']
+        if not raw.isdigit() or int(raw) < 1:
+            raise ValueError('Invalid raw alignment column')
+        if int(raw) in raw_seen:
+            raise ValueError('Duplicate original MAP column')
+        raw_seen.add(int(raw))
+        if row['status'] == 'selected':
+            if int(raw) in raw_to_col:
+                raise ValueError('Duplicate raw MAP column')
+            raw_to_col[int(raw)] = int(row['prot_ali_col']) - 1
+    residue_to_col, genomic = {}, {}
+    if reference:
+        for col, row in mapping.items():
+            residue = row['aa_position']
+            if residue is not None:
+                if residue > len(reference['protein_sequence']):
+                    raise ValueError('MAP residue outside verified protein')
                 residue_to_col[residue] = col
-            genomic = row['hg38_nt_coord']
-            if re.fullmatch(r'chr[0-9XYM]+:\d+', genomic):
-                col_to_genomic[col] = genomic
-                coords.append(int(genomic.split(':')[1]))
-    strand = '-' if sum((b > a) - (b < a) for a, b in zip(coords, coords[1:])) < 0 else '+'
-    return selected_cols, col_to_genomic, residue_to_col, strand, raw_to_col
+                codon = reference['codons'].get(str(residue))
+                if codon:
+                    genomic[col] = codon['positions'][0]
+    return list(mapping), genomic, residue_to_col, reference['strand'] if reference else 'NA', raw_to_col
 
 
 def build_map_cache(map_dir, universe_genes):
-    """Parse the MAP file of every gene of the universe into {gene: parsed fields}.
-
-    The gene is the file name up to the first dot. All genes are kept when there is no
-    universe. Files that fail to parse are skipped with a warning.
-    """
-    map_cache = {}
-    if not map_dir or not os.path.exists(map_dir):
-        print("No valid map_dir provided; skipping MAP coordinate caching.")
-        return map_cache
-    map_files = glob.glob(os.path.join(map_dir, "*.map.tsv"))
-    print(f"Scanning {len(map_files)} MAP files...")
-    seen = set()
-    for path in map_files:
-        gene = os.path.basename(path).split('.')[0]
-        if gene in seen:
-            raise ValueError(f"Several MAP files for gene {gene}; choose one reference")
-        seen.add(gene)
-        filename = os.path.basename(path)
-        gene = filename.split('.')[0]
-        if universe_genes is not None and gene not in universe_genes:
+    cache = {}
+    if not map_dir:
+        return cache
+    if not Path(map_dir).is_dir():
+        raise ValueError('MAP directory does not exist')
+    genes = universe_genes if universe_genes is not None else {
+        p.name.removesuffix('.map.tsv') for p in Path(map_dir).glob('*.map.tsv')}
+    for gene in sorted(genes):
+        path = vr.map_path(gene, map_dir)
+        if path is None:
             continue
-        try:
-            selected_cols, col_to_genomic, residue_to_col, strand, raw_to_col = parse_map_file(path)
-            map_cache[gene] = {
-                'selected_cols': set(selected_cols),
-                'col_to_genomic': col_to_genomic,
-                'residue_to_col': residue_to_col,
-                'strand': strand,
-                'raw_to_col': raw_to_col,
-                'map_file': filename
-            }
-        except Exception as e:
-            print(f"Warning: failed to parse MAP file for {gene}: {e}", file=sys.stderr)
-    print(f"Cached coordinates mapping for {len(map_cache)} genes.")
-    return map_cache
+        selected, genomic, residue, strand, raw = parse_map_file(path, gene)
+        reference = vr.load_reference(path, gene, vr.load_map(path))
+        cache[gene] = dict(selected_cols=set(selected), col_to_genomic=genomic,
+                           residue_to_col=residue, strand=strand, raw_to_col=raw,
+                           reference_status='verified' if reference else 'unverified_reference',
+                           reference_identity=({k: reference[k] for k in ('protein_id','transcript_id','gene_id',
+                                               'annotation_release','assembly','species')} if reference else None),
+                           map_file=path.name)
+    return cache
 
 
 # ── Writing ───────────────────────────────────────────────────────────────────
@@ -138,6 +125,21 @@ def build_map_cache(map_dir, universe_genes):
 
 
 # ── Source readers ───────────────────────────────────────────────────────────────────
+
+
+def verify_source_reference(path, gene, cache):
+    manifest = Path(str(path)+'.manifest.json')
+    if not cache or cache.get('reference_status') != 'verified':
+        return False
+    if not manifest.is_file():
+        return False
+    meta = json.loads(manifest.read_text())
+    identity = meta.get('reference_identities', {}).get(gene)
+    if identity is None:
+        return False
+    if identity != cache['reference_identity']:
+        raise ValueError(f'Annotation and MAP reference identities differ for {gene}')
+    return True
 
 
 def column_runs(columns):
@@ -183,7 +185,7 @@ def collect_pfam_members(domain_file, map_cache, active_genes, pending=None, reg
         return pfam_terms, pfam_clan_terms
     dom_cols = ['gene', 'pfam_id', 'target_name', 'description',
                 'clan_acc', 'clan_name', 'ali_start', 'ali_end']
-    df_dom = pd.read_csv(domain_file, sep='\t', keep_default_na=False)
+    df_dom = read_table(domain_file)
     missing = set(dom_cols) - set(df_dom.columns)
     if missing:
         raise ValueError(f'Pfam table missing columns: {sorted(missing)}')
@@ -191,8 +193,9 @@ def collect_pfam_members(domain_file, map_cache, active_genes, pending=None, reg
         raise ValueError(f'Pfam table {domain_file} has no coordinate_space; '
                          'convert verified source coordinates with build_reference_tables.py '
                          'project-ppga or regenerate the annotation')
+    seen_pfam = {}
     for row in df_dom.itertuples(index=False):
-        gene = str(row.gene).split('.')[0]
+        gene = identifier(row.gene)
         if gene not in active_genes:
             continue
 
@@ -205,13 +208,25 @@ def collect_pfam_members(domain_file, map_cache, active_genes, pending=None, reg
         try:
             ali_start = int(row.ali_start)
             ali_end = int(row.ali_end)
-        except (ValueError, TypeError):
-            continue
+        except (ValueError, TypeError) as exc:
+            raise ValueError('Invalid Pfam coordinates') from exc
+        if not 1 <= ali_start <= ali_end:
+            raise ValueError('Invalid Pfam interval')
 
+        pfam_terms.setdefault(pfam_id, (f'{target_name} ({desc})', []))
+        if clan_acc and clan_acc != 'NA':
+            pfam_clan_terms.setdefault(clan_acc, (clan_name, []))
+        pk = (gene, pfam_id, ali_start, ali_end, row.coordinate_space)
+        record = tuple(str(v) for v in row)
+        if pk in seen_pfam:
+            if seen_pfam[pk] != record:
+                raise ValueError('Conflicting Pfam duplicate')
+            continue
+        seen_pfam[pk] = record
         map_entry = map_cache.get(gene)
         residue_to_col = map_entry['residue_to_col'] if map_entry else {}
         if row.coordinate_space == 'CAAS_0based':
-            columns = sorted({int(c) for c in str(row.alignment_positions).split(',') if c != ''})
+            columns = sorted({position(c) for c in str(row.alignment_positions).split(',') if c != ''})
             if any(c < 0 for c in columns):
                 raise ValueError('Negative Pfam alignment position')
             if map_entry and not set(columns).issubset(map_entry['selected_cols']):
@@ -223,6 +238,11 @@ def collect_pfam_members(domain_file, map_cache, active_genes, pending=None, reg
                                 'reason': 'unvalidated_no_map'})
         elif row.coordinate_space == 'reference_protein_1based':
             # A trimmed endpoint must not discard surviving interior residues.
+            if map_entry and not verify_source_reference(domain_file, gene, map_entry):
+                if pending is not None:
+                    pending.append(dict(source='pfam', record_id=f'{gene}:{pfam_id}', gene=gene,
+                                        raw_position=f'{ali_start}-{ali_end}', reason='unverified_reference'))
+                continue
             columns = sorted(c for residue, c in residue_to_col.items()
                              if ali_start <= residue <= ali_end)
             mapping_status = 'projected_via_map'
@@ -294,18 +314,26 @@ def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None):
     if 'coordinate_space' in header:
         cols.append('coordinate_space')
     reader = pd.read_csv(ucr_file, sep='\t', usecols=cols,
-                         dtype={'gene': str, 'region_type': str, 'method': str},
+                         dtype=str, keep_default_na=False,
                          chunksize=500_000)
+    seen_ucr = {}
     for chunk in reader:
         chunk = chunk[chunk['method'] == 'sliding']
         for row in chunk.itertuples(index=False):
-            gene = str(row.gene).split('.')[0]
+            gene = identifier(row.gene)
             if gene not in active_genes:
                 continue
             try:
                 pos_residue = int(row.position)
-            except (ValueError, TypeError):
-                continue
+            except (ValueError, TypeError) as exc:
+                raise ValueError('Invalid UCR coordinate') from exc
+            if not str(row.position).isdigit():
+                raise ValueError('UCR coordinate must be integer')
+            uk = (gene, pos_residue, row.region_type, row.method)
+            uv = (row.coordinate_space, row.variability)
+            if uk in seen_ucr and seen_ucr[uk] != uv:
+                raise ValueError('Conflicting UCR duplicate')
+            seen_ucr[uk] = uv
             map_entry = map_cache.get(gene)
             record_id = f"ucr:{gene}:{pos_residue}:{row.region_type}:{row.method}"
             space = row.coordinate_space
@@ -328,7 +356,14 @@ def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None):
                                     'raw_position': pos_residue, 'reason': 'raw_position_not_in_map'})
                 continue
             region = str(row.region_type)
+            variability = float(row.variability)
+            if not 0 <= variability <= 1:
+                raise ValueError('Invalid UCR variability')
             key = (gene, col)
+            if key in ucr_variability_char and float(ucr_variability_char[key]) != variability:
+                raise ValueError('Conflicting UCR variability at projected position')
+            if region not in ('core', 'flank_up', 'flank_down'):
+                raise ValueError('Unknown UCR region type')
             if region == 'core':
                 gene_ucr_core_cols.setdefault(gene, set()).add(col)
                 ucr_region_char[key] = 'core'
@@ -353,25 +388,30 @@ def collect_fubar_members(fubar_file, map_cache, active_genes, pending=None):
     if not fubar_file:
         return gene_pos_sel_cols, gene_neg_sel_cols, fubar_char
     header = pd.read_csv(fubar_file, sep='\t', nrows=0).columns
+    if 'coordinate_space' not in header:
+        raise ValueError('FUBAR requires explicit coordinate_space')
     cols = ['gene', 'is_pos_hit', 'is_neg_hit', 'hg38_aa_pos']
     if 'coordinate_space' in header:
         cols.append('coordinate_space')
     if 'alignment_position' in header:
         cols.append('alignment_position')
     reader = pd.read_csv(fubar_file, sep='\t', usecols=cols,
-                         dtype={'gene': str}, chunksize=500_000)
+                         dtype=str, keep_default_na=False, chunksize=500_000)
+    seen_fubar = {}
     for chunk in reader:
         for row in chunk.itertuples(index=False):
-            gene = str(row.gene).split('.')[0]
+            gene = identifier(row.gene)
             if gene not in active_genes:
                 continue
             try:
                 is_pos = int(row.is_pos_hit)
                 is_neg = int(row.is_neg_hit)
-            except (ValueError, TypeError):
-                is_pos, is_neg = 0, 0
+            except (ValueError, TypeError) as exc:
+                raise ValueError('Invalid FUBAR call') from exc
+            if str(row.is_pos_hit) not in ('0','1') or str(row.is_neg_hit) not in ('0','1') or is_pos + is_neg > 1:
+                raise ValueError('Invalid/conflicting FUBAR call')
 
-            space = getattr(row, 'coordinate_space', 'reference_protein_1based')
+            space = getattr(row, 'coordinate_space', None)
             try:
                 pos_residue = int(row.hg38_aa_pos)
             except (ValueError, TypeError):
@@ -385,7 +425,7 @@ def collect_fubar_members(fubar_file, map_cache, active_genes, pending=None):
             if space not in ('reference_protein_1based', 'CAAS_0based'):
                 raise ValueError(f'Unknown FUBAR coordinate_space: {space}')
             if space == 'CAAS_0based':
-                col = int(row.alignment_position)
+                col = position(row.alignment_position)
                 if col < 0 or (map_entry and col not in map_entry['selected_cols']):
                     raise ValueError(f'FUBAR position outside MAP: {gene}:{col}')
             else:
@@ -394,12 +434,22 @@ def collect_fubar_members(fubar_file, map_cache, active_genes, pending=None):
                         pending.append({'source': 'fubar', 'record_id': record_id, 'gene': gene,
                                         'raw_position': pos_residue, 'reason': 'no_map'})
                     continue
+                if not verify_source_reference(fubar_file, gene, map_entry):
+                    if pending is not None:
+                        pending.append(dict(source='fubar', record_id=record_id, gene=gene,
+                                            raw_position=pos_residue, reason='unverified_reference'))
+                    continue
                 col = map_entry['residue_to_col'].get(pos_residue)
             if col is None:
                 if pending is not None:
                     pending.append({'source': 'fubar', 'record_id': record_id, 'gene': gene,
                                     'raw_position': pos_residue, 'reason': 'reference_residue_not_in_map'})
                 continue
+            key = gene, col
+            call = is_pos, is_neg
+            if key in seen_fubar and seen_fubar[key] != call:
+                raise ValueError('Conflicting FUBAR duplicate')
+            seen_fubar[key] = call
             if is_pos == 1:
                 gene_pos_sel_cols.setdefault(gene, set()).add(col)
                 fubar_char[(gene, col)] = 'positive'
@@ -420,9 +470,11 @@ def collect_fade_sites(fade_file, map_cache, active_genes, pending=None):
     """
     result = {}
     if fade_file:
-        frame = pd.read_csv(fade_file, usecols=['gene', 'position'])
+        frame = read_table(fade_file, sep=',')
+        if not {'gene', 'position'} <= set(frame):
+            raise ValueError('FADE source missing gene/position')
         for row in frame.itertuples(index=False):
-            gene, pos = str(row.gene).split('.')[0], int(row.position)
+            gene, pos = identifier(row.gene), position(row.position)
             if gene not in active_genes:
                 continue
             if pos < 0:
@@ -476,14 +528,14 @@ def collect_custom_members(custom_file, map_cache, active_genes, strict=True, pe
         for line in f:
             if line.startswith('#') or not line.strip():
                 continue
-            fields = line.strip().split('\t')
-            if len(fields) < 3:
-                continue
-            gene = fields[0]
+            fields = line.rstrip('\r\n').split('\t')
+            if len(fields) not in (3,4):
+                raise ValueError('Malformed custom source row')
+            gene = identifier(fields[0])
             if gene not in active_genes:
                 continue
             pos = int(fields[1])
-            term_name = fields[2]
+            term_name = identifier(fields[2])
             record_id = f"custom:{gene}:{pos}:{term_name}"
             if pos < 0:
                 if strict:

@@ -24,14 +24,15 @@ if (!exists("debug_log", inherits = TRUE)) {
 # Locate lean_contrast_selector.R: the staged copy in src/ first, then its home
 # in the CT scripts directory (relative to the working directory or to this file).
 selector_script_path <- {
-  this_ofile <- tryCatch(sys.frame(1)$ofile, error = function(e) NULL)
+  source_files <- Filter(Negate(is.null), lapply(sys.frames(), function(frame) frame$ofile))
+  this_ofile <- if (length(source_files)) tail(source_files, 1)[[1]] else NULL
   this_dir <- if (!is.null(this_ofile)) dirname(this_ofile) else ""
   cand_paths <- c(
     file.path(getwd(), "src", "lean_contrast_selector.R"),
     file.path(getwd(), "..", "..", "CT", "local", "scripts", "lean_contrast_selector.R"),
     file.path(getwd(), "subworkflows", "CT", "local", "scripts", "lean_contrast_selector.R"),
     file.path(this_dir, "lean_contrast_selector.R"),
-    file.path(this_dir, "..", "..", "CT", "local", "scripts", "lean_contrast_selector.R")
+    file.path(this_dir, "..", "..", "..", "CT", "local", "scripts", "lean_contrast_selector.R")
   )
   found <- cand_paths[nzchar(cand_paths) & file.exists(cand_paths)]
   if (length(found)) found[1] else ""
@@ -69,7 +70,7 @@ if (nzchar(selector_script_path) && file.exists(selector_script_path)) {
 #   Jaccard overlap of its species with H1, pair composition).
 fop_pair_sel.f <- function(ctx, ci_lb = NULL, ci_ub = NULL, n_vec = NULL,
                            ordinal = NULL, top_pct, max_contrasts = Inf,
-                           max_fop = 100L, seed, center_gate = "none") {
+                           max_fop = 100L, seed, center_gate = "none", candidate_result = NULL) {
   empty <- list(
     canon_pairs = data.frame(species1 = character(), species2 = character(),
                              stringsAsFactors = FALSE),
@@ -77,7 +78,7 @@ fop_pair_sel.f <- function(ctx, ci_lb = NULL, ci_ub = NULL, n_vec = NULL,
     cand_df = data.frame()
   )
 
-  cc <- lean_candidate_df(ctx$trait_vec, ctx$D, 1L, ctx$tree, ctx$cov_bm, ctx$cov_ou,
+  cc <- if (!is.null(candidate_result)) candidate_result else lean_candidate_df(ctx$trait_vec, ctx$D, 1L, ctx$tree, ctx$cov_bm, ctx$cov_ou,
                           ctx$selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec, center_gate)
   if (is.null(cc$cand_df) || nrow(cc$cand_df) == 0) {
     warning("fop_pair_sel.f: no candidate contrast pairs (", cc$reason, "). Returning 0 pairs.")
@@ -92,7 +93,7 @@ fop_pair_sel.f <- function(ctx, ci_lb = NULL, ci_ub = NULL, n_vec = NULL,
 
   hv <- lean_fop_harvest(ctx$trait_vec, ctx$D, K, ctx$tree, ctx$cov_bm, ctx$cov_ou,
                          ctx$selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec,
-                         max_fop = max_fop, seed = seed, canon_pairs = canon_pairs, center_gate = center_gate)
+                         max_fop = max_fop, seed = seed, canon_pairs = canon_pairs, center_gate = center_gate, candidate_result = cc)
   hypotheses <- hv$hypotheses
   debug_log("fop_pair_sel.f: K=%d canonical pairs, %d hypotheses", K, length(hypotheses))
 

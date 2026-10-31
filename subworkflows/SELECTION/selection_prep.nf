@@ -25,6 +25,7 @@
 
 include { EXTRACT_EXTREME_SPECIES } from './selection_utils.nf'
 include { listAlignmentFiles; sampleAlignmentFiles } from '../CT/ct_alignment_files'
+include { selectionQuote; selectionHash; selectionSingle; selectionPositive } from './selection_contract'
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -45,7 +46,7 @@ def createBatchManifestText(List<String> rows) {
  */
 def fade_toy_genes(String ali_dir, n, seed) {
     def files = ali_tuples_from_dir(ali_dir, null).collect { t -> t[1] }
-    return sampleAlignmentFiles(files, n, seed).collect { f -> f.name.tokenize('.')[0] }
+    return sampleAlignmentFiles(files, n, seed).collect { f -> f.baseName }
 }
 
 /**
@@ -53,13 +54,12 @@ def fade_toy_genes(String ali_dir, n, seed) {
  * Returns a plain Groovy List (not a Channel) so it is safe to call inside a
  * channel operator's closure (e.g. flatMap).
  *
- *   wanted  — Set<String> of gene IDs to keep, or null / empty to keep all.
+ *   wanted  — Set<String> of gene IDs to keep, or null to keep all (empty keeps none).
  */
 def ali_tuples_from_dir(String ali_dir, Set wanted) {
     def ali_path = file(ali_dir)
     if (!ali_path.isDirectory()) {
-        log.warn "SELECTION_PREP: alignment directory not found: ${ali_dir}"
-        return []
+        error "SELECTION_PREP: alignment directory not found: ${ali_dir}"
     }
     // The shared listing is in file-name order and leaves out tables and logs; the extensions below are the ones
     // this module converts (none of them is among those the shared listing leaves out, so they pick the same files).
@@ -73,15 +73,23 @@ def ali_tuples_from_dir(String ali_dir, Set wanted) {
         !f.name.contains('.')
     }
 
-    def tuples = all_files.collect { f ->
-        def gid = f.name.tokenize('.')[0]
-        (wanted == null || wanted.contains(gid)) ? [gid, f] : null
-    }.findAll { it != null }
-
-    if (tuples.isEmpty())
-        log.warn "SELECTION_PREP: no alignment files matched in ${ali_dir}"
-    else
-        log.info  "SELECTION_PREP: ${tuples.size()} genes queued for preprocessing"
+    if (!all_files) error "SELECTION_PREP: no supported alignment files in ${ali_dir}"
+    def ids = all_files.collect { it.baseName }
+    if (ids.unique(false).size() != ids.size())
+        error "SELECTION_PREP: alignment files must have unique gene IDs (filename without extension)"
+    all_files.each { f ->
+        def gid = f.baseName
+        assert gid && !(gid in ['.', '..']) && gid == gid.trim() &&
+            !(f.name =~ /[\t\r\n]/).find() : "SELECTION_PREP: invalid alignment filename: ${f.name}"
+    }
+    if (wanted != null && !ids.containsAll(wanted)) {
+        def message = "SELECTION_PREP: discovery genes have no supported alignment: ${(wanted - ids.toSet()).sort()}"
+        log.error message
+        error message
+    }
+    def tuples = all_files.findAll { wanted == null || wanted.contains(it.baseName) }
+        .collect { f -> [f.baseName, f] }
+    log.info "SELECTION_PREP: ${tuples.size()} genes queued for preprocessing"
     return tuples
 }
 
@@ -96,77 +104,54 @@ def ali_tuples_from_dir(String ali_dir, Set wanted) {
  */
 process PREP_ALIGNMENTS {
     tag "${gene_id}"
+    cache 'deep'
+    publishDir "${params.outdir}/selection/prep_audit", mode: 'copy', overwrite: true, pattern: '*.prep.json'
 
     input:
-    tuple val(gene_id), path(alignment_file), path(tree)
+    tuple val(gene_id), path(alignment_file), val(alignment_hash)
+    tuple path(tree), val(tree_hash)
+    val code_hash
 
     output:
-    tuple val(gene_id), path("${gene_id}.filtered.fa"), emit: filtered_fasta, optional: true
+    tuple val(gene_id), path('*.filtered.fa'), emit: filtered_fasta, optional: true
+    path '*.prep.json', emit: audit
 
     script:
-    def local_dir = "${baseDir}/subworkflows/SELECTION/local/modules"
-    def pyBin = (params.use_singularity || params.use_apptainer)
-        ? '/usr/local/bin/_entrypoint.sh python'
-        : 'python'
+    def pyBin = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python' : 'python'
     """
-    # Convert to FASTA (or copy if already FASTA)
-    _lower=\$(echo "${alignment_file}" | tr '[:upper:]' '[:lower:]')
-    if [[ "\$_lower" == *.fa || "\$_lower" == *.fasta ]]; then
-        cp "${alignment_file}" "${gene_id}_tmp.fa"
-    else
-        ${pyBin} ${local_dir}/phylip_to_fasta.py "${alignment_file}" "${gene_id}_tmp.fa"
-    fi
-
-    # Filter to tree taxa
-    ${pyBin} ${local_dir}/filter_fasta_to_tree.py \\
-        --tree "${tree}" \\
-        --fasta "${gene_id}_tmp.fa" \\
-        --output "${gene_id}.filtered.fa"
-    rm -f "${gene_id}_tmp.fa"
-
-    [ -s "${gene_id}.filtered.fa" ] || rm -f "${gene_id}.filtered.fa"
+    echo '${code_hash}:${alignment_hash}:${tree_hash}' > inputs.sha256
+    ${pyBin} -B ${selectionQuote("${baseDir}/subworkflows/SELECTION/local/src/prepare_alignments.py")} \
+        --tree ${selectionQuote(tree)} --gene ${selectionQuote(gene_id)} --alignment ${selectionQuote(alignment_file)}
     """
 }
 
-
-/**
- * PREP_ALIGNMENTS_BATCHED — batched conversion + tree-filtering.
- * Processes multiple genes in a single Nextflow task, reducing SLURM scheduling
- * overhead. Up to task.cpus genes run concurrently
- * within each task using bash job control.
- *
- * Manifest format (tab-separated, one gene per line):
- *   gene_id <TAB> alignment_filename
- *
- * Alignment files are staged under:   alignments/<alignment_filename>
- * Output files:                        <gene_id>.filtered.fa
- */
+// The same runner handles individual genes and batches. Every input gene gets an
+// audit record; technical failures abort, biological exclusions are explicit.
 process PREP_ALIGNMENTS_BATCHED {
     tag "${batchID}"
+    cache 'deep'
+    publishDir "${params.outdir}/selection/prep_audit", mode: 'copy', overwrite: true, pattern: '*.prep.json'
 
     input:
-    tuple val(batchID), val(batchSize), val(manifestText),
-          path(alignments, stageAs: 'alignments/*')
-    path tree
+    tuple val(batchID), val(manifestText), path(alignments, stageAs: 'alignments/*'), val(alignment_hash)
+    tuple path(tree), val(tree_hash)
+    val code_hash
 
     output:
     tuple val(batchID), path("*.filtered.fa"), emit: filtered_fastas, optional: true
+    path '*.prep.json', emit: audit
 
     script:
-    def local_dir  = "${baseDir}/subworkflows/SELECTION/local/src"
-    def workers    = task.cpus ?: 4
-    def runnerMode = (params.use_singularity || params.use_apptainer) ? "container" : "local"
+    def local_dir = "${baseDir}/subworkflows/SELECTION/local/src"
+    def runnerMode = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
     """
+    echo '${code_hash}:${alignment_hash}:${tree_hash}' > inputs.sha256
     cat <<'MANIFEST_EOF' > ${batchID}.manifest.tsv
 ${manifestText}MANIFEST_EOF
-
-    bash ${local_dir}/run_prep_alignments_batch.sh \\
-        --batch-id    "${batchID}" \\
-        --manifest    "${batchID}.manifest.tsv" \\
-        --workers     "${workers}" \\
-        --runner-mode "${runnerMode}" \\
-        --tree        "${tree}" \\
-        --local-dir   "${local_dir}"
+    bash ${selectionQuote("${local_dir}/run_prep_alignments_batch.sh")} \
+        --batch-id ${selectionQuote(batchID)} --manifest ${batchID}.manifest.tsv \
+        --workers ${task.cpus} --runner-mode ${runnerMode} \
+        --tree ${selectionQuote(tree)} --local-dir ${selectionQuote(local_dir)}
     """
 }
 
@@ -186,6 +171,15 @@ workflow SELECTION_PREP {
 
     main:
 
+        def sourceNames = ['selection_prep.nf', 'selection_utils.nf', 'selection_contract.nf',
+            'local/src/alignment_io.py', 'local/src/prepare_alignments.py',
+            'local/src/extract_extreme_species.py', 'local/src/run_prep_alignments_batch.sh']
+        def code_hash = selectionHash(sourceNames.collect { file("${baseDir}/subworkflows/SELECTION/${it}") })
+        def prepBatchSize = selectionPositive(params.selection_prep_batch_size != null ? params.selection_prep_batch_size : 1, 'selection_prep_batch_size')
+        def toyN = params.toy_mode ? selectionPositive(params.toy_n != null ? params.toy_n : 50, 'toy_n') : null
+        def toySeed = params.seed != null ? params.seed : 1998
+        if (params.toy_mode) assert toySeed.toString() ==~ /-?[0-9]+/ : 'SELECTION_PREP: seed must be an integer'
+
         // ── Resolve shared inputs ────────────────────────────────────────────
         // Convert to value channels so they broadcast correctly to every gene.
         tree_val = (tree_input ?: Channel.empty())
@@ -197,8 +191,7 @@ workflow SELECTION_PREP {
                 f
             }
             .collect()
-            .filter { files -> files && files.size() > 0 }
-            .map { files -> files[0] }
+            .map { files -> selectionSingle(files, 'tree') }
 
         def species_source_ch = (species_source_input ?: Channel.empty())
             .ifEmpty {
@@ -209,14 +202,13 @@ workflow SELECTION_PREP {
                 f
             }
             .collect()
-            .filter { files -> files && files.size() > 0 }
-            .map { files -> files[0] }
+            .map { files -> selectionSingle(files, 'species pool') }
 
         def ali_dir = params.alignment ?:
             error("SELECTION_PREP: no alignment directory specified (--alignment)")
 
         // ── Extract foreground species (once, shared with FADE) ───
-        def species_lists      = EXTRACT_EXTREME_SPECIES(species_source_ch)
+        def species_lists      = EXTRACT_EXTREME_SPECIES(species_source_ch.map { f -> tuple(f, selectionHash([f])) }, code_hash)
         top_species_val        = species_lists.top_species.collect().map { it[0] }
         bottom_species_val     = species_lists.bottom_species.collect().map { it[0] }
 
@@ -228,22 +220,33 @@ workflow SELECTION_PREP {
         if (params.toy_mode) {
             def resolved_ct = (ct_discovery_input ?: Channel.empty())
                 .ifEmpty { file('NO_FILE') }
+                .collect()
+                .map { inputs ->
+                    assert inputs.size() == 1 : 'SELECTION_PREP: expected at most one CT discovery table'
+                    inputs[0]
+                }
 
             ali_ch = resolved_ct.flatMap { discovery_file ->
                 def toy_genes = null
-                if (discovery_file.name != 'NO_FILE' && discovery_file.exists()) {
-                    toy_genes = discovery_file
-                        .readLines()
-                        .drop(1)
-                        .collect { it.split('\t')[0].trim() }
+                if (discovery_file.name != 'NO_FILE') {
+                    assert discovery_file.isFile() : "SELECTION_PREP: discovery not found: ${discovery_file}"
+                    def lines = discovery_file.readLines()
+                    def fields = lines ? lines[0].split('\t', -1).toList() : []
+                    assert fields.count('gene') == 1 : 'SELECTION_PREP: discovery needs a unique gene column'
+                    def geneColumn = fields.indexOf('gene')
+                    toy_genes = lines.drop(1)
+                        .collect { line ->
+                            def row = line.split('\t', -1)
+                            assert row.size() == fields.size() && row[geneColumn] : 'SELECTION_PREP: malformed discovery row'
+                            row[geneColumn]
+                        }
                         .findAll { it }
                         .toSet()
                     log.info "[toy_mode] SELECTION_PREP: reusing ${toy_genes.size()} genes from CT discovery"
                 } else {
-                    def n = (params.toy_n ?: 50) as int
                     // Seeded shuffle of the name-sorted list: reproducible, and the same genes CT draws from this directory.
-                    toy_genes = fade_toy_genes(ali_dir, n, (params.seed ?: 1998) as long).toSet()
-                    log.info "[toy_mode] SELECTION_PREP: using ${toy_genes.size()} randomly sampled genes (seed=${params.seed ?: 1998})"
+                    toy_genes = fade_toy_genes(ali_dir, toyN, toySeed as long).toSet()
+                    log.info "[toy_mode] SELECTION_PREP: using ${toy_genes.size()} randomly sampled genes (seed=${toySeed})"
                 }
                 ali_tuples_from_dir(ali_dir, toy_genes)
             }
@@ -252,8 +255,9 @@ workflow SELECTION_PREP {
         }
 
         // ── Convert + filter: batch or single-gene ───────────────────────────
-        def prepBatchSize = (params.selection_prep_batch_size ?: 1) as int
+        def tree_fingerprinted = tree_val.map { f -> tuple(f, selectionHash([f])) }
         def filtered_fasta_ch
+        def prep_audit_ch
 
         if (prepBatchSize > 1) {
             def prepBatchCounter = 0
@@ -266,20 +270,21 @@ workflow SELECTION_PREP {
                     def manifestText = createBatchManifestText(
                         batch.collect { row -> "${row[0]}\t${row[1].name}" }
                     )
-                    tuple(batchID, batch.size(), manifestText,
-                          batch.collect { row -> row[1] })
+                    def paths = batch.collect { row -> row[1] }
+                    tuple(batchID, manifestText, paths, selectionHash(paths))
                 }
 
-            def batched_out = PREP_ALIGNMENTS_BATCHED(batches_ch, tree_val).filtered_fastas
-            filtered_fasta_ch = batched_out
+            def batched_out = PREP_ALIGNMENTS_BATCHED(batches_ch, tree_fingerprinted, code_hash)
+            prep_audit_ch = batched_out.audit.flatten()
+            filtered_fasta_ch = batched_out.filtered_fastas
                 .transpose()
-                .map { batchID, f -> tuple(f.name.replace('.filtered.fa', ''), f) }
+                .map { batchID, f -> tuple(f.name.replaceFirst(/\.filtered\.fa$/, ''), f) }
         } else {
             filtered_fasta_ch = ali_ch
-                .map { gid, f -> tuple(gid, f) }
-                .combine(tree_val)
-                .map { gid, f, tree -> tuple(gid, f, tree) }
-            filtered_fasta_ch = PREP_ALIGNMENTS(filtered_fasta_ch).filtered_fasta
+                .map { gid, f -> tuple(gid, f, selectionHash([f])) }
+            def single_out = PREP_ALIGNMENTS(filtered_fasta_ch, tree_fingerprinted, code_hash)
+            filtered_fasta_ch = single_out.filtered_fasta
+            prep_audit_ch = single_out.audit
         }
 
         // ── Route filtered FASTAs into top / bottom direction channels ────────
@@ -298,4 +303,5 @@ workflow SELECTION_PREP {
         top_species              = top_species_val
         bottom_species           = bottom_species_val
         tree_ch                  = tree_val
+        prep_audit               = prep_audit_ch
 }

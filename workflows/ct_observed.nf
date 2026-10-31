@@ -6,7 +6,7 @@
  * tables. A live run gets them from the permulation core instead (CAAS_CORE, CAAS_CORE_OBSERVED).
  */
 
-include { CAAS_OBSERVED } from '../subworkflows/CT_DISAMBIGUATION/ct_observed'
+include { CAAS_OBSERVED; observedInputHash } from '../subworkflows/CT_DISAMBIGUATION/ct_observed'
 
 workflow CT_OBSERVED {
     take:
@@ -26,6 +26,7 @@ workflow CT_OBSERVED {
             if (!trait_file_param) {
                 error "CT observed scoring requires a trait file from CT/contrast_selection or --caas_config"
             }
+            assert file(trait_file_param).exists() : "Observed design not found: ${trait_file_param}"
             file(trait_file_param)
         }
 
@@ -34,6 +35,7 @@ workflow CT_OBSERVED {
             if (!tree_file_param) {
                 error "CT observed scoring requires a tree file from CT/contrast_selection or --tree"
             }
+            assert file(tree_file_param).isFile() : "Observed tree not found: ${tree_file_param}"
             file(tree_file_param)
         }
 
@@ -45,16 +47,29 @@ workflow CT_OBSERVED {
         //   3. standalone run: auto-discover in outdir, else NO_HYP_PAIRS.
         def hp_param = params.ct_disambig_hypotheses_pairs ?: params.scoring_hypotheses_pairs ?: ''
         def hyp_pairs_file
-        if (hp_param && file(hp_param).exists()) {
+        if (hp_param) {
+            assert file(hp_param).isFile() : "Requested hypothesis weights file not found: ${hp_param}"
             hyp_pairs_file = Channel.value(file(hp_param))
         } else if (hyp_pairs_in != null) {
-            hyp_pairs_file = hyp_pairs_in.ifEmpty(file('NO_HYP_PAIRS')).collect().map { it[0] }
+            hyp_pairs_file = hyp_pairs_in.ifEmpty(file('NO_HYP_PAIRS')).toList().map { items ->
+                assert items.size() == 1 : 'CT_OBSERVED requires one weights input'
+                items[0]
+            }
         } else {
-            def auto = file("${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv")
-            hyp_pairs_file = Channel.value(auto.exists() ? auto : file('NO_HYP_PAIRS'))
+            hyp_pairs_file = trait_file.map { design ->
+                def adjacent = file("${design}/contrast_hypotheses_pairs.tsv")
+                def legacy = file("${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv")
+                design.isDirectory() && adjacent.isFile() ? adjacent : (legacy.isFile() ? legacy : file('NO_HYP_PAIRS'))
+            }
         }
 
-        def observed = CAAS_OBSERVED(discovery_in, trait_file, tree_file, hyp_pairs_file, taxid_map_in)
+        def alignment = params.alignment ? file(params.alignment) : file('NO_ALIGNMENT')
+        assert !params.alignment || alignment.isDirectory() : "Alignment directory not found: ${params.alignment}"
+        def ensembl = params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_ENSEMBL')
+        assert !params.gene_ensembl_file || ensembl.isFile() : "Gene whitelist not found: ${params.gene_ensembl_file}"
+        def observed = CAAS_OBSERVED(discovery_in, trait_file.map { d -> tuple(observedInputHash(d), d) }, tree_file, hyp_pairs_file,
+                                    taxid_map_in ?: Channel.value(file('NO_FILE')),
+                                    Channel.value(tuple(observedInputHash(alignment), alignment)), Channel.value(ensembl))
 
     emit:
         results_dir = observed.results_dir

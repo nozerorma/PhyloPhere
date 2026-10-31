@@ -23,6 +23,7 @@ Usage:
   python filter_caas_clusters-param.py -i input.tsv -c 0.7 -l 3 [-v]
 """
 
+from postproc_io import read_table, positions as validated_positions, parameter_token
 import pandas as pd
 import argparse
 import logging
@@ -75,9 +76,12 @@ def parse_args():
         action="store_true",
         help="Enable verbose debug output"
     )
+    parser.add_argument("--min-positions", type=int, default=None, help="Minimum candidate count; default follows --minlen")
     args = parser.parse_args()
     if not (0.0 <= args.maxcaas <= 1.0):
         parser.error("--maxcaas must be between 0 and 1.")
+    if args.min_positions is not None and args.min_positions < 1:
+        parser.error("--min-positions must be positive")
     if args.minlen < 1:
         parser.error("--minlen must be at least 1.")
     return args
@@ -98,7 +102,7 @@ def setup_logger(input_path: Path, maxcaas: float, minlen: int, verbose: bool):
         Configured logger instance
     """
     name = input_path.stem
-    log_file = input_path.with_name(f"{name}.minlen{minlen}.maxcaas{int(maxcaas*100)}.log")
+    log_file = input_path.with_name(f"{name}.minlen{minlen}.maxcaas{parameter_token(maxcaas)}.log")
     level = logging.DEBUG if verbose else logging.INFO
     logger = logging.getLogger("CAAS_HACK")
     logger.setLevel(level)
@@ -116,7 +120,7 @@ def setup_logger(input_path: Path, maxcaas: float, minlen: int, verbose: bool):
 
 # ── Main Filtering Function ───────────────────────────────────────────────────
 
-def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.tsv"):
+def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.tsv", min_positions=None):
     """
     Filter CAAS positions by identifying and marking high-density clusters.
     
@@ -142,38 +146,13 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
         logger.error(f"Input file not found: {infile}")
         sys.exit(1)
     
-    # Validate the file format and the required columns
-    try:
-        # keep_default_na=False + na_values=[""]: the CAAS table has categorical amino-acid
-        # columns (caas, derived_residues) whose values can be NA-sentinel
-        # strings ("N/A" is Asn on the changed side against Ala), and the default NA parsing
-        # of pandas would blank them. Only an empty cell is missing here.
-        df = pd.read_csv(path, sep="\t", header=0,
-                         keep_default_na=False, na_values=["", "nan", "NaN"])
-        
-        for col in ("Gene", "Position"):
-            if col not in df.columns:
-                logger.error(f"Missing required column: {col}")
-                sys.exit(1)
-        
-        # Position must be integer
-        if not pd.api.types.is_integer_dtype(df["Position"]):
-            try:
-                df["Position"] = pd.to_numeric(
-                    df["Position"], 
-                    downcast="integer", 
-                    errors="raise"
-                )
-            except ValueError:
-                logger.error("Position column contains non-integer values")
-                sys.exit(1)
-                
-    except pd.errors.ParserError:
-        logger.error(f"Input file is not a valid tab-separated file: {infile}")
-        sys.exit(1)
+    df = read_table(path)
+    if not {'Gene', 'Position'} <= set(df):
+        raise ValueError('Missing Gene/Position')
+    df['Position'] = validated_positions(df.Position)
 
     discarded = []
-    map_index = index_files(map_dir, map_suffix) if map_dir else None
+    map_index = index_files(map_dir, map_suffix, df.Gene.unique()) if map_dir else None
     genes_without_map = []
     if map_index is not None:
         logger.info(f"Untrimmed-coordinate trains: {len(map_index)} MAP files in {map_dir}")
@@ -185,11 +164,8 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
         f"maxcaas={maxcaas}, minlen={minlen}"
     )
 
-    gene_col = df["Gene"]
-
-    # Each gene is independent: all its positions form one unit
-    for i, gene in enumerate(genes, 1):
-        gene_df = df[gene_col == gene]
+    # All candidates, including side=none; score-independent quality mask.
+    for i, (gene, gene_df) in enumerate(df.groupby("Gene", sort=False), 1):
         columns = gene_columns(map_index, gene, map_suffix) if map_index is not None else None
         if map_index is not None and columns is None:
             genes_without_map.append(gene)
@@ -197,7 +173,7 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
         logger.info(f"Gene [{i}/{total_genes}]: {gene}")
         positions = sorted(gene_df["Position"].unique())
 
-        if len(positions) < minlen:
+        if len(positions) < (minlen if min_positions is None else min_positions):
             continue
 
         logger.debug(
@@ -205,7 +181,7 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
             f"{positions[:5]}{'...' if len(positions) > 5 else ''}"
         )
 
-        gene_discarded = ctrain(positions, maxcaas, minlen, columns)
+        gene_discarded = ctrain(positions, maxcaas, minlen, columns, min_positions)
 
         if gene_discarded:
             logger.info(
@@ -222,14 +198,19 @@ def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.t
         )
 
     # Only the keys and the flag are written; a row is Discarded when its (Gene, Position) was flagged
-    out = df[["Gene", "Position"]].copy()
+    out = df[["Gene", "Position"]].drop_duplicates().copy()
     is_discarded = pd.MultiIndex.from_frame(out).isin(set(discarded))
     out["clustering_flag"] = ["Discarded" if d else "Good" for d in is_discarded]
 
     out_file = path.with_suffix(
-        f".filtered.minlen{minlen}.maxcaas{int(maxcaas*100)}.tsv"
+        f".filtered.minlen{minlen}.maxcaas{parameter_token(maxcaas)}.tsv"
     )
     out.to_csv(out_file, sep="\t", index=False)
+    import json
+    from src.core.scoring_provenance import digest
+    Path(str(out_file)+'.scoring.json').write_text(json.dumps(dict(
+        enabled=True,minlen=minlen,maxcaas=maxcaas,min_positions=min_positions,
+        maps={str(g):digest(map_index.get(g)) if map_index else None for g in genes})))
     
     logger.info(f"Output written to: {out_file}")
     logger.info(f"Total genes processed: {total_genes}")
@@ -258,7 +239,8 @@ if __name__ == "__main__":
             args.minlen, 
             logger,
             args.map_dir,
-            args.map_suffix
+            args.map_suffix,
+            args.min_positions
         )
         logger.info("✓ Clustering analysis completed successfully")
         print(f"\nFiltered output: {output_path}")

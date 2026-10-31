@@ -29,9 +29,9 @@ import os
 
 # FUNCTION simtrait_revive() revive resampled trait from
 
-def simtrait_revive(traitfile):
-    """Load resampled traits from a single file (backward compatibility)"""
-    
+def _new_multicfg():
+    """An empty multicfg: the labelings container the kernel reads (see `labelings_to_multicfg`)."""
+
     # Class multicfg
 
     class multicfg():
@@ -107,50 +107,27 @@ def simtrait_revive(traitfile):
             o.close()
 
         
-    # Declare multicfg instance
-
-    z = multicfg()
-
-    # Open the traitfile
-
-    with open(traitfile) as tf_handle:
-        tf = tf_handle.read().splitlines()
-        z.cycles = len(tf)
-    
-    for line in tf:
-        try:
-            c = line.split("\t")
-            cycleid = c[0]
-            fg = c[1].split(",")
-            bg = c[2].split(",")
-
-            # Pair identity is POSITIONAL: the i-th foreground species and the
-            # i-th background species are the two members of pair i.
-            # permulations.R writes both lists in matched pair order (see the
-            # sel_fg/sel_bg accumulation in lean_contrast_selector.R), so index
-            # correspondence is the contract between the two files. Recovering it
-            # here is what lets conserved_pair report WHICH pairs are conserved
-            # rather than only how many — the identity permulation disambiguation
-            # needs. If the lists differ in length (a Tier-2 style shortfall, or a
-            # hand-written resample), only the common prefix gets a pair id and
-            # the rest degrade to the previous "count only" behaviour.
-            paired_n = min(len(fg), len(bg))
-
-            # Foreground update
-
-            for i, s in enumerate(fg):
-                z.update_dictionary(cycleid, s, "1", str(i + 1) if i < paired_n else None)
+    return multicfg()
 
 
-            # Background update
+def simtrait_revive(traitfile):
+    """Load resampled traits from a single file (backward compatibility)"""
+    from modules.design_io import read_labelings
+    return _fill(_new_multicfg(), read_labelings([traitfile]))
 
-            for i, s in enumerate(bg):
-                z.update_dictionary(cycleid, s, "0", str(i + 1) if i < paired_n else None)
 
-        except:
-            pass
-    
-    # Deduplicate alltraits list (preserves order)
-    z.alltraits = list(dict.fromkeys(z.alltraits))
+def labelings_to_multicfg(labelings):
+    """The multicfg of in-memory labelings {tag: (foreground species, background species)}, built exactly as
+    `simtrait_revive` builds it from a file (pair k is fg[k] with bg[k]); the tags are not checked against the
+    cycle-tag grammar, so derived labelings (the orientations of the positional universe) can use their own."""
+    return _fill(_new_multicfg(), labelings)
 
+
+def _fill(z, labelings):
+    z.cycles = len(labelings)
+    for cycleid, (fg, bg) in labelings.items():
+        for group, species in (("1", fg), ("0", bg)):
+            for i, sp in enumerate(species, 1):
+                z.update_dictionary(cycleid, sp, group, str(i))
+    z.alltraits = list(labelings)
     return z

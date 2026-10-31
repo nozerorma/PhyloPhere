@@ -43,7 +43,7 @@ resolve_taxa_palette <- function(taxa_values, palette_name = NULL, fallback_name
   base_palette <- get_palette_values(palette_name)
   fallback_palette <- get_palette_values(fallback_name)
   if (is.null(fallback_palette) || length(fallback_palette) == 0) {
-    fallback_palette <- grDevices::hcl.colors(max(20, length(taxa_values)), "Dynamic")
+    fallback_palette <- as.character(paletteer::paletteer_d("ggthemes::Tableau_20"))
     names(fallback_palette) <- paste0("fallback_", seq_along(fallback_palette))
   }
 

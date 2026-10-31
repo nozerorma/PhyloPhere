@@ -62,21 +62,10 @@ def as_bool(v: Any) -> bool:
 # ── Ensembl genes ─────────────────────────────────────────────────────────────
 
 
-def gene_key(symbol: str) -> str:
-    """Gene key of a symbol or file name: the text before the first dot.
-
-    Alignment, export and shard file names carry the gene as their first dot-delimited segment,
-    so a symbol with a dot (for example "AC010616.1") is identified by "AC010616" everywhere.
-    """
-    return symbol.split(".", 1)[0]
-
-
 def load_ensembl_genes(ensembl_genes_file: Path) -> Set[str]:
     """Load the gene keys of a TSV/CSV file with a 'gene' column.
 
-    The keys follow `gene_key`, so a membership test with the gene key of a file name matches
-    symbols that contain a dot. Two different symbols with the same key would be merged by every
-    file lookup, so that case raises instead of being resolved silently.
+    Complete identifiers, including embedded dots, are preserved.
     """
     if not ensembl_genes_file.exists():
         raise FileNotFoundError(f"Ensembl genes file not found: {ensembl_genes_file}")
@@ -84,7 +73,10 @@ def load_ensembl_genes(ensembl_genes_file: Path) -> Set[str]:
     with ensembl_genes_file.open(newline="") as handle:
         sample = handle.read(2048)
         handle.seek(0)
-        dialect = csv.Sniffer().sniff(sample)
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters='\t,')
+        except csv.Error:
+            dialect = csv.excel_tab
         reader = csv.DictReader(handle, dialect=dialect)
         # reader.fieldnames is None without a header: check it before the membership test
         if not reader.fieldnames or "gene" not in reader.fieldnames:
@@ -92,14 +84,4 @@ def load_ensembl_genes(ensembl_genes_file: Path) -> Set[str]:
         symbols = {row["gene"].strip() for row in reader if row.get("gene")}
     if not symbols:
         raise ValueError("No genes found in Ensembl genes file")
-    by_key: Dict[str, List[str]] = {}
-    for symbol in sorted(symbols):
-        by_key.setdefault(gene_key(symbol), []).append(symbol)
-    clashes = {k: v for k, v in by_key.items() if len(v) > 1}
-    if clashes:
-        shown = "; ".join(f"{k}: {', '.join(v)}" for k, v in sorted(clashes.items())[:5])
-        raise ValueError(
-            f"{len(clashes)} gene key(s) shared by several symbols in {ensembl_genes_file} "
-            f"(the key is the text before the first dot): {shown}"
-        )
-    return set(by_key)
+    return symbols

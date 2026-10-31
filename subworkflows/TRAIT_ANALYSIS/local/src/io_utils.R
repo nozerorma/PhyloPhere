@@ -3,7 +3,7 @@
 # =============================================================================
 # Sourced by: commons.R (itself sourced by the trait-analysis Rmd reports)
 #
-# Defines createDir(), read_csv_to_df() and read_tsv_to_df(). Each logs through
+# Defines createDir(), read_trait_table() and write_trait_archive(). Paths log through
 # debug_log() so the report log records every path touched.
 # =============================================================================
 
@@ -31,20 +31,22 @@ createDir <- function(directory) {
   }
 }
 
-# ── Table readers ─────────────────────────────────────────────────────────────
+# ── Trait tables ───────────────────────────────────────────────────────────────
 
-# Comma-separated file with header, read with base R (column types guessed by read.csv).
-read_csv_to_df <- function(file) {
-  debug_log("read_csv_to_df: %s", file)
-  df <- read.csv(file, sep = ",")
-  debug_log("read_csv_to_df: rows = %d, cols = %d", nrow(df), ncol(df))
-  return(df)
+# Keep names verbatim: configured columns may contain spaces or punctuation.
+read_trait_table <- function(path) {
+  sep <- if (grepl("\\.(tsv|txt|tab)$", tolower(path))) "\t" else ","
+  df <- read.table(path, header = TRUE, sep = sep, quote = "\"", comment.char = "",
+                   stringsAsFactors = FALSE, check.names = FALSE, fill = FALSE, colClasses = "character",
+                   na.strings = c("NA", ""))
+  if (any(!nzchar(names(df))) || anyDuplicated(names(df))) {
+    stop("Trait table has empty or duplicate column names: ", path)
+  }
+  df[] <- lapply(df, function(col) if (is.character(col)) trimws(col) else col)
+  df
 }
 
-# Tab-separated file with header, read with readr (returns a tibble).
-read_tsv_to_df <- function(file) {
-  debug_log("read_tsv_to_df: %s", file)
-  df <- read_tsv(file, col_names = TRUE)
-  debug_log("read_tsv_to_df: rows = %d, cols = %d", nrow(df), ncol(df))
-  return(df)
+write_trait_archive <- function(input, output) {
+  write.table(read_trait_table(input), output, sep = "\t", row.names = FALSE,
+              quote = TRUE, na = "NA")
 }

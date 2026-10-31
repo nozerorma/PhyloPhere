@@ -33,108 +33,16 @@ library(RERconverge)
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
 source(file.path(dirname(normalizePath(script_file)), "rer_permulations.R"))
 source(file.path(dirname(normalizePath(script_file)), "rer_batches.R"))
-batch_seed <- if (length(args) >= 13) as.integer(args[13]) else 1998L
+source(file.path(dirname(normalizePath(script_file)), "rer_contract.R"))
+batch_seed <- rer_integer(if(length(args)>=13L) args[13] else 1998, 'batch seed')
 set.seed(batch_seed)
-
-
-# ── Load trait vector and count vectors ───────────────────────────────────────
-
-traitPath <- args[1]
-load(traitPath)   # trait_vector, n_vector, c_vector (n_vector and c_vector may be NULL)
-
-# ── Trait transformation ───────────────────────────────────────────────────────
-
-transform_type <- if (length(args) >= 12) args[12] else "auto"
-message(sprintf("[RER] Trait transformation parameter: '%s'", transform_type))
-
-# At least one non-NA value is needed
-vals <- trait_vector[!is.na(trait_vector)]
-if (length(vals) == 0) {
-  stop("ERROR: trait_vector contains no non-NA values.")
-}
-
-if (transform_type == "ha_logit") {
-  if (is.null(n_vector) || is.null(c_vector)) {
-    stop("ERROR: ha_logit transformation requested, but n_trait and/or c_trait were not specified or not found in the raw trait file.")
-  }
-  # Haldane-Anscombe logit of c_trait out of n_trait, on the species present in all three vectors
-  common_sp <- intersect(names(n_vector), names(c_vector))
-  common_sp <- intersect(common_sp, names(trait_vector))
-  if (length(common_sp) == 0) {
-    stop("ERROR: No overlap between species in n_vector, c_vector, and trait_vector.")
-  }
-  n_val <- n_vector[common_sp]
-  c_val <- c_vector[common_sp]
-  
-  trans_vals <- log((c_val + 0.5) / (n_val - c_val + 0.5))
-  
-  # The transformed values replace trait_vector; the other species become NA
-  trait_vector <- setNames(rep(NA_real_, length(trait_vector)), names(trait_vector))
-  trait_vector[common_sp] <- trans_vals
-  message("[RER] Applied Haldane-Anscombe corrected logit transformation")
-} else if (transform_type == "logit") {
-  eps  <- 1e-4
-  n_clipped <- sum(vals <= 0 | vals >= 1)
-  if (n_clipped > 0) {
-    warning(sprintf(
-      "[RER] %d value(s) outside (0,1) clipped to [%.0e, %.4f] before logit",
-      n_clipped, eps, 1 - eps
-    ))
-  }
-  trait_vector <- log(pmax(pmin(trait_vector, 1 - eps), eps) /
-                      (1 - pmax(pmin(trait_vector, 1 - eps), eps)))
-  message("[RER] Applied standard logit transformation")
-} else if (transform_type == "arcsin") {
-  # asin(sqrt(x)), defined for proportions in [0, 1]
-  if (any(vals < 0 | vals > 1)) {
-    warning("[RER] Trait values outside [0,1] detected; arcsine square root may produce NaNs.")
-  }
-  trait_vector <- asin(sqrt(trait_vector))
-  message("[RER] Applied arcsine square root transformation")
-} else if (transform_type == "log10") {
-  min_nonzero  <- min(vals[vals > 0])
-  shift        <- min_nonzero / 10
-  trait_vector <- log10(trait_vector + shift)
-  message(sprintf("[RER] Applied log10(x + %.2e) transformation", shift))
-} else if (transform_type == "none") {
-  message("[RER] No transformation applied (using raw values)")
-} else { # auto
-  lo          <- min(vals)
-  hi          <- max(vals)
-  unique_vals <- unique(vals)
-  is_prev     <- (lo >= 0 & hi <= 1 & !all(unique_vals %in% c(0, 1)))
-
-  if (is_prev) {
-    eps          <- 1e-4
-    n_clipped    <- sum(vals <= 0 | vals >= 1)
-    if (n_clipped > 0) {
-      warning(sprintf(
-        "[RER] %d value(s) outside (0,1) clipped to [%.0e, %.4f] before logit",
-        n_clipped, eps, 1 - eps
-      ))
-    }
-    trait_vector <- log(pmax(pmin(trait_vector, 1 - eps), eps) /
-                        (1 - pmax(pmin(trait_vector, 1 - eps), eps)))
-    message("[RER] Auto-detected prevalence trait — applied logit transform")
-  } else {
-    sw <- shapiro.test(vals)
-    message(sprintf(
-      "[RER] Shapiro-Wilk normality test: W = %.4f, p = %.4e",
-      sw$statistic, sw$p.value
-    ))
-    if (sw$p.value < 0.05) {
-      min_nonzero  <- min(vals[vals > 0])
-      shift        <- min_nonzero / 10
-      trait_vector <- log10(trait_vector + shift)
-      message(sprintf(
-        "[RER] Auto-detected non-normal distribution — applied log10(x + %.2e) transform",
-        shift
-      ))
-    } else {
-      message("[RER] Auto-detected normal distribution — using raw values")
-    }
-  }
-}
+trait <- rer_trait(args[1])
+transformation <- rer_transform(trait, if(length(args)>=12L) args[12] else 'auto')
+trait_vector <- transformation$values
+message('[RER] Effective transformation: ', transformation$effective)
+min_sp <- rer_integer(args[6], 'min.sp', 3)
+winR <- rer_integer(args[7], 'winsorizeRER')
+winT <- rer_integer(args[8], 'winsorizeTrait')
 
 # ── Load gene trees ───────────────────────────────────────────────────────────
 
@@ -148,6 +56,7 @@ saveRDS(charpaths, args[3])
 # ── Load RER matrix ───────────────────────────────────────────────────────────
 
 traitRERw <- readRDS(args[4])
+rer_check_matrix(traitRERw, geneTrees, names(trait_vector))
 
 # ── Dimension check ───────────────────────────────────────────────────────────
 
@@ -172,22 +81,25 @@ res <- rer_score_paths(
   traitRERw,
   charpaths,
   mode   = "continuous",
-  min.sp = as.numeric(args[6]),
-  winR   = as.numeric(args[7]),
-  winT   = as.numeric(args[8])
+  min.sp = min_sp,
+  winR   = winR,
+  winT   = winT
 )
+res <- rer_results(res)
 message(sprintf("[RER] Correlation done: %d genes tested.", nrow(res)))
-attr(res, "rer_settings") <- list(mode = "continuous", min.sp = as.numeric(args[6]),
-                                   winR = rer_winsor_limit(as.numeric(args[7])),
-                                   winT = rer_winsor_limit(as.numeric(args[8])))
+attr(res, "rer_settings") <- list(mode = "continuous", min.sp = min_sp,
+                                   winR = rer_winsor_limit(winR), winT = rer_winsor_limit(winT),
+                                   transformation = transformation[c("requested","effective","shift")],
+                                   matrix_contract = attr(traitRERw,"rer_contract"),
+                                   trait_metadata = trait$metadata)
 
 # ── Permulation null (Brownian-motion phenotypes) ─────────────────────────────
 
 # Null phenotypes are simulated under Brownian motion (permulations, Saputra et al. 2021, who typically
 # use 1,000); the configured default (conf/rerconverge.config) is 10 batches x 100 permutations.
 # Gene p values use native permpvalcor on the full cycle set of each gene batch.
-num_batches      <- as.integer(args[9])
-perms_per_batch  <- as.integer(args[10])
+num_batches      <- rer_integer(args[9], "perm batches")
+perms_per_batch  <- rer_integer(args[10], "perms per batch", 1)
 
 if (num_batches > 0 && perms_per_batch > 0) {
   message(sprintf(
@@ -208,6 +120,8 @@ if (num_batches > 0 && perms_per_batch > 0) {
                           geneTrees$masterTree$tip.label)
   sim_trait  <- trait_vector[sim_sp]
   sim_master <- ape::keep.tip(geneTrees$masterTree, sim_sp)
+  midpoint_used <- !ape::is.rooted(sim_master)
+  polytomies_resolved <- !ape::is.binary(sim_master)
   if (!ape::is.rooted(sim_master)) {
     # The pipeline defines no outgroup, so the tree is midpoint-rooted; the Brownian-motion
     # simulation is only weakly sensitive to the placement of the root.
@@ -226,13 +140,19 @@ if (num_batches > 0 && perms_per_batch > 0) {
     ape::is.rooted(sim_master), ape::is.binary(sim_master)
   ))
 
+  attr(res, "rer_settings")$simulation_tree <- list(midpoint_rooted=midpoint_used,
+    polytomies_resolved=polytomies_resolved, nonpositive_edges_replaced=sum(zero_edge),
+    sha256=rer_hash(sim_master))
   res <- rer_write_batches(res, num_batches, perms_per_batch, batch_seed,
     function(n) rer_perms_continuous(n, sim_trait, traitRERw, geneTrees, sim_master,
-                                    min.sp=as.numeric(args[6]), winR=as.numeric(args[7]), winT=as.numeric(args[8])),
+                                    min.sp=min_sp, winR=winR, winT=winT),
     sub("\\.output$", ".perms.rds", args[5]))
 } else {
   message("[RER] Permutation testing skipped (rer_perm_batches = 0).")
 }
 
+attr(res, "rer_type") <- "continuous"
+attr(res, "rer_input_hashes") <- lapply(args[c(1,2,4)], rer_file_hash)
+invisible(rer_results(res))
 saveRDS(res, args[5])
 message("[RER] Results saved to: ", args[5])

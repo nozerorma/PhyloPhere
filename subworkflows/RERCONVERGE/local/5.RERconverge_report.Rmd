@@ -19,7 +19,7 @@ params:
   continuous_rds:    "."
   traitname:         "unknown_trait"
   trait_transform:   "unknown"
-  analysis_mode:     "continuous"
+  analysis_mode:     "unknown"
   fdr_threshold: 0.05
   pval_threshold:    0.05
   top_n_labels:      15
@@ -77,19 +77,33 @@ suppressPackageStartupMessages({
   library(stringr)
 })
 
-# Tableau_10 colour swatch (10 named colours for pipeline-wide consistency)
-.tableau10 <- as.character(paletteer_d("ggthemes::Tableau_10"))
+source('rer_contract.R')
+.style <- if(file.exists('report_style.R')) 'report_style.R' else '../../TRAIT_ANALYSIS/local/src/report_style.R'
+source(.style)
+set_report_style()
+.tableau10 <- report_palette(10)
+if (!file.exists(params$continuous_rds)) stop('RER result RDS not found')
+rer_verify_snapshot(params$continuous_rds)
+res <- rer_results(readRDS(params$continuous_rds))
+.recorded <- attr(res,'rer_report_metadata')
+.settings <- attr(res,'rer_settings')
+# Restore producer metadata before rendering any prose; never consult SCORING files.
+.pe <- knitr::knit_global()
+.locked <- bindingIsLocked('params',.pe)
+if (.locked) unlockBinding('params',.pe)
+if (!is.null(.recorded)) {
+  params$traitname <- .recorded$traitname
+  params$pval_threshold <- .recorded$nominal_threshold
+  params$fdr_threshold <- .recorded$fdr_threshold
+}
+params$analysis_mode <- if(!is.null(attr(res,'rer_type'))) attr(res,'rer_type') else if(!is.null(.settings$mode)) .settings$mode else 'unknown'
+params$trait_transform <- if(!is.null(.settings$transformation$effective)) .settings$transformation$effective else 'unknown'
+if (.locked) lockBinding('params',.pe)
+n_perms_total <- attr(res,'n_perms')
+rer_df <- rer_summary(res,params$pval_threshold,params$fdr_threshold)
+has_perm <- any(!is.na(rer_df$p.perm))
+fmt_pperm <- function(x) ifelse(is.na(x),NA_character_,as.character(signif(x,3)))
 
-theme_set(
-  theme_bw(base_size = 13) +
-  theme(
-    axis.title.y  = element_text(margin = ggplot2::margin(l = 20, r = 20)),
-    axis.title.x  = element_text(margin = ggplot2::margin(t = 12)),
-    axis.text.x   = element_text(margin = ggplot2::margin(t = 5)),
-    plot.title    = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
-    plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
-  )
-)
 ```
 
 ---
@@ -137,114 +151,10 @@ is not a universal minimum number of permulations for continuous phenotypes.
 ---
 
 ```{r load-rds}
-if (!file.exists(params$continuous_rds)) {
-  message("RDS file not found: '", params$continuous_rds,
-          "'. Cannot generate report.")
-  knitr::knit_exit()
-}
-
-res <- readRDS(params$continuous_rds)
-.metadata <- file.path(dirname(dirname(dirname(params$continuous_rds))),"scoring","gene_evidence_metadata.json")
-if(file.exists(.metadata)) {
- # rmarkdown locks the params binding; temporarily unlock it to restore
- # the settings saved with these data, then retain the original lock state.
- .params_env <- knitr::knit_global()
- .params_locked <- bindingIsLocked("params", .params_env)
- if (.params_locked) unlockBinding("params", .params_env)
- .m <- jsonlite::read_json(.metadata,simplifyVector=TRUE)
- params$pval_threshold <- .m$nominal_threshold
- params$fdr_threshold <- .m$fdr_threshold
- if (.params_locked) lockBinding("params", .params_env)
-}
-
-if (is.null(res) || nrow(res) == 0) {
-  message("RDS file loaded but contains no results. Cannot generate report.")
-  knitr::knit_exit()
-}
-
-# Total permutation count stored as attribute by continuous_rer.R.
-# Falls back to NA if running the report against an older RDS.
-n_perms_total <- attr(res, "n_perms")
-
-cat(sprintf("Loaded RERconverge results: %d genes.\n", nrow(res)))
-```
-
-```{r process-results, results='hide'}
-has_perm <- "p.perm" %in% colnames(res) && any(!is.na(res$p.perm))
-
-# p.perm carries a pseudo-count, so it is never 0
-fmt_pperm <- function(x) ifelse(is.na(x), NA_character_, as.character(signif(x, 3)))
-
-rer_df <- res %>%
-  as.data.frame() %>%
-  # Ensure p.perm column exists (as NA if not present) to avoid downstream errors
-  {if (!("p.perm" %in% colnames(.))) mutate(., p.perm = NA_real_) else .} %>%
-  mutate(gene = rownames(res)) %>%   # row names ARE gene IDs
-  relocate(gene)
-
-# BH adjustment of p.perm over all genes (continuous_rer.R writes it; an older RDS gets it here)
-if (has_perm && !("p.perm.adj" %in% colnames(rer_df))) {
-  rer_df$p.perm.adj <- p.adjust(rer_df$p.perm, method = "BH")
-}
-
-# Compute significance flags based on whether permutation p-values exist
-if (has_perm) {
-  rer_df <- rer_df %>%
-    mutate(
-      # Parametric significance (always available)
-      signif_param = !is.na(p.adj) & p.adj < params$fdr_threshold,
-      # Significance is defined directly by raw p.perm when permutations are available
-      signif       = !is.na(p.perm) & p.perm < params$pval_threshold,
-      # FDR-based call: BH-adjusted permulation p-value
-      signif_perm_fdr = !is.na(p.perm.adj) & p.perm.adj < params$fdr_threshold,
-      pos_corr     = signif &  Rho >  0,
-      neg_corr     = signif &  Rho <  0
-    ) %>%
-    arrange(p.perm)
-} else {
-  rer_df <- rer_df %>%
-    mutate(
-      signif_param = !is.na(p.adj) & p.adj < params$fdr_threshold,
-      signif       = FALSE,
-      signif_perm_fdr = FALSE,
-      pos_corr     = signif &  Rho >  0,
-      neg_corr     = signif &  Rho <  0
-    ) %>%
-    arrange(p.adj)
-}
-
-# Define the human-readable Call classification column
-rer_df <- rer_df %>%
-  mutate(
-    `Empirical available` = !is.na(p.perm),
-    `BH empirical` = if (has_perm) ifelse(is.na(p.perm), NA, signif_perm_fdr) else NA,
-    Call = case_when(
-      pos_corr ~ "Positively correlated",
-      neg_corr ~ "Negatively correlated",
-      signif   ~ "Significant",
-      TRUE     ~ ""
-    )
-  )
-
-rer_df$rer_stat <- sign(rer_df$Rho) * -log10(rer_df$P)
-
-cat(sprintf(
-  "Significant after BH-FDR (p.adj < %g): %d genes.\n",
-  params$fdr_threshold,
-  sum(rer_df$signif_param, na.rm = TRUE)
-))
-if (has_perm) {
-  cat(sprintf(
-    "Significant by raw permutation p-value (p.perm < %g, not corrected for multiple testing): %d genes.\n",
-    params$pval_threshold,
-    sum(rer_df$signif, na.rm = TRUE)
-  ))
-  cat(sprintf(
-    "Significant by BH-adjusted permutation p-value (p.perm.adj < %g): %d genes.\n",
-    params$fdr_threshold,
-    sum(rer_df$signif_perm_fdr, na.rm = TRUE)
-  ))
-}
+cat(sprintf('Loaded RERconverge results: %d genes.\n',nrow(res)))
+if (!nrow(res)) cat('Valid empty result: no genes available.\n')
+if (is.null(.settings)) cat('Legacy results: original inference settings and provenance are unknown.\n')
+if (!is.null(.recorded)) cat('Null provenance:',.recorded$null_status,'\n')
 ```
 
 ---
@@ -295,20 +205,8 @@ DT::datatable(
   ) %>% DT::formatStyle("BH empirical", fontWeight=DT::styleEqual(c(TRUE,FALSE),c("bold","normal")), backgroundColor=DT::styleEqual(c(TRUE,FALSE),c("#FFE5A0","white")))
 ```
 
-```{r write-tsv}
-# Write to the Nextflow work directory (current dir) so the optional emit: can
-# capture it.  A copy is also placed in params$output_dir for human inspection.
-local_tsv <- paste0("rerconverge_summary_", params$traitname, ".tsv")
-write.table(
-  rer_df,
-  local_tsv, sep = "\t", row.names = FALSE, quote = FALSE
-)
-if (!is.null(params$output_dir) && nzchar(params$output_dir)) {
-  out_tsv <- file.path(params$output_dir, local_tsv)
-  file.copy(local_tsv, out_tsv, overwrite = TRUE)
-}
-invisible(NULL)
-```
+Machine-readable tables and gene lists are produced and validated independently of this report.
+
 
 ---
 
@@ -354,10 +252,10 @@ ggplot(rer_df, aes(x = Rho, y = -log10(if (has_perm) p.perm else (P + 1e-300))))
   labs(
     title    = paste("RERconverge correlation plot — Trait:", params$traitname),
     subtitle = paste0("n = ", nrow(rer_df), " genes"),
-    x        = expression(rho ~ "(Pearson correlation with trait)"),
+    x        = if(params$analysis_mode=="binary") "Signed binary association (rho)" else "Pearson correlation with phenotype paths (rho)",
     y        = if (has_perm) expression(-log[10](p.perm)) else expression(-log[10](P))
   ) +
-  theme_bw(base_size = 13) +
+  report_theme(base_size = 13) +
   theme(legend.position = "top")
 ```
 
@@ -377,10 +275,10 @@ ggplot(rer_df %>% filter(!is.na(Rho) & is.finite(Rho)),
   labs(
     title    = "Distribution of Rho across genes",
     subtitle = paste0("Trait: ", params$traitname),
-    x        = expression(rho ~ "(Pearson correlation)"),
+    x        = "Signed association (rho)",
     y        = "Number of genes"
   ) +
-  theme_bw(base_size = 13)
+  report_theme(base_size = 13)
 ```
 
 ### Sample size vs correlation strength
@@ -418,9 +316,9 @@ ggplot(rer_df, aes(x = N, y = Rho)) +
     subtitle = paste0("Trait: ", params$traitname,
                      " | Dashed line = zero correlation"),
     x = "N (matched paths)",
-    y = expression(rho ~ "(Pearson correlation)")
+    y = "Signed association (rho)"
   ) +
-  theme_bw(base_size = 13) +
+  report_theme(base_size = 13) +
   theme(legend.position = "top")
 ```
 
@@ -478,7 +376,7 @@ p1 <- ggplot(rer_df, aes(x = -log10(P + 1e-300), y = -log10(p.perm))) +
     x = expression(-log[10](P)),
     y = expression(-log[10](p.perm))
   ) +
-  theme_bw(base_size = 13) +
+  report_theme(base_size = 13) +
   theme(legend.position = "top")
 
 # Histogram: highlight genes exactly at the observed minimum.
@@ -501,7 +399,7 @@ p2 <- ggplot(perm_df_hist, aes(x = p.perm, fill = at_minimum)) +
     x = "p.perm",
     y = "Number of genes"
   ) +
-  theme_bw(base_size = 13) +
+  report_theme(base_size = 13) +
   theme(legend.position = "top")
 
 gridExtra::grid.arrange(p1, p2, ncol = 2)
@@ -546,7 +444,7 @@ ggplot(rer_df %>% filter(!is.na(p.adj)), aes(x = p.adj)) +
     x        = "BH p.adj",
     y        = "Number of genes"
   ) +
-  theme_bw(base_size = 13)
+  report_theme(base_size = 13)
 ```
 
 ---
@@ -626,20 +524,38 @@ if (nrow(top_neg) == 0) {
 ## Methods
 
 **Tool:** RERconverge (Kowalczyk _et al._, 2019, _Bioinformatics_ 35:4815;
-https://github.com/nclark-lab/RERconverge) via the `correlateWithContinuousPhenotype()`
-function. Permulations: Saputra _et al._ 2021, _Mol. Biol. Evol._ 38:3004, doi:10.1093/molbev/msab068.
+https://github.com/nclark-lab/RERconverge) via the correlation function for the recorded analysis mode.
+Continuous mode uses `correlateWithContinuousPhenotype()`; binary mode uses
+`correlateWithBinaryPhenotype()` with its recorded foreground-clade policy. Permulations: Saputra _et al._ 2021, _Mol. Biol. Evol._ 38:3004, doi:10.1093/molbev/msab068.
 
 **Trait:** `r params$traitname`
 
 **RER computation:** Relative evolutionary rates were calculated with `getAllResiduals()` using
 a square-root branch-length transform and scaling (`transform="sqrt"`, `norm="scale"`).
-The matrix producer requests `use.weights=TRUE` and can retry with FALSE on failure;
-verify its task log for the effective weighting. Association statistics are unavailable when the gene has fewer matched non-missing paths than `min.sp`; rows are retained as NA.
+The current matrix producer requires `use.weights=TRUE`; technical failures abort.
+Legacy results without matrix metadata have unknown effective weighting. Association statistics are unavailable when the gene has fewer matched non-missing paths than `min.sp`; rows are retained as NA.
+
+```{r recorded-settings, results='asis'}
+if (is.null(.settings)) { cat('Original inference settings: **unknown**.\n') } else {
+  visible <- .settings
+  # The full path/gene rosters and checksums remain in the saved metadata.
+  if (!is.null(visible$matrix_contract)) {
+    mc <- visible$matrix_contract
+    visible$matrix <- c(mc[intersect(c('use.weights','transform','norm','min.sp','package_version'),names(mc))],
+                       list(genes=length(mc$genes),paths=length(mc$paths)))
+    visible$matrix_contract <- NULL
+  }
+  if (!is.null(visible$trait_metadata)) visible$trait_metadata <- visible$trait_metadata[
+    intersect(c('requested_mode','mode','binary_encoding'),names(visible$trait_metadata))]
+  if (!is.null(visible$simulation_tree)) visible$simulation_tree$sha256 <- NULL
+  cat('<pre>',htmltools::htmlEscape(jsonlite::toJSON(visible,pretty=TRUE,auto_unbox=TRUE,null='null',digits=NA)),'</pre>')
+}
+```
 
 **Winsorization:** RER and trait values were optionally winsorized to reduce the influence of extreme values
 (via `winsorizeRER` and `winsorizetrait` parameters).
 
-**Trait transformation requested for these data:** `r params$trait_transform`.
+**Effective trait transformation recorded for these data:** `r params$trait_transform`.
 `r if (params$trait_transform == "ha_logit") "Haldane–Anscombe corrected logit: log((c + 0.5)/(n − c + 0.5)), where c is the case count and n the sample count. The raw prevalence is replaced by this count-based quantity before ancestral reconstruction. Correction depends on n as well as prevalence and can change the ordering of species." else if (params$trait_transform == "unknown") "Transformation was not supplied; verify the producing command before interpreting the phenotype scale." else "Consult the producing command and transformation settings; auto is a requested mode, not a recorded transformation outcome."`
 
 **Statistical inference:** In continuous mode, Pearson correlation of gene RER and phenotype

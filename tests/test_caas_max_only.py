@@ -29,7 +29,7 @@ def test_maximum_is_independent_of_pool_and_position_multiplicity():
 
 def test_observed_cli_uses_raw_maximum_and_rejects_retired_options(tmp_path):
     inp=tmp_path/'positions.tsv'
-    inp.write_text('Gene\tPosition\tside\tasr_path_score\ng\t0\ttop\t.7\ng\t0\tbottom\t.2\ng\t1\tbottom\t.9\nh\t0\ttop\t0\n')
+    inp.write_text('Gene\tPosition\tside\tasr_path_score\ng\t0\ttop\t.7\ng\t0\tbottom\t.2\ng\t1\tbottom\t.9\nh\t0\tnone\t0\n')
     args=[sys.executable,str(OBS),'--input',str(inp),'--positions-out',str(tmp_path/'pos.tsv'),'--genes-out',str(tmp_path/'genes.tsv')]
     got=subprocess.run(args,text=True,capture_output=True)
     assert got.returncode==0,got.stderr

@@ -37,36 +37,27 @@ workflow CT_META_CAAS {
             assert bg_path.exists() : "Error: background_input file/directory not found: ${params.background_input}"
 
             if (bg_path.isDirectory()) {
-                global_background_genes = Channel.fromPath("${params.background_input}/*background_genes*")
+                global_background_genes = Channel.fromPath("${params.background_input}/*background_genes*", type: 'file')
+                    .toList()
+                    .map { files ->
+                        if (files.size() != 1) {
+                            error "CT_META_CAAS requires exactly one background_genes file in ${params.background_input}; found ${files.size()}: ${files}"
+                        }
+                        files[0]
+                    }
                 log.info "📂 Loading global background genes from directory: ${params.background_input}"
             } else {
-                global_background_genes = Channel.fromPath(params.background_input)
+                assert bg_path.isFile() : "CT_META_CAAS background_input must be a regular file or directory"
+                global_background_genes = Channel.value(bg_path)
                 log.info "📄 Loading global background genes file: ${params.background_input}"
             }
         } else {
             error "CT_META_CAAS requires CT background_genes output or --background_input"
         }
 
-        // Guard: gracefully stop the pipeline when discovery has header only (no CAAS rows)
-        def discovery_with_counts = discovery_file_ch
-            .map { f ->
-                def fh = (f instanceof java.nio.file.Path) ? f.toFile() : f
-                def row_count = fh.readLines().size()
-                tuple(f, row_count)
-            }
-
-        def discovery_file_nonempty = discovery_with_counts
-            .filter { f, row_count ->
-                def has_data = row_count > 1
-                if (!has_data) {
-                    exit 0, "No CAAS discoveries found (header-only discovery file: ${f}). Stopping pipeline gracefully."
-                }
-                return has_data
-            }
-            .map { f, row_count -> f }
-
+        // Header-only discovery is a valid result; the report renders its empty state.
         meta_caas_results = CAAS_META_CAAS_REPORT(
-            discovery_file_nonempty,
+            discovery_file_ch,
             global_background_genes
         )
 

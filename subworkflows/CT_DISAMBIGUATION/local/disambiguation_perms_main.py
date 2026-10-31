@@ -26,7 +26,7 @@ the gene's precomputed ASR posteriors once and scores each labeling that has a d
 as the observed pipeline does. No discovery export is written. Each scored cycle is reduced as it is produced to a
 (gene, cycle) unit and the scored positions of the cycle (src/utils/null_tables.py, src/utils/gene_wrapper.py,
 process_all_genes_perms), and the tables of the genes of the batch are written to <output-dir>/null_tables/.
-With --strict-output the tables of the same replay pooled without the hypotheses whose discovery row has conserved pairs
+With --strict-output the tables of the same replay pooled without the hypotheses whose discovery row has residue-type overlap
 are also written to <output-dir>/null_tables_strict/, which is the null of an analysis that keeps only fully divergent
 hypotheses. Replay, ASR and scoring are shared; only the pooling is repeated.
 
@@ -52,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from src.utils.gene_wrapper import process_all_genes_perms, _read_resample_labelings
 from src.utils.perm_stream import ReplaySettings
+from src.core.universe import read_dir as read_universe_dir, STRICT_SUFFIX
 from src.utils.logger import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def parse_arguments():
     p.add_argument(
         "--manifest", required=True,
         help="Tab-separated '<gene id>\\t<alignment file name>' per line: the genes to replay; the gene key is the "
-             "id up to its first dot",
+             "complete id, including embedded dots",
     )
     p.add_argument("--manifest-alignment-dir", default="alignments",
                    help="Directory of the alignment files named in --manifest (default: alignments)")
@@ -87,6 +88,9 @@ def parse_arguments():
         "--resample-dir", required=True,
         help="Directory with resample_*.tab labelings (cycle, fg_csv, bg_csv)",
     )
+    p.add_argument("--universe-dir", required=True, type=Path,
+                   help="Directory of the *.b0.universe files (ct perm-replay --export_b0_universe) of the manifest genes: the "
+                        "positional universe, the only positions the null scores; with --strict-output also the *.b0.universe_strict files")
     p.add_argument("--output-dir", required=True, help="Output directory")
     p.add_argument("--asr-model", default="lg", help="ASR substitution model (default: lg)")
     p.add_argument("--asr-cache-dir", required=True, help="Precomputed ASR cache dir")
@@ -111,6 +115,7 @@ def parse_arguments():
                         "filter as the observed filtered_discovery.tsv.")
     p.add_argument("--clust-minlen", type=int, default=3,
                    help="CT_FILTER minlen (params.filter_minlen; default 3)")
+    p.add_argument("--clust-min-positions", type=int, default=None, help="Minimum candidates per train; default follows clust-minlen")
     p.add_argument("--clust-maxcaas", type=float, default=0.7,
                    help="CT_FILTER maxcaas density (params.filter_maxcaas; default 0.7)")
     p.add_argument("--keep-clusters", action="store_true",
@@ -124,10 +129,15 @@ def parse_arguments():
                    help="File-name tail of the MAP tables (default .map.tsv)")
     p.add_argument("--strict-output", action="store_true",
                    help="Also write null_tables_strict/: the tables of the same replay pooled without the hypotheses "
-                        "whose discovery row has conserved pairs.")
+                        "whose discovery row has residue-type overlap.")
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--log-file", type=Path, default=None)
-    return p.parse_args()
+    args = p.parse_args()
+    import math
+    if (args.clust_minlen < 1 or (args.clust_min_positions is not None and args.clust_min_positions < 1)
+            or not math.isfinite(args.clust_maxcaas) or not 0 <= args.clust_maxcaas <= 1):
+        p.error('Invalid cluster span, minimum candidate count or density')
+    return args
 
 
 def _read_manifest(path: Path, alignment_dir: Path) -> Tuple[list, dict]:
@@ -135,14 +145,16 @@ def _read_manifest(path: Path, alignment_dir: Path) -> Tuple[list, dict]:
 
     Largest first is longest-processing-time scheduling: starting the biggest gene first keeps it from starting
     late and leaving workers idle behind it (see docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md). The gene key is
-    the manifest id up to its first dot, the symbol that find_gene_alignment and the master Gene column use.
+    the complete manifest identifier, including embedded dots.
     """
     alignments: dict = {}
     for line in path.read_text().splitlines():
         if not line.strip():
             continue
         gene_id, name = line.split("\t")[:2]
-        alignments[gene_id.split(".", 1)[0]] = alignment_dir / name
+        if gene_id in alignments:
+            raise ValueError(f'Duplicate gene in manifest: {gene_id}')
+        alignments[gene_id] = alignment_dir / name
     sizes = {g: a.stat().st_size for g, a in alignments.items()}
     genes = sorted(alignments, key=lambda g: (-sizes[g], g))
     return genes, alignments
@@ -199,12 +211,15 @@ def main():
         max_tasks_per_child=args.max_tasks_per_child,
         fop_pairs_file=args.fop_pairs,
         clust_minlen=args.clust_minlen,
+        clust_min_positions=args.clust_min_positions,
         clust_maxcaas=args.clust_maxcaas,
         postproc_filter=args.postproc_filter,
         remove_clusters=not args.keep_clusters,
         train_map_dir=args.train_map_dir,
         train_map_suffix=args.train_map_suffix,
         strict_output=args.strict_output,
+        universe=read_universe_dir(args.universe_dir),
+        universe_strict=read_universe_dir(args.universe_dir, STRICT_SUFFIX) if args.strict_output else None,
     )
     logger.info(f"Done in {time.time() - t0:.1f}s → {out_path}")
 

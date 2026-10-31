@@ -28,8 +28,7 @@
  *  ASR_DIAGNOSTICS: standalone description of the ASR path score of the observed
  *  scoring. It renders the ASR diagnostics report (ASR_DIAGNOSTICS_REPORT), which
  *  describes the distribution of asr_path_score, of its descriptor derived_agreement
- *  and of the ancestral-state posteriors of the Voronoi domains over the scored rows
- *  of caas_convergence_master.csv.
+ *  over the rows of caas_convergence_master.csv, with validated observed provenance.
  *
  *  The workflow runs beside the CT_POSTPROC filtering and does not feed it. The
  *  posterior threshold (params.ct_disambig_posterior_threshold) is applied upstream,
@@ -46,14 +45,42 @@
 
 include { ASR_DIAGNOSTICS_REPORT } from '../subworkflows/ASR_DIAGNOSTICS/asr_diagnostics'
 
+// Nextflow deep caching does not hash files inside a directory. Only these two
+// scientific inputs are consumed by the report; stream them to bound memory.
+def asrInputHash(directory) {
+    def md = java.security.MessageDigest.getInstance('SHA-256')
+    ['caas_convergence_master.csv', 'observed_scoring.json'].each { name ->
+        def source = directory.resolve(name)
+        assert source.isFile() : "[asr_diagnostics] Required observed input not found: ${source}"
+        md.update(name.getBytes('UTF-8'))
+        md.update((byte)0)
+        source.toFile().withInputStream { stream ->
+            byte[] buffer = new byte[1048576]
+            int n
+            while ((n = stream.read(buffer)) != -1) md.update(buffer, 0, n)
+        }
+        md.update((byte)0)
+    }
+    return md.digest().encodeHex().toString()
+}
+
 // ── Archive input ────────────────────────────────────────────────────────────
 
-// Unpack a .tar.gz archive into extracted/, dropping its top-level directory.
-// Used only when --disambiguation_dir points to an archive.
+// Select the unique observed contract; archives may be flat or nested.
+def asrShellQuote(value) { "'" + value.toString().replace("'", "'\"'\"'") + "'" }
+def extraction_source_hash = java.security.MessageDigest.getInstance('SHA-256')
+    .digest(file("${baseDir}/subworkflows/ASR_DIAGNOSTICS/local/src/extract_diagnostics.py").bytes).encodeHex().toString()
 process EXTRACT_DISAMBIG_DIR {
-    input:  path tarball
-    output: path "extracted", emit: dir
-    script: "mkdir -p extracted && tar -xzf '${tarball}' --strip-components=1 -C extracted/"
+    ext extractor_hash: extraction_source_hash
+    cache 'deep'
+    input: path tarball
+    output: path 'extracted', emit: dir
+    script:
+    def helper = "${baseDir}/subworkflows/ASR_DIAGNOSTICS/local/src/extract_diagnostics.py"
+    """
+    echo '${task.ext.extractor_hash}' > extractor.sha256
+    python3 ${asrShellQuote(helper)} ${asrShellQuote(tarball)} extracted
+    """
 }
 
 // ── Workflow ─────────────────────────────────────────────────────────────────
@@ -76,18 +103,20 @@ workflow ASR_DIAGNOSTICS {
             assert d.exists() : "[asr_diagnostics] disambiguation_dir not found: ${params.disambiguation_dir}"
             def dStr = params.disambiguation_dir as String
             if (dStr.endsWith('.tar.gz') || dStr.endsWith('.tgz')) {
-                disambig_dir_ch = EXTRACT_DISAMBIG_DIR(Channel.value(d)).dir.collect().map { it[0] }
+                disambig_dir_ch = EXTRACT_DISAMBIG_DIR(Channel.value(d)).dir
             } else {
+                assert d.isDirectory() : "[asr_diagnostics] Expected a directory or .tar.gz/.tgz archive: ${d}"
                 disambig_dir_ch = Channel.value(d)
             }
         }
 
         def threshold_ch = Channel.value(params.ct_disambig_posterior_threshold)
 
-        log.info "🔬 [asr_diagnostics] Posterior threshold (params.ct_disambig_posterior_threshold): ${params.ct_disambig_posterior_threshold}"
+        log.info "🔬 [asr_diagnostics] Current posterior threshold (the report reads the recorded value): ${params.ct_disambig_posterior_threshold}"
         log.info "📊 [asr_diagnostics] Outputs → ${params.outdir}/asr_diagnostics/"
 
-        diagnostics_output = ASR_DIAGNOSTICS_REPORT(disambig_dir_ch, threshold_ch)
+        diagnostics_output = ASR_DIAGNOSTICS_REPORT(
+            disambig_dir_ch.map { d -> tuple(asrInputHash(d), d) }, threshold_ch)
 
     emit:
         report  = diagnostics_output.report   // 9.ASR_diagnostics.html

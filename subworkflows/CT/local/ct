@@ -72,7 +72,7 @@ if len(sys.argv) == 1:                                                  # The us
 
 tool = sys.argv[1]
 
-if "help" in tool.lower() or tool.lower == "-h":                                              # The user requested the toolbox-wide help prompt (genhelp)
+if "help" in tool.lower() or tool.lower() == "-h":                                              # The user requested the toolbox-wide help prompt (genhelp)
     print(application_info)
     print(genhelp)                                                      # Print toolbox-wide help
     exit()
@@ -81,7 +81,7 @@ if tool.lower() != "perm-replay":          # Check: the user mistyped the name o
     print(application_info)
     print(genhelp)                                                      # Print toolbox-wide help
     print("\n\n****ERROR: no tool named", tool + "\n\n")
-    exit()
+    exit(1)
 
 
 
@@ -197,9 +197,19 @@ if tool.lower() == "perm-replay":
     parser.add_option("--export_b0_background", dest="export_b0_background",
                     help="Path to output file for the positions tested by the b_0 labeling(s): '<gene>\\t<pos,pos,...|NULL>'. Default = disabled.", default = None)
 
+    parser.add_option("--export_b0_universe", dest="export_b0_universe",
+                    help="Path to output file for the positional universe of the b_0 hypotheses: '<gene>\\t<pos,pos,...|NULL>'. A position belongs to it when b_0 tested it and \
+                    some orientation of the pairs (members swapped inside a pair) of some b_0 hypothesis passes the whole CAAS test with the limits given here. Default = disabled.", default = None)
+
+    parser.add_option("--export_b0_universe_strict", dest="export_b0_universe_strict",
+                    help="Like --export_b0_universe with no conserved pair allowed (max_conserved 0): the universe of the strict analysis. Default = disabled.", default = None)
+
+    parser.add_option("--universe_max_pairs", dest="universe_max_pairs",
+                    help="Largest number of pairs per hypothesis for which the 2**K orientations of the universe are replayed. Default = 12.", default = "12")
+
     ### 3.4 Usage
 
-    parser.usage = "ct perm-replay (-a $alignment_file | --manifest $genes_file [--alignment_dir $dir] [--claim_dir $dir]) -t $trait_config_file -s $labelings_file --fmt $alignment_format (default:clustal) [--export_perm_discovery $file] [--export_b0_discovery $file] [--export_b0_background $file] [--export_groups $file]\n\nNOTE: -s is one labelings file: tag, foreground species, background species (tab-separated, no header)\nNOTE: at least one export is required; with --manifest every export path contains {id}"
+    parser.usage = "ct perm-replay (-a $alignment_file | --manifest $genes_file [--alignment_dir $dir] [--claim_dir $dir]) -t $trait_config_file -s $labelings_file --fmt $alignment_format (default:clustal) [--export_perm_discovery $file] [--export_b0_discovery $file] [--export_b0_background $file] [--export_b0_universe $file] [--export_groups $file]\n\nNOTE: -s is one labelings file: tag, foreground species, background species (tab-separated, no header)\nNOTE: at least one export is required; with --manifest every export path contains {id}"
 
     ### 3.5 Parse the options
 
@@ -216,7 +226,7 @@ if tool.lower() == "perm-replay":
         missing_option_messages.append("-a and --manifest are exclusive")
 
     if options.manifest:
-        for export in (options.export_groups, options.export_perm_discovery, options.export_b0_discovery, options.export_b0_background):
+        for export in (options.export_groups, options.export_perm_discovery, options.export_b0_discovery, options.export_b0_background, options.export_b0_universe, options.export_b0_universe_strict):
             if export and "{id}" not in export:
                 missing_option_messages.append("With --manifest every export path must contain {id}: " + export)
 
@@ -226,8 +236,8 @@ if tool.lower() == "perm-replay":
     if options.simtraits == "none":
         missing_option_messages.append("No labelings file provided")
 
-    if not (options.export_groups or options.export_perm_discovery or options.export_b0_discovery or options.export_b0_background):
-        missing_option_messages.append("No export requested (--export_perm_discovery, --export_b0_discovery, --export_b0_background or --export_groups)")
+    if not (options.export_groups or options.export_perm_discovery or options.export_b0_discovery or options.export_b0_background or options.export_b0_universe or options.export_b0_universe_strict):
+        missing_option_messages.append("No export requested (--export_perm_discovery, --export_b0_discovery, --export_b0_background, --export_b0_universe or --export_groups)")
 
     if len(missing_option_messages) > 0:
         print("\n" + application_info)
@@ -266,6 +276,8 @@ if tool.lower() == "perm-replay":
     def replay_alignment(alignment, gene_id=None):
         options.single_alignment = alignment
         sliced_alignment = runslice(options)
+        if gene_id is not None:
+            sliced_alignment.genename = gene_id
 
         def export_path(path):
             return path.replace("{id}", gene_id) if (path and gene_id is not None) else path
@@ -291,12 +303,17 @@ if tool.lower() == "perm-replay":
                     export_groups = export_path(options.export_groups),
                     export_perm_discovery = export_path(options.export_perm_discovery),
                     export_b0_background = export_path(options.export_b0_background),
-                    export_b0_discovery = export_path(options.export_b0_discovery)
+                    export_b0_discovery = export_path(options.export_b0_discovery),
+                    export_b0_universe = export_path(options.export_b0_universe),
+                    export_b0_universe_strict = export_path(options.export_b0_universe_strict),
+                    universe_max_pairs = int(options.universe_max_pairs)
                     )
 
     if options.manifest:
         with open(options.manifest) as manifest_handle:
-            genes = [line.split("\t")[:2] for line in manifest_handle.read().splitlines() if line.strip()]
+            genes = [line.split("\t") for line in manifest_handle.read().splitlines() if line.strip()]
+        if any(len(row) != 2 or not all(row) for row in genes) or len({row[0] for row in genes}) != len(genes):
+            raise ValueError("Manifest requires unique gene IDs and exactly two nonempty columns")
         if options.claim_dir:
             os.makedirs(options.claim_dir, exist_ok=True)
         for gene_id, alignment_name in genes:

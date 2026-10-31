@@ -67,8 +67,8 @@ process CONCAT_RESAMPLE {
     
     # Without resample files a placeholder is written and the process ends successfully
     if [ \${#resample_files[@]} -eq 0 ]; then
-        echo "WARNING: No resample files found - creating placeholder file"
-        echo "No resample files found" > resample.tab
+        echo "WARNING: No resample files found - creating empty file"
+        : > resample.tab
         exit 0
     fi
     

@@ -72,13 +72,11 @@ def main() -> int:
     ap.add_argument("--gene-stat", default="max", choices=GENE_STATS,
                     help="gene statistic of the matrices named `stat` (the others stay in the parts)")
     ap.add_argument("--seed", type=int, default=1998, help="pipeline seed (params.seed): the per-cycle sample")
-    ap.add_argument("--gene-lengths", default=None, help="gene annotation TSV (gene, length ...); enables the dubious/extreme removal")
-    ap.add_argument("--gene-filter-mode", default="none", choices=["none", "extreme", "dubious", "both", "stratified"])
+    ap.add_argument("--gene-lengths", default=None, help="gene annotation TSV (gene, length ...); enables the gene removal")
+    ap.add_argument("--gene-filter-mode", default="none", choices=["none", "stratified"])
     ap.add_argument("--gene-strata", type=int, default=10, help="stratified mode: number of length strata")
     ap.add_argument("--gene-k-far", type=float, default=3.0, help="stratified mode: IQR multiplier of the far fence")
     ap.add_argument("--gene-k-near", type=float, default=1.5, help="stratified mode: IQR multiplier of the near fence (with a train position)")
-    ap.add_argument("--iqr-multiplier", type=float, default=3.0)
-    ap.add_argument("--extreme-percentile", type=float, default=0.99)
     ap.add_argument("--map-dir", "--train-map-dir", type=Path, default=None, help="directory of the trimmer's MAP tables (untrimmed lengths)")
     ap.add_argument("--map-suffix", type=str, default=".map.tsv")
     args = ap.parse_args()
@@ -103,14 +101,14 @@ def main() -> int:
 
     removal_on = (bool(args.gene_lengths) or bool(args.map_dir)) and args.gene_filter_mode != "none"
     lengths = {}
+    length_sources = {}
     if removal_on:
         from src.core.postproc import load_gene_lengths
         lengths = load_gene_lengths(path=str(args.gene_lengths) if args.gene_lengths else None,
-                                    map_dir=str(args.map_dir) if args.map_dir else None, map_suffix=args.map_suffix)
+                                    map_dir=str(args.map_dir) if args.map_dir else None, map_suffix=args.map_suffix,sources=length_sources)
     per_cycle = int(os.environ.get("CAAS_PERMS_SAMPLE_PER_CYCLE", "200"))
-    counts = merge_block(args.tiles, args.output_dir, cycles, universe=universe, lengths=lengths,
+    counts = merge_block(args.tiles, args.output_dir, cycles, universe=universe, lengths=lengths, length_sources=length_sources,
                          gene_filter_mode=args.gene_filter_mode if removal_on else "none",
-                         iqr_multiplier=args.iqr_multiplier, extreme_percentile=args.extreme_percentile,
                          gene_strata=args.gene_strata, gene_k_far=args.gene_k_far, gene_k_near=args.gene_k_near,
                          gene_stat=args.gene_stat, seed=args.seed, sample_per_cycle=per_cycle)
     silent = len(cycles) - len(counts["cycles_present"])

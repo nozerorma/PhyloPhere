@@ -38,9 +38,8 @@ SPEC = ModuleTabSpec(
         "• Both Selected: Produces separate script pairs (sbatch_exploratory.sh and sbatch_filtering.sh) for parallel or sequential execution.\n\n"
         "ℹ️ Gene Filter Mode (Advanced):\n"
         "• none: no gene-level filtering.\n"
-        "• extreme: drops genes whose CAAS count exceeds the Extreme-gene quantile threshold.\n"
-        "• dubious: drops genes flagged by cluster-based IQR screening (Dubious-gene IQR multiplier; needs a cluster file).\n"
-        "• both: applies extreme and dubious together."
+        "• stratified: drops genes whose CAAS count exceeds the far fence of their gene-length stratum, or the near fence "
+        "when they also carry a cluster train (needs a cluster file)."
     ),
     disclaimer=(
         "Accumulation and Scoring need this module's output. Check 'Use precomputed "
@@ -139,11 +138,11 @@ SPEC = ModuleTabSpec(
             name="gene_filter_mode",
             label="Gene filter mode",
             kind="choice",
-            choices=("none", "extreme", "dubious", "both", "stratified"),
+            choices=("none", "stratified"),
             importance="default",
             help=(
-                "none: no gene filter; extreme: drop genes with outlier CAAS counts; dubious: drop genes flagged by cluster IQR screening; both: apply both; "
-                "stratified: one rule that compares each gene with genes of its own length (see the stratified-mode fields below)."
+                "none: no gene filter; stratified: one rule that compares each gene with genes of its own length "
+                "(see the fence fields below)."
             ),
         ),
         FieldSpec(
@@ -189,38 +188,24 @@ SPEC = ModuleTabSpec(
             help="Comma-separated Cluster max CAAS value values to grid-search. Used "
                  "only when Exploratory Sweep is selected.",
         ),
-        Section("Gene-level outlier thresholds (conf/ct_postproc.config)"),
-        FieldSpec(
-            name="extreme_threshold",
-            label="Extreme-gene quantile threshold",
-            importance="default",
-            help="Quantile above which a gene's CAAS count is considered an outlier. "
-                 "Only used when Gene filter mode is 'extreme' or 'both'.",
-        ),
-        FieldSpec(
-            name="iqr_multiplier",
-            label="Dubious-gene IQR multiplier",
-            importance="default",
-            help="IQR multiplier for the cluster-based dubious-gene screen. Only used "
-                 "when Gene filter mode is 'dubious' or 'both' (needs a cluster file).",
-        ),
+        Section("Gene-level outlier fences (conf/ct_postproc.config)"),
         FieldSpec(
             name="gene_filter_strata",
-            label="Gene-length strata (stratified mode)",
+            label="Gene-length strata",
             importance="default",
             help="Number of equal-size gene-length strata in which the outlier fences are computed, so that a gene "
                  "is compared with genes of its own length. Only used when Gene filter mode is 'stratified'.",
         ),
         FieldSpec(
             name="gene_filter_k_far",
-            label="Far-fence IQR multiplier (stratified mode)",
+            label="Far-fence IQR multiplier",
             importance="default",
             help="A gene whose CAAS count exceeds Q3 + k x IQR of its length stratum is removed. "
                  "Only used when Gene filter mode is 'stratified'.",
         ),
         FieldSpec(
             name="gene_filter_k_near",
-            label="Near-fence IQR multiplier (stratified mode)",
+            label="Near-fence IQR multiplier",
             importance="default",
             help="A gene above this lower fence is removed only when it also carries a cluster train "
                  "(needs a cluster file). Only used when Gene filter mode is 'stratified'.",

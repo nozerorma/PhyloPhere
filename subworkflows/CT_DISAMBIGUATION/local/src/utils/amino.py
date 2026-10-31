@@ -13,26 +13,13 @@ Imported by: src/core/observed.py, src/utils/gene_wrapper.py
 from typing import List, Optional
 
 
+STANDARD_AAS = frozenset('ACDEFGHIKLMNPQRSTVWY')
+
+
+def clean_amino(value):
+    aa = str(value).strip().upper() if value is not None else ''
+    return aa if aa in STANDARD_AAS else None
+
+
 def normalize_amino_list(values: List[Optional[str]]) -> List[str]:
-    """Clean and deduplicate a list of amino-acid codes.
-
-    Normalization rules:
-    - cast to uppercase strings
-    - drop empty/unknown/gap tokens: ``""``, ``-``, ``X``, ``?``
-    - preserve first-seen order while removing duplicates
-    """
-    cleaned: List[str] = []
-    seen = set()
-
-    for value in values or []:
-        if value is None:
-            continue
-
-        aa = str(value).strip().upper()
-        if aa in {"", "-", "X", "?"} or aa in seen:
-            continue
-
-        seen.add(aa)
-        cleaned.append(aa)
-
-    return cleaned
+    return list(dict.fromkeys(aa for value in values or [] if (aa := clean_amino(value)) is not None))

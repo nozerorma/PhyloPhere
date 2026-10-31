@@ -29,207 +29,104 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
-// Import local processes from subworkflows
-include { CAAS_PREPARE_POSTPROC_INPUT; CT_FILTER; CT_FILTER_SUMMARY; CAAS_FILTER_GENES; CAAS_BACKGROUND_CLEANUP; clusterParameterGrid; clusterFileSuffix } from '../subworkflows/CT_POSTPROC/ctpp_clustfilter'
+include { CAAS_PREPARE_POSTPROC_INPUT; CT_FILTER; CT_FILTER_SUMMARY; CAAS_FILTER_GENES; CAAS_BACKGROUND_CLEANUP; clusterParameterGrid; clusterFileSuffix; ppHash } from '../subworkflows/CT_POSTPROC/ctpp_clustfilter'
 include { CT_POSTPROC_REPORT } from '../subworkflows/CT_POSTPROC/ctpp_characterization'
 include { ASR_DIAGNOSTICS } from './asr_diagnostics'
 
 workflow CT_POSTPROC {
     take:
-        disambiguation_input_channel      // Post-disambiguation master CSV (optional, can use --disambiguation_input instead)
-        background_genes_channel     // Global background genes file from CT module (preferred)
-        disambiguation_dir_channel   // Full ct_disambiguation/ directory for the ASR diagnostics report (optional)
-        hyp_pairs_channel            // contrast_hypotheses_pairs.tsv of this run's contrast selection (null: auto-discover in outdir)
+    disambiguation_input_channel
+    background_genes_channel
+    disambiguation_dir_channel
+    hyp_pairs_channel
+    taxid_map_channel   // curated tax_id map (NAME_CURATION) or null: then --tax_id is read as given
 
     main:
-        def filter_dir_ch = Channel.value("${params.outdir}/postproc")
-
-        // Determine discovery file source: channel input or parameter
-        def discovery_file_ch
-        def discovery_file_obj
-        
-        // Check if using upstream outputs (integrated mode) or standalone mode
-        if (disambiguation_input_channel) {
-            log.info "📥 Using discovery file from upstream disambiguation output"
-            discovery_file_ch = disambiguation_input_channel
-            discovery_file_obj = null
-        } else {
-            assert params.disambiguation_input : "CT Post-Processing requires disambiguation master CSV from upstream workflow or --disambiguation_input parameter"
-            discovery_file_obj = file(params.disambiguation_input)
-            assert discovery_file_obj.exists() : "Error: disambiguation_input file not found: ${params.disambiguation_input}"
-            assert discovery_file_obj.isFile() : "Error: disambiguation_input must be a file"
-            discovery_file_ch = Channel.value(discovery_file_obj)
+    assert disambiguation_input_channel != null || params.disambiguation_input : 'CT_POSTPROC requires observed master input'
+    def discovery_ch = (disambiguation_input_channel ?: Channel.value(file(params.disambiguation_input, checkIfExists: true)))
+        .collect().map { hits ->
+            assert hits.size() == 1 : 'Expected exactly one observed master'
+            hits[0]
         }
-        
-        // ── ASR diagnostics report (parallel, does NOT affect clustering path) ────────────
-        // Resolve the ct_disambiguation/ directory: prefer the upstream channel, then
-        // derive from disambiguation_input CSV path when running in standalone mode.
-        if (params.asr_diagnostics) {
-            def asr_dir_ch
-            if (disambiguation_dir_channel) {
-                asr_dir_ch = disambiguation_dir_channel
-            } else if (params.disambiguation_input) {
-                def csv_parent = file(params.disambiguation_input).parent
-                asr_dir_ch = Channel.value(csv_parent)
-            } else {
-                asr_dir_ch = null
-            }
-            if (asr_dir_ch) {
-                ASR_DIAGNOSTICS(asr_dir_ch)
-            } else {
-                log.warn "[asr_diagnostics] No disambiguation directory available — ASR diagnostics skipped."
-            }
+    def observed_ch = discovery_ch.map { master ->
+        assert master.isFile() : 'CT_POSTPROC requires a master CSV'
+        def stamp = master.parent.resolve('observed_scoring.json')
+        tuple(ppHash([master, stamp]), master, stamp)
+    }
+    if (params.asr_diagnostics) {
+        ASR_DIAGNOSTICS(disambiguation_dir_channel ?: discovery_ch.map { it.parent })
+    }
+    def pairs_ch
+    if (hyp_pairs_channel != null) {
+        pairs_ch = hyp_pairs_channel.map { p -> p.name.startsWith('NO_') ? [] : p }.ifEmpty([])
+    } else {
+        def p = file("${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv")
+        pairs_ch = Channel.value(p.exists() ? p : [])
+    }
+    def taxid_ch
+    if (taxid_map_channel != null) {
+        taxid_ch = taxid_map_channel.map { t -> t.name.startsWith('NO_') ? [] : t }.ifEmpty([])
+    } else {
+        taxid_ch = Channel.value(params.tax_id ? file(params.tax_id, checkIfExists: true) : [])
+    }
+    def alignment = params.alignment ? file(params.alignment, checkIfExists: true) : []
+    def maps = params.caas_map_dir ? file(params.caas_map_dir, checkIfExists: true) : []
+    def map_hash = ppHash(maps ? [maps] : [])
+    def prepared = CAAS_PREPARE_POSTPROC_INPUT(observed_ch, pairs_ch, alignment,
+        ppHash(alignment ? [alignment] : []), taxid_ch)
+    def background_ch
+    if (background_genes_channel != null) {
+        background_ch = background_genes_channel
+    } else {
+        assert params.background_input : 'CT_POSTPROC requires --background_input or upstream background'
+        def bg = file(params.background_input, checkIfExists: true)
+        if (bg.isDirectory()) {
+            def hits = files("${bg}/*background_genes*", type: 'file')
+            assert hits.size() == 1 : "Expected exactly one background_genes file in ${bg}; found ${hits.size()}"
+            bg = hits[0]
         }
-
-        // Normalize discovery/disambiguation schema and apply the current
-        // precluster hard filters used by CT post-processing.
-        // Contrast design for the species tally: this run's contrast selection, else the file in outdir, else the sentinel.
-        def hyp_pairs_file
-        if (hyp_pairs_channel != null) {
-            hyp_pairs_file = hyp_pairs_channel.ifEmpty(file('NO_HYP_PAIRS')).collect().map { it[0] }
-        } else {
-            def auto_hp = file("${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv")
-            hyp_pairs_file = Channel.value(auto_hp.exists() ? auto_hp : file('NO_HYP_PAIRS'))
-        }
-        prepared_inputs = CAAS_PREPARE_POSTPROC_INPUT(discovery_file_ch, hyp_pairs_file)
-        def prepared_discovery_ch = prepared_inputs.prepared_discovery
-
-        log.info "📂 Post-processing input normalized from disambiguation master CSV"
-        
-        // Handle global background genes source for cleanup
-        def global_background_genes
-        if (params.ct_tool && background_genes_channel) {
-            global_background_genes = background_genes_channel
-            log.info "📥 Using global background genes from CT_DISCOVERY module"
-        } else if (params.background_input) {
-            def bg_path = file(params.background_input)
-            assert bg_path.exists() : "Error: background_input file/directory not found: ${params.background_input}"
-
-            if (bg_path.isDirectory()) {
-                // Prefer background_genes-like files in standalone mode directories
-                global_background_genes = Channel.fromPath("${params.background_input}/*background_genes*")
-                log.info "📂 Loading global background genes from directory: ${params.background_input}"
-            } else {
-                // Single file
-                global_background_genes = Channel.fromPath(params.background_input)
-                log.info "📄 Loading global background genes file: ${params.background_input}"
-            }
-        } else {
-            error "CT Post-Processing requires CT background_genes output or --background_input (global genes)"
-        }
-        
-        // The parameter pair of the production filter. params.filter_minlen/filter_maxcaas may arrive as
-        // plain Strings (JSON/CLI params), and CT_FILTER's script does `(maxcaas * 100).toInteger()`, where
-        // `*` on a String repeats it ("0.7" * 100 is "0.70.7..."), so both are cast to numbers here.
-        def filter_minlen_val = params.filter_minlen.toInteger()
-        def filter_maxcaas_val = params.filter_maxcaas.toDouble()
-
-        // Determine processing mode and create parameter combinations channel
-        if (params.caas_postproc_mode == 'exploratory') {
-            // Parameter sweep over minlen_values x maxcaas_values (plus the selected pair when it is outside the grid)
-            def minlen_list = params.minlen_values.split(',').collect { it.trim().toInteger() }
-            def maxcaas_list = params.maxcaas_values.split(',').collect { it.trim().toDouble() }
-            def combos = clusterParameterGrid(minlen_list, maxcaas_list, filter_minlen_val, filter_maxcaas_val)
-
-            param_combinations = Channel
-                .fromList(combos)
-                .combine(prepared_discovery_ch)
-                .map { minlen, maxcaas, disc_file -> tuple('exploratory', minlen, maxcaas, disc_file) }  // combine flattens the pair
-
-            log.info "🔍 Exploratory mode: testing ${combos.size()} parameter combinations"
-
-        } else if (params.caas_postproc_mode == 'filter') {
-            // Single filter run: the selected minlen and maxcaas.
-            param_combinations = Channel
-                .of(tuple('filter', filter_minlen_val, filter_maxcaas_val))
-                .combine(prepared_discovery_ch)
-                .map { mode, minlen, maxcaas, disc_file ->
-                    tuple(mode, minlen, maxcaas, disc_file)
-                }
-            
-            log.info "🔧 Filter mode: running with minlen=${params.filter_minlen}, maxcaas=${params.filter_maxcaas}"
-            
-        } else {
-            error "Invalid caas_postproc_mode: ${params.caas_postproc_mode}. Must be 'exploratory' or 'filter'"
-        }
-        
-        // Run cluster filtering process
-        filter_results = CT_FILTER(param_combinations)
-        
-        // Collect all results and generate consolidated summary
-        filter_summary_results = CT_FILTER_SUMMARY(
-            filter_results.filtered_files.collect()
-        )
-        
-        // Run gene-level filtering (always -- see note below)
-        def characterization_results = null
-
-        // CAAS_FILTER_GENES always runs -- filter_caas_genes.py's own
-        // mode='none' path (apply_gene_filter, mode='none') is a pure
-        // passthrough of discovery_df, so this is the one code path that
-        // correctly preserves the full discovery schema (asr_path_score,
-        // core, ...) for every gene_filter_mode, 'none' included. An earlier
-        // version special-cased 'none' to skip this process and reuse
-        // CT_FILTER's own output instead, but that file only ever carries
-        // Gene/Position/clustering_flag (see filter_caas_clusters-param.py's
-        // docstring) -- not the annotated columns SCORING needs.
-        assert params.gene_ensembl_file : "Error: --gene_ensembl_file is required for gene filtering"
-
-        def gene_ensembl_file = file(params.gene_ensembl_file)
-        assert gene_ensembl_file.exists() : "Error: gene_ensembl_file not found: ${params.gene_ensembl_file}"
-
-        log.info "🧬 Running gene-level filtering (mode: ${params.gene_filter_mode})..."
-
-        // The gene filter uses the cluster file of the selected pair (filter_minlen, filter_maxcaas),
-        // in filter mode and in exploratory mode alike. The name follows CT_FILTER's output naming.
-        def selected_cluster_suffix = clusterFileSuffix(filter_minlen_val, filter_maxcaas_val)
-        def cluster_file = filter_results.filtered_files
-            .collect()
-            .map { files ->
-                def hit = files.flatten().find { it.name.endsWith(selected_cluster_suffix) }
-                assert hit : "Error: CT_FILTER produced no cluster file ending in ${selected_cluster_suffix}"
-                hit
-            }
-
-        def gene_filter_results = CAAS_FILTER_GENES(
-            prepared_discovery_ch,
-            gene_ensembl_file,
-            cluster_file
-        )
-
-        // Run background cleanup (always -- a no-op removed_genes_summary in
-        // 'none' mode just yields an unchanged background)
-        cleaned_backgrounds = CAAS_BACKGROUND_CLEANUP(
-            global_background_genes,
-            gene_filter_results.removed_genes
-        )
-
-        def filtered_discovery_ch = gene_filter_results.filtered_discovery
-        def cleaned_background_main_ch = cleaned_backgrounds.cleaned_background_main
-
-        log.info "Cleaned background files: ${params.outdir}/postproc/cleaned_backgrounds"
-        
-        // Characterization reports always run (gene_ensembl_file is already resolved and validated above).
-        log.info "📊 CT characterization reports..."
-
-        // The report reads the published cluster files of the filter mode's directory
-        def filter_output_dir = params.caas_postproc_mode == 'exploratory' ?
-            "${params.outdir}/postproc/filter_${params.caas_postproc_mode}" :
-            "${params.outdir}/postproc/filter_selected"
-
-        characterization_results = CT_POSTPROC_REPORT(
-            prepared_discovery_ch,
-            filter_summary_results.summary,
-            filter_output_dir,
-            gene_ensembl_file,
-            gene_filter_results.gene_stats
-        )
-
-        log.info "Post-processing reports generated in: ${params.outdir}/postproc/reports"
-    
+        assert bg.isFile() : "Expected background file: ${bg}"
+        background_ch = Channel.value(bg)
+    }
+    background_ch = background_ch.collect().map { hits ->
+        assert hits.size() == 1 : 'Expected exactly one global background'
+        hits[0]
+    }
+    def minlen = params.filter_minlen.toString().toInteger()
+    def maxcaas = params.filter_maxcaas.toString().toDouble()
+    assert minlen >= 1 && Double.isFinite(maxcaas) && maxcaas >= 0 && maxcaas <= 1 : 'Invalid cluster parameters'
+    if (params.filter_min_positions != null) {
+        assert params.filter_min_positions.toString() ==~ /[1-9][0-9]*/ : 'filter_min_positions must be a positive integer'
+    }
+    assert params.caas_postproc_mode in ['filter','exploratory'] : 'Invalid caas_postproc_mode'
+    def combos = params.caas_postproc_mode == 'exploratory' ? clusterParameterGrid(
+        params.minlen_values.split(',').collect { it.trim().toInteger() },
+        params.maxcaas_values.split(',').collect { it.trim().toDouble() }, minlen, maxcaas) : [[minlen,maxcaas]]
+    assert combos.every { it[0] >= 1 && Double.isFinite(it[1]) && it[1] >= 0 && it[1] <= 1 } : 'Invalid exploratory parameters'
+    def combinations = Channel.fromList(combos).combine(prepared.prepared_discovery)
+        .map { l,c,d -> tuple(params.caas_postproc_mode,l,c,d) }
+    def filters = CT_FILTER(combinations, maps, map_hash)
+    def all_filters = filters.filtered_files.collect()
+    def summary = CT_FILTER_SUMMARY(all_filters)
+    def selected = all_filters.map { files ->
+        def hits = files.flatten().findAll { it.name.endsWith(clusterFileSuffix(minlen,maxcaas)) }
+        assert hits.size() == 1 : 'Expected one selected cluster artifact'
+        hits[0]
+    }
+    assert params.gene_ensembl_file : 'CT_POSTPROC requires --gene_ensembl_file'
+    def lengths = file(params.gene_ensembl_file, checkIfExists: true)
+    def selected_contract = filters.filter_contracts.collect().map { hits ->
+        def found = hits.flatten().findAll { it.name.endsWith(clusterFileSuffix(minlen,maxcaas)+'.scoring.json') }
+        assert found.size()==1 : 'Expected one selected cluster contract'
+        found[0]
+    }
+    def genes = CAAS_FILTER_GENES(prepared.prepared_discovery, prepared.quality_universe, selected_contract, lengths, selected, maps, map_hash)
+    def background = CAAS_BACKGROUND_CLEANUP(background_ch, genes.removed_genes)
+    CT_POSTPROC_REPORT(prepared.prepared_discovery, summary.summary, all_filters, selected,
+        lengths, genes.gene_stats, genes.removed_genes, genes.filtered_discovery, prepared.quality_universe)
     emit:
-        filter_summary = filter_summary_results.summary  // filter_summary.tsv (one row per parameter pair)
-        filter_dir = filter_dir_ch
-        filtered_discovery = filtered_discovery_ch
-        cleaned_background = cleaned_background_main_ch
+    filter_summary = summary.summary
+    filter_dir = Channel.value("${params.outdir}/postproc")
+    filtered_discovery = genes.filtered_discovery
+    cleaned_background = background.cleaned_background_main
 }

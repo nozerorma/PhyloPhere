@@ -17,7 +17,11 @@
 
 // ── Composition report ─────────────────────────────────────────────────────────
 
+def report_hash = java.security.MessageDigest.getInstance('SHA-256')
+    .digest((file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/3.CI-composition.Rmd").text + file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R").text).getBytes('UTF-8')).encodeHex().toString()
+
 process CI_COMPOSITION_REPORT {
+    ext report_source_hash: report_hash
     tag "CI_COMPOSITION_REPORT"
     label 'process_contrast_selection'
     publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename -> filename.equals('data_exploration') || filename.startsWith('data_exploration/') ? filename : null }
@@ -30,6 +34,8 @@ process CI_COMPOSITION_REPORT {
 
     output:
     path results_dir, emit: results_dir
+    // Required so cached pre-curation reports without the shared bundle rerun.
+    path "${results_dir}/1.Data-exploration/5.CI_overlaps/observed_selection.rds", emit: selection_inputs
     path "*.html", emit: reports, optional: true
     path "${results_dir}/**/*.csv", emit: data_tables, optional: true
     path "${results_dir}/**/*.png", emit: plots, optional: true
@@ -52,13 +58,14 @@ process CI_COMPOSITION_REPORT {
     def c_trait = params.c_trait ?: ''
     def branch_trait = params.branch_trait ?: ''
     def secondary_trait = params.secondary_trait ?: ''
-    def pss_top_pct = params.pss_top_pct ?: '0.05'
+    def pss_top_pct = params.pss_top_pct != null ? params.pss_top_pct : '0.05'
     def pair_center_gate = params.pair_center_gate ?: 'none'
     def perm_strategy = params.perm_strategy ?: 'best_model'
     def trait_type = params.trait_type ?: ''
 
     if (params.use_singularity | params.use_apptainer) {
         """
+        echo '${task.ext.report_source_hash}' > report_source.sha256
         cp -R ${local_dir}/* .
         cp ${ct_scripts}/lean_contrast_selector.R ${ct_scripts}/pss_core.R src/
         if [ -L "${results_dir}" ]; then
@@ -94,6 +101,7 @@ process CI_COMPOSITION_REPORT {
         """
     } else {
         """
+        echo '${task.ext.report_source_hash}' > report_source.sha256
         cp -R ${local_dir}/* .
         cp ${ct_scripts}/lean_contrast_selector.R ${ct_scripts}/pss_core.R src/
         if [ -L "${results_dir}" ]; then

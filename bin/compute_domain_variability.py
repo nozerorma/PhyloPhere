@@ -39,6 +39,7 @@ Usage:
 
 import argparse
 import gzip
+import fcntl
 import hashlib
 import json
 import os
@@ -54,7 +55,6 @@ from map_domain_variability import get_ref_seq, parse_domtblout, read_fasta  # n
 _PFAM_HMM_URL = "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz"
 _PFAM_CLANS_URL = "https://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.clans.tsv.gz"
 
-
 def sha256_file(path):
     digest = hashlib.sha256()
     with open(path, 'rb') as handle:
@@ -66,11 +66,17 @@ def sha256_file(path):
 def _download_gz(url: str, dest: str) -> None:
     """Download a gzip file and write it decompressed to dest."""
     print(f"Downloading {url} -> {dest}", file=sys.stderr)
-    tmp_gz = dest + ".gz.tmp"
-    urllib.request.urlretrieve(url, tmp_gz)
-    with gzip.open(tmp_gz, "rb") as fin, open(dest, "wb") as fout:
-        shutil.copyfileobj(fin, fout)
-    os.remove(tmp_gz)
+    tmp_gz = dest + f'.{os.getpid()}.gz.tmp'
+    unpacked = dest + f'.{os.getpid()}.tmp'
+    try:
+        urllib.request.urlretrieve(url, tmp_gz)
+        with gzip.open(tmp_gz, 'rb') as fin, open(unpacked, 'wb') as fout:
+            shutil.copyfileobj(fin, fout)
+        os.replace(unpacked, dest)
+    finally:
+        for path in (tmp_gz, unpacked):
+            if os.path.exists(path):
+                os.remove(path)
 
 
 def ensure_pfam_cache(cache_dir: str) -> tuple:
@@ -79,14 +85,16 @@ def ensure_pfam_cache(cache_dir: str) -> tuple:
     hmm_path = os.path.join(cache_dir, "Pfam-A.hmm")
     clans_path = os.path.join(cache_dir, "Pfam-A.clans.tsv")
 
-    if not os.path.exists(hmm_path):
-        _download_gz(_PFAM_HMM_URL, hmm_path)
-    if not os.path.exists(hmm_path + ".h3f"):
-        print(f"Running hmmpress on {hmm_path}", file=sys.stderr)
-        subprocess.run(["hmmpress", hmm_path], check=True)
-
-    if not os.path.exists(clans_path):
-        _download_gz(_PFAM_CLANS_URL, clans_path)
+    # Concurrent workflow starts must not observe a partially prepared shared cache.
+    with open(os.path.join(cache_dir, '.pfam.lock'), 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not os.path.exists(hmm_path):
+            _download_gz(_PFAM_HMM_URL, hmm_path)
+        if not all(os.path.exists(hmm_path+'.'+suffix) for suffix in ('h3f','h3i','h3m','h3p')):
+            print(f'Running hmmpress on {hmm_path}', file=sys.stderr)
+            subprocess.run(['hmmpress', '-f', hmm_path], check=True)
+        if not os.path.exists(clans_path):
+            _download_gz(_PFAM_CLANS_URL, clans_path)
 
     return hmm_path, clans_path
 
@@ -170,6 +178,7 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
     hmm_path, clans_path = ensure_pfam_cache(args.cache_dir)
+    reference_hashes = [sha256_file(hmm_path), sha256_file(clans_path)]
     clan_meta = load_clan_metadata(clans_path)
 
     ref_fasta = os.path.join(args.output_dir, "reference_seqs.fa")
@@ -229,8 +238,14 @@ def main():
                      f"{hit['ali_start']}\t{hit['ali_end']}\t{positions}\tCAAS_0based\n")
             n_written += 1
 
+    if reference_hashes != [sha256_file(hmm_path), sha256_file(clans_path)]:
+        raise ValueError('Pfam resources changed during annotation')
     manifest = {
         "coordinate_space": "CAAS_0based", "ref_species": args.ref_species,
+        "source_uri": _PFAM_HMM_URL,
+        "version": "sha256:"+sha256_file(hmm_path),
+        "coverage_positions": query_columns,
+        "coverage": "all_productive_alignment_columns", "coverage_genes": genes,
         "sequence_evalue_max": args.sequence_evalue_threshold,
         "domain_ievalue_max": args.evalue_threshold,
         "alignment_dir": str(Path(args.alignment_dir).resolve()),

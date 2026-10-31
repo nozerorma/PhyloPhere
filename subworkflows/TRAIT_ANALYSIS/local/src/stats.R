@@ -19,6 +19,21 @@ if (!exists("debug_log", inherits = TRUE)) {
   }
 }
 
+# Numeric conversion must precede missing-value filtering. Reject invalid values
+# rather than silently converting them to NA or including infinities in summaries.
+numeric_trait_values <- function(values, column = "trait") {
+  text <- as.character(values)
+  missing <- is.na(values) | !nzchar(trimws(text))
+  result <- suppressWarnings(as.numeric(text))
+  bad <- !missing & !is.finite(result)
+  if (any(bad)) {
+    stop("Column '", column, "' has invalid/non-finite numeric values in row(s): ",
+         paste(which(bad), collapse = ", "))
+  }
+  result[missing] <- NA_real_
+  result
+}
+
 # ── Trait type and global summary ─────────────────────────────────────────────
 
 # TRUE when a trait vector is an ordinal fg/bg code rather than a continuous
@@ -45,7 +60,7 @@ is_ordinal_trait <- function(trait_values, trait_type = "auto") {
 # selection is produced by 4.Independent_contrasts.Rmd from the selected
 # independent pairs, never here.
 compute_trait_summary <- function(trait_values) {
-  trait_values <- as.numeric(trait_values)
+  trait_values <- numeric_trait_values(trait_values)
   trait_values <- trait_values[!is.na(trait_values)]
 
   if (length(trait_values) == 0) {
@@ -77,7 +92,7 @@ compute_trait_summary <- function(trait_values) {
 #   extreme_outlier   same with 3 x IQR fences
 #   taxa_outlier, extreme_taxa_outlier   same fences computed within the taxon
 #   taxa_label        low_extreme / high_extreme / normal tail flag within the taxon
-# Returns NULL when fewer than 4 rows remain.
+# Returns descriptive statistics for every nonempty cohort, including 1–3 rows.
 stats.f <- function(df) {
   c_trait_name <- if (exists("c_trait", inherits = TRUE)) c_trait else ""
   n_trait_name <- if (exists("n_trait", inherits = TRUE)) n_trait else ""
@@ -108,18 +123,14 @@ stats.f <- function(df) {
 
   debug_log("stats.f using columns: %s", paste(base_cols, collapse = ", "))
 
-  df <- df %>%
-    dplyr::select(dplyr::all_of(base_cols)) %>%
-    dplyr::filter(!is.na(.data[[trait_col]]))
-  debug_log("stats.f after NA filter rows = %d", nrow(df))
-
-  if (nrow(df) < 4) {
-    message("Skipping ", trait, " (fewer than 4 rows after NA filtering)")
-    return(NULL)
+  df_num <- df %>% dplyr::select(dplyr::all_of(unique(base_cols)))
+  numeric_columns <- intersect(c(trait_col, n_trait_name, c_trait_name,
+                                  secondary_trait, branch_trait), names(df_num))
+  for (column in unique(numeric_columns)) {
+    df_num[[column]] <- numeric_trait_values(df_num[[column]], column)
   }
-
-  # Trait as numeric, once.
-  df_num <- df %>% dplyr::mutate("{trait_col}" := as.numeric(.data[[trait_col]]))
+  df_num <- df_num %>% dplyr::filter(!is.na(.data[[trait_col]]))
+  if (nrow(df_num) == 0) stop("No non-missing values remain for trait '", trait, "'.")
 
   # Global descriptive statistics; the fg/bg partition is made in 4.Independent_contrasts.Rmd.
   trait_summary <- compute_trait_summary(df_num[[trait]])

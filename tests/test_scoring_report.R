@@ -28,6 +28,8 @@ for (scenario in c("mapped", "unmapped_positions", "no_coordinates")) {
   file.copy(file.path(root, "subworkflows/SCORING/local/10.Scoring_report.Rmd"), wd, overwrite = TRUE)
   dir.create(file.path(wd,"src"),showWarnings=FALSE)
   file.copy(file.path(root,"subworkflows/SCORING/local/src/report_evidence.R"),file.path(wd,"src"),overwrite=TRUE)
+  file.copy(file.path(root,'subworkflows/SCORING/local/src/scoring_io.R'),file.path(wd,'src'),overwrite=TRUE)
+  file.copy(file.path(root,'subworkflows/TRAIT_ANALYSIS/local/src/report_style.R'),file.path(wd,'src'),overwrite=TRUE)
   jsonlite::write_json(list(gene_stat="max",nominal_threshold=.05,fdr_threshold=.05), file.path(wd,"gene_evidence_metadata.json"),auto_unbox=TRUE)
   write_tsv(genes, file.path(wd, "gene_scores.tsv"))
   pos <- positions

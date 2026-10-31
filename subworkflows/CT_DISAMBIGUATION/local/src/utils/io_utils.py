@@ -21,27 +21,37 @@ logger = logging.getLogger(__name__)
 def _is_supported_alignment_path(path: Path) -> bool:
     """True for a regular file whose extension is a PHYLIP or FASTA one, or that has none."""
     suffix = path.suffix.lower()
-    return suffix in {".phy", ".phylip", ".aln", ".fa", ".fasta", ""} and path.is_file()
+    return suffix in {".phy", ".phylip", ".aln", ".fa", ".fasta", ".fas", ".clustal", ""} and path.is_file()
 
 
 @functools.lru_cache(maxsize=32)
 def _scan_alignment_dir(alignment_dir: Path) -> Dict[str, Path]:
-    """Map every alignment file under `alignment_dir` to its gene prefix, scanning once per directory.
+    """Index complete IDs, stripping only the alignment suffix; reject ambiguity."""
+    result = {}
+    for path in sorted(alignment_dir.glob('**/*')):
+        if not _is_supported_alignment_path(path):
+            continue
+        gene = path.stem if path.suffix else path.name
+        if gene in result:
+            raise ValueError(f'Ambiguous alignment for {gene}: {result[gene]}, {path}')
+        result[gene] = path
+    return result
 
-    The scan is memoized because find_gene_alignment runs once per gene (and per chunk of a
-    gene), and a recursive glob plus a stat per entry is expensive on a network file system
-    when the directory holds thousands of alignments. The key is the file name up to the
-    first dot; the first path in sorted order wins when several files share a prefix.
-    """
-    candidates = sorted(
-        path for path in alignment_dir.glob("**/*") if _is_supported_alignment_path(path)
-    )
-    by_prefix: Dict[str, Path] = {}
-    for path in candidates:
-        prefix = path.name.split(".", 1)[0]
-        # First match in sorted order wins.
-        by_prefix.setdefault(prefix, path)
-    return by_prefix
+
+def read_alignment_manifest(path, alignment_dir):
+    import csv
+    result = {}
+    with Path(path).open(newline='') as fh:
+        for row in csv.reader(fh, delimiter='\t'):
+            if not row:
+                continue
+            if len(row) != 2 or not row[0] or row[0] in result:
+                raise ValueError(f'Invalid/duplicate alignment manifest row: {row}')
+            target = Path(alignment_dir) / row[1]
+            if not target.is_file():
+                raise FileNotFoundError(target)
+            result[row[0]] = target
+    return result
 
 
 def infer_alignment_format(alignment_file: Path, format: str = "auto") -> str:
@@ -49,11 +59,13 @@ def infer_alignment_format(alignment_file: Path, format: str = "auto") -> str:
     if format != "auto":
         return format
 
-    suffix = alignment_file.suffix.lower()
-    if suffix in {".fa", ".fasta"}:
-        return "fasta"
-
-    return "phylip-relaxed"
+    with Path(alignment_file).open() as fh:
+        first = next((line.strip() for line in fh if line.strip()), '')
+    if first.startswith('>'):
+        return 'fasta'
+    if first.upper().startswith(('CLUSTAL', 'MUSCLE')):
+        return 'clustal'
+    return 'phylip-relaxed'
 
 
 def find_gene_alignment(
@@ -66,7 +78,7 @@ def find_gene_alignment(
     :param alignment_dir: Directory containing alignment files. Supports recursive search for
         PHYLIP-like and FASTA extensions.
     :type alignment_dir: Optional[Path]
-    :param gene: Gene name (prefix used to match file name before the first dot).
+    :param gene: Complete gene identifier.
     :type gene: str
     :param ensembl_genes: Optional set of Ensembl gene IDs to limit allowed genes.
     :type ensembl_genes: Optional[Set[str]]
@@ -80,7 +92,7 @@ def find_gene_alignment(
         )
 
     if alignment_dir and alignment_dir.exists():
-        # Require exact prefix match before the first dot to avoid partials (e.g., MHS1 vs MHS12)
+        # Complete identifiers must match exactly.
         path = _scan_alignment_dir(alignment_dir).get(gene)
         if path is not None:
             return path

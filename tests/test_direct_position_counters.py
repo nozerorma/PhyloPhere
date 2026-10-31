@@ -17,7 +17,7 @@ def test_direct_counts_reduce_legacy_and_new_without_conditional_pools(tmp_path)
     for k,cols in enumerate([[0,1],[2,3]]):
         ids,cy=np.where(dense[:,cols]>0)
         p=tmp_path/f'positions{k}.parquet'
-        pq.write_table(pa.table(dict(gene=[genes[i] for i in ids],position=pos[ids],all=dense[ids,np.array(cols)[cy]])),p)
+        pq.write_table(pa.table(dict(gene=[genes[i] for i in ids],cycle=[f'b_{cols[j]+1}' for j in cy],position=pos[ids],all=dense[ids,np.array(cols)[cy]])),p)
         t=m.count_block(p,classes,np.array([1]),genes,pos,obs)
         assert t.column_names==['gene','position','k_emp']
         f=tmp_path/f'counts{k}.parquet';pq.write_table(t,f);counts.append(f)

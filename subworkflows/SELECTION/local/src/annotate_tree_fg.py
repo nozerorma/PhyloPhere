@@ -1,276 +1,112 @@
 #!/usr/bin/env python3
-"""
-Annotate a Newick tree with `{Foreground}` labels using a plain species list.
-
-Internal branches are labelled according to --internal-nodes:
-  all_descendants  an internal node whose descendant tips are all foreground is
-                   labelled, so every branch of a foreground clade (its stem
-                   branch included) is tested; equivalent to HyPhy LabelTrees'
-                   default "All descendants" strategy.
-  none             only the foreground tips' terminal branches are labelled.
-
-Optionally (--bg-species-file, fade_background_scope=opposite) prunes the
-tree/alignment down to foreground + background species only, since HyPhy
-FADE has no explicit "Background" tag -- any branch not tagged {Foreground}
-already counts as background, so restricting the background set to a
-specific group requires physically removing every other species from the
-tree before HyPhy sees it.
-"""
-
+"""Exact foreground annotation of a rooted tree, retaining alignment coordinates."""
 import argparse
-import re
-import sys
-
+from pathlib import Path
 import dendropy
+from Bio import SeqIO
+from alignment_io import read_alignment
 
 
-def parse_species_file(path: str) -> set:
-    fg_species = set()
-    with open(path) as fh:
-        for line in fh:
-            species = line.strip()
-            if species and not species.startswith("#"):
-                fg_species.add(species)
-    return fg_species
+def parse_species_file(path):
+    rows = [line.strip() for line in Path(path).read_text().splitlines()
+            if line.strip() and not line.lstrip().startswith('#')]
+    if not rows or len(rows) != len(set(rows)):
+        raise ValueError(f'Empty or duplicate species list: {path}')
+    if any(any(c.isspace() for c in sp) or ',' in sp for sp in rows):
+        raise ValueError(f'Invalid species identifier: {path}')
+    return set(rows)
 
 
-def annotate_newick(newick_str: str, fg_species: set, label: str) -> tuple:
-    annotated = newick_str
-    total_subs = 0
-
-    for sp in sorted(fg_species, key=len, reverse=True):
-        escaped = re.escape(sp)
-
-        pattern_quoted = r"'" + escaped + r"'(?!\{)(?=[,):;\[\s]|$)"
-        replacement_quoted = f"'{sp}'{{{label}}}"
-        annotated, n = re.subn(pattern_quoted, replacement_quoted, annotated)
-
-        if n == 0:
-            pattern_bare = r"(?<![a-zA-Z0-9_'])" + escaped + r"(?!\{)(?=[,):;\[\s]|$)"
-            replacement_bare = f"{sp}{{{label}}}"
-            annotated, n = re.subn(pattern_bare, replacement_bare, annotated)
-
-        total_subs += n
-
-    return annotated, total_subs
-
-
-def label_internal_nodes(
-    tree, fg_species: set, internal_mode: str = "all_descendants"
-) -> set:
-    """Assign deterministic postorder labels IntNode<k> to all non-root internal nodes.
-
-    Returns the set of internal node labels whose descendant tips are all foreground
-    (empty when internal_mode == 'none'); the caller appends the HyPhy branch tag
-    after serialisation. Naming every non-root internal node deterministically
-    ensures that top and bottom trees over the same taxa share identical branch
-    identifiers, allowing HyPhy FADE to reuse the baseline model fit across directions.
-    """
-    idx = 0
-    fg_labels = set()
-    for nd in tree.postorder_internal_node_iter():
-        if nd.parent_node is None:
+def label_internal_nodes(tree, fg_species, internal_mode='all_descendants'):
+    """Deterministic, collision-free identifiers, identical across directions."""
+    used = {leaf.taxon.label for leaf in tree.leaf_node_iter()}
+    fg_labels, index = set(), 0
+    for node in tree.postorder_internal_node_iter():
+        if node.parent_node is None:
+            node.label = None
             continue
-        idx += 1
-        nd.label = f"IntNode{idx}"
-        if internal_mode == "all_descendants" and all(
-            leaf.taxon.label in fg_species for leaf in nd.leaf_iter()
-        ):
-            fg_labels.add(nd.label)
+        index += 1
+        label = f'IntNode{index}'
+        while label in used:
+            label = '_' + label
+        used.add(label)
+        node.label = label
+        if internal_mode == 'all_descendants' and all(leaf.taxon.label in fg_species for leaf in node.leaf_iter()):
+            fg_labels.add(label)
     return fg_labels
 
 
-def parse_fasta_taxa(path: str) -> set:
-    taxa = set()
-    with open(path) as fh:
-        for line in fh:
-            line = line.strip()
-            if line.startswith(">"):
-                taxa.add(line[1:].split()[0])
-    return taxa
+def serialize(tree, foreground, internal_labels, label='Foreground'):
+    # Serialize nodes structurally: a label can never match another tip's suffix.
+    def quote(name):
+        return "'" + name.replace("'", "''") + "'" if any(c in name for c in " ()[],:;'{}\t\n") else name
+    def visit(node):
+        if node.is_leaf():
+            name = node.taxon.label
+            text = quote(name)
+            tagged = name in foreground
+        else:
+            text = '(' + ','.join(visit(child) for child in node.child_node_iter()) + ')'
+            text += quote(node.label) if node.label else ''
+            tagged = node.label in internal_labels
+        if tagged and node.parent_node is not None:
+            text += '{' + label + '}'
+        if node.edge_length is not None and node.parent_node is not None:
+            text += ':' + format(node.edge_length, '.17g')
+        return text
+    return visit(tree.seed_node) + ';\n'
 
 
-def write_filtered_fasta(in_path: str, out_path: str, keep_taxa: set) -> int:
-    written = 0
-    include = False
-    with open(in_path) as fh_in, open(out_path, "w") as fh_out:
-        for line in fh_in:
-            if line.startswith(">"):
-                taxon = line[1:].strip().split()[0]
-                include = taxon in keep_taxa
-                if include:
-                    written += 1
-            if include:
-                fh_out.write(line)
-    return written
+def annotate(tree_path, fasta_path, fg_path, output, *, bg_path=None, fasta_out=None,
+             internal_mode='all_descendants', label='Foreground'):
+    if internal_mode not in {'all_descendants', 'none'}:
+        raise ValueError('Invalid internal-node mode')
+    fg = parse_species_file(fg_path)
+    bg = parse_species_file(bg_path) if bg_path else None
+    if bg is not None and fg & bg:
+        raise ValueError('Foreground and background pools overlap')
+    tree = dendropy.Tree.get(path=str(tree_path), schema='newick', preserve_underscores=True)
+    if tree.is_rooted is False or len(tree.seed_node.child_nodes()) != 2:
+        raise ValueError('FADE requires a rooted, bifurcating reference root; no automatic rerooting')
+    leaves = list(tree.leaf_node_iter())
+    taxa = [node.taxon.label if node.taxon else None for node in leaves]
+    if any(not t for t in taxa) or len(taxa) != len(set(taxa)):
+        raise ValueError('Empty or duplicate tree tips')
+    records = read_alignment(fasta_path)
+    allowed = set(taxa) & {r.id for r in records}
+    if bg is not None:
+        allowed &= fg | bg
+    result = dict(input_taxa=len(records), alignment_columns=len(records[0].seq),
+                  retained_taxa=sorted(allowed), foreground_taxa=sorted(fg & allowed),
+                  excluded_taxa=sorted({r.id for r in records} - allowed), internal_nodes=internal_mode)
+    reason = 'fewer_than_two_taxa' if len(allowed) < 2 else 'no_foreground' if not fg & allowed else None
+    if reason:
+        return dict(result, status='excluded', reason=reason)
+    tree.retain_taxa_with_labels(allowed)
+    tree.is_rooted = True
+    fg_internal = label_internal_nodes(tree, fg, internal_mode)
+    Path(output).write_text(serialize(tree, fg & allowed, fg_internal, label))
+    if fasta_out:
+        SeqIO.write([r for r in records if r.id in allowed], fasta_out, 'fasta')
+    return dict(result, status='eligible', foreground_internal_branches=len(fg_internal))
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Annotate foreground branches for HyPhy FADE")
-    parser.add_argument(
-        "--species-file",
-        required=True,
-        help="Plain-text species list, one species name per line",
-    )
-    parser.add_argument("--tree", required=True, help="Newick tree file")
-    parser.add_argument("--output", required=True, help="Output annotated Newick file")
-    parser.add_argument(
-        "--fasta",
-        default=None,
-        help="FASTA alignment; if provided the tree is pruned to only taxa present in the alignment before annotation.",
-    )
-    parser.add_argument(
-        "--bg-species-file",
-        default=None,
-        help=(
-            "Optional background species list (fade_background_scope=opposite). "
-            "When given, retained tree/alignment taxa are additionally restricted "
-            "to (foreground species | background species) only, so species in "
-            "neither list are pruned out entirely rather than left unlabeled -- "
-            "unlabeled branches would otherwise still count as HyPhy's implicit "
-            "background."
-        ),
-    )
-    parser.add_argument(
-        "--fasta_out",
-        default=None,
-        help="If provided, write a FASTA filtered to only sequences present in the (pruned) tree.",
-    )
-    parser.add_argument(
-        "--internal-nodes",
-        choices=("all_descendants", "none"),
-        default="all_descendants",
-        help=(
-            "Internal-branch labelling: 'all_descendants' labels every internal "
-            "node whose descendant tips are all foreground (HyPhy LabelTrees "
-            "default); 'none' labels foreground terminal branches only."
-        ),
-    )
-    parser.add_argument(
-        "--label",
-        default="Foreground",
-        help="HyPhy branch label to apply (default: Foreground)",
-    )
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--tree', required=True)
+    parser.add_argument('--fasta', required=True)
+    parser.add_argument('--species-file', required=True)
+    parser.add_argument('--bg-species-file')
+    parser.add_argument('--fasta_out')
+    parser.add_argument('--internal-nodes', default='all_descendants')
+    parser.add_argument('--label', default='Foreground')
+    parser.add_argument('--output', required=True)
     args = parser.parse_args()
-
-    fg_species = parse_species_file(args.species_file)
-    if not fg_species:
-        sys.exit(
-            f"ERROR annotate_tree_fg: no foreground species found in '{args.species_file}'"
-        )
-
-    with open(args.tree) as fh:
-        newick_str = fh.read().strip()
-
-    try:
-        tree = dendropy.Tree.get(
-            data=newick_str, schema="newick", preserve_underscores=True
-        )
-    except Exception as exc:
-        sys.exit(f"ERROR annotate_tree_fg: cannot parse tree: {exc}")
-
-    # Determine which taxa to retain: intersection of (alignment taxa, when
-    # --fasta given) and (foreground | background species, when
-    # --bg-species-file given). Either constraint alone is a no-op filter for
-    # the other, matching prior behavior when only --fasta was supplied.
-    taxa_to_retain_labels = None
-    if args.fasta:
-        taxa_to_retain_labels = parse_fasta_taxa(args.fasta)
-
-    bg_species = set()
-    if args.bg_species_file:
-        bg_species = parse_species_file(args.bg_species_file)
-        allowed = fg_species | bg_species
-        taxa_to_retain_labels = (
-            allowed if taxa_to_retain_labels is None else (taxa_to_retain_labels & allowed)
-        )
-
-    if taxa_to_retain_labels is not None:
-        tree_taxa_all = {leaf.taxon.label for leaf in tree.leaf_node_iter()}
-        taxa_to_prune = tree_taxa_all - taxa_to_retain_labels
-        if taxa_to_prune:
-            sys.stderr.write(
-                f"INFO annotate_tree_fg: pruning {len(taxa_to_prune)} tip(s) not present "
-                f"in the retained taxon set (tree: {len(tree_taxa_all)}, "
-                f"retained: {len(taxa_to_retain_labels)}).\n"
-            )
-            taxa_to_retain = dendropy.TaxonNamespace(
-                [t for t in tree.taxon_namespace if t.label in taxa_to_retain_labels]
-            )
-            tree.retain_taxa(taxa_to_retain)
-            tree.purge_taxon_namespace()
-            newick_str = tree.as_string(
-                schema="newick", suppress_rooting=True
-            ).strip()
-
-    tree_taxa = {leaf.taxon.label for leaf in tree.leaf_node_iter()}
-
-    if args.fasta_out and args.fasta:
-        fasta_taxa_check = parse_fasta_taxa(args.fasta)
-        extra_in_fasta = fasta_taxa_check - tree_taxa
-        if extra_in_fasta:
-            sys.stderr.write(
-                f"INFO annotate_tree_fg: filtering {len(extra_in_fasta)} sequence(s) "
-                f"present in FASTA but absent from tree; writing filtered FASTA to "
-                f"{args.fasta_out}\n"
-            )
-        n_written = write_filtered_fasta(args.fasta, args.fasta_out, tree_taxa)
-        sys.stderr.write(
-            f"INFO annotate_tree_fg: wrote {n_written} sequence(s) to filtered FASTA "
-            f"{args.fasta_out}\n"
-        )
-
-    missing_fg = fg_species - tree_taxa
-    if missing_fg:
-        sys.stderr.write(
-            f"WARNING annotate_tree_fg: {len(missing_fg)} FG species not found in tree "
-            f"(will be ignored): {', '.join(sorted(missing_fg))}\n"
-        )
-
-    fg_in_tree = fg_species & tree_taxa
-    if not fg_in_tree:
-        sys.stderr.write(
-            "WARNING annotate_tree_fg: none of the foreground species are present "
-            "after tree/alignment reconciliation; skipping this gene.\n"
-        )
-        return
-
-    fg_internal_labels = label_internal_nodes(tree, fg_in_tree, args.internal_nodes)
-    n_internal = len(fg_internal_labels)
-    newick_str = tree.as_string(schema="newick", suppress_rooting=True).strip()
-    if fg_internal_labels:
-        fg_alt = "|".join(
-            re.escape(lbl) for lbl in sorted(fg_internal_labels, key=len, reverse=True)
-        )
-        newick_str = re.sub(
-            r"'?(" + fg_alt + r")'?(?=[:,);\s])",
-            r"\1{" + args.label + "}",
-            newick_str,
-        )
-
-    annotated, n_subs = annotate_newick(newick_str, fg_in_tree, args.label)
-    if n_subs == 0:
-        sys.stderr.write(
-            f"WARNING annotate_tree_fg: regex found 0 substitutions despite {len(fg_in_tree)} "
-            "foreground species in tree; skipping this gene.\n"
-        )
-        return
-
-    # Remove all single quotes around species names (dendropy may add them).
-    # This includes patterns like 'species'{Foreground} and 'species':branch_length
-    annotated = re.sub(r"'([^']+)'(\{|:)", r"\1\2", annotated)
-
-    with open(args.output, "w") as fh:
-        fh.write(annotated)
-        if not annotated.endswith("\n"):
-            fh.write("\n")
-
-    sys.stderr.write(
-        f"INFO annotate_tree_fg: annotated {n_subs} foreground terminal and "
-        f"{n_internal} internal branches with label '{{{args.label}}}' "
-        f"(internal nodes: {args.internal_nodes})\n"
-    )
+    result = annotate(args.tree, args.fasta, args.species_file, args.output,
+                      bg_path=args.bg_species_file, fasta_out=args.fasta_out,
+                      internal_mode=args.internal_nodes, label=args.label)
+    print(result)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

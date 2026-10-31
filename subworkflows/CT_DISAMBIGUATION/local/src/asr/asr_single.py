@@ -54,6 +54,7 @@ class SingleGeneASRConfig:
     model: str = "lg"
     posterior_threshold: float = 0.7
     threads: int = 1
+    provenance: Optional[dict] = None
 
 
 @dataclass
@@ -111,7 +112,8 @@ def _write_node_id_map(
 
 
 def load_alignment_and_mappings(
-    alignment_path: Path, taxid_path: Optional[Path] = None, gene_name: str = "unknown"
+    alignment_path: Path, taxid_path: Optional[Path] = None, gene_name: str = "unknown",
+    alignment_format: str = "auto"
 ) -> AlignmentData:
     """
     Load alignment and create lookup mappings.
@@ -130,10 +132,18 @@ def load_alignment_and_mappings(
         raise FileNotFoundError(f"Alignment file not found: {alignment_path}")
 
     # Load alignment
-    alignment: MultipleSeqAlignment = read_alignment(alignment_path, format="auto")
+    alignment: MultipleSeqAlignment = read_alignment(alignment_path, format=alignment_format)
     logger.debug(
         f"Alignment loaded: {len(alignment)} sequences, {alignment.get_alignment_length()} positions"
     )
+
+    from Bio.Seq import Seq
+    from src.utils.amino import STANDARD_AAS
+    ids = [str(rec.id) for rec in alignment]
+    if len(set(ids)) != len(ids):
+        raise ValueError(f'Duplicate alignment species in {alignment_path}')
+    for rec in alignment:
+        rec.seq = Seq(''.join(aa if aa in STANDARD_AAS else '-' for aa in str(rec.seq).upper()))
 
     # Build sequence lookups
     seq_by_id = {}
@@ -235,6 +245,17 @@ def load_and_match_tree(
 
         logger.debug(f"After matching: {len(tree.get_terminals())} tips")
 
+    if not (taxid_path and taxid_path.exists()):
+        ids = {str(rec.id) for rec in alignment_data.alignment}
+        tips = [tip.name for tip in tree.get_terminals()]
+        if len(set(tips)) != len(tips) or not ids <= set(tips):
+            raise ValueError('Alignment species must have unique matching tree tips')
+        for tip in list(tree.get_terminals()):
+            if tip.name not in ids:
+                tree.prune(tip)
+        alignment_data.species_to_taxid = {name: name for name in ids}
+        alignment_data.taxid_to_species = {name: name for name in ids}
+
     # Build tree structure data (use matched tree tips as valid taxids)
     taxid_mapping_dict = taxid_mapping
 
@@ -248,12 +269,10 @@ def load_and_match_tree(
         if getattr(tree, "rooted", False):
             logger.debug("Input tree is rooted; unrooting before ASR")
             tree.rooted = False
-            if hasattr(tree, "root"):
-                tree.root = None
     except Exception:
         logger.debug("Could not determine rooting; proceeding as-is")
 
-    Phylo.write(tree, newick_buffer, "newick")
+    Phylo.write(tree, newick_buffer, "newick", format_branch_length="%1.17g")
     tree_newick = newick_buffer.getvalue().strip()
 
     parsed_root = parse_newick(tree_newick)
@@ -272,7 +291,7 @@ def load_and_match_tree(
     )
 
 
-def run_asr_pipeline(
+def _run_asr_pipeline(
     gene: str,
     config: SingleGeneASRConfig,
     skip_if_exists: bool = True,
@@ -380,6 +399,20 @@ def run_asr_pipeline(
         f"(node-level: {len(posteriors_node) if isinstance(posteriors_node, dict) else 0} nodes)"
     )
 
+    # PAML can return 1 after writing usable reconstructions. Accept that
+    # documented status only when every reconstructed node covers every site.
+    import math
+    expected_sites = set(range(1, alignment_data.alignment.get_alignment_length() + 1))
+    internal_nodes = len(tree_data.tree.get_nonterminals())
+    if not posteriors_node or len(posteriors_node) < internal_nodes:
+        raise RuntimeError(f'Incomplete ASR node coverage for {gene}')
+    for sites in posteriors_node.values():
+        if not expected_sites <= set(sites):
+            raise RuntimeError(f'Incomplete ASR site coverage for {gene}')
+        if any(not distribution or any(not math.isfinite(float(p)) or not 0 <= float(p) <= 1 for p in distribution.values())
+               for distribution in sites.values()):
+            raise RuntimeError(f'Invalid ASR posteriors for {gene}')
+
     return ASRResults(
         gene=gene,
         posteriors_site=posteriors_site,
@@ -405,25 +438,11 @@ def load_precomputed_asr(
     Returns:
         ASRResults object with loaded data
     """
-    logger.debug(f"Loading pre-computed ASR results for {gene}")
-
-    # Try canonical location first: config.output_dir / asr_{GENE} / rst
-    rst_file = config.output_dir / f"asr_{gene}" / "rst"
-    tree_file = config.output_dir / f"asr_{gene}" / "tree_paml.nwk"
-
-    # Fall back to legacy location: config.output_dir / {GENE} / asr_{GENE} / rst
-    if not rst_file.exists():
-        legacy_rst_file = config.output_dir / gene / f"asr_{gene}" / "rst"
-        if legacy_rst_file.exists():
-            rst_file = legacy_rst_file
-            tree_file = config.output_dir / gene / f"asr_{gene}" / "tree_paml.nwk"
-
-    if not rst_file.exists():
-        raise FileNotFoundError(
-            f"Pre-computed RST file not found at:\n"
-            f"  Canonical: {config.output_dir / f'asr_{gene}' / 'rst'}\n"
-            f"  Legacy: {config.output_dir / gene / f'asr_{gene}' / 'rst'}"
-        )
+    from src.asr.cache import validate_entry
+    directory = config.output_dir / f'asr_{gene}'
+    validate_entry(directory, config.provenance)
+    rst_file = directory / 'rst'
+    tree_file = directory / 'tree_paml.nwk'
 
     logger.debug(f"Found RST file at: {rst_file}")
 
@@ -464,3 +483,47 @@ def load_precomputed_asr(
     )
 
 
+
+
+def run_asr_pipeline(gene, config, skip_if_exists=True, alignment_data=None, tree_data=None):
+    """Compute in a private directory, then publish a complete provenance-checked entry.
+
+    The driver serializes readers/writers through its per-key file lock.
+    """
+    import os
+    import tempfile
+    import uuid
+    from dataclasses import replace
+    from src.asr.cache import prepare_config, write_entry
+    if alignment_data is None:
+        alignment_data = load_alignment_and_mappings(config.alignment_path, config.taxid_path, gene)
+    if tree_data is None:
+        tree_data = load_and_match_tree(config.tree_path, alignment_data, config.taxid_path)
+    if config.provenance is None:
+        config = prepare_config(config, alignment_data, tree_data)
+    if skip_if_exists:
+        try:
+            return load_precomputed_asr(gene, config, alignment_data)
+        except (FileNotFoundError, ValueError):
+            pass
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.stage-', dir=config.output_dir) as stage:
+        staged = replace(config, output_dir=Path(stage))
+        try:
+            result = _run_asr_pipeline(gene, staged, False, alignment_data, tree_data)
+        except Exception as exc:
+            failed = config.output_dir / f'.failed-{uuid.uuid4().hex}'
+            source = Path(stage) / f'asr_{gene}'
+            if source.exists():
+                os.replace(source, failed)
+                (failed / 'failure.json').write_text(json.dumps(dict(inputs=config.provenance, error=str(exc)), indent=2))
+            raise RuntimeError(f'ASR failed for {gene}; diagnostic artifacts: {failed}') from exc
+        if not result.posteriors_node:
+            raise RuntimeError(f'ASR produced no node posteriors for {gene}')
+        source = Path(stage) / f'asr_{gene}'
+        write_entry(source, config.provenance)
+        target = config.output_dir / f'asr_{gene}'
+        if target.exists():
+            os.replace(target, config.output_dir / f'.invalid-{uuid.uuid4().hex}')
+        os.replace(source, target)
+    return load_precomputed_asr(gene, config, alignment_data)

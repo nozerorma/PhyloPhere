@@ -1,4 +1,4 @@
-# Optional saved-data CLI smoke: Rscript tests/test_wp6_rer_real.R <marine_complete>
+# Optional saved-data CLI smoke (requires a verified rer_v1 matrix from build_matrix): Rscript tests/test_wp6_rer_real.R <marine_complete>
 suppressPackageStartupMessages(library(RERconverge))
 source('subworkflows/RERCONVERGE/local/rer_permulations.R')
 root<-normalizePath(commandArgs(TRUE)[1]); wd<-tempfile('rer_cli_');dir.create(wd)
@@ -12,7 +12,7 @@ run_cli<-function(kind,trait,extra) {
          file.path(wd,paste0(kind,'.paths')),matrix_path,out,extra)
  log<-system2(rs,cmd,stdout=TRUE,stderr=TRUE)
  if(!is.null(attr(log,'status')))stop(paste(log,collapse='\n'))
- stopifnot(dir.exists(sub('[.]output$','.perms.rds',out)),length(list.files(sub('[.]output$','.perms.rds',out)))==2)
+ stopifnot(dir.exists(sub('[.]output$','.perms.rds',out)),length(list.files(sub('[.]output$','.perms.rds',out),pattern='^blk_.*[.]rds$'))==2)
  res<-readRDS(out);stopifnot(attr(res,'n_perms')==4,attr(res,'rer_batch_seed')==79)
  res
 }

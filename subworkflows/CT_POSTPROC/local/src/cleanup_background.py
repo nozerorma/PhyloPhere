@@ -28,7 +28,7 @@ def load_removed_genes(summary_file):
         print(f"Error: Removed genes summary file not found: {summary_file}", file=sys.stderr)
         sys.exit(1)
 
-    removed_df = pd.read_csv(summary_file, sep='\t')
+    removed_df = pd.read_csv(summary_file, sep='\t', dtype=str, keep_default_na=False)
     if 'Gene' not in removed_df.columns:
         print("Error: Removed genes summary missing columns: ['Gene']", file=sys.stderr)
         sys.exit(1)
@@ -45,17 +45,17 @@ def load_global_background_genes(bg_file):
         print(f"Error: Global background file not found: {bg_file}", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        bg_df = pd.read_csv(p, sep='\t', comment='#')
-        if 'Gene' in bg_df.columns:
-            genes = bg_df['Gene'].dropna().astype(str)
-        else:
-            bg_df = pd.read_csv(p, sep='\t', header=None, names=['Gene'], comment='#')
-            genes = bg_df['Gene'].dropna().astype(str)
-    except Exception:
-        bg_df = pd.read_csv(p, header=None, names=['Gene'], comment='#')
-        genes = bg_df['Gene'].dropna().astype(str)
-
+    # A single-column list may be empty and identifiers such as NA are literal.
+    import csv
+    with p.open(newline='') as fh:
+        rows = [row for row in csv.reader(fh, delimiter='\t') if row and not row[0].startswith('#')]
+    if rows and 'Gene' in rows[0]:
+        col = rows.pop(0).index('Gene')
+    else:
+        col = 0
+    if any(len(row) <= col for row in rows):
+        raise ValueError('Malformed background row')
+    genes = [row[col] for row in rows]
     genes = sorted({g.strip() for g in genes if g.strip()})
     print(f"Loaded global background genes: {len(genes)}", file=sys.stderr)
     return genes

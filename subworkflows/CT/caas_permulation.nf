@@ -40,6 +40,9 @@
  */
 
 
+include { observedSourceHash as scoringSourceHash; observedQuote as scoringQuote; observedInputHash as scoringInputHash } from '../CT_DISAMBIGUATION/ct_observed'
+def core_scoring_source_hash = scoringSourceHash("${baseDir}/subworkflows/CT_DISAMBIGUATION/local", "${baseDir}/subworkflows/CT/local/modules/design_io.py", "${baseDir}/subworkflows/CT/local") + java.security.MessageDigest.getInstance('SHA-256').digest(file("${baseDir}/subworkflows/SCORING/local/src/assemble_block_matrices.R").bytes).encodeHex().toString()
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 // True unless params.caas_perms_postproc is off (Boolean false, or the strings false / 0 / no).
@@ -59,17 +62,41 @@ def strictOutputOn() {
 // off, left out of the scores. Empty when the filter is off or the gene annotation file is a NO_* sentinel. With
 // params.caas_map_dir the trains measure their span in untrimmed columns, as the observed CT_FILTER does.
 def caasTileArgs(gene_lengths) {
-    if (!caasPostprocOn() || gene_lengths.name =~ /^NO_/) return ""
-    def map_arg = params.caas_map_dir ? "--train-map-dir ${params.caas_map_dir}" : ""
-    return "--postproc-filter --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} ${params.remove_caas_clusters ? '' : '--keep-clusters'} ${map_arg}"
+    if (!caasPostprocOn() || new File(gene_lengths.toString()).name =~ /^NO_/) return ""
+    def map_arg = params.caas_map_dir ? "--train-map-dir ${scoringQuote(params.caas_map_dir)}" : ""
+    def count_arg = params.filter_min_positions != null ? "--clust-min-positions ${scoringQuote(params.filter_min_positions)}" : ""
+    return "--postproc-filter ${count_arg} --clust-minlen ${scoringQuote(params.filter_minlen)} --clust-maxcaas ${scoringQuote(params.filter_maxcaas)} ${params.remove_caas_clusters ? '' : '--keep-clusters'} ${map_arg}"
 }
 
 // CLI arguments that give merge_null_block.py the observed gene removal (dubious and extreme genes, or the length-stratified
 // fences, each cycle against its own units). Empty when the filters are off or the gene annotation file is a NO_* sentinel.
 def caasRemovalArgs(gene_lengths) {
-    if (!caasPostprocOn() || gene_lengths.name =~ /^NO_/) return ""
-    def map_arg = params.caas_map_dir ? "--map-dir '${params.caas_map_dir}'" : ""
-    return "--gene-lengths ${gene_lengths} ${map_arg} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} --gene-strata ${params.gene_filter_strata} --gene-k-far ${params.gene_filter_k_far} --gene-k-near ${params.gene_filter_k_near}"
+    if (!caasPostprocOn() || new File(gene_lengths.toString()).name =~ /^NO_/) return ""
+    def map_arg = params.caas_map_dir ? "--map-dir ${scoringQuote(params.caas_map_dir)}" : ""
+    return "--gene-lengths ${scoringQuote(gene_lengths)} ${map_arg} --gene-filter-mode ${scoringQuote(params.gene_filter_mode)} --gene-strata ${scoringQuote(params.gene_filter_strata)} --gene-k-far ${scoringQuote(params.gene_filter_k_far)} --gene-k-near ${scoringQuote(params.gene_filter_k_near)}"
+}
+
+// Shell lines that write .ct_perm_replay_batch_args, the effective CAAS limits of `ct perm-replay` (patterns, miss_pair,
+// max_conserved from min_divergent_fraction and the pair count, min_non_overlapping, gap and missing limits). The replay
+// of the permulations and the positional universe read the same file, so the universe is judged with the limits of CT.
+def replayArgsScript(caas_config) {
+    return """
+    # With multi_hypothesis the design is a directory of traitfile_H*.tab (same K): one .tab gives the pair count
+    if [ -d ${scoringQuote(caas_config)} ]; then
+        _cfg_file=\$(find -L ${scoringQuote(caas_config)} -type f -name '*.tab' | sort | head -n 1)
+    else
+        _cfg_file=${scoringQuote(caas_config)}
+    fi
+    n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' "\$_cfg_file" | sort -nu | wc -l | tr -d ' ')
+    _frac() { awk -v n="\$n_pairs" -v f="\$1" 'BEGIN{printf "%d", int(n*f)}'; }
+    declare -a extra_opts=(--patterns "${params.patterns}")
+    if [ "${params.miss_pair}" = "true" ]; then extra_opts+=(--miss_pair); fi
+    extra_opts+=(--max_conserved \$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}'))
+    extra_opts+=(--min_non_overlapping "${params.min_non_overlapping ?: 2}")
+    extra_opts+=(--max_bg_gaps \$(_frac ${params.max_bg_gaps_fraction}) --max_fg_gaps \$(_frac ${params.max_fg_gaps_fraction}) --max_gaps \$(_frac ${params.max_gaps_fraction}))
+    extra_opts+=(--max_bg_miss \$(_frac ${params.max_bg_miss_fraction}) --max_fg_miss \$(_frac ${params.max_fg_miss_fraction}) --max_miss \$(_frac ${params.max_miss_fraction}))
+    echo "\${extra_opts[@]}" > .ct_perm_replay_batch_args
+"""
 }
 
 // ── 1. First N permulated labelings in cycle order, plus b_0, split into cycle blocks ─────────
@@ -82,7 +109,7 @@ def caasRemovalArgs(gene_lengths) {
 process SUBSET_RESAMPLE_PERMS {
     tag "caas_perms_subset|N=${n_perms}|block=${block_size}"
     label 'process_low'
-    publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'resample_perms.tab'
+    publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: '{resample_perms.tab,ct_preparation.json}'
 
     input:
     path resample_dir
@@ -92,98 +119,60 @@ process SUBSET_RESAMPLE_PERMS {
 
     output:
     path "resample_perms.tab", emit: subset
+    path "ct_preparation.json", emit: provenance
     path "blocks/*", emit: blocks   // blocks/b0 and one blocks/blk_NNNN per block of cycles
 
     script:
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
-    // A multi-hypothesis design (a directory of hypotheses) keeps all of them for b_0 even when the harvest holds no permuted cycle
-    // (N = 0) and so wrote no fop_labelings.tab.
-    def fop_design = "${params.multi_hypothesis}" == 'true'
     """
-    if [ "${block_size}" -lt 1 ]; then echo "ERROR: caas_cycle_block_size must be at least 1 (got ${block_size})" >&2; exit 1; fi
-    mkdir -p blocks/b0
+    ${run} "${baseDir}/subworkflows/CT/local/scripts/prepare_labelings.py" \
+        --source "${resample_dir}" --config "${caas_config}" \
+        --n "${n_perms}" --block-size "${block_size}" \
+        --multi "${params.multi_hypothesis == true}" \
+        --allow-relaxed "${params.ct_allow_relaxed_null == true}"
+    """
+}
 
-    # Writes the cycles of \$1 (labelings in cycle order, tags b_N or b_N~H<m>) into blocks/blk_NNNN/resample_perms.tab and,
-    # when \$2 is a pair table (header + rows keyed by base cycle), their rows into blocks/blk_NNNN/fop_pairs.tsv.
-    split_blocks() {
-        cut -f1 "\$1" | sed 's/~.*//' | awk '!seen[\$0]++' > block_cycles.txt
-        n_cycles=\$(wc -l < block_cycles.txt)
-        for (( k = 1; k <= (n_cycles + ${block_size} - 1) / ${block_size}; k++ )); do mkdir -p "\$(printf 'blocks/blk_%04d' \$k)"; done
-        awk -F'\\t' -v B=${block_size} 'NR==FNR{blk[\$1]=int((FNR-1)/B)+1; next} {b=\$1; sub(/~.*/,"",b); print blk[b] "\\t" \$0}' block_cycles.txt "\$1" \\
-            | awk -F'\\t' '{ if (\$1 != cur) { if (cur != "") close(f); cur = \$1; f = sprintf("blocks/blk_%04d/resample_perms.tab", cur) } sub(/^[0-9]+\\t/, ""); print > f }'
-        if [ -n "\$2" ]; then
-            hdr=\$(head -n 1 "\$2")
-            awk -F'\\t' -v B=${block_size} 'NR==FNR{blk[\$1]=int((FNR-1)/B)+1; next} FNR>1 && (\$1 in blk){print blk[\$1] "\\t" \$0}' block_cycles.txt "\$2" \\
-                | LC_ALL=C sort -s -k1,1n \\
-                | awk -F'\\t' -v hdr="\$hdr" '{ if (\$1 != cur) { if (cur != "") close(f); cur = \$1; f = sprintf("blocks/blk_%04d/fop_pairs.tsv", cur); print hdr > f } sub(/^[0-9]+\\t/, ""); print > f }'
-        fi
-        rm -f block_cycles.txt
-    }
+// ── 2a. Positional universe of the observed design, one task per gene batch ─────────────────────
+// The positions a gene can score under the observed hypotheses H1..Hn: those b_0 tested that pass the CAAS test, with the
+// effective limits of CT, under some orientation of the pairs of some hypothesis (`ct perm-replay --export_b0_universe`,
+// modules/universe.py; the same kernel as the replay, no pair is added). One `<gene>.b0.universe` line per gene, NULL when
+// it has none. Every tile of the batch (the permuted blocks and b_0) reads it, so the null and the observed labeling are
+// scored over the same positions, and CAAS_CORE_OBSERVED writes it as background.output. With the strict tables on, the
+// strict universe (`<gene>.b0.universe_strict`) is the same test with no conserved pair allowed.
+process CAAS_UNIVERSE {
+    tag "$batchID (${batchSize} genes)"
+    label 'process_resample'
 
-    # Deterministic collect: cycles are ordered by their numeric id and the first N are kept
-    # (N = 0 keeps none), so a resample with more cycles than N always yields the same null.
-    # (-L: the resample directory is staged as a symlink.) The real labeling b_0 is rebuilt
-    # from the observed design and prepended, so it is replayed through the same path as the
-    # permulated cycles and split off downstream.
-    FOP_TAB=""
-    if [ -d "${resample_dir}" ]; then
-        FOP_TAB=\$(find -L ${resample_dir} -name 'fop_labelings.tab' | head -n 1)
-    fi
-    # numeric cycle id of a row's tag: "b_12~H3" -> 12
-    CYC='{b=\$1; sub(/^b_/,"",b); sub(/~.*/,"",b); print b"\\t"\$0}'
+    input:
+    tuple val(batchID), val(batchSize), val(manifestText), path(alignmentFiles, stageAs: 'alignments/*')
+    path b0_block, stageAs: 'b0_block'   // blocks/b0 of SUBSET_RESAMPLE_PERMS: the b_0 hypotheses
+    file caas_config
 
-    if [ -n "\$FOP_TAB" ] || { [ "${fop_design}" = true ] && [ -d "${caas_config}" ]; }; then
-        # FOP mirror: labelings are "<base>~H<m>". All hypothesis rows of the first N base
-        # cycles are kept, with the matching fop_pairs.tsv rows (PSS weights for pooling).
-        if [ -n "\$FOP_TAB" ]; then
-            FOP_PAIRS=\$(find -L ${resample_dir} -name 'fop_pairs.tsv' | head -n 1)
-            if [ -z "\$FOP_PAIRS" ]; then echo "ERROR: FOP labelings without fop_pairs.tsv (b_0 needs its PSS weights)" >&2; exit 1; fi
-            awk -F'\\t' 'NF>=3 && \$1!~/^b_0(~|\$)/' "\$FOP_TAB" > candidates.tab
-        else
-            # no permuted cycle was harvested (N = 0): b_0 comes from the design alone
-            : > candidates.tab
-            printf 'cycle\\thypothesis_id\\tpair\\tspecies1\\tspecies2\\tpss_score\\n' > fop_pairs_header.tsv
-            FOP_PAIRS=fop_pairs_header.tsv
-        fi
-        awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' candidates.tab | sort -u \\
-            | awk '{b=\$1; sub(/^b_/,"",b); print b"\\t"\$1}' | sort -k1,1n | cut -f2 > base_all.txt
-        awk -v n=${n_perms} 'n>0{print; if(++c>=n) exit}' base_all.txt > keep_base.txt
-        awk -F'\\t' 'NR==FNR{k[\$1]=1; next} {b=\$1; sub(/~.*/,"",b); if(b in k) print}' \\
-            keep_base.txt candidates.tab | awk -F'\\t' "\$CYC" | sort -s -k1,1n | cut -f2- > resample_perms.tab
-        n=\$(awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' resample_perms.tab | sort -u | wc -l)
-        rows=\$(wc -l < resample_perms.tab)
-        avail=\$(wc -l < base_all.txt)
-        echo "[caas_perms] FOP mirror: first \$n of \$avail base cycles in cycle order (\$rows hypothesis labelings; requested ${n_perms})"
-        if [ "${n_perms}" -gt 0 ] && [ "\$rows" -eq 0 ]; then echo "ERROR: no FOP labelings selected" >&2; exit 1; fi
-        split_blocks resample_perms.tab "\$FOP_PAIRS"
-        ${run} $baseDir/subworkflows/CT/local/scripts/build_b0_labelings.py --config ${caas_config} --fop \\
-            --labelings-out b0_labelings.tab --pairs-out b0_pairs.tsv
-        cp b0_labelings.tab blocks/b0/resample_perms.tab
-        { head -n 1 "\$FOP_PAIRS"; cat b0_pairs.tsv; } > blocks/b0/fop_pairs.tsv
-        cat b0_labelings.tab resample_perms.tab > resample_perms.tmp && mv resample_perms.tmp resample_perms.tab
-        # The selection files are not outputs; they run to hundreds of MB in FOP mode.
-        rm -f all_resamples.tab candidates.tab base_all.txt keep_base.txt b0_labelings.tab b0_pairs.tsv fop_pairs_header.tsv
-        exit 0
-    fi
+    output:
+    tuple val(batchID), path("universe"), emit: universe
 
-    if [ -d "${resample_dir}" ]; then
-        cat \$(find -L ${resample_dir} -name 'resample_*.tab' | sort) > all_resamples.tab
-    elif [ -f "${resample_dir}" ]; then
-        cat ${resample_dir} > all_resamples.tab
-    else
-        echo "ERROR: resample input not found: ${resample_dir}" >&2; exit 1
-    fi
-    awk -F'\\t' 'NF>=3 && \$1!="b_0"' all_resamples.tab | awk -F'\\t' "\$CYC" | sort -s -k1,1n | cut -f2- > candidates.tab
-    awk -v n=${n_perms} 'n>0{print; if(++c>=n) exit}' candidates.tab > resample_perms.tab
-    n=\$(wc -l < resample_perms.tab)
-    avail=\$(wc -l < candidates.tab)
-    echo "[caas_perms] first \$n of \$avail permuted labelings in cycle order (requested ${n_perms})"
-    if [ "${n_perms}" -gt 0 ] && [ "\$n" -eq 0 ]; then echo "ERROR: no permuted labelings selected" >&2; exit 1; fi
-    split_blocks resample_perms.tab ""
-    ${run} $baseDir/subworkflows/CT/local/scripts/build_b0_labelings.py --config ${caas_config} --labelings-out b0_labelings.tab
-    cp b0_labelings.tab blocks/b0/resample_perms.tab
-    cat b0_labelings.tab resample_perms.tab > resample_perms.tmp && mv resample_perms.tmp resample_perms.tab
-    rm -f all_resamples.tab candidates.tab b0_labelings.tab
+    script:
+    def ctBinary = (params.use_singularity || params.use_apptainer)
+        ? "/usr/local/bin/_entrypoint.sh ${scoringQuote("${baseDir}/subworkflows/CT/local/ct")}"
+        : scoringQuote("${baseDir}/subworkflows/CT/local/ct")
+    """
+    export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+    cat > ${batchID}.manifest.tsv <<'EOF'
+""" + manifestText + """EOF
+    ${replayArgsScript(caas_config)}
+    bash ${scoringQuote("${baseDir}/subworkflows/CT/local/scripts/run_ct_perm_replay_batch.sh")} \\
+        --batch-id ${batchID} \\
+        --manifest ${batchID}.manifest.tsv \\
+        --caas-config ${scoringQuote(caas_config)} \\
+        --resampled-path ${scoringQuote("b0_block/resample_perms.tab")} \\
+        --workers ${task.cpus} \\
+        --ali-format ${scoringQuote(params.ali_format)} \\
+        --ct-bin ${scoringQuote(ctBinary)} \\
+        --export-universe 1 ${strictOutputOn() ? '--export-universe-strict 1' : ''} \\
+        --extra-args-file .ct_perm_replay_batch_args
+    mkdir universe
+    find . -maxdepth 1 \\( -name '*.b0.universe' -o -name '*.b0.universe_strict' \\) -exec mv {} universe/ \\;
     """
 }
 
@@ -200,15 +189,16 @@ process SUBSET_RESAMPLE_PERMS {
 // Output: null_tables/ (the tile's tables, with the name of its block) and, for the b_0 tile, b0_observed/ (per gene
 // with b_0 hits: its discovery rows, its tested positions and its master rows).
 process CAAS_CORE_BATCHED {
+    ext scoring_source_hash: core_scoring_source_hash
     tag "$batchID (${batchSize} genes) ${block.name}"
     label 'process_resample'
 
     input:
-    tuple val(batchID), val(batchSize), val(manifestText), path(alignmentFiles, stageAs: 'alignments/*'), path(block)   // block: blocks/blk_NNNN or blocks/b0 of SUBSET_RESAMPLE_PERMS
+    tuple val(batchID), val(batchSize), val(manifestText), path(alignmentFiles, stageAs: 'alignments/*'), path(block), path(universe, stageAs: 'universe_in')   // block: blocks/blk_NNNN or blocks/b0 of SUBSET_RESAMPLE_PERMS; universe: the batch's CAAS_UNIVERSE output
     file caas_config
     path tree_file
-    path gene_lengths // gene_ensembl_file (CT_POSTPROC filters) or NO_FILE
-    path taxid_map    // tax_id map of the species (curated by NAME_CURATION, or params.tax_id) or the NO_FILE sentinel
+    path gene_lengths, stageAs: 'inputs/gene_lengths/*' // gene_ensembl_file (CT_POSTPROC filters) or NO_FILE
+    path taxid_map, stageAs: 'inputs/taxid/*' // tax_id map of the species (curated by NAME_CURATION, or params.tax_id) or the NO_FILE sentinel
 
     output:
     tuple val("${block.name}"), path("null_tables"), emit: null_tables                         // the tile tables of the block
@@ -219,13 +209,14 @@ process CAAS_CORE_BATCHED {
     script:
     def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
     def ctBinary = (params.use_singularity || params.use_apptainer)
-        ? "/usr/local/bin/_entrypoint.sh $baseDir/subworkflows/CT/local/ct"
-        : "$baseDir/subworkflows/CT/local/ct"
+        ? "/usr/local/bin/_entrypoint.sh ${scoringQuote("${baseDir}/subworkflows/CT/local/ct")}"
+        : scoringQuote("${baseDir}/subworkflows/CT/local/ct")
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def asr_cache_dir = params.ct_disambig_asr_cache_dir ?: ''
-    def taxid_mapping = taxid_map.name != 'NO_FILE' ? taxid_map : ''
-    def ensembl_file = params.gene_ensembl_file ?: ''
+    def taxid_mapping = new File(taxid_map.toString()).name != 'NO_FILE' ? taxid_map : ''
+    def ensembl_file = new File(gene_lengths.toString()).name.startsWith('NO_') ? '' : gene_lengths
     def max_tasks_per_child = params.ct_disambig_max_tasks_per_child ?: 50
+    def postproc_maps_hash = params.caas_map_dir ? scoringInputHash(params.caas_map_dir) : ''
     def tile_args = caasTileArgs(gene_lengths)
     // The strict tables come from the same replay: the null tables pooled without the hypotheses that have conserved
     // pairs, and the b_0 rows without conserved pairs scored again (the observed labeling is a single labeling).
@@ -237,38 +228,43 @@ process CAAS_CORE_BATCHED {
     // The observed labeling as full records: one master shard per gene with b_0 hits (the b_0 tile only).
     def observed_b0 = !is_b0 ? '' : """
     # The observed labeling as full records: one master shard per gene with b_0 hits.
-    if compgen -G 'b0_observed/*.b0.discovery.tsv' > /dev/null; then
         ${run} ./observed_b0_main.py \\
-            --alignment-dir ${params.alignment} \\
-            --tree ${tree_file} \\
+            --alignment-dir alignments \\
+            --tree ${scoringQuote(tree_file)} \\
             --b0-dir b0_observed ${strict_observed_flag} \\
-            --design ${caas_config} \\
+            --alignment-manifest ${batchID}.manifest.tsv --manifest-alignment-dir alignments \\
+            --ali-format ${scoringQuote(params.ali_format)} \\
+            --design ${scoringQuote(caas_config)} \\
             \$FOP_PAIRS_ARG \\
             --output-dir b0_observed \\
-            --asr-model ${params.ct_disambig_asr_model} \\
-            --posterior-threshold ${params.ct_disambig_posterior_threshold} \\
+            --asr-model ${scoringQuote(params.ct_disambig_asr_model)} \\
+            --posterior-threshold ${scoringQuote(params.ct_disambig_posterior_threshold)} \\
             --workers ${task.cpus} \\
             --max-tasks-per-child ${max_tasks_per_child} \\
-            --asr-cache-dir ${asr_cache_dir} \\
-            ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
-            ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
-    fi"""
+            --asr-cache-dir ${scoringQuote(asr_cache_dir)} \\
+            ${taxid_mapping ? "--taxid-mapping ${scoringQuote(taxid_mapping)}" : ''} \\
+            ${ensembl_file ? "--ensembl-genes-file ${scoringQuote(ensembl_file)}" : ''}
+    """
     // The b_0 slice of each gene through `ct perm-replay` (the b_0 tile only): discovery.tab rows and tested positions.
-    def ct_b0 = !is_b0 ? '' : """bash $baseDir/subworkflows/CT/local/scripts/run_ct_perm_replay_batch.sh \\
+    def ct_b0 = !is_b0 ? '' : """bash ${scoringQuote("${baseDir}/subworkflows/CT/local/scripts/run_ct_perm_replay_batch.sh")} \\
         --batch-id ${batchID} \\
         --manifest ${batchID}.manifest.tsv \\
-        --caas-config ${caas_config} \\
-        --resampled-path ${block}/resample_perms.tab \\
+        --caas-config ${scoringQuote(caas_config)} \\
+        --resampled-path ${scoringQuote("${block}/resample_perms.tab")} \\
         --workers ${task.cpus} \\
-        --ali-format ${params.ali_format} \\
-        --ct-bin ${ctBinary} \\
+        --ali-format ${scoringQuote(params.ali_format)} \\
+        --ct-bin ${scoringQuote(ctBinary)} \\
         --export-groups 0 \\
         --export-perm-discovery 0 \\
         --export-b0 1 \\
         --extra-args-file .ct_perm_replay_batch_args
-    find . -maxdepth 1 \\( -name '*.b0.discovery.tsv' -o -name '*.b0.background' \\) -exec mv {} b0_observed/ \\;"""
+    find . -maxdepth 1 \\( -name '*.b0.discovery.tsv' -o -name '*.b0.background' \\) -exec mv {} b0_observed/ \\;
+    # the positional universe of the batch's genes goes with the b_0 slice: background.output is written from it
+    cp universe_in/*.b0.universe* b0_observed/"""
     def strict_move = strict_on ? "mv caas_perms_out/null_tables_strict null_tables_strict" : ''
     """
+    # CT scoring contract v4: validated provenance, strict overlap, complete observed/null scoring.
+    echo '${task.ext.scoring_source_hash}:${postproc_maps_hash}' > scoring_source.sha256
     # One worker pool runs the genes in parallel; BLAS and OpenMP stay at one thread each.
     export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     ${is_b0 ? 'mkdir -p b0_observed' : ''}
@@ -276,21 +272,7 @@ process CAAS_CORE_BATCHED {
     cat > ${batchID}.manifest.tsv <<'EOF'
 """ + manifestText + """EOF
 
-    # With multi_hypothesis the design is a directory of traitfile_H*.tab (same K): one .tab gives the pair count
-    if [ -d "${caas_config}" ]; then
-        _cfg_file=\$(find -L ${caas_config} -type f -name '*.tab' | sort | head -n 1)
-    else
-        _cfg_file="${caas_config}"
-    fi
-    n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' "\$_cfg_file" | sort -nu | wc -l | tr -d ' ')
-    _frac() { awk -v n="\$n_pairs" -v f="\$1" 'BEGIN{printf "%d", int(n*f)}'; }
-    declare -a extra_opts=(--patterns "${params.patterns}")
-    if [ "${params.miss_pair}" = "true" ]; then extra_opts+=(--miss_pair); fi
-    extra_opts+=(--max_conserved \$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}'))
-    extra_opts+=(--min_non_overlapping "${params.min_non_overlapping ?: 2}")
-    extra_opts+=(--max_bg_gaps \$(_frac ${params.max_bg_gaps_fraction}) --max_fg_gaps \$(_frac ${params.max_fg_gaps_fraction}) --max_gaps \$(_frac ${params.max_gaps_fraction}))
-    extra_opts+=(--max_bg_miss \$(_frac ${params.max_bg_miss_fraction}) --max_fg_miss \$(_frac ${params.max_fg_miss_fraction}) --max_miss \$(_frac ${params.max_miss_fraction}))
-    echo "\${extra_opts[@]}" > .ct_perm_replay_batch_args
+    ${replayArgsScript(caas_config)}
 
     # The b_0 slice of each gene: the discovery.tab rows of the real labeling and the positions it tested.
     ${ct_b0}
@@ -299,28 +281,30 @@ process CAAS_CORE_BATCHED {
     FOP_PAIRS_ARG=""
     if [ -f ${block}/fop_pairs.tsv ]; then FOP_PAIRS_ARG="--fop-pairs ${block}/fop_pairs.tsv"; fi
 
-    cp -R ${local_dir}/* .
+    cp -R ${scoringQuote(local_dir)}/. .
+    cp ${scoringQuote("${baseDir}/subworkflows/CT/local/modules/design_io.py")} src/core/_ct_design_io.py
     find . -name '*.pyc' -delete 2>/dev/null || true
     mkdir -p caas_perms_out
     ${run} ./disambiguation_perms_main.py \\
-        --alignment-dir ${params.alignment} \\
-        --tree ${tree_file} \\
+        --alignment-dir alignments \\
+        --tree ${scoringQuote(tree_file)} \\
         --manifest ${batchID}.manifest.tsv --manifest-alignment-dir alignments \\
-        --design ${caas_config} \\
-        --ct-dir $baseDir/subworkflows/CT/local \\
+        --design ${scoringQuote(caas_config)} \\
+        --ct-dir ${scoringQuote("${baseDir}/subworkflows/CT/local")} \\
         --replay-args-file .ct_perm_replay_batch_args \\
-        --ali-format ${params.ali_format} \\
+        --universe-dir universe_in \\
+        --ali-format ${scoringQuote(params.ali_format)} \\
         --resample-dir ${block} \\
         --output-dir caas_perms_out \\
         ${strict_flag} \\
         \$FOP_PAIRS_ARG ${tile_args} \\
-        --asr-model ${params.ct_disambig_asr_model} \\
-        --posterior-threshold ${params.ct_disambig_posterior_threshold} \\
+        --asr-model ${scoringQuote(params.ct_disambig_asr_model)} \\
+        --posterior-threshold ${scoringQuote(params.ct_disambig_posterior_threshold)} \\
         --workers ${task.cpus} \\
         --max-tasks-per-child ${max_tasks_per_child} \\
-        --asr-cache-dir ${asr_cache_dir} \\
-        ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
-        ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
+        --asr-cache-dir ${scoringQuote(asr_cache_dir)} \\
+        ${taxid_mapping ? "--taxid-mapping ${scoringQuote(taxid_mapping)}" : ''} \\
+        ${ensembl_file ? "--ensembl-genes-file ${scoringQuote(ensembl_file)}" : ''}
     mv caas_perms_out/null_tables null_tables
     ${strict_move}
     rm -rf caas_perms_out
@@ -354,8 +338,13 @@ workflow CAAS_CORE {
                 def manifest = batch.collect { row -> "${row[0]}\t${row[1].name}" }.join('\n') + '\n'
                 tuple(id, batch.size(), manifest, batch.collect { row -> row[1] }.unique { f -> f.name })
             }
+        // The positional universe of each gene batch (from b_0 and the observed pairs) is computed once and read by every
+        // tile of the batch, the permuted blocks and b_0 alike.
+        def b0_block = blocks.flatten().filter { it.name == 'b0' }.collect().map { items -> items[0] }
+        def universe_cfg = caas_config.collect().map { items -> items[0] }
+        def universe_out = CAAS_UNIVERSE(live, b0_block, universe_cfg)
         // Every gene batch replays against every block directory.
-        def tiles = live.combine(blocks.flatten())
+        def tiles = live.combine(blocks.flatten()).combine(universe_out.universe, by: 0)
         // The single-item inputs (resample subset, gene lengths, trait file, tree) are queue
         // channels once they have crossed a take:/emit: boundary, not value channels. A process pairs its
         // input channels positionally and stops when any one runs out, so paired with the many-item tile
@@ -373,6 +362,7 @@ workflow CAAS_CORE {
         null_tables    = core.null_tables          // tuple(block name, tile tables), one per tile
         null_tables_strict = core.null_tables_strict   // empty unless the strict tables are on
         blocks         = blocks.flatten().map { b -> tuple(b.name, b) }   // tuple(block name, block directory)
+        universe       = universe_out.universe     // tuple(batch id, directory of its *.b0.universe files)
         b0_observed    = core.b0_observed
         b0_observed_strict = core.b0_observed_strict
 }
@@ -385,6 +375,7 @@ workflow CAAS_CORE {
 // where the rest of the pipeline reads them: caastools/, meta_caas/meta_caas/ and
 // ct_disambiguation/.
 process CAAS_CORE_OBSERVED {
+    ext scoring_source_hash: core_scoring_source_hash
     tag "caas_core_observed"
     label 'process_low'
     // ext.publish_prefix is empty for this process and "/strict" for its strict alias (CAAS_CORE_OBSERVED_STRICT), which
@@ -410,9 +401,11 @@ process CAAS_CORE_OBSERVED {
     def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
     def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     """
-    cp -R ${local_dir}/* .
+    echo '${task.ext.scoring_source_hash}' > scoring_source.sha256
+    cp -R ${scoringQuote(local_dir)}/. .
+    cp ${scoringQuote("${baseDir}/subworkflows/CT/local/modules/design_io.py")} src/core/_ct_design_io.py
     find . -name '*.pyc' -delete 2>/dev/null || true
-    ${py} ./contract_main.py --b0-dirs b0obs_* --design ${design} --output-dir .
+    ${py} ./contract_main.py --b0-dirs b0obs_* --design ${scoringQuote(design)} --output-dir .
     """
 }
 
@@ -423,6 +416,8 @@ process CAAS_CORE_OBSERVED {
 // is computed. Observed and null gene scores both use max; FCS calibrates the
 // same statistic on both sides. Position-level null products are unchanged.
 process CAAS_CORE_MERGE {
+    ext scoring_source_hash: core_scoring_source_hash
+    cache 'deep'
     tag "caas_core_merge|${block}"
     label 'process_medium'
     // ext.publish_prefix is "/strict" for the strict alias (CAAS_CORE_MERGE_STRICT)
@@ -438,6 +433,7 @@ process CAAS_CORE_MERGE {
     tuple val(block), path("${block}"), emit: block_out
 
     script:
+    def postproc_maps_hash = params.caas_map_dir ? scoringInputHash(params.caas_map_dir) : ''
     def disambig_local = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
     def scoring_local  = "${baseDir}/subworkflows/SCORING/local"
     // The sentinel convention is a NO_* basename (NO_FILE here, NO_BACKGROUND from SCORING's resolved_background), so
@@ -447,6 +443,7 @@ process CAAS_CORE_MERGE {
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript'  : 'Rscript'
     def b0_arg = block == 'b0' ? '--include-b0' : ''
     """
+    echo '${task.ext.scoring_source_hash}:${postproc_maps_hash}' > scoring_source.sha256
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     # merge_null_block.py imports its src package relative to its own location.
     cp -R ${disambig_local}/* .

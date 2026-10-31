@@ -276,7 +276,8 @@ has_fcs_stats_cmp <- .file_ok(params$fcs_stats_file)
 fcs_stats_cmp_df  <- if (has_fcs_stats_cmp) readr::read_tsv(params$fcs_stats_file, show_col_types = FALSE) else NULL
 
 has_position_scores_cmp <- .file_ok(params$position_scores_file)
-position_scores_cmp_df  <- if (has_position_scores_cmp) readr::read_tsv(params$position_scores_file, show_col_types = FALSE) else NULL
+position_scores_cmp_df  <- if (has_position_scores_cmp) readr::read_tsv(params$position_scores_file, quote = "", na = character(),
+    col_types = readr::cols(Gene = readr::col_character(), gene = readr::col_character()), show_col_types = FALSE) else NULL
 if (!is.null(position_scores_cmp_df) && "Position" %in% names(position_scores_cmp_df)) {
   position_scores_cmp_df$Position <- suppressWarnings(as.integer(position_scores_cmp_df$Position))
 }
@@ -290,22 +291,56 @@ if (!is.null(position_scores_cmp_df) && "side" %in% names(position_scores_cmp_df
   position_scores_cmp_df$side <- as.character(position_scores_cmp_df$side)
 }
 
-has_vep_primateai_cmp <- .file_ok(params$vep_primateai_file)
-vep_primateai_cmp_df  <- if (has_vep_primateai_cmp) readr::read_tsv(params$vep_primateai_file, show_col_types = FALSE) else NULL
-
-has_vep_cosmic_cmp <- .file_ok(params$vep_cosmic_file)
-vep_cosmic_cmp_df  <- if (has_vep_cosmic_cmp) readr::read_tsv(params$vep_cosmic_file, show_col_types = FALSE) else NULL
-
-has_vep_ensembl_cmp <- .file_ok(params$vep_ensembl_file)
-if (has_vep_ensembl_cmp) {
-  vep_ensembl_cmp_df <- readr::read_tsv(params$vep_ensembl_file, name_repair = "minimal", show_col_types = FALSE)
-  .dup_g <- which(names(vep_ensembl_cmp_df) == "Gene")
-  if (length(.dup_g) > 1L) names(vep_ensembl_cmp_df)[.dup_g[-1]] <- "Ensembl_Gene"
-  if ("Position" %in% names(vep_ensembl_cmp_df)) vep_ensembl_cmp_df$Position <- suppressWarnings(as.integer(vep_ensembl_cmp_df$Position))
-  if ("side"     %in% names(vep_ensembl_cmp_df)) vep_ensembl_cmp_df$side     <- as.character(vep_ensembl_cmp_df$side)
-} else {
-  vep_ensembl_cmp_df <- NULL
+# <vep_contract>
+# VEP outputs carry one explicit status per target; annotation rows may fan out by SNV.
+# Literal identifiers follow the SCORING TSV contract, including quotes and NA.
+read_vep_contract <- function(path, source) {
+  if (!.file_ok(path)) return(NULL)
+  d <- readr::read_tsv(path, quote = "", na = character(), name_repair = "check_unique",
+                       col_types = readr::cols(.default = readr::col_character()), show_col_types = FALSE)
+  required <- c("Gene","Position","side","status","coverage","source","variant_id","candidate_count","annotated_count")
+  if (!all(required %in% names(d))) {
+    warning("Unverified legacy VEP table excluded: ", path, "; regenerate with the VEP contract")
+    return(NULL)
+  }
+  valid_status <- c("annotated","no_hit","missing_annotation","unresolved_annotation","unresolved_asr",
+    "excluded_gap","excluded_ambiguous_residue","unmapped_no_map","unmapped_reference_gap",
+    "unverified_reference","unmapped_protein_id","reference_state_mismatch","excluded_no_change",
+    "unmapped_codon","excluded_requires_multiple_nucleotides","outside_source_scope")
+  if (any(!nzchar(d$Gene)) || any(!grepl("^(0|[1-9][0-9]*)$", d$Position)) ||
+      any(!d$side %in% c("top","bottom")) || any(d$source != source) ||
+      any(!d$status %in% valid_status)) stop("Invalid VEP target/status contract: ", path)
+  d$Position <- as.integer(d$Position)
+  if (anyNA(d$Position)) stop("Invalid VEP position: ",path)
+  if (any(!grepl("^(0|[1-9][0-9]*)$", d$candidate_count)) ||
+      any(!grepl("^(0|[1-9][0-9]*)$", d$annotated_count))) stop("Invalid VEP coverage counts")
+  n <- as.numeric(d$candidate_count); k <- as.numeric(d$annotated_count)
+  if (any(!is.finite(n) | !is.finite(k) | k > n) ||
+      any(d$status == "annotated" & (k == 0 | !nzchar(d$variant_id))) ||
+      any(d$status != "annotated" & k != 0) ||
+      any(d$status == "no_hit" & (source != "cosmic" | d$coverage != "snapshot_searched"))) stop("Incompatible VEP coverage")
+  key <- paste(d$Gene,d$Position,d$side,sep="\r")
+  for (idx in split(seq_len(nrow(d)),key)) {
+    if (length(unique(d$status[idx])) != 1L || length(unique(d$coverage[idx])) != 1L ||
+        length(unique(n[idx])) != 1L || length(unique(k[idx])) != 1L ||
+        (d$status[idx[1]] != "annotated" && length(idx) != 1L)) stop("Incompatible duplicate VEP targets")
+  }
+  if (anyDuplicated(d)) stop("Duplicate VEP annotation rows")
+  d
 }
+vep_target_key <- function(d, gene="Gene") paste(d[[gene]],d$Position,d$side,sep="\r")
+vep_status_for <- function(d,base,field="status") {
+  if (is.null(d)) return(rep("source_unavailable",nrow(base)))
+  x <- d[[field]][match(vep_target_key(base,"gene"),vep_target_key(d))]
+  ifelse(is.na(x),"target_absent",x)
+}
+# </vep_contract>
+vep_primateai_cmp_df <- read_vep_contract(params$vep_primateai_file,"primateai")
+vep_cosmic_cmp_df <- read_vep_contract(params$vep_cosmic_file,"cosmic")
+vep_ensembl_cmp_df <- read_vep_contract(params$vep_ensembl_file,"ensembl")
+has_vep_primateai_cmp <- !is.null(vep_primateai_cmp_df)
+has_vep_cosmic_cmp <- !is.null(vep_cosmic_cmp_df)
+has_vep_ensembl_cmp <- !is.null(vep_ensembl_cmp_df)
 
 # <vep_collapse>
 # Reduces the per-transcript rows of the Ensembl VEP table to ONE consequence per group (by default Gene, Position,
@@ -395,9 +430,12 @@ position_char_cmp_df  <- if (has_position_char_cmp) {
   # the later left_join by c("gene", "Position") against position_scores_cmp_df's
   # numeric Position doesn't fail on incompatible types (same fix already
   # applied to fade_sites_top/bottom_cmp_df above for the same reason).
-  readr::read_tsv(params$position_characterization_file, show_col_types = FALSE) %>%
+  readr::read_tsv(params$position_characterization_file, na = character(),
+                   col_types = readr::cols(.default = readr::col_character()), show_col_types = FALSE) %>%
     dplyr::mutate(Position = suppressWarnings(as.integer(Position)))
 } else NULL
+if (!is.null(position_char_cmp_df) && anyDuplicated(position_char_cmp_df[c('Gene','Position')]))
+  stop('Duplicate POSENRICH characterization key')
 if(!is.null(position_char_cmp_df) && "fubar_selection" %in% names(position_char_cmp_df))
   position_char_cmp_df$fubar_selection <- dplyr::recode(as.character(position_char_cmp_df$fubar_selection),negative="purifying",pervasive="purifying")
 
@@ -1053,7 +1091,7 @@ cap_note <- function(n_total) {
 }
 
 .position_emp_flags <- function(base, dir_key) {
- base$gene <- sub("\\.[0-9]+$","",trimws(base$Gene))
+ base$gene <- as.character(base$Gene)
  base$`CAAS p` <- suppressWarnings(as.numeric(evidence_column(base,"p.emp")))
  base$`CAAS BH` <- suppressWarnings(as.numeric(evidence_column(base,"p.adj_bh")))
  base$`CAAS nominal` <- if("caas_nominal" %in% names(base))base$caas_nominal else ifelse(is.finite(base$`CAAS p`),base$`CAAS p`<.nominal_cmp,NA)
@@ -1125,6 +1163,8 @@ for (dr in c("Global", "Top", "Bottom")) {
 ---
 
 # Interesting Positions {.tabset .tabset-fade}
+
+VEP, PrimateAI-3D and COSMIC describe candidate variants on the verified human reference; they do not establish substitutions observed in another species. `no_hit` means no matching record in the declared COSMIC snapshot and covered gene, not absence of cancer relevance. Missing, excluded and unresolved targets have explicit status columns. A benign PrimateAI label requires complete coverage of the candidate SNVs.
 
 Positions are ordered by pooled CAAS positional p ascending and CAAS score descending.
 The same pooled CAAS p/BH pair is displayed once; FADE overlap is matched to Top/Bottom
@@ -1199,51 +1239,43 @@ build_interesting_positions <- function(direction) {
   base$is_biochem <- dplyr::coalesce(as.logical(base$is_biochem), FALSE)
   base$biochem_groupings <- dplyr::coalesce(as.character(base$biochem_groupings), "")
 
-  # External characterization: PrimateAI-3D
+  # Human-reference candidate annotations preserve the scored side and explicit coverage.
+  base$PAI3D_status <- vep_status_for(vep_primateai_cmp_df,base)
+  base$COSMIC_status <- vep_status_for(vep_cosmic_cmp_df,base)
+  base$VEP_status <- vep_status_for(vep_ensembl_cmp_df,base)
+  base$PAI3D_coverage <- vep_status_for(vep_primateai_cmp_df,base,"coverage")
+  base$COSMIC_coverage <- vep_status_for(vep_cosmic_cmp_df,base,"coverage")
+  base$VEP_coverage <- vep_status_for(vep_ensembl_cmp_df,base,"coverage")
+  base$PAI3D_pathogenic <- rep("missing",nrow(base))
   has_pai3d_pos <- FALSE
-  if (has_vep_primateai_cmp && !is.null(vep_primateai_cmp_df) && nrow(vep_primateai_cmp_df) > 0) {
-    .pai <- vep_primateai_cmp_df
-    .pred_col <- intersect(c("prediction"), names(.pai))[1]
-    if (!is.na(.pred_col)) {
-      .pai_pos <- .pai %>%
-        dplyr::mutate(.patho = grepl("pathogenic", .data[[.pred_col]], ignore.case = TRUE)) %>%
-        dplyr::group_by(Gene, Position) %>% dplyr::summarise(.patho = any(.patho), .groups = "drop")
-      .m <- .pai_pos[match(paste(base$gene, base$Position), paste(.pai_pos$Gene, .pai_pos$Position)), ]
-      base$PAI3D_pathogenic <- dplyr::case_when(is.na(.m$.patho) ~ "missing", .m$.patho ~ "pathogenic", TRUE ~ "benign")
+  if (has_vep_primateai_cmp && nrow(vep_primateai_cmp_df)) {
+    .pai <- vep_primateai_cmp_df %>% dplyr::filter(status == "annotated")
+    if (nrow(.pai)) {
+      if (!"prediction" %in% names(.pai) || any(!.pai$prediction %in% c("benign","pathogenic"))) stop("Invalid PrimateAI prediction contract")
+      .pai_pos <- .pai %>% dplyr::group_by(Gene,Position,side) %>%
+        dplyr::summarise(.patho=any(prediction == "pathogenic"),
+                         .all_covered=all(coverage == "complete"),.groups="drop")
+      .m <- .pai_pos[match(vep_target_key(base,"gene"),vep_target_key(.pai_pos)),]
+      base$PAI3D_pathogenic <- dplyr::case_when(.m$.patho ~ "pathogenic",
+        .m$.all_covered & !.m$.patho ~ "benign", TRUE ~ "missing")
       has_pai3d_pos <- any(base$PAI3D_pathogenic != "missing")
     }
   }
-  if (!has_pai3d_pos) base$PAI3D_pathogenic <- rep("missing", nrow(base))
-
-  # External characterization: COSMIC
-  has_cosmic_pos <- FALSE
-  if (has_vep_cosmic_cmp && !is.null(vep_cosmic_cmp_df) && nrow(vep_cosmic_cmp_df) > 0) {
-    .cosmic <- vep_cosmic_cmp_df
-    .cosmic_hit <- paste(base$gene, base$Position) %in% paste(.cosmic$Gene, .cosmic$Position)
-    .checkable <- if (has_pai3d_pos) base$PAI3D_pathogenic != "missing" else rep(TRUE, nrow(base))
-    base$COSMIC <- dplyr::case_when(.cosmic_hit ~ "hit", .checkable ~ "no_hit", TRUE ~ "missing")
-    has_cosmic_pos <- any(base$COSMIC != "missing")
-  }
-  if (!has_cosmic_pos) base$COSMIC <- rep("missing", nrow(base))
-
-  # External characterization: Ensembl VEP consequence
+  base$COSMIC <- dplyr::case_when(base$COSMIC_status == "annotated" ~ "hit",
+                                 base$COSMIC_status == "no_hit" ~ "no_hit",TRUE ~ "missing")
+  has_cosmic_pos <- any(base$COSMIC != "missing")
+  base$VEP_consequence <- rep("missing",nrow(base))
   has_vep_ensembl_pos <- FALSE
-  if (has_vep_ensembl_cmp && !is.null(vep_ensembl_cmp_df) && nrow(vep_ensembl_cmp_df) > 0 && "Consequence" %in% names(vep_ensembl_cmp_df)) {
-    .vep_ens <- vep_ensembl_cmp_df
-    # One consequence per position and side (MANE Select, else canonical, else the most severe over all transcripts).
-    # A table without a side column is matched by Gene and Position only.
-    .vep_has_side <- "side" %in% names(.vep_ens) && "side" %in% names(base)
-    if (!.vep_has_side) message("Ensembl VEP table has no side column: positions matched by Gene and Position only.")
-    .vep_by <- if (.vep_has_side) c("Gene", "Position", "side") else c("Gene", "Position")
-    .vep_ens_pos <- collapse_vep_consequence(.vep_ens, by = .vep_by)
-    .vep_ens_pos$.conseq <- gsub(",", "; ", .vep_ens_pos$Consequence, fixed = TRUE)
-    .key_ens  <- do.call(paste, c(unname(as.list(.vep_ens_pos[.vep_by])), sep = "\r"))
-    .key_base <- if (.vep_has_side) paste(base$gene, base$Position, base$side, sep = "\r") else paste(base$gene, base$Position, sep = "\r")
-    .me <- .vep_ens_pos[match(.key_base, .key_ens), ]
-    base$VEP_consequence <- dplyr::coalesce(dplyr::na_if(.me$.conseq, ""), "missing")
-    has_vep_ensembl_pos <- any(base$VEP_consequence != "missing")
+  if (has_vep_ensembl_cmp && nrow(vep_ensembl_cmp_df)) {
+    .vep_ens <- vep_ensembl_cmp_df %>% dplyr::filter(status == "annotated")
+    if (nrow(.vep_ens)) {
+      if (!"Consequence" %in% names(.vep_ens)) stop("Missing VEP consequence")
+      .vep_ens_pos <- collapse_vep_consequence(.vep_ens,by=c("Gene","Position","side"))
+      .me <- .vep_ens_pos[match(vep_target_key(base,"gene"),vep_target_key(.vep_ens_pos)),]
+      base$VEP_consequence <- dplyr::coalesce(dplyr::na_if(gsub(",","; ",.me$Consequence,fixed=TRUE),""),"missing")
+      has_vep_ensembl_pos <- any(base$VEP_consequence != "missing")
+    }
   }
-  if (!has_vep_ensembl_pos) base$VEP_consequence <- rep("missing", nrow(base))
 
   # Position characterization GMTs: Pfam, UCR, variability, FUBAR
   has_pfam_pos  <- FALSE
@@ -1337,6 +1369,9 @@ build_interesting_positions <- function(direction) {
   desc_cols <- if (has_biochem_pos) c("biochem_groupings", "is_biochem") else c()
   desc_cols <- c(desc_cols,"Gene CAAS FCS terms","Gene RER FCS terms","Gene CAAS FCS all terms","Gene RER FCS all terms")
   # CAAS p and CAAS BH above are the canonical pooled positional pair.
+  if (has_vep_cosmic_cmp) desc_cols <- c(desc_cols,"COSMIC_status","COSMIC_coverage")
+  if (has_vep_primateai_cmp) desc_cols <- c(desc_cols,"PAI3D_status","PAI3D_coverage")
+  if (has_vep_ensembl_cmp) desc_cols <- c(desc_cols,"VEP_status","VEP_coverage")
   if (has_cosmic_pos)      desc_cols <- c(desc_cols, "COSMIC")
   if (has_pai3d_pos)       desc_cols <- c(desc_cols, "PAI3D_pathogenic")
   if (has_vep_ensembl_pos) desc_cols <- c(desc_cols, "VEP_consequence")

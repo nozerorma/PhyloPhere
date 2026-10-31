@@ -49,7 +49,8 @@ process CAAS_EVIDENCE {
     """
     # One worker per gene; BLAS and OpenMP stay at one thread each.
     export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
-    cp -R ${local_dir}/* .
+    cp -R "${local_dir}/." .
+    cp "${baseDir}/subworkflows/CT/local/modules/design_io.py" src/core/_ct_design_io.py
     find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
     find . -name '*.pyc' -delete 2>/dev/null || true
 

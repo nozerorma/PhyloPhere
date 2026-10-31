@@ -1,154 +1,86 @@
-"""Universe U: definition, gene list as input, tested-set rule, manifest, and agreement with SCORING."""
-import importlib.util
+"""Fixed tested universe, literal IDs, scientific provenance and empirical count families."""
 import json
-import math
-import subprocess
 import sys
-import os
+import subprocess
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
-
-pytest.importorskip('pyarrow')
-
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / 'subworkflows/POSENRICH/local/src'
-UNIVERSE = SRC / 'posenrich_universe.py'
-SCORING_SRC = ROOT / 'subworkflows/SCORING/local/src/null_position_stats.py'
-
-
-def load(path, name):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+from posenrich_fixtures import canonical, digest, seal_block
+ROOT=Path(__file__).resolve().parents[1]
+SRC=ROOT/'subworkflows/POSENRICH/local/src'
+sys.path.insert(0,str(SRC))
+import posenrich_universe as u
+from posenrich_contract import observed_table, verify_universe
+from accumulation_test import run as accumulation
+from argparse import Namespace
 
 
-uni = load(UNIVERSE, 'posenrich_universe_under_test')
-
-# G1 tests 0..9, G2 0..5, G3 0..4. The null scores G1 {1,2,3,12,15}, G2 {0,1}, G3 {0}; G3 is outside the gene list.
-BACKGROUND = 'G1\t' + ','.join(map(str, range(10))) + '\nG2\t' + ','.join(map(str, range(6))) + \
-             '\nG3\t' + ','.join(map(str, range(5))) + '\n'
-NULL = pd.DataFrame({'gene': ['G1'] * 5 + ['G2'] * 2 + ['G3'],
-                     'position': [1, 2, 3, 12, 15, 0, 1, 0],
-                     'nd': [5, 2, 1, 9, 2, 3, 4, 7],
-                     'first_rank': [0] * 8})
-# Observed rows: G1:1 on both sides, G1:5 with a non-positive score, G1:12 (null-scored, untested), G1:20 (neither),
-# G2:0, and G3:0 (gene outside the list).
-OBSERVED = ('Gene\tPosition\tside\tasr_path_score\n'
-            'G1\t1\ttop\t0.9\nG1\t1\tbottom\t0.8\nG1\t5\ttop\t0.0\nG1\t12\ttop\t0.4\nG1\t20\tbottom\t0.5\n'
-            'G2\t0\ttop\t0.7\nG3\t0\ttop\t0.6\n')
+def inputs(tmp_path, silent=False):
+    genes=['001','NA','G.v1','"Q"','empty']
+    (tmp_path/'genes').write_text('\n'.join(genes)+'\n')
+    (tmp_path/'tested').write_text(''.join(f'{g}\t'+('' if g=='empty' else '0,1,2')+'\n' for g in genes))
+    obs=tmp_path/'observed.tsv'
+    pd.DataFrame([['001',0,'top',.8],['001',0,'bottom',.4],['NA',1,'top',.5],['"Q"',2,'none',0]],columns=['Gene','Position','side','asr_path_score']).to_csv(obs,sep='\t',index=False)
+    block=canonical(tmp_path/'null',obs,genes,[] if silent else [('001','b_1',0,.9,np.nan),('NA','b_2',0,np.nan,.3),('001','b_2',99,.5,np.nan)],tested=tmp_path/'tested')
+    args=[sys.executable,str(SRC/'posenrich_universe.py'),'--background-genes',str(tmp_path/'genes'),'--background-positions',str(tmp_path/'tested'),'--null-positions',str(tmp_path/'null/null_positions.parquet'),'--observed',str(obs),'--observed-contract',str(obs)+'.scoring.json','--roster',str(tmp_path/'null/cycle_roster.txt'),'--counts',str(tmp_path/'null/counts.json'),'--blocks',str(block),'--output-dir',str(tmp_path/'universe')]
+    return genes,block,args
 
 
-@pytest.fixture
-def files(tmp_path):
-    (tmp_path / 'genes.txt').write_text('G1\nG2\n')
-    (tmp_path / 'background.output').write_text(BACKGROUND)
-    NULL.to_parquet(tmp_path / 'null_positions.parquet', index=False)
-    (tmp_path / 'observed.tsv').write_text(OBSERVED)
-    return tmp_path
+def test_fixed_family_keeps_undetected_and_silent_positions(tmp_path):
+    genes,block,args=inputs(tmp_path)
+    r=subprocess.run(args,capture_output=True,text=True);assert r.returncode==0,r.stderr
+    t=pd.read_csv(tmp_path/'universe/universe.tsv.gz',sep='\t',dtype={'gene':str},keep_default_na=False)
+    assert len(t)==12 and set(t.gene)==set(genes)-{'empty'}
+    assert t.observed_positive.sum()==2 and t.nd.sum()==2
+    m=verify_universe(tmp_path/'universe/universe.tsv.gz',blocks=[block])
+    assert m['genes']==genes and m['null']['N']==5
+    output=tmp_path/'acc/accumulation_all_results.csv'
+    accumulation(Namespace(universe=str(tmp_path/'universe/universe.tsv.gz'),universe_manifest=str(tmp_path/'universe/universe_manifest.json'),blocks=[block],change_side='both',output=str(output)))
+    a=pd.read_csv(output,keep_default_na=False).set_index('Gene')
+    assert float(a.loc['001','EmpiricalP'])==pytest.approx(2/6)
+    assert float(a.loc['NA','EmpiricalP'])==pytest.approx(2/6)
+    assert float(a.loc['G.v1','EmpiricalP'])==1
+    assert a.loc['empty','status']=='no_tested_positions' and a.loc['empty','PValue']=='NA'
+    assert float(a.loc['001','EmpiricalQ'])==pytest.approx(2/3)
 
 
-def build(files, genes=None, background='background.output'):
-    genes = genes or uni.load_universe_genes(files / 'genes.txt')
-    return uni.build_universe(genes, uni.load_null_positive(files / 'null_positions.parquet'),
-                              uni.load_observed_positive(files / 'observed.tsv'),
-                              files / background if background else None)
+def test_entirely_silent_null_is_valid(tmp_path):
+    _,_,args=inputs(tmp_path,True)
+    r=subprocess.run(args,capture_output=True,text=True);assert r.returncode==0,r.stderr
+    t=pd.read_csv(tmp_path/'universe/universe.tsv.gz',sep='\t')
+    assert len(t)==12 and t.nd.sum()==0
 
 
-def as_pairs(universe):
-    table = universe.table()
-    return {(g, int(p)): int(nd) for g, p, nd in zip(table.gene, table.position, table.nd)}
+@pytest.mark.parametrize('kind',['duplicate','bad_score','bad_side','fractional','quotes'])
+def test_observed_contract(tmp_path,kind):
+    p=tmp_path/'s.tsv';text='Gene\tPosition\tside\tCAAS_score\n001\t0\ttop\t.5\nNA\t1\tbottom\t.4\n"Q"\t2\ttop\t.8\n'
+    if kind=='duplicate':text+='001\t0\ttop\t.5\n'
+    elif kind=='bad_score':text=text.replace('.5','inf')
+    elif kind=='bad_side':text=text.replace('top','none')
+    elif kind=='fractional':text=text.replace('001\t0','001\t0.5')
+    p.write_text(text)
+    if kind=='quotes':assert observed_table(p).Gene.tolist()==['001','NA','"Q"']
+    else:
+        with pytest.raises(ValueError):observed_table(p)
 
 
-def test_universe_is_tested_and_null_positive_plus_observed_positives(files):
-    u = build(files)
-    # G1:15 is null-positive but untested; G1:12 and G1:20 are observed positives and stay; G3 is outside the list.
-    assert as_pairs(u) == {('G1', 1): 5, ('G1', 2): 2, ('G1', 3): 1, ('G1', 12): 9, ('G1', 20): 0,
-                           ('G2', 0): 3, ('G2', 1): 4}
-    assert u.metrics['tested_set'] == 'used'
-    assert u.metrics['n_universe'] == 7
-    assert u.metrics['n_observed_positive'] == 4          # G1:1, G1:12, G1:20, G2:0 (G1:5 is not positive; G3 is dropped)
-    assert u.metrics['n_observed_outside_tested'] == 2    # G1:12 and G1:20
-    assert u.metrics['n_observed_not_scored_by_null'] == 1  # G1:20
+def test_observed_outside_tested_rejected_and_no_fallback(tmp_path):
+    genes,_,_=inputs(tmp_path)
+    null=u.load_null_positive(tmp_path/'null/null_positions.parquet')
+    obs=u.load_observed_positive(tmp_path/'observed.tsv');obs.loc[0,'position']=88
+    with pytest.raises(ValueError,match='outside declared'):u.build_universe(genes,null,obs,tmp_path/'tested')
+    with pytest.raises(ValueError,match='Explicit tested'):u.build_universe(genes,null,obs,None)
 
 
-def test_observed_sides_and_both_count_once(files):
-    u = build(files)
-    names = lambda keys: {(u.genes[k >> uni.POS_BITS], int(k & 0xFFFFFFFF)) for k in keys}
-    assert names(u.top) == {('G1', 1), ('G1', 12), ('G2', 0)}
-    assert names(u.bottom) == {('G1', 1), ('G1', 20)}
-    assert u.observed.size == 4
-
-
-def test_gene_list_is_an_input(files):
-    u = build(files, genes=['G1', 'G2', 'G3'])
-    assert ('G3', 0) in as_pairs(u) and u.metrics['n_universe'] == 8
-
-
-def test_incompatible_tested_set_is_ignored(files):
-    (files / 'far.output').write_text('G1\t100,101\nG2\t100\nG3\t100\n')
-    u = build(files, background='far.output')
-    assert u.metrics['tested_set'] == 'ignored_incompatible'
-    assert ('G1', 15) in as_pairs(u)                       # every null-positive position of the list
-
-
-def test_without_background_every_null_positive_position_of_the_list(files):
-    u = build(files, background=None)
-    assert u.metrics['tested_set'] == 'not_given' and ('G1', 15) in as_pairs(u)
-
-
-def test_positive_rule_is_the_core_rule():
-    core = load(ROOT / 'subworkflows/CT_DISAMBIGUATION/local/src/core/scores.py', 'core_scores_under_test')
-    for value in (0, -1.5, 0.1, 3, float('nan'), float('inf'), None, '0.5', 'x'):
-        try:
-            expected = core.position_score(value) is not None
-        except (TypeError, ValueError):
-            expected = False
-        assert uni.is_positive_score(value) == (expected and math.isfinite(float(value)) if expected else False)
-
-
-def test_position_scores_table_is_accepted(tmp_path):
-    (tmp_path / 'p.tsv').write_text('Gene\tPosition\tCAAS_score\tside\nG1\t1\t0.5\ttop\nG1\t2\t0.2\tbottom\n')
-    df = uni.load_observed_positive(tmp_path / 'p.tsv')
-    assert len(df) == 2
-
-
-def test_command_writes_table_and_manifest(files, tmp_path):
-    out = tmp_path / 'out'
-    subprocess.run([sys.executable, str(UNIVERSE), '--background-genes', str(files / 'genes.txt'),
-                    '--background-positions', str(files / 'background.output'),
-                    '--null-positions', str(files / 'null_positions.parquet'),
-                    '--observed', str(files / 'observed.tsv'), '--output-dir', str(out)], check=True)
-    table = pd.read_csv(out / 'universe.tsv.gz', sep='\t')
-    assert len(table) == 7 and table['observed_positive'].sum() == 4
-    assert table['observed_top'].sum() == 3 and table['observed_bottom'].sum() == 2
-    manifest = json.loads((out / 'universe_manifest.json').read_text())
-    assert manifest['gene_list_sha256'] == uni.sha256_file(files / 'genes.txt')
-    assert manifest['metrics']['n_universe'] == 7
-
-
-def test_agrees_with_scoring_universe(files):
-    scoring = load(SCORING_SRC, 'scoring_null_stats_under_test')
-    import pyarrow as pa
-    obs = uni.load_observed_positive(files / 'observed.tsv')
-    obs = obs[obs.gene.isin(['G1', 'G2'])].drop_duplicates(['gene', 'position'])  # SCORING keeps observed rows of genes outside the list
-    classes, _, _, metrics = scoring.build_universe(
-        pa.Table.from_pandas(NULL, preserve_index=False), list(obs.gene), obs.position.to_numpy(),
-        files / 'background.output', files / 'genes.txt', ['b_1', 'b_2'])
-    scoring_keys = set(zip(classes['gene'].to_pylist(), classes['position'].to_pylist()))
-    u = build(files)
-    in_null = set(zip(NULL.gene, NULL.position))
-    assert {k for k in as_pairs(u) if k in in_null} == scoring_keys
-    assert metrics['n_null_u'] == len(scoring_keys)
-
-
-def test_table_flags_sides_and_both_count_once(files):
-    table = build(files).table()
-    both = table[(table.gene == 'G1') & (table.position == 1)].iloc[0]
-    assert (both.observed_positive, both.observed_top, both.observed_bottom) == (1, 1, 1)
-    assert list(table.columns) == ['gene', 'position', 'nd', 'observed_positive', 'observed_top', 'observed_bottom']
-    assert ((table.observed_top | table.observed_bottom) == table.observed_positive).all()
+@pytest.mark.parametrize('kind',['checksum','scientific','aggregate','missing_roster','duplicate_tested'])
+def test_incompatible_inputs_fail(tmp_path,kind):
+    _,block,args=inputs(tmp_path)
+    if kind=='checksum':(block/'positions.parquet').write_bytes(b'corrupt')
+    elif kind=='scientific':
+        p=tmp_path/'observed.tsv.scoring.json';m=json.loads(p.read_text());m['scientific']['model']='WAG';p.write_text(json.dumps(m))
+    elif kind=='aggregate':
+        p=tmp_path/'null/null_positions.parquet';t=pd.read_parquet(p);t.loc[0,'nd']=4;t.to_parquet(p,index=False)
+    elif kind=='missing_roster':(block/'cycles.txt').unlink()
+    else:(tmp_path/'tested').write_text('001\t0,0\n')
+    r=subprocess.run(args,capture_output=True,text=True);assert r.returncode!=0

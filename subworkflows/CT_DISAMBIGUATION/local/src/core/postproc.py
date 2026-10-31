@@ -15,12 +15,9 @@ scored rows (observed = labeling ``b_0``):
   density ``count / span`` reaches ``maxcaas`` (``span >= minlen``), with the span measured
   in the positions or, given a column map, in untrimmed alignment columns. :func:`train_flags`
   is the single entry point that decides over which positions a train is computed.
-* Gene removal: :func:`gene_removal` drops (labeling, gene) units by
-  ``dubious`` (IQR outlier in distinct positions AND at least one train position) and
-  ``extreme`` (density above a percentile), each calibrated within its own
-  labeling pool. In ``stratified`` mode both are replaced by one rule on the count against the fences of
-  the unit's length stratum (:func:`stratified_fences`): ``extreme`` above the far fence, ``dubious`` above the
-  near fence with a train position.
+* Gene removal: :func:`gene_removal` drops (labeling, gene) units whose count of distinct positions exceeds the
+  fences of their gene-length stratum (:func:`stratified_fences`), calibrated within each labeling pool:
+  ``extreme`` above the far fence, ``dubious`` above the near fence with at least one train position.
 
 Pure Python, no numpy/pandas: the null workers import it too.
 """
@@ -29,6 +26,7 @@ from __future__ import annotations
 
 import csv
 import os
+import math
 from array import array
 from typing import Dict, Hashable, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
 
@@ -46,6 +44,7 @@ def ctrain(
     maxcaas: float = 0.7,
     minlen: int = 3,
     columns: Optional[Mapping[int, int]] = None,
+    min_positions: Optional[int] = None,
 ) -> List[int]:
     """Sorted positions inside a high-density interval.
 
@@ -54,28 +53,51 @@ def ctrain(
     positions. ``columns`` maps each position to the column the span is measured in (see
     :mod:`core.columns`): with it, columns that lie between two positions and hold none (the ones
     the trimmer removed) count towards the span; without it the positions themselves are the
-    coordinates. A unit with fewer than ``minlen`` positions has no train either way.
+    coordinates. An explicit ``min_positions`` applies to each interval. None retains
+    the legacy rule: at least ``minlen`` candidates in the gene, with no separate
+    interval-count requirement.
     """
-    uniq = sorted({int(p) for p in positions})
+    legacy = min_positions is None
+    minimum_gene_count = minlen if legacy else min_positions
+    min_positions = 1 if legacy else min_positions
+    if (not isinstance(minlen, int) or minlen < 1 or not isinstance(min_positions, int)
+            or min_positions < 1 or not math.isfinite(maxcaas) or not 0 <= maxcaas <= 1):
+        raise ValueError('Invalid train span, position count or density')
+    if any(not math.isfinite(p) or p < 0 or p != int(p) for p in positions):
+        raise ValueError('Invalid train position')
+    uniq = sorted(set(positions))
     if columns is None:
         coords = uniq
     else:
         missing = [p for p in uniq if p not in columns]
         if missing:
-            raise ValueError(f"position {missing[0]} has no column in the map")
+            raise ValueError(f'position {missing[0]} has no column in the map')
         uniq = sorted(uniq, key=columns.__getitem__)
         coords = [columns[p] for p in uniq]
         if len(set(coords)) != len(coords):
-            raise ValueError("two positions share a column")
+            raise ValueError('two positions share a column')
     n = len(uniq)
-    if n < minlen:
+    if n < minimum_gene_count:
         return []
-    bad: Set[int] = set()
-    for r in range(n):
-        for l in range(r + 1):
+    full_span = coords[-1] - coords[0] + 1
+    if full_span >= minlen and n / full_span >= maxcaas:
+        return sorted(uniq)
+    # Mark intervals with a difference array: no repeated O(interval length)
+    # set updates. O(n²) time and O(n) additional memory, identical decisions.
+    marks = [0] * (n + 1)
+    for r in range(min_positions - 1, n):
+        for l in range(r - min_positions + 2):
             span = coords[r] - coords[l] + 1
-            if span >= minlen and (r - l + 1) / span >= maxcaas:
-                bad.update(uniq[l:r + 1])
+            if span < minlen:
+                break
+            if (r - l + 1) / span >= maxcaas:
+                marks[l] += 1
+                marks[r + 1] -= 1
+    active, bad = 0, []
+    for i, pos in enumerate(uniq):
+        active += marks[i]
+        if active:
+            bad.append(pos)
     return sorted(bad)
 
 
@@ -84,6 +106,7 @@ def train_flags(
     maxcaas: float = 0.7,
     minlen: int = 3,
     columns: Optional[Mapping[int, int]] = None,
+    min_positions: Optional[int] = None,
 ) -> Dict[Hashable, Set[int]]:
     """Train positions per key, for one gene.
 
@@ -93,7 +116,7 @@ def train_flags(
     gene's position -> untrimmed column map (:func:`ctrain`), or None to measure in the
     positions themselves.
     """
-    return {key: set(ctrain(list(pos), maxcaas, minlen, columns)) for key, pos in pos_by_key.items()}
+    return {key: set(ctrain(list(pos), maxcaas, minlen, columns, min_positions)) for key, pos in pos_by_key.items()}
 
 
 # ── Gene removal ──────────────────────────────────────────────────────────────
@@ -161,71 +184,36 @@ def stratified_fences(
 def gene_unit_stats(
     units: Iterable[GeneUnit],
     gene_lengths: Mapping[str, float],
-    iqr_multiplier: float = 3.0,
-    extreme_percentile: float = 0.99,
-    mode: str = "both",
     strata: int = 10,
     k_far: float = 3.0,
     k_near: float = 1.5,
 ) -> List[dict]:
     """Per-unit statistics and outlier flags, calibrated within each labeling.
 
-    ``dubious`` pool: every unit (it needs no length); threshold ``Q3 + k * IQR`` of the
-    distinct-position counts; flagged when ``n_caas > threshold`` and the unit has a train
-    position. ``extreme`` pool: units whose gene has a positive length; density
-    ``n_caas / length * 100``; flagged when it exceeds the ``extreme_percentile`` quantile.
-    Units without a length have ``length``, ``density`` and ``threshold_extreme`` as None.
-
-    With ``mode == "stratified"`` the thresholds are the fences of :func:`stratified_fences`: ``extreme`` is the
-    far fence (``threshold_extreme``) and ``dubious`` the near fence (``threshold_dubious``) with a train position.
+    The thresholds are the fences of :func:`stratified_fences`: ``extreme`` is a count above the far fence
+    (``threshold_extreme``) and ``dubious`` a count above the near fence (``threshold_dubious``) with a train
+    position. Units without a length have ``length``, ``density`` and both thresholds as None.
     """
-    units = list(units)
     pools: Dict[str, List[GeneUnit]] = {}
     for u in units:
         pools.setdefault(u.labeling, []).append(u)
 
     out: List[dict] = []
     for labeling, members in pools.items():
-        if (mode or "").lower() == STRATIFIED:
-            fences = stratified_fences([u.gene for u in members], [u.n_caas for u in members], gene_lengths,
-                                       strata, k_far, k_near)
-            for u, (far, near) in zip(members, fences):
-                length = gene_lengths.get(u.gene) if far is not None else None
-                out.append({
-                    "labeling": labeling, "Gene": u.gene,
-                    "n_caas": u.n_caas,
-                    "length": length,
-                    "density": u.n_caas / length * 100.0 if length else None,
-                    "threshold_dubious": near,
-                    "threshold_extreme": far,
-                    "has_clustered": u.has_clustered,
-                    "dubious": near is not None and u.n_caas > near and u.has_clustered,
-                    "extreme": far is not None and u.n_caas > far,
-                })
-            continue
-        counts = [u.n_caas for u in members]
-        q1, q3 = _percentile_linear(counts, 25.0), _percentile_linear(counts, 75.0)
-        thr_dub = q3 + iqr_multiplier * (q3 - q1)
-
-        dens = {}
-        for u in members:
-            length = gene_lengths.get(u.gene)
-            if length and length > 0:
-                dens[u.gene] = u.n_caas / length * 100.0
-        thr_ext = _percentile_linear(list(dens.values()), extreme_percentile * 100.0) if dens else None
-
-        for u in members:
-            d = dens.get(u.gene)
+        fences = stratified_fences([u.gene for u in members], [u.n_caas for u in members], gene_lengths,
+                                   strata, k_far, k_near)
+        for u, (far, near) in zip(members, fences):
+            length = gene_lengths.get(u.gene) if far is not None else None
             out.append({
                 "labeling": labeling, "Gene": u.gene,
                 "n_caas": u.n_caas,
-                "length": gene_lengths.get(u.gene) if d is not None else None,
-                "density": d,
-                "threshold_dubious": thr_dub,
-                "threshold_extreme": thr_ext,
+                "length": length,
+                "density": u.n_caas / length * 100.0 if length else None,
+                "threshold_dubious": near,
+                "threshold_extreme": far,
                 "has_clustered": u.has_clustered,
-                "dubious": u.n_caas > thr_dub and u.has_clustered,
-                "extreme": d is not None and d > thr_ext,
+                "dubious": near is not None and u.n_caas > near and u.has_clustered,
+                "extreme": far is not None and u.n_caas > far,
             })
     return out
 
@@ -233,27 +221,23 @@ def gene_unit_stats(
 def gene_removal(
     units: Iterable[GeneUnit],
     gene_lengths: Mapping[str, float],
-    mode: str = "dubious",
-    iqr_multiplier: float = 3.0,
-    extreme_percentile: float = 0.99,
-    thresholds: Optional[Dict[str, Tuple[float, Optional[float]]]] = None,
+    mode: str = STRATIFIED,
     strata: int = 10,
     k_far: float = 3.0,
     k_near: float = 1.5,
 ) -> Dict[Unit, str]:
     """Units to remove, mapped to their category (``Dubious``, ``Extreme`` or ``Both``).
 
-    ``mode``: ``dubious``, ``extreme``, ``both``, ``stratified`` or ``none`` (empty result).
-    ``stratified`` removes a unit whose count exceeds the far fence of its length stratum (``Extreme``), or the near
-    fence with a train position (``Dubious``); both is ``Both`` (see :func:`stratified_fences`; the fences vary with
-    the gene, so ``thresholds`` stays empty).
-    ``thresholds``, when given, is filled with (count threshold, density threshold) of every labeling; it does not
-    change the decisions.
+    ``mode``: ``stratified`` or ``none`` (empty result); any other value is an error, so that a setting of a
+    retired mode cannot turn the filter off silently. A unit is removed when its count exceeds the far fence of its
+    length stratum (``Extreme``) or the near fence with a train position (``Dubious``); both is ``Both`` (see
+    :func:`stratified_fences`).
     """
     mode = (mode or "none").lower()
-    if mode not in ("dubious", "extreme", "both", STRATIFIED):
+    if mode == "none":
         return {}
-    want_dub, want_ext = mode in ("dubious", "both"), mode in ("extreme", "both")
+    if mode != STRATIFIED:
+        raise ValueError(f"unknown gene filter mode {mode!r}: use 'none' or '{STRATIFIED}'")
     # Same decision rule as gene_unit_stats, but the stream is held in compact per-pool columns
     # (gene, count, train flag) instead of one stats dict per unit: the null has tens of millions
     # of units, and only the removed ones are kept.
@@ -266,27 +250,10 @@ def gene_removal(
 
     removed: Dict[Unit, str] = {}
     for labeling, (genes, counts, flags) in pools.items():
-        if mode == STRATIFIED:
-            for g, n, fl, (far, near) in zip(genes, counts, flags, stratified_fences(genes, counts, gene_lengths, strata, k_far, k_near)):
-                if far is None:
-                    continue
-                ext, dub = n > far, n > near and bool(fl)
-                if dub or ext:
-                    removed[(labeling, g)] = "Both" if dub and ext else "Dubious" if dub else "Extreme"
-            continue
-        q1, q3 = _percentile_linear(counts, 25.0), _percentile_linear(counts, 75.0)
-        thr_dub = q3 + iqr_multiplier * (q3 - q1)
-        dens = []
-        for g, n in zip(genes, counts):
-            length = gene_lengths.get(g)
-            dens.append(n / length * 100.0 if length and length > 0 else None)
-        valid = [d for d in dens if d is not None]
-        thr_ext = _percentile_linear(valid, extreme_percentile * 100.0) if valid else None
-        if thresholds is not None:
-            thresholds[labeling] = (thr_dub, thr_ext)
-        for g, n, fl, d in zip(genes, counts, flags, dens):
-            dub = want_dub and n > thr_dub and bool(fl)
-            ext = want_ext and d is not None and d > thr_ext
+        for g, n, fl, (far, near) in zip(genes, counts, flags, stratified_fences(genes, counts, gene_lengths, strata, k_far, k_near)):
+            if far is None:
+                continue
+            ext, dub = n > far, n > near and bool(fl)
             if dub or ext:
                 removed[(labeling, g)] = "Both" if dub and ext else "Dubious" if dub else "Extreme"
     return removed
@@ -297,6 +264,7 @@ def load_gene_lengths(
     map_dir: Optional[str] = None,
     map_suffix: str = ".map.tsv",
     genes: Optional[Iterable[str]] = None,
+    sources: Optional[Dict[str, str]] = None,
 ) -> Dict[str, float]:
     """TSV or MAP directory to ``{gene: length}``.
 
@@ -304,38 +272,54 @@ def load_gene_lengths(
     coordinates used by cluster trains). Falls back to the Ensembl TSV at ``path`` (columns gene, length)
     for any gene missing from ``map_dir`` or when ``map_dir`` is None.
     """
-    out: Dict[str, float] = {}
-
-    # 1. Primary source: untrimmed alignment lengths from MAP directory
-    if map_dir and os.path.isdir(map_dir):
-        from .columns import index_files, map_untrimmed_length
-        m_index = index_files(map_dir, map_suffix)
-        target_genes = genes if genes is not None else m_index.keys()
-        for g in target_genes:
-            map_path = m_index.get(g)
-            if map_path and os.path.isfile(map_path):
-                length = map_untrimmed_length(map_path)
-                if length is not None and length > 0:
-                    out[g] = float(length)
-
-    # 2. Fallback source: Ensembl gene annotation TSV
-    if path and os.path.isfile(path):
-        with open(path, "r", newline="", encoding="utf-8", errors="replace") as f:
-            reader = csv.reader(f, delimiter="\t")
-            header = next(reader, None)
-            if header:
-                lc = [h.strip().lower() for h in header]
-                if "gene" in lc and "length" in lc:
-                    gi, li = lc.index("gene"), lc.index("length")
-                    for row in reader:
-                        if len(row) <= max(gi, li):
-                            continue
-                        gene_name = row[gi].strip()
-                        if gene_name not in out:
-                            try:
-                                val = float(row[li])
-                                if val > 0:
-                                    out[gene_name] = val
-                            except (TypeError, ValueError):
-                                continue
+    annotation: Dict[str, float] = {}
+    known_genes = set(genes) if genes is not None else None
+    if path:
+        if not os.path.isfile(path):
+            raise FileNotFoundError(path)
+        with open(path, newline='', encoding='utf-8-sig') as handle:
+            reader = csv.DictReader(handle, delimiter='\t')
+            names = {key.strip().lower(): key for key in (reader.fieldnames or [])}
+            if not {'gene', 'length'} <= names.keys():
+                raise ValueError('Gene annotation needs gene and length columns')
+            seen = set()
+            for row in reader:
+                gene = (row[names['gene']] or '').strip()
+                if not gene or gene in seen:
+                    raise ValueError(f'Invalid or duplicate annotated gene: {gene}')
+                seen.add(gene)
+                text = (row[names['length']] or '').strip()
+                if text in ('', 'NA'):
+                    continue  # An absent optional length is not a malformed number.
+                length = float(text)
+                if not math.isfinite(length) or length <= 0:
+                    raise ValueError(f'Invalid length for {gene}')
+                annotation[gene] = length
+                if sources is not None:
+                    source = 'annotation_units'
+                    if {'start','end'} <= names.keys():
+                        try:
+                            if float(row[names['end']]) - float(row[names['start']]) + 1 == length:
+                                source = 'genomic_bp'
+                        except (TypeError,ValueError):
+                            pass
+                    sources[gene] = source
+            if known_genes is None:
+                known_genes = seen
+    out = dict(annotation)
+    if map_dir:
+        if not os.path.isdir(map_dir):
+            raise FileNotFoundError(map_dir)
+        from .columns import index_files, find_file, read_map
+        index = index_files(map_dir, map_suffix, known_genes)
+        for gene in (known_genes if known_genes is not None else index):
+            if gene not in index:
+                continue
+            map_path = find_file(index, gene, map_suffix)
+            length = len(read_map(map_path)[0])
+            if not length:
+                raise ValueError(f'Empty MAP table: {map_path}')
+            out[gene] = float(length)
+            if sources is not None:
+                sources[gene] = 'untrimmed_alignment_columns'
     return out

@@ -18,6 +18,9 @@ output:
 params:
   discovery_input: NULL
   background_input: NULL
+  traitname: "trait"
+  output_dir: "." # Compatibility with older independent render callers.
+  seed: "1998" # Compatibility; this report has no stochastic calculations.
 ---
 
 <style type="text/css">
@@ -56,7 +59,7 @@ params:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
-  echo = TRUE,
+  echo = FALSE,
   warning = FALSE,
   message = FALSE,
   fig.width = 10,
@@ -67,72 +70,41 @@ knitr::opts_chunk$set(
 suppressPackageStartupMessages({
   library(tidyverse)
   library(knitr)
-  library(scales)
-  library(data.table)
   library(paletteer)
 })
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-# Creates `path`, and its parents, when it does not exist.
-createDir <- function(path) {
-  if (!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
-}
-
-
-# ── Palettes ──────────────────────────────────────────────────────────────────
-
-# Tableau 10 under colourblind-safe names; the category palette below is built from it.
-tableau_10 <- paletteer_d("ggthemes::Tableau_10")
-names(tableau_10) <- c(
-  "blue", "orange", "vermillion", "bluish_green",
-  "green", "yellow", "reddish_purple", "pink",
-  "brown", "gray"
-)
-
-category_palette <- c(
-  "Normal" = tableau_10[["gray"]],
-  "Dubious" = tableau_10[["blue"]],
-  "Extreme" = tableau_10[["vermillion"]],
-  "Both" = tableau_10[["reddish_purple"]]
-)
-
-removal_palette <- c(
-  Discarded = tableau_10[["vermillion"]],
-  Good = tableau_10[["green"]]
-)
+# Shared paletteer defaults and typography, also used by reports 0–4.
+.style <- c("src/report_style.R", "../../TRAIT_ANALYSIS/local/src/report_style.R")
+.style <- .style[file.exists(.style)]
+if (!length(.style)) stop("report_style.R not found next to the report")
+source(.style[1], local = TRUE)
+set_report_style()
+pattern_palette <- setNames(report_palette(4), as.character(1:4))
 ```
 
 ## 1. Data Import and Validation
 
-This section loads the filtered CAAS data and validates input files.
+This section loads the discovery data and validates input files.
 
 ```{r data_import, message=FALSE}
-# ── Filtered discovery ────────────────────────────────────────────────────────
+# ── Discovery ────────────────────────────────────────────────────────
 
-filtered_discovery_path <- params$discovery_input
-if (is.null(filtered_discovery_path)) {
-  stop("Filtered discovery file parameter is NULL")
+discovery_path <- params$discovery_input
+if (is.null(discovery_path)) {
+  stop("Discovery file parameter is NULL")
 }
 
-cat(sprintf("Attempting to load: %s\n", filtered_discovery_path))
-cat(sprintf("  File exists: %s\n", file.exists(filtered_discovery_path)))
-cat(sprintf("  Working directory: %s\n", getwd()))
+if (!file.exists(discovery_path)) stop("Discovery file not found: ", discovery_path)
 
-if (!file.exists(filtered_discovery_path)) {
-  # Show the working directory to help locate a misplaced input.
-  cat("Files in current directory:\n")
-  print(list.files(".", full.names = TRUE))
-  stop("Filtered discovery file not found: ", filtered_discovery_path)
-}
-
-discovery_df <- read_tsv(filtered_discovery_path, show_col_types = FALSE)
+# Read text first so numeric-looking identifiers retain their exact spelling.
+discovery_df <- read_tsv(discovery_path, show_col_types = FALSE,
+                         col_types = cols(.default = col_character()), na = "", trim_ws = FALSE)
 
 # The columns of discovery.tab are lowercase (gene, trait, position, pattern, ffgn, ...).
 # Only the structural keys are renamed to the CamelCase names this report joins on (Gene,
-# Position; GenePos = paste(Gene, Position)). The other columns, including the `pattern`
-# contrast index, keep their lowercase names.
+# Position). Other columns, including the residue-diversity `pattern` code,
+# keep their lowercase names.
 .disc_keymap <- c(Gene = "gene", Position = "position")
 for (.new in names(.disc_keymap)) {
   .old <- .disc_keymap[[.new]]
@@ -141,19 +113,26 @@ for (.new in names(.disc_keymap)) {
   }
 }
 
-cat(sprintf("Loaded discovery file: %s\n", basename(filtered_discovery_path)))
-cat(sprintf("  Total CAAS positions: %s\n", format(nrow(discovery_df), big.mark = ",")))
+cat(sprintf("Loaded discovery file: %s\n", basename(discovery_path)))
 
+# ── Background ───────────────────────────────────────────────────────
 
-# ── Filtered background ───────────────────────────────────────────────────────
-
-filtered_background_path <- params$background_input
-if (is.null(filtered_background_path) || !file.exists(filtered_background_path)) {
-  stop("Filtered background file not found: ", filtered_background_path)
+background_path <- params$background_input
+if (is.null(background_path) || !file.exists(background_path)) {
+  stop("Background file not found: ", background_path)
 }
 
-background_df <- read_tsv(filtered_background_path, show_col_types = FALSE)
-cat(sprintf("Loaded background file: %s\n", basename(filtered_background_path)))
+# Canonical CT background_genes.output is a headerless, one-gene-per-line list.
+# Accept a single Gene/gene header for legacy callers explicitly.
+background_genes <- trimws(readLines(background_path, warn = FALSE))
+background_genes <- background_genes[nzchar(background_genes)]
+if (length(background_genes) && background_genes[1] %in% c("Gene", "gene")) {
+  background_genes <- background_genes[-1]
+}
+if (any(grepl("\\t", background_genes))) stop("Background input must be a one-column gene list")
+background_genes <- unique(background_genes)
+background_df <- tibble(Gene = background_genes)
+cat(sprintf("Loaded background file: %s\n", basename(background_path)))
 cat(sprintf("Total genes in background: %s\n", format(nrow(background_df), big.mark = ",")))
 
 
@@ -164,43 +143,43 @@ missing_cols <- setdiff(required_cols, names(discovery_df))
 if (length(missing_cols) > 0) {
   stop("Missing required columns in discovery: ", paste(missing_cols, collapse = ", "))
 }
+if (anyNA(discovery_df$Gene) || any(!nzchar(discovery_df$Gene))) stop("Discovery has missing gene identifiers")
+position <- suppressWarnings(as.numeric(discovery_df$Position))
+if (any(!is.finite(position) | position < 0 | position != floor(position))) stop("Discovery positions must be nonnegative integers")
+discovery_df$Position <- position
+if (anyNA(discovery_df$pattern) || any(!discovery_df$pattern %in% as.character(1:4))) stop("Discovery patterns must be 1, 2, 3 or 4")
+n_positions <- nrow(distinct(discovery_df, Gene, Position))
+cat(sprintf("Discovery rows: %s; unique alignment positions: %s\n", nrow(discovery_df), n_positions))
+if (!nrow(discovery_df)) cat("No CAAS discoveries were found. Downstream analyses can continue.\n")
 
 ```
 
 ## 2. Pattern-Based Analysis
 
-Analyze CAAS patterns across discovered positions.
+Patterns describe foreground/background residue diversity: 1 = one/one, 2 = one/many,
+3 = many/one and 4 = many/many. Counts of discovery rows include repeated positions
+under different hypotheses. Unique positions are counted by `(Gene, Position)`;
+a position appearing in different patterns contributes to each of those patterns.
+These are discovery summaries, before downstream post-processing or significance filtering.
 
 ```{r pattern_analysis}
-# Columns the meta_caas export reads; filled with NA when the table does not carry them.
-if (!"is_conserved_meta" %in% names(discovery_df)) {
-  discovery_df <- discovery_df %>% mutate(is_conserved_meta = NA)
-}
-if (!"conserved_pair" %in% names(discovery_df)) {
-  discovery_df <- discovery_df %>% mutate(conserved_pair = NA_character_)
-}
-
-caas_for_export <- discovery_df
-
-# ── Pattern distribution ──────────────────────────────────────────────────────
-
-pattern_summary <- caas_for_export %>%
+# One position can occur under several hypotheses or patterns. Per-pattern
+# unique-position counts overlap and must not be summed into a global total.
+pattern_summary <- discovery_df %>%
   group_by(pattern) %>%
-  summarize(
-    Total = n(),
-    .groups = "drop"
-  )
+  summarize(Discovery_rows = n(), Unique_positions = n_distinct(Gene, Position), .groups = "drop")
 
 cat("\nPattern Distribution:\n")
 print(kable(pattern_summary, format.args = list(big.mark = ",")))
 
-p_pattern <- ggplot(pattern_summary, aes(x = factor(pattern), y = Total, fill = factor(pattern))) +
+p_pattern <- ggplot(pattern_summary, aes(x = factor(pattern), y = Discovery_rows, fill = factor(pattern))) +
   geom_bar(stat = "identity") +
-  theme_minimal() +
+  report_theme() +
+  scale_fill_manual(values = pattern_palette, drop = FALSE) +
   labs(
     title = "CAAS Pattern Distribution",
     x = "Pattern",
-    y = "Candidate Count"
+    y = "Discovery rows"
   ) +
   theme(
     axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),

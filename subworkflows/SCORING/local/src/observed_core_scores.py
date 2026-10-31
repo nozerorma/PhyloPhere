@@ -9,7 +9,7 @@ permulation null (core.scores), so observed and null statistics are built by one
 Called by:  SCORING_COMPUTE Nextflow process (scoring_compute.nf → observed_core_scores.py);
             its two outputs are read by scoring_compute.R (--core_positions, --core_genes)
 Inputs:     --input  filtered_discovery.tsv, one row per (Gene, Position, side) with an asr_path_score
-                     column; an asr_path_score that is not numeric counts as missing
+                     column; invalid keys, sides and nonfinite/out-of-range scores abort
 Outputs:    --positions-out  TSV [Gene, Position, side, CAAS_score]; one row per detected position side,
                              CAAS_score being its asr_path_score (core.scores)
             --genes-out      TSV [Gene, gene_caas_score, gene_caas_score_top,
@@ -22,7 +22,6 @@ Needs only the standard library plus src/core/scores.py, which the process stage
 
 import argparse
 import csv
-import math
 import sys
 from pathlib import Path
 
@@ -37,29 +36,7 @@ for _cand in (_here.parent, _here.parents[3] / "CT_DISAMBIGUATION" / "local"):
 from src.core.scores import GENE_STATS, gene_scores, position_score  # noqa: E402
 
 
-def _num(x):
-    """float(x), or None when x is not numeric or is NaN."""
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return None
-    return None if math.isnan(v) else v
-
-
-def read_position_scores(path):
-    """{(gene, position, side): asr_path_score or None}.
-
-    A position side is scored once; a repeated (gene, position, side) row raises ValueError
-    instead of being averaged silently.
-    """
-    out = {}
-    with open(path, newline="") as f:
-        for row in csv.DictReader(f, delimiter="\t"):
-            key = (row["Gene"], int(row["Position"]), row["side"])
-            if key in out:
-                raise ValueError(f"duplicate row for {key}: a position side is scored once")
-            out[key] = _num(row["asr_path_score"])
-    return out
+from scoring_input import read_rows as read_position_scores
 
 
 def _fmt(x):
@@ -79,12 +56,12 @@ def main():
     try:
         rows = read_position_scores(a.input)
     except ValueError as e:
-        print(f"Error: duplicate rows: {e}", file=sys.stderr)
+        print(f"Error: invalid observed input: {e}", file=sys.stderr)
         return 1
 
     scores = {k: position_score(v) for k, v in rows.items()}
     with open(a.positions_out, "w", newline="") as f:
-        w = csv.writer(f, delimiter="\t", lineterminator="\n")
+        w = csv.writer(f, delimiter="\t", lineterminator="\n", quoting=csv.QUOTE_NONE, quotechar=None)
         w.writerow(["Gene", "Position", "side", "CAAS_score"])
         for (g, p, side), v in sorted(scores.items()):
             w.writerow([g, p, side, _fmt(v)])
@@ -98,7 +75,7 @@ def main():
     for (g, _p), sides in by_pos.items():
         per_gene.setdefault(g, []).append(sides)
     with open(a.genes_out, "w", newline="") as f:
-        w = csv.writer(f, delimiter="\t", lineterminator="\n")
+        w = csv.writer(f, delimiter="\t", lineterminator="\n", quoting=csv.QUOTE_NONE, quotechar=None)
         w.writerow(["Gene", "gene_caas_score", "gene_caas_score_top", "gene_caas_score_bottom"])
         for g in sorted(per_gene):
             s = gene_scores(per_gene[g], pools, a.gene_stat)

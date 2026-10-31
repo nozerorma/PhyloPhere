@@ -26,6 +26,7 @@ if (source_type == 'caas' && a[4] != 'disabled' && length(stores)) {
     if (!identical(sort(hashes), sort(old_hashes))) stop('CAAS block content differs from metadata')
   }
 }
+if(a[4]=='scoring' && !length(paths) && file.exists('null_input')) stop('SCORING requires canonical null blocks with scientific provenance; regenerate legacy CAAS null')
 if (a[4] == 'disabled') { paths <- character() } else if (!length(paths) && dir.exists('null_input')) {
   paths <- if (source_type == 'caas') Sys.glob('null_input/blocks/blk_*/matrices.rds') else sort(list.files('null_input', pattern = '\\.rds$', full.names = TRUE, recursive = TRUE))
   if (source_type == 'caas') {

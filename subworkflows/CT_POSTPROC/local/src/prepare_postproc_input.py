@@ -15,12 +15,14 @@ Outputs:    --output  normalized TSV (Gene, Position, ...)
 """
 
 import argparse
-import os
+import json
+from pathlib import Path
 import sys
 
 import pandas as pd
 
-from residue_descriptors import add_species_tally
+from residue_descriptors import add_species_tally, _read_hyp_pairs
+from postproc_io import load_observed, coverage
 
 
 def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
@@ -38,11 +40,21 @@ def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _digest(path):
+    import hashlib
+    value = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        for chunk in iter(lambda: handle.read(1048576), b''):
+            value.update(chunk)
+    return value.hexdigest()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Prepare ct_disambiguation master CSV for CT post-processing."
     )
     parser.add_argument("--input", required=True, help="Disambiguation master CSV/TSV")
+    parser.add_argument("--completion", required=True, help="observed_scoring.json")
     parser.add_argument(
         "--output",
         default="postproc_disambiguation_input.tsv",
@@ -57,43 +69,39 @@ def main() -> int:
     # n_conserved_pairs). It needs the alignment directory and the contrast design; without them
     # the columns stay empty.
     parser.add_argument("--alignment", default=None,
-                        help="Alignment directory (flat, gene = basename up to first '.')")
+                        help="Alignment directory (recursive, gene = basename without alignment suffix; preserves internal '.')")
     parser.add_argument("--alignment-format", default="fasta",
                         help="Bio.AlignIO format for --alignment (default: fasta)")
     parser.add_argument("--hyp-pairs", default=None,
                         help="contrast_hypotheses_pairs.tsv (hypothesis_id, species1 = top, species2 = bottom)")
+    parser.add_argument("--taxid-mapping", default=None)
     args = parser.parse_args()
 
-    # keep_default_na=False + na_values=[""]: the disambiguation master has categorical
-    # amino-acid columns (caas, mrca_*_aa) that can equal NA-sentinel
-    # strings; only an empty cell is missing here.
-    # The C engine with float_precision="round_trip" keeps every bit of the float columns
-    # (asr_path_score feeds a gene score that compares values exactly); the python engine
-    # that autodetects the separator does not. The separator is read from the header line.
-    with open(args.input, newline="") as fh:
-        header = fh.readline()
-    sep = "\t" if header.count("\t") > header.count(",") else ","
-    df = pd.read_csv(args.input, sep=sep, engine="c", float_precision="round_trip",
-                     keep_default_na=False, na_values=["", "nan", "NaN"])
-    df = _normalize_schema(df)
-
-    for col in ("Gene", "Position"):
-        if col not in df.columns:
-            raise ValueError(f"Required column missing after normalization: {col}")
-
-    cleaned = df.copy()
-    cleaned["Position"] = pd.to_numeric(cleaned["Position"], errors="raise").astype(int)
-
-    # Extant-species residue tally: a no-op when the alignment or the contrast design is not
-    # supplied (e.g. a standalone --disambiguation_input run).
-    def _opt(p):
-        return p if p and os.path.exists(p) else None
-    cleaned = add_species_tally(
-        cleaned,
-        _opt(args.alignment),
-        _opt(args.hyp_pairs),
-        ali_format=args.alignment_format,
-    )
+    df, record = load_observed(args.input, args.completion)
+    if args.hyp_pairs:
+        pairs = _read_hyp_pairs(args.hyp_pairs)
+        supplied = {h: [list(pair) for pair in items] for h, items in pairs.items()}
+        for batch in record['batches']:
+            if 'design' in batch:
+                expected = {f'H{int(h)}': items for h, items in batch['design'].items()}
+                if supplied != expected:
+                    raise ValueError('Tally design differs from the original observed design')
+    cleaned = _normalize_schema(df.copy())
+    cleaned = add_species_tally(cleaned, args.alignment, args.hyp_pairs,
+                                ali_format=args.alignment_format, taxid_mapping=args.taxid_mapping)
+    # The quality universe contains every candidate, including side=none. ASR
+    # categories/scores do not select it; the completion ledger checks coverage.
+    Path('quality_universe.json').write_text(json.dumps({
+        'version': 1, 'universe': 'all_ct_candidates',
+        'alignments': {g:v for b in record['batches'] for g,v in b.get('alignments',{}).items()},
+        'strict': bool(record['batches'] and record['batches'][0].get('strict',False)),
+        'scientific': {k: record['batches'][0].get(k) for k in ('tree_sha256','model','posterior_threshold','taxid_sha256','weights_sha256')} if record['batches'] else None,
+        'genes': coverage(cleaned, 'Gene', 'Position'),
+        'excluded_genes': record.get('excluded_genes', []),
+        'score_rule': 'caas_pos_species_pss_v4',
+        'master_sha256': _digest(args.input),
+        'completion_sha256': _digest(args.completion),
+    }, indent=2))
 
     removed = pd.DataFrame(columns=[*df.columns, "removal_reason"])
 

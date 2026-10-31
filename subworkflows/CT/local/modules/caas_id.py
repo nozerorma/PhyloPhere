@@ -99,7 +99,7 @@ def process_position(position, multiconfig, species_in_alignment):
     # Load aas2species
     for x in position.keys():
         z.position = position[x].split("@")[1]
-        aa = position[x].split("@")[0].upper()
+        aa = normalize_residue(position[x].split("@")[0])
         
         try:
             z.aas2species[aa].append(x)
@@ -144,7 +144,7 @@ def process_position(position, multiconfig, species_in_alignment):
     # and counted towards the gap quota, preventing spurious convergence calls
     # where X would be silently dropped from group encoding while the species
     # remained in the foreground/background counts and species lists.
-    _AMBIGUOUS_AAS = {'X', 'B', 'Z', 'J', 'U'}
+    _AMBIGUOUS_AAS = GAP_SYMBOLS - {'-'}
     for _ambig in _AMBIGUOUS_AAS:
         if _ambig in z.aas2species:
             z.gapped = list(set(z.gapped) | set(z.aas2species[_ambig]))
@@ -227,7 +227,11 @@ def process_position(position, multiconfig, species_in_alignment):
 
 
 #: The 20 standard amino acids; any other symbol is not a state of the convergence test.
-STANDARD_AAS = frozenset("ACDEFGHIKLMNPQRSTVWY")
+def residue_overlap(fg_aas, bg_aas):
+    fg = [aa for aa in fg_aas.upper() if aa in STANDARD_AAS]
+    bg = [aa for aa in bg_aas.upper() if aa in STANDARD_AAS]
+    shared = set(fg) & set(bg)
+    return min(sum(aa in shared for aa in fg), sum(aa in shared for aa in bg))
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +268,8 @@ def check_pattern(
     Returns:
         (is_convergent, pattern, substitution, conserved_pairs)
     """
+    fg_aas = "".join(normalize_residue(aa) for aa in fg_aas)
+    bg_aas = "".join(normalize_residue(aa) for aa in bg_aas)
     substitution = f"{fg_aas}/{bg_aas}"
     if fg_species_list is None:
         fg_species_list = []
@@ -290,10 +296,7 @@ def check_pattern(
         pattern = "4"
 
     # Overlap and divergence calculations
-    shared_types = fg_unique.intersection(bg_unique)
-    shared_fg = sum(1 for g in fg_groups if g in shared_types)
-    shared_bg = sum(1 for g in bg_groups if g in shared_types)
-    overlap = min(shared_fg, shared_bg)
+    overlap = residue_overlap(fg_aas, bg_aas)
     non_overlapping_fg = sum(1 for g in fg_groups if g not in bg_unique)
     non_overlapping_bg = sum(1 for g in bg_groups if g not in fg_unique)
 
@@ -305,16 +308,15 @@ def check_pattern(
 
     conserved_pairs = "0:"
     if is_convergent and max_conserved > 0 and multiconfig:
-        conserved_pair_indices = []
-        min_len = min(len(fg_groups), len(bg_groups))
-        for i in range(min_len):
-            if fg_groups[i] == bg_groups[i]:
-                if i < len(fg_species_list) and i < len(bg_species_list):
-                    fg_sp = fg_species_list[i]
-                    pair_id = multiconfig.get_pair(fg_sp, trait)
-                    if pair_id:
-                        conserved_pair_indices.append(str(pair_id))
-        pair_list = ",".join(conserved_pair_indices) if conserved_pair_indices else ""
-        conserved_pairs = f"{overlap}:{pair_list}"
+        # The two sides can lose different members to gaps/missingness.
+        # Compare by domain ID, never by independently shortened list offsets.
+        fg_by_pair = {multiconfig.get_pair(sp, trait): aa
+                      for sp, aa in zip(fg_species_list, fg_aas) if aa in STANDARD_AAS}
+        bg_by_pair = {multiconfig.get_pair(sp, trait): aa
+                      for sp, aa in zip(bg_species_list, bg_aas) if aa in STANDARD_AAS}
+        conserved_pair_indices = sorted(
+            (str(pid) for pid in fg_by_pair.keys() & bg_by_pair.keys()
+             if pid is not None and fg_by_pair[pid] == bg_by_pair[pid]), key=int)
+        conserved_pairs = f"{len(conserved_pair_indices)}:{','.join(conserved_pair_indices)}"
 
     return (is_convergent, pattern, substitution, conserved_pairs)

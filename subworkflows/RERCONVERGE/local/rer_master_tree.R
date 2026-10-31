@@ -1,184 +1,84 @@
-#
-#
-#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
-#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
-#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
-#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#
-#
-# PHYLOPHERE: A Nextflow pipeline including a complete set
-# of phylogenetic comparative tools and analyses for Phenome-Genome studies
-#
-# Github: https://github.com/nozerorma/caastools/nf-phylophere
-#
-# Author:         Miguel Ramon (miguel.ramon@upf.edu)
-#
-# File: rer_objects.R
-#
-
-# Set up variable to control command line arguments
-args <- commandArgs(TRUE)
-
-# Load libraries
-library(dplyr)
-library(ape)
-library(RERconverge)
-
-# Reading in gene trees with `readTrees`
-geneTreesPath <- args[1]
-print(geneTreesPath)
-
-# Load trees into gene_trees object
-gene_trees <- read.tree(geneTreesPath)
-
-# read.tree() on a plain multi-Newick file (one tree per line, no gene-name
-# prefix) returns an unnamed multiPhylo -- names(gene_trees) is then character(0),
-# so the pruning loop below (which iterates over names(gene_trees)) silently runs
-# zero times, producing an empty pruned-trees file with no error at this stage.
-# Fall back to positional names so every tree still gets pruned and written.
-if (is.null(names(gene_trees)) || !any(nzchar(names(gene_trees)))) {
-  names(gene_trees) <- paste0("gene", seq_along(gene_trees))
+# Validate and prune gene trees using the same species contract as the trait.
+a <- commandArgs(TRUE)
+suppressPackageStartupMessages({library(ape); library(RERconverge)})
+script <- sub('^--file=', '', grep('^--file=', commandArgs(FALSE), value=TRUE)[1])
+source(file.path(dirname(normalizePath(script)), 'rer_contract.R'))
+trait_col <- if(length(a)>=7L) a[7] else NULL
+x <- rer_read_traits(a[2], a[3], trait_col)
+species <- x[[a[3]]]
+if (!length(species)) stop('No usable trait species')
+records <- readLines(a[1],warn=FALSE)
+records <- records[nzchar(trimws(records))]
+named <- grepl('^[^(]*\t',records)
+if (any(named)) {
+  if (!all(named)) stop('Mixed named and unnamed gene tree records')
+  delimiter <- regexpr('\t',records,fixed=TRUE)
+  ids <- substring(records,1L,delimiter-1L)
+  rer_ids(ids,'Tree genes')
+  newicks <- substring(records,delimiter+1L)
+  trees <- ape::read.tree(text=newicks,keep.multi=TRUE)
+  if (length(trees)!=length(ids)) stop('Expected one Newick tree per named record')
+  names(trees) <- ids
+} else trees <- ape::read.tree(a[1],keep.multi=TRUE)
+if (!inherits(trees,'multiPhylo') || !length(trees)) stop('No gene trees')
+ids <- names(trees)
+if (is.null(ids)) ids <- rep('',length(trees))
+if (all(!nzchar(ids))) ids <- paste0('gene',seq_along(trees))
+rer_ids(ids,'Tree genes')
+names(trees) <- ids
+mapping <- NULL
+tax_path <- if(length(a)>=6L) a[6] else ''
+if (nzchar(tax_path) && basename(tax_path) != 'NO_FILE') {
+  m <- rer_table(tax_path)
+  if (!all(c('tax_id','species') %in% names(m))) stop('TaxID table requires tax_id and species')
+  m$species <- rer_species(m$species)
+  m <- unique(m[,c('tax_id','species')])
+  rer_ids(m$species,'TaxID species')
+  if (any(!nzchar(m$tax_id))) stop('Missing tax_id')
+  target <- m[m$species %in% species,,drop=FALSE]
+  rer_ids(target$tax_id,'Trait tax_id (ambiguous canonical species)')
+  canonical <- setNames(target$species,target$tax_id)
+  mapping <- setNames(unname(canonical[m$tax_id]),m$species)
 }
-
-# Prune trees for species in trait file
-# Load traitfile
-## File must have a multi-column structure with at least a "species" and "trait" column
-traitfile_sep <- if (endsWith(args[2], ".tsv")) "\t" else ","
-ori_traits <- read.csv(args[2], sep = traitfile_sep)
-sp_colname <- args[3]
-
-print(sp_colname)
-
-# ── Taxid-based tip-name translation (optional) ──────────────────────────────
-# When a taxid mapping file is provided as args[6], rename gene-tree tip labels
-# to match the canonical species names used in the traitfile, resolving synonyms
-# and name variants via NCBI taxid as a shared key.  This mirrors the same logic
-# used for the species tree in TRAIT_ANALYSIS/local/obj/phylo.R.
-tax_id_file <- if (length(args) >= 6) args[6] else ""
-has_taxid   <- nzchar(tax_id_file) && file.exists(tax_id_file)
-
-if (has_taxid) {
-  message("[RER_TREES] Loading taxid file: ", tax_id_file)
-  sep_char <- if (endsWith(tax_id_file, ".tsv")) "\t" else ","
-  tax_id_df <- read.csv(tax_id_file, sep = sep_char, stringsAsFactors = FALSE)
-  tax_id_df[] <- lapply(tax_id_df, function(col) if (is.character(col)) trimws(col) else col)
-
-  # Keep only the two columns we need (tax_id and species)
-  if (!all(c("tax_id", "species") %in% names(tax_id_df))) {
-    warning("[RER_TREES] taxid file missing 'tax_id' or 'species' column – skipping translation")
-    has_taxid <- FALSE
+audit <- data.frame(gene=ids,status='complete',reason='',input_tips=integer(length(trees)),retained_tips=integer(length(trees)))
+kept <- list()
+for (i in seq_along(trees)) {
+  t <- trees[[i]]
+  t$tip.label <- rer_species(t$tip.label)
+  rer_ids(t$tip.label,paste('Tree',ids[i],'tips'))
+  if (is.null(t$edge.length) || any(!is.finite(t$edge.length) | t$edge.length < 0))
+    stop('Tree ',ids[i],': finite nonnegative branch lengths required')
+  audit$input_tips[i] <- length(t$tip.label)
+  if (!is.null(mapping)) {
+    mapped <- unname(mapping[t$tip.label]); hit <- !is.na(mapped)
+    t$tip.label[hit] <- mapped[hit]
+    rer_ids(t$tip.label,paste('Tree',ids[i],'tips after TaxID translation'))
   }
+  tips <- intersect(t$tip.label,species)
+  audit$retained_tips[i] <- length(tips)
+  if (length(tips)<3L) {
+    audit$status[i] <- 'excluded'; audit$reason[i] <- 'fewer_than_three_trait_taxa'
+  } else kept[[ids[i]]] <- ape::keep.tip(t,tips)
 }
-
-if (has_taxid) {
-  tax_id_df <- tax_id_df[, c("tax_id", "species"), drop = FALSE]
-  tax_id_df <- unique(tax_id_df)
-
-  # Build lookup: any species name (synonym or scientific) -> taxid
-  tip_to_taxid <- setNames(tax_id_df$tax_id, gsub(" ", "_", tax_id_df$species))
-
-  # Build canonical name for each taxid: prefer scientific name if that column
-  # exists, otherwise take the first entry per taxid.
-  # 'canonical' maps taxid -> the species name as used in the traitfile
-  trait_species <- unique(gsub(" ", "_", ori_traits[[sp_colname]]))
-  # From the taxid lookup, which taxids correspond to traitfile species?
-  trait_taxids  <- tip_to_taxid[names(tip_to_taxid) %in% trait_species]
-  # Reverse: for each taxid, what is the traitfile canonical name?
-  # (use the traitfile name itself, not the taxid file name)
-  taxid_to_canonical <- tapply(
-    names(trait_taxids), trait_taxids,
-    FUN = function(nms) {
-      # Prefer the exact traitfile name; if multiple, pick first
-      hit <- nms[nms %in% trait_species]
-      if (length(hit) > 0) hit[1] else nms[1]
-    }
-  )
-  message(sprintf("[RER_TREES] taxid map: %d unique taxids with traitfile coverage",
-                  length(taxid_to_canonical)))
-}
-
-# Prune (and optionally rename) the trees
-
-gene_trees_pruned <- list()
-
-for (tree_name in names(gene_trees)) {
-    phylotree <- gene_trees[[tree_name]]
-
-    # ── Taxid translation: rename tips before pruning ──────────────────────
-    if (has_taxid) {
-      old_labels <- phylotree$tip.label
-      new_labels <- old_labels
-      for (i in seq_along(old_labels)) {
-        tip <- old_labels[i]
-        if (tip %in% names(tip_to_taxid)) {
-          txid <- tip_to_taxid[[tip]]
-          txid_key <- as.character(txid)
-          canonical <- if (txid_key %in% names(taxid_to_canonical)) taxid_to_canonical[[txid_key]] else NULL
-          if (!is.null(canonical) && !is.na(canonical) && canonical != tip) {
-            # Guard against duplicate labels: if the canonical target is already
-            # present in new_labels (either as an original scientific-name tip or
-            # because a previous synonym was already renamed to it), skip the
-            # rename.  The unmodified synonym keeps its original name and will be
-            # dropped by drop.tip() since it won't match any traitfile species.
-            # This mirrors the synthetic-taxid logic used in CT_DISAMBIGUATION.
-            if (canonical %in% new_labels) {
-              message(sprintf(
-                "[RER_TREES] Skipping rename '%s' -> '%s' (taxid %s): target already present; synonym will be pruned.",
-                tip, canonical, txid_key
-              ))
-            } else {
-              new_labels[i] <- canonical
-            }
-          }
-        }
-      }
-      phylotree$tip.label <- new_labels
-    }
-    # ───────────────────────────────────────────────────────────────────────
-
-    gene_trees_pruned[[tree_name]] <- drop.tip(phylotree, setdiff(phylotree$tip.label, ori_traits[[sp_colname]]))
-}
-
-print("Prunned")
-
-# Export
-
-pruned_out <- args[4]
-
-# Drop degenerate trees (fewer than 3 tips) before writing — readTrees() cannot
-# parse single-tip or empty Newick strings and will crash the whole batch.
-n_before <- length(gene_trees_pruned)
-gene_trees_pruned <- Filter(function(t) !is.null(t) && length(t$tip.label) >= 3, gene_trees_pruned)
-n_dropped <- n_before - length(gene_trees_pruned)
-if (n_dropped > 0) message(sprintf("[RER_TREES] Dropped %d gene tree(s) with < 3 tips after pruning", n_dropped))
-
-# Open a connection to the output file
-file_conn <- file(pruned_out, open = "wt")
-
-for (genetree in names(gene_trees_pruned)) {
-  # Get the tree
-  tree <- gene_trees_pruned[[genetree]]
-
-  # Get the Newick format of the tree as a string
-  newick_tree <- write.tree(tree, file = "", append = FALSE)
-
-  # Write the gene name and tree to the output file in a single line without adding a newline
-  write(paste0(genetree, "\t", newick_tree), file = file_conn, append = TRUE)
-}
-
-# Close the file connection
-close(file_conn)
-
-# Pruned trees path
-prunedTreesPath <- args[4]
-print(prunedTreesPath)
-
-## Generating masterTree
-geneTrees <- readTrees(prunedTreesPath) # Set max.read = 100 to toy-up
-
-## Write our masterTree to path
-saveRDS(geneTrees, args[5])
-
-### DONE ###
+rer_write_tsv(audit,paste0(a[4],'.audit.tsv'))
+if (!length(kept)) stop('No usable gene trees after pruning; see tree audit')
+# The native reader needs at least one tree spanning the union of taxa.
+all_sp <- unique(unlist(lapply(kept,`[[`,'tip.label')))
+if (!any(vapply(kept,function(t) setequal(t$tip.label,all_sp),logical(1))))
+  stop('No gene tree spans the retained taxon union; cannot infer a master tree')
+lines <- vapply(names(kept),function(id) paste(id,ape::write.tree(kept[[id]]),sep='\t'),'')
+writeLines(lines,a[4])
+# Native readTrees uses scan() with quote handling. Opaque IDs prevent literal
+# apostrophes/quotes in gene IDs from changing its parser; restore every gene axis.
+native_ids <- sprintf('rer_gene_%09d',seq_along(kept))
+native_path <- tempfile('rer_native_',tmpdir=getwd())
+writeLines(vapply(seq_along(kept),function(i) paste(native_ids[i],ape::write.tree(kept[[i]]),sep='\t'),''),native_path)
+obj <- RERconverge::readTrees(native_path)
+unlink(native_path)
+if (!identical(names(obj$trees),native_ids)) stop('Native reader changed gene coverage')
+names(obj$trees) <- names(kept)
+rownames(obj$report) <- names(kept)
+if (!is.null(rownames(obj$paths))) rownames(obj$paths) <- names(kept)
+attr(obj,'rer_provenance') <- list(version='rer_v1',input_sha256=rer_file_hash(a[1]),
+  trait_sha256=rer_file_hash(a[2]),taxid_sha256=if(nzchar(tax_path) && basename(tax_path)!='NO_FILE') rer_file_hash(tax_path) else NULL)
+saveRDS(obj,a[5])

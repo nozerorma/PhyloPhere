@@ -62,7 +62,7 @@ Convergence is meaningful only across independent lineages. Contrast selection c
 
 **Candidate pairs.** A candidate is an ordered pair $(i, j)$ with $x_i > x_j$. The gate depends on the trait type (`--trait_type`; `auto` codes a trait as ordinal when it has 2 to 5 distinct integer values, so a 0/1 trait takes the ordinal gate):
 
-- Continuous: the top `pss_top_pct` fraction of positive-difference pairs ranked by PSS (default 0.05).
+- Continuous: the top `pss_top_pct` fraction of positive-difference pairs ranked by PSS (default 0.05). Zero disables the percentile filter; 1 retains all pairs. Other values outside [0, 1] are rejected; exact score ties are settled by species names.
 - Count (`--n_trait`, `--c_trait`): the Jeffreys intervals of the two proportions must not overlap, $\mathrm{lb}(i) > \mathrm{ub}(j)$, with the Beta(0.5, 0.5) posterior at 95%.
 - Ordinal and binary: $i$ must carry the maximum observed level and $j$ the minimum.
 
@@ -72,11 +72,17 @@ $$S = 1 - 2\,P\!\left(Z > \frac{\delta}{\sqrt{V_{ij}}}\right), \qquad \text{Fina
 
 with $d$ the patristic distance. A pair scores high when the trait difference is large given the phylogenetic variance, and when the species are close, which favors pairs where few other changes intervene.
 
-**Canonical set (H1).** Pairs are added greedily in PSS order. A pair is accepted if the overall modified Dunn index stays at or above 1:
+**Canonical set (H1).** The first pair has the highest PSS candidate rank. Subsequent additions prioritize their minimum distance to the selected pairs, then their Dunn index, then candidate rank. A pair is accepted if the overall modified Dunn index stays at or above 1:
 
 $$\text{mod\_dunn}_k = \frac{\min_{j \ne k}\min_{x \in C_k,\, y \in C_j} D(x,y)}{\max_{x,y \in C_k} D(x,y)}, \qquad \text{Dunn} = \min_k \text{mod\_dunn}_k \ge 1$$
 
 so the distance between any two pairs is at least the distance spanned inside a pair. The number of accepted pairs is $K$. Selection stops when no candidate qualifies or at `--max_contrasts` (0 = no cap). If fewer than `--min_contrasts` pairs exist (default 3) the CT stage is skipped.
+
+Composition and selection share one prepared tree, model fit and candidate table through `observed_selection.rds`, with provenance checked against the current inputs and settings. Fewer than three usable species or an invariant phenotype produce a zero-pair result and reach the minimum gate. A model-fitting failure on otherwise usable data remains an error. Count inputs must be integer totals/cases with `n > 0` and `0 <= c <= n`; separated intervals may not reverse the phenotype ordering.
+
+The minimum gate validates complete pairs and emits only active hypothesis metadata. With `--multi_hypothesis false`, only H1 contributes to downstream weighting. The published `low_contrasts.skip` is reconciled before consumers run, including on resume, so a previous skip cannot persist after a passing result.
+
+FADE's candidate-member export keeps its existing global grouping: above/below the median for count and continuous traits, highest/lowest coded levels for ordinal traits. These are global groups, distinct from pair-local high/low roles. Median and intermediate species remain excluded; `candidate_species_audit.tsv` records membership and exclusion reasons. This curation does not change FADE's coupling to the minimum-contrast gate.
 
 **Domains and alternative hypotheses.** Each species is assigned to the canonical pair at the smallest distance, which gives $K$ Voronoi domains. For every domain, alternative pairs lying inside it are drawn and combined into hypotheses H2 to Hn, each with one pair per domain, kept when Dunn is still at least 1 and ranked by minimum PSS, mean PSS and Dunn (`--max_fop`, default 100 including H1). The multi-hypothesis design lets the score average over the choice of representative species and reduces the dependence on one fortunate pair.
 
@@ -101,7 +107,11 @@ The null is a set of labelings with the same structure as the observed one, gene
 1. **Simulate.** A Brownian trait is simulated on the species tree with the rate estimated from the data (`geiger::ratematrix`, `geiger::sim.char`; the tree is first rescaled when the selected model is OU).
 2. **Rank-match.** The observed trait values are reassigned to species by the rank of the simulated values. The marginal distribution of the trait is preserved exactly, and the phylogenetic covariance is inherited from the simulation.
 3. **Select contrasts.** The same contrast selector runs on the permulated trait with $K$ fixed to the observed value. When `--perm_match_pss` is on (default, not applied to count traits) each null pair must lie within a relative tolerance `--perm_match_pss_tol` (0.25) of the PSS of the corresponding observed pair; with multiple hypotheses a cycle must also reach the observed number of hypotheses. The matching makes the null selection comparable to the observed one, which matters because pairs chosen for high PSS are closer than random pairs.
-4. **Pool.** The first `--caas_full_perms` accepted draws (default 1000) form the null. A draw budget escalates when acceptance is low.
+4. **Pool.** The first `--caas_full_perms` accepted draws (default 1000) form the null. The initial draw budget can escalate. Matching is strict by default: missing requested PSS profiles, insufficient FOP hypotheses and Tier-2 shortfalls fail instead of silently broadening the null. `--ct_allow_relaxed_null true` explicitly restores those fallbacks. `permulation_provenance.json` records the settings and every relaxation; preparation carries that provenance forward and refuses a known relaxed harvest without the opt-in.
+
+Integrated resampling reuses `observed_selection.rds` from the active design, checking the prepared tree, values, count intervals and selection settings before using the observed fit and covariances. Standalone trait tables require a header; CSV, TSV and headered `.tab` inputs preserve configured column names, including spaces. Explicitly requested missing columns are errors. Direct harvest CLI runs require a fresh output directory, so stale chunks cannot mix with a new run. `auto` and `best_model` select the same automatic BM/OU rule.
+
+Reused labelings must contain exactly the requested number of available distinct cycles, complete pairs and matching hypothesis weights. With `--multi_hypothesis false`, only H1 and its weights are retained. `ct_preparation.json` records the active hypotheses, source provenance and relaxations. Legacy plain labelings remain supported; absent generation provenance is recorded as unavailable. Zero requested cycles produce only the observed block and an empty `resample.tab`, and need no phenotype simulation or alignment directory for resampling alone.
 
 The observed labeling is written as the cycle `b_0` and replayed through exactly the same code as the null cycles, so the observed statistic is the $b_0$ slice of the replay. Cycles are processed in blocks (`--caas_cycle_block_size`, 500) against batches of genes (`--ct_core_batch_size`, 20), which keeps task memory independent of the number of cycles.
 
@@ -146,6 +156,10 @@ Code: `subworkflows/CT/local/modules/caas_id.py:237-304`; `perm_replay.py:78-89`
 ![CAAS pattern distribution](img/caas_patterns.png)
 
 *Candidate CAAS by pattern class in the observed discovery. Report 7.*
+
+CT normalizes residue case and applies the same ambiguity/gap policy in the kernel and exports. Gene IDs follow the manifest or the alignment filename with its final extension removed, preserving embedded dots. Repeated species, gene IDs, labeling tags or pair assignments are rejected.
+
+For relaxed discovery, `conserved_pair` contains the **actual within-pair count and IDs**, joined by domain ID even after asymmetric gaps. The separate `shared_residue_count` records the residue-type overlap used for eligibility. `is_conserved_meta` retains its overlap-based meaning, so the strict-output rule remains unchanged. Outputs generated before this correction should be regenerated together with their null; the replay task contract has been bumped to invalidate older cached tiles.
 
 ## 6. Ancestral reconstruction and the path score
 

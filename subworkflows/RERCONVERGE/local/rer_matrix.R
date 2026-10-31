@@ -1,70 +1,19 @@
-#
-#
-#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
-#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗  
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝  
-#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
-#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#                                                                                    
-#                                      
-# PHYLOPHERE: A Nextflow pipeline including a complete set
-# of phylogenetic comparative tools and analyses for Phenome-Genome studies
-#
-# Github: https://github.com/nozerorma/caastools/nf-phylophere
-#
-# Author:         Miguel Ramon (miguel.ramon@upf.edu)
-#
-# File: rer_matrix.R
-#
-
-# Set up variable to control command line arguments
-args <- commandArgs(TRUE)
-
-# Load libraries
-library(dplyr)
-library(RERconverge)
-
-# Load our traits
-traitPath <- args[1]
-load(traitPath) # As trait_vector
-
-# Load our trees
-treePath <- args[2]
-geneTrees <- readRDS(treePath)
-
-# Get residuals from our traitfile
-min_sp <- if (length(args) >= 4) as.integer(args[4]) else 10L
-
-# Verify species overlap between trait vector and master tree
-master_species <- geneTrees$masterTree$tip.label
-n_overlap <- length(intersect(names(trait_vector), master_species))
-message(sprintf(
-    "INFO rer_matrix: %d/%d trait species found in master tree (useSpecies filter active)",
-    n_overlap, length(names(trait_vector))
-))
-if (n_overlap < min_sp) {
-    stop(sprintf(
-        "ERROR rer_matrix: only %d species overlap trait vector / master tree (min.sp = %d). Check species name formatting.",
-        n_overlap, min_sp
-    ))
-}
-# RERconverge >= 0.3.0 renamed getAllResiduals() args: weighted -> use.weights,
-# scale=TRUE -> norm="scale" (now the default). Older builds used weighted/scale.
-traitRERw <- tryCatch(
-    getAllResiduals(geneTrees, useSpecies=names(trait_vector),
-        transform = "sqrt", use.weights = T, norm = "scale", min.sp = min_sp),
-    error = function(e) {
-        message("WARNING: getAllResiduals with use.weights=T failed: ", conditionMessage(e))
-        message("Retrying with use.weights=F ...")
-        getAllResiduals(geneTrees, useSpecies=names(trait_vector),
-            transform = "sqrt", use.weights = F, norm = "scale", min.sp = min_sp)
-    }
-)
-
-# Now we save our RERs
-
-## Save to path
-saveRDS(traitRERw, args[3])
-
-### DONE ###
+# Weighted RER estimation: a technical error must never change the estimator.
+a <- commandArgs(TRUE)
+suppressPackageStartupMessages(library(RERconverge))
+script <- sub('^--file=', '', grep('^--file=', commandArgs(FALSE), value=TRUE)[1])
+source(file.path(dirname(normalizePath(script)), 'rer_contract.R'))
+trait <- rer_trait(a[1]); trees <- readRDS(a[2])
+min_sp <- rer_integer(if(length(a)>=4L) a[4] else 10,'min.sp',3)
+if (length(intersect(names(trait$values),trees$masterTree$tip.label)) < min_sp)
+  stop('Insufficient trait/master-tree species overlap')
+identity <- rer_tree_contract(trees)
+mat <- RERconverge::getAllResiduals(trees,useSpecies=names(trait$values),
+  transform='sqrt',use.weights=TRUE,norm='scale',min.sp=min_sp)
+rer_ids(rownames(mat),'Matrix genes')
+if (!identical(colnames(mat),colnames(trees$paths))) stop('Native RER column order differs from tree paths')
+colnames(mat) <- identity$paths
+attr(mat,'rer_contract') <- list(version='rer_v1',tree=identity$tree,paths=colnames(mat),
+  genes=rownames(mat),species=names(trait$values),use.weights=TRUE,transform='sqrt',norm='scale',min.sp=min_sp,
+  package_version=as.character(packageVersion('RERconverge')))
+saveRDS(mat,a[3])

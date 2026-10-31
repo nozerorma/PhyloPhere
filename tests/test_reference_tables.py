@@ -68,17 +68,18 @@ def test_reference_preflight_checks_alignment_hash_and_inventory(tmp_path):
  table=tmp_path/'pfam.tsv';table.write_text('gene\tpfam_id\ttarget_name\tdescription\tclan_acc\tclan_name\tali_start\tali_end\tcoordinate_space\n')
  meta=dict(alignment_dir=str(align),alignments={'G.fa':hashlib.sha256(fa.read_bytes()).hexdigest()},table_sha256=hashlib.sha256(table.read_bytes()).hexdigest())
  Path(str(table)+'.manifest.json').write_text(json.dumps(meta))
- script=ROOT/'.smoke_reference_preflight.nf'
- script.write_text("include { validatePositionReferences } from './workflows/posenrich.nf'\nworkflow { validatePositionReferences(); log.info 'REFERENCE_PREFLIGHT_PASSED' }\n")
+ project=tmp_path/'project';project.mkdir()
+ script=project/'main.nf'
+ script.write_text("include { validatePositionReferences } from '"+str(ROOT/'workflows/posenrich.nf')+"'\nworkflow { validatePositionReferences(); log.info 'REFERENCE_PREFLIGHT_PASSED' }\n")
  cmd=[nf,'run',str(script),'--alignment',str(align),'--posenrich_domains','true','--domain_variability_file',str(table),'-ansi-log','false']
  try:
-  result=subprocess.run(cmd,cwd=ROOT,capture_output=True,text=True,timeout=90)
+  result=subprocess.run(cmd,cwd=project,capture_output=True,text=True,timeout=90)
   assert result.returncode==0,result.stdout+result.stderr
   fa.write_text('>Homo_sapiens\nAT\n')
-  result=subprocess.run(cmd,cwd=ROOT,capture_output=True,text=True,timeout=90)
+  result=subprocess.run(cmd,cwd=project,capture_output=True,text=True,timeout=90)
   assert result.returncode!=0 and 'Productive alignment changed' in result.stdout+result.stderr
   fa.write_text('>Homo_sapiens\nAS\n');(align/'NEW.fa').write_text('>Homo_sapiens\nAS\n')
-  result=subprocess.run(cmd,cwd=ROOT,capture_output=True,text=True,timeout=90)
+  result=subprocess.run(cmd,cwd=project,capture_output=True,text=True,timeout=90)
   assert result.returncode!=0 and 'Alignment inventory changed' in result.stdout+result.stderr
  finally:script.unlink(missing_ok=True)
 
@@ -129,3 +130,22 @@ def test_pp2a_peptide_offset_must_agree_with_the_site(tmp_path):
  pending={r['record_id']:r['mapping_status'] for r in csv.DictReader((out/'pending_sites.tsv').open(),delimiter='\t')}
  # S is the 2nd residue of ASDF: offset 2 and no offset map; offset 3 contradicts the site.
  assert mapped=={'0','2'} and pending=={'1':'peptide_offset_mismatch'}
+
+
+def test_pfam_first_use_preparation_reuse_and_incomplete_index(tmp_path, monkeypatch):
+ import compute_domain_variability as p
+ calls=[]
+ def download(url,dest):
+  calls.append(('download',Path(dest).name));Path(dest).write_bytes(b'prepared fixture snapshot')
+ def press(argv,**kwargs):
+  calls.append(('index',argv[-1]))
+  assert argv[:2]==['hmmpress','-f']
+  for suffix in ('h3f','h3i','h3m','h3p'):Path(argv[-1]+'.'+suffix).write_bytes(b'index')
+ monkeypatch.setattr(p,'_download_gz',download)
+ monkeypatch.setattr(p.subprocess,'run',press)
+ hmm,clans=p.ensure_pfam_cache(str(tmp_path/'cache'))
+ assert Path(hmm).is_file() and Path(clans).is_file()
+ assert len(calls)==3
+ p.ensure_pfam_cache(str(tmp_path/'cache'));assert len(calls)==3
+ Path(hmm+'.h3m').unlink()
+ p.ensure_pfam_cache(str(tmp_path/'cache'));assert len(calls)==4 and calls[-1][0]=='index'

@@ -17,7 +17,7 @@ output:
     self_contained: true
 params:
   disambig_dir:        NULL   # path to ct_disambiguation/ output directory
-  posterior_threshold: NULL   # params.ct_disambig_posterior_threshold (shown, not applied)
+  posterior_threshold: NULL   # optional current setting, compared with recorded provenance
   output_dir:          "."    # working directory (TSVs → ./tsv/, plots → ./plots/)
 ---
 
@@ -81,25 +81,23 @@ suppressPackageStartupMessages({
   library(kableExtra)
 })
 
-theme_set(
-  theme_bw(base_size = 12) +
-  theme(
-    axis.title.y  = element_text(margin = ggplot2::margin(l = 20, r = 20)),
-    axis.title.x  = element_text(margin = ggplot2::margin(t = 12)),
-    axis.text.x   = element_text(margin = ggplot2::margin(t = 5)),
-    plot.title    = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
-    plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10)),
-    strip.background = element_rect(fill = "grey95", colour = "grey80"),
-    strip.text    = element_text(face = "bold")
-  )
-)
+source("src/report_style.R")
+source("src/diagnostics_io.R")
+set_report_style()
 
-# ── Parameters ────────────────────────────────────────────────────────────────
-disambig_dir        <- params$disambig_dir
-posterior_threshold <- if (is.null(params$posterior_threshold)) NA_real_ else as.numeric(params$posterior_threshold)
-output_dir          <- params$output_dir
-
+# Scientific settings are read from the result, never inferred from this run.
+disambig_dir <- params$disambig_dir
+output_dir <- params$output_dir
 stopifnot(!is.null(disambig_dir))
+inputs <- load_asr_diagnostics(disambig_dir)
+posterior_threshold <- inputs$posterior_threshold
+requested_threshold <- params$posterior_threshold
+if (!is.null(requested_threshold)) {
+  if (length(requested_threshold) != 1) asr_fail("Invalid requested posterior threshold")
+  requested_threshold <- asr_number(requested_threshold, "requested posterior threshold", upper = 1)
+}
+threshold_mismatch <- !is.null(requested_threshold) && !is.na(posterior_threshold) &&
+  requested_threshold != posterior_threshold
 
 # ── Output directories ────────────────────────────────────────────────────────
 # Tables go to tsv/ and figures to plots/, both published by ASR_DIAGNOSTICS_REPORT.
@@ -118,76 +116,48 @@ save_plot <- function(p, fname, width = 11, height = 6) {
   invisible(file.path(plots_dir, fname))
 }
 
-# Categorical palette (Tableau 10)
-.tableau10 <- c(
-  "#1F77B4", "#AEC7E8", "#FF7F0E", "#FFBB78",
-  "#2CA02C", "#98DF8A", "#D62728", "#FF9896",
-  "#9467BD", "#C5B0D5"
-)
+.tableau10 <- report_palette(10)
 ```
 
 ## Introduction
 
-`asr_path_score` is the CAAS convergence score of a position on the K fixed Voronoi domains of the contrast design. It is computed for each phenotype side, so a position contributes up to two rows to the master table.
+`asr_path_score` is the CAAS convergence score of a position on the K fixed Voronoi domains of the contrast design. Positive scores are emitted per phenotype side (`top` and/or `bottom`). If neither side scores positively, the position contributes one diagnostic `side=none` row with score zero. Its classification and agreement describe the side with the most changed domains (ties: greatest agreement numerator, then top). These rows are shown separately, not assigned to a phenotype side.
 
-For one hypothesis and one side, a domain is *changed* when its observed foreground residue differs from the modal ancestral residue at the MRCA of its pair. A changed domain scores the noisy-OR, over the changed domains that carry the same residue, of `1 - P`, where `P` is the posterior mass of that residue at the LCA of the two domains. `P` is the recorded mass of the residue and, when the residue is not in the recorded distribution of the node, the whole unrecorded mass (worst case). A changed domain without a same-residue partner scores 0. The domain scores are averaged over the hypotheses and the score of the row is their mean weighted by the PSS of each domain; domains without a valid reconstruction stay in the denominator with score 0.
+For one hypothesis and one side, a domain is *changed* when its observed foreground residue differs from the modal ancestral residue at the MRCA of its pair. A changed domain scores the noisy-OR, over the changed domains that carry the same residue, of `1 - P`, where `P` is the posterior mass of that residue at the LCA of the two domains. `P` is the recorded mass of the residue and, when the residue is not in the recorded distribution of the node, the whole unrecorded mass (worst case). A changed domain without a same-residue partner scores 0. Within each domain and side, scores are first averaged over all design hypotheses represented by each species, including zero for hypotheses that did not detect the position. The domain score is the PSS-weighted mean over distinct species (weights are their mean PSS; equal weights if all are zero). The row score is the unweighted mean over all K domains. Domains without evidence contribute zero and remain in the denominator. The score rule is `caas_pos_species_pss_v4`; this aggregation is a score, not a calibrated probability of independent origins.
 
 `derived_agreement` is `agree_num / agree_den`: the fraction of the changed domains whose modal derived residue is the most frequent one. It describes the row and does not enter the score.
 
-The posterior threshold removes from the recorded distribution of a node every residue below it, except the most probable one. Removed mass is unrecorded, so a higher threshold can only raise `P` and lower the scores. The threshold is applied when the ASR posteriors are read; this report shows its value and does not vary it. By default, it is fixed at 0.1.
+The posterior threshold removes from the recorded distribution of a node every residue below it, except the most probable one. Removed mass is unrecorded, so a higher threshold can only raise `P` and lower the scores. The threshold is applied when the ASR posteriors are read; this report shows its value and does not vary it. The value displayed below comes from the observed completion record, including when results from another run are reused.
 
 ---
 
 ```{r load-data}
-master_csv <- file.path(disambig_dir, "caas_convergence_master.csv")
-if (!file.exists(master_csv)) {
-  stop(sprintf("[asr_diagnostics] caas_convergence_master.csv not found in: %s", disambig_dir))
-}
-
-# Only the columns used here are read; the support tallies of the master are large.
-base_cols <- c("gene", "msa_pos", "side", "convergence_type", "n_hypotheses",
-               "asr_path_score", "derived_agreement", "agreement_ambiguous")
-hdr  <- names(readr::read_csv(master_csv, n_max = 0, show_col_types = FALSE))
-need <- c("gene", "msa_pos", "side", "asr_path_score")
-if (!all(need %in% hdr)) {
-  stop(sprintf("[asr_diagnostics] the master lacks the columns: %s", paste(setdiff(need, hdr), collapse = ", ")))
-}
-keep <- hdr[hdr %in% base_cols]
-
-master_df <- readr::read_csv(
-  master_csv, col_select = all_of(keep), show_col_types = FALSE, guess_max = 10000,
-  col_types = readr::cols(.default = readr::col_guess(), gene = "c", side = "c",
-                          convergence_type = "c")
-)
-# Optional columns are present as NA when the master lacks them
-for (nm in c("derived_agreement", "convergence_type", "agreement_ambiguous", "n_hypotheses")) {
-  if (!nm %in% names(master_df)) master_df[[nm]] <- NA
-}
-master_df <- master_df %>%
-  mutate(agreement_ambiguous = as.logical(as.character(agreement_ambiguous)),
-         derived_agreement   = suppressWarnings(as.numeric(derived_agreement)))
-
-# Rows without an asr_path_score are not scored and are left out
-score_df <- master_df %>% filter(!is.na(asr_path_score))
-if (nrow(score_df) == 0) stop("No ASR path scores found in the provided CSV.")
-
+master_df <- inputs$data
+score_df <- master_df
 n_positions <- score_df %>% distinct(gene, msa_pos) %>% nrow()
+if (!nrow(score_df)) cat("**No observed positions were detected.** The completed empty result is valid; summary tables retain their headers and plots are omitted.\n")
+
 ```
 
-> **Posterior threshold** (`params.ct_disambig_posterior_threshold`): **`r if (is.na(posterior_threshold)) "not provided" else posterior_threshold`**
+> **Recorded posterior threshold**: **`r if (is.na(posterior_threshold)) "not provided" else posterior_threshold`**
+>
+> **ASR model**: `r inputs$model`; **score rule**: `caas_pos_species_pss_v4`; **genes excluded by whitelist**: `r inputs$excluded_genes`
 >
 > **Disambiguation directory**: `r disambig_dir`
 >
 > **Rows in the master** (gene × position × side): `r format(nrow(master_df), big.mark = ",")`
 >
-> **Scored rows**: `r format(nrow(score_df), big.mark = ",")`, over `r format(n_positions, big.mark = ",")` positions in `r n_distinct(score_df$gene)` genes
+> **Evaluated rows (including diagnostic zeros)**: `r format(nrow(score_df), big.mark = ",")`, over `r format(n_positions, big.mark = ",")` positions in `r n_distinct(score_df$gene)` genes
+
+```{r threshold-note, results='asis'}
+if (threshold_mismatch) cat(sprintf("**Configuration differs:** this run requests threshold %s; these results were scored with %s. All diagnostics use the recorded value.\n", requested_threshold, posterior_threshold))
+```
 
 ```{r rows-table}
 score_df %>%
-  count(side) %>%
-  pivot_wider(names_from = side, values_from = n, values_fill = 0) %>%
-  kable(format = "html", caption = "Scored rows per side") %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+  count(side, name = "Rows") %>%
+  kable(format = "html", caption = "Evaluated rows per side (none = diagnostic zero)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
 ```
 
 ---
@@ -195,6 +165,7 @@ score_df %>%
 ## 1. Distribution of the ASR path score
 
 ```{r plot-score-dist, fig.height=4, fig.cap="Distribution of asr_path_score per side."}
+if (nrow(score_df)) {
 p_score <- ggplot(score_df, aes(x = asr_path_score)) +
   geom_histogram(binwidth = 0.02, fill = .tableau10[1], colour = "white", alpha = 0.85) +
   facet_wrap(~ side, scales = "free_y") +
@@ -208,17 +179,21 @@ p_score <- ggplot(score_df, aes(x = asr_path_score)) +
 
 print(p_score)
 save_plot(p_score, "asr_path_score_distribution.png", width = 9, height = 5)
+}
 ```
 
 ---
 
 ## 2. Derived agreement
 
+Classification percentages use rows with a recorded classification; ambiguity percentages use rows with a recorded flag. Missing descriptors remain unavailable. `none` rows retain the diagnostic categories `divergent`, `single`, `no_change`, `symplesiomorphic` (agreement within a hypothesis but zero score), or `cross_hypothesis` (agreement only after pooling hypotheses and zero score).
+
 `derived_agreement` is a descriptor of the row (see Introduction). `agreement_ambiguous` marks rows where a changed domain had two derived residues tied across hypotheses and the smallest residue was taken by convention; for those rows, `derived_agreement` and `convergence_type` rest on that convention.
 
 ```{r plot-agreement, fig.height=4, fig.cap="Distribution of derived_agreement per side."}
 agree_df <- score_df %>% filter(!is.na(derived_agreement))
 
+if (nrow(agree_df)) {
 p_agree <- ggplot(agree_df, aes(x = derived_agreement)) +
   geom_histogram(binwidth = 0.05, fill = .tableau10[3], colour = "white", alpha = 0.85) +
   facet_wrap(~ side, scales = "free_y") +
@@ -226,6 +201,7 @@ p_agree <- ggplot(agree_df, aes(x = derived_agreement)) +
 
 print(p_agree)
 save_plot(p_agree, "derived_agreement_distribution.png", width = 9, height = 5)
+} else cat("Derived agreement is unavailable for these rows; the plot is omitted.\n")
 ```
 
 ```{r agreement-table}
@@ -233,10 +209,15 @@ agree_tab <- score_df %>%
   group_by(Side = side) %>%
   summarise(
     Rows = n(),
-    `Convergent (%)` = 100 * mean(convergence_type == "convergent", na.rm = TRUE),
-    `Divergent (%)`  = 100 * mean(convergence_type == "divergent",  na.rm = TRUE),
-    `Single (%)`     = 100 * mean(convergence_type == "single",     na.rm = TRUE),
-    `Ambiguous agreement (%)` = 100 * mean(agreement_ambiguous, na.rm = TRUE),
+    `Convergent (%)` = asr_percent(convergence_type == "convergent"),
+    `Divergent (%)`  = asr_percent(convergence_type == "divergent"),
+    `Single (%)`     = asr_percent(convergence_type == "single"),
+    `No change (%)` = asr_percent(convergence_type == "no_change"),
+    `Symplesiomorphic (%)` = asr_percent(convergence_type == "symplesiomorphic"),
+    `Cross hypothesis (%)` = asr_percent(convergence_type == "cross_hypothesis"),
+    `Classified rows` = sum(!is.na(convergence_type)),
+    `Agreement flags available` = sum(!is.na(agreement_ambiguous)),
+    `Ambiguous agreement (%)` = asr_percent(agreement_ambiguous),
     .groups = "drop"
   )
 
@@ -244,7 +225,7 @@ write_tsv_safe(agree_tab, "convergence_type_by_side.tsv")
 
 agree_tab %>%
   kable(format = "html", digits = 2, caption = "Convergence type and ambiguous agreement per side (convergence_type_by_side.tsv)") %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
 ```
 
 ---
@@ -258,8 +239,8 @@ summary_table <- score_df %>%
   filter(!is.na(value)) %>%
   group_by(Variable, Side = side) %>%
   summarise(
-    n = n(), Mean = mean(value), Median = median(value),
-    SD = sd(value), Min = min(value), Max = max(value),
+    n = n(), Mean = if (n()) mean(value) else NA_real_, Median = if (n()) median(value) else NA_real_,
+    SD = sd(value), Min = if (n()) min(value) else NA_real_, Max = if (n()) max(value) else NA_real_,
     .groups = "drop"
   )
 
@@ -283,7 +264,7 @@ tibble(
   File = c(tsv_files, plot_files)
 ) %>%
   kable(format = "html", caption = "Files written under asr_diagnostics/") %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
 ```
 
 ---

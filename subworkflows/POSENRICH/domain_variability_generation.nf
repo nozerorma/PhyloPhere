@@ -17,10 +17,13 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
+include { scoringHash; scoringQuote } from '../SCORING/scoring_contract.nf'
+
 
 // ── Pfam domain scan ─────────────────────────────────────────────────────────
 
 process COMPUTE_DOMAIN_VARIABILITY {
+    cache 'deep'
     tag "auto-generate domain_variability_file"
     label 'process_medium'
 
@@ -36,8 +39,12 @@ process COMPUTE_DOMAIN_VARIABILITY {
 
     script:
     def cache_dir = params.pfam_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/pfam"
+    def source_hash = scoringHash(['compute_domain_variability.py','map_domain_variability.py'].collect { file("${baseDir}/bin/${it}") })
+    def prepared = ['Pfam-A.hmm','Pfam-A.clans.tsv','Pfam-A.hmm.h3f','Pfam-A.hmm.h3i','Pfam-A.hmm.h3m','Pfam-A.hmm.h3p'].collect { file("${cache_dir}/${it}") }.findAll { it.isFile() }
+    def resource_hash = prepared ? scoringHash(prepared) : 'prepare-on-first-use'
     def ref_species = params.domain_ref_species ?: 'Homo_sapiens'
     """
+    # Sources: ${source_hash}; prepared Pfam resource content: ${resource_hash}
     python3 ${baseDir}/bin/compute_domain_variability.py \\
         --alignment-dir "${alignment_dir}" \\
         --output-dir . \\

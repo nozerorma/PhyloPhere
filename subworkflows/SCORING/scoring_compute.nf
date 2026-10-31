@@ -1,4 +1,5 @@
 #!/usr/bin/env nextflow
+include { scoringQuote } from './scoring_contract'
 // scoring_compute.nf — Position-level and gene-level CAAS scores, joined with FADE and RER evidence.
 // PhyloPhere | subworkflows/SCORING/
 
@@ -33,6 +34,7 @@
 // ── Scoring ────────────────────────────────────────────────────────────────────
 
 process SCORING_COMPUTE {
+    cache 'deep'
     tag "scoring_compute|${params.traitname ?: 'unknown_trait'}"
     label 'error_retry'
 
@@ -42,6 +44,7 @@ process SCORING_COMPUTE {
                saveAs: { name -> name in ['gene_scores.tsv','position_scores.tsv','fcs_stats.tsv'] ? null : name }
 
     input:
+    val source_hash
     path postproc_file
     path fade_summary_top
     path fade_summary_bottom
@@ -77,58 +80,62 @@ process SCORING_COMPUTE {
 
     if (params.use_singularity || params.use_apptainer) {
         """
-        cp ${local_dir}/scoring_compute.R ${local_dir}/aa_grouping.R ${local_dir}/null_position_p.R ${local_dir}/observed_core_scores.py .
+        export VROOM_THREADS=${task.cpus} OMP_NUM_THREADS=${task.cpus} OPENBLAS_NUM_THREADS=${task.cpus} MKL_NUM_THREADS=${task.cpus}
+        echo '${source_hash}' > scoring_contract.txt
+        cp ${local_dir}/scoring_compute.R ${local_dir}/scoring_io.R ${local_dir}/scoring_input.py ${local_dir}/aa_grouping.R ${local_dir}/null_position_p.R ${local_dir}/observed_core_scores.py .
         mkdir -p src/core && cp ${core_dir}/scores.py src/core/ && touch src/__init__.py src/core/__init__.py
 
         /usr/local/bin/_entrypoint.sh python3 observed_core_scores.py \
-            --input '${postproc_file}' \
+            --input ${scoringQuote(postproc_file)} \
             --positions-out core_positions.tsv \
             --genes-out core_genes.tsv \
             --gene-stat ${gene_stat}
 
         /usr/local/bin/_entrypoint.sh Rscript scoring_compute.R \
-            --postproc       '${postproc_file}' \
+            --postproc       ${scoringQuote(postproc_file)} \
             --core_positions core_positions.tsv \
             --core_genes     core_genes.tsv \
-            --fade_top       '${fade_summary_top}' \
-            --fade_bottom    '${fade_summary_bottom}' \
-            --fade_site_top  '${fs_top_arg}' \
-            --fade_site_bot  '${fs_bot_arg}' \
-            --rer            '${rer_summary}' \
-            --hypotheses_pairs '${hp_arg}' \
-            --null_counters   '${counters_arg}' \
-            --null_fit        '${fit_arg}' \
-            --null_base       '${base_arg}' \
-            --cycle_roster    '${roster_arg}' \
+            --fade_top       ${scoringQuote(fade_summary_top)} \
+            --fade_bottom    ${scoringQuote(fade_summary_bottom)} \
+            --fade_site_top  ${scoringQuote(fs_top_arg)} \
+            --fade_site_bot  ${scoringQuote(fs_bot_arg)} \
+            --rer            ${scoringQuote(rer_summary)} \
+            --hypotheses_pairs ${scoringQuote(hp_arg)} \
+            --null_counters   ${scoringQuote(counters_arg)} \
+            --null_fit        ${scoringQuote(fit_arg)} \
+            --null_base       ${scoringQuote(base_arg)} \
+            --cycle_roster    ${scoringQuote(roster_arg)} \
             --nominal_threshold ${params.evidence_p_threshold ?: 0.05} \
             --fdr_threshold ${params.evidence_fdr_threshold ?: 0.05} \
             --fade_bf_threshold ${params.fade_bf_threshold ?: 100}
         """
     } else {
         """
-        cp ${local_dir}/scoring_compute.R ${local_dir}/aa_grouping.R ${local_dir}/null_position_p.R ${local_dir}/observed_core_scores.py .
+        export VROOM_THREADS=${task.cpus} OMP_NUM_THREADS=${task.cpus} OPENBLAS_NUM_THREADS=${task.cpus} MKL_NUM_THREADS=${task.cpus}
+        echo '${source_hash}' > scoring_contract.txt
+        cp ${local_dir}/scoring_compute.R ${local_dir}/scoring_io.R ${local_dir}/scoring_input.py ${local_dir}/aa_grouping.R ${local_dir}/null_position_p.R ${local_dir}/observed_core_scores.py .
         mkdir -p src/core && cp ${core_dir}/scores.py src/core/ && touch src/__init__.py src/core/__init__.py
 
         python3 observed_core_scores.py \
-            --input '${postproc_file}' \
+            --input ${scoringQuote(postproc_file)} \
             --positions-out core_positions.tsv \
             --genes-out core_genes.tsv \
             --gene-stat ${gene_stat}
 
         Rscript scoring_compute.R \
-            --postproc       '${postproc_file}' \
+            --postproc       ${scoringQuote(postproc_file)} \
             --core_positions core_positions.tsv \
             --core_genes     core_genes.tsv \
-            --fade_top       '${fade_summary_top}' \
-            --fade_bottom    '${fade_summary_bottom}' \
-            --fade_site_top  '${fs_top_arg}' \
-            --fade_site_bot  '${fs_bot_arg}' \
-            --rer            '${rer_summary}' \
-            --hypotheses_pairs '${hp_arg}' \
-            --null_counters   '${counters_arg}' \
-            --null_fit        '${fit_arg}' \
-            --null_base       '${base_arg}' \
-            --cycle_roster    '${roster_arg}' \
+            --fade_top       ${scoringQuote(fade_summary_top)} \
+            --fade_bottom    ${scoringQuote(fade_summary_bottom)} \
+            --fade_site_top  ${scoringQuote(fs_top_arg)} \
+            --fade_site_bot  ${scoringQuote(fs_bot_arg)} \
+            --rer            ${scoringQuote(rer_summary)} \
+            --hypotheses_pairs ${scoringQuote(hp_arg)} \
+            --null_counters   ${scoringQuote(counters_arg)} \
+            --null_fit        ${scoringQuote(fit_arg)} \
+            --null_base       ${scoringQuote(base_arg)} \
+            --cycle_roster    ${scoringQuote(roster_arg)} \
             --nominal_threshold ${params.evidence_p_threshold ?: 0.05} \
             --fdr_threshold ${params.evidence_fdr_threshold ?: 0.05} \
             --fade_bf_threshold ${params.fade_bf_threshold ?: 100}

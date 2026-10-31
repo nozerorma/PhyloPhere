@@ -6,8 +6,8 @@ include { ENRICHMENT } from './workflows/enrichment.nf'
 workflow {
     def input = params.fixture
     def universe = Channel.value(file("${input}/universe.txt"))
-    SCORING_EVIDENCE(Channel.value(file("${input}/genes.tsv")),Channel.value(file("${input}/positions.tsv")),
-        Channel.value(file("${input}/stats.tsv")),universe,Channel.value([]),Channel.value(file("${input}/null.rds")))
+    SCORING_EVIDENCE('manual-fixture-v2',Channel.value(file("${input}/genes.tsv")),Channel.value(file("${input}/positions.tsv")),
+        Channel.value(file("${input}/stats.tsv")),universe,Channel.value([file("${input}/null_store")]),Channel.value(file('NO_FILE')))
     SCORING_EVIDENCE.out.gene_evidence.subscribe { println "EVIDENCE=${it}" }
     if(params.fcs_enabled) {
         FCS_COMPUTE_CALIBRATED(universe, SCORING_EVIDENCE.out.calibration)

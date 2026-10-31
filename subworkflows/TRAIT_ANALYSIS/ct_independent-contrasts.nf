@@ -18,7 +18,11 @@
 
 // ── Contrast selection report ──────────────────────────────────────────────────
 
+def report_hash = java.security.MessageDigest.getInstance('SHA-256')
+    .digest((file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/4.Independent_contrasts.Rmd").text + file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R").text).getBytes('UTF-8')).encodeHex().toString()
+
 process CONTRAST_ALGORITHM {
+    ext report_source_hash: report_hash
     tag "CONTRAST_ALGORITHM"
     label 'process_contrast_selection'
     publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, saveAs: { filename -> filename.equals('data_exploration') || filename.startsWith('data_exploration/') ? filename : null }
@@ -34,6 +38,7 @@ process CONTRAST_ALGORITHM {
     path "*.html", emit: reports, optional: true
     path "data_exploration/2.CT/1.Traitfiles/traitfile.tab", emit: trait_file_out
     path "data_exploration/2.CT/1.Traitfiles", emit: trait_dir_out
+    path "data_exploration/2.CT/1.Traitfiles/observed_selection.rds", emit: selection_inputs
 
     path "data_exploration/2.CT/3.Tree/pruned_tree_file.nwk", emit: tree_file_out
     path "data_exploration/2.CT/2.Permulation_traitfiles/permulation_traitfile.tab", emit: permulation_trait_file_out
@@ -55,15 +60,16 @@ process CONTRAST_ALGORITHM {
     def c_trait = params.c_trait ?: ''
     def branch_trait = params.branch_trait ?: ''
     def secondary_trait = params.secondary_trait ?: ''
-    def pss_top_pct = params.pss_top_pct ?: '0.05'
+    def pss_top_pct = params.pss_top_pct != null ? params.pss_top_pct : '0.05'
     def pair_center_gate = params.pair_center_gate ?: 'none'
     def perm_strategy = params.perm_strategy ?: 'best_model'
     def trait_type = params.trait_type ?: ''
     def max_contrasts = params.max_contrasts ?: '0'
-    def max_fop = params.max_fop ?: 100
+    def max_fop = params.max_fop != null ? params.max_fop : 100
 
     if (params.use_singularity | params.use_apptainer) {
         """
+        echo '${task.ext.report_source_hash}' > report_source.sha256
         cp -R ${local_dir}/* .
         cp ${ct_scripts}/lean_contrast_selector.R ${ct_scripts}/pss_core.R src/
         if [ -L "${results_dir}" ]; then
@@ -105,6 +111,7 @@ process CONTRAST_ALGORITHM {
         """
     } else {
         """
+        echo '${task.ext.report_source_hash}' > report_source.sha256
         cp -R ${local_dir}/* .
         cp ${ct_scripts}/lean_contrast_selector.R ${ct_scripts}/pss_core.R src/
         if [ -L "${results_dir}" ]; then

@@ -45,6 +45,7 @@ from contextlib import ExitStack
 
 import numpy as np
 
+from posenrich_contract import verify_registry, finish_manifest, inventory
 import posenrich_members as pm
 
 REGISTRY_FILES = ['positions.tsv', 'position_evidence.tsv', 'regions.tsv', 'sites.tsv',
@@ -169,6 +170,7 @@ def parse_coord(coord):
 
 def main():
     args = parse_args()
+    verify_registry(args.registry_dir)
     os.makedirs(args.output_dir, exist_ok=True)
     missing = [f for f in REGISTRY_FILES
                if not os.path.exists(os.path.join(args.registry_dir, f))]
@@ -324,6 +326,8 @@ def main():
 
     out_manifest = {
         'component': 'proximity',
+        'inputs': inventory(args.registry_dir),
+        'source_annotations': manifest.get('annotations', {}),
         'ranking_population': 'canonical_positive_detections_only',
         'contract_version': manifest.get('contract_version'),
         'parameters': {'collections': args.collections, 'radios': radios},
@@ -339,9 +343,7 @@ def main():
                    'la distancia no se mide en columnas MSA con gaps',
                    'consulta condicionada a detecciones positivas; no es el universo completo evaluado'],
     }
-    with open(os.path.join(args.output_dir, 'proximity_manifest.json'), 'w') as f:
-        json.dump(out_manifest, f, indent=2, sort_keys=True)
-        f.write('\n')
+    finish_manifest(args.output_dir, 'proximity_manifest.json', out_manifest)
     print(f"proximity: {protein_rows.rows_written} protein distance rows, {genomic_rows.rows_written} genomic rows "
           f"-> {args.output_dir}")
 

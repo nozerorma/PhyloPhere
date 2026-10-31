@@ -1,132 +1,81 @@
 #!/usr/bin/env nextflow
-// ctpp_characterization.nf — Characterization report of the post-processed CAAS discovery.
-// PhyloPhere | subworkflows/CT_POSTPROC/
-
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  CT_POSTPROC_REPORT: renders 8.Characterization_report.Rmd, which characterizes the
- *  discovery (genes, patterns, clusters, outliers) and the effect of the post-processing
- *  filters. Called from workflows/ct_postproc.nf.
- *
- *  Consumes:  prepared discovery, filter_summary.tsv, the directory of the published
- *             cluster files of the filter mode, gene_ensembl_file (gene lengths), gene stats
- *  Produces:  HTML report (html_reports/) and its files under postproc/ (CT_postproc_files,
- *             outliers, clusters, summary_statistics, disambiguation_characterization,
- *             postproc_inputs)
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- */
-
-
-// ── Characterization report ──────────────────────────────────────────────────
-
+// Report 8 consumes task artifacts directly; published directories are not inputs.
+include { ppQuote; ppHash } from './ctpp_clustfilter'
+def characterization_hash = ppHash([
+    file("${baseDir}/subworkflows/CT_POSTPROC/local/8.Characterization_report.Rmd"),
+    file("${baseDir}/subworkflows/CT_POSTPROC/local/src/report_io.R"),
+    file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R")])
 
 process CT_POSTPROC_REPORT {
-    tag "caas_postproc_report"
+    ext source_hash: characterization_hash
+    cache 'deep'
+    tag 'caas_postproc_report'
     label 'process_reporting'
     publishDir path: "${params.outdir}/postproc", mode: 'copy', overwrite: true, pattern: '{CT_postproc_files/**,outliers/**,clusters/**,summary_statistics/**,disambiguation_characterization/**,postproc_inputs/**}'
     publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'
-
     input:
-    path discovery_file
-    path filter_summary
-    val filter_dir
-    path gene_ensembl_file
-    path gene_stats_file
-
+    path discovery_file, stageAs: 'inputs/discovery/*'
+    path filter_summary, stageAs: 'inputs/summary/*'
+    path filter_files, stageAs: 'inputs/clusters/*'
+    path selected_cluster, stageAs: 'inputs/selected/*'
+    path gene_ensembl_file, stageAs: 'inputs/annotation/*'
+    path gene_stats_file, stageAs: 'inputs/stats/*'
+    path removed_genes, stageAs: 'inputs/removals/*'
+    path filtered_discovery, stageAs: 'inputs/filtered/*'
+    path quality_universe, stageAs: 'inputs/universe/*'
     output:
-    path "*.html", emit: report
-    path "CT_postproc_files/**", emit: assets, optional: true
-    path "outliers/**", emit: outliers, optional: true
-    path "clusters/**", emit: clusters, optional: true
-    path "summary_statistics/**", emit: summary_stats, optional: true
-    path "disambiguation_characterization/**", emit: disambiguation_characterization, optional: true
-    // Copy of the raw --gene_ensembl_file input. The genomic_info_file of SCORING and POSENRICH
-    // is the same file (scoring.nf resolves it from params.gene_ensembl_file), so publishing it
-    // here also provides the gene genomic coordinates.
-    path "postproc_inputs/**", emit: gene_ensembl_input, optional: true
-
+    path '8.Characterization_report.html', emit: report
+    path 'outliers/**', emit: outliers
+    path 'clusters/**', emit: clusters
+    path 'summary_statistics/**', emit: summary_stats
+    path 'disambiguation_characterization/**', emit: disambiguation_characterization
+    path 'postproc_inputs/**', emit: gene_ensembl_input
     script:
     def local_dir = "${baseDir}/subworkflows/CT_POSTPROC/local"
-    def discovery = discovery_file.toString()
-    def filter_sum = filter_summary.toString()
-    def filter_dir_path = filter_dir
-    def gene_len = gene_ensembl_file.toString()
-    def gene_stats = gene_stats_file.toString()
-    def mode = params.caas_postproc_mode
-    def outdir = "${params.outdir}/postproc"
-    def extreme_thresh = params.extreme_threshold
-    def iqr_mult = params.iqr_multiplier
-    def gene_filter = params.gene_filter_mode
-    def remove_clusters = params.remove_caas_clusters ? 'TRUE' : 'FALSE'
-
-
-    if (params.use_singularity | params.use_apptainer) {
-        """
-        cp -R ${local_dir}/* .
-        find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
-        find . -name '*.pyc' -delete 2>/dev/null || true
-
-        mkdir -p postproc_inputs
-        [[ "\$(basename '${gene_len}')" == NO_* ]] || cp '${gene_len}' postproc_inputs/
-
-        REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
-            rmarkdown::render(
-                '8.Characterization_report.Rmd',
-                params = list(
-                    discovery_file = '${discovery}',
-                    filter_summary_file = '${filter_sum}',
-                    filter_dir = '${filter_dir_path}',
-                    gene_ensembl_file = '${gene_len}',
-                    gene_stats_file = '${gene_stats}',
-                    processing_mode = '${mode}',
-                    output_dir = '${outdir}',
-                    extreme_threshold = ${extreme_thresh},
-                    iqr_multiplier = ${iqr_mult},
-                    gene_filter_mode = '${gene_filter}',
-                    gene_filter_k_far = ${params.gene_filter_k_far},
-                    gene_filter_k_near = ${params.gene_filter_k_near},
-                    remove_caas_clusters = ${remove_clusters},
-                    selected_filter_minlen = ${params.filter_minlen},
-                    selected_filter_maxcaas = ${params.filter_maxcaas},
-                    seed = '${params.seed ?: 1998}'
-                ),
-                output_file = '8.Characterization_report.html'
-            )
-        "
-        """
-    } else {
-        """
-        cp -R ${local_dir}/* .
-        find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
-        find . -name '*.pyc' -delete 2>/dev/null || true
-
-        mkdir -p postproc_inputs
-        [[ "\$(basename '${gene_len}')" == NO_* ]] || cp '${gene_len}' postproc_inputs/
-
-        REPORT_CORES=${task.cpus} Rscript -e "
-            rmarkdown::render(
-                '8.Characterization_report.Rmd',
-                params = list(
-                    discovery_file = '${discovery}',
-                    filter_summary_file = '${filter_sum}',
-                    filter_dir = '${filter_dir_path}',
-                    gene_ensembl_file = '${gene_len}',
-                    gene_stats_file = '${gene_stats}',
-                    processing_mode = '${mode}',
-                    output_dir = '${outdir}',
-                    extreme_threshold = ${extreme_thresh},
-                    iqr_multiplier = ${iqr_mult},
-                    gene_filter_mode = '${gene_filter}',
-                    gene_filter_k_far = ${params.gene_filter_k_far},
-                    gene_filter_k_near = ${params.gene_filter_k_near},
-                    remove_caas_clusters = ${remove_clusters},
-                    selected_filter_minlen = ${params.filter_minlen},
-                    selected_filter_maxcaas = ${params.filter_maxcaas},
-                    seed = '${params.seed ?: 1998}'
-                ),
-                output_file = '8.Characterization_report.html'
-            )
-        "
-        """
-    }
+    def settings = groovy.json.JsonOutput.toJson([
+        processing_mode: params.caas_postproc_mode, gene_filter_mode: params.gene_filter_mode,
+        gene_filter_strata: params.gene_filter_strata, gene_filter_k_far: params.gene_filter_k_far,
+        gene_filter_k_near: params.gene_filter_k_near, remove_caas_clusters: params.remove_caas_clusters,
+        selected_filter_minlen: params.filter_minlen, selected_filter_maxcaas: params.filter_maxcaas,
+        selected_filter_min_positions: params.filter_min_positions,
+        legacy_gene_count_gate: params.filter_min_positions == null,
+        seed: params.seed ?: 1998, quality_universe: 'all_ct_candidates'])
+    def report_params = groovy.json.JsonOutput.toJson([
+        discovery_file: 'postproc_inputs/postproc_disambiguation_input.tsv',
+        filtered_discovery_file: 'postproc_inputs/filtered_discovery.tsv',
+        filter_summary_file: 'postproc_inputs/filter_summary.tsv', filter_dir: 'postproc_inputs/clusters',
+        selected_cluster_file: 'postproc_inputs/selected_clusters.tsv',
+        gene_ensembl_file: 'postproc_inputs/gene_annotation.tsv', gene_stats_file: 'postproc_inputs/gene_stats.tsv',
+        removed_genes_file: 'postproc_inputs/removed_genes_summary.tsv',
+        quality_universe_file: 'postproc_inputs/quality_universe.json',
+        configuration_file: 'postproc_inputs/postproc_settings.json', output_dir: '.'])
+    def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
+    def staged_clusters = filter_files instanceof Collection ? filter_files : [filter_files]
+    def cluster_copies = staged_clusters.collect { "cp ${ppQuote(it)} postproc_inputs/clusters/" }.join('\n')
+    """
+    echo '${task.ext.source_hash}' > report_source.sha256
+    cp -R ${ppQuote(local_dir)}/. .
+    cp ${ppQuote("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R")} src/
+    mkdir -p postproc_inputs/clusters
+    cp ${ppQuote(discovery_file)} postproc_inputs/postproc_disambiguation_input.tsv
+    cp ${ppQuote(filtered_discovery)} postproc_inputs/filtered_discovery.tsv
+    cp ${ppQuote(filter_summary)} postproc_inputs/filter_summary.tsv
+    cp ${ppQuote(selected_cluster)} postproc_inputs/selected_clusters.tsv
+    cp ${ppQuote(gene_ensembl_file)} postproc_inputs/gene_annotation.tsv
+    cp ${ppQuote(gene_stats_file)} postproc_inputs/gene_stats.tsv
+    cp ${ppQuote(removed_genes)} postproc_inputs/removed_genes_summary.tsv
+    cp ${ppQuote(quality_universe)} postproc_inputs/quality_universe.json
+    ${cluster_copies}
+    cat > postproc_inputs/postproc_settings.json <<'PHYLOPHERE_SETTINGS'
+${settings}
+PHYLOPHERE_SETTINGS
+    cat > report_params.json <<'PHYLOPHERE_PARAMS'
+${report_params}
+PHYLOPHERE_PARAMS
+    REPORT_CORES=${task.cpus} ${run} - <<'PHYLOPHERE_RENDER'
+    rmarkdown::render('8.Characterization_report.Rmd',
+        params = jsonlite::read_json('report_params.json', simplifyVector = TRUE),
+        output_file = '8.Characterization_report.html', envir = new.env())
+PHYLOPHERE_RENDER
+    """
 }

@@ -1,174 +1,64 @@
 #!/usr/bin/env nextflow
-// fade_run.nf — HyPhy FADE (directional amino-acid selection) on foreground-annotated gene trees.
-// PhyloPhere | subworkflows/FADE/
-
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  FADE_RUN, FADE_BATCHED: run HyPhy FADE (FUBAR Approach to Directional Evolution) on
- *  a protein alignment and a tree whose foreground branches are labeled {Foreground}
- *  (from ANNOTATE_TREE_FG), testing the foreground branches for directional selection
- *  toward each amino acid. FADE_RUN handles one gene; FADE_BATCHED handles
- *  fade_batch_size genes per task through run_hyphy_fade_batch.sh. A gene whose FADE
- *  run fails is skipped and writes no row. The HyPhy JSON of a run is reduced inside the task to the tables of
- *  fade_json_to_tables.py (a gene row and the significant sites) and deleted: the JSON is not an output.
- *
- *  Consumes:  gene id, direction ('top' or 'bottom'), protein alignment (taxa names
- *             equal to the tree labels), annotated tree, lg_dat (model .dat file
- *             staged in the task directory)
- *  Produces:  FADE_BATCHED: <batch>.fade_genes.tsv and <batch>.fade_sites.tsv (header only when no gene has a result)
- *             FADE_RUN: <gene>.<direction>.fade_genes.tsv and <gene>.<direction>.fade_sites.tsv (none when the run fails)
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- */
-
-
-// ── Batched run ────────────────────────────────────────────────────────────────
+// Both execution modes use the same annotation/inference/coverage contract.
+include { selectionQuote } from '../SELECTION/selection_contract'
+include { fadeJson } from './fade_contract'
 
 process FADE_BATCHED {
-    tag "$batchID (${batchSize} genes, ${direction})"
+    tag "${batchID}"
     label 'process_long_compute'
-
-    // A failed gene does not fail the task: the batch script logs it and continues.
+    cache 'deep'
+    publishDir "${params.outdir}/selection/fade/audit", mode:'copy', overwrite:true, pattern:'*.fade.audit.json'
 
     input:
-    tuple val(batchID), val(direction), val(batchSize), val(batchManifestText),
-          path(fastas, stageAs: 'fastas/*'), path(trees, stageAs: 'trees/*')
-    path lg_dat
+    tuple val(batchID), val(manifest), path(fastas, stageAs:'fastas/*'), path(trees, stageAs:'trees/*'), path(species, stageAs:'species/*'), val(content_hash)
+    val settings
+    val source_hash
 
     output:
-    path "${batchID}.fade_genes.tsv", emit: genes
-    path "${batchID}.fade_sites.tsv", emit: sites
+    path '*.fade_genes.tsv', emit: genes
+    path '*.fade_sites.tsv', emit: sites
+    path '*.fade.audit.json', emit: audits
+    path '*.hyphy.log', emit: logs, optional:true
 
     script:
-    def model         = params.fade_model        ?: 'GTR'
-    def method        = params.fade_method       ?: 'Variational-Bayes'
-    def grid          = params.fade_grid         ?: 20
-    def conc          = params.fade_concentration ?: 0.5
-    def bfThreshold   = params.fade_bf_threshold ?: 100
-    def shareBaseline = ((params.fade_background_scope ?: 'all') == 'all') ? 'true' : 'false'
-    def runnerMode    = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
-    def nWorkers      = (task.cpus ?: 8) as int
-    // Each HyPhy call gets floor(task.cpus / workers) CPUs, at least 1, so that it does
-    // not read the CPU count of the whole node and oversubscribe it.
-    def cpuPerWorker  = Math.max(1, (task.cpus as int).intdiv(nWorkers))
-
-    def mcmc_args = (method == 'Variational-Bayes') ? "" :
-        """--mcmc-chains ${params.fade_chains ?: 5} \\
-           --mcmc-chain-length ${params.fade_chain_length ?: 2000000} \\
-           --mcmc-burn-in ${params.fade_burn_in ?: 1000000} \\
-           --mcmc-samples ${params.fade_samples ?: 100}"""
-
+    def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python' : 'python'
+    def container = (params.use_singularity || params.use_apptainer) ? '--container' : ''
     """
-cat > ${batchID}.manifest.tsv <<'EOF'
-""" + batchManifestText + """EOF
-
-bash ${baseDir}/subworkflows/FADE/local/src/run_hyphy_fade_batch.sh \\
-    --batch-id       ${batchID} \\
-    --manifest       ${batchID}.manifest.tsv \\
-    --direction      ${direction} \\
-    --workers        ${nWorkers} \\
-    --cpu-per-worker ${cpuPerWorker} \\
-    --runner-mode    ${runnerMode} \\
-    --model          ${model} \\
-    --method         "${method}" \\
-    --grid           ${grid} \\
-    --concentration  ${conc} \\
-    --bf-threshold   ${bfThreshold} \\
-    --share-baseline ${shareBaseline} \\
-    ${mcmc_args}
-"""
+    echo '${source_hash}:${content_hash}' > inputs.sha256
+    printf '%s\\n' ${fadeJson(settings)} > settings.json
+    cat <<'MANIFEST_EOF' > manifest.tsv
+${manifest}MANIFEST_EOF
+    ${py} -B ${selectionQuote("${baseDir}/subworkflows/FADE/local/src/run_fade.py")} \\
+        --manifest manifest.tsv --settings settings.json --batch-id ${batchID} --workers ${task.cpus} --cpu-per-worker 1 ${container}
+    """
 }
-
-
-// ── Single-gene run ────────────────────────────────────────────────────────────
 
 process FADE_RUN {
     tag "${gene_id}|${direction}"
     label 'process_long_compute'
-
-    errorStrategy 'ignore'  // a gene that fails (e.g. too few foreground branches) is skipped
+    cache 'deep'
+    publishDir "${params.outdir}/selection/fade/audit", mode:'copy', overwrite:true, pattern:'*.fade.audit.json'
 
     input:
-    tuple val(gene_id), val(direction), path(fasta), path(annotated_tree)
-    path lg_dat
+    tuple val(gene_id), val(direction), val(manifest), path(fastas, stageAs:'fastas/*'), path(trees, stageAs:'trees/*'), path(species, stageAs:'species/*'), val(content_hash)
+    val settings
+    val source_hash
 
     output:
-    path "${gene_id}.${direction}.fade_genes.tsv", emit: genes, optional: true
-    path "${gene_id}.${direction}.fade_sites.tsv", emit: sites, optional: true
+    path '*.fade_genes.tsv', emit: genes
+    path '*.fade_sites.tsv', emit: sites
+    path '*.fade.audit.json', emit: audits
+    path '*.hyphy.log', emit: logs, optional:true
 
     script:
-    def model   = params.fade_model   ?: 'GTR'
-    def method  = params.fade_method  ?: 'Variational-Bayes'
-    def grid    = params.fade_grid    ?: 20
-    def conc    = params.fade_concentration ?: 0.5
-    def fade_bf = "${baseDir}/subworkflows/FADE/local/src/FADE_phylophere.bf"
-    def extract = "${baseDir}/subworkflows/FADE/local/src/fade_json_to_tables.py"
-    def bf_thr  = params.fade_bf_threshold ?: 100
-    def pyBin   = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python' : 'python'
-
-    // MCMC options apply only when the method is not Variational-Bayes
-    def mcmc_args = (method == 'Variational-Bayes') ? "" :
-        """--chains ${params.fade_chains ?: 5} \\
-           --chain-length ${params.fade_chain_length ?: 2000000} \\
-           --burn-in ${params.fade_burn_in ?: 1000000} \\
-           --samples ${params.fade_samples ?: 100}"""
-
-    if (params.use_singularity || params.use_apptainer) {
-        """
-        export OMP_NUM_THREADS=${task.cpus}
-        export MKL_NUM_THREADS=${task.cpus}
-        export OPENBLAS_NUM_THREADS=${task.cpus}
-        export BLAS_NUM_THREADS=${task.cpus}
-        /usr/local/bin/_entrypoint.sh hyphy "${fade_bf}" \\
-            --alignment "${fasta}" \\
-            --tree      "${annotated_tree}" \\
-            --branches  Foreground \\
-            --model     ${model} \\
-            --method    "${method}" \\
-            --grid      ${grid} \\
-            --concentration_parameter ${conc} \\
-            --cache     NONE \\
-            --cpu       ${task.cpus} \\
-            ${mcmc_args} \\
-            --output    "${gene_id}.${direction}.FADE.json" > "${gene_id}.${direction}.hyphy.log" 2>&1 \\
-        || { tail -n 30 "${gene_id}.${direction}.hyphy.log" >&2 || true; echo "FADE failed for ${gene_id} (${direction}), skipping"; }
-        rm -f "${gene_id}.${direction}.hyphy.log" *.cache
-        # The tables replace the JSON, which is not kept: a failed or empty run writes no row (optional outputs)
-        if [ -s "${gene_id}.${direction}.FADE.json" ]; then
-            ${pyBin} "${extract}" --json "${gene_id}.${direction}.FADE.json" --gene "${gene_id}" --direction "${direction}" \\
-                --bf-threshold ${bf_thr} \\
-                --genes-out "${gene_id}.${direction}.fade_genes.tsv" --sites-out "${gene_id}.${direction}.fade_sites.tsv" \\
-              || echo "FADE: no usable result for ${gene_id} (${direction}), skipping" >&2
-        fi
-        rm -f "${gene_id}.${direction}.FADE.json"
-        """
-    } else {
-        """
-        export OMP_NUM_THREADS=${task.cpus}
-        export MKL_NUM_THREADS=${task.cpus}
-        export OPENBLAS_NUM_THREADS=${task.cpus}
-        export BLAS_NUM_THREADS=${task.cpus}
-        hyphy "${fade_bf}" \\
-            --alignment "${fasta}" \\
-            --tree      "${annotated_tree}" \\
-            --branches  Foreground \\
-            --model     ${model} \\
-            --method    "${method}" \\
-            --grid      ${grid} \\
-            --concentration_parameter ${conc} \\
-            --cache     NONE \\
-            --cpu       ${task.cpus} \\
-            ${mcmc_args} \\
-            --output    "${gene_id}.${direction}.FADE.json" > "${gene_id}.${direction}.hyphy.log" 2>&1 \\
-        || { tail -n 30 "${gene_id}.${direction}.hyphy.log" >&2 || true; echo "FADE failed for ${gene_id} (${direction}), skipping"; }
-        rm -f "${gene_id}.${direction}.hyphy.log" *.cache
-        # The tables replace the JSON, which is not kept: a failed or empty run writes no row (optional outputs)
-        if [ -s "${gene_id}.${direction}.FADE.json" ]; then
-            ${pyBin} "${extract}" --json "${gene_id}.${direction}.FADE.json" --gene "${gene_id}" --direction "${direction}" \\
-                --bf-threshold ${bf_thr} \\
-                --genes-out "${gene_id}.${direction}.fade_genes.tsv" --sites-out "${gene_id}.${direction}.fade_sites.tsv" \\
-              || echo "FADE: no usable result for ${gene_id} (${direction}), skipping" >&2
-        fi
-        rm -f "${gene_id}.${direction}.FADE.json"
-        """
-    }
+    def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python' : 'python'
+    def container = (params.use_singularity || params.use_apptainer) ? '--container' : ''
+    """
+    echo '${source_hash}:${content_hash}' > inputs.sha256
+    printf '%s\\n' ${fadeJson(settings)} > settings.json
+    cat <<'MANIFEST_EOF' > manifest.tsv
+${manifest}MANIFEST_EOF
+    ${py} -B ${selectionQuote("${baseDir}/subworkflows/FADE/local/src/run_fade.py")} \\
+        --manifest manifest.tsv --settings settings.json --batch-id=${selectionQuote("${gene_id}.${direction}")} --workers 1 --cpu-per-worker ${task.cpus} ${container}
+    """
 }

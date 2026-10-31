@@ -57,12 +57,30 @@ process RESAMPLE {
     input:
     path nw_tree,     stageAs: 'nw_tree.nwk'
     path caas_config, stageAs: 'caas_config.tab'
-    path trait_val,   stageAs: 'traitvalues.tab'
+    path trait_val,   stageAs: 'traitvalues/*'
+    val species_column
 
     output:
     path("${nw_tree.baseName}.resampled.output/")
 
     script:
+    def cycles = params.caas_full_perms == null ? 1000 : params.caas_full_perms
+    if (!(cycles.toString() ==~ /[0-9]+/)) error "caas_full_perms must be a nonnegative integer."
+    if (cycles.toString().toBigInteger() == 0) {
+        def modulePath = groovy.json.JsonOutput.toJson("${baseDir}/subworkflows/CT/local")
+        def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
+        return """
+        ${py} - "${caas_config}" "${nw_tree.baseName}.resampled.output" <<'EMPTY_HARVEST'
+import json, sys
+from pathlib import Path
+sys.path.insert(0, ${modulePath})
+from modules.design_io import read_design
+read_design(sys.argv[1], ${params.multi_hypothesis == true ? 'True' : 'False'})
+p = Path(sys.argv[2]); p.mkdir()
+(p / 'permulation_provenance.json').write_text(json.dumps({'schema_version': 1, 'requested_cycles': 0, 'selected_cycles': 0, 'relaxed_reasons': []}) + '\\n')
+EMPTY_HARVEST
+        """
+    }
     if (params.use_singularity | params.use_apptainer) {
         """
         echo "Using Singularity/Apptainer"
@@ -75,12 +93,13 @@ process RESAMPLE {
             exit 1
         fi
         # With multi_hypothesis the input is a directory of traitfile_H*.tab; the observed pair
-        # count comes from the canonical hypothesis H1 (any .tab file when H1 is absent).
+        # count comes from the canonical hypothesis H1; all active pairs are validated.
         if [ -d "${caas_config}" ]; then
             if [ -f "${caas_config}/traitfile_H1.tab" ]; then
                 actual_caas_config="${caas_config}/traitfile_H1.tab"
             else
-                actual_caas_config=\$(find -L "${caas_config}" -type f -name '*.tab' | sort | head -n 1)
+                echo "[ERROR] Canonical traitfile_H1.tab is missing" >&2
+                exit 1
             fi
         else
             actual_caas_config="${caas_config}"
@@ -110,20 +129,22 @@ process RESAMPLE {
         "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
-        ${params.pss_top_pct ?: 0.05} \\
-        ${params.max_tries ?: 1000000} \\
+        ${params.pss_top_pct != null ? params.pss_top_pct : 0.05} \\
+        ${params.max_tries != null ? params.max_tries : 1000000} \\
         "${params.traitname ?: ''}" \\
         "${params.n_trait ?: ''}" \\
         "${params.c_trait ?: ''}" \\
         ${params.resample_use_n != null ? params.resample_use_n : true} \\
         "${params.trait_type ?: 'auto'}" \\
         ${params.multi_hypothesis ?: false} \\
-        ${params.max_fop ?: 100} \\
+        ${params.max_fop != null ? params.max_fop : 100} \\
         ${task.cpus} \\
-        ${params.seed ?: 1998} \\
+        ${params.seed != null ? params.seed : 1998} \\
         ${params.perm_match_pss != null ? params.perm_match_pss : true} \\
-        ${params.perm_match_pss_tol ?: 0.25} \\
-        "${params.pair_center_gate ?: 'none'}"
+        ${params.perm_match_pss_tol != null ? params.perm_match_pss_tol : 0.25} \\
+        "${params.pair_center_gate ?: 'none'}" \
+        ${params.ct_allow_relaxed_null == true} \
+        "${species_column}"
         """
     } else {
         """
@@ -137,12 +158,13 @@ process RESAMPLE {
             exit 1
         fi
         # With multi_hypothesis the input is a directory of traitfile_H*.tab; the observed pair
-        # count comes from the canonical hypothesis H1 (any .tab file when H1 is absent).
+        # count comes from the canonical hypothesis H1; all active pairs are validated.
         if [ -d "${caas_config}" ]; then
             if [ -f "${caas_config}/traitfile_H1.tab" ]; then
                 actual_caas_config="${caas_config}/traitfile_H1.tab"
             else
-                actual_caas_config=\$(find -L "${caas_config}" -type f -name '*.tab' | sort | head -n 1)
+                echo "[ERROR] Canonical traitfile_H1.tab is missing" >&2
+                exit 1
             fi
         else
             actual_caas_config="${caas_config}"
@@ -172,20 +194,22 @@ process RESAMPLE {
         "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
-        ${params.pss_top_pct ?: 0.05} \\
-        ${params.max_tries ?: 1000000} \\
+        ${params.pss_top_pct != null ? params.pss_top_pct : 0.05} \\
+        ${params.max_tries != null ? params.max_tries : 1000000} \\
         "${params.traitname ?: ''}" \\
         "${params.n_trait ?: ''}" \\
         "${params.c_trait ?: ''}" \\
         ${params.resample_use_n != null ? params.resample_use_n : true} \\
         "${params.trait_type ?: 'auto'}" \\
         ${params.multi_hypothesis ?: false} \\
-        ${params.max_fop ?: 100} \\
+        ${params.max_fop != null ? params.max_fop : 100} \\
         ${task.cpus} \\
-        ${params.seed ?: 1998} \\
+        ${params.seed != null ? params.seed : 1998} \\
         ${params.perm_match_pss != null ? params.perm_match_pss : true} \\
-        ${params.perm_match_pss_tol ?: 0.25} \\
-        "${params.pair_center_gate ?: 'none'}"
+        ${params.perm_match_pss_tol != null ? params.perm_match_pss_tol : 0.25} \\
+        "${params.pair_center_gate ?: 'none'}" \
+        ${params.ct_allow_relaxed_null == true} \
+        "${species_column}"
         """
     }
 }

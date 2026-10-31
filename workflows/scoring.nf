@@ -1,4 +1,5 @@
 #!/usr/bin/env nextflow
+include { scoringHash } from '../subworkflows/SCORING/scoring_contract'
 
 /*
  * PHYLOPHERE: CAAS Scoring Workflow
@@ -47,59 +48,66 @@ workflow SCORING {
     main:
         assert params.traitname : "SCORING requires --traitname"
 
+        def optional_input = { value, sentinel -> value ? file(value,checkIfExists:true) : file(sentinel) }
+        def score_dir = "${baseDir}/subworkflows/SCORING"
+        def hash_sources = { names -> scoringHash(names.collect { file("${baseDir}/subworkflows/${it}") } + [file("${score_dir}/scoring_contract.nf")]) }
+        def compute_hash = hash_sources(['SCORING/local/src/scoring_compute.R','SCORING/local/src/scoring_io.R','SCORING/local/src/scoring_input.py','SCORING/local/src/observed_core_scores.py','SCORING/local/src/aa_grouping.R','SCORING/local/src/null_position_p.R','CT_DISAMBIGUATION/local/src/core/scores.py'])
+        def evidence_hash = hash_sources(['SCORING/local/src/scoring_evidence.R','SCORING/local/src/scoring_io.R','SCORING/local/src/caas_block_contract.R','ENRICHMENT/local/src/fcs_prepare_blocks.R','ENRICHMENT/local/src/gene_p.R','ENRICHMENT/local/src/caas_blocks.R'])
+        def report_hash = hash_sources(['SCORING/local/10.Scoring_report.Rmd','SCORING/local/src/scoring_io.R','SCORING/local/src/report_evidence.R','TRAIT_ANALYSIS/local/src/report_style.R'])
+
         // ── Resolve each input with .ifEmpty{} fallbacks ───────────────────
 
         def resolved_postproc
         if (postproc_ch) {
             // Broadcastable value channel: filtered_discovery is consumed
             // by BOTH SCORING_COMPUTE and the report's functional-group overlay tab.
-            resolved_postproc = postproc_ch
+            resolved_postproc = postproc_ch.collect().map { assert it.size()==1 : "SCORING requires exactly one postproc table"; it[0] }
         } else if (params.scoring_postproc_input) {
             def f = file(params.scoring_postproc_input)
             assert f.exists() : "SCORING: postproc input not found: ${params.scoring_postproc_input}"
             resolved_postproc = Channel.value(f)
         } else {
-            resolved_postproc = Channel.empty()
+            error("SCORING requires postproc input")
         }
 
         def resolved_fade_top = (fade_summary_top_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_fade_summary_top ?: 'NO_FADE_TOP') }
+            .ifEmpty { optional_input(params.scoring_fade_summary_top,'NO_FADE_TOP') }.collect().map { assert it.size()==1 : 'Expected one FADE top summary'; it[0] }
 
         def resolved_fade_bottom = (fade_summary_bottom_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_fade_summary_bottom ?: 'NO_FADE_BOTTOM') }
+            .ifEmpty { optional_input(params.scoring_fade_summary_bottom,'NO_FADE_BOTTOM') }.collect().map { assert it.size()==1 : 'Expected one FADE bottom summary'; it[0] }
 
         def resolved_rer = (rer_summary_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_rer_input ?: (params.rer_continuous_file ?: (params.rer_binary_file ?: 'NO_RER'))) }
+            .ifEmpty { optional_input(params.scoring_rer_input,'NO_RER') }.collect().map { assert it.size()==1 : 'Expected one RER summary'; it[0] }
 
         def resolved_genomic_info = (genomic_info_ch ?: Channel.empty())
             .ifEmpty {
                 def gi = params.gene_ensembl_file ?: ''
-                if (gi && file(gi).exists()) file(gi) else file('NO_GENOMIC_INFO')
+                gi ? file(gi,checkIfExists:true) : file('NO_GENOMIC_INFO')
             }
 
         // .collect() turns these into value channels so they can be safely consumed
         // by both SCORING_COMPUTE and SCORING_REPORT below — without it, a regular
         // (queue) channel is drained by its first consumer, leaving the report with
         // nothing and silently dropping the FADE site data from the rendered report.
-        // .map { it[0] } unwraps the single-element list .collect() produces back to
+        // .map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] } unwraps the single-element list .collect() produces back to
         // a scalar path, since both processes call `.name` directly on this input.
         def resolved_fade_site_top_ch = (fade_site_top_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_fade_site_top ?: 'NO_FADE_SITE_TOP.txt') }
+            .ifEmpty { optional_input(params.scoring_fade_site_top,'NO_FADE_SITE_TOP.txt') }
             .collect()
-            .map { it && it.size() > 0 ? it[0] : file('NO_FADE_SITE_TOP.txt') }
+            .map { assert it.size()==1 : "Expected one FADE top site table"; it[0] }
 
         def resolved_fade_site_bot_ch = (fade_site_bot_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_fade_site_bottom ?: 'NO_FADE_SITE_BOT.txt') }
+            .ifEmpty { optional_input(params.scoring_fade_site_bottom,'NO_FADE_SITE_BOT.txt') }
             .collect()
-            .map { it && it.size() > 0 ? it[0] : file('NO_FADE_SITE_BOT.txt') }
+            .map { assert it.size()==1 : "Expected one FADE bottom site table"; it[0] }
 
         def resolved_background = (cleaned_background_ch ?: Channel.empty())
             .collect()
             .ifEmpty {
                 def bg = params.scoring_background_input ?: ''
-                if (bg && file(bg).exists()) [file(bg)] else [file('NO_BACKGROUND')]
+                bg ? [file(bg,checkIfExists:true)] : [file('NO_BACKGROUND')]
             }
-            .map { it && it.size() > 0 ? it[0] : file('NO_BACKGROUND') }
+            .map { assert it.size()==1 : "Expected one cleaned background"; it[0] }
 
         // FOP per-pair PSS weights for domain-pooled scoring (contrast_hypotheses_pairs.tsv).
         // NO_HYP_PAIRS -> scoring_compute.R treats every position as single-hypothesis.
@@ -112,10 +120,10 @@ workflow SCORING {
         // run cannot stand in for this run's contrast selection.
         def hp_param = params.scoring_hypotheses_pairs ?: ''
         def resolved_hyp_pairs
-        if (hp_param && file(hp_param).exists()) {
-            resolved_hyp_pairs = Channel.value(file(hp_param))
+        if (hp_param) {
+            resolved_hyp_pairs = Channel.value(file(hp_param,checkIfExists:true))
         } else if (hypotheses_pairs_ch != null) {
-            resolved_hyp_pairs = hypotheses_pairs_ch.ifEmpty(file('NO_HYP_PAIRS')).collect().map { it[0] }
+            resolved_hyp_pairs = hypotheses_pairs_ch.ifEmpty(file('NO_HYP_PAIRS')).collect().map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] }
         } else {
             def auto = file("${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv")
             resolved_hyp_pairs = Channel.value(auto.exists() ? auto : file('NO_HYP_PAIRS'))
@@ -125,10 +133,10 @@ workflow SCORING {
         // NO_PERM_MANIFEST -> the report omits the panel. --caas_perm_manifest_file overrides.
         def pm_param = params.caas_perm_manifest_file ?: ''
         def resolved_perm_manifest
-        if (pm_param && file(pm_param).exists()) {
-            resolved_perm_manifest = Channel.value(file(pm_param))
+        if (pm_param) {
+            resolved_perm_manifest = Channel.value(file(pm_param,checkIfExists:true))
         } else if (perm_manifest_ch != null) {
-            resolved_perm_manifest = perm_manifest_ch.ifEmpty(file('NO_PERM_MANIFEST')).collect().map { it[0] }
+            resolved_perm_manifest = perm_manifest_ch.ifEmpty(file('NO_PERM_MANIFEST')).collect().map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] }
         } else {
             resolved_perm_manifest = Channel.value(file('NO_PERM_MANIFEST'))
         }
@@ -137,10 +145,10 @@ workflow SCORING {
         // NO_PERM_HARVEST -> the report omits the tab. --caas_perm_harvest_file overrides.
         def ph_param = params.caas_perm_harvest_file ?: ''
         def resolved_perm_harvest
-        if (ph_param && file(ph_param).exists()) {
-            resolved_perm_harvest = Channel.value(file(ph_param))
+        if (ph_param) {
+            resolved_perm_harvest = Channel.value(file(ph_param,checkIfExists:true))
         } else if (perm_harvest_ch != null) {
-            resolved_perm_harvest = perm_harvest_ch.ifEmpty(file('NO_PERM_HARVEST')).collect().map { it[0] }
+            resolved_perm_harvest = perm_harvest_ch.ifEmpty(file('NO_PERM_HARVEST')).collect().map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] }
         } else {
             resolved_perm_harvest = Channel.value(file('NO_PERM_HARVEST'))
         }
@@ -149,21 +157,22 @@ workflow SCORING {
         def caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
             .ifEmpty { file('NO_FILE') }
             .collect()
-            .map { it[0] }
+            .map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] }
 
         // Positional universe and N of the null (see null_position_stats.py). The tested positions are the live
         // background.output, else --posenrich_background_file (the same file POSENRICH Accumulation reads); the cleaned background
         // (resolved_background) limits the null to the genes of the run. Each falls back to a NO_* sentinel: the universe is
         // then every null-positive position, and the log says so.
         def resolved_tested_pos = (tested_positions_ch ?: Channel.empty())
-            .ifEmpty { file(params.posenrich_background_file ?: 'NO_TESTED_POSITIONS') }
+            .ifEmpty { optional_input(params.posenrich_background_file,'NO_TESTED_POSITIONS') }
             .collect()
-            .map { it[0] }
+            .map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] }
 
         // The position-level null: the live one of CAAS_CORE_MERGE_REDUCE, else the null of an earlier run
         // (--caas_null_dir: its caas_permulation/ directory). Without one every consumer receives the NO_* sentinels and
         // the position p-values stay NA.
         def null_dir = params.caas_null_dir ? file(params.caas_null_dir) : null
+        if (null_dir) assert null_dir.isDirectory() && null_dir.resolve('null_positions.parquet').isFile() : 'SCORING requires a canonical --caas_null_dir'
         def prior_null = null_dir && file("${null_dir}/null_positions.parquet").exists()
         def have_null = (null_positions_ch != null) || prior_null
         def null_counters_v
@@ -172,18 +181,18 @@ workflow SCORING {
         def resolved_cycle_roster
         def null_summary_v
         if (have_null) {
-            def null_positions_v = null_positions_ch != null ? null_positions_ch.collect().map { it[0] } : Channel.value(file("${null_dir}/null_positions.parquet"))
+            def null_positions_v = null_positions_ch != null ? null_positions_ch.collect().map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] } : Channel.value(file("${null_dir}/null_positions.parquet"))
             // The block directories of a prior null. type: 'dir' is required: files() matches regular files by default
             // and would return an empty list here, so no blk_* is staged and the block validation fails downstream.
             def prior_blocks = null_blocks_ch == null ? files("${null_dir}/blocks/*", type: 'dir').sort() : []
             if (null_blocks_ch == null && !prior_blocks) error("--caas_null_dir has no block directories: ${null_dir}/blocks/")
             def null_blocks_v = null_blocks_ch != null ? null_blocks_ch : Channel.value(prior_blocks)
-            def null_counts_v = null_counts_ch != null ? null_counts_ch.collect().map { it[0] } : Channel.value(file("${null_dir}/counts.json"))
-            resolved_cycle_roster = cycle_roster_ch != null ? cycle_roster_ch.collect().map { it[0] } : Channel.value(file("${null_dir}/cycle_roster.txt"))
+            def null_counts_v = null_counts_ch != null ? null_counts_ch.collect().map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] } : Channel.value(file("${null_dir}/counts.json"))
+            resolved_cycle_roster = cycle_roster_ch != null ? cycle_roster_ch.collect().map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] } : Channel.value(file("${null_dir}/cycle_roster.txt"))
             // Preserve each summary/histogram pair; collect() otherwise flattens it
             // and the report's [0]/[1] indexing selects components of one Path.
-            null_summary_v = null_summary_ch != null ? null_summary_ch.collect(flat: false).map { it[0] } : Channel.value([file("${null_dir}/cycle_summary.tsv"), file("${null_dir}/cycle_hist.tsv")])
-            def null_stats = SCORING_NULL_POSITIONS(null_positions_v, null_blocks_v, null_counts_v, resolved_postproc.collect().map { it[0] },
+            null_summary_v = null_summary_ch != null ? null_summary_ch.collect(flat: false).map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] } : Channel.value([file("${null_dir}/cycle_summary.tsv"), file("${null_dir}/cycle_hist.tsv")])
+            def null_stats = SCORING_NULL_POSITIONS(null_positions_v, null_blocks_v, null_counts_v, resolved_postproc.collect().map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] },
                                                     resolved_tested_pos, resolved_background, resolved_cycle_roster)
             null_counters_v = null_stats.counters
             null_fit_v = null_stats.fit
@@ -198,6 +207,7 @@ workflow SCORING {
 
         // ── Run scoring — single pass on full postproc pool ────────────────
         def compute_out = SCORING_COMPUTE(
+            compute_hash,
             resolved_postproc,
             resolved_fade_top,
             resolved_fade_bottom,
@@ -217,7 +227,7 @@ workflow SCORING {
         def calibration_blocks = (null_blocks_ch ?: Channel.empty()).flatten().collect().ifEmpty { [] }.map { b ->
             b ? b : (params.caas_null_dir ? [file(params.caas_null_dir)] : [])
         }
-        def evidence_out = SCORING_EVIDENCE(compute_out.gene_scores, compute_out.position_scores,
+        def evidence_out = SCORING_EVIDENCE(evidence_hash, compute_out.gene_scores, compute_out.position_scores,
             compute_out.fcs_stats, resolved_background, calibration_blocks, caas_perms_resolved)
 
         // ── Render report ──────────────────────────────────────────────────
@@ -227,25 +237,26 @@ workflow SCORING {
         }
 
         def caas_pos_sample_resolved = (caas_pos_sample_ch ?: Channel.empty())
-            .ifEmpty { file(params.caas_pos_sample_file ?: 'NO_CAAS_POS_SAMPLE') }
+            .ifEmpty { optional_input(params.caas_pos_sample_file,'NO_CAAS_POS_SAMPLE') }
             .collect()
-            .map { it[0] }
+            .map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] }
         def caas_pos_quantiles_resolved = (caas_pos_quantiles_ch ?: Channel.empty())
-            .ifEmpty { file(params.caas_pos_quantiles_file ?: 'NO_CAAS_POS_QUANTILES') }
+            .ifEmpty { optional_input(params.caas_pos_quantiles_file,'NO_CAAS_POS_QUANTILES') }
             .collect()
-            .map { it[0] }
+            .map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] }
 
         // N, universe size, unseen observed positions and saturation curve of the null (null_universe_summary.tsv);
         // the sentinel when no null was given, and the report then omits its section.
         def null_universe_resolved = compute_out.null_universe_summary
             .ifEmpty { file('NO_NULL_UNIVERSE') }
             .collect()
-            .map { it[0] }
+            .map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] }
 
         // filtered_discovery (resolved_postproc, a value channel) = the observed
         // per-(gene,position) asr_path_score overlaid on the null;
         // when scoring runs it is always present (same condition as position_scores).
         def report_out = SCORING_REPORT(
+            report_hash,
             evidence_out.position_scores,
             evidence_out.gene_scores,
             compute_out.gene_correlations,

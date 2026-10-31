@@ -19,6 +19,8 @@ def make_proximity_fixture(tmp_path):
     maps = tmp_path / 'maps'
     maps.mkdir()
     write(maps / 'G1.map.tsv', MAP_TSV)
+    from posenrich_fixtures import reference, annotation
+    identity=reference(maps/'G1.map.tsv','G1')
     bg = write(tmp_path / 'bg.txt', 'G1\n')
     scores = write(tmp_path / 'position_scores.tsv',
                    'Gene\tPosition\tCAAS_score\tside\tp.emp\tp.adj_bh\n'
@@ -28,6 +30,7 @@ def make_proximity_fixture(tmp_path):
     domains = write(tmp_path / 'domains.tsv',
                     'gene\tpfam_id\ttarget_name\tdescription\tclan_acc\tclan_name\tali_start\tali_end\tcoordinate_space\n'
                     'G1\tPF1\tD1\tdesc\tNA\tNA\t12\t12\treference_protein_1based\n')
+    annotation(domains, ['G1'], identities={'G1':identity})
     custom = write(tmp_path / 'custom.tsv', 'G1\t2\tSITE\tpoint site\n')
     out = tmp_path / 'registry'
     result = subprocess.run([sys.executable, str(REGISTRY), '--map_dir', str(maps),
@@ -140,6 +143,9 @@ def test_best_side_scores_and_empty_collection_filter(tmp_path):
     duplicate[columns.index('side')] = 'bottom'
     duplicate[columns.index('CAAS_score')] = '0.99'
     evidence.write_text('\n'.join(lines + ['\t'.join(duplicate)]) + '\n')
+    from posenrich_contract import finish_manifest
+    meta=json.loads((registry_dir/'manifest.json').read_text())
+    finish_manifest(registry_dir,'manifest.json',meta)
     out = run_proximity(registry_dir, tmp_path / 'prox')
     rows = read_tsv(out / 'proximity_protein_distances.tsv')
     queries = [r for r in rows if r['collection_id'] == 'custom' and r['Position'] == '0']

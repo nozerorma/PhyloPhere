@@ -30,9 +30,16 @@ from src.data.models import CAASPosition
 
 
 def is_strict_row(row: Dict[str, Any]) -> bool:
-    """True when the discovery row has no pair that carries the same residue on both sides (`conserved_pair` empty
-    or "0:"): the rows a discovery run without conservation tolerance would have kept."""
-    return not _parse_conserved_pair(str(row.get("conserved_pair") or ""))
+    """Strict eligibility is zero residue-type overlap, not zero identical pairs."""
+    from src.utils.amino import normalize_amino_list
+    parts = str(row.get('caas') or '').split('/')
+    if len(parts) == 2:
+        return not (set(normalize_amino_list(parts[0])) & set(normalize_amino_list(parts[1])))
+    if row.get('shared_residue_count') not in (None, ''):
+        return int(row['shared_residue_count']) == 0
+    if row.get('is_conserved_meta') not in (None, ''):
+        return not as_bool(row['is_conserved_meta'])
+    return not _parse_conserved_pair(str(row.get('conserved_pair') or ''))
 
 
 def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosition]:
@@ -42,6 +49,8 @@ def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosi
     entries: List[CAASPosition] = []
     for row in rows:
         pos0 = int(row["position"])
+        if pos0 < 0:
+            raise ValueError('Discovery positions must be nonnegative')
         caas = str(row.get("caas") or "")
         parts = caas.split("/") if caas else []
         trait = str(row.get("trait") or "")
@@ -52,7 +61,7 @@ def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosi
             caas=caas,
             trait1_aa=normalize_amino_list(list(parts[0])) if len(parts) == 2 else [],
             trait0_aa=normalize_amino_list(list(parts[1])) if len(parts) == 2 else [],
-            is_conserved_meta=as_bool(row.get("is_conserved_meta")),
+            is_conserved_meta=not is_strict_row(row),
             conserved_pair=_parse_conserved_pair(str(row.get("conserved_pair") or "")),
             trait=trait,
         ))
@@ -61,12 +70,10 @@ def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosi
 
 def unresolved_entries(entries: List[CAASPosition], trait_pairs: Dict[int, List[Tuple[str, str]]]) -> List[CAASPosition]:
     """The entries whose `trait` names no contrast of `trait_pairs`; none when the design has one contrast."""
-    if len(trait_pairs) <= 1:
-        return []
     out = []
     for e in entries:
         m = re.search(r"H(\d+)", e.trait or "")
-        if not m or int(m.group(1)) not in trait_pairs:
+        if (m and int(m.group(1)) not in trait_pairs) or (not m and len(trait_pairs) != 1):
             out.append(e)
     return out
 
@@ -93,7 +100,7 @@ def analyze_observed(
             f"{gene}: {len(unresolved)} entries name no hypothesis of the {len(trait_pairs)}-contrast design "
             f"(trait of the first: {unresolved[0].trait!r})")
     node_posteriors = ctx["node_posteriors"]
-    return analyze_gene_disambiguation(
+    results, diagnostics = analyze_gene_disambiguation(
         gene=gene,
         alignment_data=ctx["alignment_data"],
         tree_data=ctx["tree_data"],
@@ -110,6 +117,9 @@ def analyze_observed(
         hoisted_name_index=ctx.get("name_index"),
         hoisted_taxid_index=ctx.get("taxid_index"),
     )
+    if diagnostics.get('skipped_positions'):
+        raise RuntimeError(f"{gene}: unscorable observed entries: {diagnostics['skip_reasons']}")
+    return results, diagnostics
 
 
 def score_observed(

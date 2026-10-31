@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+from postproc_io import read_table, positions
 
 
 def _parse_args():
@@ -48,13 +49,16 @@ def main() -> int:
     summary_data = []
 
     for file_path in filter_files:
-        match = re.search(r"minlen(\d+)\.maxcaas(\d+)", file_path.stem)
+        match = re.search(r"minlen(\d+)\.maxcaas(\d+(?:\.\d+)?)", file_path.stem)
         if not match:
             continue
 
         minlen = int(match.group(1))
-        maxcaas = int(match.group(2))
-        df = pd.read_csv(file_path, sep="\t")
+        maxcaas = float(match.group(2))
+        df = read_table(file_path)
+        df['Position'] = positions(df.Position)
+        if df.duplicated(['Gene','Position']).any() or not df.clustering_flag.isin(['Good','Discarded']).all():
+            raise ValueError(f'Invalid cluster artifact: {file_path}')
         summary_data.append(
             {
                 "Parameter": f"{minlen}/{maxcaas}",
@@ -64,8 +68,12 @@ def main() -> int:
             }
         )
 
+    if not summary_data:
+        raise ValueError('No valid cluster parameter files')
     summary_df = pd.DataFrame(summary_data).sort_values(["Minlen", "Maxcaas"])
 
+    if summary_df.duplicated(['Minlen','Maxcaas']).any():
+        raise ValueError('Duplicate cluster parameter artifacts')
     summary_df.to_csv(args.summary_output, sep="\t", index=False)
 
     print(f"✓ {args.summary_output}: {len(summary_df)} parameter combinations")

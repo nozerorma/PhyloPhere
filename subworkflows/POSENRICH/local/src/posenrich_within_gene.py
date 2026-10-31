@@ -10,8 +10,8 @@ spread evenly over its positions, k_g m_g / n_g of them would fall in S. The res
 
     r_g = (positives of g in S)  -  k_g m_g / n_g
 
-and the statistic of the term is the sum of r_g over its eligible genes. Every gene is compared with itself, so
-what the gene accumulates (level 1) does not enter the term. Observed and null cycles go through the same code
+and the statistic of the term is the sum of r_g over its eligible genes. Residuals are centered within each gene/cycle, not conditioned exactly on observed counts.
+Genes with more detections may contribute larger residuals. Observed and null cycles go through the same code
 with the margins k_g of their own cycle, so detectability per position, co-occurrence of detections inside a gene
 and the gene filter of the null are in the null.
 
@@ -19,7 +19,7 @@ Calibration: p = (1 + #{cycles with statistic >= observed}) / (N + 1), one-sided
 are read once and only the exceedance counts cross blocks, so the result does not depend on how cycles are split.
 
 Eligibility is fixed by the annotation, never by the observed positives. A gene is eligible for a term when it has
-members and non-members in U. A term is tested when it has members in at least --min-genes genes of U (default 2:
+members and non-members in the source-covered subset of U. A term is tested with at least --min-genes eligible genes (default 2:
 a term in one gene is a test inside that gene, not a concentration across genes); the rest are listed with the
 reason and carry no p.
 
@@ -62,6 +62,7 @@ import scipy.sparse as sp
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import posenrich_members as pm  # noqa: E402
+from posenrich_contract import observed_table, read_table, verify_universe, verify_registry, finish_manifest, inventory, position
 from posenrich_universe import POS_BITS, pair_keys, sha256_file  # noqa: E402
 
 TIE_TOL = 1e-9                       # relative tolerance of ties between statistics
@@ -84,7 +85,10 @@ class Universe:
 
 
 def load_universe(path):
-    df = pd.read_csv(path, sep='\t', usecols=['gene', 'position'], dtype={'gene': str, 'position': np.int64})
+    df = read_table(path)[['gene', 'position']]
+    df['position'] = df['position'].map(position)
+    if df.duplicated(['gene', 'position']).any():
+        raise ValueError('Duplicate universe position')
     genes = sorted(df['gene'].unique())
     ids = {g: i for i, g in enumerate(genes)}
     keys = np.unique(pair_keys(df['gene'].map(ids).to_numpy(), df['position'].to_numpy()))
@@ -96,7 +100,7 @@ def locate(U, genes, positions):
     ids = pd.Series(genes).map({g: i for i, g in enumerate(U.genes)})
     ok = ids.notna().to_numpy()
     idx = np.full(len(ok), -1, dtype=np.int64)
-    if ok.any():
+    if ok.any() and len(U.keys):
         keys = pair_keys(ids[ok].to_numpy(dtype=np.int64), np.asarray(positions)[ok])
         at = np.minimum(np.searchsorted(U.keys, keys), len(U.keys) - 1)
         hit = U.keys[at] == keys
@@ -106,13 +110,12 @@ def locate(U, genes, positions):
 
 def load_observed_scores(path, U):
     """Score per position of U: best-side positive CAAS score, 0 elsewhere (positive = score > 0)."""
-    df = pd.read_csv(path, sep='\t', usecols=['Gene', 'Position', 'CAAS_score'], dtype=str, na_values=['NA'])
-    df['score'] = pd.to_numeric(df['CAAS_score'], errors='coerce')
-    df = df[np.isfinite(df['score']) & (df['score'] > 0)]
-    best = df.assign(Position=df['Position'].astype(np.int64)).groupby(['Gene', 'Position'], as_index=False)['score'].max()
+    df = observed_table(path)
+    df['score'] = df['CAAS_score'].astype(float)
+    best = df.groupby(['Gene', 'Position'], as_index=False)['score'].max()
     idx = locate(U, best['Gene'].tolist(), best['Position'].to_numpy())
     if (idx < 0).any():
-        logging.warning(f"{int((idx < 0).sum())} observed positive positions are not in U and are ignored")
+        raise ValueError('Observed positives outside fixed positional universe')
     w = np.zeros(len(U.keys))
     w[idx[idx >= 0]] = best['score'].to_numpy()[idx >= 0]
     return w
@@ -120,7 +123,7 @@ def load_observed_scores(path, U):
 
 def default_collections(registry_dir):
     """Collections whose terms are informative within a protein (collections.tsv of the registry)."""
-    df = pd.read_csv(Path(registry_dir) / 'collections.tsv', sep='\t', dtype=str)
+    df = read_table(Path(registry_dir) / 'collections.tsv')
     return sorted(df.loc[df['informative_within_protein'] == '1', 'collection_id'].unique())
 
 
@@ -150,16 +153,19 @@ class Design:
     pair_m: np.ndarray           # positions of the term in the gene (in U)
     pair_n: np.ndarray           # positions of the gene in U
     M: sp.csc_matrix             # positions of U x pairs: 1 when the position is a member of the pair's term
-    G: sp.csr_matrix             # positions of U x genes
+    G: sp.csr_matrix             # positions of U x (collection, gene) coverage groups
+    pair_group: np.ndarray       # coverage group index per term/gene pair
 
     @property
     def n_pairs(self):
         return len(self.pair_term)
 
 
-def build_design(members, U):
+def build_design(members, U, coverage=None, declared_terms=None):
     terms = members[['collection_id', 'term_id']].drop_duplicates().sort_values(['collection_id', 'term_id'],
                                                                                 kind='stable').reset_index(drop=True)
+    if declared_terms is not None:
+        terms = declared_terms[['collection_id','term_id']].drop_duplicates().sort_values(['collection_id','term_id']).reset_index(drop=True)
     term_index = pd.MultiIndex.from_frame(terms)
     t = term_index.get_indexer(pd.MultiIndex.from_frame(members[['collection_id', 'term_id']]))
     gene = U.gene_of[members['uidx'].to_numpy()]
@@ -169,7 +175,24 @@ def build_design(members, U):
     pair_term, pair_gene = uniq // n_genes, uniq % n_genes
     M = sp.csc_matrix((np.ones(len(inverse)), (members['uidx'].to_numpy(), inverse)), shape=(len(U.keys), len(uniq)))
     G = sp.csr_matrix((np.ones(len(U.keys)), (np.arange(len(U.keys)), U.gene_of)), shape=(len(U.keys), n_genes))
-    return Design(terms, pair_term, pair_gene, m, U.n_by_gene[pair_gene], M, G)
+    pair_n, pair_group = U.n_by_gene[pair_gene], pair_gene
+    if coverage is not None:
+        groups = {}
+        rr, cc, pair_group, pair_n = [], [], [], []
+        for ti, gi in zip(pair_term, pair_gene):
+            cid = terms.iloc[ti].collection_id
+            key = cid, int(gi)
+            if key not in groups:
+                group = len(groups)
+                covered = coverage.get(cid, np.array([], dtype=np.int64))
+                cols = covered[U.gene_of[covered] == gi]
+                groups[key] = (group, len(cols))
+                rr.extend(cols.tolist()); cc.extend([group]*len(cols))
+            group, count = groups[key]
+            pair_group.append(group); pair_n.append(count)
+        G = sp.csr_matrix((np.ones(len(rr)), (rr,cc)), shape=(len(U.keys),len(groups)))
+        pair_n, pair_group = np.asarray(pair_n, dtype=np.int64), np.asarray(pair_group, dtype=np.int64)
+    return Design(terms, pair_term, pair_gene, m, pair_n, M, G, pair_group)
 
 
 # ── Null blocks ───────────────────────────────────────────────────────────────
@@ -178,16 +201,38 @@ def build_design(members, U):
 def block_cycles(block):
     """Cycle names of a block: cycles.txt, else the distinct cycles of its positions table."""
     listing = Path(block) / 'cycles.txt'
-    if listing.is_file():
-        return [c for c in listing.read_text().splitlines() if c.strip()]
-    return sorted(set(pq.read_table(Path(block) / 'positions.parquet', columns=['cycle'])['cycle'].to_pylist()))
+    if not listing.is_file():
+        raise ValueError('Canonical cycles.txt is required; detections cannot define N')
+    cycles = listing.read_text().splitlines()
+    if not cycles or len(cycles) != len(set(cycles)) or any(not c or c.strip() != c for c in cycles):
+        raise ValueError('Invalid/empty/duplicate cycle roster')
+    return cycles
 
 
-def read_block(block, U):
+def read_block(block, U, side="all"):
     """(cycle names, CSR matrix cycles x positions of U with the null scores). One row per scored position and cycle."""
     # the scores are only read for their sign: read_positives turns them into 0/1
     cycles = block_cycles(block)
-    table = pq.read_table(Path(block) / 'positions.parquet', columns=['gene', 'cycle', 'position', 'all'])
+    table = pq.read_table(Path(block) / 'positions.parquet')
+    required = {'gene', 'cycle', 'position', 'all', 'top', 'bottom'}
+    if not required <= set(table.column_names):
+        raise ValueError('Canonical null position sides are required')
+    if table.select(['gene','cycle','position','all']).to_pandas().isna().any().any():
+        raise ValueError('Missing canonical null position fields')
+    if not pa.types.is_integer(table['position'].type):
+        raise ValueError('Null positions must be integers')
+    ps = table['position'].to_numpy()
+    if np.any(ps < 0) or np.any(ps >= 2**31):
+        raise ValueError('Invalid null position')
+    sides = np.column_stack([table[c].to_numpy(zero_copy_only=False) for c in ('top','bottom')]).astype(float)
+    allv = table['all'].to_numpy(zero_copy_only=False).astype(float)
+    if np.any(np.isinf(sides)) or np.any((np.isfinite(sides)) & ((sides <= 0) | (sides > 1))):
+        raise ValueError('Invalid directional null scores')
+    maxima = np.fmax(sides[:, 0], sides[:, 1])
+    if np.any(~np.isfinite(allv)) or not np.allclose(maxima, allv, atol=1e-12, rtol=0):
+        raise ValueError('Null all score differs from max over sides')
+    if table.group_by(['gene','cycle','position']).aggregate([('all','count')]).num_rows != table.num_rows:
+        raise ValueError('more than one row per (cycle, position)')
     gene = pc.index_in(table['gene'].combine_chunks(), value_set=pa.array(U.genes, pa.string()))
     cyc = pc.index_in(table['cycle'].combine_chunks(), value_set=pa.array(cycles, pa.string()))
     if pc.any(pc.is_null(cyc)).as_py():
@@ -195,11 +240,12 @@ def read_block(block, U):
     g = pc.fill_null(gene, -1).to_numpy().astype(np.int64)
     keep = g >= 0
     keys = pair_keys(g[keep], table['position'].to_numpy(zero_copy_only=False)[keep])
-    at = np.minimum(np.searchsorted(U.keys, keys), len(U.keys) - 1)
-    hit = U.keys[at] == keys
+    at = np.minimum(np.searchsorted(U.keys, keys), max(len(U.keys) - 1, 0))
+    hit = U.keys[at] == keys if len(U.keys) else np.zeros(len(keys), dtype=bool)
     rows = cyc.to_numpy().astype(np.int64)[keep][hit]
     cols = at[hit]
-    score = table['all'].to_numpy(zero_copy_only=False)[keep][hit].astype(np.float64)
+    score = table[side].to_numpy(zero_copy_only=False)[keep][hit].astype(np.float64)
+    score = np.nan_to_num(score, nan=0.0)
     W = sp.coo_matrix((score, (rows, cols)), shape=(len(cycles), len(U.keys))).tocsr()
     if W.nnz != len(score):
         raise ValueError(f"{block}: more than one row per (cycle, position)")
@@ -220,11 +266,11 @@ def read_positives(block, U):
 def residual_chunks(W, design, pair_idx, chunk):
     """Yield (start, stop, R) with R[c, j] = r of pair pair_idx[start + j] in row c of W (cycles x pairs, dense)."""
     gene_positives = (W @ design.G).toarray()
-    ratio = design.pair_m / design.pair_n
+    ratio = np.divide(design.pair_m, design.pair_n, out=np.zeros(len(design.pair_m), dtype=float), where=design.pair_n>0)
     for a in range(0, len(pair_idx), chunk):
         sel = pair_idx[a:a + chunk]
         A = (W @ design.M[:, sel]).toarray()
-        yield a, a + len(sel), A - gene_positives[:, design.pair_gene[sel]] * ratio[sel]
+        yield a, a + len(sel), A - gene_positives[:, design.pair_group[sel]] * ratio[sel]
 
 
 def term_statistic(W, design, pair_idx, pair_to_term, chunk):
@@ -264,15 +310,18 @@ def benjamini_hochberg(p):
 
 
 def eligibility(design, min_genes):
-    """(testable term, eligible pair) masks. A term is tested when it has members in >= min_genes genes of U; a gene
+    """(testable term, eligible pair) masks. A term needs >= min_genes genes with both covered members and nonmembers; a gene
     is eligible for it when it also has non-members. Both depend on the annotation and U only."""
-    genes_per_term = np.bincount(design.pair_term, minlength=len(design.terms))
+    structural = design.pair_m < design.pair_n
+    genes_per_term = np.bincount(design.pair_term[structural], minlength=len(design.terms))
     term_ok = genes_per_term >= min_genes
     return term_ok, (design.pair_m < design.pair_n) & term_ok[design.pair_term]
 
 
 def run(U, design, blocks, observed_score, min_genes=MIN_GENES, holdout=0, holdout_seed=1, chunk=20000):
     """Count the null cycles whose statistic reaches the target (the observed vector or the held-out cycles)."""
+    if not blocks or min_genes < 1 or holdout < 0 or chunk < 1:
+        raise ValueError('Null blocks and positive min_genes/pair_chunk required')
     cycle_lists = [block_cycles(b) for b in blocks]
     all_cycles = sorted(c for cs in cycle_lists for c in cs)
     if len(all_cycles) != len(set(all_cycles)):
@@ -282,6 +331,8 @@ def run(U, design, blocks, observed_score, min_genes=MIN_GENES, holdout=0, holdo
         if holdout >= len(all_cycles):
             raise ValueError("--holdout must leave null cycles for the calibration")
         held = set(np.random.default_rng(holdout_seed).choice(all_cycles, size=holdout, replace=False).tolist())
+    if not all_cycles:
+        raise ValueError('No valid null cycles')
     term_ok, eligible_pair = eligibility(design, min_genes)
     eligible = np.flatnonzero(eligible_pair)
     pair_to_term = sp.csr_matrix((np.ones(len(eligible)), (np.arange(len(eligible)), design.pair_term[eligible])),
@@ -330,10 +381,10 @@ def results_tables(U, design, out, observed_score):
     # observed quantities per pair
     positive = (observed_score > 0).astype(np.float64)
     pos_S = (sp.csr_matrix(positive.reshape(1, -1)) @ design.M).toarray().ravel()    # positives among the members
-    pos_pair = (positive @ design.G)[design.pair_gene]                                # positives of the gene
+    pos_pair = (positive @ design.G)[design.pair_group]                                # positives of the gene
     score_S = (sp.csr_matrix(observed_score.reshape(1, -1)) @ design.M).toarray().ravel()
-    score_pair = (observed_score @ design.G)[design.pair_gene]
-    expected = pos_pair * design.pair_m / design.pair_n
+    score_pair = (observed_score @ design.G)[design.pair_group]
+    expected = np.divide(pos_pair * design.pair_m, design.pair_n, out=np.zeros(len(pos_pair)), where=design.pair_n>0)
 
     reason = np.where(~structural, 'no_nonmembers', np.where(~term_ok[design.pair_term], 'term_below_min_genes', ''))
     by_gene = pd.DataFrame({
@@ -372,7 +423,8 @@ def results_tables(U, design, out, observed_score):
     results['q'] = np.nan
     for _, idx in results.groupby('collection_id').groups.items():
         results.loc[idx, 'q'] = benjamini_hochberg(results.loc[idx, 'p'].to_numpy())
-    results['status'] = np.where(testable, 'tested', np.where(~term_ok, 'below_min_genes', 'not_identifiable'))
+    contrast_count = np.bincount(design.pair_term[structural], minlength=n_terms)
+    results['status'] = np.where(testable, 'tested', np.where(contrast_count == 0, 'not_identifiable', 'below_min_genes'))
     return results, by_gene
 
 
@@ -413,7 +465,7 @@ def gene_list_check(universe_path, registry_dir):
     registry = digest(os.path.join(registry_dir, 'manifest.json'), 'universe', 'gene_list_check', 'registry_digest')
     status = 'not_recorded' if not universe or not registry else ('match' if universe == registry else 'mismatch')
     if status == 'mismatch':
-        logging.warning("the gene list of the universe differs from the one of the registry: the terms and the universe "
+        raise ValueError("the gene list of the universe differs from the one of the registry: the terms and the universe "
                         "do not describe the same genes")
     return {'status': status, 'universe_digest': universe, 'registry_digest': registry}
 
@@ -429,11 +481,12 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--universe', required=True)
     ap.add_argument('--observed', required=True)
+    ap.add_argument('--universe-manifest', default=None)
     ap.add_argument('--registry-dir', required=True)
     ap.add_argument('--collections', default=None, help='comma-separated collection ids (default: informative_within_protein = 1)')
     ap.add_argument('--blocks', nargs='+', required=True)
     ap.add_argument('--output-dir', required=True)
-    ap.add_argument('--min-genes', type=int, default=MIN_GENES, help='genes of U a term needs members in to be tested')
+    ap.add_argument('--min-genes', type=int, default=MIN_GENES, help='minimum source-covered genes with both members and nonmembers')
     ap.add_argument('--holdout', type=int, default=0)
     ap.add_argument('--holdout-seed', type=int, default=1)
     ap.add_argument('--pair-chunk', type=int, default=20000)
@@ -442,26 +495,56 @@ def main(argv=None):
     logging.basicConfig(level=getattr(logging, a.log_level), format='%(asctime)s - %(levelname)s - %(message)s')
     t0 = time.time()
 
+    um = verify_universe(a.universe, a.universe_manifest, a.blocks)
+    rm = verify_registry(a.registry_dir)
+    if rm['universe'].get('universe_sha256') != sha256_file(a.universe):
+        raise ValueError('Registry and inference universe differ')
     U = load_universe(a.universe)
     collections = [c for c in a.collections.split(',') if c] if a.collections else default_collections(a.registry_dir)
+    metadata = read_table(Path(a.registry_dir)/'collections.tsv')
+    wanted = metadata[metadata.collection_id.isin(collections)]
+    if set(collections) != set(wanted.collection_id) or (wanted.informative_within_protein != '1').any():
+        raise ValueError('Requested collection has no verified coverage / is not eligible for inference')
+    cr = read_table(Path(a.registry_dir)/'annotation_coverage.tsv')
+    coverage = {}
+    for cid, frame in cr[cr.collection_id.isin(collections)].groupby('collection_id'):
+        parts = []
+        for row in frame.itertuples(index=False):
+            gid = {g:i for i,g in enumerate(U.genes)}.get(row.Gene)
+            if gid is None:
+                continue
+            ps = U.keys[U.gene_of == gid] & ((1<<POS_BITS)-1)
+            ps = ps[(ps >= int(row.start)) & (ps <= int(row.end))]
+            idx = locate(U, [row.Gene]*len(ps), ps)
+            parts.append(idx)
+        coverage[cid] = np.unique(np.concatenate(parts)) if parts else np.array([],dtype=np.int64)
     members = load_members(a.registry_dir, collections, U)
-    if members.empty:
-        raise ValueError(f"no member of the collections {collections} lies in U")
-    design = build_design(members, U)
+    if len(members):
+        ok = np.zeros(len(members), dtype=bool)
+        for cid, idx in members.groupby('collection_id').groups.items():
+            ok[np.asarray(idx)] = np.isin(members.loc[idx,'uidx'], coverage.get(cid, []))
+        members = members[ok].reset_index(drop=True)
+    design = build_design(members, U, coverage=coverage, declared_terms=wanted)
     observed_score = load_observed_scores(a.observed, U)
+    universe_flags = read_table(a.universe)
+    expected = locate(U, universe_flags.gene, universe_flags.position.astype(int))
+    if not np.array_equal(observed_score[expected] > 0, universe_flags.observed_positive.astype(int).to_numpy() == 1):
+        raise ValueError('SCORING and universe observed detections disagree')
     logging.info(f"U: {len(U.keys)} positions; {len(design.terms)} terms, {design.n_pairs} (term, gene) pairs; "
                  f"{int((observed_score > 0).sum())} observed positives")
     out = run(U, design, a.blocks, observed_score, a.min_genes, a.holdout, a.holdout_seed, a.pair_chunk)
+    if out['n_cycles_total'] != um['null']['N']:
+        raise ValueError('Null cycle denominator differs from universe')
     logging.info(f"null cycles used: {out['n_null']} of {out['n_cycles_total']}; eligible pairs: {len(out['eligible'])}")
 
     os.makedirs(a.output_dir, exist_ok=True)
-    results, by_gene = results_tables(U, design, out, observed_score)
     if a.holdout:
         write_tsv(holdout_table(design, out), os.path.join(a.output_dir, 'holdout_fpr.tsv'))
     else:
+        results, by_gene = results_tables(U, design, out, observed_score)
         write_tsv(results, os.path.join(a.output_dir, 'within_gene_results.tsv'))
         write_tsv(by_gene, os.path.join(a.output_dir, 'within_gene_by_gene.tsv'))
-    manifest = {'component': 'within_gene', 'contract_version': 2,
+    manifest = {'component': 'within_gene', 'contract_version': 3,
                 'inputs': {k: {'path': os.path.abspath(v), 'sha256': sha256_file(v)}
                            for k, v in (('universe', a.universe), ('observed', a.observed),
                                         ('collections', os.path.join(a.registry_dir, 'collections.tsv')))},
@@ -472,10 +555,11 @@ def main(argv=None):
                            'n_pairs': int(design.n_pairs), 'n_pairs_eligible': int(len(out['eligible'])),
                            'n_null_cycles': int(out['n_null']), 'n_blocks': len(a.blocks),
                            'n_held_out': len(out['held'])},
+                'null_blocks': um['null']['blocks'],
+                'registry_inputs': inventory(a.registry_dir),
+                'state': 'no_annotations_in_universe' if members.empty else 'executed',
                 'seconds': round(time.time() - t0, 1)}
-    with open(os.path.join(a.output_dir, 'within_gene_manifest.json'), 'w') as f:
-        json.dump(manifest, f, indent=2, sort_keys=True)
-        f.write('\n')
+    finish_manifest(a.output_dir, 'within_gene_manifest.json', manifest)
     return 0
 
 

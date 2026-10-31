@@ -18,11 +18,11 @@ params:
   universe_dir: NULL           # universe.tsv.gz and universe_manifest.json
   registry_dir: NULL           # registry manifest (gene-list check) and coverage
   characterization_dir: NULL   # collection_summary.tsv, ranking_summary.tsv, universe_summary.tsv
-  accumulation_dir: NULL       # accumulation_results.tsv, accumulation_manifest.json (level 1)
+  accumulation_dir: NULL       # accumulation_{all,top,bottom}_results.csv (level 1)
   within_gene_dir: NULL        # within_gene_results.tsv, within_gene_by_gene.tsv, holdout_fpr.tsv (level 2)
   proximity_dir: NULL          # proximity_{protein,genomic}_summary.tsv, proximity_protein_{hits,by_gene}.tsv
   traitname: "trait"
-  fdr_threshold: 0.1           # Benjamini-Hochberg threshold of both inferential levels
+  fdr_threshold: NULL          # explicit override; otherwise recover published report_settings.json, then default 0.1
   table_rows: 2000             # rows of a table kept in the HTML; the complete tables are published as TSV/CSV
   detail_terms: 50             # terms whose per-gene rows are embedded (the most significant ones)
 ---
@@ -45,7 +45,11 @@ theme_set(
 if (!length(.helpers)) stop("report_presentation.R not found next to the report")
 source(.helpers[1])
 
-fdr <- as.numeric(params$fdr_threshold)
+settings_file <- if (!is.null(params$universe_dir)) file.path(dirname(params$universe_dir),'report_settings.json') else ''
+saved_settings <- if (file.exists(settings_file)) fromJSON(settings_file,simplifyVector=FALSE) else NULL
+if (!is.null(saved_settings) && !identical(saved_settings$schema,'phylophere.posenrich_report.v1')) stop('Invalid POSENRICH report settings')
+fdr <- as.numeric(if (!is.null(params$fdr_threshold)) params$fdr_threshold else
+                  if (!is.null(saved_settings$fdr_threshold)) saved_settings$fdr_threshold else 0.1)
 max_rows <- as.integer(params$table_rows)
 stopifnot(length(fdr) == 1L, is.finite(fdr), fdr > 0, fdr < 1, length(max_rows) == 1L, !is.na(max_rows), max_rows > 0L)
 
@@ -58,7 +62,16 @@ read_json_file <- function(path, name) {
 }
 read_table <- function(path, name, ...) {
   f <- component_file(path, name)
-  if (file.exists(f)) read_tsv(f, show_col_types = FALSE, ...) else NULL
+  if (!file.exists(f)) return(NULL)
+  d <- read_tsv(f, show_col_types = FALSE, na = character(), col_types = cols(.default = col_character()))
+  ids <- c('Gene','gene','collection_id','term_id','term_label','description','metric','scope','id','source','note',
+           'status','evaluation_status','exclusion_cause','denominator_definition','denominator_is')
+  numeric_columns <- grep('^(n_|N_|prop_|frequency_|mean_score_|intensity_|positives_|expected_)|^(p|q|statistic|Position|position|residual|denominator|proportion|median_distance|mean_distance|coverage_proportion|min|max|median|q25|q75|alpha|fpr|eligible|n_positions_gene)$',names(d),value=TRUE)
+  for (column in setdiff(names(d), ids)) {
+    if (column %in% numeric_columns) d[[column]] <- parse_double(d[[column]],na=c('', 'NA'))
+    else if (nrow(d)) d[[column]] <- type_convert(tibble(value=d[[column]]), na=c('', 'NA'), col_types=cols(value=col_guess()))$value
+  }
+  d
 }
 
 fmt_int <- function(x) ifelse(is.na(x), "NA", format(round(x), big.mark = ",", scientific = FALSE, trim = TRUE))
@@ -85,8 +98,23 @@ emit_plot <- function(p, height = 4.5, width = 10) {
   unlink(f)
 }
 
+verify_component <- function(path, name) {
+  f <- component_file(path,name)
+  if (!file.exists(f)) return(invisible(NULL))
+  m <- fromJSON(f,simplifyVector=FALSE)
+  if (is.null(m$outputs) || is.null(names(m$outputs))) stop('Unverified POSENRICH component; regenerate it')
+  for (file in names(m$outputs)) {
+    p <- file.path(path,file)
+    if (basename(file)!=file || !file.exists(p) || digest::digest(file=p,algo='sha256')!=m$outputs[[file]]) stop(paste('Changed POSENRICH artifact:',p))
+  }
+}
+verify_component(params$universe_dir,'universe_manifest.json')
+verify_component(params$registry_dir,'manifest.json')
+verify_component(params$characterization_dir,'characterization_manifest.json')
+verify_component(params$within_gene_dir,'within_gene_manifest.json')
+verify_component(params$proximity_dir,'proximity_manifest.json')
+
 universe_manifest <- read_json_file(params$universe_dir, "universe_manifest.json")
-acc_manifest <- read_json_file(params$accumulation_dir, "accumulation_manifest.json")
 registry_manifest <- read_json_file(params$registry_dir, "manifest.json")
 wg_manifest <- read_json_file(params$within_gene_dir, "within_gene_manifest.json")
 prox_manifest <- read_json_file(params$proximity_dir, "proximity_manifest.json")
@@ -94,13 +122,27 @@ prox_manifest <- read_json_file(params$proximity_dir, "proximity_manifest.json")
 universe_file <- component_file(params$universe_dir, "universe.tsv.gz")
 universe <- if (file.exists(universe_file)) {
   read_tsv(universe_file, show_col_types = FALSE,
-           col_types = cols(gene = col_character(), position = col_integer(), nd = col_integer(),
+           na = character(), col_types = cols(gene = col_character(), position = col_integer(), nd = col_integer(),
                             observed_positive = col_integer(), observed_top = col_integer(),
                             observed_bottom = col_integer()))
 } else NULL
 n_u <- if (is.null(universe)) NA_integer_ else nrow(universe)
 
-accumulation <- read_table(params$accumulation_dir, "accumulation_results.tsv")
+accumulation <- lapply(c(all = "all", top = "top", bottom = "bottom"), function(d) {
+  f <- component_file(params$accumulation_dir, sprintf("accumulation_%s_results.csv", d))
+  if (!file.exists(f) && !is.null(params$accumulation_dir)) {
+    candidates <- list.files(params$accumulation_dir, pattern=paste0('^accumulation_',d,'_results[.]csv$'), recursive=TRUE, full.names=TRUE)
+    if (length(candidates)>1) stop('Duplicate accumulation direction')
+    if (length(candidates)==1) f <- candidates
+  }
+  if (file.exists(f)) {
+    meta <- fromJSON(paste0(f,'.manifest.json'), simplifyVector=FALSE)
+    if (is.null(meta$outputs[[basename(f)]]) || digest::digest(file=f,algo='sha256') != meta$outputs[[basename(f)]]) stop('Changed accumulation results')
+    d <- read_csv(f, show_col_types=FALSE, na=character(), col_types=cols(.default=col_character()))
+    for (column in setdiff(names(d),c('Gene','status'))) d[[column]] <- parse_double(d[[column]],na=c('NA',''))
+    d
+  } else NULL
+})
 wg_results <- read_table(params$within_gene_dir, "within_gene_results.tsv")
 wg_by_gene <- read_table(params$within_gene_dir, "within_gene_by_gene.tsv",
                          col_types = cols_only(collection_id = col_character(), term_id = col_character(),
@@ -125,19 +167,20 @@ A position is **positive** when its canonical score of convergent amino acid sub
 |---|---|---|
 | Universe | Which positions could produce a detection? | none |
 | Characterization | How do the positive positions distribute over the annotation layers? | none (tables with denominators) |
-| Level 1 | Does a gene hold a larger share of the detections than it does in random cycles? | share of the gene calibrated with the null cycles |
+| Level 1 | Does a gene hold more positive positions than its share of the universe? | hypergeometric and empirical count tests per gene |
 | Level 2 | Within genes, do the positive positions concentrate in a term more than in the rest of the same gene? | statistic calibrated with the null cycles |
 | Overlaps and proximity | Which detections coincide with, or lie near, a site or region of their protein? | none (descriptive lists) |
 
 ```{r states, results='asis'}
 wg_state <- if (!is.null(wg_results)) "available" else if (!is.null(holdout)) "validation mode: only the false-positive table was written" else "not available"
+acc_present <- names(accumulation)[!vapply(accumulation, is.null, logical(1))]
 states <- data.frame(
   Component = c("Universe", "Registry", "Characterization", "Level 1 (Accumulation)", "Level 2 (within-gene concentration)", "Proximity"),
   State = c(
     if (is.null(universe)) "not available" else "available",
     if (is.null(registry_manifest)) "not available" else "available",
     if (is.null(read_table(params$characterization_dir, "collection_summary.tsv"))) "not available" else "available",
-    if (is.null(accumulation)) "not available" else "available",
+    if (length(acc_present) == 3L) "available" else if (length(acc_present)) paste("partial:", paste(acc_present, collapse = ", ")) else "not available",
     wg_state,
     if (is.null(read_table(params$proximity_dir, "proximity_protein_summary.tsv"))) "not available" else "available (descriptive)"),
   stringsAsFactors = FALSE)
@@ -146,7 +189,7 @@ report_emit(report_table(states))
 
 # 1. Universe and coverage
 
-The universe U holds the positions that CAAStools tested in the genes of the gene list and that score above 0 in at least one cycle of the filtered permulation null, plus every observed positive position. A position the null never scores cannot yield a detection under the permulation labelings, so it is not part of a gene's opportunity. Positions outside U are not negatives: they are not evaluable for frequency, and they remain valid targets for proximity.
+The universe U is the intersection of declared tested alignment positions and the cleaned gene background. Observed and null detections annotate this fixed opportunity; neither selects its members. Tested positions without a detection remain in U. An observed position outside U is an input incompatibility. Valid silent cycles count in the null denominator.
 
 ```{r universe, results='asis'}
 if (is.null(universe)) {
@@ -176,11 +219,9 @@ if (is.null(universe)) {
   cat(sprintf("\nThe base rate of positive positions in U is %s (%s of %s). The tested-position set was %s.\n\n",
               fmt_prop(n_pos / n_u), fmt_int(n_pos), fmt_int(n_u),
               switch(if (is.null(m$tested_set)) "unknown" else m$tested_set,
-                     used = "used to restrict the null",
-                     ignored_incompatible = "ignored (it lies in another coordinate space than the null)",
-                     not_given = "not given",
+                     used = "used as the fixed opportunity",
                      unknown = "not recorded", m$tested_set)))
-  nd_q <- quantile(universe$nd, c(0.05, 0.5, 0.95))
+  nd_q <- if (nrow(universe)) quantile(universe$nd, c(0.05, 0.5, 0.95)) else rep(NA_real_,3)
   cat(sprintf("Detectability varies across U: the number of null cycles that score a position has median %s and 5th to 95th percentile %s to %s.\n\n",
               fmt_int(nd_q[2]), fmt_int(nd_q[1]), fmt_int(nd_q[3])))
   pn <- ggplot(universe, aes(nd + 1)) + geom_histogram(bins = 60, fill = "#2166ac") +
@@ -207,6 +248,19 @@ if (is.null(check) && is.null(wg_check)) {
   report_emit(report_table(chk))
   if (any(chk$Status == "mismatch"))
     cat("\n**Warning:** two consumers used different gene lists; their tables are not defined on the same universe.\n\n")
+}
+
+annotations <- registry_manifest$annotations
+if (length(annotations)) {
+  cat("**Annotation provenance and inferential availability**\n\n")
+  annotation_states <- do.call(rbind,lapply(names(annotations),function(source) {
+    x <- annotations[[source]]
+    data.frame(Source=source,Status=x$status,
+               Version=if(is.null(x$metadata$version)) 'not declared' else as.character(x$metadata$version),
+               Coverage=if(is.null(x$metadata$coverage)) 'not declared' else as.character(x$metadata$coverage))
+  }))
+  report_emit(report_table(annotation_states))
+  cat("Sources marked unverified_source contribute descriptive annotation only; missing hits do not establish tested coverage.\n\n")
 }
 
 states_tbl <- read_table(params$characterization_dir, "universe_summary.tsv")
@@ -278,65 +332,71 @@ if (!is.null(rank_sum)) {
 
 # 3. Level 1: accumulation per gene
 
-The question is whether a gene holds a larger **share** of the detections than it does in random cycles. Let K be the number of observed positive positions in U and c~g~ those of gene g; the share of the gene is c~g~ / K. The same share is computed in each null cycle with that cycle's own total, and p = (1 + cycles with a share at least the observed one) / (N + 1). The null keeps what a hypergeometric test ignores: positions are not equally detectable and detections co-occur within a gene. Dividing by the total of each cycle removes the difference between the number of detections of the observed data and that of a cycle. Only genes with at least one positive position are tested; q is Benjamini-Hochberg (BH) over them.
+Both analyses use the same fixed tested universe and observed count per gene, separately for `all`, `top` and `bottom`. A position positive on both sides counts once in `all`.
+
+The **hypergeometric** model conditions on the observed total K and allocates K detections uniformly without replacement over U: `Hyper(M, n_g, K)`. `PValue`, `QValue`, `MeanNull` and `SD` describe this model. Its assumptions differ from the fitted evolutionary permulation procedure; its q-values refer to the uniform-opportunity model.
+
+The **empirical count** test compares the observed count with the count produced in each compatible null cycle: `(1 + cycles with count >= observed)/(N + 1)`. `EmpiricalP`, `EmpiricalQ`, `EmpiricalMeanNull` and `EmpiricalSD` describe this second model. Total detections and gene filtering may vary by cycle.
+
+For each model, separate BH families for global/top/bottom include every cleaned-background gene with tested positions, including genes with zero observed positives (p=1). Genes without tested positions are listed with no p/q. Neither analysis establishes positive selection or causality. Their q-values apply separately; selecting discoveries from either model is not a jointly controlled family.
 
 ```{r level1, results='asis'}
-if (is.null(accumulation)) {
-  unavailable("Level 1", "`accumulation_results.tsv` was not found: the module ran without level 1.")
+if (!length(acc_present)) {
+  unavailable("Level 1", "No `accumulation_<direction>_results.csv` was published: the module ran without level 1.")
 } else {
-  acc <- accumulation
-  tested1 <- acc %>% filter(!is.na(p))
-  above <- tested1 %>% filter(share_ratio > 1)
-  kk <- acc_manifest$counts$null_positives_per_cycle
-  n_null1 <- if (nrow(acc)) acc$n_null_cycles[1] else NA
-  q1 <- tibble::tribble(
-    ~Quantity, ~Value,
-    "Positions in U", fmt_int(sum(acc$n_positions)),
-    "Observed positive positions (K)", fmt_int(sum(acc$positives)),
-    "Positive positions per null cycle, mean (SD)", if (is.null(kk)) "NA" else sprintf("%s (%s)", fmt_int(kk$mean), fmt_int(kk$sd)),
-    "Null cycles with at least K positive positions", if (is.null(kk)) "NA" else sprintf("%s of %s", fmt_int(round(kk$observed_rank_fraction * n_null1)), fmt_int(n_null1)),
-    "Genes in U", fmt_int(nrow(acc)),
-    "Genes tested (at least one positive position)", fmt_int(nrow(tested1)),
-    sprintf("Genes above the null share with q < %s", fdr), fmt_int(sum(above$q < fdr, na.rm = TRUE)),
-    "Smallest q", formatC(suppressWarnings(min(tested1$q, na.rm = TRUE)), format = "g", digits = 3),
-    "Smallest attainable p (1 / (N + 1))", formatC(1 / (n_null1 + 1), format = "g", digits = 3))
-  report_emit(report_table(q1))
-  cat("\n\nThe observed data hold more positive positions than a typical null cycle, which is why the share and not the raw count is compared: a raw count would carry that global excess into every gene.\n\n")
-  cat("**Observed share against the null share** (each dot is a gene; the diagonal is equality; red dots have q below the threshold)\n\n")
-  lab <- tested1 %>% arrange(p, desc(share_ratio)) %>% head(10)
-  p1 <- ggplot(tested1, aes(null_share_mean, share, colour = !is.na(q) & q < fdr & share_ratio > 1)) +
-    geom_abline(slope = 1, intercept = 0, colour = "grey60", linetype = "dashed") +
-    geom_point(alpha = 0.55, size = 1.4) +
-    geom_text(data = lab, aes(label = gene), size = 3, vjust = -0.7, check_overlap = TRUE, show.legend = FALSE) +
-    scale_x_log10() + scale_y_log10() +
-    scale_colour_manual(values = c(`TRUE` = "#b2182b", `FALSE` = "#7a7a7a"), guide = "none") +
-    labs(x = "Mean share in the null cycles", y = "Observed share")
-  emit_plot(p1, height = 5)
-  cat("**Calibration of the p-values.** Observed against uniform expectation of the p-values of the tested genes. A departure above the diagonal means more small p-values than a null would give; the discreteness of p at 1 / (N + 1) steps shows as a ladder at the top.\n\n")
-  qq <- tested1 %>% arrange(p) %>% mutate(expected = (row_number() - 0.5) / n())
-  p2 <- ggplot(qq, aes(-log10(expected), -log10(p))) +
-    geom_abline(slope = 1, intercept = 0, colour = "grey60", linetype = "dashed") + geom_point(alpha = 0.5, size = 1.3, colour = "#2166ac") +
-    labs(x = expression(-log[10]~"expected p"), y = expression(-log[10]~"observed p"))
-  emit_plot(p2, height = 4)
-  cat("## Gene tables {.tabset}\n\n")
-  gene_view <- function(d) d %>% transmute(Gene = gene, `Positions in U` = n_positions, `Positive positions` = positives,
-      `Top side` = positives_top, `Bottom side` = positives_bottom, Share = share, `Null share` = null_share_mean,
-      `Share / null share` = share_ratio, p = p, q = q, `q < threshold` = !is.na(q) & q < fdr)
-  cat("\n### Genes above the null share\n\n")
-  cat(sprintf("%s tested genes hold a larger share than the null mean; %s have q < %s. The side columns describe the observed data; the null keeps the best side only.\n\n",
-              fmt_int(nrow(above)), fmt_int(sum(above$q < fdr, na.rm = TRUE)), fdr))
-  if (nrow(above)) emit_table(gene_view(above %>% arrange(p, desc(share_ratio))), "posenrich/accumulation/accumulation_results.tsv", sci_cols = c("p", "q"))
-  cat("\n### All tested genes\n\n")
-  emit_table(gene_view(tested1 %>% arrange(p, desc(share_ratio))), "posenrich/accumulation/accumulation_results.tsv", sci_cols = c("p", "q"))
+  level1 <- lapply(accumulation[acc_present], function(d) {
+    d$q <- d$QValue
+    d
+  })
+  K_of <- c(all = if (is.null(universe)) NA else sum(universe$observed_positive),
+            top = if (is.null(universe)) NA else sum(universe$observed_top),
+            bottom = if (is.null(universe)) NA else sum(universe$observed_bottom))
+  summary_rows <- do.call(rbind, lapply(acc_present, function(dir) {
+    d <- level1[[dir]]
+    data.frame(Direction = dir, `Positions in U (M)` = n_u, `Observed positives (K)` = K_of[[dir]],
+               `Genes in U` = nrow(d), `Genes tested` = sum(d$status == "tested"),
+               `Hypergeometric q < threshold` = sum(!is.na(d$q) & d$q < fdr),
+               `Empirical q < threshold` = sum(!is.na(d$EmpiricalQ) & d$EmpiricalQ < fdr),
+               `Smallest q` = if (any(!is.na(d$q))) min(d$q, na.rm = TRUE) else NA,
+               check.names = FALSE, stringsAsFactors = FALSE)
+  }))
+  cat(sprintf("**Summary by direction** (BH threshold q < %s)\n\n", fdr))
+  report_emit(report_table(summary_rows, sci_cols = "Smallest q"))
   cat("\n\n")
+  cat("**Scope.** Empirical calibration preserves positional dependence and detectability represented by the compatible null cycles. It tests accumulation under that null; it does not establish positive selection or causality.\n\n")
+  cat("## Genes above their share of U {.tabset}\n\n")
+  for (dir in acc_present) {
+    d <- level1[[dir]]
+    cat(sprintf("\n### %s\n\n", dir))
+    shown <- d %>% filter(ActualCount > MeanNull | ActualCount > EmpiricalMeanNull, !is.na(q)) %>% arrange(PValue, desc(ActualCount)) %>%
+      transmute(Gene, `Positions in gene (n_g)` = PoolPositions, `Observed positives` = ActualCount,
+                `Expected` = MeanNull, `Observed / expected` = ActualCount / MeanNull,
+                `Hypergeometric p` = PValue, q = q, `q < threshold` = q < fdr,
+                `Empirical expected` = EmpiricalMeanNull, `Empirical p` = EmpiricalP, `Empirical q` = EmpiricalQ)
+    cat(sprintf("%s tested genes hold more positive positions than expected; %s have q < %s.\n\n",
+                fmt_int(nrow(shown)), fmt_int(sum(shown$`q < threshold`)), fdr))
+    pl <- d %>% filter(ActualCount > 0)
+    if (nrow(pl)) {
+      lab <- pl %>% filter(!is.na(q)) %>% arrange(PValue) %>% head(8)
+      pp <- ggplot(pl, aes(MeanNull, ActualCount, colour = !is.na(q) & q < fdr & ActualCount > MeanNull)) +
+        geom_abline(slope = 1, intercept = 0, colour = "grey60", linetype = "dashed") + geom_point(alpha = 0.5, size = 1.3) +
+        geom_text(data = lab, aes(label = Gene), size = 3, vjust = -0.7, check_overlap = TRUE, show.legend = FALSE) +
+        scale_x_log10() + scale_y_log10() +
+        scale_colour_manual(values = c(`TRUE` = "#b2182b", `FALSE` = "#7a7a7a"), guide = "none") +
+        labs(x = "Expected positive positions (hypergeometric mean)", y = "Observed positive positions")
+      emit_plot(pp, height = 4.5)
+    }
+    if (nrow(shown)) emit_table(shown, sprintf("posenrich/accumulation/%s/accumulation_%s_results.csv", dir, dir), sci_cols = c("p", "q"))
+  }
+  cat("\n\nThe table lists genes above either model-specific expected count, ordered by hypergeometric p; this display does not combine their FDR claims. The published CSV holds every gene of U with its raw p-value; p and q are computed by the producer.\n\n")
 }
 ```
 
 # 4. Level 2: concentration within genes
 
-The question is whether, inside the genes that carry a term, the positive positions fall in the term more often than in the rest of the same gene. For a term S and a gene g with positions inside and outside S, the residual is r~g~ = (positive positions of g in S) − k~g~ m~g~ / n~g~, where k~g~ is the number of positive positions of g, n~g~ its positions in U and m~g~ those in S: the positives of g that would fall in S if they were spread evenly over the gene. The statistic of the term is the sum of r~g~ over its eligible genes. Each gene is compared with itself, so what a gene accumulates (level 1) does not enter the term. The statistic is computed identically in each null cycle with that cycle's positives per gene, and p = (1 + cycles with a statistic at least the observed one) / (N + 1); q is BH within each collection.
+The question is whether, inside the genes that carry a term, the positive positions fall in the term more often than in the rest of the same gene. For a term S and a gene g with positions inside and outside S, the residual is r~g~ = (positive positions of g in S) − k~g~ m~g~ / n~g~, where k~g~ is the number of positive positions of g, n~g~ its positions in U covered by that annotation source and m~g~ those in S: the positives of g that would fall in S if they were spread evenly over the gene. The statistic of the term is the sum of r~g~ over its eligible genes. Each residual is centered using its own cycle margins; this is not exact conditioning on the observed counts. Genes with more detections can contribute larger residuals. The statistic is computed identically in each null cycle with that cycle's positives per gene, and p = (1 + cycles with a statistic at least the observed one) / (N + 1); q is BH within each collection.
 
-A term is tested when it has members in at least `min_genes` genes of U (the parameter is fixed by the annotation, never by the observed positives: a term in one gene is a test inside that gene, not a concentration across genes). A gene is eligible when it has members and non-members in U.
+A term is tested when at least `min_genes` genes have both members and nonmembers in the declared coverage of its source (the parameter is fixed by the annotation, never by the observed positives: a term in one gene is a test inside that gene, not a concentration across genes). A gene is eligible when it has members and non-members in U.
 
 ```{r level2, results='asis'}
 n_cycles <- if (!is.null(wg_manifest$counts$n_null_cycles)) wg_manifest$counts$n_null_cycles else NA
@@ -349,7 +409,7 @@ if (is.null(wg_results)) {
 } else {
   res <- wg_results
   p_floor <- if (is.na(n_cycles)) NA else 1 / (n_cycles + 1)
-  cat(sprintf("%s terms were evaluated against %s null cycles (smallest attainable p = 1 / (N + 1) = %s). Terms with status `below_min_genes` have members in fewer than %s genes of U and `not_identifiable` terms have no eligible gene: neither has a p or q.\n\n",
+  cat(sprintf("%s terms were evaluated against %s null cycles (smallest attainable p = 1 / (N + 1) = %s). Terms with status `below_min_genes` have within-gene contrasts in fewer than %s source-covered genes and `not_identifiable` terms have no eligible gene: neither has a p or q.\n\n",
               fmt_int(nrow(res)), fmt_int(n_cycles), if (is.na(p_floor)) "NA" else format(p_floor, digits = 3), min_genes))
   by_coll <- res %>% group_by(Collection = collection_id) %>%
     summarise(Terms = n(), Tested = sum(status == "tested"), `Below minimum genes` = sum(status == "below_min_genes"),
@@ -541,22 +601,23 @@ if (is.null(prox_p) && is.null(prox_g)) {
 
 ```{r methods, results='asis'}
 min_genes_m <- wg_manifest$parameters$min_genes
+cat(sprintf("**Displayed BH threshold:** %s (producer p/q are preserved).\n\n",fdr))
 cat(paste0(
   "- **Estimand.** Positive positions of the canonical score. A position that is not detected is never imputed as a negative outside U.\n",
-  "- **Universe.** U is conditioned on positive evidence: positions the null scores in at least one cycle, plus the observed positives. All counts and rates refer to U, not to every tested position.\n",
-  "- **Calibration.** Levels 1 and 2 are calibrated with the null cycles (",
+  "- **Universe.** U is fixed by tested positions and the cleaned background, independently of observed/null detections.\n",
+  "- **Calibration.** Level 2 is calibrated with the null cycles (",
   if (is.na(n_cycles)) "number not recorded" else paste0(fmt_int(n_cycles), " in this run"),
-  "), which carry the detectability of each position, the co-occurrence of detections within a gene and the gene filter of the null.\n",
-  "- **Level 1.** The statistic is the share of the detections of a gene, computed in each cycle with its own total. Genes without an observed positive are not tested. The raw count is not used because the observed data hold more positive positions than a typical cycle.\n",
+  "), which carry the detectability of each position, the co-occurrence of detections within a gene and the gene filter of the null. The empirical component of level 1 uses the same cycles; its hypergeometric component has a separate uniform-opportunity model.\n",
+  "- **Level 1.** Empirical upper-tail count test per gene over all valid cycles; separate fixed BH families for global/top/bottom include genes with no observed positives. Both models are reported separately; their hypotheses and assumptions differ.\n",
   "- **Level 2.** The statistic of a term is the sum over its eligible genes of the observed positive positions inside the term minus those expected if the positives of the gene were spread evenly. Positions are weighted equally (a position is positive or not); the score enters only the descriptive intensity.\n",
   "- **Terms in one gene.** A term needs members in at least ",
   if (is.null(min_genes_m)) "a minimum number of" else min_genes_m,
-  " genes of U to be tested. The rule depends on the annotation and U only.\n",
-  "- **Global ranking only.** The null stores the best side of each position (`all`), so there is no null per side. The side is described in the observed data (the top and bottom columns of level 1 and the flags of section 1); it is not calibrated.\n",
+  " source-covered genes supplying both members and nonmembers. The rule depends on annotation, coverage and U only.\n",
+  "- **Rankings.** Level 2 deliberately pools sides by their best score. Level 1 reports separate all/top/bottom analyses using the corresponding observed and null directions.\n",
   "- **Validation.** ",
   if (is.null(holdout)) "This run has no held-out cycles, so the false-positive rate of level 2 was not measured here. "
   else sprintf("The held-out cycles of this run (%s) bound the false-positive rate only to the precision they allow. ", paste(unique(holdout$n_holdout_cycles), collapse = ", ")),
-  "A conclusive validation needs all 10,000 null cycles and several sets of terms.\n",
+  "Attainable p-value resolution is 1/(N+1); holdout precision depends on the number of held-out cycles and their dependence.\n",
   "- **Overlaps and proximity.** Descriptive; the positions queried are the positive ones, an overlap is identity of the position and no control of distances is applied.\n"))
 if (!is.null(wg_manifest$parameters)) {
   p <- wg_manifest$parameters

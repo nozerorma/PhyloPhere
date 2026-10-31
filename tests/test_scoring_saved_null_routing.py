@@ -35,16 +35,17 @@ def test_saved_null_reaches_caas_seed_preparation(tmp_path, mode):
     for rank in global top bottom; do
         printf 'Gene\\tranking\\tnominal\\n' > gene_lists/active_\\${rank}.tsv
     done
-    echo "${x4}" > null_source
+    echo "${x5}" > null_source
     touch ''' + ' '.join(o for o in evidence_outputs if o != 'gene_lists')
-    mocks = _mock_process('SCORING_NULL_POSITIONS', 7, ['counters', 'fit', 'base'])
-    mocks += _mock_process('SCORING_COMPUTE', 11, ['gene_scores', 'position_scores', 'fcs_stats',
+    mocks = "def scoringHash(paths) { 'mock' }\n"
+    mocks += _mock_process('SCORING_NULL_POSITIONS', 7, ['counters', 'fit', 'base'])
+    mocks += _mock_process('SCORING_COMPUTE', 12, ['gene_scores', 'position_scores', 'fcs_stats',
                           'fcs_stats_rer', 'fcs_stats_fade',
                           'null_universe_summary', 'gene_correlations'])
-    mocks += _mock_process('SCORING_EVIDENCE', 6, evidence_outputs + ['null_source'],
+    mocks += _mock_process('SCORING_EVIDENCE', 7, evidence_outputs + ['null_source'],
                           body + '\n')
     # null_source is a diagnostic mock output, not part of the production contract.
-    mocks += _mock_process('SCORING_REPORT', 17, ['report'])
+    mocks += _mock_process('SCORING_REPORT', 18, ['report'])
     (tmp_path / 'scoring.nf').write_text(mocks + source)
     main_source = (ROOT / 'main.nf').read_text()
     decision = re.search(r'def run_caas_permulation\s*= (.+)', main_source).group(1)

@@ -1,63 +1,27 @@
 #!/usr/bin/env nextflow
-// rer_matrix.nf — Matrix of relative evolutionary rates (RERs) of all genes.
-// PhyloPhere | subworkflows/RERCONVERGE/
-
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  RER_MATRIX: runs rer_matrix.R, which computes the RER of every gene on every branch
- *  of the master tree (getAllResiduals) for the species of the trait vector.
- *
- *  Consumes:  polished trait RData (trait_vector), master gene-trees RDS (RER_TREES)
- *  Produces:  <trait>.RERmatrix.output (RDS)
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- */
-
-
-// ── RER matrix ─────────────────────────────────────────────────────────────────
+include { rerQuote; rerHash; rerSources } from './rer_contract'
 
 process RER_MATRIX {
-    tag "$gene_trees_file"
-
+    tag "RER_MATRIX|${params.traitname}"
     label 'process_medium'
-
-
-    publishDir path: "${params.outdir}/rerconverge/rer_objects", mode: 'copy', saveAs: { filename -> filename.equals('versions.yml') ? null : filename }
+    errorStrategy 'terminate'
+    cache 'deep'
+    publishDir path: "${params.outdir}/rerconverge/rer_objects", mode: 'copy'
 
     input:
     path trait_file
     path gene_trees_file
 
+    val source_hash
     output:
-    file("${params.traitname}.RERmatrix.output")
-
+    path "${params.traitname}.RERmatrix.output", emit: matrix
 
     script:
-    // Extra arguments from task.ext.args
-    def args = task.ext.args ?: ''
-    def matrix_out = "${params.traitname}.RERmatrix.output"
+    def input_hash = rerHash([trait_file, gene_trees_file])
+    def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
 
-    if (params.use_singularity) {
-        """
-        echo "Using Singularity"
-        /usr/local/bin/_entrypoint.sh Rscript \\
-        '$baseDir/subworkflows/RERCONVERGE/local/rer_matrix.R' \\
-        ${ trait_file } \\
-        ${ gene_trees_file } \\
-        ${ matrix_out } \\
-        ${params.rer_minsp} \\
-        $args
-        """
-    } else {
-        """
-        echo "Running locally"
-        Rscript \\
-        '$baseDir/subworkflows/RERCONVERGE/local/rer_matrix.R' \\
-        ${ trait_file } \\
-        ${ gene_trees_file } \\
-        ${ matrix_out } \\
-        ${params.rer_minsp} \\
-        $args
-        """
-    }
-
+    """
+    # RER sources: ${source_hash}; inputs: ${input_hash}
+    ${rs} ${rerQuote("${baseDir}/subworkflows/RERCONVERGE/local/rer_matrix.R")} ${rerQuote(trait_file)} ${rerQuote(gene_trees_file)} ${rerQuote("${params.traitname}.RERmatrix.output")} ${rerQuote(params.rer_minsp)}
+    """
 }

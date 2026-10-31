@@ -117,3 +117,36 @@ def test_fcs_regeneration_requires_original_settings(tmp_path):
     found = {r.id: r for r in detect_reports(str(out), ROOT)}
     assert not found["fcs_scoring"].runnable
     assert any("Saved FCS settings" in label for label in found["fcs_scoring"].missing_required)
+
+
+def test_meta_caas_regeneration_stages_shared_style(tmp_path):
+    from gui.generation.report_registry import detect_reports, build_script
+
+    out = tmp_path / 'out'
+    for name in ['html_reports/7.CAAS_pattern_annotation.html',
+                 'html_reports/15.CAAS_significance_report.html',
+                 'caastools/discovery.tab', 'caastools/background_genes.output',
+                 'scoring/position_scores.tsv', 'scoring/gene_scores.tsv',
+                 'scoring/gene_evidence_metadata.json']:
+        _touch(out / name)
+    reports = {r.id: r for r in detect_reports(str(out), ROOT)}
+    for key, filename in [('meta_caas', '7.CAAS_pattern_annotation.Rmd'),
+                          ('signif_significance', '15.CAAS_significance_report.Rmd')]:
+        assert reports[key].runnable
+        script = build_script(reports[key], ROOT, use_singularity=False)
+        assert 'report_style.R' in script
+        check = subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True)
+        assert check.returncode == 0, check.stderr
+        declared = _declared_params(ROOT / 'subworkflows/CT_META_CAAS/local' / filename)
+        assert not (_rendered_params(script) - declared)
+
+
+def test_scoring_regeneration_stages_shared_style(tmp_path):
+    from gui.generation.report_registry import detect_reports, build_script
+    out = _make_outdir(tmp_path)
+    report = {r.id:r for r in detect_reports(str(out),ROOT)}['scoring']
+    script = build_script(report,ROOT,use_singularity=False)
+    assert 'report_style.R' in script
+    check = subprocess.run(['bash','-n'],input=script,text=True,capture_output=True)
+    assert check.returncode==0,check.stderr
+    assert not (_rendered_params(script)-_declared_params(ROOT/RMD_OF['scoring']))

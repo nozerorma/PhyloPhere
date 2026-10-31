@@ -261,7 +261,6 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("RERconverge: tested-gene universe file", m.rer.rer_universe_file, "file"),
         ("RERconverge: cross-module gene scores", m.rer.rer_gene_scores, "file"),
         ("FADE: custom fg/bg species file", m.fade.fade_species_file, "file"),
-        ("FADE: Substitution matrix", m.fade.lg_dat_path, "file"),
         ("FADE: tested-gene universe file", m.fade.fade_universe_file, "file"),
         ("VEP: PrimateAI-3D database", m.vep.vep_primateai_db, "file"),
         ("Post-processing: MAP directory", m.disambiguation.caas_map_dir, "dir"),

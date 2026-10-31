@@ -11,6 +11,8 @@ ct_bin=""
 export_groups="0"
 export_perm_discovery="0"
 export_b0="0"
+export_universe="0"
+export_universe_strict="0"
 extra_args_file=""
 stall_timeout="1800"
 
@@ -56,6 +58,14 @@ while [[ $# -gt 0 ]]; do
             export_b0="$2"
             shift 2
             ;;
+        --export-universe)
+            export_universe="$2"
+            shift 2
+            ;;
+        --export-universe-strict)
+            export_universe_strict="$2"
+            shift 2
+            ;;
         --extra-args-file)
             extra_args_file="$2"
             shift 2
@@ -90,7 +100,16 @@ fi
 # ct_bin may be a single path (local mode) or a space-separated command
 # prefix such as "/usr/local/bin/_entrypoint.sh <path-to-ct>" (container mode).
 declare -a ct_bin_arr
-read -ra ct_bin_arr <<< "$ct_bin"
+prefix_file=".ct_prefix_${batch_id}.argv"
+python3 - "$ct_bin" > "$prefix_file" <<'PHYLOPHERE_PREFIX'
+import shlex, sys
+parts = shlex.split(sys.argv[1])
+if not parts:
+    raise SystemExit('Empty CT command prefix')
+sys.stdout.buffer.write(b'\0'.join(p.encode() for p in parts) + b'\0')
+PHYLOPHERE_PREFIX
+mapfile -d '' -t ct_bin_arr < "$prefix_file"
+rm -f "$prefix_file"
 declare -a base_cmd=("${ct_bin_arr[@]}" "perm-replay")
 
 gene_count="$(grep -cve '^[[:space:]]*$' "$manifest" || true)"
@@ -136,11 +155,14 @@ watchdog_guard() {
 }
 
 wait_for_all() {
-    while [[ "$(jobs -pr | wc -l | tr -d ' ')" -gt 0 ]]; do
-        local status=0
-        wait -n || status=$?
+    local pid status
+    # Completed jobs still need waiting: jobs -pr omits failures that finished
+    # before collection. Keep every launched PID, including fast failures.
+    for pid in "${worker_pids[@]}"; do
+        status=0
+        wait "$pid" || status=$?
         if [[ "$status" -ne 0 ]]; then
-            echo "[perm-replay batch] A child perm-replay job failed (exit $status); stopping batch $batch_id" >&2
+            echo "[perm-replay batch] A child failed (exit $status); stopping $batch_id" >&2
             terminate_children
             exit "$status"
         fi
@@ -175,6 +197,18 @@ if [[ "$export_b0" == "1" ]]; then
     cmd+=(--export_b0_discovery '{id}.b0.discovery.tsv' --export_b0_background '{id}.b0.background')
 fi
 
+if [[ "$export_universe" == "1" ]]; then
+    # the positional universe of the b_0 hypotheses (positions tested by b_0 and eligible under some pair orientation)
+    cmd+=(--export_b0_universe '{id}.b0.universe')
+fi
+
+if [[ "$export_universe_strict" == "1" ]]; then
+    # the same universe with no conserved pair allowed (the strict analysis)
+    cmd+=(--export_b0_universe_strict '{id}.b0.universe_strict')
+fi
+
+declare -a worker_pids=()
+trap terminate_children INT TERM
 n_proc=$(( gene_count < workers ? gene_count : workers ))
 for (( p = 1; p <= n_proc; p++ )); do
     (
@@ -188,6 +222,7 @@ for (( p = 1; p <= n_proc; p++ )); do
         kill "$watchdog_pid" 2>/dev/null || true
         exit "$worker_status"
     ) </dev/null &
+    worker_pids+=("$!")
 done
 
 wait_for_all

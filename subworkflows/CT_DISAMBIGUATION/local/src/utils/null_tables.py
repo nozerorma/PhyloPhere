@@ -86,13 +86,21 @@ class CycleReducer:
     The cluster trains are computed here over the positions of every record of the cycle (core.postproc.ctrain, with
     the gene's position -> column map when there is one); they are flagged only with ``postproc_filter`` and their
     rows are dropped only with ``remove_clusters``, but they count for ``n_pos`` and ``clust`` either way.
+
+    ``universe`` (the gene's positions of the positional universe, None = no restriction) limits what is scored: rows
+    outside it are dropped before the scores, the counts and the maxima of the unit are computed, so the gene maximum of
+    a cycle is the maximum over universe positions. The detections themselves still count for ``n_pos`` and the trains:
+    the dubious-gene test and the cluster filter judge the labeling's detections, as they judge the observed ones.
     """
 
     def __init__(self, postproc_filter: bool, remove_clusters: bool, clust_minlen: int = 3, clust_maxcaas: float = 0.7,
-                 train_columns: Optional[Dict[int, int]] = None):
+                 train_columns: Optional[Dict[int, int]] = None, clust_min_positions: Optional[int] = None,
+                 universe: Optional[Iterable[int]] = None):
+        self.universe = None if universe is None else frozenset(int(p) for p in universe)
         self.postproc_filter = postproc_filter
         self.remove_clusters = remove_clusters
         self.clust_minlen = clust_minlen
+        self.clust_min_positions = clust_min_positions
         self.clust_maxcaas = clust_maxcaas
         self.train_columns = train_columns
 
@@ -110,8 +118,9 @@ class CycleReducer:
         positions = {p for p, _, _ in rows}
         train = set()
         if self.postproc_filter:
-            train = set(ctrain(list(positions), self.clust_maxcaas, self.clust_minlen, self.train_columns))
-        kept = [row for row in rows if not (self.remove_clusters and row[0] in train)]
+            train = set(ctrain(list(positions), self.clust_maxcaas, self.clust_minlen, self.train_columns, self.clust_min_positions))
+        kept = [row for row in rows if not (self.remove_clusters and row[0] in train)
+                and (self.universe is None or row[0] in self.universe)]
 
         # score of each (position, side) (the last record wins, as a record key is unique by construction), then per
         # position the sides that score
@@ -179,20 +188,35 @@ def concat_tables(parts: List[Tuple[pa.Table, pa.Table]]) -> Tuple[pa.Table, pa.
 
 def write_tables(directory: Path, units: pa.Table, scores: pa.Table, meta: Optional[Dict[str, Any]] = None) -> None:
     """Write ``units.parquet`` and ``scores.parquet`` (zstd) under `directory`, with `meta` as ``meta.json``."""
+    from src.core.scores import SCORE_RULE
+    record = dict(meta or {})
+    if record.get('score_rule', SCORE_RULE) != SCORE_RULE:
+        raise ValueError('Cannot write a tile with a retired score rule')
+    record['score_rule'] = SCORE_RULE
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     pq.write_table(units, directory / TABLE_NAMES["units"], compression="zstd")
     pq.write_table(scores, directory / TABLE_NAMES["scores"], compression="zstd")
-    (directory / "meta.json").write_text(json.dumps(meta or {}, sort_keys=True))
+    (directory / "meta.json").write_text(json.dumps(record, sort_keys=True))
+
+
+def validate_tile(path):
+    from src.core.scores import SCORE_RULE
+    directory = path if path.is_dir() else path.parent
+    stamp = directory / 'meta.json'
+    if not stamp.is_file() or json.loads(stamp.read_text()).get('score_rule') != SCORE_RULE:
+        raise ValueError(f'Unverifiable/retired CAAS tile score rule: {directory}; regenerate observed and null artifacts together')
 
 
 def read_units(path: Path) -> pa.Table:
     """The units table of a tile directory (or of a single parquet file)."""
     path = Path(path)
+    validate_tile(path)
     return pq.read_table(path / TABLE_NAMES["units"] if path.is_dir() else path, schema=UNITS_SCHEMA)
 
 
 def read_scores(path: Path) -> pa.Table:
     """The scores table of a tile directory (or of a single parquet file)."""
     path = Path(path)
+    validate_tile(path)
     return pq.read_table(path / TABLE_NAMES["scores"] if path.is_dir() else path, schema=SCORES_SCHEMA)

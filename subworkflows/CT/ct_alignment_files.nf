@@ -18,6 +18,7 @@
 // Alignment files of a directory in file-name order, without the annotation tables and logs that can sit
 // beside them (.txt, .tsv, .csv, .log, .map). An absent directory gives an empty list.
 def listAlignmentFiles(dirPath) {
+    if (!dirPath) return []
     def dir = file(dirPath as String)
     if (!dir.exists()) return []
     def files = dir.listFiles()?.findAll { f -> f.isFile() && !f.name.matches('.*\\.txt$|.*\\.tsv$|.*\\.csv$|.*\\.log$|.*\\.map$') } ?: []

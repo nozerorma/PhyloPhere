@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
-# filter_caas_genes.py — Remove extreme and dubious genes, and optionally clustered positions, from the pooled CAAS table.
+# filter_caas_genes.py — Remove outlier genes (length-stratified fences), and optionally clustered positions, from the pooled CAAS table.
 # PhyloPhere | subworkflows/CT_POSTPROC/local/src/
 
 """
 Gene-level filter of the pooled CAAS discovery table, with the implementation of the
 permulation null (core.postproc):
 
-1. Extreme genes: density (distinct positions / gene length) above a percentile.
-2. Dubious genes: IQR outliers (Q3 + k*IQR) in distinct positions that also carry a
-   cluster-train position.
-In stratified mode both are replaced by one rule on the distinct positions against the fences of the gene's length
-stratum (core.postproc.stratified_fences): Extreme above the far fence (k_far), Dubious above the near fence (k_near)
-with a cluster-train position.
+A gene is an outlier when its count of distinct positions exceeds the fences of its gene-length stratum
+(core.postproc.stratified_fences): Extreme above the far fence (k_far), Dubious above the near fence (k_near) with a
+cluster-train position, Both when both hold.
 
 Thresholds are calibrated over the pooled rows (one unit per gene). Cluster positions are dropped only with --remove-clusters.
 
@@ -22,9 +19,11 @@ Inputs:     -i  pooled discovery TSV (Gene, Position)
                 both modes and for --remove-clusters)
 Outputs:    -o  filtered discovery TSV
             -s  removed (Gene, category) units
-            -g  statistics of every unit that has a gene length (gene_stats.tsv)
+            -g  statistics of every candidate gene, including missing lengths (gene_stats.tsv)
 """
 
+from postproc_io import read_table, positions, validate_cluster
+import math
 import argparse
 import sys
 from pathlib import Path
@@ -35,21 +34,16 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CT_DISAMBIGUATION" / "local"))
 from src.core.postproc import GeneUnit, gene_removal, gene_unit_stats, load_gene_lengths  # noqa: E402
 
-# The CAAS table carries categorical amino-acid columns (caas,
-# derived_residues) whose values can equal NA-sentinel strings ("N/A" is Asn on the
-# changed side against Ala), and the default NA parsing of pandas would blank them.
-# Only an empty cell is missing data in these files.
-# float_precision="round_trip": float columns (asr_path_score) keep every bit.
-_CAAS_READ_KW = dict(keep_default_na=False, na_values=["", "nan", "NaN"], float_precision="round_trip")
-
 # Labeling of the observed slice in core.postproc units, and the hyp_id column of gene_stats.tsv.
 OBSERVED = "b_0"
 POOL_ID = "ALL"
 
 
-def read_discarded(cluster_file):
+def read_discarded(cluster_file, discovery=None):
     """Cluster file to the set of (Gene, Position) flagged Discarded."""
-    cluster_df = pd.read_csv(cluster_file, sep="\t", **_CAAS_READ_KW)
+    cluster_df = read_table(cluster_file)
+    if discovery is not None:
+        cluster_df = validate_cluster(discovery, cluster_df)
     required = ["Gene", "Position", "clustering_flag"]
     if not all(c in cluster_df.columns for c in required):
         print(f"Error: Cluster file missing required columns: {required}", file=sys.stderr)
@@ -66,20 +60,19 @@ def build_units(discovery_df, discarded):
             for gene, n in counts.items()]
 
 
-def gene_stats_table(stats, removal):
-    """gene_stats.tsv: one row per Gene with a gene length; category is the removal verdict (Extreme, Dubious, Both or Normal)."""
+def gene_stats_table(stats, removal, length_sources=None):
+    """gene_stats.tsv: one row per candidate Gene; category is the removal verdict (Extreme, Dubious, Both or Normal)."""
     rows = []
     for s in stats:
-        if s["density"] is None:
-            continue
         cat = removal.get((s["labeling"], s["Gene"]), "Normal")
         rows.append({
             "hyp_id": POOL_ID, "Gene": s["Gene"],
+            "length_source": (length_sources or {}).get(s["Gene"], "missing"),
             "length": s["length"], "n_CAAS": s["n_caas"], "n_CAAS_per_length": s["density"],
             "threshold_extreme": s["threshold_extreme"], "threshold_dubious": s["threshold_dubious"],
             "category": cat,
         })
-    cols = ["hyp_id", "Gene", "length", "n_CAAS", "n_CAAS_per_length",
+    cols = ["hyp_id", "Gene", "length_source", "length", "n_CAAS", "n_CAAS_per_length",
             "threshold_extreme", "threshold_dubious", "category"]
     return pd.DataFrame(rows, columns=cols)
 
@@ -118,15 +111,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Remove both extreme and dubious genes
-  python filter_caas_genes.py -i discovery.tsv -l gene_lengths.tsv -c clusters.tsv -m both -o filtered.tsv
+  # Remove outlier genes with the default fences (10 length strata, k_far 3, k_near 1.5)
+  python filter_caas_genes.py -i discovery.tsv -l gene_lengths.tsv -c clusters.tsv -m stratified -o filtered.tsv
 
-  # Remove only extreme genes (top 1% density)
-  python filter_caas_genes.py -i discovery.tsv -l gene_lengths.tsv -m extreme -o filtered.tsv
-
-  # Custom thresholds
+  # Custom fences
   python filter_caas_genes.py -i discovery.tsv -l gene_lengths.tsv -c clusters.tsv \\
-    --extreme-percentile 0.95 --iqr-multiplier 4.0 -o filtered.tsv
+    --strata 20 --k-far 4.0 --k-near 2.0 -o filtered.tsv
 """
     )
 
@@ -142,21 +132,17 @@ Examples:
                         help='Cluster filtering output (required for dubious gene detection)')
 
     parser.add_argument('-m', '--filter-mode',
-                        choices=['none', 'extreme', 'dubious', 'both', 'stratified'],
-                        default='both',
-                        help='Filtering mode (default: both)')
+                        choices=['none', 'stratified'],
+                        default='stratified',
+                        help='Filtering mode (default: stratified)')
     parser.add_argument('--remove-clusters', action='store_true', default=False,
                         help='Remove positions flagged as Discarded by cluster filtering, decoupled from gene filter mode')
-    parser.add_argument('--extreme-percentile', type=float, default=0.99,
-                        help='Density percentile for extreme genes (default: 0.99 = top 1%%)')
-    parser.add_argument('--iqr-multiplier', type=float, default=3.0,
-                        help='IQR multiplier for dubious gene threshold (default: 3.0)')
     parser.add_argument('--strata', type=int, default=10,
-                        help='Stratified mode: number of equal-size gene-length strata (default: 10)')
+                        help='Number of equal-size gene-length strata (default: 10)')
     parser.add_argument('--k-far', type=float, default=3.0,
-                        help='Stratified mode: IQR multiplier of the far fence, above which a gene is removed (default: 3.0)')
+                        help='IQR multiplier of the far fence, above which a gene is removed (default: 3.0)')
     parser.add_argument('--k-near', type=float, default=1.5,
-                        help='Stratified mode: IQR multiplier of the near fence, above which a gene with a cluster train is removed (default: 1.5)')
+                        help='IQR multiplier of the near fence, above which a gene with a cluster train is removed (default: 1.5)')
 
     parser.add_argument('-o', '--output', required=True,
                         help='Filtered discovery output file')
@@ -165,7 +151,12 @@ Examples:
     parser.add_argument('-g', '--gene-stats-output', default=None,
                         help='Full gene statistics output file (optional)')
 
+    parser.add_argument('--quality-universe')
+    parser.add_argument('--cluster-contract')
     args = parser.parse_args()
+    if (any(not math.isfinite(x) or x < 0 for x in [args.k_far, args.k_near])
+            or args.strata < 1 or args.k_far < args.k_near):
+        parser.error('Invalid IQR multipliers or length strata (k-far must not be below k-near)')
 
     if not Path(args.disambiguation_input).exists():
         print(f"Error: Disambiguation file not found: {args.disambiguation_input}", file=sys.stderr)
@@ -174,33 +165,35 @@ Examples:
         print(f"Error: Gene ensembl file not found: {args.gene_ensembl_file}", file=sys.stderr)
         sys.exit(1)
 
-    needs_clusters = args.remove_clusters or args.filter_mode in ['dubious', 'both', 'stratified']
+    needs_clusters = args.remove_clusters or args.filter_mode == 'stratified'
     if needs_clusters and args.cluster_file is None:
-        print("Error: --cluster-file required when --remove-clusters is set or for 'dubious'/'both'/'stratified' filter modes", file=sys.stderr)
+        print("Error: --cluster-file required when --remove-clusters is set or for the 'stratified' filter mode", file=sys.stderr)
         sys.exit(1)
     if needs_clusters and not Path(args.cluster_file).exists():
         print(f"Error: Cluster file not found: {args.cluster_file}", file=sys.stderr)
         sys.exit(1)
 
     print(f"Loading disambiguation data: {args.disambiguation_input}", file=sys.stderr)
-    discovery_df = pd.read_csv(args.disambiguation_input, sep='\t', **_CAAS_READ_KW)
+    discovery_df = read_table(args.disambiguation_input)
+    discovery_df['Position'] = positions(discovery_df.Position)
 
+    length_sources = {}
     gene_lengths = load_gene_lengths(
         path=args.gene_ensembl_file,
         map_dir=args.map_dir,
         map_suffix=args.map_suffix,
         genes=discovery_df['Gene'].unique(),
+        sources=length_sources,
     )
-    if not gene_lengths and args.filter_mode in ['extreme', 'both', 'stratified']:
+    if not discovery_df.empty and not gene_lengths and args.filter_mode == 'stratified':
         print("Error: Could not load gene lengths from MAP directory or gene ensembl file", file=sys.stderr)
         sys.exit(1)
 
-    discarded = read_discarded(args.cluster_file) if needs_clusters else set()
+    discarded = read_discarded(args.cluster_file, discovery_df) if needs_clusters else set()
     print(f"Loaded {len(discovery_df)} CAAS positions across {discovery_df['Gene'].nunique()} genes", file=sys.stderr)
 
     units = build_units(discovery_df, discarded)
-    removal = gene_removal(units, gene_lengths, args.filter_mode, args.iqr_multiplier, args.extreme_percentile,
-                           strata=args.strata, k_far=args.k_far, k_near=args.k_near)
+    removal = gene_removal(units, gene_lengths, args.filter_mode, strata=args.strata, k_far=args.k_far, k_near=args.k_near)
     removed_genes_df = pd.DataFrame(
         sorted((gene, cat) for (_lab, gene), cat in removal.items()),
         columns=['Gene', 'category'])
@@ -215,16 +208,26 @@ Examples:
 
     print(f"Writing filtered discovery: {args.output}", file=sys.stderr)
     filtered_df.to_csv(args.output, sep='\t', index=False)
+    if args.quality_universe and args.cluster_contract:
+        import json
+        from src.core.scoring_provenance import digest, save
+        quality = json.loads(Path(args.quality_universe).read_text())
+        cluster = json.loads(Path(args.cluster_contract).read_text())
+        maps = cluster.pop('maps')
+        cluster['remove'] = args.remove_clusters
+        save(str(args.output)+'.scoring.json',dict(version=1,observed_sha256=digest(args.output),
+             excluded_genes=quality.get('excluded_genes',[]),scientific=quality['scientific'],alignments=quality.get('alignments',{}),cluster=cluster,maps=maps,strict=quality.get('strict',False),
+             gene_filter=dict(mode=args.filter_mode,strata=args.strata,k_far=args.k_far,k_near=args.k_near),lengths=gene_lengths,
+             length_sources=length_sources))
 
     if args.summary:
         print(f"Writing removed genes summary: {args.summary}", file=sys.stderr)
         removed_genes_df.to_csv(args.summary, sep='\t', index=False)
 
     if args.gene_stats_output:
-        stats = gene_unit_stats(units, gene_lengths, args.iqr_multiplier, args.extreme_percentile,
-                                mode=args.filter_mode, strata=args.strata, k_far=args.k_far, k_near=args.k_near)
+        stats = gene_unit_stats(units, gene_lengths, strata=args.strata, k_far=args.k_far, k_near=args.k_near)
         print(f"Writing gene statistics: {args.gene_stats_output}", file=sys.stderr)
-        gene_stats_table(stats, removal).to_csv(args.gene_stats_output, sep='\t', index=False)
+        gene_stats_table(stats, removal, length_sources).to_csv(args.gene_stats_output, sep='\t', index=False)
 
     print("\n=== Post-Processing Filtering Summary ===", file=sys.stderr)
     print(f"Gene filter mode: {args.filter_mode}", file=sys.stderr)

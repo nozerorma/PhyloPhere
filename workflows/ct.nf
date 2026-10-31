@@ -71,98 +71,59 @@ workflow CT {
         def tree_file_emit = Channel.empty()
         
     if (params.ct_tool) {
-        // params.ct_tool is a Boolean (true) when --ct_tool is passed without a value; only a
-        // String is split into tool names, so .split() never fails on a Boolean.
-        def toolsToRun = params.ct_tool instanceof String
-            ? params.ct_tool.split(',').collect { it.trim() }.findAll { it }
-            : []
-
-        // Alignment channel (replayed by the permulation core); params.alignment is a directory of
-        // per-gene alignment files. With toy_mode, a seeded random subset of toy_n alignments is used
-        // (the same one for the same --seed), which keeps the batches of the core, and so -resume
-        // cache hits, stable.
-        def allFiles = listAlignmentFiles(params.alignment)
-        if (params.toy_mode) {
-            def n = (params.toy_n ?: 50) as int
-            allFiles = sampleAlignmentFiles(allFiles, n, params.seed ?: 1998)
-            log.info "[toy_mode] CT: using ${allFiles.size()} randomly sampled alignments from directory (seed=${params.seed})"
-        }
-        align_tuple = Channel
-            .fromList(allFiles.collect { f -> tuple(f.baseName, f) })
-
-        def trait_file_out
-        def permulation_trait_file_out
-        // resample_dir_out  → directory of the partitioned labelings (resample_NNN.tab), input of CAAS_PERMS_PREP
-        // resample_out      → single resample.tab (the concatenation), for reporting
-        def resample_out = Channel.empty()
-        def resample_dir_out = Channel.empty()
-        if (params.resample_from) {
-            def resample_path = file(params.resample_from)
-            if (resample_path.isDirectory()) {
-                resample_dir_out = Channel.value(file(params.resample_from, type: 'dir'))
-                resample_out     = resample_dir_out
-            } else {
-                // --resample_from may also name a single resample file
-                resample_out     = Channel.value(resample_path)
-                resample_dir_out = resample_out
+        if (!(params.ct_tool instanceof String)) error "ct_tool requires named stages: resample,discovery"
+        def toolsToRun = params.ct_tool.split(',').collect { it.trim() }.findAll { it }.unique()
+        if (!toolsToRun || toolsToRun.any { !(it in ['resample', 'discovery']) })
+            error "Unknown ct_tool stage; supported stages are resample and discovery."
+        def enabled = { v -> v == true || v?.toString()?.toLowerCase() in ['true','1','yes'] }
+        def savedNull = params.containsKey('caas_null_dir') && params.caas_null_dir
+        def observedInput = params.discovery_from ||
+            (params.containsKey('disambiguation_input') && params.disambiguation_input)
+        def needsCore = toolsToRun.contains('discovery') ||
+            (enabled(params.ct_disambiguation) && observedInput) ||
+            (enabled(params.enrichment) && enabled(params.caas_permulation_enrichment) && !savedNull)
+        def align_tuple = Channel.empty()
+        if (needsCore) {
+            def allFiles = listAlignmentFiles(params.alignment)
+            if (!allFiles) error "CT replay requires a nonempty alignment directory."
+            if (allFiles.collect { it.baseName }.unique().size() != allFiles.size())
+                error "CT alignment files must have unique gene IDs (filename without extension)."
+            if (params.toy_mode) {
+                def n = (params.toy_n != null ? params.toy_n : 50) as int
+                if (n < 1) error "toy_n must be positive."
+                allFiles = sampleAlignmentFiles(allFiles, n, params.seed != null ? params.seed : 1998)
             }
+            align_tuple = Channel.fromList(allFiles.collect { f -> tuple(f.baseName, f) })
         }
-        if (params.contrast_selection && trait_file_in && permulation_trait_file_in) {
-            log.info "Using contrast selection output for CT analyses."
-            trait_file_out = trait_file_in
-            trait_val = permulation_trait_file_in
-            tree_file_out = tree_file_in
-        } else {
-            log.info "No contrast selection output provided for CT analyses."
-            assert params.caas_config : "CT workflow requires --caas_config."
-            trait_file_out = file(params.caas_config)
-            tree_file_out = file(params.tree)
-            if (toolsToRun.contains('resample')) {
-                if (params.my_traits) {
-                    trait_val = file(params.my_traits)
-                }
-            }
-        }
-
-        // Trait and tree as channels for the downstream modules (already channels when they come from CONTRAST_SELECTION).
-        trait_file_emit = (params.contrast_selection && trait_file_in && permulation_trait_file_in) ? trait_file_out : Channel.value(trait_file_out)
-        tree_file_emit  = (params.contrast_selection && trait_file_in && permulation_trait_file_in) ? tree_file_out  : Channel.value(tree_file_out)
-
+        if (trait_file_in == null && !params.caas_config) error "CT requires --caas_config or an upstream design."
+        if (tree_file_in == null && !params.tree) error "CT requires a curated tree or --tree."
+        trait_file_emit = trait_file_in != null ? trait_file_in : Channel.value(file(params.caas_config, checkIfExists:true))
+        tree_file_emit = tree_file_in != null ? tree_file_in : Channel.value(file(params.tree, checkIfExists:true))
+        def resample_dir_out = params.resample_from
+            ? Channel.value(file(params.resample_from, checkIfExists:true)) : Channel.empty()
         if (toolsToRun.contains('resample')) {
-            // From CONTRAST_SELECTION the inputs are already channels; otherwise they are files.
-            if (params.contrast_selection && trait_file_in && permulation_trait_file_in) {
-                // File-staging collisions are prevented by the stageAs aliases of the RESAMPLE process.
-                nw_tree = tree_file_out
-                caas_config = trait_file_out
-                trait_values = trait_val
-            } else {
-                nw_tree = Channel.value(file(tree_file_out))
-                caas_config = Channel.value(file(trait_file_out))
-                trait_values = curated_trait_in ?: Channel.value(file(trait_val))
+            def values = permulation_trait_file_in != null ? permulation_trait_file_in : curated_trait_in
+            if (values == null && params.caas_full_perms != null && params.caas_full_perms.toString() == '0')
+                values = Channel.value([])
+            if (values == null) {
+                if (!params.my_traits) error "CT resampling requires phenotype values."
+                values = Channel.value(file(params.my_traits, checkIfExists:true))
             }
-            resample_dir_out = RESAMPLE(nw_tree, caas_config, trait_values)
-
-            // Concatenate the partitioned labelings into a single resample.tab, for reporting.
+            resample_dir_out = RESAMPLE(tree_file_emit, trait_file_emit, values,
+                permulation_trait_file_in != null ? 'species' : (params.sp_colname ?: 'species'))
             CONCAT_RESAMPLE(resample_dir_out)
-            resample_out = CONCAT_RESAMPLE.out.resample_concat
-            // resample_dir_out keeps the directory: the permulation core takes the partitioned
-            // resample_NNN.tab files, not the concatenated file.
         }
         perm_resample_dir_out = resample_dir_out
-        // Permulation core: b_0 and the first N permuted labelings are subset here; CAAS_CORE (main.nf)
-        // replays them over the alignments in align_tuple. Discovery is the b_0 slice of that replay,
-        // so it needs the labelings too.
-        if (toolsToRun.contains('discovery') || params.caas_permulation_enrichment) {
-            if (toolsToRun.contains('discovery') && !toolsToRun.contains('resample') && !params.resample_from) {
-                error "ct_tool 'discovery' needs the permuted labelings of the core: add 'resample' to --ct_tool or give --resample_from"
-            }
-            def perms_prep = CAAS_PERMS_PREP(trait_file_out, resample_dir_out)
-            caas_align_tuple_out     = align_tuple
-            caas_resample_subset_out = perms_prep.resample_subset
-            caas_blocks_out          = perms_prep.blocks
+        if (needsCore) {
+            if (!toolsToRun.contains('resample') && !params.resample_from)
+                error "CT replay requires resample or --resample_from."
+            def prep = CAAS_PERMS_PREP(trait_file_emit, resample_dir_out)
+            caas_align_tuple_out = align_tuple
+            caas_resample_subset_out = prep.resample_subset
+            caas_blocks_out = prep.blocks
         }
     }
-    
+
     emit:
         trait_file = trait_file_emit
         tree_file = tree_file_emit

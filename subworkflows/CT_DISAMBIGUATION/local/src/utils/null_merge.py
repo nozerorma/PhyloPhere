@@ -72,13 +72,11 @@ class BlockTables:
 CATEGORIES = ("Extreme", "Dubious", "Both")   # codes 0, 1, 2 of the category column of units.parquet
 
 
-def removal_units(t: BlockTables, lengths: Dict[str, float], mode: str, iqr_multiplier: float,
-                  extreme_percentile: float, detail: Optional[dict] = None, *, strata: int = 10,
-                  k_far: float = 3.0, k_near: float = 1.5) -> np.ndarray:
+def removal_units(t: BlockTables, lengths: Dict[str, float], mode: str, detail: Optional[dict] = None, *,
+                  strata: int = 10, k_far: float = 3.0, k_near: float = 1.5) -> np.ndarray:
     """Boolean per unit: removed by gene removal (core.postproc.gene_removal, each cycle against its own units).
 
-    `detail`, when given, receives `thresholds` (cycle -> (count threshold, density threshold)) and `flagged`
-    ((cycle, gene) -> category); the decisions do not depend on it.
+    `detail`, when given, receives `flagged` ((cycle, gene) -> category); the decisions do not depend on it.
     """
     removed = np.zeros(len(t.u_gene), dtype=bool)
     if (mode or "none").lower() == "none" or not len(t.u_gene):
@@ -86,12 +84,9 @@ def removal_units(t: BlockTables, lengths: Dict[str, float], mode: str, iqr_mult
     n_pos, clust = t.units["n_pos"], t.units["clust"]
     stream = (GeneUnit(t.cycles[c], t.genes[g], int(n), bool(k))
               for c, g, n, k in zip(t.u_cycle.tolist(), t.u_gene.tolist(), n_pos.tolist(), clust.tolist()))
-    thresholds: Dict[str, Tuple[float, Optional[float]]] = {}
-    flagged = gene_removal(stream, lengths, mode=mode, iqr_multiplier=iqr_multiplier,
-                           extreme_percentile=extreme_percentile, thresholds=thresholds,
-                           strata=strata, k_far=k_far, k_near=k_near)
+    flagged = gene_removal(stream, lengths, mode=mode, strata=strata, k_far=k_far, k_near=k_near)
     if detail is not None:
-        detail["thresholds"], detail["flagged"] = thresholds, flagged
+        detail["flagged"] = flagged
     if flagged:
         cyc_index = {c: i for i, c in enumerate(t.cycles)}
         gene_index = {g: i for i, g in enumerate(t.genes)}
@@ -118,10 +113,6 @@ def units_table(t: BlockTables, removed: np.ndarray, flagged: Optional[dict]) ->
         "category": dictionary(cat, CATEGORIES, mask=~removed),
     })
 
-
-def threshold_rows(detail: dict, n_units: Dict[str, int]) -> List[Tuple[str, int, float, Optional[float]]]:
-    """(cycle, units of the cycle, count threshold, density threshold) of the cycles the removal looked at."""
-    return [(c, n_units.get(c, 0), thr_dub, thr_ext) for c, (thr_dub, thr_ext) in sorted(detail.get("thresholds", {}).items())]
 
 
 def _flagged_pairs(t: BlockTables, removed: np.ndarray) -> List[Tuple[str, str]]:
@@ -292,10 +283,9 @@ def _write_tsv(path: Path, header: Sequence[str], rows: Iterable[Sequence]) -> N
 
 
 def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str], *, universe: Optional[Iterable[str]] = None,
-                lengths: Optional[Dict[str, float]] = None, gene_filter_mode: str = "none", iqr_multiplier: float = 3.0,
-                extreme_percentile: float = 0.99, gene_stat: str = "max", seed: int = 1998,
+                lengths: Optional[Dict[str, float]] = None, gene_filter_mode: str = "none", gene_stat: str = "max", seed: int = 1998,
                 sample_per_cycle: int = 200, gene_strata: int = 10, gene_k_far: float = 3.0,
-                gene_k_near: float = 1.5) -> dict:
+                gene_k_near: float = 1.5, length_sources: Optional[Dict[str,str]] = None) -> dict:
     """Merge the tiles of one block into `out_dir`; returns counts (units, removed units, scored positions, cycles present)."""
     if gene_stat not in GENE_STATS:
         raise ValueError(f"gene_stat must be one of {GENE_STATS}, not {gene_stat!r}")
@@ -305,7 +295,7 @@ def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str],
     out_dir.mkdir(parents=True, exist_ok=True)
     t = BlockTables(tile_dirs, cycles, universe)
     detail: dict = {}
-    removed = removal_units(t, lengths or {}, gene_filter_mode, iqr_multiplier, extreme_percentile, detail,
+    removed = removal_units(t, lengths or {}, gene_filter_mode, detail,
                             strata=gene_strata, k_far=gene_k_far, k_near=gene_k_near)
     keep = kept_scores(t, removed)
     parts = gene_statistics(t, removed)
@@ -319,15 +309,11 @@ def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str],
 
     pq.write_table(position_table(t, keep), out_dir / "positions.parquet", compression="zstd")
     pq.write_table(position_detections(t, keep), out_dir / "detections.parquet", compression="zstd")
-    # The unit table (n_pos, cluster flag, category of the removal) and the per-cycle thresholds: what the gene filter
-    # decided on, kept so any gene rule can be evaluated later without replaying the tiles.
+    # The unit table (n_pos, cluster flag, category of the removal): what the gene filter decided on, kept so any
+    # gene rule can be evaluated later without replaying the tiles.
     pq.write_table(units_table(t, removed, detail.get("flagged")), out_dir / "units.parquet", compression="zstd")
     if (gene_filter_mode or "none").lower() != "none":
         _write_tsv(out_dir / "removed_units.tsv", ("cycle", "Gene"), _flagged_pairs(t, removed))
-        if detail.get("thresholds"):                    # the stratified mode has fences per gene, not per cycle
-            per_cycle = np.bincount(t.u_cycle, minlength=len(t.cycles))
-            _write_tsv(out_dir / "cycle_thresholds.tsv", ("cycle", "n_units", "thr_count", "thr_density"),
-                       threshold_rows(detail, {c: int(n) for c, n in zip(t.cycles, per_cycle)}))
     summary, hist = cycle_summaries(t, removed, keep)
     _write_tsv(out_dir / "cycle_summary.tsv", ("cycle", "direction", "n", "n_genes"), summary)
     _write_tsv(out_dir / "cycle_hist.tsv", ("cycle", "direction", "bin", "n"), hist)
@@ -337,7 +323,30 @@ def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str],
     _write_tsv(out_dir / "perm_pos_quantiles.tsv", quant_fields, ([rec[f] for f in quant_fields] for rec in quantiles))
     present = sorted({t.cycles[c] for c in np.unique(t.u_cycle[~removed & (t.units["n_rows"] > 0)]).tolist()})
     (out_dir / "cycles.txt").write_text("".join(f"{c}\n" for c in t.cycles))
+    tile_meta = [json.loads((Path(d)/'meta.json').read_text()) for d in tile_dirs]
+    provenance = None
+    if tile_meta and all('scientific' in m and 'cluster' in m for m in tile_meta):
+        base = tile_meta[0]
+        for m in tile_meta:
+            if any(m.get(k)!=base.get(k) for k in ('scientific','cluster','strict')):
+                raise ValueError('Null tiles have incompatible scientific/filter settings')
+        maps = {}
+        alignments = {}
+        universe = {}
+        for m in tile_meta:
+            for g,v in m.get('universe',{}).items():
+                if g in universe and universe[g]!=v: raise ValueError('Null positional universe mismatch')
+                universe[g]=v
+            for g,v in m.get('alignments',{}).items():
+                if g in alignments and alignments[g]!=v: raise ValueError('Null alignment content mismatch')
+                alignments[g]=v
+            for g,v in m.get('maps',{}).items():
+                if g in maps and maps[g]!=v:
+                    raise ValueError('Null MAP content mismatch')
+                maps[g]=v
+        provenance = dict(version=1,scientific=base['scientific'],cluster=base['cluster'],strict=base.get('strict',False),maps=maps,alignments=alignments,universe=universe,
+                          gene_filter=dict(mode=gene_filter_mode,strata=gene_strata,k_far=gene_k_far,k_near=gene_k_near),lengths=lengths or {},length_sources=length_sources or {})
     counts = {"units": int(len(t.u_gene)), "removed_units": int(removed.sum()), "scored_positions": int(keep.sum()),
-              "cycles": len(t.cycles), "cycles_present": present, "score_rule": SCORE_RULE}
+              "cycles": len(t.cycles), "cycles_present": present, "score_rule": SCORE_RULE, "scoring_provenance": provenance}
     (out_dir / "counts.json").write_text(json.dumps(counts))
     return counts

@@ -55,3 +55,12 @@ parts <- list(max = named("max"), n = named("n"))
 saveRDS(list(genes = genes, cycles = cycles, gene_stat = man$gene_stat, n_units = man$n_units,
              stat = stat, parts = parts), out_file)
 cat(sprintf("[block] wrote %s: %d genes x %d cycles, gene_stat %s\n", out_file, n_g, n_c, man$gene_stat))
+# Canonical block artifacts are sealed after the RDS exists. Consumers verify
+# this manifest before comparing matrices with the independent position table.
+block_dir <- dirname(out_file)
+if (basename(out_file)=='matrices.rds' && file.exists(file.path(block_dir,'counts.json'))) {
+  names <- c('matrices.rds','positions.parquet','cycles.txt','counts.json','units.parquet','detections.parquet')
+  names <- names[file.exists(file.path(block_dir,names))]
+  hashes <- as.list(setNames(unname(tools::md5sum(file.path(block_dir,names))),names))
+  jsonlite::write_json(list(version=1L,files=hashes),file.path(block_dir,'scoring_artifacts.json'),auto_unbox=TRUE,pretty=TRUE)
+}

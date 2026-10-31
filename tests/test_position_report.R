@@ -8,10 +8,10 @@ file.copy(file.path(root,'subworkflows/ENRICHMENT/local/14.Comparison_report.Rmd
 dir.create(file.path(work,'src'),showWarnings=FALSE)
 file.copy(file.path(root,'subworkflows/ENRICHMENT/local/src',c('evidence_flags.R','fcs_selection.R','report_presentation.R','ami_evidence.R')),file.path(work,'src'),overwrite=TRUE)
 writeLines(c('Gene\tPosition\tside\tCAAS_score\tp.emp\tp.adj_bh\tcaas_nominal\tcaas_adjusted','G1\t0\ttop\t0.9\t0.01\t0.02\tTRUE\tTRUE','G1\t0\tbottom\t0.8\t0.01\t0.02\tTRUE\tTRUE','G2\t1\ttop\t0.7\t0.7\t0.7\tFALSE\tFALSE'),file.path(work,'scores.tsv'))
-writeLines(c('Gene\tPosition\tside\tFeature\tConsequence\tIMPACT\tMANE_SELECT',
-'G1\t0\ttop\tENST1\tmissense_variant\tMODERATE\tNM1',
-'G1\t0\ttop\tENST2\tstop_gained\tHIGH\t-',
-'G1\t0\tbottom\tENST3\tsplice_region_variant\tLOW\t-'),file.path(work,'vep.tsv'))
+writeLines(c('Gene\tPosition\tside\tFeature\tConsequence\tIMPACT\tMANE_SELECT\tstatus\tcoverage\tsource\tvariant_id\tcandidate_count\tannotated_count',
+'G1\t0\ttop\tENST1\tmissense_variant\tMODERATE\tNM1\tannotated\tcomplete\tensembl\tchr1:1:A:T\t1\t1',
+'G1\t0\ttop\tENST2\tstop_gained\tHIGH\t-\tannotated\tcomplete\tensembl\tchr1:1:A:T\t1\t1',
+'G1\t0\tbottom\tENST3\tsplice_region_variant\tLOW\t-\tannotated\tcomplete\tensembl\tchr1:1:A:T\t1\t1'),file.path(work,'vep.tsv'))
 writeLines(c('gene,position,max_bf,target_aa','G1,0,100,S'),file.path(work,'fade.csv'))
 writeLines('gene,position,max_bf,target_aa',file.path(work,'fade_bottom.csv'))
 writeLines(c('Gene\tPosition\tpfam_domain\tpfam_clan\tucr_region\tposition_variability\tfubar_selection',

@@ -24,7 +24,7 @@ params:
   gene_evidence_input: NULL
   null_universe_input: NULL
   traitname: "trait"
-  output_dir: "."
+  output_dir: "." # Compatibility; exports are task-local under significance/.
   seed: "1998"
   max_table_rows: 0 # Compatibility only: all positive-score rows are accessible.
 ---
@@ -62,19 +62,18 @@ suppressPackageStartupMessages({library(dplyr);library(tidyr);library(readr);lib
 if(!length(.helpers)) stop("report_presentation.R not found next to the report")
 source(.helpers[1])
 
-# Tableau_10 swatch, shared with the other reports of the pipeline.
-.tableau10 <- if(requireNamespace("paletteer",quietly=TRUE)) as.character(paletteer::paletteer_d("ggthemes::Tableau_10")) else
-  c("#4E79A7","#F28E2B","#E15759","#76B7B2","#59A14F","#EDC948","#B07AA1","#FF9DA7","#9C755F","#BAB0AC")
-theme_set(theme_minimal(base_size=13)+theme(
-  axis.title.y=element_text(margin=ggplot2::margin(l=20,r=20)),axis.title.x=element_text(margin=ggplot2::margin(t=12)),
-  plot.title=element_text(face="bold",hjust=0,margin=ggplot2::margin(b=6)),
-  plot.subtitle=element_text(colour="grey40",hjust=0,margin=ggplot2::margin(b=10)),
-  strip.text=element_text(face="bold"),legend.position="bottom"))
+# Shared paletteer colours and typography from the curated trait reports.
+.style <- c("src/report_style.R", "../../TRAIT_ANALYSIS/local/src/report_style.R")
+.style <- .style[file.exists(.style)]
+if (!length(.style)) stop("report_style.R not found next to the report")
+source(.style[1], local = TRUE)
+set_report_style()
+.tableau10 <- report_palette(10)
 
 # Evidence classes, from strongest to weakest, and their colours (also used by the tables and the exports).
 status_levels <- c("BH","Nominal","Evaluated; not significant","p available; q unavailable","p unavailable")
-status_colours <- c("BH"="#E15759","Nominal"="#F28E2B","Evaluated; not significant"="grey65",
-  "p available; q unavailable"="#BAB0AC","p unavailable"="grey88")
+status_colours <- c("BH"=.tableau10[3],"Nominal"=.tableau10[2],"Evaluated; not significant"="grey65",
+  "p available; q unavailable"=.tableau10[10],"p unavailable"="grey88")
 ranking_labels <- c(global="Global",top="Top",bottom="Bottom")
 
 seed_val <- if(!is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998L
@@ -82,7 +81,6 @@ set.seed(seed_val)
 plot_cap <- 20000L # points drawn per scatter; every point that is not "Evaluated; not significant" is always drawn
 
 fmt_int <- function(x) ifelse(is.na(x),"NA",format(round(x),big.mark=",",scientific=FALSE,trim=TRUE))
-fmt_p <- function(x) ifelse(is.finite(x),formatC(x,format="g",digits=3),"NA")
 file_ok <- function(f) !is.null(f) && length(f)==1L && !is.na(f) && !grepl("^NO_",basename(f)) && file.exists(f) && file.info(f)$size>0
 num <- function(d,n) if(n %in% names(d)) suppressWarnings(as.numeric(d[[n]])) else rep(NA_real_,nrow(d))
 below <- function(p,threshold) ifelse(is.finite(p),p<threshold,NA)
@@ -90,8 +88,8 @@ status <- function(p,q) factor(ifelse(!is.finite(p),"p unavailable",
   ifelse(!is.finite(q),"p available; q unavailable",ifelse(q<fdr,"BH",ifelse(p<nominal,"Nominal","Evaluated; not significant")))),
   levels=status_levels)
 for(n in c("position_scores_input","gene_scores_input")) if(!file_ok(params[[n]])) stop("Missing canonical scoring input: ",n)
-pos <- read_tsv(params$position_scores_input,show_col_types=FALSE)
-genes <- read_tsv(params$gene_scores_input,show_col_types=FALSE)
+pos <- read_tsv(params$position_scores_input,show_col_types=FALSE, col_types=cols(Gene=col_character(), Position=col_double(), side=col_character()), na="NA", trim_ws=FALSE)
+genes <- read_tsv(params$gene_scores_input,show_col_types=FALSE, col_types=cols(Gene=col_character()), na="NA", trim_ws=FALSE)
 if(!all(c("Gene","Position","side","CAAS_score") %in% names(pos))) stop("Position evidence requires Gene/Position/side/CAAS_score")
 if(!all(c("Gene","gene_caas_score","gene_caas_score_top","gene_caas_score_bottom") %in% names(genes))) stop("Missing canonical gene scores for the three rankings")
 if(anyDuplicated(genes$Gene)) stop("Duplicate gene evidence keys")
@@ -101,9 +99,12 @@ if(!file_ok(stamp)) stop("Missing gene_evidence_metadata.json")
 metadata <- jsonlite::read_json(stamp,simplifyVector=TRUE)
 if(!identical(metadata$gene_stat,"max")) stop("Retired gene statistic: regenerate gene evidence with max")
 nominal <- as.numeric(metadata$nominal_threshold); fdr <- as.numeric(metadata$fdr_threshold)
-stopifnot(length(nominal)==1L,is.finite(nominal),length(fdr)==1L,is.finite(fdr))
+stopifnot(length(nominal)==1L,is.finite(nominal),nominal>0,nominal<=1,
+          length(fdr)==1L,is.finite(fdr),fdr>0,fdr<=1)
 for(n in c("CAAS_score","p.emp","p.adj_bh","n_hypotheses")) pos[[n]] <- num(pos,n)
-pos$Position <- as.integer(pos$Position)
+if (anyNA(pos$Gene) || any(!nzchar(pos$Gene)) || anyNA(genes$Gene) || any(!nzchar(genes$Gene))) stop("Missing gene identifiers")
+if (any(!is.finite(pos$Position) | pos$Position < 0 | pos$Position != floor(pos$Position))) stop("Positions must be nonnegative integers")
+if (anyNA(pos$side) || any(!pos$side %in% c("top", "bottom"))) stop("Invalid position side")
 if(anyDuplicated(pos[c("Gene","Position","side")])) stop("Duplicate canonical position/side keys")
 conflict <- pos %>% distinct(Gene,Position,p.emp,p.adj_bh) %>% count(Gene,Position) %>% filter(n>1)
 if(nrow(conflict)) stop("Pooled position p/q disagree between sides")
@@ -114,7 +115,7 @@ full_gene_family <- lapply(c("global","top","bottom"),function(rk) {
 }) %>% bind_rows()
 ge_file <- params$gene_evidence_input
 if(!file_ok(ge_file)) ge_file <- file.path(dirname(params$gene_scores_input),"gene_evidence.tsv")
-ge <- if(file_ok(ge_file)) read_tsv(ge_file,show_col_types=FALSE) else NULL
+ge <- if(file_ok(ge_file)) read_tsv(ge_file,show_col_types=FALSE,col_types=cols(gene=col_character(),ranking=col_character()),na="NA",trim_ws=FALSE) else NULL
 if(!is.null(ge)) {
   if(!all(c("gene","ranking","N_valid") %in% names(ge))) stop("Invalid gene calibration schema: requires gene/ranking/N_valid")
   if(anyDuplicated(ge[c("gene","ranking")])) stop("Duplicate gene/ranking calibration records")
@@ -294,7 +295,7 @@ for(rk in names(views_pos)) {
   cat(sprintf("%s positive positions: %s with p and %s with q available; %s nominal, %s BH in %s genes.\n\n",
     fmt_int(nrow(d)),fmt_int(sum(is.finite(d$p.emp))),fmt_int(sum(is.finite(d$p.adj_bh))),fmt_int(sum(d$nominal %in% TRUE)),
     fmt_int(sum(d$BH %in% TRUE)),fmt_int(n_distinct(d$Gene[d$BH %in% TRUE]))))
-  evidence_scatter(transform(d,label=paste0(Gene,":",Position)),"CAAS_score","p.emp","label",
+  evidence_scatter(mutate(d,label=if(nrow(d))paste0(Gene,":",Position) else character()),"CAAS_score","p.emp","label",
     if(is.finite(N_position)) 1/(N_position+1) else NA_real_,paste("Positions,",tolower(ranking_labels[[rk]]),"view"))
   cat("\n\n")
   evidence_histograms(d,"CAAS_score","p.emp","p.adj_bh",paste("Positions,",tolower(ranking_labels[[rk]]),"view"))

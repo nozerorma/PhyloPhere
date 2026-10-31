@@ -63,11 +63,8 @@ from typing import Any, Dict, List, Optional
 
 # ── Residue helpers ───────────────────────────────────────────────────────────
 def clean_aa(aa: Optional[str]) -> Optional[str]:
-    """The residue as an upper-case letter; None for an empty or missing value."""
-    if not aa:
-        return None
-    raw = str(aa).strip().upper()
-    return raw or None
+    from src.utils.amino import clean_amino
+    return clean_amino(aa)
 
 
 def residue_distribution(distribution: Optional[Dict[str, float]]) -> Dict[str, float]:

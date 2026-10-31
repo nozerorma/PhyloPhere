@@ -26,6 +26,8 @@
 #   args[18] seed                 RNG seed; required with multi_hypothesis
 #   args[19] match_pss            match the PSS profile of the observed canonical pairs (default true; not applied to count traits)
 #   args[20] match_pss_tol        relative PSS tolerance of that matching (default 0.25)
+#   args[22] allow_relaxed_null  explicit opt-in to PSS/FOP/Tier-2 fallback (default false)
+#   args[23] species_col         configured species column (default species)
 #   args[21] pair_center_gate     none | median | mean: candidate pairs must straddle that centre of the trait (default none)
 #
 # Method: the trait is simulated under BM on the species tree (rescaled to the fitted OU
@@ -67,20 +69,10 @@ log_msg <- function(tag, ...) write(paste0("[", tag, "] ", format(Sys.time()), "
 # ── Permulation primitives (RERconverge) ──────────────────────────────────────
 
 # One BM simulation of the trait on the tree, with the rate matrix estimated from `namedvec`.
-simulatevec <- function(namedvec, treewithbranchlengths) {
-  rm   <- ratematrix(treewithbranchlengths, namedvec)
+simulatevec <- function(namedvec, treewithbranchlengths, rate = NULL) {
+  rm   <- if (is.null(rate)) ratematrix(treewithbranchlengths, namedvec) else rate
   sims <- sim.char(treewithbranchlengths, rm, nsim = 1)
   setNames(as.data.frame(sims)[, 1], rownames(sims))
-}
-
-# Rank matching: the simulated vector supplies the ordering, the observed vector supplies
-# the values. The permulated marginal distribution is therefore identical to the observed
-# one by construction.
-simpermvec <- function(namedvec, treewithbranchlengths) {
-  vec       <- simulatevec(namedvec, treewithbranchlengths)
-  simsorted <- sort(vec)
-  simsorted[] <- sort(namedvec)
-  simsorted
 }
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -89,11 +81,17 @@ if (length(args) < 6) {
   stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
        "[chunk_size] [pss_top_pct] [max_tries] [pheno_col] ",
        "[n_col] [c_col] [resample_use_n] [trait_type] [multi_hypothesis] [max_fop] ",
-       "[n_cpus] [seed] [match_pss] [match_pss_tol] [pair_center_gate]")
+       "[n_cpus] [seed] [match_pss] [match_pss_tol] [pair_center_gate] [allow_relaxed_null] [species_col]")
 }
 
 arg_or <- function(i, default, cast = as.character) {
   if (length(args) >= i && nzchar(args[i])) cast(args[i]) else default
+}
+
+arg_bool <- function(i, default, name) {
+  text <- tolower(arg_or(i, as.character(default)))
+  if (!text %in% c("1","true","t","yes","y","0","false","f","no","n")) stop("Invalid boolean ",name)
+  text %in% c("1","true","t","yes","y")
 }
 
 tree.path          <- args[1]
@@ -108,12 +106,20 @@ max_tries          <- arg_or(9,  1000000L,   as.integer)
 pheno_col_name     <- arg_or(10, "")
 n_col              <- arg_or(11, "")   # denominator column (e.g. adult_necropsy_count)
 c_col              <- arg_or(12, "")   # numerator column   (e.g. malignant_count)
-resample_use_n     <- tolower(arg_or(13, "true")) %in% c("1", "true", "t", "yes", "y")
+resample_use_n     <- arg_bool(13, TRUE, "resample_use_n")
 trait_type         <- tolower(arg_or(14, "auto"))
 # The null mirrors the observed design: with multi_hypothesis every accepted cycle also gets a FOP
 # hypothesis harvest (fop_labelings.tab, fop_pairs.tsv), so that it is pooled like the observed data.
-fop_null           <- tolower(arg_or(15, "false")) %in% c("1", "true", "t", "yes", "y")
+fop_null           <- arg_bool(15, FALSE, "multi_hypothesis")
 max_fop            <- arg_or(16, 100L, as.integer)
+allow_relaxed_null <- arg_bool(22, FALSE, "ct_allow_relaxed_null")
+sp_col_name       <- arg_or(23, "species")
+relaxed_reasons <- character()
+relax_or_stop <- function(reason) {
+  if (!allow_relaxed_null) stop("Strict null: ", reason, ". Set ct_allow_relaxed_null=true only to explicitly permit relaxation.")
+  relaxed_reasons <<- unique(c(relaxed_reasons, reason))
+  log_msg("WARN", reason)
+}
 
 # ── Parallelism and RNG seed ──────────────────────────────────────────────────
 # n_cpus drives the forked FOP-mirror harvest only (the pool harvest is serial). Without
@@ -131,7 +137,7 @@ n_cpus <- max(1L, min(as.integer(n_cpus), .detected_cores))
 # With a seed (the pipeline passes params.seed, 1998 by default) the parallel streams are
 # reproducible; without one the RNG is left unseeded.
 seed_arg <- arg_or(18, NA_integer_, as.integer)
-match_pss     <- tolower(arg_or(19, "true")) %in% c("1", "true", "t", "yes", "y")
+match_pss     <- arg_bool(19, TRUE, "match_pss")
 match_pss_tol <- arg_or(20, 0.25, as.numeric)
 if (!is.finite(match_pss_tol) || match_pss_tol <= 0) stop("match_pss_tol must be a positive number.")
 # The same gate as the observed selector (lean_candidate_df): the permulated vectors keep the marginal distribution
@@ -155,11 +161,12 @@ if (fop_null && is.na(seed_arg)) {
 # and takes effect only when the FOP harvest is on and the observed count is known.
 match_fop <- TRUE
 
-if (!selection.strategy %in% c("auto", "best_model", "ou", "bm")) {
-  log_msg("WARN", sprintf("Unknown strategy '%s', defaulting to 'auto'", selection.strategy))
-  selection.strategy <- "auto"
-}
+if (!selection.strategy %in% c("auto", "best_model", "ou", "bm"))
+  stop("Unknown perm_strategy: ", selection.strategy)
 
+if (dir.exists(outdir) && length(list.files(outdir,
+    pattern="^(resample_.*[.]tab|fop_labelings[.]tab|fop_pairs[.]tsv|permulation_.*[.](tsv|json))$")))
+  stop("Harvest output already contains CT artifacts; choose a fresh output directory.")
 if (!dir.exists(outdir)) {
   dir.create(outdir, recursive = TRUE)
   log_msg("INFO", "Created output directory: ", outdir)
@@ -173,27 +180,34 @@ script_dir <- {
 }
 lean_script <- file.path(script_dir, "lean_contrast_selector.R")
 
-# ── Config: species | binary label | pair (cluster) id ────────────────────────
-cfg <- read.table(config.file, sep = "\t", header = FALSE, stringsAsFactors = FALSE)
+# Shared table/numeric validators also used by observed selection. Stage paths
+# retain their extensions so CSV, TSV and the headered .tab contract agree.
+trait_src <- normalizePath(file.path(script_dir, "../../../TRAIT_ANALYSIS/local/src"))
+source(file.path(trait_src, "io_utils.R"))
+source(file.path(trait_src, "stats.R"))
+source(file.path(trait_src, "contrast_inputs.R"))
+number.of.cycles <- contrast_integer(args[3], "caas_full_perms")
+if (length(args)>=18L && nzchar(args[18])) seed_arg <- contrast_integer(args[18],"seed")
+chunk.size <- contrast_integer(arg_or(7, 500L), "chunk_size", 1)
+max_tries <- contrast_integer(arg_or(9, 1000000L), "max_tries", 1)
+max_fop <- contrast_integer(arg_or(16, 100L), "max_fop", 1)
+if (!trait_type %in% c("auto", "ordinal", "continuous")) stop("Invalid trait_type: ", trait_type)
+if (!is.finite(pss_top_pct) || pss_top_pct < 0 || pss_top_pct > 1) stop("Invalid pss_top_pct")
+
+# ── Config: species | binary label | contiguous pair id ───────────────────────
+cfg <- read.table(config.file, sep = "\t", header = FALSE, stringsAsFactors = FALSE,
+                  colClasses = "character", quote = "", comment.char = "", fill = FALSE)
+if (ncol(cfg) != 3L || any(!cfg$V2 %in% c("0", "1")) || anyDuplicated(cfg$V1))
+  stop("Observed config requires unique species and exactly species/0|1/pair columns.")
+if (any(!grepl("^[1-9][0-9]*$", cfg$V3))) stop("Invalid observed pair ID.")
+pid <- as.integer(cfg$V3)
+target_pairs <- length(unique(pid))
+if (anyNA(pid) || !identical(sort(unique(pid)), seq_len(target_pairs)) ||
+    any(table(pid, factor(cfg$V2, levels=c("0","1"))) != 1L))
+  stop("Observed config requires complete pairs with contiguous IDs starting at 1.")
 foreground.species <- cfg$V1[cfg$V2 == "1"]
 background.species <- cfg$V1[cfg$V2 == "0"]
-
-if (ncol(cfg) < 3) {
-  stop("Discovery config '", config.file, "' has no V3 cluster-id column, so the ",
-       "observed independent pair count cannot be determined. Permulations must ",
-       "match the pair count produced by the contrast selection step.")
-}
-target_pairs <- suppressWarnings(max(as.integer(cfg$V3), na.rm = TRUE))
-if (!is.finite(target_pairs) || target_pairs <= 0L) {
-  stop("Could not parse a positive pair count from the config V3 column.")
-}
-n_fg <- sum(cfg$V2 == "1"); n_bg <- sum(cfg$V2 == "0")
-if (n_fg != target_pairs || n_bg != target_pairs) {
-  log_msg("WARN", sprintf(
-    "Config has %d FG / %d BG species but %d pair ids — permulations will target %d pairs",
-    n_fg, n_bg, target_pairs, target_pairs))
-}
-log_msg("INFO", sprintf("Observed independent pair count from config V3: N_pairs_obs = %d", target_pairs))
+log_msg("INFO", sprintf("Observed independent pair count: N_pairs_obs = %d", target_pairs))
 
 # Observed FOP hypothesis count: the number of hypotheses the observed harvest produced
 # (at most max_fop), read from contrast_hypotheses_pairs.tsv next to the discovery config.
@@ -209,75 +223,68 @@ if (fop_null) {
   if (n_hyp_obs > 0L) {
     log_msg("INFO", sprintf("Observed FOP harvest: %d hypotheses; null cycles must reach >= %d", n_hyp_obs, n_hyp_obs))
   } else {
-    log_msg("WARN", "no observed contrast_hypotheses_pairs.tsv next to the config; null cycles are not design-matched")
+    # A single supplied design still has one hypothesis, even without a sidecar.
+    .hyp_files <- list.files(dirname(config.file), pattern="^traitfile_H[0-9]+[.]tab$")
+    n_hyp_obs <- max(1L, length(.hyp_files))
+    if (n_hyp_obs > 1L && number.of.cycles > 0L)
+      relax_or_stop("multiple observed hypotheses lack PSS pair metadata")
   }
 }
 match_fop <- fop_null && match_fop && n_hyp_obs > 0L
+if (match_fop && max_fop < n_hyp_obs && number.of.cycles > 0L)
+  relax_or_stop("max_fop is below the observed hypothesis count")
 
-first_line <- readLines(phenotypes, n = 1L, warn = FALSE)
-delim_char <- if (grepl(",", first_line) && !grepl("\t", first_line)) "," else "\t"
-first_flds <- strsplit(first_line, delim_char, fixed = TRUE)[[1]]
-has_header <- length(first_flds) < 2 || is.na(suppressWarnings(as.numeric(first_flds[2])))
-
-pheno_raw <- read.delim(phenotypes, sep = delim_char, header = has_header,
-                        stringsAsFactors = FALSE,
-                        na.strings = c("", "NA", "NaN", "nan", "NULL", "null"))
-log_msg("INFO", sprintf("Read %d phenotype rows from %s (header=%s)",
-                        nrow(pheno_raw), basename(phenotypes), has_header))
-
-sp_col <- if ("species" %in% names(pheno_raw)) "species" else names(pheno_raw)[1]
-val_col <- if (nzchar(pheno_col_name) && pheno_col_name %in% names(pheno_raw)) {
-  pheno_col_name
-} else {
-  cand <- setdiff(names(pheno_raw)[vapply(pheno_raw, is.numeric, logical(1))], sp_col)
-  if (length(cand)) cand[1] else names(pheno_raw)[2]
+pheno_raw <- read_trait_table(phenotypes)
+if (!sp_col_name %in% names(pheno_raw)) stop("Species column not found: ", sp_col_name)
+if (!nzchar(pheno_col_name)) {
+  candidates <- setdiff(names(pheno_raw), c(sp_col_name, n_col, c_col))
+  numeric <- vapply(pheno_raw[candidates], function(v) {
+    text <- v[!is.na(v) & nzchar(v)]
+    length(text) > 0L && all(is.finite(suppressWarnings(as.numeric(text))))
+  }, logical(1))
+  if (sum(numeric) != 1L) stop("Specify the phenotype column; numeric columns are ambiguous.")
+  pheno_col_name <- candidates[numeric]
 }
-log_msg("INFO", sprintf("Using species column '%s' and value column '%s'", sp_col, val_col))
-
-phenotype.df <- data.frame(
-  species = as.character(pheno_raw[[sp_col]]),
-  value   = suppressWarnings(as.numeric(pheno_raw[[val_col]])),
-  stringsAsFactors = FALSE
-)
-
-# ── Count data → Jeffreys CIs ─────────────────────────────────────────────────
+if (!pheno_col_name %in% names(pheno_raw)) stop("Phenotype column not found: ", pheno_col_name)
+if (anyDuplicated(pheno_raw[[sp_col_name]])) stop("Duplicate phenotype species.")
+pheno_raw$species <- pheno_raw[[sp_col_name]]
+log_msg("INFO", sprintf("Using species column '%s' and value column '%s'", sp_col_name, pheno_col_name))
+# Auto-detection is reserved for unspecified count columns, never misspellings.
 if (resample_use_n) {
-  if (!nzchar(n_col) || !n_col %in% names(pheno_raw)) {
-    cand_n <- c("n_trait", "n", "n_population", "sample_size", "total_count", "N")
-    found_n <- intersect(cand_n, names(pheno_raw))
-    if (length(found_n) > 0) n_col <- found_n[1]
+  if (!nzchar(n_col)) {
+    candidate <- intersect(c("n_trait","n","n_population","sample_size","total_count","N"),names(pheno_raw))
+    if (length(candidate)) n_col <- candidate[1]
   }
-  if (!nzchar(c_col) || !c_col %in% names(pheno_raw)) {
-    cand_c <- c("c_trait", "c", "c_cases", "n_cases", "cases", "C")
-    found_c <- intersect(cand_c, names(pheno_raw))
-    if (length(found_c) > 0) c_col <- found_c[1]
+  if (!nzchar(c_col)) {
+    candidate <- intersect(c("c_trait","c","c_cases","n_cases","cases","C"),names(pheno_raw))
+    if (length(candidate)) c_col <- candidate[1]
   }
 }
-
-use_ci <- resample_use_n && nzchar(n_col) && nzchar(c_col) &&
-          n_col %in% names(pheno_raw) && c_col %in% names(pheno_raw)
+for (column in unique(c(pheno_col_name, if (resample_use_n) c(n_col[nzchar(n_col)], c_col[nzchar(c_col)])))) {
+  if (!column %in% names(pheno_raw)) stop("Configured phenotype/count column not found: ", column)
+  pheno_raw[[column]] <- numeric_trait_values(pheno_raw[[column]], column)
+}
+validate_contrast_inputs(pheno_raw, pheno_col_name,
+  if (resample_use_n) n_col else "", if (resample_use_n) c_col else "",
+  list(trait_type=trait_type,perm_strategy=selection.strategy,pss_top_pct=pss_top_pct,
+       seed=if(is.na(seed_arg))0 else seed_arg,max_fop=max_fop))
+phenotype.df <- data.frame(species=pheno_raw$species, value=pheno_raw[[pheno_col_name]])
+use_ci <- resample_use_n && nzchar(n_col) && nzchar(c_col)
 if (use_ci) {
-  if (!requireNamespace("binom", quietly = TRUE)) {
-    stop("Count columns were supplied but the 'binom' package is unavailable.")
-  }
-  np <- suppressWarnings(as.numeric(pheno_raw[[n_col]]))
-  nc <- suppressWarnings(as.numeric(pheno_raw[[c_col]]))
-  good <- is.finite(np) & is.finite(nc) & np > 0 & nc >= 0 & nc <= np
-  phenotype.df$n_pop <- np   # denominator, for the pair_n ranking tiebreak
-  phenotype.df$ci_lb <- NA_real_; phenotype.df$ci_ub <- NA_real_
+  np <- pheno_raw[[n_col]]; nc <- pheno_raw[[c_col]]
+  good <- !is.na(np) & !is.na(nc)
+  phenotype.df$n_pop <- np
+  phenotype.df$ci_lb <- phenotype.df$ci_ub <- NA_real_
   if (any(good)) {
-    b <- binom::binom.confint(nc[good], np[good], method = "bayes",
-                              priors = c(0.5, 0.5), conf.level = 0.95)
-    phenotype.df$ci_lb[good] <- b[, 5]; phenotype.df$ci_ub[good] <- b[, 6]
+    ci <- binom::binom.confint(nc[good],np[good],methods="bayes",prior.shape1=.5,prior.shape2=.5)
+    phenotype.df$ci_lb[good] <- ci$lower; phenotype.df$ci_ub[good] <- ci$upper
   }
-  log_msg("INFO", sprintf("Count columns '%s'/'%s' found: %d/%d species have Jeffreys CIs",
-                          n_col, c_col, sum(good), length(good)))
 }
-
 keep <- !is.na(phenotype.df$species) & is.finite(phenotype.df$value)
 if (use_ci) keep <- keep & is.finite(phenotype.df$ci_lb) & is.finite(phenotype.df$ci_ub)
-phenotype.df <- phenotype.df[keep, , drop = FALSE]
-if (nrow(phenotype.df) == 0) stop("No valid phenotype rows remain after NA filtering")
+phenotype.df <- phenotype.df[keep,,drop=FALSE]
+if (nrow(phenotype.df) < 3L) stop("Fewer than three usable phenotype species.")
+if (!all(cfg$V1 %in% phenotype.df$species)) stop("Observed design species missing usable phenotype/count data.")
 
 # ── Vendored phyloq engine and shared selector ────────────────────────────────
 pss_core_script <- file.path(script_dir, "pss_core.R")
@@ -293,8 +300,37 @@ log_msg("INFO", "Shared contrast selector + phyloq PSS loaded from ", script_dir
 # selection_context() that the observed selector uses. The covariances stay fixed across
 # all permulation draws.
 .force_model <- if (selection.strategy %in% c("bm", "ou")) toupper(selection.strategy) else NULL
-ctx <- selection_context(setNames(phenotype.df$value, phenotype.df$species),
-                         read.tree(tree.path), force_model = .force_model)
+observed_bundle <- file.path(dirname(config.file), "observed_selection.rds")
+if (file.exists(observed_bundle)) {
+  observed <- readRDS(observed_bundle)
+  raw_tree <- read.tree(tree.path)
+  input_values <- setNames(phenotype.df$value, phenotype.df$species)
+  analysis_tree <- drop.tip(raw_tree, setdiff(raw_tree$tip.label,names(input_values)))
+  analysis_tree <- multi2di(analysis_tree,random=FALSE)
+  analysis_tree$edge.length[analysis_tree$edge.length<=0] <- 1e-8
+  same <- identical(observed$provenance$version,1L) &&
+    identical(use_ci,any(!is.na(observed$trait_ci$n_population))) &&
+    identical(if(use_ci)FALSE else is_ordinal_trait(phenotype.df$value,trait_type),observed$provenance$ordinal) &&
+    identical(write.tree(analysis_tree,digits=17),write.tree(observed$ctx$tree,digits=17)) &&
+    isTRUE(all.equal(input_values[observed$ctx$tree$tip.label],observed$ctx$trait_vec,tolerance=1e-12)) &&
+    identical(.force_model,observed$provenance$force_model) &&
+    identical(pair_center_gate,observed$provenance$center_gate) &&
+    identical(as.numeric(pss_top_pct),observed$provenance$top_pct)
+  if (!same) stop("Observed selection bundle does not match resampling inputs/settings.")
+  if (use_ci) {
+    ii <- match(observed$trait_ci$species,phenotype.df$species)
+    if (!isTRUE(all.equal(phenotype.df$n_pop[ii],observed$trait_ci$n_population,tolerance=0)) ||
+        !isTRUE(all.equal(phenotype.df$ci_lb[ii],observed$trait_ci$trait_ci_lb,tolerance=1e-12)) ||
+        !isTRUE(all.equal(phenotype.df$ci_ub[ii],observed$trait_ci$trait_ci_ub,tolerance=1e-12)))
+      stop("Observed count intervals do not match resampling data.")
+  }
+  ctx <- observed$ctx
+  log_msg("INFO", "Reusing the exact observed model fit and covariances")
+} else {
+  ctx <- selection_context(setNames(phenotype.df$value, phenotype.df$species),
+                           read.tree(tree.path), force_model = .force_model)
+}
+
 pruned.tree     <- ctx$tree
 starting.values <- ctx$trait_vec
 D               <- ctx$D
@@ -325,6 +361,8 @@ if (selected_model == "OU") {
   simulation_tree <- pruned.tree
 }
 
+simulation_rate <- ratematrix(simulation_tree, starting.values)
+
 # ── PSS profile of the observed canonical pairs ───────────────────────────────
 # The observed selector chooses its pairs until the Dunn index stops it, so they are the pairs the
 # trait offers; the permulations are matched to their PSS (see match_pss_select). The profile is
@@ -347,7 +385,7 @@ if (match_pss && use_ci) {
     if (length(hit)) obs_cand$pss_score[hit[1]] else NA_real_
   }, numeric(1))
   if (length(obs_pss) != target_pairs || anyNA(obs_pss)) {
-    log_msg("WARN", "the PSS of the observed pairs could not be recovered; PSS matching is off")
+    relax_or_stop("the PSS of the observed pairs could not be recovered; PSS matching is off")
   } else {
     pss_profile <- obs_pss
     log_msg("INFO", sprintf("PSS matching on: observed PSS (selection order) %s, tolerance %.0f%%",
@@ -359,7 +397,7 @@ if (match_pss && use_ci) {
       .hp1 <- .hp1[.hp1$hypothesis_id == "H1", ]
       if (nrow(.hp1) == target_pairs && "pss_score" %in% names(.hp1) &&
           max(abs(.hp1$pss_score[order(.hp1$pair)] - obs_pss)) > 1e-6) {
-        log_msg("WARN", "the recomputed PSS of the observed pairs differs from contrast_hypotheses_pairs.tsv (H1)")
+        relax_or_stop("the recomputed PSS of observed H1 differs from its pair metadata")
       }
     }
   }
@@ -388,7 +426,6 @@ log_msg("START", sprintf("Harvesting pool (strategy: %s, pool_size: %d, max_trie
 rec_ord    <- order(starting.values)
 rec_value  <- unname(starting.values[rec_ord])
 n_rec      <- length(rec_value)
-rank_order <- seq_len(n_rec)
 rec_lb <- rec_ub <- rec_n <- NULL
 if (use_ci) {
   ci_map <- setNames(phenotype.df$ci_lb, phenotype.df$species)
@@ -403,7 +440,11 @@ tier1 <- vector("list", number.of.cycles)
 tier2 <- vector("list", number.of.cycles)
 n1 <- 0L; n2 <- 0L
 total_draws <- 0L
-reject_reasons <- character(0)
+reject_reasons <- new.env(hash=TRUE,parent=emptyenv())
+rejection_counts <- function() {
+  keys <- sort(ls(reject_reasons))
+  setNames(vapply(keys,function(k)reject_reasons[[k]],integer(1)),keys)
+}
 # Harvest audit: the worst PSS mismatch of every draw (NA where no complete set of pairs was found), the
 # design-matching rounds, and the pool and capacity of a sample of the draws (written to permulation_harvest.tsv).
 draw_mm  <- rep(NA_real_, 10000L)
@@ -436,9 +477,14 @@ escalations         <- 0L         # kept for the "filled after N escalation(s)" 
 # state afterwards) and `evaluate_lean_contrast_selection` is RNG-free, so the harvest of
 # a cycle is a pure function of its own inputs: counting it here and re-harvesting it in
 # the FOP mirror below yields the same hypotheses.
+fop_cache <- file.path(outdir, ".fop_candidates")
+if (dir.exists(fop_cache)) unlink(fop_cache, recursive=TRUE)
+if (fop_null) dir.create(fop_cache)
 fop_hypotheses <- function(e, label) {
   if (is.null(e$pvec) || is.null(e$fg) || is.null(e$bg)) return(NULL)
-  tryCatch(
+  cache_path <- file.path(fop_cache, paste0(e$draw_id, ".rds"))
+  if (file.exists(cache_path)) return(readRDS(cache_path))
+  hv <- tryCatch(
     lean_fop_harvest(
       trait_vec = e$pvec, D = D, target_pairs = target_pairs,
       tree = pruned.tree, cov_bm = cov_bm, cov_ou = cov_ou,
@@ -450,7 +496,10 @@ fop_hypotheses <- function(e, label) {
       canon_pairs = if (!is.null(e$canon)) e$canon
                     else data.frame(species1 = e$fg, species2 = e$bg, stringsAsFactors = FALSE),
       center_gate = pair_center_gate),
-    error = function(err) { log_msg("WARN", sprintf("FOP harvest %s: %s", label, conditionMessage(err))); NULL })
+    error = function(err) { relax_or_stop(sprintf("FOP harvest %s: %s", label, conditionMessage(err))); NULL })
+  if (is.null(hv) || !length(hv$hypotheses)) relax_or_stop("FOP harvest yielded no hypotheses")
+  saveRDS(hv, cache_path)
+  hv
 }
 # Hypotheses a cycle contributes; an empty harvest falls back to H1 only.
 fop_count <- function(e) {
@@ -480,7 +529,7 @@ repeat {
     while (n1 < pool_target && total_draws < budget) {
       total_draws <- total_draws + 1L
 
-      sim_v <- simulatevec(starting.values, simulation_tree)
+      sim_v <- simulatevec(starting.values, simulation_tree, simulation_rate)
       sim_ord <- order(sim_v)
       
       pvec <- setNames(rec_value[order(sim_ord)], names(sim_v))
@@ -532,7 +581,7 @@ repeat {
       } else if (e$tier == 2L && n2 < pool_target) {
         n2 <- n2 + 1L; tier2[[n2]] <- e
       } else if (e$tier == 0L) {
-        reject_reasons <- c(reject_reasons, e$reason)
+        reject_reasons[[e$reason]] <- if (is.null(reject_reasons[[e$reason]])) 1L else reject_reasons[[e$reason]] + 1L
       }
 
       if (total_draws %% 5000 == 0 || n1 == pool_target) {
@@ -580,20 +629,26 @@ repeat {
     log_msg("INFO", sprintf("Pool filled entirely from Tier 1 (%d/%d) in %d draws%s",
                             pool_target, pool_target, total_draws,
                             if (escalations) sprintf(" after %d escalation(s)", escalations) else ""))
-  } else if (n1 + n2 >= pool_target) {
+  } else if (allow_relaxed_null && n1 + n2 >= pool_target) {
     use2 <- pool_target - n1
+    relax_or_stop("Tier-2 draws used to fill the null pool")
     cands <- c(tier1[seq_len(n1)], tier2[seq_len(use2)])
     log_msg("WARN", sprintf(
       "Tier 1 exhausted after %d draws: topping up with Tier 2. %d Tier-1 + %d Tier-2 = %d/%d records",
       n1, use2, length(cands), pool_target))
-  } else if (n1 + n2 >= number.of.cycles) {
+  } else if (!allow_relaxed_null && n1 >= number.of.cycles) {
+    cands <- tier1[seq_len(n1)]
+  } else if (allow_relaxed_null && n1 + n2 >= number.of.cycles) {
     # A design-matching extension ran out of draws: keep every candidate drawn.
+    relax_or_stop("design-matching extension stopped before its target")
     cands <- c(tier1[seq_len(n1)], tier2[seq_len(n2)])
     log_msg("WARN", sprintf(
       "Design-matching extension stopped at %d of %d candidates after %d draws",
       length(cands), pool_target, total_draws))
   } else {
-    tab <- sort(table(reject_reasons), decreasing = TRUE)
+    if (!allow_relaxed_null && n1 + n2 >= number.of.cycles)
+      stop(sprintf("Strict null shortfall: %d Tier-1 draws; Tier-2 fallback (%d draws) is disabled.",n1,n2))
+    tab <- sort(rejection_counts(), decreasing = TRUE)
     top <- seq_len(min(3, length(tab)))
     final_rate <- (n1 + 1) / (total_draws + 1)
     # The message names the failure mode, so the remedy is clear from the log alone.
@@ -630,7 +685,8 @@ repeat {
     nh_new <- parallel::mclapply(cands[new_i], fop_count,
                                  mc.cores = max(1L, min(n_cpus, length(new_i))),
                                  mc.preschedule = TRUE)
-    nh_new <- vapply(nh_new, function(x) if (is.numeric(x)) as.integer(x) else 1L, integer(1))
+    if (any(vapply(nh_new, inherits, logical(1), "try-error"))) stop("FOP design matching worker failed.")
+    nh_new <- vapply(nh_new, as.integer, integer(1))
     nhyp_cache[as.character(cand_ids[new_i])] <- nh_new
   }
   nh_c <- unname(nhyp_cache[as.character(cand_ids)])
@@ -646,6 +702,7 @@ repeat {
   }
   if (length(cands) < pool_target || match_rate < MIN_MATCH_RATE ||
       pool_target >= MATCH_HARD_CAP * number.of.cycles) {
+    relax_or_stop("null cycles cannot reach the observed FOP hypothesis count")
     rest <- setdiff(seq_along(cands), qual)
     rest <- rest[order(-nh_c[rest], rest)]
     fill <- rest[seq_len(min(length(rest), number.of.cycles - length(qual)))]
@@ -691,7 +748,7 @@ rbind_fast <- function(lst) {
 .add("settings", "top_pct", value = pss_top_pct)
 .add("settings", "n_hyp_obs", value = n_hyp_obs)
 .add("settings", "target_pairs", value = target_pairs)
-.rt <- table(reject_reasons)
+.rt <- rejection_counts()
 for (i in seq_along(.rt)) .add("reject", names(.rt)[i], value = as.numeric(.rt[[i]]))
 .mm <- draw_mm[seq_len(total_draws)]
 if (!is.null(pss_profile)) {
@@ -878,8 +935,11 @@ if (fop_null) {
       if (inherits(r, "try-error") || is.null(r)) {
         log_msg("WARN", sprintf("FOP worker for cycle b_%d failed: %s",
                                 block[i], as.character(r)))
+        if (!allow_relaxed_null) stop("FOP mirror worker failed; refusing an incomplete null.")
+        relax_or_stop("FOP worker failed; null is incomplete")
         next
       }
+      if (r$n_hyp == 0L) relax_or_stop("FOP mirror used an H1-only fallback")
       lab_batch[[i]]  <- r$lab
       pair_batch[[i]] <- r$pair
       n_hyp_tot <- n_hyp_tot + r$n_hyp
@@ -907,6 +967,16 @@ if (fop_null) {
                               length(pool), n_hyp_tot,
                               if (length(pool)) n_hyp_tot / length(pool) else 0))
 }
+
+if (dir.exists(fop_cache)) unlink(fop_cache, recursive=TRUE)
+jsonlite::write_json(list(schema_version=1L, allow_relaxed_null=allow_relaxed_null,
+  relaxed_reasons=relaxed_reasons, requested_cycles=number.of.cycles,
+  selected_cycles=length(pool),
+  observed_canonical_signature=digest::digest(paste0(paste(apply(cfg[order(as.integer(cfg$V3),cfg$V2),,drop=FALSE],1,paste,collapse="\t"),collapse="\n"),"\n"),algo="sha256",serialize=FALSE),
+  strategy=selection.strategy, selected_model=selected_model,
+  observed_model_reused=file.exists(observed_bundle),
+  match_pss_requested=match_pss, match_pss_applied=!is.null(pss_profile),
+  observed_hypotheses=n_hyp_obs), file.path(outdir,"permulation_provenance.json"), auto_unbox=TRUE,pretty=TRUE)
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 tiers <- vapply(pool, function(e) e$tier, integer(1))

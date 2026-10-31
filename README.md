@@ -176,6 +176,7 @@ Detects CAAS, columns where foreground and background species carry mostly disjo
 | `min_non_overlapping` | 2 | Species whose residue is absent from the other side, needed to call a CAAS |
 | `multi_hypothesis` | true | Test all alternative contrast hypotheses |
 | `max_fop` | 100 | Maximum hypotheses (H1 to Hn) per contrast |
+| `ct_allow_relaxed_null` | false | Explicitly allow PSS/FOP matching shortfalls and Tier-2 fallback; recorded in provenance |
 | `max_bg_gaps_fraction`, `max_fg_gaps_fraction`, `max_gaps_fraction` | 0.0 | Gap tolerance per side and overall |
 | `max_bg_miss_fraction`, `max_fg_miss_fraction`, `max_miss_fraction` | 0.0 | Missing-data tolerance per side and overall |
 | `miss_pair` | true | Discard labelings whose two sides have gaps in different pairs |
@@ -209,22 +210,31 @@ Reconstructs ancestral states with PAML codeml and scores each position by how l
 | `asr_diagnostics` | true | Render report 9 |
 | `meta_caas_from` | empty | Standalone: `meta_caas.tsv` of a previous run |
 
+Observed scoring validates complete paired designs, discovery keys and supplied PSS metadata before starting workers. An explicitly requested missing weights file is an error; weights beside the selected design take precedence over historical output directories. Missing alignments, failed ASR and scoring failures stop the run. Empty discovery produces header-only master/meta tables without ASR workers. Gene IDs retain embedded dots, and `ali_format` is honored.
+
+ASR entries now live under `ct_disambig_asr_cache_dir/validated_v1/<input fingerprint>/asr_<gene>/`. Their provenance checks the normalized alignment, matched tree/branch lengths, taxon mapping, model/rate table and ASR implementation, plus checksums of the generated artifacts. Entries are built privately and published after validation. Legacy cache files are preserved but recomputed. `ct_disambiguation/observed_scoring.json` records completion, source checksums, scoring settings, intentional gene exclusions and position coverage; incomplete shards cannot be published as a completed observed analysis.
+
+Standalone observed scoring fingerprints the contents of alignment and design directories for Nextflow resume, including nested files. Editing a file invalidates the task even when its size and timestamp are unchanged.
+
+The strict output means **zero foreground/background residue-type overlap**, independently of the actual identical-pair count. `meta_caas.tsv` preserves `shared_residue_count`. The shared score contract is now `caas_pos_species_pss_v4`; older null tiles and saved nulls are rejected. Regenerate observed scores and their null artifacts together after this update.
+
 ### CT_POSTPROC: `conf/ct_postproc.config`
 
 Removes spatial clusters of CAAS and outlier genes, cleans the gene background and renders the characterization report (8).
 
+Quality masks use all distinct CT candidate positions, including diagnostic `side=none` sites, independently of ASR scores and categories. The same span, minimum-count and density rules apply to each null cycle. CT_POSTPROC requires a completed observed master with its sibling `observed_scoring.json`; legacy or incomplete inputs must be regenerated. Gene statistics retain the effective length source: untrimmed alignment columns from MAP or the annotation length (genomic base pairs for generated Ensembl tables); these denominator units must not be conflated. Report 8 stages exact filter artifacts and saves its original settings in `postproc/postproc_inputs/` for reproducible regeneration.
+
 | Option | Default | Meaning |
 |---|---|---|
 | `caas_postproc_mode` | filter | `filter` (single run) or `exploratory` (sweep) |
-| `filter_minlen` | 3 | Minimum alignment length of a cluster |
+| `filter_minlen` | 3 | Minimum cluster interval span in alignment columns |
+| `filter_min_positions` | null | Minimum candidates per interval; unset preserves the legacy `filter_minlen` candidate-count gate per gene |
 | `filter_maxcaas` | 0.7 | Maximum CAAS density of a cluster window |
 | `remove_caas_clusters` | true | Discard clusters from the filtered discovery |
-| `gene_filter_mode` | dubious | Outlier genes to remove: `none`, `extreme`, `dubious`, `both` or `stratified` |
-| `extreme_threshold` | 0.99 | Quantile defining extreme genes |
-| `iqr_multiplier` | 3.0 | IQR multiplier defining dubious genes |
-| `gene_filter_strata` | 10 | `stratified` mode: number of equal-size gene-length strata; a gene is compared with genes of its own length |
-| `gene_filter_k_far` | 3.0 | `stratified` mode: IQR multiplier of the far fence (Q3 of the stratum + k x IQR); a gene above it is removed |
-| `gene_filter_k_near` | 1.5 | `stratified` mode: IQR multiplier of the near fence; a gene above it is removed only when it also carries a cluster train |
+| `gene_filter_mode` | stratified | Outlier genes to remove: `none` or `stratified` |
+| `gene_filter_strata` | 10 | Number of equal-size gene-length strata; a gene is compared with genes of its own length |
+| `gene_filter_k_far` | 3.0 | IQR multiplier of the far fence (Q3 of the stratum + k x IQR); a gene above it is removed |
+| `gene_filter_k_near` | 1.5 | IQR multiplier of the near fence; a gene above it is removed only when it also carries a cluster train |
 | `caas_map_dir` | `vep_map_dir` or empty | Per-gene MAP tables (alignment column to protein residue) from the [Ortholog Characterizator](https://github.com/nozerorma/ortholog_characterizator.git) |
 | `minlen_values`, `maxcaas_values` | `2,3,4,10`; `0.6,0.7,0.8` | Sweep values in exploratory mode |
 | `disambiguation_input`, `disambiguation_dir`, `background_input` | empty | Standalone inputs |
@@ -237,7 +247,7 @@ Correlates relative evolutionary rate of each gene with the trait and calibrates
 |---|---|---|
 | `rer_trait_mode` | auto | `auto`, `continuous`, `binary` |
 | `rer_transform` | ha_logit | `auto`, `ha_logit`, `logit`, `arcsin`, `log10`, `none`; `ha_logit` needs `n_trait` and `c_trait` |
-| `rer_minsp` | 15 | Minimum species per gene |
+| `rer_minsp` | 15 | Species cutoff for the matrix; matched-path cutoff for native association tests |
 | `winsorizeRER`, `winsorizeTrait` | 3, 3 | Winsorization limits |
 | `rer_perm_batches`, `rer_perms_per_batch` | 10, 100 | Null size is the product; 0 batches skips the null |
 | `rer_batch_seed` | 1998 | Batch `i` uses seed + i - 1 |
@@ -248,13 +258,19 @@ Correlates relative evolutionary rate of each gene with the trait and calibrates
 | `trait_out`, `trees_out`, `matrix_out` | `Data/RER/...` | Objects reused when the matching build step is skipped |
 | `rer_perms_file`, `rer_continuous_file`, `rer_binary_file`, `rer_universe_file`, `rer_gene_scores` | empty | Standalone: null, results, tested genes and SCORING table of a previous run |
 
+RER validates unique species and gene IDs, finite nonconstant traits, count bounds (`0 ≤ c ≤ n`) and branch lengths. Species whitespace is normalized consistently; gene IDs remain literal. Explicit continuous mode preserves two-valued measurements. Binary recoding records its original values and keeps count vectors. Tree exclusions with fewer than three retained taxa are recorded in `<gene_trees>.pruned.txt.audit.tsv`; technical errors abort.
+
+The matrix always uses weighted estimation. Precomputed matrices used for new correlations must carry the current tree/path/species provenance stamp; rebuild older matrices with `build_matrix`. One invocation accepts one result source: new inference, a continuous RDS or a binary RDS. Without `build_trait`, routing is resolved from the stored trait rather than defaulting to continuous.
+
+Validated summaries and lists are produced separately from report 5. `rerconverge/rer_results/rer_inputs/` retains the validated result, thresholds, summary and checksums for regeneration. New null stores contain `rer_null_manifest.json` with block checksums and the complete cycle roster; missing, mixed or modified blocks fail validation. Legacy final RDS results can still be reported, with unknown inference settings or null coverage identified explicitly. Nominal calls use `p.perm < evidence_p_threshold`; empirical BH remains separate, and FCS uses `sign(Rho) × −log10(P)`. Input and source fingerprints keep HTML-only changes from repeating inference.
+
 ### FADE: `conf/fade.config`
 
 HyPhy FADE tests directional substitution towards amino acids on the foreground branches and reports Bayes factors per site and gene (report 6).
 
 | Option | Default | Meaning |
 |---|---|---|
-| `fade_model` | LG | `LG`, `WAG`, `JTT`, `Dayhoff` |
+| `fade_model` | LG | HyPhy built-in model, e.g. `LG`, `WAG`, `JTT`; `Dayhoff` is unsupported |
 | `fade_bf_threshold` | 100 | Bayes factor for a significant site and gene |
 | `fade_direction` | both | Foreground group: `top`, `bottom`, `both` |
 | `fade_background_scope` | all | `all`: every other branch; `opposite`: prune to foreground plus opposite extreme |
@@ -263,10 +279,13 @@ HyPhy FADE tests directional substitution towards amino acids on the foreground 
 | `fade_method` | Variational-Bayes | Or `Collapsed-Gibbs`, `Metropolis-Hastings` |
 | `fade_grid`, `fade_concentration` | 20, 0.5 | Posterior grid and Dirichlet prior |
 | `fade_chains`, `fade_chain_length`, `fade_burn_in`, `fade_samples` | 5, 2000000, 1000000, 1000 | MCMC settings, ignored by Variational-Bayes |
-| `lg_dat_path` | derived | Path of the model file |
 | `selection_prep_batch_size`, `fade_batch_size` | 500, 200 | Alignments per prep task; genes per FADE task |
-| `fade_min_genes_for_heatmap` | 2 | Minimum genes for the heatmap |
+| `fade_min_genes_for_heatmap` | 2 | Legacy compatibility option; current report has no heatmap |
 | `fade_universe_file`, `fade_tables_dir_top`, `fade_tables_dir_bottom` | empty | Standalone: tested genes; `selection/fade/<direction>` of a previous run |
+
+SELECTION_PREP validates alignments before FADE, preserves gene IDs with internal dots and uses the same preparation rules for individual genes and batches. FASTA and PHYLIP both exclude sequences composed entirely of `-`, `?` and `X/x`, then retain tree taxa. Malformed alignments fail the task. Each processed gene has a JSON audit under `selection/prep_audit/`, including excluded taxa and genes with no usable tree taxa. Species pools must contain disjoint top/bottom groups; their optional `pair` column does not impose a paired design. Preparation cache keys include input and helper content.
+
+FADE audits every requested gene/direction. Biological exclusions (no foreground or fewer than two retained taxa) are recorded; technical failures prevent complete tables from being published. Each direction publishes `fade_audit.tsv`, `fade_run_metadata.json` and saved report inputs under `fade_inputs/`. Report 6 uses the recorded model, branch settings and cutoff; legacy tables without metadata are explicitly marked as lacking original settings and completion evidence.
 
 ### SCORING: `conf/scoring.config`
 

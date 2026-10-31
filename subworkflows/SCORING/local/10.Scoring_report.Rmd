@@ -110,33 +110,10 @@ suppressPackageStartupMessages({
 # ── Palette and theme ─────────────────────────────────────────────────────────
 
 # Tableau_10 swatch, shared with the other reports of the pipeline.
-if (requireNamespace("paletteer", quietly = TRUE)) {
-  .tableau10 <- as.character(paletteer::paletteer_d("ggthemes::Tableau_10"))
-} else {
-  .tableau10 <- c(
-    "#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F",
-    "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC"
-  )
-}
-theme_set(
-  theme_minimal(base_size = 13) +
-  theme(
-    axis.title.y  = element_text(margin = ggplot2::margin(l = 20, r = 20)),
-    axis.title.x  = element_text(margin = ggplot2::margin(t = 12)),
-    axis.text.x   = element_text(margin = ggplot2::margin(t = 5)),
-    plot.title    = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
-    plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
-  )
-)
+source('src/report_style.R')
+set_report_style()
+.tableau10 <- report_palette(10)
 
-# ── Seed and helpers ──────────────────────────────────────────────────────────
-
-# Seed for the subsamples and jitter of the plots (params$seed, 1998 when unset).
-seed_val <- if (exists("params") && !is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998
-set.seed(seed_val)
-
-# Correlation that returns NA, not an error, when fewer than 3 complete pairs remain, so that
-# sections of sparse optional modules do not fail.
 safe_cor <- function(x, y, method = "pearson") {
   ok <- complete.cases(x, y)
   if (sum(ok) < 3) return(NA_real_)
@@ -152,9 +129,10 @@ $(document).on('shown.bs.tab shown.bs.collapse', function () {
 
 
 ```{r load-data}
-pos_df  <- read_tsv(params$position_scores_file, show_col_types = FALSE) %>%
+source("src/scoring_io.R")
+pos_df  <- scoring_read(params$position_scores_file) %>%
   select(-matches("^p[.](emp|adj_bh)_fact$"))
-gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
+gene_df <- scoring_read(params$gene_scores_file)
 .metadata <- file.path(dirname(params$gene_scores_file),"gene_evidence_metadata.json")
 if(file.exists(.metadata)) {
  # rmarkdown locks the params binding; temporarily unlock it to restore
@@ -163,6 +141,10 @@ if(file.exists(.metadata)) {
  .params_locked <- bindingIsLocked("params", .params_env)
  if (.params_locked) unlockBinding("params", .params_env)
  .m <- jsonlite::read_json(.metadata,simplifyVector=TRUE)
+ if(!is.null(.m$table_md5)) {
+   .paths <- c(gene_scores.tsv=params$gene_scores_file,position_scores.tsv=params$position_scores_file)
+   for(.n in names(.paths)) if(!identical(unname(tools::md5sum(.paths[[.n]])),.m$table_md5[[.n]])) stop('Scoring snapshot checksum mismatch: ',.n)
+ }
  if (!identical(.m$gene_stat, "max")) stop("Legacy CAAS gene scores: rebuild with gene_stat=max before rendering")
  params$evidence_p_threshold <- .m$nominal_threshold
  params$evidence_fdr_threshold <- .m$fdr_threshold
@@ -170,7 +152,7 @@ if(file.exists(.metadata)) {
 } else {
  stop("Missing gene_evidence_metadata.json: cannot verify gene_stat=max; regenerate gene evidence before rendering")
 }
-corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
+corr_df <- scoring_read(params$gene_corr_file)
 
 # Force numeric types for columns that may be guessed as character due to leading NAs or empty tables
 .num_cols_pos <- c(
@@ -243,9 +225,10 @@ if (has_genomic) {
   # Format: gene, chr, start, end, length  (no header assumed; detect if header present)
   genomic_raw <- read_tsv(params$genomic_info_file,
                           col_names = c("Gene", "chr", "gene_start", "gene_end", "gene_length"),
-                          show_col_types = FALSE)
+                          col_types=cols(.default=col_character()),na=character(),quote='',show_col_types = FALSE)
   # Drop header row if first cell is literally "gene" or "Gene"
   if (tolower(genomic_raw$Gene[1]) == "gene") genomic_raw <- genomic_raw[-1, ]
+  scoring_keys(genomic_raw,'Gene','genomic gene')
   genomic_raw <- genomic_raw %>%
     mutate(
       gene_start  = as.integer(gene_start),
@@ -659,8 +642,8 @@ cat("_No null-universe summary for this run (`null_universe_summary.tsv` absent:
 
 cat(paste0(
   "The position p-values compare each observed position with a null that can only produce the positions the ",
-  "permulation labelings reach. The universe U of the position family (`p.adj_bh`) is the null-positive positions inside the tested set plus every observed positive ",
-  "position, the same set the position enrichment uses as background.\n\n",
+  "permulation labelings reach. The universe U of the position BH family (`p.adj_bh`) is fixed by all declared tested positions within the cleaned gene background, ",
+  "including positions detected by neither observed nor null labelings. It does not depend on how many cycles detect each position.\n\n",
   "- **N**: ", .nu_n(.nu_val("N_cycles")), " cycles (", .nu_note("N_cycles"), "; ",
   .nu_n(.nu_val("N_cycles_present_in_null")), " leave a row in the null file)\n",
   "- **Null-positive positions**: ", .nu_n(.nu_val("null_positive_positions_all")), " in total, ",
@@ -1023,7 +1006,7 @@ n_floor <- if (!is.na(.p_floor) && is.finite(.p_floor)) {
 }
 
 cat(sprintf(paste0(
-  "Position p-values retain their numeric values. The evidence tables below apply nominal p.emp < 0.05 and pooled BH q < 0.05.\n\n",
+  "Position p-values retain their numeric values. The evidence tables below apply the nominal and BH thresholds saved with the scoring data.\n\n",
   "`p.emp` is the empirical permulation p of the position: the proportion of the N permuted-labeling cycles ",
   "that detect the position (on either phenotype side) and give it a `CAAS_score` at least as high as the ",
   "observed one, counting the observed run as one more cycle, (k + 1)/(N + 1). Its minimum is 1/(N + 1), ",
@@ -1128,7 +1111,7 @@ CAAS and other are calls within their shared evaluable gene universe; overlap is
 ```{r empirical-overlap, results='asis'}
 source("src/report_evidence.R")
 .overlap <- scoring_overlap(gene_df, params$evidence_p_threshold, params$evidence_fdr_threshold)
-readr::write_tsv(.overlap,file.path(params$output_dir,"gene_evidence_overlap.tsv"))
+scoring_write(.overlap,file.path(params$output_dir,"gene_evidence_overlap.tsv"))
 for(rk in c("global","top","bottom")) {
  cat("\n#### ",rk,"\n\n",sep="")
  emit_widget(DT::datatable(.overlap[.overlap$ranking==rk,],rownames=FALSE,filter="top",options=list(pageLength=15,scrollX=TRUE,order=list())))
@@ -1148,14 +1131,14 @@ if(nrow(pos_df)>1)print(ggplot(pos_df,aes(CAAS_score,fill=side))+geom_histogram(
   # header line, not by the extension, so a tab-separated table also loads.
   hdr <- tryCatch(readLines(path, n = 1L, warn = FALSE), error = function(e) "")
   df <- if (length(hdr) && grepl(",", hdr) && !grepl("\t", hdr)) {
-    read_csv(path, show_col_types = FALSE)
+    scoring_read(path,delim=',',quote='"')
   } else {
-    read_tsv(path, show_col_types = FALSE)
+    scoring_read(path)
   }
   names(df) <- tolower(names(df))
   if (ncol(df) < 2) return(NULL)  # malformed / single-column: nothing to join
   
-  if (!"gene" %in% names(df)) names(df)[1] <- "gene"
+  scoring_keys(df,c('gene','position'),'FADE site')
   if ("site" %in% names(df)) {
     df$position <- as.integer(df$site) - 1L
   } else if ("position" %in% names(df)) {
@@ -1166,9 +1149,9 @@ if(nrow(pos_df)>1)print(ggplot(pos_df,aes(CAAS_score,fill=side))+geom_histogram(
   
   bf_col <- intersect(c("max_site_bf", "max_bf", "bayes_factor", "bf"), names(df))[1]
   if (is.na(bf_col)) {
-    df$max_site_bf <- rep(NA_real_,nrow(df))
+    stop('Missing FADE site BF column')
   } else {
-    df$max_site_bf <- as.numeric(df[[bf_col]])
+    df$max_site_bf <- scoring_number(df[[bf_col]],'FADE site BF',0,Inf,positive_inf=TRUE)
   }
   
   aa_col <- intersect(c("top_target_aa", "target_aa", "aa"), names(df))[1]
@@ -1395,7 +1378,7 @@ DT::datatable(
 
 ```{r genomic-window-tsv-export, eval=has_genomic}
 if (exists("gene_caas_wins") && nrow(gene_caas_wins) > 0) {
-  readr::write_tsv(
+  scoring_write(
     gene_caas_wins %>% select(-chr_even, -window_mean, -window_max),
     file.path(params$output_dir, "genomic_window_accum_gene_caas.tsv"))
 }
@@ -1433,7 +1416,7 @@ if (has_fade_pos) {
   }
 }
 
-readr::write_tsv(supp_df,
+scoring_write(supp_df,
   file.path(params$output_dir, "position_scores_annotated.tsv"))
 
 cat(sprintf("Exported position_scores_annotated.tsv: %d rows, %d columns\n",

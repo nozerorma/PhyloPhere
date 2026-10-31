@@ -2,26 +2,11 @@
 # posenrich_universe.py — Universe U of positions shared by Accumulation and POSENRICH.
 # PhyloPhere | subworkflows/POSENRICH/local/src/
 
-"""Build the universe U: the positions an observed CAAS could come from.
+"""Fixed positional opportunity: declared tested positions intersected with the cleaned gene background.
 
-U = (positions CAAStools tested  ∩  positions that score > 0 in at least one cycle of the filtered null)
-    restricted to the genes of the gene list, plus every observed positive position of those genes.
-
-A position the null never scores cannot produce a CAAS under the permulation labelings, so it is not part of
-the opportunity of a gene. An observed position the null never scores stays in U (its nd is 0).
-
-The gene list is an explicit input and its hash goes to the manifest, so every consumer can check that it
-used the same universe. When fewer than RATE_MIN of the null-positive positions lie in the tested set (the tested
-file is in another coordinate space), the tested set is ignored, the same rule as SCORING (null_position_stats.py).
-
-Observed positions are the rows with a positive score on the top or bottom side: `asr_path_score` of
-filtered_discovery.tsv or `CAAS_score` of position_scores.tsv.
-
-The table universe.tsv.gz is the single universe of POSENRICH: level 1 (accumulation_test.py) and level 2
-(posenrich_within_gene.py) both read it. As a command it writes:
-  universe.tsv.gz        gene, position, nd (cycles that score the position), observed_positive,
-                         observed_top, observed_bottom (0/1; positive on either side, on the top side, on the bottom side)
-  universe_manifest.json input hashes, counts and the tested-set decision
+Observed and null detections annotate U; neither selects its members. Canonical null
+blocks, their complete cycle roster and observed scientific provenance are verified
+before any inferential consumer runs. Silent valid cycles remain in N.
 """
 
 import argparse
@@ -30,13 +15,15 @@ import json
 import logging
 import math
 import os
+import sys
+from pathlib import Path
+from posenrich_contract import observed_table, identifier, position, block_inventory, finish_manifest, read_table
 from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
 
 POS_BITS = 32                  # position keys: gene id << 32 | position
-RATE_MIN = 0.5                 # share of null-positive positions that must lie in the tested set to use it
 SIDES = ('top', 'bottom')
 
 
@@ -67,37 +54,41 @@ def gene_list_digest(genes):
 
 def load_universe_genes(path):
     """Genes of the gene list (one gene per line, optional 'Gene' header), in file order without repeats."""
-    with open(path) as f:
-        genes = [line.strip() for line in f if line.strip() and line.strip() != 'Gene']
-    return list(dict.fromkeys(genes))
+    genes = Path(path).read_text().splitlines()
+    if genes and genes[0] in ('Gene', 'gene'):
+        genes = genes[1:]
+    for g in genes:
+        identifier(g)
+    if len(genes) != len(set(genes)):
+        raise ValueError('Duplicate cleaned-background genes')
+    return genes
 
 
 def read_tested(background_file, genes):
-    """{gene: sorted unique int64 positions CAAStools tested}, for the genes in `genes`.
-
-    background.output is one line per gene, `gene<TAB>comma-separated positions`, in the coordinate space of
-    filtered_discovery's `Position`.
-    """
     tested = {}
-    with open(background_file) as f:
-        for line in f:
-            parts = line.rstrip('\n').rstrip('\r').split('\t')
-            if len(parts) < 2 or parts[0] not in genes or parts[1] in ('', 'NULL', 'Position'):
-                continue
-            values = [int(p) for p in parts[1].split(',') if p.strip().lstrip('-').isdigit()]
-            tested[parts[0]] = np.unique(np.array(values, dtype=np.int64))
-    return tested
+    for line in Path(background_file).read_text().splitlines():
+        parts = line.split('\t')
+        if len(parts) != 2 or identifier(parts[0]) in tested:
+            raise ValueError('Invalid/duplicate tested gene')
+        values = [] if parts[1] in ('', 'NULL') else [position(p) for p in parts[1].split(',')]
+        if len(values) != len(set(values)):
+            raise ValueError('Duplicate tested position')
+        tested[parts[0]] = np.asarray(sorted(values), dtype=np.int64)
+    return {g: v for g, v in tested.items() if g in genes}
 
 
 def load_null_positive(null_path):
-    """DataFrame (gene, position, nd) of the positions the filtered null scores (nd > 0), from null_positions.parquet."""
     df = pd.read_parquet(null_path)
-    missing = [c for c in ('gene', 'position', 'nd') if c not in df.columns]
-    if missing:
-        raise ValueError(f"{null_path} lacks column(s) {missing}: regenerate the CAAS permulation null (CAAS_CORE_MERGE_REDUCE).")
-    df = df[['gene', 'position', 'nd']]
-    df = df[df['nd'] > 0]
-    return df.astype({'gene': str, 'position': np.int64, 'nd': np.int64}).reset_index(drop=True)
+    if not {'gene', 'position', 'nd'} <= set(df):
+        raise ValueError('Missing aggregate null position columns')
+    if df.duplicated(['gene', 'position']).any():
+        raise ValueError('Duplicate aggregate null position')
+    for g in df.gene:
+        identifier(g)
+    df['position'] = df['position'].map(position).astype(np.int64)
+    if any(not str(n).isdigit() or int(n) < 1 for n in df.nd):
+        raise ValueError('Invalid null detection counts')
+    return df[['gene', 'position', 'nd']].astype({'nd': np.int64})
 
 
 def is_positive_score(x):
@@ -114,27 +105,9 @@ def load_observed_positive(path):
 
     `path` is filtered_discovery.tsv (score column asr_path_score) or position_scores.tsv (CAAS_score).
     """
-    empty = pd.DataFrame({'gene': pd.Series(dtype=str), 'position': pd.Series(dtype=np.int64),
-                          'side': pd.Series(dtype=str)})
-    if os.path.getsize(path) == 0:
-        logging.warning("observed positions file is empty: no positions passed the filter")
-        return empty
-    header = list(pd.read_csv(path, sep='\t', nrows=0).columns)
-    score_col = next((c for c in ('asr_path_score', 'CAAS_score') if c in header), None)
-    missing = [c for c in ('Gene', 'Position', 'side') if c not in header]
-    if score_col is None or missing:
-        raise ValueError(f"{path} must have Gene, Position, side and asr_path_score or CAAS_score "
-                         f"(filtered_discovery.tsv or position_scores.tsv).")
-    df = pd.read_csv(path, sep='\t', usecols=['Gene', 'Position', 'side', score_col])
-    df['side'] = df['side'].astype(str).str.strip().str.lower()
-    df = df[df['side'].isin(SIDES)]
-    n_rows = len(df)
-    df = df[df[score_col].map(is_positive_score)]
-    if len(df) < n_rows:
-        logging.info(f"{n_rows - len(df)} of {n_rows} observed rows have no positive score and are not observed positives")
-    out = pd.DataFrame({'gene': df['Gene'].astype(str), 'position': df['Position'].astype(np.int64),
-                        'side': df['side']})
-    return out.drop_duplicates().reset_index(drop=True)
+    df = observed_table(path)
+    df = df[df.side.isin(SIDES)]
+    return df[['Gene', 'Position', 'side']].rename(columns={'Gene': 'gene', 'Position': 'position'}).reset_index(drop=True)
 
 
 # ── Universe ──────────────────────────────────────────────────────────────────
@@ -176,71 +149,91 @@ def _membership(frame, tested):
     return in_tested, covered
 
 
-def build_universe(genes, null_df, observed_df, background_file=None, rate_min=RATE_MIN):
-    """U from the gene list, the null-positive positions, the observed positives and the tested positions."""
-    genes = list(dict.fromkeys(genes))
+def build_universe(genes, null_df, observed_df, background_file=None):
+    if background_file is None:
+        raise ValueError('Explicit tested positions are required')
+    if len(genes) != len(set(genes)):
+        raise ValueError('Duplicate background genes')
+    for g in genes:
+        identifier(g)
     gene_to_id = {g: i for i, g in enumerate(genes)}
-    metrics = {'n_genes': len(genes), 'n_null_positive_all': int(len(null_df))}
-
-    in_universe = null_df['gene'].isin(gene_to_id).to_numpy()
-    keep = in_universe.copy()
-    tested = None
-    metrics['tested_set'] = 'not_given'
-    if background_file is not None:
-        wanted = set(genes) | set(null_df['gene'].unique())
-        tested = read_tested(background_file, wanted)
-        in_tested, covered = _membership(null_df, tested)
-        n_cov = int(covered.sum())
-        rate = float(in_tested[covered].sum() / n_cov) if n_cov > 0 else 0.0
-        metrics['tested_rate'] = rate
-        if rate >= rate_min:
-            keep = in_universe & in_tested
-            metrics['tested_set'] = 'used'
-            metrics['n_tested_positions'] = int(sum(len(v) for g, v in tested.items() if g in gene_to_id))
-        else:
-            metrics['tested_set'] = 'ignored_incompatible'
-            logging.warning(f"tested positions ignored: only {100 * rate:.1f}% of the null-positive positions lie in them")
-    null_u = null_df[keep]
-    null_keys = pair_keys(null_u['gene'].map(gene_to_id).to_numpy(), null_u['position'].to_numpy())
-    metrics['n_null_positive_in_universe'] = int(len(null_u))
-
-    outside = observed_df[~observed_df['gene'].isin(gene_to_id)]
-    if len(outside):
-        logging.warning(f"{len(outside)} observed rows belong to genes outside the gene list and are dropped")
-    obs = observed_df[observed_df['gene'].isin(gene_to_id)]
-    top = np.unique(pair_keys(obs.loc[obs['side'] == 'top', 'gene'].map(gene_to_id).to_numpy(),
-                              obs.loc[obs['side'] == 'top', 'position'].to_numpy()))
-    bottom = np.unique(pair_keys(obs.loc[obs['side'] == 'bottom', 'gene'].map(gene_to_id).to_numpy(),
-                                 obs.loc[obs['side'] == 'bottom', 'position'].to_numpy()))
-    observed = np.union1d(top, bottom)
-    metrics['n_observed_positive'] = int(observed.size)
-    if tested is not None and metrics['tested_set'] == 'used':
-        obs_frame = pd.DataFrame({'gene': np.asarray(genes, dtype=object)[observed >> POS_BITS],
-                                  'position': observed & ((1 << POS_BITS) - 1)})
-        obs_in_tested, _ = _membership(obs_frame, tested)
-        metrics['n_observed_outside_tested'] = int((~obs_in_tested).sum())
-
-    # nd of every position of U comes from all null rows of the list's genes: an observed position that the
-    # null scores but CAAStools did not test keeps its nd.
-    in_genes = null_df[in_universe]
-    gene_keys = pair_keys(in_genes['gene'].map(gene_to_id).to_numpy(), in_genes['position'].to_numpy())
-    order = np.argsort(gene_keys, kind='stable')
-    sorted_keys = gene_keys[order]
-    sorted_nd = in_genes['nd'].to_numpy()[order]
-    keys = np.union1d(null_keys, observed)
+    tested = read_tested(background_file, set(genes))
+    keys = np.sort(np.concatenate([pair_keys(np.full(len(v), gene_to_id[g]), v)
+                                   for g, v in tested.items()])) if tested else np.array([], dtype=np.int64)
+    if observed_df.duplicated(['gene', 'position', 'side']).any():
+        raise ValueError('Duplicate observed position side')
+    inside, _ = _membership(observed_df, tested)
+    if not inside.all():
+        raise ValueError('Observed position outside declared tested universe / cleaned background')
+    side_keys = {}
+    for side in SIDES:
+        rows = observed_df[observed_df.side == side]
+        side_keys[side] = np.unique(pair_keys(rows.gene.map(gene_to_id), rows.position))
+    if null_df.duplicated(['gene', 'position']).any():
+        raise ValueError('Duplicate null positions')
+    keep, _ = _membership(null_df, tested)
+    rows = null_df[keep]
+    null_keys = pair_keys(rows.gene.map(gene_to_id), rows.position)
     nd = np.zeros(len(keys), dtype=np.int64)
-    at = np.minimum(np.searchsorted(sorted_keys, keys), max(len(sorted_keys) - 1, 0))
-    found = (sorted_keys[at] == keys) if len(sorted_keys) else np.zeros(len(keys), dtype=bool)
-    nd[found] = sorted_nd[at[found]]
-    metrics['n_universe'] = int(keys.size)
-    metrics['n_observed_not_scored_by_null'] = int((~np.isin(observed, sorted_keys)).sum())
-    return Universe(genes, gene_to_id, keys, nd, top, bottom, metrics)
+    nd[np.searchsorted(keys, null_keys)] = rows.nd.to_numpy()
+    observed = np.union1d(*side_keys.values())
+    metrics = {'n_genes': len(genes), 'n_universe': len(keys), 'tested_set': 'used',
+               'n_tested_positions': len(keys), 'n_observed_positive': len(observed),
+               'n_observed_outside_tested': 0, 'n_null_positive_all': len(null_df),
+               'n_null_positive_in_universe': int(keep.sum()),
+               'n_observed_not_scored_by_null': int((~np.isin(observed, null_keys)).sum())}
+    return Universe(genes, gene_to_id, keys, nd, side_keys['top'], side_keys['bottom'], metrics)
+
+
+def validate_null_inputs(observed, contract_path, null_path, roster_path, counts_path, blocks, output, background_positions):
+    # Reuse the scientific/checksum checks already approved for SCORING.
+    scoring = Path(__file__).resolve().parents[3]/'SCORING/local/src'
+    sys.path.insert(0, str(scoring))
+    from null_position_stats import validate_null, SCORE_RULE, read_tested as read_declared_tested
+    import pyarrow.parquet as pq
+    contract = json.loads(Path(contract_path).read_text())
+    if contract.get('version') != 1 or contract.get('observed_sha256') != sha256_file(observed) or not contract.get('scientific'):
+        raise ValueError('Observed provenance absent or checksum mismatch; regenerate CT_POSTPROC')
+    roster = Path(roster_path).read_text().splitlines()
+    counts = json.loads(Path(counts_path).read_text())
+    if counts.get('score_rule') != SCORE_RULE or not blocks:
+        raise ValueError('Canonical null blocks / score rule required')
+    # the null must have been scored over the positional universe of this background.output
+    validate_null([Path(b) for b in blocks], roster, pq.read_table(null_path), counts, output, contract,
+                  read_declared_tested(background_positions))
+    return {'N': len(roster), 'blocks': block_inventory(blocks), 'cycles': roster,
+            'observed_contract': contract}
+
+
+def position_calibration(observed, blocks, null_path, universe, N):
+    """Independent consumer check of SCORING p/q on exactly U and the same cycles."""
+    from null_position_stats import observed_best, count_block
+    import pyarrow.parquet as pq
+    genes, positions, scores = observed_best(Path(observed))
+    classes = pq.read_table(null_path)
+    ge = np.zeros(len(genes), dtype=np.int64)
+    for block in blocks:
+        counts = count_block(Path(block)/'positions.parquet', classes, np.array([]), genes, positions, scores)
+        ge += counts['k_emp'].to_numpy()
+    p = (ge + 1)/(N + 1)
+    q = np.ones(len(p))
+    if len(p):
+        order = np.argsort(p, kind='stable')
+        q[order] = np.minimum(1., np.minimum.accumulate((p[order]*len(universe.keys)/np.arange(1,len(p)+1))[::-1])[::-1])
+    nd_lookup = dict(zip(universe.keys.tolist(), universe.nd.tolist()))
+    keys = pair_keys([universe.gene_to_id[g] for g in genes], positions)
+    nd = np.array([nd_lookup[int(key)] for key in keys],dtype=np.int64)
+    if np.any(ge > nd) or np.any(nd > N):
+        raise ValueError('Invalid positional calibration counts')
+    return pd.DataFrame(dict(Gene=genes, Position=positions, CAAS_score=scores,
+                             **{'p.emp':p,'p.adj_bh':q,'nd':nd,'k_emp':ge}))
 
 
 def manifest(universe, inputs):
     """Manifest dict: SHA-256 of every input file, counts and the tested-set decision."""
     return {'component': 'universe',
-            'contract_version': 1,
+            'contract_version': 2,
+            'genes': universe.genes,
             'inputs': {k: {'path': os.path.abspath(v), 'sha256': sha256_file(v)} for k, v in inputs.items() if v},
             'gene_list_sha256': sha256_file(inputs['background_genes']),
             'gene_set_sha256': gene_list_digest(universe.genes),
@@ -253,9 +246,13 @@ def manifest(universe, inputs):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--background-genes', required=True, help='gene list, one gene per line')
-    p.add_argument('--background-positions', default=None, help='caastools background.output (gene<TAB>tested positions)')
+    p.add_argument('--background-positions', required=True, help='caastools background.output (gene<TAB>tested positions)')
     p.add_argument('--null-positions', required=True, help='null_positions.parquet')
     p.add_argument('--observed', required=True, help='filtered_discovery.tsv or position_scores.tsv')
+    p.add_argument('--blocks', nargs='+', required=True)
+    p.add_argument('--roster', required=True)
+    p.add_argument('--counts', required=True)
+    p.add_argument('--observed-contract', required=True)
     p.add_argument('--output-dir', required=True)
     p.add_argument('--log-level', default='INFO', choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'])
     a = p.parse_args()
@@ -263,17 +260,22 @@ def main():
 
     genes = load_universe_genes(a.background_genes)
     null_df = load_null_positive(a.null_positions)
-    if null_df.empty:
-        raise ValueError(f"{a.null_positions} has no position the null scores: the universe U cannot be defined.")
+    null = validate_null_inputs(a.observed, a.observed_contract, a.null_positions, a.roster, a.counts, a.blocks, a.output_dir, a.background_positions)
+    if set(null['observed_contract'].get('excluded_genes', [])) & set(genes):
+        raise ValueError('Cleaned background includes explicitly excluded observed genes')
     universe = build_universe(genes, null_df, load_observed_positive(a.observed), a.background_positions)
 
     os.makedirs(a.output_dir, exist_ok=True)
     universe.table().to_csv(os.path.join(a.output_dir, 'universe.tsv.gz'), sep='\t', index=False)
     inputs = {'background_genes': a.background_genes, 'background_positions': a.background_positions,
               'null_positions': a.null_positions, 'observed': a.observed}
-    with open(os.path.join(a.output_dir, 'universe_manifest.json'), 'w') as f:
-        json.dump(manifest(universe, inputs), f, indent=2, sort_keys=True)
-        f.write('\n')
+    inputs.update(roster=a.roster, counts=a.counts, observed_contract=a.observed_contract)
+    calibration = position_calibration(a.observed, a.blocks, a.null_positions, universe, null['N'])
+    calibration.to_csv(Path(a.output_dir)/'position_calibration.tsv',sep='\t',index=False)
+    meta = manifest(universe, inputs)
+    meta['null'] = null
+    meta['universe_sha256'] = sha256_file(Path(a.output_dir)/'universe.tsv.gz')
+    finish_manifest(a.output_dir, 'universe_manifest.json', meta)
     logging.info(f"|U| = {universe.metrics['n_universe']} "
                  f"({universe.metrics['n_observed_positive']} observed positive positions)")
 

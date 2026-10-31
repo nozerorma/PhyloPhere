@@ -26,11 +26,13 @@ include { POSENRICH } from './workflows/posenrich.nf'
 
 params.position_registry_memory = '500 MB'
 params.position_module_memory = '500 MB'
+params.posenrich_within_gene_memory = '500 MB'
 params.fixture_dir = null
 params.outdir = 'results'
 params.traitname = 'smoke'
 params.posenrich_radios = '0,5,10'
 params.null_source = 'live'     // live: null positions and blocks go in as channels; prior: --caas_null_dir holds them
+params.posenrich_holdout = 0
 params.level1 = 'true'         // level 1 (Accumulation) on the universe table
 
 workflow {
@@ -83,6 +85,10 @@ def stage_fixture(tmp_path):
     shutil.copy(files['custom'], fixture / 'custom.tsv')
     shutil.copytree(maps, fixture / 'maps')
     stage_null(fixture)
+    from posenrich_fixtures import annotation, calibrate_scores
+    calibrate_scores(fixture/'position_scores.tsv',fixture/'caas_permulation',fixture/'background.output',{'G1'})
+    annotation(fixture/'custom.tsv', ['G1'], tested=fixture/'background.output', background=fixture/'cleaned_background.txt')
+    p=fixture/'null_universe_summary.tsv';p.write_text(p.read_text().replace('N_cycles\tNA\t100','N_cycles\tNA\t40'))
     return files, maps, fixture
 
 
@@ -93,30 +99,21 @@ def stage_null(fixture):
     """Tested positions of G1 and a permulation null of two blocks of exchangeable cycles (caas_permulation layout)."""
     (fixture / 'background.output').write_text('G1\t0,1,2,3\n')
     null = fixture / 'caas_permulation'
-    rng = np.random.default_rng(5)
-    rows = [(f'b_{c}', p, float(rng.uniform(0.05, 1))) for c in range(1, N_CYCLES + 1) for p in range(4) if rng.random() < 0.5]
-    frame = pd.DataFrame(rows, columns=['cycle', 'position', 'all']).astype({'position': np.int32})
-    frame.insert(0, 'gene', 'G1')
-    nd = frame.groupby('position').size().rename('nd').reset_index().assign(gene='G1')
-    null.mkdir()
-    nd.to_parquet(null / 'null_positions.parquet', index=False)
-    for k, half in enumerate((range(1, N_CYCLES // 2 + 1), range(N_CYCLES // 2 + 1, N_CYCLES + 1))):
-        block = null / 'blocks' / f'blk_{k}'
-        block.mkdir(parents=True)
-        names = [f'b_{c}' for c in half]
-        frame[frame['cycle'].isin(names)].to_parquet(block / 'positions.parquet', index=False)
-        (block / 'cycles.txt').write_text('\n'.join(names) + '\n')
+    from posenrich_fixtures import canonical
+    rng=np.random.default_rng(5)
+    rows=[('G1', f'b_{c}', pos, float(rng.uniform(.05,1)),np.nan) for c in range(1,N_CYCLES+1) for pos in range(4) if rng.random()<.5]
+    canonical(null,fixture/'filtered_discovery.tsv',['G1'],rows,[f'b_{c}' for c in range(1,N_CYCLES+1)],real_matrix=True,tested=fixture/'background.output')
 
 
 def run_nextflow(main_name, script, tmp_path, args):
-    main = ROOT / main_name
-    main.write_text(script)
-    try:
-        cmd = [NEXTFLOW, 'run', str(main), '--outdir', str(tmp_path / 'out'), '-w', str(tmp_path / 'work'),
-               '-ansi-log', 'false', *args]
-        return subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT), timeout=280)
-    finally:
-        main.unlink(missing_ok=True)
+    project=tmp_path/'project';project.mkdir()
+    for name in ('workflows','subworkflows'):
+        (project/name).symlink_to(ROOT/name,target_is_directory=True)
+    main=project/main_name;main.write_text(script)
+    config=project/'serial.config';config.write_text("process.executor='local'\nprocess.cpus=1\nexecutor.queueSize=1\nprocess.beforeScript='export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VROOM_THREADS=1'\n")
+    cmd=[NEXTFLOW,'-log',str(project/'run.log'),'run',str(main),'-c',str(config),'--outdir',str(tmp_path/'out'),'-w',str(tmp_path/'work'),'-ansi-log','false','--position_registry_memory','500 MB','--position_module_memory','500 MB','--posenrich_within_gene_memory','500 MB','--posenrich_holdout','0','--posenrich_radios','0,5,10',*args]
+    return subprocess.run(cmd,capture_output=True,text=True,cwd=project,timeout=280)
+
 
 
 @pytest.mark.skipif(NEXTFLOW is None, reason='nextflow no disponible en PATH')
@@ -153,15 +150,16 @@ def test_posenrich_nextflow_smoke(tmp_path, null_source, level1):
     assert 'Level 2: concentration within genes' in text
     assert ('Level 1: not available' in text) == (level1 == 'false')
     if level1 == 'true':
+        for direction in ('all', 'top', 'bottom'):
+            assert (pos / f'accumulation/{direction}/accumulation_{direction}_results.csv').exists()
         # Level 1 reads the universe table of level 2: the same positions.
-        acc = pd.read_csv(pos / 'accumulation/accumulation_results.tsv', sep='\t')
+        acc = pd.read_csv(pos / 'accumulation/all/accumulation_all_results.csv')
         universe = pd.read_csv(pos / 'universe/universe.tsv.gz', sep='\t')
-        assert acc['n_positions'].sum() == len(universe)
-        assert acc['positives'].sum() == universe['observed_positive'].sum()
-        assert (pos / 'accumulation/accumulation_manifest.json').exists()
+        assert acc['PoolPositions'].sum() == len(universe)
+        assert acc['ActualCount'].sum() == universe['observed_positive'].sum()
     # El motor usa los 40 ciclos de los dos bloques y la lista de genes del universo coincide con la del registro.
     manifest = json.loads((pos / 'within_gene/within_gene_manifest.json').read_text())
-    assert manifest['counts']['n_null_cycles'] == N_CYCLES and manifest['counts']['n_blocks'] == 2
+    assert manifest['counts']['n_null_cycles'] == N_CYCLES and manifest['counts']['n_blocks'] == 1
     assert manifest['gene_list_check']['status'] == 'match'
     assert manifest['parameters']['min_genes'] == 1
     # El registro no escribe ningún GMT.

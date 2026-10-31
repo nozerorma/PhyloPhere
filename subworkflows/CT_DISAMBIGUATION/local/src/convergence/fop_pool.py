@@ -136,6 +136,14 @@ def pool_domains(
     """
     if not design_pairs:
         raise ValueError("pool_domains needs the design pairs {(hypothesis, domain): (top species, bottom species, pss)}")
+    for pair in design_pairs.values():
+        if pair[2] is not None and (not math.isfinite(float(pair[2])) or float(pair[2]) < 0):
+            raise ValueError('PSS weights must be finite and nonnegative')
+    for record in hyp_records:
+        for side in ('top','bottom'):
+            scores = (((record.get('sides') or {}).get(side) or {}).get('domain_scores') or {}).values()
+            if any(not math.isfinite(float(score)) or not 0 <= float(score) <= 1 for score in scores):
+                raise ValueError('Domain scores must be finite and in [0,1]')
     design = {(h, str(d)): pair for (h, d), pair in design_pairs.items()}
     design_hyps = {h for h, _d in design}
     sole = next(iter(design_hyps)) if len(design_hyps) == 1 else None

@@ -1,79 +1,50 @@
-#!/usr/bin/env nextflow
-// asr_diagnostics.nf — Render the ASR diagnostics report from the observed scoring output.
-// PhyloPhere | subworkflows/ASR_DIAGNOSTICS/
+// Report 9 describes completed observed scoring; it does not feed CT_POSTPROC.
+def shellQuote(value) { "'" + value.toString().replace("'", "'\"'\"'") + "'" }
 
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  ASR_DIAGNOSTICS_REPORT: renders 9.ASR_diagnostics.Rmd, which describes the
- *  distribution of asr_path_score, of its descriptor derived_agreement and of the
- *  ancestral-state posteriors of the Voronoi domains over the scored rows of
- *  caas_convergence_master.csv.
- *
- *  The report only displays params.ct_disambig_posterior_threshold; the threshold is
- *  applied upstream, when the ASR posteriors are read, and is not varied here.
- *
- *  Consumes:  ct_disambiguation/ directory of the observed scoring (CAAS_CORE_OBSERVED, or
- *             CAAS_OBSERVED when a discovery.tab is reused), posterior threshold
- *  Produces:  9.ASR_diagnostics.html, tsv/ (summary tables), plots/ (PNG)
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- */
-
-
-// ── ASR diagnostics report ─────────────────────────────────────────────────────
+def diagnostics_source_hash = java.security.MessageDigest.getInstance('SHA-256').digest([
+    'subworkflows/ASR_DIAGNOSTICS/local/9.ASR_diagnostics.Rmd',
+    'subworkflows/ASR_DIAGNOSTICS/local/src/diagnostics_io.R',
+    'subworkflows/TRAIT_ANALYSIS/local/src/report_style.R'
+].collect { file("${baseDir}/${it}").text }.join('\n').getBytes('UTF-8')).encodeHex().toString()
 
 process ASR_DIAGNOSTICS_REPORT {
-    tag "asr_diagnostics"
+    ext report_source_hash: diagnostics_source_hash
+    cache 'deep'
+    tag 'asr_diagnostics'
     label 'process_reporting'
     label 'error_retry'
     publishDir path: "${params.outdir}/asr_diagnostics", mode: 'copy', overwrite: true, pattern: '{tsv/**,plots/**}'
-    publishDir path: "${params.outdir}/html_reports",   mode: 'copy', overwrite: true, pattern: '*.html'
+    publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'
 
     input:
-    path disambiguation_dir   // full ct_disambiguation/ output directory
-    val  posterior_threshold  // params.ct_disambig_posterior_threshold
+    tuple val(observed_hash), path(disambiguation_dir, stageAs: 'inputs/observed/*')
+    val posterior_threshold
 
     output:
-    path "*.html",  emit: report
-    path "tsv/**",  emit: tables,  optional: true
-    path "plots/**", emit: plots,  optional: true
+    path '9.ASR_diagnostics.html', emit: report
+    path 'tsv/**', emit: tables
+    path 'plots/**', emit: plots, optional: true
 
     script:
-    def local_dir         = "${baseDir}/subworkflows/ASR_DIAGNOSTICS/local"
-    def disambig_dir_str  = disambiguation_dir.toString()
-    def threshold_str     = posterior_threshold.toString()
-    def outdir_str        = "${params.outdir}/asr_diagnostics"
-
-    if (params.use_singularity || params.use_apptainer) {
-        """
-        cp ${local_dir}/9.ASR_diagnostics.Rmd .
-
-        REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
-            rmarkdown::render(
-                '9.ASR_diagnostics.Rmd',
-                params = list(
-                    disambig_dir        = '${disambig_dir_str}',
-                    posterior_threshold = ${threshold_str},
-                    output_dir          = '.'
-                ),
-                output_file = '9.ASR_diagnostics.html'
-            )
-        "
-        """
-    } else {
-        """
-        cp ${local_dir}/9.ASR_diagnostics.Rmd .
-
-        REPORT_CORES=${task.cpus} Rscript -e "
-            rmarkdown::render(
-                '9.ASR_diagnostics.Rmd',
-                params = list(
-                    disambig_dir        = '${disambig_dir_str}',
-                    posterior_threshold = ${threshold_str},
-                    output_dir          = '.'
-                ),
-                output_file = '9.ASR_diagnostics.html'
-            )
-        "
-        """
-    }
+    def local_dir = "${baseDir}/subworkflows/ASR_DIAGNOSTICS/local"
+    def style = "${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R"
+    def report_params = groovy.json.JsonOutput.toJson([
+        disambig_dir: disambiguation_dir.toString(),
+        posterior_threshold: posterior_threshold, output_dir: '.'
+    ])
+    def rscript = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
+    """
+    echo '${task.ext.report_source_hash}' > report_source.sha256
+    echo '${observed_hash}' > observed_input.sha256
+    cp -R ${shellQuote(local_dir)}/. .
+    cp ${shellQuote(style)} src/
+    cat > report_params.json <<'PHYLOPHERE_REPORT_PARAMS'
+${report_params}
+PHYLOPHERE_REPORT_PARAMS
+    REPORT_CORES=${task.cpus} ${rscript} - <<'PHYLOPHERE_RENDER_R'
+    rmarkdown::render('9.ASR_diagnostics.Rmd',
+        params = jsonlite::read_json('report_params.json', simplifyVector = TRUE),
+        output_file = '9.ASR_diagnostics.html', envir = new.env())
+PHYLOPHERE_RENDER_R
+    """
 }

@@ -60,37 +60,38 @@ PositionAxes = namedtuple(
 # ``compute_domain_scores`` return ``{"top", "bottom", "domain_meta"}`` that the
 # treeless pooler (``fop_pool.pool_domains``) consumes; it is populated in the
 # axes-only replay. `n_hypotheses` is the number M of FOP hypotheses that detected the position in the cycle.
-# `conserved` is True when the discovery row of the hypothesis has pairs that carry the same residue on both sides
-# (the tolerance of the discovery admitted them); the strict pooling leaves those rows out.
+# `conserved` means foreground/background residue-type overlap in the hypothesis;
+# strict pooling leaves those rows out, independently of identical-pair counts.
 PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None, None, False)
 
 
 def _derive_convergent_call(all_rows: List["ConvergenceResult"], attr: str) -> str:
-    """Pool one side's per-hypothesis ``caas`` fg/bg strings into a
-    single "<derived>/<ancestral>" call: exclude each pair index where fg==bg
-    (conserved; caas_id.py's conserved-pair check also compares the two sides at
-    the same index), then union the surviving divergent
-    residues per side across every pooled hypothesis. The union summarizes the
-    whole pool instead of reflecting one hypothesis's raw pattern.
+    """Pool known residues from actual species pairs across hypotheses.
+
+    Exclude known identical pairs and retain known members of incomplete pairs.
+    Raw strings are usable only when their pair positions are unambiguous.
     """
-    fg_chars: set = set()
-    bg_chars: set = set()
-    for r in all_rows or []:
-        val = str(getattr(r, attr, "") or "")
-        parts = val.split("/")
-        if len(parts) != 2:
-            continue
-        fg, bg = parts
-        if len(fg) != len(bg):
-            continue
-        for f, b in zip(fg, bg):
-            if f == b:
+    from src.utils.amino import clean_amino
+    fg_chars, bg_chars = set(), set()
+    for row in all_rows or []:
+        details = getattr(row, 'pair_details', None)
+        if details is not None:
+            pairs = [(p.get('top_tip_residue', p.get('top_tip_mode')),
+                      p.get('bottom_tip_residue', p.get('bottom_tip_mode'))) for p in details]
+        else:
+            parts = str(getattr(row, attr, '') or '').split('/')
+            if len(parts) != 2 or len(parts[0]) != len(parts[1]):
+                raise ValueError('Ungapped CAAS annotation needs domain/species pair details')
+            pairs = zip(*parts)
+        for fg, bg in pairs:
+            fg, bg = clean_amino(fg), clean_amino(bg)
+            if fg is not None and bg is not None and fg == bg:
                 continue
-            fg_chars.add(f)
-            bg_chars.add(b)
-    if not fg_chars and not bg_chars:
-        return ""
-    return "".join(sorted(fg_chars)) + "/" + "".join(sorted(bg_chars))
+            if fg is not None:
+                fg_chars.add(fg)
+            if bg is not None:
+                bg_chars.add(bg)
+    return ''.join(sorted(fg_chars)) + '/' + ''.join(sorted(bg_chars)) if fg_chars or bg_chars else ''
 
 
 def _pooled_pair_lca(hyp_rows: List[Dict[str, Any]], side: str) -> Optional[List[Tuple[Any, Any, int, float]]]:
@@ -575,10 +576,7 @@ def analyze_caas_position_disambiguation(
             domain_sig=domain_sig,
         )
     except Exception as e:  # a path-scoring failure must not stop the disambiguation
-        domain_split = None
-        logger.warning(
-            f"ASR path scoring failed for {gene}:{caas_pos.position}: {e}"
-        )
+        raise RuntimeError(f'{gene}:{caas_pos.position}: ASR path scoring failed') from e
 
     base_result = ConvergenceResult(
         gene=gene,
@@ -726,6 +724,7 @@ def analyze_gene_disambiguation(
     # the pairs of every hypothesis would mix contrasts of unrelated hypotheses
     # into the domains and discard the independence between the pairs of one
     # hypothesis.
+    taxid_mapping = taxid_mapping or {}
     trait_pairs_all: Dict[int, List[Tuple[str, str]]] = trait_pairs
 
     def _dedup_pairs(pairs: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
@@ -777,7 +776,7 @@ def analyze_gene_disambiguation(
     # depend only on the alignment and the tree, which are fixed for the gene.
     # They are built here (or reused from the caller's hoisted context), outside
     # the per-position loop, which changes no result.
-    if any_pairs and taxid_mapping and (hoisted_seq_by_id is None or hoisted_seq_by_species is None):
+    if any_pairs and (hoisted_seq_by_id is None or hoisted_seq_by_species is None):
         hoisted_seq_by_id, hoisted_seq_by_species = build_alignment_lookup(
             alignment_data.alignment, alignment_data.taxid_to_species
         )
@@ -840,7 +839,7 @@ def analyze_gene_disambiguation(
             tip_diagnostics: Dict[str, Any] = {}
             domain_sig: Optional[tuple] = None
             try:
-                if contrast_pairs and taxid_mapping:
+                if contrast_pairs:
                     seq_by_id, seq_by_species = hoisted_seq_by_id, hoisted_seq_by_species
                     site = caas_pos.position_one_based
                     contrast_key = tuple(contrast_pairs)
@@ -964,7 +963,7 @@ def analyze_gene_disambiguation(
                         }
                         tip_diagnostics["node_mapping"] = node_mapping
             except Exception as e:
-                logger.warning(f"Tip-level analysis failed for position {pos}: {e}")
+                raise RuntimeError(f'{gene}:{pos}: tip-level analysis failed') from e
 
             # Without trait pairs that overlap the alignment and the taxid mapping
             # there is no focal node mapping for the node-level ASR analysis.
@@ -1003,7 +1002,7 @@ def analyze_gene_disambiguation(
                     logger.warning(
                         f"ASR path scoring failed for {gene}:{caas_pos.position}: {e}"
                     )
-                    axes_sides = None
+                    raise RuntimeError(f'{gene}:{pos}: ASR path scoring failed') from e
                 results.append(
                     PositionAxes(
                         position=caas_pos.position,
@@ -1013,7 +1012,7 @@ def analyze_gene_disambiguation(
                         domain_scores=None,
                         derived_agreement=None,
                         sides=axes_sides,
-                        conserved=bool(caas_pos.conserved_pair),
+                        conserved=caas_pos.is_conserved_meta,
                     )
                 )
                 logger.debug(f"✓ Axes-only position {pos}")
@@ -1044,9 +1043,7 @@ def analyze_gene_disambiguation(
 
         except Exception as e:
             logger.exception(f"Failed to analyze position {pos}: {e}")
-            diagnostics["skipped_positions"] += 1
-            diagnostics["skip_reasons"][str(e).split(":")[0]] += 1
-            continue
+            raise RuntimeError(f'{gene}:{pos}: position scoring failed') from e
 
     if keep_unpooled and not axes_only:
         diagnostics["unpooled"] = list(results)
@@ -1072,7 +1069,7 @@ def analyze_gene_disambiguation(
                 )
             results = pooled_rows
         except Exception as e:  # a pooling failure must not stop the disambiguation
-            logger.warning(f"[{gene}] domain pooling failed: {e}")
+            raise RuntimeError(f'{gene}: domain pooling failed') from e
 
     if axes_only:
         logger.debug(
