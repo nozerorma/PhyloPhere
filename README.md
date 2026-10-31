@@ -152,7 +152,7 @@ Inputs, module switches and metadata shared by all modules.
 | `max_contrasts`, `min_contrasts` | 0, 3 | Cap on selected pairs (0 = no cap); minimum pairs to proceed |
 | `n_trait`, `c_trait` | empty | Count traits: sampled individuals and cases (Jeffreys intervals) |
 | `secondary_trait`, `branch_trait` | empty | Extra trait shown in reports; trait colouring branches |
-| `clade_name`, `clade_taxid`, `taxon_of_interest` | primates, 9443, family | Report metadata and taxonomic rank of interest |
+| `clade_name`, `taxon_of_interest` | primates, family | Report metadata and taxonomic rank of interest |
 | `ref_species_name`, `ref_species_taxid` | Homo_sapiens, 9606 | Reference species for annotations, STRING and BioMart |
 | `prune_data`, `prune_list`, `prune_list_secondary` | empty | Manual species pruning |
 | `toy_mode`, `toy_n` | false, 1000 | Subsample alignments for smoke tests |
@@ -279,7 +279,6 @@ HyPhy FADE tests directional substitution towards amino acids on the foreground 
 | `fade_grid`, `fade_concentration` | 20, 0.5 | Posterior grid and Dirichlet prior |
 | `fade_chains`, `fade_chain_length`, `fade_burn_in`, `fade_samples` | 5, 2000000, 1000000, 1000 | MCMC settings, ignored by Variational-Bayes |
 | `selection_prep_batch_size`, `fade_batch_size` | 500, 200 | Alignments per prep task; genes per FADE task |
-| `fade_min_genes_for_heatmap` | 2 | Legacy compatibility option; current report has no heatmap |
 | `fade_universe_file`, `fade_tables_dir_top`, `fade_tables_dir_bottom` | empty | Standalone: tested genes; `selection/fade/<direction>` of a previous run |
 
 SELECTION_PREP validates alignments before FADE, preserves gene IDs with internal dots and uses the same preparation rules for individual genes and batches. FASTA and PHYLIP both exclude sequences composed entirely of `-`, `?` and `X/x`, then retain tree taxa. Malformed alignments fail the task. Each processed gene has a JSON audit under `selection/prep_audit/`, including excluded taxa and genes with no usable tree taxa. Species pools must contain disjoint top/bottom groups; their optional `pair` column does not impose a paired design. Preparation cache keys include input and helper content.

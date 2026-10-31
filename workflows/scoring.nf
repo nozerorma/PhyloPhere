@@ -237,11 +237,11 @@ workflow SCORING {
         }
 
         def caas_pos_sample_resolved = (caas_pos_sample_ch ?: Channel.empty())
-            .ifEmpty { optional_input(params.caas_pos_sample_file,'NO_CAAS_POS_SAMPLE') }
+            .ifEmpty { file('NO_CAAS_POS_SAMPLE') }
             .collect()
             .map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] }
         def caas_pos_quantiles_resolved = (caas_pos_quantiles_ch ?: Channel.empty())
-            .ifEmpty { optional_input(params.caas_pos_quantiles_file,'NO_CAAS_POS_QUANTILES') }
+            .ifEmpty { file('NO_CAAS_POS_QUANTILES') }
             .collect()
             .map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] }
 

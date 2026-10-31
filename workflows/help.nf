@@ -338,7 +338,6 @@ Usage:
 --fade_chains, --fade_chain_length,
 --fade_burn_in, --fade_samples               (MCMC-only settings; ignored by Variational-Bayes)
 --fade_concentration                            <FLOAT>                  0.5
---fade_min_genes_for_heatmap                       <INTEGER>                2     (legacy compatibility option; no effect)
 --fade_universe_file                              <"gene_list">            null  (else falls back to cleaned background)
 --fade_tables_dir_top / --fade_tables_dir_bottom    <"dir/selection/fade/<direction>">   null  (scoring and report from the merged FADE tables of a prior run)
 '''
