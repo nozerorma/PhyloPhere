@@ -44,6 +44,7 @@ process CHECK_MIN_CONTRASTS {
     path "low_contrasts.skip",           emit: skip_flag,                 optional: true
 
     script:
+    def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python' : 'python'
     def arguments = groovy.json.JsonOutput.toJson([
         traitfile: traitfile.toString(), permulation_traitfile: permulation_traitfile.toString(),
         trait_dir: trait_dir.toString(), min_contrasts: params.min_contrasts != null ? params.min_contrasts : 3,
@@ -54,7 +55,7 @@ process CHECK_MIN_CONTRASTS {
     cat > gate_inputs.json <<'PHYLOPHERE_GATE_INPUTS'
 ${arguments}
 PHYLOPHERE_GATE_INPUTS
-    python check_contrasts.py gate_inputs.json
+    ${py} check_contrasts.py gate_inputs.json
     """
 }
 

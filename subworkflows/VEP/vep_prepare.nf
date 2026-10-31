@@ -17,11 +17,12 @@ process VEP_PREPARE {
     path 'validated_inputs.json', emit: audit
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def src = "${baseDir}/subworkflows/VEP/local/src"
     def proteins_arg = proteins ? "--proteins ${vepQuote(proteins)}" : ''
     """
     cp ${vepQuote(src+'/vep_common.py')} ${vepQuote(src+'/prepare_targets.py')} .
-    python3 prepare_targets.py --scores ${vepQuote(scores)} --maps ${vepQuote(maps)} \
+    ${py3} prepare_targets.py --scores ${vepQuote(scores)} --maps ${vepQuote(maps)} \
         ${proteins_arg} --fingerprint ${vepQuote(fingerprint)}
     """
 }

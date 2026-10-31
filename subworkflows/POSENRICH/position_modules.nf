@@ -44,11 +44,12 @@ process POSITION_REGISTRY {
     path 'registry', emit: registry
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def source_hash = modularSourceHash(['src/posenrich_registry.py', 'src/position_sources.py', 'src/posenrich_universe.py', 'src/posenrich_members.py'])
     // The registry tolerates every absent source (see optionalFlag).
     """
     # POSENRICH sources SHA256: ${source_hash}
-    python3 ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_registry.py \\
+    ${py3} ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_registry.py \\
         ${optionalFlag('position_scores', position_scores)} \\
         ${optionalFlag('postproc', postproc)} \\
         ${optionalFlag('null_universe', null_universe)} \\
@@ -81,10 +82,11 @@ process POSENRICH_CHARACTERIZE {
     path 'characterization/position_characterization.tsv', emit: position_char
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def source_hash = modularSourceHash(['src/posenrich_members.py', 'src/posenrich_characterize.py'])
     """
     # POSENRICH sources SHA256: ${source_hash}
-    python3 ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_characterize.py \\
+    ${py3} ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_characterize.py \\
         --registry_dir registry --output_dir characterization
     """
 }
@@ -112,17 +114,19 @@ process POSENRICH_UNIVERSE {
     path 'universe/position_calibration.tsv', emit: calibration
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
+    def rscript = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def source_hash = modularSourceHash(['src/posenrich_universe.py', '../../SCORING/local/src/validate_position_matrices.R'])
     def tested_arg = background_positions.name.startsWith('NO_') ? '' : "--background-positions '${background_positions}'"
     """
     # POSENRICH sources SHA256: ${source_hash}
-    python3 ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_universe.py \\
+    ${py3} ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_universe.py \\
         --background-genes '${background_genes}' ${tested_arg} \\
         --null-positions '${null_positions}' \\
         --observed '${observed}' \\
         --observed-contract '${observed_contract}' --roster '${roster}' --counts '${counts}' --blocks blk_* \\
         --output-dir universe
-    Rscript ${baseDir}/subworkflows/SCORING/local/src/validate_position_matrices.R universe blk_*
+    ${rscript} ${baseDir}/subworkflows/SCORING/local/src/validate_position_matrices.R universe blk_*
     """
 }
 
@@ -146,11 +150,12 @@ process POSENRICH_WITHIN_GENE {
     path 'within_gene', emit: within_gene
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def source_hash = modularSourceHash(['src/posenrich_within_gene.py', 'src/posenrich_members.py', 'src/posenrich_universe.py'])
     def collections_arg = params.posenrich_collections ? "--collections '${params.posenrich_collections}'" : ''
     """
     # POSENRICH sources SHA256: ${source_hash}
-    python3 ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_within_gene.py \\
+    ${py3} ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_within_gene.py \\
         --universe universe.tsv.gz --universe-manifest universe_manifest.json --observed '${observed}' --registry-dir registry \\
         --blocks blk_* --output-dir within_gene \\
         --min-genes ${params.posenrich_min_genes ?: 2} \\
@@ -171,10 +176,11 @@ process POSENRICH_PROXIMITY {
     path 'proximity', emit: proximity
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def source_hash = modularSourceHash(['src/posenrich_members.py', 'src/posenrich_proximity.py'])
     """
     # POSENRICH sources SHA256: ${source_hash}
-    python3 ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_proximity.py \\
+    ${py3} ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_proximity.py \\
         --registry_dir registry --output_dir proximity \\
         --radios '${params.posenrich_radios ?: '0,5,10'}'
     """
@@ -201,6 +207,7 @@ process POSENRICH_REPORT {
     path "report_settings.json", emit: settings
 
     script:
+    def rscript = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def source_hash = modularSourceHash(['13.POSENRICH_report.Rmd']) + modularSourceHash(['../../ENRICHMENT/local/src/report_presentation.R'])
     def local_dir = "${baseDir}/subworkflows/POSENRICH/local"
     def traitname = params.traitname ?: 'unknown_trait'
@@ -210,7 +217,7 @@ process POSENRICH_REPORT {
     cp -R ${local_dir}/* .
     mkdir -p src
     cp ${baseDir}/subworkflows/ENRICHMENT/local/src/report_presentation.R src/
-    Rscript -e "
+    ${rscript} -e "
         rmarkdown::render(
             '13.POSENRICH_report.Rmd',
             params = list(

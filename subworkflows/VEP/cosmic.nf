@@ -18,11 +18,12 @@ process COSMIC_MAP {
     path 'cosmic_scores.tsv.manifest.json', emit: audit
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def src = "${baseDir}/subworkflows/VEP/local/src"
     """
     # Content fingerprint: ${fingerprint}
     cp ${vepQuote(src+'/map_to_cosmic.py')} ${vepQuote(src+'/map_database.py')} ${vepQuote(src+'/vep_common.py')} .
-    python3 map_to_cosmic.py --targets ${vepQuote(targets)} --database ${vepQuote(database)} \
+    ${py3} map_to_cosmic.py --targets ${vepQuote(targets)} --database ${vepQuote(database)} \
         --manifest ${vepQuote(database_manifest)} --output cosmic_scores.tsv
     """
 }

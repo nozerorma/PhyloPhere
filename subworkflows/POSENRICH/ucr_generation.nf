@@ -18,10 +18,11 @@ process COMPUTE_UCR_POSITIONS {
     path "ucr_positions.tsv.gz.manifest.json", emit: manifest, optional: true
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def source_hash = scoringHash(['build_reference_tables.py','compute_variability.py','detect_ucr.py'].collect { file("${baseDir}/bin/${it}") })
     """
     # Sources: ${source_hash}
-    python3 ${baseDir}/bin/build_reference_tables.py alignment-ucr \\
+    ${py3} ${baseDir}/bin/build_reference_tables.py alignment-ucr \\
         --alignment-dir "${alignment_dir}" \\
         --output ucr_positions.tsv.gz --cpus ${task.cpus}
     """

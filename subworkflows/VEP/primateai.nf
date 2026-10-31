@@ -18,11 +18,12 @@ process PRIMATEAI_MAP {
     path 'primateai_mapped.tsv.manifest.json', emit: audit
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def src = "${baseDir}/subworkflows/VEP/local/src"
     """
     # Content fingerprint: ${fingerprint}
     cp ${vepQuote(src+'/map_to_primateai.py')} ${vepQuote(src+'/map_database.py')} ${vepQuote(src+'/vep_common.py')} .
-    python3 map_to_primateai.py --targets ${vepQuote(targets)} --database ${vepQuote(database)} \
+    ${py3} map_to_primateai.py --targets ${vepQuote(targets)} --database ${vepQuote(database)} \
         --manifest ${vepQuote(database_manifest)} --output primateai_mapped.tsv
     """
 }

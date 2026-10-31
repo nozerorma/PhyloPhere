@@ -54,8 +54,9 @@ process DERIVE_ALI_SP_NAMES {
     path "ali_sp_names.txt", emit: sp_names
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     """
-    python3 "${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/alignment_species.py" \\
+    ${py3} "${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/alignment_species.py" \\
         --alignment "${alignment_dir}" \\
         --format "${params.ali_format ?: 'fasta'}" \\
         --output ali_sp_names.txt
@@ -83,6 +84,7 @@ process TREE_CLEANUP {
     path "species_taxid_map.tsv",            emit: taxid_map
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     // The curated trait table keeps the format (extension) of the input table. Without a trait
     // table (the NO_FILE sentinel) only the tree and the species tables are curated.
     // TaskPath's name/getFileName can include the stageAs directory.
@@ -95,7 +97,7 @@ process TREE_CLEANUP {
         ? "--traits \"${trait_file}\" --sp-col \"${params.sp_colname}\" --traits-out \"curated_traits.${ext}\""
         : ""
     """
-    python3 "${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/tree_cleanup.py" \\
+    ${py3} "${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/tree_cleanup.py" \\
         --tree          "${tree_file}" \\
         --ali-sp-names  "${species_arg}" \\
         --tax-id        "${tax_arg}" \\

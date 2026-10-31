@@ -72,10 +72,11 @@ process EXTRACT_DISAMBIG_DIR {
     input: path tarball
     output: path 'extracted', emit: dir
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def helper = "${baseDir}/subworkflows/ASR_DIAGNOSTICS/local/src/extract_diagnostics.py"
     """
     echo '${task.ext.extractor_hash}' > extractor.sha256
-    python3 ${asrShellQuote(helper)} ${asrShellQuote(tarball)} extracted
+    ${py3} ${asrShellQuote(helper)} ${asrShellQuote(tarball)} extracted
     """
 }
 

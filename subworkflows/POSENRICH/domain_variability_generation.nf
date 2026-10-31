@@ -38,6 +38,7 @@ process COMPUTE_DOMAIN_VARIABILITY {
     path "domain_variability.tsv.manifest.json", emit: manifest, optional: true
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def cache_dir = params.pfam_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/pfam"
     def source_hash = scoringHash(['compute_domain_variability.py','map_domain_variability.py'].collect { file("${baseDir}/bin/${it}") })
     def prepared = ['Pfam-A.hmm','Pfam-A.clans.tsv','Pfam-A.hmm.h3f','Pfam-A.hmm.h3i','Pfam-A.hmm.h3m','Pfam-A.hmm.h3p'].collect { file("${cache_dir}/${it}") }.findAll { it.isFile() }
@@ -45,7 +46,7 @@ process COMPUTE_DOMAIN_VARIABILITY {
     def ref_species = params.domain_ref_species ?: 'Homo_sapiens'
     """
     # Sources: ${source_hash}; prepared Pfam resource content: ${resource_hash}
-    python3 ${baseDir}/bin/compute_domain_variability.py \\
+    ${py3} ${baseDir}/bin/compute_domain_variability.py \\
         --alignment-dir "${alignment_dir}" \\
         --output-dir . \\
         --cpus ${task.cpus} \\

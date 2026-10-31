@@ -49,6 +49,7 @@ process DOMINO_BUILD_NETWORK {
     path "slices.txt",               emit: slices
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def source_hash = java.security.MessageDigest.getInstance('SHA-256')
         .digest(file("${baseDir}/subworkflows/ENRICHMENT/local/src/build_domino_network.py").text.getBytes('UTF-8')).encodeHex().toString()
     def db_dir_arg = string_db_dir ? "--string-db-dir ${string_db_dir}" : ""
@@ -63,7 +64,7 @@ process DOMINO_BUILD_NETWORK {
         echo "[DOMINO_BUILD_NETWORK] Skipping network build: background file is absent or sentinel (\${bg_name})"
         touch network.sif network_edge_scores.tsv slices.txt
     else
-        python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/build_domino_network.py \
+        ${py3} ${baseDir}/subworkflows/ENRICHMENT/local/src/build_domino_network.py \
             --cleaned-background ${background_file} \
             --score-threshold ${score_threshold} \
             ${db_dir_arg} \
@@ -100,6 +101,7 @@ process DOMINO_RUN_MODULES {
     path "domino_modules", emit: modules_dir
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def source_hash = java.security.MessageDigest.getInstance('SHA-256')
         .digest(["run_domino_modules.py","prepare_ami_lists.py"].collect { file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text }.join("\n").getBytes('UTF-8')).encodeHex().toString()
     """
@@ -111,10 +113,10 @@ process DOMINO_RUN_MODULES {
         exit 0
     fi
 
-    python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/prepare_ami_lists.py \
+    ${py3} ${baseDir}/subworkflows/ENRICHMENT/local/src/prepare_ami_lists.py \
         --method ${consumer_label} --sources ${gene_lists} --output-dir domino_gene_lists
 
-    python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/run_domino_modules.py \
+    ${py3} ${baseDir}/subworkflows/ENRICHMENT/local/src/run_domino_modules.py \
         --network ${network_sif} \
         --slices ${slices_file} \
         --gene-lists-dir domino_gene_lists \

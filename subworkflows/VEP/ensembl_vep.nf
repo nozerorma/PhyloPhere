@@ -26,12 +26,13 @@ process ENSEMBL_VEP_ANNOTATE {
     path 'vep_warnings.txt', optional: true
 
     script:
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def src = "${baseDir}/subworkflows/VEP/local/src"
     def cache_arg = cache_dir ? "--cache ${vepQuote(cache_dir)}" : ''
     """
     cp ${vepQuote(src+'/run_ensembl.py')} ${vepQuote(src+'/build_vep_variants.py')} \
         ${vepQuote(src+'/join_vep_output.py')} ${vepQuote(src+'/vep_common.py')} .
-    python3 run_ensembl.py --targets ${vepQuote(targets)} --output ensembl_vep_mapped.tsv \
+    ${py3} run_ensembl.py --targets ${vepQuote(targets)} --output ensembl_vep_mapped.tsv \
         --fingerprint ${vepQuote(fingerprint)} --mode ${vepQuote(settings.mode)} ${cache_arg} \
         --host ${vepQuote(settings.host)} --port ${vepQuote(settings.port)}
     """
