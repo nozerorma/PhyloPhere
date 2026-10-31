@@ -10,7 +10,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from test_scoring_workflow import project as scoring_project
-from posenrich_fixtures import annotation, seal_block, digest
+from posenrich_fixtures import annotation, seal_block, digest, universe_provenance
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -107,6 +107,12 @@ def test_joint_families_and_cache(integrated):
     before_stat=float(wg[0]['statistic'])
     (p/'tested').write_text(''.join(f'{g}\t0,1,2,3,4,5\n' for g in genes))
     annotation(p/'custom.tsv',genes,tested=p/'tested',background=p/'genes.txt')
+    # A null is valid only for the positional universe it was scored over (checked against background.output), so the
+    # enlarged universe is recorded in the block's provenance; its detections, and hence the raw counts, stay as they are.
+    block=p/'prior/blocks/blk_000001'
+    counts=json.loads((block/'counts.json').read_text())
+    counts['scoring_provenance']['universe']=universe_provenance(p/'tested')
+    (block/'counts.json').write_text(json.dumps(counts));seal_block(block)
     run(p,'-resume')
     after=rows(p/'out/scoring/position_scores.tsv')
     for r in after:
