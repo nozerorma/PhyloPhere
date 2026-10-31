@@ -96,7 +96,6 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="selection_prep_batch_size", help="Genes per alignment-preparation task; default 500. Smaller values give more, shorter Nextflow tasks.", label="Alignment-prep genes per task", importance="optional"),
         FieldSpec(name="fade_batch_size", help="Genes per FADE Nextflow task; default 200. Smaller values give more, shorter tasks.", label="FADE genes per task", importance="optional"),
         Section("Reporting and precomputed inputs"),
-        FieldSpec(name="fade_min_genes_for_heatmap", help="Minimum number of genes needed to draw the report heatmaps; default 2.", label="Min genes for report heatmaps", importance="optional"),
         FieldSpec(name="fade_universe_file", help="Gene list defining the FADE tested universe; blank falls back to the cleaned background.", label="FADE tested-gene universe file", kind="path_file", importance="optional"),
     ),
 )

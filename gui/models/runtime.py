@@ -80,14 +80,13 @@ class RuntimeConfig:
     tree_file: str = ""  # --tree (TREE_FILE)
     trait_file: str = ""  # --my_traits (TRAIT_FILE)
     prune_dir: str = ""  # PRUNE_DIR, joined with each row's prune/prune_secondary filename
-    branch_trait: str = "LQ"  # --branch_trait
+    branch_trait: str = ""  # --branch_trait (empty: no colouring, as in conf/common.config)
     ali_sp_names: str = ""  # --ali_sp_names (optional)
     tax_id_file: str = ""  # --tax_id (INPUT_TAX_ID)
 
     # --- Reporting / contrast-selection dataset shape (conf/common.config) ---
     sp_colname: str = "species"  # --sp_colname
     clade_name: str = "primates"  # --clade_name
-    clade_taxid: str = "9443"  # Clade-level NCBI TaxID 
     taxon_of_interest: str = "family"  # --taxon_of_interest
     ref_species_name: str = "Homo_sapiens"  # Reference species name (in alignments / annotations)
     ref_species_taxid: str = "9606"  # Reference species NCBI TaxID (e.g. for STRING / BioMart)

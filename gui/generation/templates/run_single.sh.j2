@@ -219,8 +219,6 @@ fi
 {% endif %}
 if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     DISCOVERY_FROM="${PRECOMP_CAAS_OUTDIR}/caastools/discovery.tab"
-    # meta_caas/ is where CT_META_CAAS publishes.
-    META_CAAS_FROM="${PRECOMP_CAAS_OUTDIR}/meta_caas/meta_caas/meta_caas.tsv"
     BACKGROUND_INPUT="${PRECOMP_CAAS_OUTDIR}/caastools/background_genes.output"
     POSENRICH_BACKGROUND_FILE="${PRECOMP_CAAS_OUTDIR}/caastools/background.output"
     # These exist only if the source run had --caas_permulation_enrichment on. The caas_permulation/ directory
@@ -258,7 +256,7 @@ fi
 {% if strict_pass %}
 # The strict pass never reads CAAS-derived tables from outside <outdir>/strict/: a missing file stops the script instead of
 # letting the pass run on tables of another labeling.
-for _f in "${DISCOVERY_FROM:-}" "${META_CAAS_FROM:-}" "${SCORING_POSTPROC_INPUT:-}" "${SCORING_BACKGROUND_INPUT:-}"; do
+for _f in "${DISCOVERY_FROM:-}" "${SCORING_POSTPROC_INPUT:-}" "${SCORING_BACKGROUND_INPUT:-}"; do
     [ -z "$_f" ] || [ -e "$_f" ] || { echo "[ERROR] strict pass: missing $_f" >&2; exit 1; }
 done
 {% endif %}
@@ -464,7 +462,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "max_time": "$MAX_TIME",
   "sp_colname": "${SP_COLNAME:-species}",
   "clade_name": "${CLADE_NAME:-primates}",
-  "clade_taxid": "${CLADE_TAXID:-9443}",
   "taxon_of_interest": "${TAXON_OF_INTEREST:-family}",
   "ref_species_name": "${REF_SPECIES_NAME:-Homo_sapiens}",
   "ref_species_taxid": "${REF_SPECIES_TAXID:-9606}",
@@ -538,7 +535,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "ct_disambig_asr_cache_dir": "${ASR_CACHE_DIR:-$REPO_DIR/caches/.asr_cache}",
   "ct_disambig_posterior_threshold": "${POSTERIOR_THRESHOLD:-0.1}",
   "ct_disambig_max_tasks_per_child": "${MAX_TASKS_PER_CHILD:-50}",
-  "meta_caas_from": "${META_CAAS_FROM:-}",
   "disambiguation_input": "${DISAMBIGUATION_INPUT:-}",
   "disambiguation_dir": "${DISAMBIGUATION_DIR:-}",
   "background_input": "${BACKGROUND_INPUT:-}",
@@ -595,7 +591,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "fade_burn_in": "${FADE_BURN_IN:-1000000}",
   "fade_samples": "${FADE_SAMPLES:-1000}",
   "fade_concentration": "${FADE_CONCENTRATION:-0.5}",
-  "fade_min_genes_for_heatmap": "${FADE_MIN_GENES_FOR_HEATMAP:-2}",
   "fade_universe_file": "${FADE_UNIVERSE_FILE:-}",
   "fade_tables_dir_top": "${FADE_TABLES_DIR_TOP:-}",
   "fade_tables_dir_bottom": "${FADE_TABLES_DIR_BOTTOM:-}",

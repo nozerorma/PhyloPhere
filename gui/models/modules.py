@@ -122,7 +122,7 @@ class DisambiguationConfig(ModuleConfigBase):
     gene_filter_k_far: str = "3.0"  # --gene_filter_k_far
     gene_filter_k_near: str = "1.5"  # --gene_filter_k_near
 
-    # Precomputed inputs (meta_caas_from, disambiguation_input, disambiguation_dir,
+    # Precomputed inputs (disambiguation_input, disambiguation_dir,
     # background_input) are derived from PrecomputedConfig.
 
 
@@ -208,7 +208,6 @@ class FadeConfig(ModuleConfigBase):
     fade_concentration: str = "0.5"  # --fade_concentration
 
     # Report options
-    fade_min_genes_for_heatmap: str = "2"  # --fade_min_genes_for_heatmap
     # Gene universe of the FCS report for FADE. Unset, the union of the tested genes
     # of both directions is used (workflows/enrichment.nf).
     fade_universe_file: str = ""  # --fade_universe_file

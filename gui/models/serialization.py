@@ -51,6 +51,7 @@ _RETIRED_FIELDS = {
                 "scoring_stress_rank_metric", "scoring_ami", "scoring_string", "scoring_compare_fdr", "scoring_compare_top_n"),
     "enrichment": ("posenrich_eggnog", "cosmic_db", "fcs_fdr_wilcoxon", "fcs_fdr_lachenbruch"),
     "posenrich": ("posenrich_ranking", "eggnog_taxid", "auto_fetch_eggnog", "egg_members_file", "egg_annotations_file"),
+    "fade": ("fade_min_genes_for_heatmap",),
 }
 
 # Fields of the POSENRICH module that older projects hold in the enrichment section.
@@ -122,6 +123,8 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
             logger.warning("project parameter cleanup_policy=%r is not a known value; remove_work is left off", policy)
         _retired_intermediates, remove_work = _CLEANUP_POLICY_OPTIONS.get(policy, (False, False))
         runtime.setdefault("remove_work", remove_work)
+    if isinstance(runtime, dict) and runtime.pop("clade_taxid", None) is not None:
+        logger.warning("project parameter clade_taxid was retired: no process reads it")
     if isinstance(runtime, dict) and "remove_intermediates" in runtime:
         runtime.pop("remove_intermediates")
         logger.warning("project parameter remove_intermediates was retired: task hygiene is unconditional; published null blocks are preserved")

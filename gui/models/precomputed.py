@@ -59,7 +59,7 @@ class PrecomputedConfig:
 
     # --- CT / CAAS (one general toggle and the two step toggles of the CAAS tab:
     # discovery and resample) ---
-    use_ct: bool = False  # turns off CAAS; also wires background_input, meta_caas_from,
+    use_ct: bool = False  # turns off CAAS; also wires background_input,
     # posenrich_background_file, which come from CT's concatenation and
     # permulation outputs rather than from either single step.
     use_discovery: bool = False  # wires discovery_from
@@ -103,7 +103,6 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
 
     if config.use_discovery:
         entries.append(("discovery_from", os.path.join(outdir, "caastools", "discovery.tab"), "file"))
-        entries.append(("meta_caas_from", os.path.join(outdir, "meta_caas", "meta_caas", "meta_caas.tsv"), "file"))
         entries.append(("background_input", os.path.join(outdir, "caastools", "background_genes.output"), "file"))
         entries.append(("posenrich_background_file", os.path.join(outdir, "caastools", "background.output"), "file"))
         # The position-level permulation null travels as one directory: the positions the null scores, its blocks of

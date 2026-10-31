@@ -306,12 +306,6 @@ class RuntimeTab(QWidget):
         form.addRow(self.clade_name_label, self.clade_name)
         _tip("Focus clade name used in the reports (--clade_name).", self.clade_name_label, self.clade_name)
 
-        self.clade_taxid = QLineEdit(self._config.clade_taxid)
-        self.clade_taxid.textChanged.connect(self._on_clade_taxid_changed)
-        self.clade_taxid_label = QLabel("Clade NCBI TaxID")
-        form.addRow(self.clade_taxid_label, self.clade_taxid)
-        _tip("NCBI TaxID of the focus clade named above.", self.clade_taxid_label, self.clade_taxid)
-
         self.taxon_of_interest = QLineEdit(self._config.taxon_of_interest)
         self.taxon_of_interest.textChanged.connect(self._on_taxon_of_interest_changed)
         self.taxon_of_interest_label = QLabel("Taxonomic level of interest (--taxon_of_interest)")
@@ -466,10 +460,6 @@ class RuntimeTab(QWidget):
         self._config.clade_name = value
         self.changed.emit()
 
-    def _on_clade_taxid_changed(self, value: str) -> None:
-        self._config.clade_taxid = value
-        self.changed.emit()
-
     def _on_taxon_of_interest_changed(self, value: str) -> None:
         self._config.taxon_of_interest = value
         self.changed.emit()
@@ -555,8 +545,6 @@ class RuntimeTab(QWidget):
             self.sp_colname_label.setText(tr("Species column name (--sp_colname)", lang))
         if hasattr(self, "clade_name_label"):
             self.clade_name_label.setText(tr("Clade name (--clade_name)", lang))
-        if hasattr(self, "clade_taxid_label"):
-            self.clade_taxid_label.setText(tr("Clade NCBI TaxID", lang))
         if hasattr(self, "taxon_of_interest_label"):
             self.taxon_of_interest_label.setText(tr("Taxonomic level of interest (--taxon_of_interest)", lang))
         if hasattr(self, "ref_species_name_label"):
