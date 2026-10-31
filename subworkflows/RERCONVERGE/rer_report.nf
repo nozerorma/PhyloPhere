@@ -4,7 +4,7 @@ include { rerQuote; rerHash; rerSources } from './rer_contract'
 process RER_REPORT {
     tag "rer_report|${params.traitname}"
     label 'process_reporting'
-    errorStrategy 'terminate'
+    // errorStrategy comes from conf/resources.config (label process_reporting), which takes precedence over a directive here.
     cache 'deep'
     publishDir path: "${params.outdir}/rerconverge/rer_results", mode: 'copy', pattern: '*.html'
     publishDir path: "${params.outdir}/html_reports", mode: 'copy', pattern: '*.html'
