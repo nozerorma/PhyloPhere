@@ -65,3 +65,6 @@ papers
 
 # Validation fixtures and reports are kept outside the repository
 validation/
+
+# Local scratch files and audit outputs
+/.tmp/
