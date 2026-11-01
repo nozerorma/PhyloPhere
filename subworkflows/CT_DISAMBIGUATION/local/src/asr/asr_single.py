@@ -54,7 +54,6 @@ class SingleGeneASRConfig:
     model: str = "lg"
     posterior_threshold: float = 0.7
     threads: int = 1
-    provenance: Optional[dict] = None
 
 
 @dataclass
@@ -438,9 +437,8 @@ def load_precomputed_asr(
     Returns:
         ASRResults object with loaded data
     """
-    from src.asr.cache import validate_entry
-    directory = config.output_dir / f'asr_{gene}'
-    validate_entry(directory, config.provenance)
+    from src.asr.cache import find_entry
+    directory = find_entry(config.output_dir, gene)
     rst_file = directory / 'rst'
     tree_file = directory / 'tree_paml.nwk'
 
@@ -465,7 +463,15 @@ def load_precomputed_asr(
         else:
             posteriors_node = parsed
 
-    logger.debug("Pre-computed ASR results loaded")
+    expected_sites = set(range(1, alignment_data.alignment.get_alignment_length() + 1))
+    if not posteriors_node or any(not expected_sites <= set(sites) for sites in posteriors_node.values()):
+        raise ValueError(f'Incomplete cached ASR site coverage for {gene}')
+    import math
+    if any(not distribution or any(not math.isfinite(float(p)) or not 0 <= float(p) <= 1
+                                   for p in distribution.values())
+           for sites in posteriors_node.values() for distribution in sites.values()):
+        raise ValueError(f'Invalid cached ASR posteriors for {gene}')
+    logger.info("[asr] %s: reusing existing cache %s", gene, directory)
 
     _write_node_id_map(
         node_id_map if isinstance(node_id_map, dict) else None,
@@ -486,21 +492,20 @@ def load_precomputed_asr(
 
 
 def run_asr_pipeline(gene, config, skip_if_exists=True, alignment_data=None, tree_data=None):
-    """Compute in a private directory, then publish a complete provenance-checked entry.
+    """Compute in a private directory, then publish a complete readable entry.
 
-    The driver serializes readers/writers through its per-key file lock.
+    The driver serializes readers/writers through its per-gene file lock.
     """
     import os
     import tempfile
     import uuid
     from dataclasses import replace
-    from src.asr.cache import prepare_config, write_entry
+    from src.asr.cache import prepare_config
     if alignment_data is None:
         alignment_data = load_alignment_and_mappings(config.alignment_path, config.taxid_path, gene)
     if tree_data is None:
         tree_data = load_and_match_tree(config.tree_path, alignment_data, config.taxid_path)
-    if config.provenance is None:
-        config = prepare_config(config, alignment_data, tree_data)
+    config = prepare_config(config, alignment_data, tree_data)
     if skip_if_exists:
         try:
             return load_precomputed_asr(gene, config, alignment_data)
@@ -516,12 +521,11 @@ def run_asr_pipeline(gene, config, skip_if_exists=True, alignment_data=None, tre
             source = Path(stage) / f'asr_{gene}'
             if source.exists():
                 os.replace(source, failed)
-                (failed / 'failure.json').write_text(json.dumps(dict(inputs=config.provenance, error=str(exc)), indent=2))
+                (failed / 'failure.json').write_text(json.dumps(dict(gene=gene, model=config.model, error=str(exc)), indent=2))
             raise RuntimeError(f'ASR failed for {gene}; diagnostic artifacts: {failed}') from exc
         if not result.posteriors_node:
             raise RuntimeError(f'ASR produced no node posteriors for {gene}')
         source = Path(stage) / f'asr_{gene}'
-        write_entry(source, config.provenance)
         target = config.output_dir / f'asr_{gene}'
         if target.exists():
             os.replace(target, config.output_dir / f'.invalid-{uuid.uuid4().hex}')

@@ -67,7 +67,7 @@ def _compute_or_read_asr(gene, config, alignment_data, tree_data):
 
     A shared filesystem can expose a directory created by another worker after
     the publisher's existence check, even with the advisory lock. Reuse it only
-    through the normal provenance/checksum/parser checks. Brief retries allow
+    through the normal parser and coverage checks. Brief retries allow
     metadata to become visible; an absent or invalid winner preserves the error.
     """
     import errno
@@ -81,7 +81,7 @@ def _compute_or_read_asr(gene, config, alignment_data, tree_data):
         for attempt in range(6):
             found, _ = _read_cached(gene, config, alignment_data)
             if found is not None:
-                logger.warning('[asr] %s: reusing validated cache entry after concurrent publication', gene)
+                logger.warning('[asr] %s: reusing readable cache entry after concurrent publication', gene)
                 return found
             if attempt < 5:
                 time.sleep(0.1 * 2 ** attempt)

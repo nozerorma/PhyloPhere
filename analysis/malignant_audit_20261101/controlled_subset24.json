@@ -1,0 +1,950 @@
+[
+  {
+    "gene": "A1BG",
+    "asr_change": {
+      "shared": 25,
+      "keys_changed": 0,
+      "scores_changed": 8,
+      "types_changed": 1,
+      "max_delta": 0.04706884521953125
+    },
+    "code_change": {
+      "shared": 25,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 25,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 9.103828801926284e-15
+    },
+    "new_reproduced": {
+      "shared": 25,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 225,
+    "new_taxa": 226,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 30
+    }
+  },
+  {
+    "gene": "A1CF",
+    "asr_change": {
+      "shared": 2,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "code_change": {
+      "shared": 2,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 2,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 6.5503158452884236e-15
+    },
+    "new_reproduced": {
+      "shared": 2,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 225,
+    "new_taxa": 226,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {}
+  },
+  {
+    "gene": "A3GALT2",
+    "asr_change": {
+      "shared": 9,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "code_change": {
+      "shared": 9,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 9,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 6.494804694057166e-15
+    },
+    "new_reproduced": {
+      "shared": 9,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 208,
+    "new_taxa": 209,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 12
+    }
+  },
+  {
+    "gene": "AADACL3",
+    "asr_change": {
+      "shared": 10,
+      "keys_changed": 0,
+      "scores_changed": 3,
+      "types_changed": 0,
+      "max_delta": 0.00032201471813295135
+    },
+    "code_change": {
+      "shared": 10,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 10,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 3.7470027081099033e-16
+    },
+    "new_reproduced": {
+      "shared": 10,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 188,
+    "new_taxa": 189,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {}
+  },
+  {
+    "gene": "AAK1",
+    "asr_change": {
+      "shared": 5,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "code_change": {
+      "shared": 5,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 5,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 1.27675647831893e-15
+    },
+    "new_reproduced": {
+      "shared": 5,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 187,
+    "new_taxa": 188,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 35
+    }
+  },
+  {
+    "gene": "AASDH",
+    "asr_change": {
+      "shared": 15,
+      "keys_changed": 0,
+      "scores_changed": 1,
+      "types_changed": 0,
+      "max_delta": 0.10463725008987824
+    },
+    "code_change": {
+      "shared": 15,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 15,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 2.3869795029440866e-15
+    },
+    "new_reproduced": {
+      "shared": 15,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 219,
+    "new_taxa": 220,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 16
+    }
+  },
+  {
+    "gene": "ABCA3",
+    "asr_change": {
+      "shared": 11,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "code_change": {
+      "shared": 11,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 11,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 1.0547118733938987e-15
+    },
+    "new_reproduced": {
+      "shared": 11,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 229,
+    "new_taxa": 230,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 105
+    }
+  },
+  {
+    "gene": "ABCA6",
+    "asr_change": {
+      "shared": 24,
+      "keys_changed": 0,
+      "scores_changed": 8,
+      "types_changed": 0,
+      "max_delta": 0.018533887926546172
+    },
+    "code_change": {
+      "shared": 24,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 24,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 6.5503158452884236e-15
+    },
+    "new_reproduced": {
+      "shared": 24,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 186,
+    "new_taxa": 187,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 35
+    }
+  },
+  {
+    "gene": "ABCB5",
+    "asr_change": {
+      "shared": 16,
+      "keys_changed": 0,
+      "scores_changed": 5,
+      "types_changed": 0,
+      "max_delta": 0.0013888888889252715
+    },
+    "code_change": {
+      "shared": 16,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 16,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 1.942890293094024e-15
+    },
+    "new_reproduced": {
+      "shared": 16,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 218,
+    "new_taxa": 219,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 5
+    }
+  },
+  {
+    "gene": "ABCB8",
+    "asr_change": {
+      "shared": 13,
+      "keys_changed": 0,
+      "scores_changed": 1,
+      "types_changed": 0,
+      "max_delta": 0.00013444799000755792
+    },
+    "code_change": {
+      "shared": 13,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 13,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 9.103828801926284e-15
+    },
+    "new_reproduced": {
+      "shared": 13,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 202,
+    "new_taxa": 203,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 9
+    }
+  },
+  {
+    "gene": "ABCC10",
+    "asr_change": {
+      "shared": 12,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "code_change": {
+      "shared": 12,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 12,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 6.494804694057166e-15
+    },
+    "new_reproduced": {
+      "shared": 12,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 229,
+    "new_taxa": 230,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 524
+    }
+  },
+  {
+    "gene": "ABHD12B",
+    "asr_change": {
+      "shared": 8,
+      "keys_changed": 0,
+      "scores_changed": 3,
+      "types_changed": 0,
+      "max_delta": 0.008809795222407574
+    },
+    "code_change": {
+      "shared": 8,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 8,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 6.494804694057166e-15
+    },
+    "new_reproduced": {
+      "shared": 8,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 229,
+    "new_taxa": 230,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 10
+    }
+  },
+  {
+    "gene": "ABHD15",
+    "asr_change": {
+      "shared": 10,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "code_change": {
+      "shared": 10,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 10,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 2.3314683517128287e-15
+    },
+    "new_reproduced": {
+      "shared": 10,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 202,
+    "new_taxa": 203,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 2
+    }
+  },
+  {
+    "gene": "ABLIM2",
+    "asr_change": {
+      "shared": 8,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "code_change": {
+      "shared": 8,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 8,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 5.329070518200751e-15
+    },
+    "new_reproduced": {
+      "shared": 8,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 213,
+    "new_taxa": 214,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 41
+    }
+  },
+  {
+    "gene": "ACAA2",
+    "asr_change": {
+      "shared": 9,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "code_change": {
+      "shared": 9,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 9,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 3.0531133177191805e-15
+    },
+    "new_reproduced": {
+      "shared": 9,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 219,
+    "new_taxa": 220,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {}
+  },
+  {
+    "gene": "ACAD10",
+    "asr_change": {
+      "shared": 19,
+      "keys_changed": 0,
+      "scores_changed": 2,
+      "types_changed": 0,
+      "max_delta": 0.1440498496030578
+    },
+    "code_change": {
+      "shared": 19,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 19,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 8.43769498715119e-15
+    },
+    "new_reproduced": {
+      "shared": 19,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 227,
+    "new_taxa": 228,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 9
+    }
+  },
+  {
+    "gene": "ACAD9",
+    "asr_change": {
+      "shared": 12,
+      "keys_changed": 0,
+      "scores_changed": 1,
+      "types_changed": 0,
+      "max_delta": 9.092031894807583e-06
+    },
+    "code_change": {
+      "shared": 12,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 12,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 3.469446951953614e-16
+    },
+    "new_reproduced": {
+      "shared": 12,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 229,
+    "new_taxa": 230,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 4
+    }
+  },
+  {
+    "gene": "ACBD7",
+    "asr_change": {
+      "shared": 1,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "code_change": {
+      "shared": 1,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 1,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "new_reproduced": {
+      "shared": 1,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 229,
+    "new_taxa": 230,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 5
+    }
+  },
+  {
+    "gene": "ACOD1",
+    "asr_change": {
+      "shared": 9,
+      "keys_changed": 0,
+      "scores_changed": 1,
+      "types_changed": 0,
+      "max_delta": 0.00014040824186778433
+    },
+    "code_change": {
+      "shared": 9,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 9,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 4.912736883966318e-15
+    },
+    "new_reproduced": {
+      "shared": 9,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 189,
+    "new_taxa": 189,
+    "extra_taxa": [],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 7
+    }
+  },
+  {
+    "gene": "ACOT13",
+    "asr_change": {
+      "shared": 4,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "code_change": {
+      "shared": 4,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 4,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 1.096345236817342e-15
+    },
+    "new_reproduced": {
+      "shared": 4,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 210,
+    "new_taxa": 211,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {}
+  },
+  {
+    "gene": "ACOX3",
+    "asr_change": {
+      "shared": 15,
+      "keys_changed": 0,
+      "scores_changed": 1,
+      "types_changed": 0,
+      "max_delta": 0.00029629629629238097
+    },
+    "code_change": {
+      "shared": 15,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 15,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 1.8318679906315083e-15
+    },
+    "new_reproduced": {
+      "shared": 15,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 229,
+    "new_taxa": 230,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 39
+    }
+  },
+  {
+    "gene": "ACRBP",
+    "asr_change": {
+      "shared": 10,
+      "keys_changed": 0,
+      "scores_changed": 3,
+      "types_changed": 0,
+      "max_delta": 0.000527105438210107
+    },
+    "code_change": {
+      "shared": 10,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 10,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 3.066991105526995e-15
+    },
+    "new_reproduced": {
+      "shared": 10,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 225,
+    "new_taxa": 226,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 6
+    }
+  },
+  {
+    "gene": "ACSF3",
+    "asr_change": {
+      "shared": 20,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "code_change": {
+      "shared": 20,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 20,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 2.2967738821932926e-15
+    },
+    "new_reproduced": {
+      "shared": 20,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 202,
+    "new_taxa": 203,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {
+      "X>-": 1
+    }
+  },
+  {
+    "gene": "ACSM3",
+    "asr_change": {
+      "shared": 11,
+      "keys_changed": 0,
+      "scores_changed": 2,
+      "types_changed": 0,
+      "max_delta": 0.00018265390265248538
+    },
+    "code_change": {
+      "shared": 11,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_reproduced": {
+      "shared": 11,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 6.439293542825908e-15
+    },
+    "new_reproduced": {
+      "shared": 11,
+      "keys_changed": 0,
+      "scores_changed": 0,
+      "types_changed": 0,
+      "max_delta": 0.0
+    },
+    "old_taxa": 229,
+    "new_taxa": 230,
+    "extra_taxa": [
+      "1268362"
+    ],
+    "missing_taxa": [],
+    "residue_changes": {}
+  }
+]
