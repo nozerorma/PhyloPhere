@@ -271,8 +271,11 @@ def load_gene_lengths(
     Prioritizes untrimmed alignment columns from each gene's MAP table in ``map_dir`` (the same
     coordinates used by cluster trains). Falls back to the Ensembl TSV at ``path`` (columns gene, length)
     for any gene missing from ``map_dir`` or when ``map_dir`` is None.
+    With ``genes``, return only those literal IDs and resolve annotation producer
+    suffixes consistently with the observed/null annotation whitelist.
     """
     annotation: Dict[str, float] = {}
+    annotation_sources = {}
     known_genes = set(genes) if genes is not None else None
     if path:
         if not os.path.isfile(path):
@@ -303,10 +306,14 @@ def load_gene_lengths(
                                 source = 'genomic_bp'
                         except (TypeError,ValueError):
                             pass
-                    sources[gene] = source
+                    annotation_sources[gene] = source
             if known_genes is None:
                 known_genes = seen
-    out = dict(annotation)
+    from ..data.loaders import annotation_keys
+    matched = annotation_keys(known_genes, annotation) if genes is not None else {g: g for g in annotation}
+    out = {gene: annotation[key] for gene, key in matched.items()}
+    if sources is not None:
+        sources.update({gene: annotation_sources[key] for gene, key in matched.items()})
     if map_dir:
         if not os.path.isdir(map_dir):
             raise FileNotFoundError(map_dir)

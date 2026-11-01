@@ -191,7 +191,7 @@ def main():
     logger.info(f"[observed] {len(by_gene)} genes with b_0 hits")
     fields = master_fields(len(next(iter(trait_pairs.values()))))
     pss = observed_pss(args.fop_pairs, trait_pairs) if args.fop_pairs else None
-    ensembl = (load_ensembl_genes(Path(args.ensembl_genes_file)) or set()) if args.ensembl_genes_file else None
+    ensembl = load_ensembl_genes(Path(args.ensembl_genes_file), genes=by_gene) if args.ensembl_genes_file else None
     genes = [g for g in by_gene if ensembl is None or g in ensembl]
     excluded = sorted(set(by_gene) - set(genes))
     if args.alignment_manifest and set(genes) - set(alignments):

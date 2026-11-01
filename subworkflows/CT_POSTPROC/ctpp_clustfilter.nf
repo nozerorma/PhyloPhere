@@ -21,6 +21,7 @@ def ppSources() {
     return files("${baseDir}/subworkflows/CT_POSTPROC/local/**/*.py", type: 'file')
             .findAll { !it.toString().contains('__pycache__') && !it.name.endsWith('.pyc') } + [
         file("${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/core/postproc.py"),
+        file("${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/data/loaders.py"),
         file("${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/core/scoring_provenance.py"),
         file("${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/core/columns.py"),
         file("${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/core/ct_io.py"),

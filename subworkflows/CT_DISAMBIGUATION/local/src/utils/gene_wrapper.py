@@ -309,10 +309,7 @@ def process_all_genes_perms(
     from src.data.loaders import load_ensembl_genes
     ensembl_genes: Optional[Set[str]] = None
     if ensembl_genes_file:
-        try:
-            ensembl_genes = load_ensembl_genes(Path(ensembl_genes_file)) or set()
-        except Exception as exc:
-            logger.warning(f"[perms] failed to load ensembl genes: {exc}")
+        ensembl_genes = load_ensembl_genes(Path(ensembl_genes_file), genes=genes)
 
     if ensembl_genes is not None:
         outside = [g for g in genes if g not in ensembl_genes]

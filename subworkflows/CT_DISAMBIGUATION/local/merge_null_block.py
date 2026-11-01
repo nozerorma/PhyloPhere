@@ -105,7 +105,8 @@ def main() -> int:
     if removal_on:
         from src.core.postproc import load_gene_lengths
         lengths = load_gene_lengths(path=str(args.gene_lengths) if args.gene_lengths else None,
-                                    map_dir=str(args.map_dir) if args.map_dir else None, map_suffix=args.map_suffix,sources=length_sources)
+                                    map_dir=str(args.map_dir) if args.map_dir else None, map_suffix=args.map_suffix,
+                                    genes=universe, sources=length_sources)
     per_cycle = int(os.environ.get("CAAS_PERMS_SAMPLE_PER_CYCLE", "200"))
     counts = merge_block(args.tiles, args.output_dir, cycles, universe=universe, lengths=lengths, length_sources=length_sources,
                          gene_filter_mode=args.gene_filter_mode if removal_on else "none",

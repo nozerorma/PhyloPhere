@@ -127,7 +127,7 @@ def main():
             logger.error(f"[evidence] {gene}: no discovery rows at position(s) {','.join(absent)}")
 
     trait_pairs = read_trait_pairs(Path(args.design))
-    ensembl = (load_ensembl_genes(Path(args.ensembl_genes_file)) or set()) if args.ensembl_genes_file else None
+    ensembl = load_ensembl_genes(Path(args.ensembl_genes_file), genes=rows_of) if args.ensembl_genes_file else None
     jobs = [(g, rows_of[g], args.alignment_dir, args.tree, args.taxid_mapping, args.asr_model, args.asr_cache_dir,
              args.posterior_threshold, ensembl, trait_pairs) for g in sorted(rows_of) if rows_of[g]]
     workers, _ = plan_concurrency(args.workers, 1, logger)

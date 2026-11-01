@@ -20,6 +20,7 @@ entries come from the discovery rows (`src.core.observed.observed_entries`) or f
 
 import csv
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
@@ -62,9 +63,38 @@ def as_bool(v: Any) -> bool:
 # ── Ensembl genes ─────────────────────────────────────────────────────────────
 
 
-def load_ensembl_genes(ensembl_genes_file: Path) -> Set[str]:
+def annotation_keys(genes, annotated):
+    """Match producer reference-species/.prot suffixes without changing literal IDs.
+
+    Exact annotation IDs win. Other dotted identifiers stay literal, and several
+    possible annotation aliases are an error rather than an arbitrary choice.
+    """
+    annotated = set(annotated)
+    result = {}
+    for gene in genes:
+        if gene in annotated:
+            result[gene] = gene
+            continue
+        candidates = set()
+        stem = gene
+        if stem.endswith('.prot'):
+            stem = stem[:-5]
+            candidates.add(stem)
+        base, sep, species = stem.rpartition('.')
+        if sep and re.fullmatch(r'[A-Z][a-z]+_[a-z]+(?:_[a-z]+)*', species):
+            candidates.add(base)
+        matches = candidates & annotated
+        if len(matches) > 1:
+            raise ValueError(f'Ambiguous annotated gene alias: {gene}: {sorted(matches)}')
+        if matches:
+            result[gene] = matches.pop()
+    return result
+
+
+def load_ensembl_genes(ensembl_genes_file: Path, genes=None) -> Set[str]:
     """Load the gene keys of a TSV/CSV file with a 'gene' column.
 
+    With ``genes``, return matching input IDs, allowing producer suffixes on them.
     Complete identifiers, including embedded dots, are preserved.
     """
     if not ensembl_genes_file.exists():
@@ -84,4 +114,4 @@ def load_ensembl_genes(ensembl_genes_file: Path) -> Set[str]:
         symbols = {row["gene"].strip() for row in reader if row.get("gene")}
     if not symbols:
         raise ValueError("No genes found in Ensembl genes file")
-    return symbols
+    return set(annotation_keys(genes, symbols)) if genes is not None else symbols
