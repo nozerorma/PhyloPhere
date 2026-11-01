@@ -39,7 +39,7 @@ caas_block_index <- function(files, roster = NULL, universe = character(), gene_
     local_roster <- file.path(dirname(f), "cycles.txt")
     if (file.exists(local_roster) && !identical(readLines(local_roster), cy)) stop("Block roster differs from matrix cycles")
     seen <- c(seen, cy); genes <- union(genes, g); units <- units + b$n_units
-    entries[[length(entries)+1L]] <- list(md5=unname(tools::md5sum(f)), cycles=cy, genes=g)
+    entries[[length(entries)+1L]] <- list(md5=if(Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS')=='1') unname(tools::md5sum(f)) else NULL, cycles=cy, genes=g)
     rm(b)
   }
   if (!is.null(roster)) {

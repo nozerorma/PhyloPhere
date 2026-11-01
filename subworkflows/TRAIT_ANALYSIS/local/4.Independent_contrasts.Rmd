@@ -168,7 +168,14 @@ sel_ordinal <- !use_count_data && is_ordinal_trait(trait_df[[trait]], trait_type
 force_model <- if (tolower(perm_strategy) %in% c("bm", "ou")) toupper(perm_strategy) else NULL
 provenance <- contrast_provenance(trait_df, pruned_tree, trait, n_trait, c_trait,
   pss_top_pct, sel_ordinal, pair_center_gate, force_model, seed_val)
-observed <- read_observed_contrasts(file.path(ci_dir, "observed_selection.rds"), provenance)
+observed <- read_observed_contrasts(file.path(ci_dir, "observed_selection.rds"), provenance,
+  rebuild=function() {
+    ci <- contrast_trait_ci(trait_df, trait, n_trait, c_trait, sel_ordinal)
+    bundle <- prepare_observed_contrasts(ci, pruned_tree, pss_top_pct,
+      sel_ordinal, pair_center_gate, force_model)
+    bundle$trait_ci <- ci
+    bundle
+  })
 sp_tab <- observed$trait_ci
 sel_trait <- setNames(sp_tab$trait, sp_tab$species)
 sel_ci_lb <- if (use_count_data) setNames(sp_tab$trait_ci_lb, sp_tab$species) else NULL

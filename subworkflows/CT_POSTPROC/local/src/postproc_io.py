@@ -40,8 +40,14 @@ def coverage(df, gene='gene', pos='msa_pos'):
 
 
 def load_observed(master, stamp):
-    record = json.loads(Path(stamp).read_text())
-    if (record.get('version') != 1 or record.get('complete') is not True
+    legacy=not stamp or not Path(stamp).is_file()
+    if legacy:
+        import warnings
+        warnings.warn('Observed completion record absent: checking table structure; model/design provenance remains unknown')
+        record=dict(version=1,complete=False,provenance_status='legacy_unknown',genes={},batches=[])
+    else:
+        record=json.loads(Path(stamp).read_text())
+    if (record.get('version') != 1 or (not legacy and record.get('complete') is not True)
             or not isinstance(record.get('genes'), dict) or not isinstance(record.get('batches'), list)):
         raise ValueError('Invalid observed completion record')
     genes, settings = {}, None
@@ -97,6 +103,7 @@ def load_observed(master, stamp):
             vals = pd.to_numeric(df.loc[df[col] != '', col], errors='raise')
             if any(not math.isfinite(x) or not lower <= x <= upper or (integer and x != int(x)) for x in vals):
                 raise ValueError(f'Invalid {col}')
+    if legacy:record['genes']=coverage(df)
     if coverage(df) != record['genes']:
         raise ValueError('Master position coverage differs from observed record')
     # Keep the original score text: serialization must not round scientific values.

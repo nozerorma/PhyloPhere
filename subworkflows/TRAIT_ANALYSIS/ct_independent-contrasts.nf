@@ -19,8 +19,14 @@
 // ── Contrast selection report ──────────────────────────────────────────────────
 
 def reportSourceKey() {
+    def sources = ['4.Independent_contrasts.Rmd',
+        'src/report_style.R','src/contrast_inputs.R','src/selection_algorithm.R',
+        'src/commons.R','src/io_utils.R','src/stats.R','src/phylo.R','src/branch_cache.R']
+    def content = sources.collect { file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/${it}").text }.join('\n')
+    content += file("${baseDir}/subworkflows/CT/local/scripts/lean_contrast_selector.R").text
+    content += file("${baseDir}/subworkflows/CT/local/scripts/pss_core.R").text
     return java.security.MessageDigest.getInstance('SHA-256')
-        .digest((file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/4.Independent_contrasts.Rmd").text + file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R").text).getBytes('UTF-8')).encodeHex().toString()
+        .digest(content.getBytes('UTF-8')).encodeHex().toString()
 }
 
 process CONTRAST_ALGORITHM {

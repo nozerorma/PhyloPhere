@@ -1164,7 +1164,7 @@ for (dr in c("Global", "Top", "Bottom")) {
 
 # Interesting Positions {.tabset .tabset-fade}
 
-VEP, PrimateAI-3D and COSMIC describe candidate variants on the verified human reference; they do not establish substitutions observed in another species. `no_hit` means no matching record in the declared COSMIC snapshot and covered gene, not absence of cancer relevance. Missing, excluded and unresolved targets have explicit status columns. A benign PrimateAI label requires complete coverage of the candidate SNVs.
+VEP, PrimateAI-3D and COSMIC describe candidate variants on the declared human reference; they do not establish substitutions observed in another species. A COSMIC coincidence describes a matching source record; missing annotations do not establish absence of cancer relevance. MAP-only matches retain partial coverage and their mapping basis. Missing, excluded and unresolved targets have explicit status columns. A benign PrimateAI label requires complete coverage of the candidate SNVs.
 
 Positions are ordered by pooled CAAS positional p ascending and CAAS score descending.
 The same pooled CAAS p/BH pair is displayed once; FADE overlap is matched to Top/Bottom

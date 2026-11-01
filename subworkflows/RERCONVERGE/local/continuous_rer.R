@@ -56,7 +56,7 @@ saveRDS(charpaths, args[3])
 # ── Load RER matrix ───────────────────────────────────────────────────────────
 
 traitRERw <- readRDS(args[4])
-rer_check_matrix(traitRERw, geneTrees, names(trait_vector))
+traitRERw <- rer_compatible_matrix(traitRERw, geneTrees, names(trait_vector), args[6])
 
 # ── Dimension check ───────────────────────────────────────────────────────────
 
@@ -152,7 +152,8 @@ if (num_batches > 0 && perms_per_batch > 0) {
 }
 
 attr(res, "rer_type") <- "continuous"
-attr(res, "rer_input_hashes") <- lapply(args[c(1,2,4)], rer_file_hash)
+attr(res, "rer_input_identity") <- lapply(args[c(1,2,4)], rer_file_identity)
+if (rer_verify_checksums()) attr(res, "rer_input_hashes") <- lapply(args[c(1,2,4)], rer_file_hash)
 invisible(rer_results(res))
 saveRDS(res, args[5])
 message("[RER] Results saved to: ", args[5])

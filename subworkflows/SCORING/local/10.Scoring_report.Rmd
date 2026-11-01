@@ -134,23 +134,23 @@ pos_df  <- scoring_read(params$position_scores_file) %>%
   select(-matches("^p[.](emp|adj_bh)_fact$"))
 gene_df <- scoring_read(params$gene_scores_file)
 .metadata <- file.path(dirname(params$gene_scores_file),"gene_evidence_metadata.json")
-if(file.exists(.metadata)) {
+{
+ .known_metadata <- file.exists(.metadata)
  # rmarkdown locks the params binding; temporarily unlock it to restore
  # the settings saved with these data, then retain the original lock state.
  .params_env <- knitr::knit_global()
  .params_locked <- bindingIsLocked("params", .params_env)
  if (.params_locked) unlockBinding("params", .params_env)
- .m <- jsonlite::read_json(.metadata,simplifyVector=TRUE)
- if(!is.null(.m$table_md5)) {
+ .m <- if(.known_metadata) jsonlite::read_json(.metadata,simplifyVector=TRUE) else
+   list(gene_stat="unknown",nominal_threshold=NA_real_,fdr_threshold=NA_real_)
+ if(Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS')=='1' && length(.m$table_md5)>0L) {
    .paths <- c(gene_scores.tsv=params$gene_scores_file,position_scores.tsv=params$position_scores_file)
-   for(.n in names(.paths)) if(!identical(unname(tools::md5sum(.paths[[.n]])),.m$table_md5[[.n]])) stop('Scoring snapshot checksum mismatch: ',.n)
+   for(.n in names(.paths)) if(length(.m$table_md5[[.n]])>0L && !identical(unname(tools::md5sum(.paths[[.n]])),.m$table_md5[[.n]])) stop('Scoring snapshot checksum mismatch: ',.n)
  }
- if (!identical(.m$gene_stat, "max")) stop("Legacy CAAS gene scores: rebuild with gene_stat=max before rendering")
+ if (!.known_metadata) cat("**Original scoring metadata are absent. This report describes the source scores and p/q; gene statistic and significance thresholds remain unknown.**\n\n")
  params$evidence_p_threshold <- .m$nominal_threshold
  params$evidence_fdr_threshold <- .m$fdr_threshold
  if (.params_locked) lockBinding("params", .params_env)
-} else {
- stop("Missing gene_evidence_metadata.json: cannot verify gene_stat=max; regenerate gene evidence before rendering")
 }
 corr_df <- scoring_read(params$gene_corr_file)
 

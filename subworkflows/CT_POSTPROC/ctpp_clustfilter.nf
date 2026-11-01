@@ -43,7 +43,7 @@ def clusterFileSuffix(minlen, maxcaas) {
 
 process CAAS_PREPARE_POSTPROC_INPUT {
     ext source_hash: { ppSourceKey() }
-    cache 'deep'
+    cache true
     tag 'prepare_postproc_input'
     publishDir "${params.outdir}/postproc/preprocessed", mode: 'copy', overwrite: true
     input:
@@ -64,7 +64,7 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     """
     echo '${task.ext.source_hash}:${observed_hash}:${scientific_hash}' > inputs.sha256
     ${run} ${ppQuote("${baseDir}/subworkflows/CT_POSTPROC/local/src/prepare_postproc_input.py")} \
-        --input ${ppQuote(disambiguation_input)} --completion ${ppQuote(completion)} \
+        --input ${ppQuote(disambiguation_input)} --completion ${ppQuote(completion ?: "")} \
         --output postproc_disambiguation_input.tsv --removed-output removed_patterns_precluster.tsv \
         ${alignment_arg} ${hyp_arg} ${taxid_arg}
     """
@@ -72,7 +72,7 @@ process CAAS_PREPARE_POSTPROC_INPUT {
 
 process CT_FILTER {
     ext source_hash: { ppSourceKey() }
-    cache 'deep'
+    cache true
     tag "${mode}:${minlen}:${maxcaas}"
     publishDir path: params.caas_postproc_mode == 'exploratory' ? "${params.outdir}/postproc/filter_exploratory/minlen${minlen}_maxcaas${maxcaas}" : "${params.outdir}/postproc/filter_selected", mode: 'copy', overwrite: true
     input:
@@ -95,7 +95,7 @@ process CT_FILTER {
 
 process CT_FILTER_SUMMARY {
     ext source_hash: { ppSourceKey() }
-    cache 'deep'
+    cache true
     tag 'filter_summary'
     publishDir "${params.outdir}/postproc/summary_statistics", mode: 'copy', overwrite: true, pattern: 'filter_summary.tsv'
     input:
@@ -112,7 +112,7 @@ process CT_FILTER_SUMMARY {
 
 process CAAS_FILTER_GENES {
     ext source_hash: { ppSourceKey() }
-    cache 'deep'
+    cache true
     tag "gene_filter:${params.gene_filter_mode}"
     label 'CT_FILTER'
     publishDir "${params.outdir}/postproc/gene_filtering", mode: 'copy', overwrite: true
@@ -145,7 +145,7 @@ process CAAS_FILTER_GENES {
 
 process CAAS_BACKGROUND_CLEANUP {
     ext source_hash: { ppSourceKey() }
-    cache 'deep'
+    cache true
     tag 'bg_cleanup'
     label 'CT_FILTER'
     publishDir "${params.outdir}/postproc/cleaned_backgrounds", mode: 'copy', overwrite: true

@@ -4,7 +4,7 @@ include { fadeSources } from './fade_contract'
 process FADE_RENDER {
     tag "${direction}"
     label 'process_reporting'
-    cache 'deep'
+    cache true
     publishDir "${params.outdir}/selection/fade/${direction}", mode:'copy', overwrite:true
     publishDir "${params.outdir}/html_reports", mode:'copy', overwrite:true, pattern:'*.html'
     input:

@@ -149,7 +149,8 @@ sig_sites <- read.csv(params$sites_file, stringsAsFactors = FALSE, colClasses=c(
 if (known_settings) {
   stopifnot(nrow(gene_summary) == metadata$tested)
   check_hash <- function(path, expected) {
-    stopifnot(identical(digest::digest(file=path, algo='sha256'), expected))
+    if (Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS') == '1' && !is.null(expected))
+      stopifnot(identical(digest::digest(file=path, algo='sha256'), expected))
   }
   check_hash(params$gene_counts_file, metadata$output_sha256[[paste0('fade_gene_counts_',params$direction,'.tsv')]])
   check_hash(params$sites_file, metadata$output_sha256[[paste0('fade_sites_',params$direction,'.csv')]])

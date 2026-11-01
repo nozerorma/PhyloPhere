@@ -18,7 +18,7 @@ include { scoringHash } from '../SCORING/scoring_contract.nf'
 
 // One run per direction ('top', 'bottom', 'all'): the empirical count test of every gene of the universe U
 process ACCUMULATION_TEST {
-    cache 'deep'
+    cache true
     tag "accumulation_test|${direction}"
     label 'process_medium'
 

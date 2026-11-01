@@ -51,7 +51,7 @@ workflow CT_POSTPROC {
     def observed_ch = discovery_ch.map { master ->
         assert master.isFile() : 'CT_POSTPROC requires a master CSV'
         def stamp = master.parent.resolve('observed_scoring.json')
-        tuple(ppHash([master, stamp]), master, stamp)
+        tuple(ppHash([master]+(stamp.exists() ? [stamp] : [])), master, stamp.exists() ? stamp : [])
     }
     if (params.asr_diagnostics) {
         ASR_DIAGNOSTICS(disambiguation_dir_channel ?: discovery_ch.map { it.parent })

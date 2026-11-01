@@ -105,7 +105,7 @@ verify_component <- function(path, name) {
   if (is.null(m$outputs) || is.null(names(m$outputs))) stop('Unverified POSENRICH component; regenerate it')
   for (file in names(m$outputs)) {
     p <- file.path(path,file)
-    if (basename(file)!=file || !file.exists(p) || digest::digest(file=p,algo='sha256')!=m$outputs[[file]]) stop(paste('Changed POSENRICH artifact:',p))
+    if (basename(file)!=file || !file.exists(p) || (is.list(m$outputs[[file]]) && file.info(p)$size != m$outputs[[file]]$size)) stop(paste('Changed POSENRICH artifact:',p))
   }
 }
 verify_component(params$universe_dir,'universe_manifest.json')
@@ -137,7 +137,7 @@ accumulation <- lapply(c(all = "all", top = "top", bottom = "bottom"), function(
   }
   if (file.exists(f)) {
     meta <- fromJSON(paste0(f,'.manifest.json'), simplifyVector=FALSE)
-    if (is.null(meta$outputs[[basename(f)]]) || digest::digest(file=f,algo='sha256') != meta$outputs[[basename(f)]]) stop('Changed accumulation results')
+    if (is.null(meta$outputs[[basename(f)]]) || (is.list(meta$outputs[[basename(f)]]) && file.info(f)$size != meta$outputs[[basename(f)]]$size)) stop('Changed accumulation results')
     d <- read_csv(f, show_col_types=FALSE, na=character(), col_types=cols(.default=col_character()))
     for (column in setdiff(names(d),c('Gene','status'))) d[[column]] <- parse_double(d[[column]],na=c('NA',''))
     d

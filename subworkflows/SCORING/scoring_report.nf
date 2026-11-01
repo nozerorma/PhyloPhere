@@ -28,7 +28,7 @@
 // ── Scoring report ─────────────────────────────────────────────────────────────
 
 process SCORING_REPORT {
-    cache 'deep'
+    cache true
     tag "scoring_report|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
 

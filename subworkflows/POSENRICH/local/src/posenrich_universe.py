@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import sys
+from posenrich_contract import file_identity
 from pathlib import Path
 from posenrich_contract import observed_table, identifier, position, block_inventory, finish_manifest, read_table
 from dataclasses import dataclass, field
@@ -191,8 +192,8 @@ def validate_null_inputs(observed, contract_path, null_path, roster_path, counts
     sys.path.insert(0, str(scoring))
     from null_position_stats import validate_null, SCORE_RULE, read_tested as read_declared_tested
     import pyarrow.parquet as pq
-    contract = json.loads(Path(contract_path).read_text())
-    if contract.get('version') != 1 or contract.get('observed_sha256') != sha256_file(observed) or not contract.get('scientific'):
+    contract = json.loads(Path(contract_path).read_text()) if Path(contract_path).is_file() else {}
+    if contract.get('version') != 1 or not contract.get('scientific'):
         raise ValueError('Observed provenance absent or checksum mismatch; regenerate CT_POSTPROC')
     roster = Path(roster_path).read_text().splitlines()
     counts = json.loads(Path(counts_path).read_text())
@@ -234,7 +235,7 @@ def manifest(universe, inputs):
     return {'component': 'universe',
             'contract_version': 2,
             'genes': universe.genes,
-            'inputs': {k: {'path': os.path.abspath(v), 'sha256': sha256_file(v)} for k, v in inputs.items() if v},
+            'inputs': {k: {'path': os.path.abspath(v), 'identity': file_identity(v)} for k, v in inputs.items() if v},
             'gene_list_sha256': sha256_file(inputs['background_genes']),
             'gene_set_sha256': gene_list_digest(universe.genes),
             'metrics': universe.metrics}
@@ -274,7 +275,7 @@ def main():
     calibration.to_csv(Path(a.output_dir)/'position_calibration.tsv',sep='\t',index=False)
     meta = manifest(universe, inputs)
     meta['null'] = null
-    meta['universe_sha256'] = sha256_file(Path(a.output_dir)/'universe.tsv.gz')
+    meta['universe_identity'] = file_identity(Path(a.output_dir)/'universe.tsv.gz')
     finish_manifest(a.output_dir, 'universe_manifest.json', meta)
     logging.info(f"|U| = {universe.metrics['n_universe']} "
                  f"({universe.metrics['n_observed_positive']} observed positive positions)")

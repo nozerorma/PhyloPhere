@@ -76,8 +76,39 @@ prepare_observed_contrasts <- function(ci, tree, top_pct, ordinal, center_gate,
   list(ctx = ctx, candidates = cc, scores = sc)
 }
 
-read_observed_contrasts <- function(path, provenance) {
-  if (!file.exists(path)) stop("Missing observed selection inputs; rerun composition: ", path)
+contrast_trait_ci <- function(df, trait, n_trait, c_trait, ordinal) {
+  ci <- df
+  names(ci)[match(trait, names(ci))] <- 'trait'
+  v <- ci$trait
+  median_value <- median(v, na.rm=TRUE)
+  if (nzchar(n_trait) && nzchar(c_trait)) {
+    bounds <- binom::binom.confint(df[[c_trait]], df[[n_trait]], methods='bayes',
+      prior.shape1=.5, prior.shape2=.5, conf.level=.95)
+    names(ci)[match(c(n_trait,c_trait),names(ci))] <- c('n_population','n_cases')
+    ci$trait_ci_lb <- bounds$lower; ci$trait_ci_ub <- bounds$upper
+    ci$trait_ci <- paste0('[',round(bounds$lower,2),'-',round(bounds$upper,2),']')
+    ci$category <- ifelse(v>median_value,'top',ifelse(v<median_value,'bottom','intermediate'))
+  } else {
+    ci$n_population <- ci$n_cases <- ci$trait_ci_lb <- ci$trait_ci_ub <- rep(NA_real_,nrow(ci))
+    ci$trait_ci <- rep(NA_character_,nrow(ci))
+    if (ordinal) {
+      levels <- sort(unique(stats::na.omit(v)))
+      ci$category <- ifelse(v>=max(levels),'top',ifelse(v<=min(levels),'bottom','intermediate'))
+    } else ci$category <- ifelse(v>median_value,'top',ifelse(v<median_value,'bottom','intermediate'))
+  }
+  ci[!duplicated(ci$species),,drop=FALSE]
+}
+
+read_observed_contrasts <- function(path, provenance, rebuild=NULL) {
+  if (!file.exists(path)) {
+    if (is.null(rebuild)) stop("Missing observed selection inputs; rerun composition: ", path)
+    warning('Legacy composition lacks observed_selection.rds: recomputing from the current staged traits, tree and settings')
+    bundle <- rebuild()
+    bundle$provenance <- provenance
+    bundle$provenance_status <- 'recomputed_from_current_inputs'
+    saveRDS(bundle, path)
+    return(bundle)
+  }
   bundle <- readRDS(path)
   if (!identical(bundle$provenance, provenance))
     stop("Observed selection provenance mismatch; rerun composition.")

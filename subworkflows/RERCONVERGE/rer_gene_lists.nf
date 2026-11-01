@@ -5,7 +5,7 @@ process RER_GENE_LISTS {
     tag "RER_GENE_LISTS|${params.traitname}"
     label 'process_low'
     errorStrategy 'terminate'
-    cache 'deep'
+    cache true
     publishDir path: "${params.outdir}/rerconverge/gene_lists", mode: 'copy'
 
     input:

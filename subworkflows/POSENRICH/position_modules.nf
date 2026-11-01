@@ -17,7 +17,7 @@ def optionalFlag(flag, source) {
 }
 
 process POSITION_REGISTRY {
-    cache 'deep'
+    cache true
     label 'process_registry'
     memory { params.position_registry_memory ?: (background.size() < 20000 ? '8 GB' : '64 GB') }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'registry'
@@ -69,7 +69,7 @@ process POSITION_REGISTRY {
 }
 
 process POSENRICH_CHARACTERIZE {
-    cache 'deep'
+    cache true
     label 'process_low'
     memory { params.position_module_memory ?: (registry.toRealPath().resolve('positions.tsv').size() < 200000000 ? '4 GB' : '32 GB') }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'characterization'
@@ -92,7 +92,7 @@ process POSENRICH_CHARACTERIZE {
 }
 
 process POSENRICH_UNIVERSE {
-    cache 'deep'
+    cache true
     tag "posenrich_universe"
     label 'process_medium'
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'universe'
@@ -133,7 +133,7 @@ process POSENRICH_UNIVERSE {
 // Level 2: concentration of the signal inside genes, calibrated with the cycles of the null. The null blocks are read
 // one at a time, so the memory follows the size of a block (1.5 GB for 500 cycles and 474,450 term-gene pairs).
 process POSENRICH_WITHIN_GENE {
-    cache 'deep'
+    cache true
     tag "posenrich_within_gene"
     label 'process_medium'
     memory { params.posenrich_within_gene_memory ?: '16 GB' }
@@ -164,7 +164,7 @@ process POSENRICH_WITHIN_GENE {
 }
 
 process POSENRICH_PROXIMITY {
-    cache 'deep'
+    cache true
     label 'process_low'
     memory { params.position_module_memory ?: (registry.toRealPath().resolve('positions.tsv').size() < 200000000 ? '4 GB' : '32 GB') }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'proximity'
@@ -188,7 +188,7 @@ process POSENRICH_PROXIMITY {
 
 // The report closes the module. Absent components arrive as NO_* sentinels or empty directories and are stated as unavailable.
 process POSENRICH_REPORT {
-    cache 'deep'
+    cache true
     tag "posenrich_report|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: '{*.html,report_settings.json}'

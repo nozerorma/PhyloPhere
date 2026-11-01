@@ -5,7 +5,7 @@ process RER_TREES {
     tag "RER_TREES|${params.traitname}"
     label 'process_reporting'
     // errorStrategy comes from conf/resources.config (label process_reporting), which takes precedence over a directive here.
-    cache 'deep'
+    cache true
     publishDir path: "${params.outdir}/rerconverge/rer_objects", mode: 'copy'
 
     input:

@@ -58,7 +58,7 @@ cat(sprintf("[block] wrote %s: %d genes x %d cycles, gene_stat %s\n", out_file, 
 # Canonical block artifacts are sealed after the RDS exists. Consumers verify
 # this manifest before comparing matrices with the independent position table.
 block_dir <- dirname(out_file)
-if (basename(out_file)=='matrices.rds' && file.exists(file.path(block_dir,'counts.json'))) {
+if (Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS')=='1' && basename(out_file)=='matrices.rds' && file.exists(file.path(block_dir,'counts.json'))) {
   names <- c('matrices.rds','positions.parquet','cycles.txt','counts.json','units.parquet','detections.parquet')
   names <- names[file.exists(file.path(block_dir,names))]
   hashes <- as.list(setNames(unname(tools::md5sum(file.path(block_dir,names))),names))

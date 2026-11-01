@@ -3,8 +3,8 @@
 from vep_common import read_targets
 
 
-def build(targets_file,output):
-    data=read_targets(targets_file)
+def build(targets_file,output,data=None):
+    data=read_targets(targets_file) if data is None else data
     if data.get('schema')!='phylophere.vep_targets.v1':raise ValueError('Invalid VEP targets')
     variants={v['variant_id']:v for t in data['targets'] if t['status']=='ready' for v in t['variants']}
     with open(output,'w') as f:

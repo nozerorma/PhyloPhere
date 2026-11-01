@@ -10,6 +10,8 @@ import json
 import math
 import re
 from pathlib import Path
+from functools import lru_cache
+import warnings
 
 AA = set('ACDEFGHIKLMNPQRSTVWY')
 MISSING = {'', 'NA', '-'}
@@ -17,7 +19,8 @@ BASE = ['Gene', 'Position', 'side', 'status', 'coverage', 'detail', 'source',
         'species', 'assembly', 'reference_gene_id', 'reference_transcript_id',
         'reference_protein_id', 'reference_aa_position', 'hg38_ref_aa',
         'caas_alt_aas', 'caas_change', 'transfer', 'orientation', 'evidence_basis',
-        'variant_id', 'candidate_count', 'annotated_count', 'unqueryable_alt_aas']
+        'variant_id', 'candidate_count', 'annotated_count', 'unqueryable_alt_aas',
+        'reference_status', 'mapping_basis', 'candidate_count_known']
 # NCBI standard genetic code, in T,C,A,G order at each base.
 _CODONS = [a+b+c for a in 'TCAG' for b in 'TCAG' for c in 'TCAG']
 CODE = dict(zip(_CODONS, 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG'))
@@ -134,40 +137,98 @@ def load_scores(path):
     return rows
 
 
+@lru_cache(maxsize=8)
+def map_index(directory):
+    exact, prefixed = {}, {}
+    for p in sorted(Path(directory).iterdir()):
+        if not p.is_file() or not p.name.endswith('.map.tsv'):
+            continue
+        stem = p.name.removesuffix('.map.tsv')
+        exact[stem] = p
+        for i,c in enumerate(stem):
+            if c == '.':
+                prefixed.setdefault(stem[:i], []).append(p)
+    return exact, prefixed
+
+
 def map_path(gene, directory):
-    # Literal matching: dots, quotes, brackets and glob metacharacters are IDs.
-    paths = [p for p in Path(directory).iterdir() if p.is_file() and
-             (p.name == gene+'.map.tsv' or (p.name.startswith(gene+'.') and p.name.endswith('.map.tsv')))]
+    exact, prefixed = map_index(str(Path(directory).resolve()))
+    if gene in exact:
+        return exact[gene]
+    paths = prefixed.get(gene, [])
     if len(paths)>1:
         raise ValueError(f'Multiple MAP references for {gene}: {[p.name for p in paths]}')
     return paths[0] if paths else None
 
 
+def genomic_coord(text):
+    if text in MISSING:
+        return None
+    match = re.fullmatch(r'([^:\s]+):([1-9][0-9]*)', text)
+    if not match:
+        raise ValueError(f'Invalid MAP genomic coordinate: {text!r}')
+    chrom=match[1]
+    if not chrom.startswith('chr'):chrom='chr'+chrom
+    if chrom=='chrMT':chrom='chrM'
+    return f'{chrom}:{match[2]}'
+
+
 def load_map(path):
+    """Read declared MAP coordinates; do not require reference sidecars.
+
+    A codon is contiguous only when the next reference residue starts exactly
+    three genomic bases away in consistent coding order. Otherwise only its
+    declared first base is usable. Extended producer columns supply split codons.
+    """
     require(path, ['status','prot_ali_col','hg38_aa_pos','hg38_nt_coord'])
-    result, residues = {}, set()
+    result, all_residues = {}, {}
     for r in table(path):
         if r['status'] not in {'selected','removed'}:
             raise ValueError(f'Unknown MAP status in {path}')
-        if r['status'] != 'selected':
-            if r['prot_ali_col'] not in MISSING:
-                raise ValueError('Removed MAP row carries a trimmed column')
-            continue
-        col = integer(r['prot_ali_col'])-1
-        if col in result:
-            raise ValueError('Repeated MAP alignment column')
-        aa = r['hg38_aa_pos']
-        aa = None if aa in MISSING else integer(aa)
-        if aa is not None and aa in residues:
-            raise ValueError('Repeated MAP reference residue')
+        aa = None if r['hg38_aa_pos'] in MISSING else integer(r['hg38_aa_pos'])
+        anchor = genomic_coord(r['hg38_nt_coord'])
+        explicit = [anchor, genomic_coord(r.get('hg38_nt_coord_2','')), genomic_coord(r.get('hg38_nt_coord_3',''))]
+        if any(explicit[1:]) and not all(explicit):
+            raise ValueError('MAP codon must provide all three coordinates or only its anchor')
+        strand = r.get('strand','')
+        if strand not in {'','NA','+','-'}:raise ValueError('Invalid MAP strand')
+        bases = r.get('hg38_codon','').upper()
+        if bases not in MISSING and (len(bases)!=3 or set(bases)-set('ACGTN')):
+            raise ValueError('Invalid MAP coding triplet')
+        entry = dict(aa_position=aa,anchor=anchor,positions=explicit if all(explicit) else ([anchor] if anchor else []),
+                     strand=strand if strand in {'+','-'} else None, coding_bases=bases if bases not in MISSING else '',
+                     protein_id=r.get('human_protein_id',''))
         if aa is not None:
-            residues.add(aa)
-        coord = r['hg38_nt_coord']
-        if coord not in MISSING and not re.fullmatch(r'chr(?:[1-9]|1[0-9]|2[0-2]|X|Y):[1-9][0-9]*',coord):
-            raise ValueError('Invalid MAP genomic coordinate')
-        result[col] = {'aa_position':aa, 'anchor':None if coord in MISSING else coord}
-    if sorted(result) != list(range(len(result))):
-        raise ValueError('Selected MAP columns must be contiguous 1..n')
+            if aa in all_residues:raise ValueError('Repeated MAP reference residue')
+            all_residues[aa]=entry
+        if r['status'] != 'selected':
+            if r['prot_ali_col'] not in MISSING:raise ValueError('Removed MAP row carries a trimmed column')
+            continue
+        col=integer(r['prot_ali_col'])-1
+        if col in result:raise ValueError('Repeated MAP alignment column')
+        result[col]=entry
+    if sorted(result) != list(range(len(result))):raise ValueError('Selected MAP columns must be contiguous 1..n')
+    anchors=[e['anchor'] for _,e in sorted(all_residues.items()) if e['anchor']]
+    chroms={x.split(':')[0] for x in anchors}
+    if len(chroms)>1:raise ValueError('A MAP reference spans different chromosomes')
+    steps={1 if int(b.split(':')[1])>int(a.split(':')[1]) else -1 for a,b in zip(anchors,anchors[1:]) if a!=b}
+    trend=('+' if steps=={1} else '-' if steps=={-1} else None)
+    for aa,e in all_residues.items():
+        strand=e['strand'] or trend
+        if e['strand'] and trend and strand!=trend:raise ValueError('MAP strand disagrees with coordinate order')
+        e['strand']=strand
+        if len(e['positions'])==3:
+            nums=[int(x.split(':')[1]) for x in e['positions']]
+            if len({x.split(':')[0] for x in e['positions']})!=1 or len(set(nums))!=3:
+                raise ValueError('Invalid explicit MAP codon')
+            order='+' if nums[0]<nums[1]<nums[2] else '-' if nums[0]>nums[1]>nums[2] else None
+            if order is None or (strand and strand!=order):raise ValueError('MAP codon order disagrees with strand')
+            e['strand']=order
+        elif e['anchor'] and strand:
+            nxt=all_residues.get(aa+1,{})
+            first=int(e['anchor'].split(':')[1]); step=1 if strand=='+' else -1
+            if nxt.get('anchor')==e['anchor'].split(':')[0]+':'+str(first+3*step):
+                e['positions']=[e['anchor'].split(':')[0]+':'+str(first+j*step) for j in range(3)]
     return result
 
 
@@ -179,7 +240,10 @@ def identity(value, prefix):
 
 def same_id(actual, expected):
     """Stable IDs may omit a version; supplied versions must agree."""
-    return actual == expected or ('.' not in actual and actual == expected.rsplit('.',1)[0])
+    if not actual or not expected:return False
+    if actual==expected:return True
+    a=actual.rsplit('.',1);b=expected.rsplit('.',1)
+    return a[0]==b[0] and (len(a)==1 or len(b)==1)
 
 
 def load_reference(path, gene, mapping):
@@ -257,76 +321,141 @@ def variants_for(ref, aa_position, alternatives):
     return result
 
 
-def prepare(scores, map_dir, proteins=None):
-    rows = load_scores(scores)
-    proteins_map = None
-    if proteins:
-        require(proteins,['gene','human_protein_id'])
-        proteins_map = {}
-        for r in table(proteins):
-            if not r['gene'] or r['gene'] in proteins_map:
-                raise ValueError('Empty or duplicate gene in protein mapping')
-            proteins_map[r['gene']] = r['human_protein_id']
-    cache, targets = {}, []
+def gene_aliases(gene):
+    """Documented producer suffixes only; arbitrary dots/version strings stay literal."""
+    out={gene}
+    if gene.endswith('.prot'):out.add(gene.removesuffix('.prot'))
+    for name in list(out):
+        if name.endswith('.Homo_sapiens'):out.add(name.removesuffix('.Homo_sapiens'))
+    return out
+
+
+def resolve_gene(gene,identifiers):
+    if gene in identifiers:return gene
+    aliases=gene_aliases(gene)
+    candidates={name+suffix for name in aliases for suffix in ('','.prot','.Homo_sapiens','.Homo_sapiens.prot')}
+    matches=sorted(candidates & identifiers.keys() if isinstance(identifiers,dict) else candidates & identifiers)
+    if len(matches)>1:raise ValueError(f'Ambiguous producer gene alias: {gene}: {matches}')
+    return matches[0] if matches else gene
+
+
+def protein_mapping(path):
+    if not path:return {}
+    require(path,['gene','human_protein_id'])
+    mapping={}
+    for row in table(path):
+        if not row['gene'] or row['gene'] in mapping:raise ValueError('Empty or duplicate gene in protein mapping')
+        mapping[row['gene']]=row
+    return mapping
+
+
+@lru_cache(maxsize=8)
+def alignment_index(directory):
+    out={}
+    for p in Path(directory).iterdir():
+        if p.is_file() and p.suffix.lower() in {'.fa','.fasta','.faa','.fas'}:
+            stem=p.stem
+            out[stem]=p
+    return out
+
+
+def alignment_reference(directory,gene):
+    if not directory:return None
+    index=alignment_index(str(Path(directory).resolve()))
+    paths=[p for name,p in index.items() if name==gene or name.startswith(gene+'.')]
+    if len(paths)>1:
+        if gene in index:paths=[index[gene]]
+        else:raise ValueError(f'Multiple productive alignments for {gene}')
+    if not paths:return None
+    refs=[];header='';seq=[]
+    def keep():
+        if 'homo_sapiens' in header.lower() or 'hg38' in header.lower():refs.append(''.join(seq).upper())
+    for line in paths[0].read_text().splitlines():
+        if line.startswith('>'):
+            keep();header=line[1:];seq=[]
+        else:seq.append(line.strip())
+    keep()
+    if len(refs)>1:raise ValueError(f'Multiple human references in alignment for {gene}')
+    return refs[0] if refs else None
+
+
+def prepare(scores,map_dir,proteins=None,alignments=None):
+    rows=load_scores(scores); proteins_map=protein_mapping(proteins)
+    cache,targets={},[]
     for row in rows:
-        gene, position, side = row['Gene'], row['Position'], row['side']
-        t = dict(Gene=gene,Position=position,side=side,status='',coverage='not_evaluated',detail='',
-                 species='homo_sapiens',assembly='GRCh38',caas_change=row['caas'],
-                 transfer='human_reference_candidate',evidence_basis='pooled_ASR_state_candidate',
-                 variants=[],reference=None)
+        gene,position,side=row['Gene'],row['Position'],row['side']
+        t=dict(Gene=gene,Position=position,side=side,status='',coverage='not_evaluated',detail='',
+               species='homo_sapiens',assembly='GRCh38',caas_change=row['caas'],
+               transfer='human_reference_candidate',evidence_basis='pooled_ASR_state_candidate',
+               variants=[],reference=None,candidate_count_known=False)
         if gene not in cache:
-            path = map_path(gene,map_dir)
-            mapping = load_map(path) if path else {}
-            ref = load_reference(path,gene,mapping) if path else None
-            cache[gene] = (mapping,ref)
-        mapping, ref = cache[gene]
-        if mapping and position not in mapping:
-            raise ValueError(f'SCORING position outside selected MAP: {gene}:{position}')
-        anc, der = anc_der_from_row(row['ancestral_aa'],row['derived_aa'])
-        if not anc or not der:
-            t['status'] = 'unresolved_asr'
-        elif (anc|der)-AA:
-            t['status'] = 'excluded_gap' if (anc|der)&set('-?') else 'excluded_ambiguous_residue'
-        elif not mapping:
-            t['status'] = 'unmapped_no_map'
-        elif position not in mapping:
-            raise ValueError(f'SCORING position outside selected MAP: {gene}:{position}')
-        elif mapping[position]['aa_position'] is None:
-            t['status'] = 'unmapped_reference_gap'
-        elif ref is None:
-            t['status'] = 'unverified_reference'
+            path=map_path(gene,map_dir)
+            mapping=load_map(path) if path else {}
+            ref=load_reference(path,gene,mapping) if path else None
+            sequence=alignment_reference(alignments,gene)
+            if sequence is not None and len(sequence)!=len(mapping):raise ValueError(f'MAP/productive alignment length differs: {gene}')
+            cache[gene]=(mapping,ref,sequence)
+        mapping,ref,sequence=cache[gene]
+        if mapping and position not in mapping:raise ValueError(f'SCORING position outside selected MAP: {gene}:{position}')
+        anc,der=anc_der_from_row(row['ancestral_aa'],row['derived_aa'])
+        t.update(ancestral_aas=sorted(anc),derived_aas=sorted(der))
+        if not anc or not der:t['status']='unresolved_asr'
+        elif (anc|der)-AA:t['status']='excluded_gap' if (anc|der)&set('-?') else 'excluded_ambiguous_residue'
+        elif not mapping:t['status']='unmapped_no_map'
+        elif mapping[position]['aa_position'] is None:t['status']='unmapped_reference_gap'
         else:
-            aa = mapping[position]['aa_position']
-            if aa>len(ref['protein_sequence']):
-                raise ValueError('MAP residue outside reference protein')
-            if proteins_map is not None and (gene not in proteins_map or proteins_map[gene] in MISSING):
-                t['status'] = 'unmapped_protein_id'
-            elif proteins_map is not None and not same_id(proteins_map[gene],ref['protein_id']):
-                raise ValueError(f'Protein mapping disagrees with reference: {gene}')
-            else:
-                wt = ref['protein_sequence'][aa-1]
-                # Pooled sets cannot recover domain-paired substitutions. Label every candidate.
-                direct, reverse = (der-{wt} if wt in anc else set()), (anc-{wt} if wt in der else set())
-                alternatives = direct|reverse
+            e=mapping[position];aa=e['aa_position'];protein=proteins_map.get(resolve_gene(gene,proteins_map),{})
+            pid=e.get('protein_id') if e.get('protein_id') not in MISSING|{None} else protein.get('human_protein_id','')
+            if pid in MISSING:pid=''
+            t.update(reference_aa_position=aa,reference_protein_id=pid,
+                     reference_gene_id=protein.get('ensembl_gene_id',''),reference_transcript_id=protein.get('human_transcript_id',''),
+                     genomic_positions=e['positions'],strand=e['strand'],map_file=str(map_path(gene,map_dir)),
+                     reference_status='map_declared',mapping_basis='MAP protein position and genomic coordinates')
+            wt=None
+            if ref:
+                wt=ref['protein_sequence'][aa-1]
                 t.update(reference=ref,reference_gene_id=ref['gene_id'],reference_transcript_id=ref['transcript_id'],
-                         reference_protein_id=ref['protein_id'],reference_aa_position=aa,hg38_ref_aa=wt,
-                         caas_alt_aas=','.join(sorted(alternatives)))
-                if not alternatives:
-                    t['status'] = 'reference_state_mismatch' if wt not in anc|der else 'excluded_no_change'
-                elif str(aa) not in ref['codons']:
-                    t['status'] = 'unmapped_codon'
-                else:
-                    variants = variants_for(ref,aa,alternatives)
-                    reachable = {v['alt_aa'] for v in variants}
-                    t['unqueryable_alt_aas'] = ','.join(sorted(alternatives-reachable))
-                    if alternatives-reachable:
-                        t['detail'] = 'Candidate amino acids outside single-nucleotide scope: '+t['unqueryable_alt_aas']
-                    for v in variants:
-                        v['orientation'] = 'direct_and_reverse_candidate' if v['alt_aa'] in direct&reverse else ('direct_candidate' if v['alt_aa'] in direct else 'reverse_candidate')
-                    t['variants'] = variants
-                    t['status'] = 'ready' if variants else 'excluded_requires_multiple_nucleotides'
+                         reference_protein_id=ref['protein_id'],reference_status='reference_sequence_checked')
+                if pid and not same_id(pid,ref['protein_id']):raise ValueError(f'Protein mapping disagrees with reference: {gene}')
+                c=ref['codons'].get(str(aa))
+                if c:t['genomic_positions']=c['positions'];t['strand']=ref['strand']
+            elif sequence:
+                if position>=len(sequence):raise ValueError('Scored position outside productive human alignment')
+                wt=sequence[position]
+            elif e.get('coding_bases') in CODE and not any(p.startswith('chrM:') for p in e['positions']):wt=CODE[e['coding_bases']]
+            nuclear = not any(p.startswith('chrM:') for p in e['positions'])
+            if wt is not None and wt not in AA:
+                t['status']='unmapped_reference_gap' if wt in '-?' else 'excluded_ambiguous_residue'
+            elif wt is not None and wt not in anc|der:t['status']='reference_state_mismatch'
+            elif nuclear and wt is not None and e.get('coding_bases') in CODE and CODE[e['coding_bases']]!=wt:
+                t['status']='reference_state_mismatch'
+            else:
+                t['status']='ready'
+                if wt:
+                    t['hg38_ref_aa']=wt
+                    alts=(der-{wt} if wt in anc else set()) | (anc-{wt} if wt in der else set())
+                    t['caas_alt_aas']=','.join(sorted(alts))
+                    if not alts:t['status']='excluded_no_change'
+                    if ref and t['status']=='ready':t['variants']=variants_for(ref,aa,alts);t['candidate_count_known']=True
+                    elif nuclear and len(e['positions'])==3 and e.get('coding_bases') in CODE and e['strand']:
+                        small=dict(protein_sequence='A'*(aa-1)+wt,strand=e['strand'],codons={str(aa):dict(positions=e['positions'],coding_bases=e['coding_bases'])})
+                        t['variants']=variants_for(small,aa,alts);t['candidate_count_known']=True
+                    if t['candidate_count_known']:
+                        unreachable=alts-{v['alt_aa'] for v in t['variants']}
+                        t['unqueryable_alt_aas']=','.join(sorted(unreachable))
+                        if not t['variants'] and alts:t['status']='excluded_requires_multiple_nucleotides'
+        for variant in t['variants']:
+            variant['orientation']=candidate_orientation(t,variant['ref_aa'],variant['alt_aa'])
         targets.append(t)
     return targets
+
+
+def candidate_orientation(target,wt,alt):
+    anc=set(target['ancestral_aas']);der=set(target['derived_aas'])
+    direct=wt in anc and alt in der and wt!=alt
+    reverse=wt in der and alt in anc and wt!=alt
+    if direct and reverse:return 'direct_and_reverse_candidate'
+    return 'direct_candidate' if direct else 'reverse_candidate' if reverse else None
 
 
 def output_row(target, source, status=None, **extra):
@@ -336,29 +465,13 @@ def output_row(target, source, status=None, **extra):
     return result
 
 
-def source_manifest(database, manifest_path, source):
-    m = read_json(manifest_path)
-    if m.get('schema')!='phylophere.vep_database.v1' or m.get('source')!=source:
-        raise ValueError('Invalid annotation database manifest')
-    if m.get('species')!='homo_sapiens' or m.get('assembly')!='GRCh38' or m.get('coordinates')!='genomic_1based_forward':
-        raise ValueError('Incompatible annotation database species/assembly/coordinates')
-    if not m.get('version') or not m.get('source_uri') or m.get('sha256')!=digest(database):
-        raise ValueError('Annotation database version/provenance/checksum missing or mismatched')
-    integer(m.get('annotation_release'))
-    m['_sha256'] = digest(manifest_path)
-    return m
-
-
-def finish(output, header, rows, source, inputs, metadata=None):
+def finish(output,header,rows,source,inputs,metadata=None):
     write_table(output,header,rows)
-    statuses = {}
-    # Count unique objectives, not transcript/variant rows.
-    for r in rows:
-        statuses.setdefault(r['status'],set()).add((r['Gene'],r['Position'],r['side']))
-    write_json(str(output)+'.manifest.json',dict(schema='phylophere.vep_output.v1',source=source,
-               complete=True,inputs=inputs,metadata=metadata or {},output_sha256=digest(output),
-               implementation_sha256={p.name:digest(p) for p in sorted(Path(__file__).parent.glob('*.py'))},
-               targets_by_status={k:len(v) for k,v in statuses.items()}))
+    statuses={}
+    for row in rows:statuses.setdefault(row['status'],set()).add((row['Gene'],row['Position'],row['side']))
+    write_json(str(output)+'.manifest.json',dict(schema='phylophere.vep_output.v2',source=source,
+        complete=True,inputs=inputs,metadata=metadata or {},
+        targets_by_status={k:len(v) for k,v in statuses.items()}))
 
 
 def pack_targets(targets, inputs):

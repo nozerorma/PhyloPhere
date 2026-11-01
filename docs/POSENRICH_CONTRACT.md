@@ -37,8 +37,8 @@ shared position p/q are one max-over-sides test, not directional tests.
 ## Null identity and silent cycles
 
 Inference requires canonical blocks, complete `cycles.txt` and `cycle_roster.txt`,
-aggregate counts/positions, `scoring_artifacts.json`, and postproc
-`<observed>.scoring.json`. POSENRICH reuses SCORING's checks of artifact checksums,
+aggregate counts/positions and scientific provenance, and postproc
+`<observed>.scoring.json`. POSENRICH reuses SCORING's checks of
 scientific/filter provenance, unique cycles/position-cycle keys and aggregate
 consistency. Workflow validation compares global matrix maxima to position rows.
 Directional null scores must be positive finite fractions when present; missing
@@ -47,8 +47,9 @@ sides are absent detections, and `all` must equal their maximum.
 Valid silent cycles remain in N. An entirely silent valid null is supported;
 a missing/empty roster is not treated as a negative experiment. Inferential
 consumers verify that their block contents equal those validated for U. A changed
-background, tested input, annotation or reference must be revalidated. Old nulls
-without the current contracts must be regenerated.
+background, tested input, annotation or reference must be revalidated. A missing artifact checksum manifest alone is not a reason to regenerate a null.
+Missing scientific/filter/universe provenance still prevents claiming calibrated
+inference; structural consistency cannot establish unknown scientific settings.
 
 ## Two accumulation models
 
@@ -85,25 +86,29 @@ assuming that every p must change or that every result must remain constant.
 
 MAP selected columns must be unique and contiguous; raw columns are explicit.
 Raw/trimmed alignment projection is separate from biological reference transfer.
-Protein/genomic coordinates and strand require the same verified `.vep.json`
-reference contract as VEP. A missing sidecar is `unverified_reference`, with no
-inferred strand or transferred reference coordinates. Malformed MAPs/references
-fail. Protein-space source annotations additionally require matching
-`reference_identities` per literal gene in their source manifest. Removed raw
+Protein/genomic positions already declared in MAP are used without requiring a
+VEP reference sidecar. Unknown strand remains NA unless consistent coordinate
+order or an explicit producer field establishes it. Codon expansion is separate
+from using a declared point coordinate. Optional reference metadata is checked
+when it is present. Protein-space annotations can use the declared MAP residue
+mapping without an invented `reference_identities` manifest. Contradictory explicit
+reference identities still fail. Removed raw
 columns are audited exclusions, not projected to neighboring columns.
 
 Pfam uses declared direct CAAS columns or verified protein coordinates. UCR uses
-explicit raw/trimmed/CAAS coordinates and the sliding method. FUBAR requires
-explicit coordinates, records all tested sites including neutral calls and
+explicit raw/trimmed/CAAS coordinates and the sliding method. FUBAR accepts explicit coordinates or its native one-based productive `site` column, records all tested sites including neutral calls and
 rejects contradictory duplicate calls. FADE consumes its upstream selected-site
 CSV without inventing a new BF cutoff. Custom TSV uses literal zero-based columns.
 Overlapping memberships are sets, not repeated statistical units.
 
 A source may be descriptive without supplying enough provenance for inference.
-For within-gene use, `<source>.manifest.json` must checksum the complete table,
-identify `source_uri` and `version` (or a verified projection version), bind the
-productive alignment inventory or both `tested_sha256`/`background_sha256`, and
-declare coverage independently of hits. Supported coverage declarations:
+For within-gene use, source provenance and the scanned opportunity must be known,
+independently of hits. Optional `<source>.manifest.json` records `source_uri` and
+`version` or a recognized projection version, and the productive alignment inventory
+or tested/background identity. Existing `ppga_productive_alignment_v2` inventories
+declare the genes scanned by that producer. Complete FUBAR tested-site tables supply
+their own tested positions, including neutral calls. Full-table checksum verification
+is optional. Supported coverage declarations:
 
 * `all_productive_alignment_columns` or `tested_positions_in_declared_genes`,
   with `coverage_genes` explicitly including covered genes with no hits;
@@ -145,9 +150,28 @@ nucleotide anchors, and reports missing reference coverage rather than infinite
 distances. Characterization denominators distinguish tested opportunity from
 positive-score availability; missing annotation is not a biological negative.
 
-Manifests checksum inputs and output tables. Rendering verifies snapshots and
+Manifests record file metadata and output structure. Rendering checks available artifacts and
 uses producer p/q; it does not rerun inference or select a new BH family.
 The workflow publishes `report_settings.json`; regeneration recovers the saved
 BH display threshold unless the caller explicitly overrides it.
-Nextflow uses deep content caches and explicit source fingerprints. No GUI or
+Nextflow uses ordinary metadata caches and explicit source fingerprints. No GUI or
 runner regeneration redesign is included in this checkpoint.
+
+## Compatibility and execution cost
+
+Ordinary tasks use Nextflow metadata caching, not mandatory deep-content hashing.
+Large reference collections are not rehashed at workflow startup. Code fingerprints
+remain small and content-sensitive. Historical checksums are provenance; optional
+Python integrity checks can be requested with `PHYLOPHERE_VERIFY_CHECKSUMS=1` on an
+explicit audit execution. New ordinary component audits use file metadata. Scientific
+null compatibility, cycle counts, matrix/position consistency and tested families
+remain mandatory for inference.
+
+Input IDs are kept verbatim when they match the active universe. The documented
+producer suffixes `.prot` and `.Homo_sapiens` can bridge Pfam/UCR/FUBAR/PP2A names
+to an existing universe ID when there is exactly one possible destination. No
+arbitrary splitting at dots or numeric version stripping is applied. Ambiguous
+aliases fail. PP2A custom positions use their existing accession/peptide-validated
+CAAS export; its measured background remains separate from its hit list. Native
+Pfam/UCR coordinate declarations or the existing PPGA converter establish their
+space; absence of a private sidecar is not a reason to discard direct positions.

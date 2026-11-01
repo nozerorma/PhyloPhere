@@ -1,15 +1,22 @@
 #!/usr/bin/env nextflow
 
-// Content fingerprints for task cache keys. One entry hashes as: name bytes, a 0 byte, the content,
+// Source fingerprints and data metadata for task cache keys. One entry hashes as: name bytes, a 0 byte, the content,
 // then a 0 byte unless nulAfterContent is false. A directory contributes its files recursively, sorted
 // by path and named relative to the directory; a file contributes itself under its own name.
-// The byte layout is fixed: changing it changes every cache key that depends on it.
+// Policy change intentionally invalidates older deep-hash task keys once.
 // Callers assert that their inputs exist; a missing root contributes nothing.
 
-// Stream one file through the digest in chunks, so large files are never loaded whole.
+// Hash small implementation sources; identify data by the same metadata policy
+// as ordinary Nextflow caching. Do not read multi-GB resources at workflow startup.
 def fingerprintFile(md, java.nio.file.Path f) {
-    f.toFile().withInputStream { stream ->
-        new java.security.DigestInputStream(stream, md).transferTo(java.io.OutputStream.nullOutputStream())
+    def source = f.toString() ==~ /.*\/(?:subworkflows|workflows|bin)\/.*\.(?:py|R|r|nf|Rmd|qmd|sh|bf)/
+    if (source) {
+        f.toFile().withInputStream { stream ->
+            new java.security.DigestInputStream(stream, md).transferTo(java.io.OutputStream.nullOutputStream())
+        }
+    } else {
+        def stat = java.nio.file.Files.readAttributes(f, java.nio.file.attribute.BasicFileAttributes)
+        md.update((stat.size().toString()+':'+stat.lastModifiedTime().toString()).getBytes('UTF-8'))
     }
 }
 

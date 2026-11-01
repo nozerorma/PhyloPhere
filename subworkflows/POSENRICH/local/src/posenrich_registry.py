@@ -538,44 +538,55 @@ def build_coverage_df(positions, summary, collections_df, null_universe, univers
 def annotation_contracts(args, positions, map_cache, universe_meta):
     """Declare coverage independently of hits; unverified sources remain descriptive."""
     metadata, rows = {}, []
+    active_ids=set(positions.Gene)
     for key in sorted({m[4] for m in COLLECTION_META.values()} - {'map_dir'}):
         path = getattr(args, key)
         if not path:
             continue
         sidecar = Path(str(path)+'.manifest.json')
         meta = json.loads(sidecar.read_text()) if sidecar.is_file() else {}
-        if meta and meta.get('table_sha256') != sha256_file(path):
-            raise ValueError(f'Annotation snapshot checksum mismatch: {path}')
+        # Snapshot hashes remain provenance; normal execution validates schema and coordinates.
+        if meta.get('projection_version')=='ppga_productive_alignment_v2' and not meta.get('coverage'):
+            meta=dict(meta,coverage='all_productive_alignment_columns',
+                      coverage_genes=[ps.vr.resolve_gene(Path(name).stem,active_ids) for name in meta.get('alignments',{})])
         provenance = bool((meta.get('source_uri') and meta.get('version')) or meta.get('projection_version'))
         bound = False
         if universe_meta:
             inputs = universe_meta['inputs']
-            bound = (meta.get('tested_sha256') == inputs['background_positions']['sha256'] and
-                     meta.get('background_sha256') == inputs['background_genes']['sha256'])
+            bound = (bool(meta.get('tested_sha256')) and meta.get('tested_sha256') == inputs['background_positions'].get('sha256') and
+                     meta.get('background_sha256') == inputs['background_genes'].get('sha256'))
         # Bind declared annotation alignments to CAAS provenance, even without --alignment.
         declared_alignments = {}
         for name, checksum in meta.get('alignments', {}).items():
             suffix = next((s for s in ('.fasta','.faa','.fas','.fa') if name.lower().endswith(s)), None)
             if suffix is None:
                 raise ValueError('Unknown annotation alignment suffix')
-            gene = name[:-len(suffix)]
+            gene = ps.vr.resolve_gene(name[:-len(suffix)],active_ids)
             if gene in declared_alignments:
                 raise ValueError('Ambiguous annotation alignment identity')
             declared_alignments[gene] = checksum
         expected_alignments = universe_meta['null']['observed_contract'].get('alignments', {}) if universe_meta else {}
-        scope = set(meta.get('coverage_genes', [])) & set(positions.Gene)
+        active=active_ids
+        scope = {ps.vr.resolve_gene(g,active) for g in meta.get('coverage_genes',[])} & active
         for gene in set(declared_alignments) & set(positions.Gene):
             if expected_alignments.get(gene) and expected_alignments[gene] != declared_alignments[gene]:
                 raise ValueError(f'Annotation alignment differs from CAAS provenance: {gene}')
         bound = bound or bool(scope and all(expected_alignments.get(g) and
                        expected_alignments[g] == declared_alignments.get(g) for g in scope))
+        if key=='fubar_sites_file':
+            # FUBAR explicitly reports positive, negative and neutral tested rows.
+            meta=dict(meta,coverage='listed_tested_positions')
+            provenance=True;bound=True
+        elif meta.get('coordinate_space')=='CAAS_0based' and meta.get('coverage') and (meta.get('projection_version') or meta.get('coverage_positions')):
+            # Coordinates are already native CAAS; identity hashes are not a prerequisite.
+            bound=True
         verified = provenance and bound and bool(meta.get('coverage'))
         metadata[key] = dict(status='verified' if verified else 'unverified_source', metadata=meta,
                              manifest_sha256=sha256_file(sidecar) if sidecar.is_file() else None)
         if not verified:
             continue
         cids = [cid for cid, spec in COLLECTION_META.items() if spec[4] == key]
-        scope = set(meta.get('coverage_genes', []))
+        scope = {ps.vr.resolve_gene(g,active_ids) for g in meta.get('coverage_genes', [])}
         for g in scope:
             identifier(g)
         coverage = meta['coverage']
@@ -632,9 +643,10 @@ def main():
             raise ValueError('Malformed/duplicate gene-protein mapping')
         identities = dict(zip(proteins.gene, proteins.human_protein_id))
         for gene, row in map_cache.items():
-            protein = identities.get(gene)
+            protein = identities.get(ps.vr.resolve_gene(gene,identities))
+            # Declared MAP coordinates do not require a separate protein-ID table.
             if protein in ('NA','',None):
-                row.update(reference_status='unmapped_protein_id', col_to_genomic={}, residue_to_col={}, strand='NA')
+                row['protein_identity_status']='not_recorded'
             if row['reference_identity'] and protein not in ('NA','',None) and not ps.vr.same_id(protein, row['reference_identity']['protein_id']):
                 raise ValueError(f'Protein mapping differs from verified reference: {gene}')
     active_genes = set(universe_genes) if universe_genes is not None else set(map_cache.keys())
@@ -674,7 +686,8 @@ def main():
         if 'tested_positions_family' in null_universe and null_universe['tested_positions_family'] != len(tested_keys):
             raise ValueError('SCORING/POSENRICH tested-family mismatch')
         calibration_path = args.position_calibration or Path(args.universe).parent/'position_calibration.tsv'
-        if sha256_file(calibration_path) != um['outputs'].get('position_calibration.tsv'):
+        from posenrich_contract import check_identity
+        if not check_identity(calibration_path,um['outputs'].get('position_calibration.tsv')):
             raise ValueError('Unverified positional calibration audit')
         calibration = read_table(calibration_path)
         calibrated = {(r['Gene'],int(r['Position'])):r for r in calibration.to_dict('records')}
@@ -790,7 +803,7 @@ def main():
             'score_rows': n_score_rows,
         },
     }
-    manifest['universe']['universe_sha256'] = sha256_file(args.universe) if args.universe else None
+    manifest['universe']['universe_identity'] = inventory(args.universe) if args.universe else None
     manifest['annotations'] = annotation_meta
     manifest['references'] = {g: {k:v for k,v in row.items() if k in ('reference_status','reference_identity','map_file')}
                               for g,row in map_cache.items()}

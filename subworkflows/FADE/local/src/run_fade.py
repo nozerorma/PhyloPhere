@@ -32,14 +32,16 @@ def run_group(jobs, settings, cpu, container):
     cache=Path(f'{gene}.baseline.cache').absolute()
     cache.unlink(missing_ok=True)
     shared = (len(jobs)>1 and settings['background_scope']=='all'
-              and len({(digest(row[2]),digest(row[3])) for row in jobs})==1)
+              and len({(str(Path(row[2]).resolve()),str(Path(row[3]).resolve())) for row in jobs})==1)
     for _,direction,fasta,tree,fg,bg in jobs:
         stem=f'{gene}.{direction}'
         log=Path(stem+'.hyphy.log')
         output=Path(stem+'.FADE.json')
         audit=dict(gene=gene,direction=direction,status='technical_failure',
                    code_sha256=Path('inputs.sha256').read_text().strip().split(':')[0] if Path('inputs.sha256').exists() else None,
-                   input_sha256={k:digest(p) for k,p in [('alignment',fasta),('tree',tree),('foreground',fg)]+([('background',bg)] if bg else [])})
+                   input_identity={k:dict(size=Path(p).stat().st_size,mtime_ns=Path(p).stat().st_mtime_ns) for k,p in [('alignment',fasta),('tree',tree),('foreground',fg)]+([('background',bg)] if bg else [])},
+                   input_sha256={k:digest(p) for k,p in ([('alignment',fasta),('tree',tree),('foreground',fg)]+([('background',bg)] if bg else []))}
+                   if os.environ.get('PHYLOPHERE_VERIFY_CHECKSUMS')=='1' else {'foreground':digest(fg)})
         try:
             annotated=Path(stem+'_fg.nwk')
             filtered=Path(stem+'.fa')

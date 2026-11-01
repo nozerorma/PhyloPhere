@@ -22,7 +22,7 @@ scoring_overlap <- function(d, nominal=.05, fdr=.05) {
         other <- Reduce(`|`,lapply(calls,function(x)x %in% TRUE))
         measured <- other | Reduce(`&`, side_measured)
       }
-      ok <- is.finite(cp) & measured
+      ok <- is.finite(cp) & measured & !is.na(ca) & !is.na(other)
       ca <- ca[ok]; ot <- other[ok]
       cells <- c(sum(ca & ot),sum(ca & !ot),sum(!ca & ot),sum(!ca & !ot))
       pv <- if(length(ca)) stats::fisher.test(matrix(cells,2,byrow=TRUE))$p.value else NA_real_

@@ -5,6 +5,7 @@ import csv
 import json
 import hashlib
 import math
+import os
 from pathlib import Path
 from fade_json_to_tables import AA_LETTERS, GENES_COLUMNS, SITES_COLUMNS, number
 
@@ -118,7 +119,7 @@ def main():
     metadata=dict(schema_version=1,complete=True,direction=a.direction,settings=settings,
                   expected=len(audit_rows),tested=len(genes),excluded=sum(r['status']=='excluded' for r in audit_rows))
     metadata['output_sha256']={name:hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in
-        [f'fade_gene_counts_{a.direction}.tsv',f'fade_sites_{a.direction}.csv','fade_audit.tsv']}
+        [f'fade_gene_counts_{a.direction}.tsv',f'fade_sites_{a.direction}.csv','fade_audit.tsv']} if os.environ.get('PHYLOPHERE_VERIFY_CHECKSUMS')=='1' else {}
     foreground={v['input_sha256']['foreground'] for k,v in status.items() if k[1]==a.direction}
     if len(foreground)>1:raise ValueError('Conflicting foreground inputs')
     metadata['foreground_sha256']=next(iter(foreground),None)

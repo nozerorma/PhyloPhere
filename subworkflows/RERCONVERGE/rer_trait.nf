@@ -5,7 +5,7 @@ process RER_TRAIT {
     tag "RER_TRAIT|${params.traitname}"
     label 'process_low'
     errorStrategy 'terminate'
-    cache 'deep'
+    cache true
     publishDir path: "${params.outdir}/rerconverge/rer_traits", mode: 'copy'
 
     input:

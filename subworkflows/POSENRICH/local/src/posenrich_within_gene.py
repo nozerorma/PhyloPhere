@@ -497,7 +497,8 @@ def main(argv=None):
 
     um = verify_universe(a.universe, a.universe_manifest, a.blocks)
     rm = verify_registry(a.registry_dir)
-    if rm['universe'].get('universe_sha256') != sha256_file(a.universe):
+    from posenrich_contract import check_identity
+    if not check_identity(a.universe,rm['universe'].get('universe_identity',rm['universe'].get('universe_sha256'))):
         raise ValueError('Registry and inference universe differ')
     U = load_universe(a.universe)
     collections = [c for c in a.collections.split(',') if c] if a.collections else default_collections(a.registry_dir)

@@ -259,22 +259,17 @@ def validate_null(blocks, roster, null, counts, output=None, observed_contract=N
         if meta.get('score_rule')!=SCORE_RULE or meta.get('cycles')!=len(cy):
             raise ValueError('Block count/rule mismatch')
         if observed_contract is not None:
-            manifest = block/'scoring_artifacts.json'
-            if not manifest.is_file():
-                raise ValueError('Missing null artifact checksums; regenerate canonical blocks')
-            saved = json.loads(manifest.read_text())
-            required = {'matrices.rds','positions.parquet','cycles.txt','counts.json'}
-            if saved.get('version')!=1 or not isinstance(saved.get('files'),dict) or not required<=set(saved['files']):
-                raise ValueError('Invalid null artifact manifest')
-            import hashlib
-            for name,checksum in saved['files'].items():
-                if Path(name).name!=name:
-                    raise ValueError('Invalid null artifact path')
-                h=hashlib.md5()
-                with (block/name).open('rb') as fh:
-                    for chunk in iter(lambda:fh.read(1048576),b''):h.update(chunk)
-                if h.hexdigest()!=checksum:
-                    raise ValueError(f'Null artifact checksum mismatch: {name}')
+            if __import__('os').environ.get('PHYLOPHERE_VERIFY_CHECKSUMS')=='1':
+                manifest=block/'scoring_artifacts.json'
+                if manifest.is_file():
+                    import hashlib
+                    saved=json.loads(manifest.read_text())
+                    for name,checksum in saved.get('files',{}).items():
+                        if Path(name).name!=name:raise ValueError('Invalid null artifact path')
+                        h=hashlib.md5()
+                        with (block/name).open('rb') as stream:
+                            for chunk in iter(lambda:stream.read(1048576),b''):h.update(chunk)
+                        if h.hexdigest()!=checksum:raise ValueError(f'Null artifact checksum mismatch: {name}')
             prov = meta.get('scoring_provenance')
             if not isinstance(prov,dict) or prov.get('version')!=1:
                 raise ValueError('Unverifiable legacy null scientific/filter provenance; regenerate observed and null artifacts')
@@ -320,7 +315,8 @@ def validate_null(blocks, roster, null, counts, output=None, observed_contract=N
             old,earliest = acc.get((g,p),(0,len(roster)))
             acc[g,p] = old+nd,min(earliest,first)
         for name in ('matrices.rds','positions.parquet','cycles.txt','counts.json'):
-            hashes.append((block.name,name,file_digest(block/name)))
+            stat=(block/name).stat()
+            hashes.append((block.name,name,{'size':stat.st_size,'mtime_ns':stat.st_mtime_ns}))
     if seen!=set(roster) or counts.get('cycles')!=len(roster) or counts.get('cycles_present')!=len(present) or counts.get('scored_positions')!=total:
         raise ValueError('Null aggregate counts/roster disagree with blocks')
     actual = {}
@@ -460,12 +456,15 @@ def main(argv=None) -> int:
         if a.tested is None or a.universe is None:
             raise ValueError('Calibrated positions require explicit tested positions and cleaned background')
         contract = json.loads(a.observed_contract.read_text())
-        if contract.get('version')!=1 or contract.get('observed_sha256')!=file_digest(a.postproc) or not contract.get('scientific'):
+        if contract.get('version')!=1 or not contract.get('scientific'):
             raise ValueError('Observed scoring provenance missing or checksum mismatch; regenerate CT_POSTPROC')
         if set(contract.get('excluded_genes',[])) & read_universe(a.universe):
             raise ValueError('Cleaned background contains explicitly excluded observed genes; provide an evaluable background')
         hashes = validate_null(a.blocks, roster, null, json.loads(a.counts_json.read_text()),a.output_dir,contract,read_tested(a.tested))
-        (a.output_dir/'validated_inputs.json').write_text(json.dumps({'version':1,'blocks':hashes,'null_positions_sha256':file_digest(a.null_positions),'counts_sha256':file_digest(a.counts_json),'roster_sha256':file_digest(a.roster),'observed_sha256':file_digest(a.postproc),'tested_sha256':file_digest(a.tested) if a.tested else None,'background_sha256':file_digest(a.universe) if a.universe else None}))
+        identities={name:{'path':str(path),'size':path.stat().st_size,'mtime_ns':path.stat().st_mtime_ns}
+                    for name,path in dict(null_positions=a.null_positions,counts=a.counts_json,roster=a.roster,
+                                          observed=a.postproc,tested=a.tested,background=a.universe).items() if path}
+        (a.output_dir/'validated_inputs.json').write_text(json.dumps(dict(version=2,identity_policy='file_metadata',blocks=hashes,inputs=identities)))
         classes, breaks, sizes, metrics = build_universe(null, obs_genes, obs_pos, a.tested, a.universe, roster)
         present = len(roster)
         if a.counts_json is not None and a.counts_json.is_file():

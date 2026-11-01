@@ -5,7 +5,7 @@ process RER_TABLES {
     tag "RER_TABLES|${params.traitname}"
     label 'process_low'
     errorStrategy 'terminate'
-    cache 'deep'
+    cache true
     publishDir path: "${params.outdir}/rerconverge/rer_results", mode: 'copy', pattern: '{rerconverge_summary_*.tsv,rer_run_metadata.json,rer_inputs}'
 
     input:

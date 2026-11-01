@@ -21,9 +21,18 @@ if (source_type == 'caas' && a[4] != 'disabled' && length(stores)) {
     saved <- jsonlite::read_json(meta, simplifyVector=FALSE)
     if (!identical(saved$gene_stat, index$gene_stat) || !identical(as.character(unlist(saved$cycles)), index$cycles) ||
         !identical(as.character(unlist(saved$genes)), index$genes)) stop('CAAS metadata disagrees with blocks')
-    hashes <- vapply(index$blocks, function(b) b$md5, '')
-    old_hashes <- vapply(saved$blocks, function(b) b$md5, '')
-    if (!identical(sort(hashes), sort(old_hashes))) stop('CAAS block content differs from metadata')
+    # Bind each block to its recorded cycle and gene axes without rereading its
+    # compressed bytes. Historical file hashes remain optional integrity checks.
+    block_key <- function(b) paste(as.character(unlist(b$cycles)), collapse=',')
+    current_keys <- vapply(index$blocks, block_key, '')
+    saved_keys <- vapply(saved$blocks, block_key, '')
+    if (anyDuplicated(saved_keys) || !setequal(current_keys, saved_keys)) stop('CAAS block roster differs from metadata')
+    for (i in seq_along(index$blocks)) {
+      prior <- saved$blocks[[match(current_keys[i], saved_keys)]]
+      if (!identical(index$blocks[[i]]$genes, as.character(unlist(prior$genes)))) stop('CAAS block gene axis differs from metadata')
+      if (Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS')=='1' && length(prior$md5)>0L &&
+          !identical(index$blocks[[i]]$md5, prior$md5)) stop('CAAS block checksum differs from metadata')
+    }
   }
 }
 if(a[4]=='scoring' && !length(paths) && file.exists('null_input')) stop('SCORING requires canonical null blocks with scientific provenance; regenerate legacy CAAS null')

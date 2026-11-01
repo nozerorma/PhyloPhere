@@ -425,7 +425,7 @@ process CAAS_CORE_OBSERVED {
 // same statistic on both sides. Position-level null products are unchanged.
 process CAAS_CORE_MERGE {
     ext scoring_source_hash: { coreScoringSourceKey() }
-    cache 'deep'
+    cache true
     tag "caas_core_merge|${block}"
     label 'process_medium'
     // The publish prefix is "/strict" for the strict alias (CAAS_CORE_MERGE_STRICT)

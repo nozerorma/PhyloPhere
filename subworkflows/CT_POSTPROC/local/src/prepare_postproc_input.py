@@ -54,7 +54,7 @@ def main() -> int:
         description="Prepare ct_disambiguation master CSV for CT post-processing."
     )
     parser.add_argument("--input", required=True, help="Disambiguation master CSV/TSV")
-    parser.add_argument("--completion", required=True, help="observed_scoring.json")
+    parser.add_argument("--completion", default="", help="Optional observed_scoring.json; missing scientific provenance stays unknown")
     parser.add_argument(
         "--output",
         default="postproc_disambiguation_input.tsv",
@@ -100,7 +100,7 @@ def main() -> int:
         'excluded_genes': record.get('excluded_genes', []),
         'score_rule': 'caas_pos_species_pss_v4',
         'master_sha256': _digest(args.input),
-        'completion_sha256': _digest(args.completion),
+        'completion_sha256': _digest(args.completion) if args.completion and Path(args.completion).is_file() else None,
     }, indent=2))
 
     removed = pd.DataFrame(columns=[*df.columns, "removal_reason"])

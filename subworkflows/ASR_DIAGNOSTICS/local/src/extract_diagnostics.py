@@ -22,9 +22,9 @@ def extract_contract(archive, destination):
                 seen.add(path)
                 if path.name in names:
                     selected.setdefault(path.parent, {})[path.name] = member
-        candidates = [items for items in selected.values() if set(items) == names]
+        candidates = [items for items in selected.values() if 'caas_convergence_master.csv' in items]
         if len(candidates) != 1 or len(selected) != 1:
-            raise ValueError('Archive must contain exactly one master CSV and its completion record together')
+            raise ValueError('Archive must contain exactly one observed master CSV (with an optional completion record)')
         destination = Path(destination)
         destination.mkdir(parents=True, exist_ok=False)
         for name, member in candidates[0].items():

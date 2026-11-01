@@ -47,7 +47,7 @@ if (!setequal(unique(trait_vector),c(0,1))) stop("Binary trait must contain both
 
 geneTrees <- readRDS(args[2])
 traitRERw <- readRDS(args[4])
-rer_check_matrix(traitRERw, geneTrees, names(trait_vector))
+traitRERw <- rer_compatible_matrix(traitRERw, geneTrees, names(trait_vector), args[6])
 if (!all(geneTrees$masterTree$tip.label %in% names(trait_vector)))
   stop("Master-tree taxa lack binary phenotype; rebuild trees on complete-case trait species")
 trait_vector <- trait_vector[geneTrees$masterTree$tip.label]
@@ -173,7 +173,8 @@ attr(res, "rer_type") <- "binary"
 attr(res, "fg_sp")    <- fg_sp
 attr(res, "clade")    <- rer_clade
 
-attr(res, "rer_input_hashes") <- lapply(args[c(1,2,4)], rer_file_hash)
+attr(res, "rer_input_identity") <- lapply(args[c(1,2,4)], rer_file_identity)
+if (rer_verify_checksums()) attr(res, "rer_input_hashes") <- lapply(args[c(1,2,4)], rer_file_hash)
 invisible(rer_results(res))
 saveRDS(res, args[5])
 message("[RER_BIN] Results saved to: ", args[5])

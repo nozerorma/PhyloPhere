@@ -6,7 +6,7 @@ include { fadeJson } from './fade_contract'
 process FADE_BATCHED {
     tag "${batchID}"
     label 'process_long_compute'
-    cache 'deep'
+    cache true
     publishDir "${params.outdir}/selection/fade/audit", mode:'copy', overwrite:true, pattern:'*.fade.audit.json'
 
     input:
@@ -36,7 +36,7 @@ ${manifest}MANIFEST_EOF
 process FADE_RUN {
     tag "${gene_id}|${direction}"
     label 'process_long_compute'
-    cache 'deep'
+    cache true
     publishDir "${params.outdir}/selection/fade/audit", mode:'copy', overwrite:true, pattern:'*.fade.audit.json'
 
     input:

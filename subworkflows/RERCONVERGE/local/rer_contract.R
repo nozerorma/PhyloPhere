@@ -61,12 +61,22 @@ rer_trait <- function(path) {
 
 rer_hash <- function(x) digest::digest(x, algo='sha256', serialize=TRUE)
 rer_file_hash <- function(path) digest::digest(file=path, algo='sha256')
+rer_verify_checksums <- function() identical(Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS'), '1')
+rer_file_identity <- function(path) {
+  info <- file.info(path)
+  if (is.na(info$size) || info$isdir) stop('Missing regular file: ', path)
+  list(size=unname(info$size), mtime=as.numeric(info$mtime))
+}
 
 rer_verify_snapshot <- function(path) {
   folder <- dirname(path)
   if (basename(folder) != 'rer_inputs') return(invisible(NULL))
   manifest <- file.path(folder,'checksums.json')
-  if (!file.exists(manifest)) stop('Missing RER snapshot checksums')
+  if (!file.exists(manifest)) {
+    if (!file.exists(file.path(folder,'file_identity.json')))
+      warning('Snapshot checksums absent; validating report data without a completion claim')
+    return(invisible(NULL))
+  }
   hashes <- jsonlite::read_json(manifest,simplifyVector=TRUE)
   required <- c('validated_rer.output','rer_run_metadata.json')
   if (!all(required %in% names(hashes)) || !any(grepl('^rerconverge_summary_.*[.]tsv$',names(hashes))))
@@ -74,10 +84,46 @@ rer_verify_snapshot <- function(path) {
   if (any(basename(names(hashes)) != names(hashes))) stop('Invalid RER snapshot path')
   for (name in names(hashes)) {
     f <- file.path(folder,name)
-    if (!file.exists(f) || !identical(rer_file_hash(f),unname(hashes[[name]])))
+    if (!file.exists(f) || (rer_verify_checksums() && !identical(rer_file_hash(f),unname(hashes[[name]]))))
       stop('RER snapshot checksum mismatch: ',name)
   }
   invisible(NULL)
+}
+
+# A legacy matrix does not identify its estimator. Rebuild it from the supplied
+# trees rather than assuming it used weights (older code could fall back to FALSE).
+rer_compatible_matrix <- function(mat, trees, species, min.sp) {
+  if (!is.null(attr(mat, 'rer_contract'))) {
+    rer_check_matrix(mat, trees, species)
+    return(mat)
+  }
+  expected <- rer_tree_contract(trees)
+  if (!is.matrix(mat) || !is.numeric(mat) || any(is.infinite(mat))) stop('Invalid legacy RER matrix')
+  rer_ids(rownames(mat), 'Legacy matrix genes')
+  # Native getAllResiduals can retain duplicated display labels from trees$paths;
+  # the rebuilt matrix receives the unique path IDs from nodeId below.
+  native_axis <- identical(colnames(mat), colnames(trees$paths))
+  if (!is.null(colnames(mat)) && !native_axis) rer_ids(colnames(mat), 'Legacy matrix paths')
+  if (!identical(rownames(mat), expected$genes) ||
+      ncol(mat) != length(expected$paths) ||
+      (!is.null(colnames(mat)) && !(identical(colnames(mat), expected$paths) || native_axis)))
+    stop('Legacy RER matrix/tree axes differ; provide matching trees and matrix')
+  min.sp <- rer_integer(min.sp, 'min.sp', 3)
+  if (length(intersect(species, trees$masterTree$tip.label)) < min.sp)
+    stop('Insufficient trait/master-tree species overlap')
+  warning('Legacy matrix has no estimator provenance: recomputing weighted RERs from supplied trees')
+  rebuilt <- RERconverge::getAllResiduals(trees, useSpecies=species,
+    transform='sqrt', use.weights=TRUE, norm='scale', min.sp=min.sp)
+  if (!identical(rownames(rebuilt), expected$genes) ||
+      !identical(colnames(rebuilt), colnames(trees$paths))) stop('Rebuilt RER axes differ from supplied trees')
+  colnames(rebuilt) <- expected$paths
+  attr(rebuilt, 'rer_contract') <- list(version='rer_v1', tree=expected$tree,
+    paths=expected$paths, genes=rownames(rebuilt), species=species,
+    use.weights=TRUE, transform='sqrt', norm='scale', min.sp=min.sp,
+    package_version=as.character(packageVersion('RERconverge')),
+    provenance_status='recomputed_from_legacy_inputs')
+  rer_check_matrix(rebuilt, trees, species)
+  rebuilt
 }
 
 rer_tree_contract <- function(trees) {

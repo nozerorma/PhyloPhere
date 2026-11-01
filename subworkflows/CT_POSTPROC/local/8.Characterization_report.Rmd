@@ -38,25 +38,29 @@ source('src/report_io.R')
 set_report_style()
 for (directory in c('outliers','clusters','summary_statistics','disambiguation_characterization'))
   dir.create(directory, showWarnings=FALSE, recursive=TRUE)
-if (is.null(params$configuration_file) || !file.exists(params$configuration_file))
-  stop('Original postproc_settings.json is required; regenerate CT_POSTPROC for legacy results')
-cfg <- jsonlite::read_json(params$configuration_file, simplifyVector=TRUE)
-if (!identical(cfg$quality_universe, 'all_ct_candidates')) stop('Incompatible quality-filter universe')
-set.seed(as.integer(cfg$seed))
+known_settings <- !is.null(params$configuration_file) && file.exists(params$configuration_file)
+cfg <- if(known_settings) jsonlite::read_json(params$configuration_file, simplifyVector=TRUE) else
+  list(provenance_status='legacy_unknown', quality_universe='unknown')
+if (known_settings && !identical(cfg$quality_universe, 'all_ct_candidates')) stop('Incompatible quality-filter universe')
+if (!is.null(cfg$seed)) set.seed(as.integer(cfg$seed))
 discovery <- pp_discovery(params$discovery_file)
 retained <- pp_discovery(params$filtered_discovery_file)
 if (!identical(names(retained),names(discovery))) stop('Retained discovery schema differs')
 if (nrow(anti_join(retained, discovery, by=names(discovery))))
   stop('Retained discovery differs from input')
-universe <- jsonlite::read_json(params$quality_universe_file, simplifyVector=FALSE)
-if (!identical(universe$universe, 'all_ct_candidates')) stop('Invalid quality universe record')
-actual_genes <- split(discovery$Position, discovery$Gene)
-if (!setequal(names(actual_genes), names(universe$genes))) stop('Quality universe gene coverage differs')
-for (gene in names(actual_genes)) {
-  positions <- sort(unique(actual_genes[[gene]]))
-  digest <- digest::digest(paste0(paste(sprintf('%.0f',positions),collapse='\n'),'\n'), algo='sha256',serialize=FALSE)
-  expected <- universe$genes[[gene]]
-  if (length(positions) != expected$positions || digest != expected$sha256) stop('Quality universe position coverage differs')
+known_universe <- !is.null(params$quality_universe_file) && file.exists(params$quality_universe_file)
+universe <- if(known_universe) jsonlite::read_json(params$quality_universe_file, simplifyVector=FALSE) else
+  list(universe='input_positions_only', excluded_genes=NULL)
+if (known_universe) {
+  if (!identical(universe$universe, 'all_ct_candidates')) stop('Invalid quality universe record')
+  actual_genes <- split(discovery$Position, discovery$Gene)
+  if (!setequal(names(actual_genes), names(universe$genes))) stop('Quality universe gene coverage differs')
+  for (gene in names(actual_genes)) {
+    positions <- sort(unique(actual_genes[[gene]]))
+    digest <- digest::digest(paste0(paste(sprintf('%.0f',positions),collapse='\n'),'\n'), algo='sha256',serialize=FALSE)
+    expected <- universe$genes[[gene]]
+    if (length(positions) != expected$positions || digest != expected$sha256) stop('Quality universe position coverage differs')
+  }
 }
 stats <- pp_table(params$gene_stats_file, c('Gene','length','length_source','n_CAAS','n_CAAS_per_length','category')) %>%
   pp_numeric(c('length','n_CAAS','n_CAAS_per_length','threshold_extreme','threshold_dubious'))
@@ -82,8 +86,13 @@ if (!isTRUE(cfg$remove_caas_clusters)) cluster_events <- cluster_events[0,]
 removal_events <- bind_rows(gene_events,cluster_events)
 expected_retained <- discovery %>% anti_join(removed_genes,by='Gene')
 if (isTRUE(cfg$remove_caas_clusters)) expected_retained <- anti_join(expected_retained,cluster_hits,by=c('Gene','Position'))
-if (!setequal(do.call(paste,retained[c('Gene','Position','side')]),
+if (known_settings && !setequal(do.call(paste,retained[c('Gene','Position','side')]),
               do.call(paste,expected_retained[c('Gene','Position','side')]))) stop('Filter decisions differ from retained artifact')
+if (!known_settings) {
+  # Actual removals can be recovered from the two tables; their cause cannot.
+  removal_events <- anti_join(discovery, retained, by=c('Gene','Position','side')) %>%
+    mutate(removal_stage='unknown')
+}
 write_tsv(removal_events,'disambiguation_characterization/removal_events.tsv')
 ```
 
@@ -103,7 +112,9 @@ are calibrated over the analyzed candidate pool, rather than the entire backgrou
 
 ```{r configuration, results='asis'}
 pp_show(tibble(Setting=names(cfg),Value=vapply(cfg, function(x) paste(x,collapse=', '), character(1))), 'Original filtering settings')
-cat(sprintf('\nUpstream excluded genes: %d.\n\n',length(universe$excluded_genes)))
+if (!known_settings || !known_universe)
+  cat('**Legacy inputs: original settings or complete candidate coverage are unknown. This report describes the supplied input and retained tables; it does not certify an all-candidate universe or infer removal causes.**\n\n')
+if (known_universe) cat(sprintf('\nUpstream excluded genes: %d.\n\n',length(universe$excluded_genes)))
 counts <- tibble(Stage=c('Input','Retained'),
   Rows=c(nrow(discovery),nrow(retained)),
   Positions=c(nrow(distinct(discovery,Gene,Position)),nrow(distinct(retained,Gene,Position))),
@@ -168,7 +179,7 @@ cluster_by_gene <- selected %>% group_by(Gene) %>% summarise(
   candidate_positions=n(),flagged_positions=sum(clustering_flag=='Discarded'),
   flagged_coordinates=paste(Position[clustering_flag=='Discarded'],collapse=', '),.groups='drop') %>%
   mutate(gene_removed=Gene %in% removed_genes$Gene,
-         effect=case_when(gene_removed~'Complete gene removal',!isTRUE(cfg$remove_caas_clusters)~'Flagged only; retained',
+         effect=case_when(!known_settings~'Original removal rule unknown',gene_removed~'Complete gene removal',!isTRUE(cfg$remove_caas_clusters)~'Flagged only; retained',
            flagged_positions==0~'Retained',flagged_positions==candidate_positions~'All positions removed by cluster filter',
            TRUE~'Partial position removal by cluster filter'))
 write_tsv(cluster_by_gene,'clusters/selected_cluster_genes.tsv')
@@ -196,7 +207,7 @@ score. The score is **not a calibrated probability of independent origins**.
 flags <- stats %>% mutate(Extreme=category %in% c('Extreme','Both'),
   Dubious=category %in% c('Dubious','Both'),
   Cluster_flagged=Gene %in% cluster_hits$Gene,
-  Cluster_removed=isTRUE(cfg$remove_caas_clusters) & Cluster_flagged)
+  Cluster_removed=if(known_settings) isTRUE(cfg$remove_caas_clusters) & Cluster_flagged else NA)
 overlap <- flags %>% count(Extreme,Dubious,Cluster_removed,name='Genes')
 write_tsv(flags,'outliers/filter_overlap_gene_table.tsv')
 write_tsv(overlap,'outliers/filter_overlap_summary.tsv')

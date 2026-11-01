@@ -21,8 +21,11 @@ if (basename(null_path) != 'NO_FILE') {
           !identical(manifest$observed_sha256,rer_hash(list(genes=rownames(res),Rho=res$Rho,P=res$P)))) stop('Null/observed identity mismatch')
       files <- vapply(manifest$blocks,`[[`,'','file')
       if (!identical(basename(paths),files)) stop('Incomplete or extra null blocks')
-      for (i in seq_along(paths)) if (!identical(rer_file_hash(paths[i]),manifest$blocks[[i]]$sha256)) stop('Null block checksum mismatch')
-      null_status <- 'verified'
+      if (rer_verify_checksums()) for (i in seq_along(paths)) {
+        checksum <- manifest$blocks[[i]]$sha256
+        if (!is.null(checksum) && !identical(rer_file_hash(paths[i]),checksum)) stop('Null block checksum mismatch')
+      }
+      null_status <- if(rer_verify_checksums()) 'verified_with_available_checksums' else 'verified_scientific_identity_and_roster'
     } else {
       if (!is.null(attr(res,'rer_null_manifest'))) stop('Missing required null manifest')
       null_status <- 'legacy_unverified_coverage'
@@ -37,6 +40,8 @@ if (basename(null_path) != 'NO_FILE') {
   for (i in seq_along(paths)) {
     b <- readRDS(paths[i]); m <- as.matrix(b$corStat)
     if (!is.numeric(m) || !ncol(m)) stop('Invalid null corStat')
+    if (!is.null(manifest) && !identical(b$rer_settings, attr(res,'rer_settings')))
+      stop('Null block correlation settings differ from observed results')
     rer_ids(rownames(m),'Null gene identifiers')
     if (!identical(rownames(m),rownames(res))) stop('Null genes/order differ from observed results')
     ids <- colnames(m)
@@ -53,7 +58,8 @@ summary <- rer_summary(res,nominal,fdr)
 metadata <- list(version='rer_v1',traitname=a[3],analysis_mode=attr(res,'rer_type'),
   inference=attr(res,'rer_settings'),n_perms=attr(res,'n_perms'),seed=attr(res,'rer_batch_seed'),
   nominal_threshold=nominal,fdr_threshold=fdr,null_status=null_status,
-  original_result_sha256=rer_file_hash(a[1]),null_manifest=manifest,
+  original_result_identity=rer_file_identity(a[1]),
+  original_result_sha256=if(rer_verify_checksums()) rer_file_hash(a[1]) else NULL,null_manifest=manifest,
   inference_provenance=if(is.null(attr(res,'rer_settings'))) 'legacy_unknown' else 'recorded')
 attr(res,'rer_report_metadata') <- metadata
 saveRDS(res,'validated_rer.output')
@@ -62,6 +68,11 @@ jsonlite::write_json(metadata,'rer_run_metadata.json',auto_unbox=TRUE,null='null
 if (!dir.exists('rer_inputs')) dir.create('rer_inputs')
 files <- c('validated_rer.output','rer_run_metadata.json',paste0('rerconverge_summary_',a[3],'.tsv'))
 if (!all(file.copy(files,'rer_inputs',overwrite=TRUE))) stop('Cannot preserve RER inputs')
-hashes <- lapply(file.path('rer_inputs',files),rer_file_hash)
-names(hashes) <- files
-jsonlite::write_json(hashes,'rer_inputs/checksums.json',auto_unbox=TRUE)
+identities <- lapply(file.path('rer_inputs',files),rer_file_identity)
+names(identities) <- files
+jsonlite::write_json(identities,'rer_inputs/file_identity.json',auto_unbox=TRUE)
+if (rer_verify_checksums()) {
+  hashes <- lapply(file.path('rer_inputs',files),rer_file_hash)
+  names(hashes) <- files
+  jsonlite::write_json(hashes,'rer_inputs/checksums.json',auto_unbox=TRUE)
+}

@@ -5,7 +5,7 @@ process RER_TRAIT_MODE {
     tag "RER_TRAIT_MODE|${params.traitname}"
     label 'process_low'
     errorStrategy 'terminate'
-    cache 'deep'
+    cache true
 
     input:
     path trait_file

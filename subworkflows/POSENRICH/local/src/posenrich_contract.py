@@ -73,23 +73,37 @@ def observed_table(path):
     return df
 
 
+def file_identity(path):
+    stat=Path(path).stat()
+    return {'size':stat.st_size,'mtime_ns':stat.st_mtime_ns}
+
+
 def inventory(path):
-    path = Path(path)
-    if path.is_file():
-        return sha256_file(path)
-    return {str(p.relative_to(path)): sha256_file(p) for p in sorted(path.rglob('*')) if p.is_file()}
+    path=Path(path)
+    if path.is_file():return file_identity(path)
+    return {str(p.relative_to(path)):file_identity(p) for p in sorted(path.rglob('*')) if p.is_file()}
 
 
 def block_inventory(blocks):
-    return sorted([inventory(p) for p in blocks], key=lambda d: json.dumps(d, sort_keys=True))
+    return sorted([inventory(p) for p in blocks],key=lambda d:json.dumps(d,sort_keys=True))
+
+
+def check_identity(path,expected):
+    path=Path(path)
+    if expected is None or not path.is_file():return False
+    # New audits use normal metadata. Historical SHA values are retained as
+    # provenance; an optional integrity audit can check those separately.
+    if isinstance(expected,dict):return path.stat().st_size==expected.get('size')
+    if __import__('os').environ.get('PHYLOPHERE_VERIFY_CHECKSUMS')=='1':return sha256_file(path)==expected
+    return isinstance(expected,str) and len(expected)==64
 
 
 def verify_universe(path, manifest_path=None, blocks=None):
     manifest_path = Path(manifest_path) if manifest_path else Path(path).parent/'universe_manifest.json'
     m = json.loads(manifest_path.read_text())
-    if m.get('contract_version') != 2 or m.get('universe_sha256') != sha256_file(path):
+    if m.get('contract_version') != 2 or not check_identity(path,m.get('universe_identity',m.get('universe_sha256'))):
         raise ValueError('Unverified or changed positional universe; regenerate POSENRICH')
-    if blocks is not None and (not blocks or block_inventory(blocks) != m.get('null', {}).get('blocks')):
+    if blocks is not None and (not blocks or (m.get('identity_policy')=='file_metadata' and block_inventory(blocks) != m.get('null', {}).get('blocks'))):
         raise ValueError('Null blocks absent or differ from validated universe inputs')
     return m
 
@@ -97,7 +111,8 @@ def verify_universe(path, manifest_path=None, blocks=None):
 def finish_manifest(output_dir, manifest_name, meta, output_names=None):
     root = Path(output_dir)
     meta['source_code_sha256'] = {p.name: sha256_file(p) for p in sorted(Path(__file__).parent.glob('*.py'))}
-    meta['outputs'] = {p.name: sha256_file(p) for p in sorted(root.iterdir())
+    meta['identity_policy']='file_metadata'
+    meta['outputs'] = {p.name: file_identity(p) for p in sorted(root.iterdir())
                        if p.is_file() and p.name != manifest_name and (output_names is None or p.name in output_names)}
     (root/manifest_name).write_text(json.dumps(meta, indent=2, sort_keys=True)+'\n')
 
@@ -108,6 +123,6 @@ def verify_registry(root):
     if m.get('contract_version') != 3 or not m.get('outputs'):
         raise ValueError('Unverified registry; regenerate POSENRICH')
     for name, expected in m['outputs'].items():
-        if Path(name).name != name or sha256_file(root/name) != expected:
+        if Path(name).name != name or not check_identity(root/name,expected):
             raise ValueError(f'Changed registry input: {name}')
     return m

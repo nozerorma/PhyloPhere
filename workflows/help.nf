@@ -306,10 +306,10 @@ Usage:
 --vep_primateai_db                 <"primateai_db">          ""   (PrimateAI-3D hg38 table; not bundled)
 --cosmic_db                          <"cosmic_db">              ""   (COSMIC Mutant Census GRCh38 table; not bundled)
 --vep_ensembl                         <BOOLEAN>                 false (runs the official Ensembl VEP CLI, independent of the two DBs above; needs --gene_ensembl_file)
---vep_mode                             <"mode">                   "auto"  (auto = database when vep_db_host is reachable, else offline cache; database; offline)
+--vep_mode                             <"mode">                   "auto"  (auto = existing standard offline cache when present, otherwise database; database; offline)
 --vep_db_host                           <"host">                   "ensembldb.ensembl.org"
 --vep_db_port                            <PORT>                    3306
---vep_cache_dir                        <"vep_cache_dir">          ""    (offline mode; blank auto-populates ~/.cache/phylophere/vep/<species>_<assembly> via vep_install on first use)
+--vep_cache_dir                        <"vep_cache_dir">          ""    (existing standard offline cache and preindexed FASTA; no automatic installation or private manifest)
 --vep_species                            <"species">                "homo_sapiens"
 --vep_assembly                             <"assembly">               "GRCh38"
 '''

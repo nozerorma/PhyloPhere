@@ -31,13 +31,14 @@ def prepare(method, sources, output):
             if name not in by_name:
                 raise ValueError(f'Missing canonical CAAS seed table: {name}')
             with by_name[name].open() as handle:
-                reader = csv.DictReader(handle, delimiter='\t')
+                reader = csv.DictReader(handle, delimiter='\t', quoting=csv.QUOTE_NONE)
                 if not {'Gene', 'ranking', 'nominal'}.issubset(reader.fieldnames or []):
                     raise ValueError(f'{name}: canonical Gene/ranking/nominal columns required')
                 rows = list(reader)
             if any(row['ranking'] != rank or row['nominal'].lower() not in ('true', '1') for row in rows):
                 raise ValueError(f'{name}: incompatible ranking or non-active rows')
-            genes = [row['Gene'].strip() for row in rows]
+            genes = [row['Gene'] for row in rows]
+            if any(g!=g.strip() for g in genes):raise ValueError('Whitespace in canonical gene identifier')
             if any(not g for g in genes) or len(set(genes)) != len(genes):
                 raise ValueError(f'{name}: empty or duplicate seed gene')
             lists[rank] = set(genes)

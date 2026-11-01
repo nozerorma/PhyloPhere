@@ -5,7 +5,7 @@ process RER_MATRIX {
     tag "RER_MATRIX|${params.traitname}"
     label 'process_medium'
     errorStrategy 'terminate'
-    cache 'deep'
+    cache true
     publishDir path: "${params.outdir}/rerconverge/rer_objects", mode: 'copy'
 
     input:

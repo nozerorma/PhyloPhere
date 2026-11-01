@@ -1,114 +1,112 @@
 #!/usr/bin/env python3
-"""Streaming, transcript-aware joins of human candidate SNVs to fixed snapshots."""
+"""Read original PrimateAI/COSMIC tables without private snapshot prerequisites.
+
+A match is descriptive human variant evidence at a MAP locus/residue. Source
+transcripts/proteins are retained, checked when the input declares their identity,
+and never relabelled as an ASR event in a nonhuman species.
+"""
 import argparse
-import hashlib
 import math
 import re
-from vep_common import (BASE, columns, digest, finish, integer, output_row,
-                        read_targets, same_id, source_manifest, table)
+from collections import defaultdict
+from pathlib import Path
+from vep_common import (BASE, candidate_orientation, columns, finish, integer,
+                        output_row, read_json, read_targets, same_id, table)
 
-DEFAULTS = {
-    'primateai':dict(chrom='chr',pos='pos',ref='non_flipped_ref',alt='non_flipped_alt',
-                    ref_aa='ref_aa',alt_aa='alt_aa',aa_pos='change_position_1based',
-                    transcript_id='gene_name',gene_id='ensembl_gene_id',
-                    score='score_PAI3D',percentile='percentile_PAI3D',prediction='prediction'),
-    'cosmic':dict(chrom='CHROMOSOME',pos='GENOME_START',ref='GENOMIC_WT_ALLELE',
-                  alt='GENOMIC_MUT_ALLELE',aa_change='MUTATION_AA',
-                  transcript_id='TRANSCRIPT_ACCESSION',gene_id='GENE_ID')}
+FIELDS={
+ 'primateai':dict(chrom='chr',pos='pos',ref='non_flipped_ref',alt='non_flipped_alt',
+    wt='ref_aa',mut='alt_aa',aa_pos='change_position_1based',transcript='gene_name',score='score_PAI3D'),
+ 'cosmic':dict(chrom='CHROMOSOME',pos='GENOME_START',ref='GENOMIC_WT_ALLELE',alt='GENOMIC_MUT_ALLELE',
+    change='MUTATION_AA',transcript='TRANSCRIPT_ACCESSION')}
 
 
-def map_database(targets_file, database, manifest_file, output, source):
-    data = read_targets(targets_file)
-    if data.get('schema')!='phylophere.vep_targets.v1':
-        raise ValueError('Invalid prepared VEP targets')
-    targets = data['targets']
-    manifest = source_manifest(database,manifest_file,source)
-    fields = DEFAULTS[source] | manifest.get('fields',{})
-    header = columns(database)
-    if not set(fields.values()) <= set(header):
-        raise ValueError(f'Database lacks declared fields: {set(fields.values())-set(header)}')
-    if source=='cosmic' and (not isinstance(manifest.get('scope_gene_ids'),list) or not manifest['scope_gene_ids']):
-        raise ValueError('COSMIC snapshot requires explicit nonempty scope_gene_ids (Census coverage)')
-    lookup, hits = {}, {i:[] for i in range(len(targets))}
+def map_database(targets_file,database,manifest_file,output,source):
+    data=read_targets(targets_file);targets=data['targets']
+    # Optional metadata records source version/field aliases; it is not a run prerequisite.
+    meta=read_json(manifest_file) if manifest_file and Path(manifest_file).is_file() else {}
+    if meta.get('assembly') and meta['assembly']!='GRCh38':raise ValueError('Annotation database assembly differs from MAP hg38 coordinates')
+    fields=FIELDS[source] | meta.get('fields',{})
+    header=columns(database)
+    missing=set(fields.values())-set(header)
+    if missing:raise ValueError(f'{source} database lacks required columns: {sorted(missing)}')
+    lookup=defaultdict(list);hits=defaultdict(list);seen=set();predictions={}
     for i,t in enumerate(targets):
-        if t['status']!='ready':continue
-        if t['reference']['annotation_release']!=manifest['annotation_release']:
-            raise ValueError('Annotation database and reference releases differ')
-        for v in t['variants']:
-            lookup.setdefault((v['chrom'],v['pos'],v['ref'],v['alt']),[]).append((i,v))
-    seen = set()
-    predictions = {}
-    for row in table(database):
-        chrom = row[fields['chrom']]
+        if t['status']=='ready':
+            for coord in t['genomic_positions']:lookup[coord].append(i)
+    scanned=0;skipped_unlocated=0
+    # No viable targets: validate the schema, but do not decompress a multi-GB database.
+    for row in (table(database) if lookup else []):
+        scanned+=1
+        chrom=row[fields['chrom']]
         if not chrom.startswith('chr'):chrom='chr'+chrom
         if chrom=='chrMT':chrom='chrM'
-        pos = integer(row[fields['pos']])
-        ref,alt = row[fields['ref']],row[fields['alt']]
-        # Other variant classes are valid source rows, but outside this SNV contract.
-        matches = lookup.get((chrom,pos,ref,alt))
-        if not matches:continue
-        if source=='cosmic':
-            m = re.fullmatch(r'p\.([ACDEFGHIKLMNPQRSTVWY])([1-9][0-9]*)([ACDEFGHIKLMNPQRSTVWY])',row[fields['aa_change']])
-            if not m:continue
-            wt,aa,mut=m.group(1),int(m.group(2)),m.group(3)
+        if row[fields['pos']] in {'','NA','-'}:
+            skipped_unlocated+=1;continue
+        pos=integer(row[fields['pos']]);coord=f'{chrom}:{pos}'
+        if coord not in lookup:continue
+        ref,alt=row[fields['ref']],row[fields['alt']]
+        if len(ref)!=1 or len(alt)!=1 or ref not in 'ACGT' or alt not in 'ACGT' or ref==alt:continue
+        if source=='primateai':
+            wt,mut=row[fields['wt']],row[fields['mut']];aa=integer(row[fields['aa_pos']])
         else:
-            wt,mut=row[fields['ref_aa']],row[fields['alt_aa']]
-            aa=integer(row[fields['aa_pos']])
-        for i,v in matches:
-            t=targets[i];r=t['reference']
-            aliases = r.get('transcript_aliases',[])
-            tx=row[fields['transcript_id']]
-            if not any(same_id(tx,x) for x in [r['transcript_id']]+aliases):continue
-            gid=row[fields['gene_id']]
-            if not same_id(gid,r['gene_id']):continue
-            if aa!=t['reference_aa_position'] or wt!=v['ref_aa'] or mut!=v['alt_aa']:
-                raise ValueError('Source transcript/variant matches but protein consequence disagrees with verified reference')
+            match=re.fullmatch(r'p\.([ACDEFGHIKLMNPQRSTVWY])([1-9][0-9]*)([ACDEFGHIKLMNPQRSTVWY])',row[fields['change']])
+            if not match:continue
+            wt,aa,mut=match[1],int(match[2]),match[3]
+        vid=f'{coord}:{ref}:{alt}'
+        for i in lookup[coord]:
+            t=targets[i]
+            if aa!=t['reference_aa_position']:continue
+            if t.get('hg38_ref_aa') and wt!=t['hg38_ref_aa']:continue
+            orientation=candidate_orientation(t,wt,mut)
+            if not orientation:continue
+            tx=row[fields['transcript']]
+            if t.get('reference_transcript_id') and not same_id(tx,t['reference_transcript_id']):continue
+            if source=='cosmic' and t.get('reference_protein_id') and row.get('HGVSP'):
+                pid=row['HGVSP'].split(':',1)[0]
+                if pid.startswith('ENSP') and not same_id(pid,t['reference_protein_id']):continue
+            # With complete codon bases, also enforce the exact nucleotide change.
+            if t['candidate_count_known'] and vid not in {v['variant_id'] for v in t['variants']}:continue
+            extra={'db_'+k:v for k,v in row.items()}
             if source=='primateai':
-                score,percentile=float(row[fields['score']]),float(row[fields['percentile']])
-                if not math.isfinite(score) or not 0<=score<=1 or not math.isfinite(percentile) or not 0<=percentile<=1:
-                    raise ValueError('Invalid PrimateAI score/percentile (expected [0,1])')
-                if row[fields['prediction']].lower() not in {'benign','pathogenic'}:
-                    raise ValueError('Unrecognised PrimateAI gene-specific prediction')
-            if source=='primateai':
-                signature=(float(row[fields['score']]),float(row[fields['percentile']]),row[fields['prediction']].lower())
-                pk=(i,v['variant_id'])
-                if pk in predictions and predictions[pk]!=signature:
-                    raise ValueError('Conflicting PrimateAI predictions for the same verified variant/transcript')
+                score=float(row[fields['score']])
+                if not math.isfinite(score) or not 0<=score<=1:raise ValueError('Invalid PrimateAI score')
+                percentile=row.get('percentile_PAI3D','')
+                if percentile and (not math.isfinite(float(percentile)) or not 0<=float(percentile)<=1):raise ValueError('Invalid PrimateAI percentile')
+                prediction=row.get('prediction','').lower()
+                if prediction and prediction not in {'benign','pathogenic'}:raise ValueError('Unknown PrimateAI prediction')
+                signature=(score,percentile,prediction)
+                pk=(i,vid,tx)
+                if pk in predictions and predictions[pk]!=signature:raise ValueError('Conflicting PrimateAI records for a variant/transcript')
                 predictions[pk]=signature
-            fingerprint=hashlib.sha256('\t'.join(row[k] for k in header).encode()).hexdigest()
-            key=(i,v['variant_id'],fingerprint)
+                extra.update(score_PAI3D=row[fields['score']],percentile_PAI3D=percentile,prediction=prediction)
+            raw=tuple(row[k] for k in header)
+            key=(i,vid,raw)
             if key in seen:continue
             seen.add(key)
-            extra={'db_'+k:value for k,value in row.items()}
-            if source=='primateai':
-                extra.update(score_PAI3D=row[fields['score']],percentile_PAI3D=row[fields['percentile']],
-                             prediction=row[fields['prediction']].lower())
-            extra.update(source_record_sha256=fingerprint,variant_id=v['variant_id'],orientation=v['orientation'])
+            extra.update(variant_id=vid,orientation=orientation,hg38_ref_aa=wt,caas_alt_aas=mut)
             hits[i].append(extra)
     rows=[]
     for i,t in enumerate(targets):
-        if t['status']!='ready':
-            rows.append(output_row(t,source));continue
-        scope = source!='cosmic' or any(same_id(g,t['reference_gene_id']) for g in manifest['scope_gene_ids'])
-        if not scope:
-            if hits[i]:raise ValueError('COSMIC hit outside declared Census scope')
-            rows.append(output_row(t,source,'outside_source_scope'));continue
-        covered=len({h['variant_id'] for h in hits[i]})
+        if t['status']!='ready':rows.append(output_row(t,source));continue
         if hits[i]:
-            coverage='complete' if covered==len(t['variants']) and not t.get('unqueryable_alt_aas') else 'partial'
-            for h in hits[i]:rows.append(output_row(t,source,'annotated',coverage=coverage,annotated_count=covered,**h))
+            n=len({h['variant_id'] for h in hits[i]})
+            complete=t['candidate_count_known'] and n==len(t['variants']) and not t.get('unqueryable_alt_aas')
+            for h in hits[i]:
+                rows.append(output_row(t,source,'annotated',coverage='complete' if complete else 'partial',
+                    candidate_count=len(t['variants']) if t['candidate_count_known'] else n,annotated_count=n,**h))
         else:
-            # No source record is not a benign prediction or absence of cancer relevance.
-            status='no_hit' if source=='cosmic' else 'missing_annotation'
-            rows.append(output_row(t,source,status,coverage='snapshot_searched' if source=='cosmic' else 'unavailable'))
-    extras=(['score_PAI3D','percentile_PAI3D','prediction'] if source=='primateai' else [])+['source_record_sha256']+['db_'+k for k in header]
-    finish(output,BASE+extras,rows,source,
-           dict(targets_sha256=digest(targets_file),database_sha256=manifest['sha256'],manifest_sha256=manifest['_sha256']),
-           {k:manifest[k] for k in ['version','source_uri','annotation_release','species','assembly']})
+            # Absence in a source with unknown biological/isoform coverage is not a negative call.
+            rows.append(output_row(t,source,'missing_annotation',coverage='searched_map_coordinates',
+                        detail='No compatible source record at declared MAP coordinates; source coverage is not assumed'))
+    extras=(['score_PAI3D','percentile_PAI3D','prediction'] if source=='primateai' else [])+['db_'+k for k in header]
+    finish(output,BASE+extras,rows,source,dict(targets=str(targets_file),database=str(database)),
+           dict(version=meta.get('version','not_recorded'),source_uri=meta.get('source_uri',str(database)),
+                scanned_rows=scanned,unlocated_source_rows=skipped_unlocated,
+                limitation='MAP anchors alone cover only the declared first base; inferred complete codons require adjacent reference anchors or explicit coordinates.'))
 
 
 def main(source):
     p=argparse.ArgumentParser(description=__doc__)
-    for arg in ['targets','database','manifest','output']:p.add_argument('--'+arg,required=True)
-    a=p.parse_args()
-    map_database(a.targets,a.database,a.manifest,a.output,source)
+    for name in ['targets','database','output']:p.add_argument('--'+name,required=True)
+    p.add_argument('--manifest')
+    a=p.parse_args();map_database(a.targets,a.database,a.manifest,a.output,source)

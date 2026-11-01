@@ -35,7 +35,7 @@ process CAAS_OBSERVED {
     tag 'caas_observed'
     label 'process_resample'
     // Hash regular file inputs by content; directory fingerprints arrive as values.
-    cache 'deep'
+    cache true
     ext observed_source_hash: { observedSourceKey() }
     publishDir path: "${params.outdir}", mode: 'copy', overwrite: true, pattern: 'ct_disambiguation'
     publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: 'meta_caas'

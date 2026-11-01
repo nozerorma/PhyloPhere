@@ -15,12 +15,12 @@ def fadeSources(stage) {
         file("${baseDir}/subworkflows/SELECTION/local/src/alignment_io.py"),
         file("${baseDir}/subworkflows/SELECTION/local/src/prepare_alignments.py")]
     if (stage=='report') paths += [file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R")]
-    selectionHash(paths.sort { it.toString() })
+    selectionHash(paths.sort { it.toString() }) + ':integrity=' + (System.getenv('PHYLOPHERE_VERIFY_CHECKSUMS') ?: '0')
 }
 
 def fadeSpecies(path) {
     def rows=path.readLines().collect { it.trim() }.findAll { it && !it.startsWith('#') }
-    assert rows && rows.unique(false).size()==rows.size() : "Empty or duplicate FADE species list: ${path}"
+    assert rows.unique(false).size()==rows.size() : "Duplicate FADE species list: ${path}"
     assert rows.every { !(it =~ /[\s,]/).find() } : "Invalid FADE species identifier: ${path}"
     rows.toSet()
 }

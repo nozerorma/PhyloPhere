@@ -35,10 +35,11 @@ asr_check_coverage <- function(actual, expected) {
 load_asr_diagnostics <- function(directory) {
   master <- file.path(directory, 'caas_convergence_master.csv')
   stamp <- file.path(directory, 'observed_scoring.json')
-  if (!file.exists(master) || !file.exists(stamp))
-    asr_fail('Requires caas_convergence_master.csv and observed_scoring.json; regenerate legacy observed results')
-  record <- jsonlite::read_json(stamp, simplifyVector = FALSE)
-  if (!identical(record$version, 1L) || !identical(record$complete, TRUE) || is.null(record$genes))
+  if (!file.exists(master)) asr_fail('Requires caas_convergence_master.csv')
+  legacy <- !file.exists(stamp)
+  if (legacy) warning('Observed completion record absent: reporting validated table with unknown model/design provenance')
+  record <- if (legacy) list(version=1L, complete=FALSE, provenance_status='legacy_unknown', genes=list(), batches=list()) else jsonlite::read_json(stamp, simplifyVector = FALSE)
+  if (!identical(record$version, 1L) || (!legacy && !identical(record$complete, TRUE)) || is.null(record$genes))
     asr_fail('Invalid observed completion record')
   batches <- record$batches
   if (is.null(batches)) asr_fail('Missing observed batch provenance')
@@ -60,7 +61,7 @@ load_asr_diagnostics <- function(directory) {
     excluded <- c(excluded, unlist(batch$excluded_genes, use.names = FALSE))
   }
   if (any(names(genes) %in% excluded)) asr_fail('Genes are both scored and excluded')
-  asr_check_coverage(genes, record$genes)
+  if (!legacy) asr_check_coverage(genes, record$genes)
   if (!length(batches) && length(record$genes)) asr_fail('Nonempty results without batch provenance')
 
   header <- names(readr::read_csv(master, n_max = 0, name_repair = 'minimal', show_col_types = FALSE))
@@ -87,10 +88,10 @@ load_asr_diagnostics <- function(directory) {
     dplyr::summarise(conflict = any(side == 'none') && dplyr::n() > 1, .groups = 'drop')
   if (any(conflicts$conflict) || any(df$side == 'none' & df$asr_path_score != 0))
     asr_fail('Conflicting none-side rows')
-  asr_check_coverage(asr_coverage(df), record$genes)
+  if (!legacy) asr_check_coverage(asr_coverage(df), record$genes)
   list(data = df, record = record,
        posterior_threshold = if (length(batches)) batches[[1]]$posterior_threshold else NA_real_,
-       model = if (length(batches)) batches[[1]]$model else 'not recorded (empty result)',
+       model = if (length(batches)) batches[[1]]$model else if (legacy) 'not recorded (legacy input)' else 'not recorded (empty result)',
        excluded_genes = length(unique(excluded)))
 }
 

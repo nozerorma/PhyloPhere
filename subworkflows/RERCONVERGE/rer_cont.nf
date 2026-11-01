@@ -5,7 +5,7 @@ process RER_CONT {
     tag "RER_CONT|${params.traitname}"
     label 'process_medium'
     errorStrategy 'terminate'
-    cache 'deep'
+    cache true
     publishDir path: "${params.outdir}/rerconverge/rer_results", mode: 'copy'
 
     input:

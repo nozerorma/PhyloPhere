@@ -1,6 +1,6 @@
 // Shared calibration, independent of GMT/FCS/AMI switches.
 process SCORING_EVIDENCE {
-    cache 'deep'
+    cache true
     label 'process_fcs_batched'
     publishDir path: "${params.outdir}/scoring", mode: 'copy', overwrite: true, pattern: '*.tsv'
     publishDir path: "${params.outdir}/scoring", mode: 'copy', overwrite: true, pattern: '*_lists'

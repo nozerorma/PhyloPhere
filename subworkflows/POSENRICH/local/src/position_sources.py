@@ -84,17 +84,14 @@ def parse_map_file(path, gene=None):
                 raise ValueError('Duplicate raw MAP column')
             raw_to_col[int(raw)] = int(row['prot_ali_col']) - 1
     residue_to_col, genomic = {}, {}
-    if reference:
-        for col, row in mapping.items():
-            residue = row['aa_position']
-            if residue is not None:
-                if residue > len(reference['protein_sequence']):
-                    raise ValueError('MAP residue outside verified protein')
-                residue_to_col[residue] = col
-                codon = reference['codons'].get(str(residue))
-                if codon:
-                    genomic[col] = codon['positions'][0]
-    return list(mapping), genomic, residue_to_col, reference['strand'] if reference else 'NA', raw_to_col
+    strands=set()
+    for col,row in mapping.items():
+        residue=row['aa_position']
+        if residue is not None:residue_to_col[residue]=col
+        if row['anchor']:genomic[col]=row['anchor']
+        if row.get('strand'):strands.add(row['strand'])
+    if len(strands)>1:raise ValueError('Inconsistent MAP strand')
+    return list(mapping),genomic,residue_to_col,next(iter(strands)) if strands else 'NA',raw_to_col
 
 
 def build_map_cache(map_dir, universe_genes):
@@ -113,7 +110,7 @@ def build_map_cache(map_dir, universe_genes):
         reference = vr.load_reference(path, gene, vr.load_map(path))
         cache[gene] = dict(selected_cols=set(selected), col_to_genomic=genomic,
                            residue_to_col=residue, strand=strand, raw_to_col=raw,
-                           reference_status='verified' if reference else 'unverified_reference',
+                           reference_status='verified' if reference else 'map_declared',
                            reference_identity=({k: reference[k] for k in ('protein_id','transcript_id','gene_id',
                                                'annotation_release','assembly','species')} if reference else None),
                            map_file=path.name)
@@ -127,18 +124,20 @@ def build_map_cache(map_dir, universe_genes):
 # ── Source readers ───────────────────────────────────────────────────────────────────
 
 
-def verify_source_reference(path, gene, cache):
-    manifest = Path(str(path)+'.manifest.json')
-    if not cache or cache.get('reference_status') != 'verified':
-        return False
-    if not manifest.is_file():
-        return False
-    meta = json.loads(manifest.read_text())
-    identity = meta.get('reference_identities', {}).get(gene)
-    if identity is None:
-        return False
-    if identity != cache['reference_identity']:
-        raise ValueError(f'Annotation and MAP reference identities differ for {gene}')
+def verify_source_reference(path,gene,cache):
+    """Use declared MAP residue coordinates without inventing reference metadata.
+
+    If a source explicitly declares a reference identity and MAP identity is
+    available, a contradiction is an error. Missing private sidecars are not.
+    """
+    if not cache:return False
+    sidecar=Path(str(path)+'.manifest.json')
+    if sidecar.is_file():
+        meta=json.loads(sidecar.read_text())
+        declared=meta.get('reference_identities',{}).get(gene)
+        actual=cache.get('reference_identity')
+        if declared is not None and actual is not None and declared!=actual:
+            raise ValueError(f'Annotation and MAP reference identities differ for {gene}')
     return True
 
 
@@ -195,7 +194,7 @@ def collect_pfam_members(domain_file, map_cache, active_genes, pending=None, reg
                          'project-ppga or regenerate the annotation')
     seen_pfam = {}
     for row in df_dom.itertuples(index=False):
-        gene = identifier(row.gene)
+        gene = vr.resolve_gene(identifier(row.gene),active_genes)
         if gene not in active_genes:
             continue
 
@@ -320,7 +319,7 @@ def collect_ucr_members(ucr_file, map_cache, active_genes, pending=None):
     for chunk in reader:
         chunk = chunk[chunk['method'] == 'sliding']
         for row in chunk.itertuples(index=False):
-            gene = identifier(row.gene)
+            gene = vr.resolve_gene(identifier(row.gene),active_genes)
             if gene not in active_genes:
                 continue
             try:
@@ -388,19 +387,24 @@ def collect_fubar_members(fubar_file, map_cache, active_genes, pending=None):
     if not fubar_file:
         return gene_pos_sel_cols, gene_neg_sel_cols, fubar_char
     header = pd.read_csv(fubar_file, sep='\t', nrows=0).columns
-    if 'coordinate_space' not in header:
-        raise ValueError('FUBAR requires explicit coordinate_space')
+    native_site='coordinate_space' not in header and 'site' in header
+    if 'coordinate_space' not in header and not native_site:
+        raise ValueError('FUBAR needs coordinate_space or its native one-based alignment site column')
     cols = ['gene', 'is_pos_hit', 'is_neg_hit', 'hg38_aa_pos']
     if 'coordinate_space' in header:
         cols.append('coordinate_space')
     if 'alignment_position' in header:
         cols.append('alignment_position')
+    if native_site:cols.append('site')
     reader = pd.read_csv(fubar_file, sep='\t', usecols=cols,
                          dtype=str, keep_default_na=False, chunksize=500_000)
     seen_fubar = {}
     for chunk in reader:
+        if native_site:
+            chunk['coordinate_space']='CAAS_0based'
+            chunk['alignment_position']=[vr.integer(v)-1 for v in chunk['site']]
         for row in chunk.itertuples(index=False):
-            gene = identifier(row.gene)
+            gene = vr.resolve_gene(identifier(row.gene),active_genes)
             if gene not in active_genes:
                 continue
             try:
@@ -474,7 +478,7 @@ def collect_fade_sites(fade_file, map_cache, active_genes, pending=None):
         if not {'gene', 'position'} <= set(frame):
             raise ValueError('FADE source missing gene/position')
         for row in frame.itertuples(index=False):
-            gene, pos = identifier(row.gene), position(row.position)
+            gene, pos = vr.resolve_gene(identifier(row.gene),active_genes), position(row.position)
             if gene not in active_genes:
                 continue
             if pos < 0:
@@ -531,7 +535,7 @@ def collect_custom_members(custom_file, map_cache, active_genes, strict=True, pe
             fields = line.rstrip('\r\n').split('\t')
             if len(fields) not in (3,4):
                 raise ValueError('Malformed custom source row')
-            gene = identifier(fields[0])
+            gene = vr.resolve_gene(identifier(fields[0]),active_genes)
             if gene not in active_genes:
                 continue
             pos = int(fields[1])

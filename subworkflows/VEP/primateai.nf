@@ -1,7 +1,7 @@
 include { vepQuote } from './vep_contract'
 
 process PRIMATEAI_MAP {
-    cache 'deep'
+    cache true
     tag 'primateai'
     label 'process_long_compute'
     errorStrategy 'terminate'
@@ -11,7 +11,6 @@ process PRIMATEAI_MAP {
     val fingerprint
     path targets
     path database
-    path database_manifest
 
     output:
     path 'primateai_mapped.tsv', emit: primateai_tsv
@@ -24,6 +23,6 @@ process PRIMATEAI_MAP {
     # Content fingerprint: ${fingerprint}
     cp ${vepQuote(src+'/map_to_primateai.py')} ${vepQuote(src+'/map_database.py')} ${vepQuote(src+'/vep_common.py')} .
     ${py3} map_to_primateai.py --targets ${vepQuote(targets)} --database ${vepQuote(database)} \
-        --manifest ${vepQuote(database_manifest)} --output primateai_mapped.tsv
+        --output primateai_mapped.tsv
     """
 }

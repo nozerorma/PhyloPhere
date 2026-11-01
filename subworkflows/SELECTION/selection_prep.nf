@@ -104,7 +104,7 @@ def ali_tuples_from_dir(String ali_dir, Set wanted) {
  */
 process PREP_ALIGNMENTS {
     tag "${gene_id}"
-    cache 'deep'
+    cache true
     publishDir "${params.outdir}/selection/prep_audit", mode: 'copy', overwrite: true, pattern: '*.prep.json'
 
     input:
@@ -129,7 +129,7 @@ process PREP_ALIGNMENTS {
 // audit record; technical failures abort, biological exclusions are explicit.
 process PREP_ALIGNMENTS_BATCHED {
     tag "${batchID}"
-    cache 'deep'
+    cache true
     publishDir "${params.outdir}/selection/prep_audit", mode: 'copy', overwrite: true, pattern: '*.prep.json'
 
     input:

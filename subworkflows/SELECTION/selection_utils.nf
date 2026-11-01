@@ -12,7 +12,7 @@
 include { selectionQuote } from './selection_contract'
 
 process EXTRACT_EXTREME_SPECIES {
-    cache 'deep'
+    cache true
     tag "extract_extreme_species"
 
     publishDir path: "${params.outdir}/selection/species_sets",

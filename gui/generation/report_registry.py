@@ -452,14 +452,14 @@ def _postproc_find_slots(outdir: Listing) -> list[InputSlot]:
         "quality_universe_file": "quality_universe.json",
         "configuration_file": "postproc_settings.json",
     }
-    return [_slot(key, filename, True, _first_match(inputs, filename)) for key, filename in names.items()] + [
+    return [_slot(key, filename, key not in {"quality_universe_file", "configuration_file"}, _first_match(inputs, filename)) for key, filename in names.items()] + [
         _slot("filter_dir", "Cluster sweep artifacts", True, _first_match(inputs, "clusters"))]
 
 
 def _postproc_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     import json
     import shlex
-    payload = {slot.key: str(slot.path) for slot in report.slots}
+    payload = {slot.key: str(slot.path) if slot.path is not None else None for slot in report.slots}
     payload["output_dir"] = "."
     q = shlex.quote
     target = report.html_path.parent
@@ -539,7 +539,7 @@ def _signif_significance_find_slots(outdir: Listing) -> list[InputSlot]:
     return [
         _slot("position_scores_input", "Canonical position scores", True, _first_match(scoring,"position_scores.tsv")),
         _slot("gene_scores_input", "Canonical gene scores", True, _first_match(scoring,"gene_scores.tsv")),
-        _slot("gene_metadata_input", "Original evidence thresholds and gene statistic", True, _first_match(scoring,"gene_evidence_metadata.json")),
+        _slot("gene_metadata_input", "Original evidence thresholds and gene statistic", False, _first_match(scoring,"gene_evidence_metadata.json")),
         _slot("gene_evidence_input", "Per-gene valid null counts", False, _first_match(scoring,"gene_evidence.tsv")),
         _slot("null_universe_input", "Original positional BH family and null resolution", False, _first_match(scoring,"null_universe_summary.tsv")),
     ]
@@ -553,7 +553,7 @@ def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, us
         [
             f"position_scores_input = '{s['position_scores_input']}'",
             f"gene_scores_input = '{s['gene_scores_input']}'",
-            f"gene_metadata_input = '{s['gene_metadata_input']}'",
+            f"gene_metadata_input = {_r_arg(s['gene_metadata_input'])}",
             f"gene_evidence_input = {_r_arg(s['gene_evidence_input'])}",
             f"null_universe_input = {_r_arg(s['null_universe_input'])}",
             f"traitname = '{report.traitname}'",

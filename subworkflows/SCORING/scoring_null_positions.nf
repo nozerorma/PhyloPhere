@@ -22,7 +22,7 @@ include { scoringHash; scoringQuote } from './scoring_contract'
  */
 
 process CAAS_NULL_UNIVERSE {
-    cache 'deep'
+    cache true
     publishDir "${params.outdir}/scoring/scoring_inputs", mode:'copy', overwrite:true,
                saveAs: { name -> name.toString().endsWith('validated_inputs.json') ? 'validated_inputs.json' : null }
     tag "caas_null_universe"
@@ -67,7 +67,7 @@ process CAAS_NULL_UNIVERSE {
 }
 
 process CAAS_NULL_COUNT {
-    cache 'deep'
+    cache true
     tag "caas_null_count|${block.name}"
     label 'process_medium'
 
@@ -97,7 +97,7 @@ process CAAS_NULL_COUNT {
 }
 
 process CAAS_NULL_COUNTERS {
-    cache 'deep'
+    cache true
     tag "caas_null_counters"
     label 'process_low'
 

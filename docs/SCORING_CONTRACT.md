@@ -40,22 +40,27 @@ cycles together and native leave-one-out null ranks. Missing evidence is exposed
 by availability fields and missing p/q; no analytic substitute is used.
 Disabling pathway enrichment does not disable SCORING calibration.
 
-Canonical block artifacts carry `scoring_artifacts.json` content checksums. The
+Canonical producers can write `scoring_artifacts.json` for optional integrity audits;
+its absence alone no longer invalidates a block. The
 validated input identities are published under `scoring/scoring_inputs/`.
 
 New inference from a saved null requires canonical blocks and
 `filtered_discovery.tsv.scoring.json`, produced by CT_POSTPROC. Null tile/merge
 records carry model, tree, weights, taxon mapping, cluster and gene-filter
-settings, MAP/alignment hashes and length values. SCORING verifies the observed
-checksum and compatibility of these records. It checks unique cycles and
+settings, MAP/alignment hashes and length values. SCORING checks the scientific compatibility of these records. It checks unique cycles and
 position/cycle keys, reconstructs aggregate detection counts, compares position
 maxima with global matrices, and enforces `0 <= k_emp <= nd <= N`.
 Legacy nulls without scientific/filter provenance must be regenerated; matching
 a score-rule string alone does not establish compatibility. The public workflow
 signature and downstream table/list channels are retained.
 
-Calculation, counters, calibration and rendering use content-sensitive caches
-and source fingerprints. Report metadata records table hashes and effective
+Calculation, counters and calibration use normal Nextflow metadata caches and
+small source-code fingerprints. Large block artifacts are not hashed twice merely
+to validate identity. An explicit Python audit with `PHYLOPHERE_VERIFY_CHECKSUMS=1`
+can verify existing checksum manifests; scientific consistency checks remain active
+in ordinary runs. Descriptive CT_POSTPROC/ASR diagnostics can consume structurally
+valid legacy observed tables without a completion ledger, marking provenance as
+unknown. That does not fabricate the scientific settings required for calibration. Report metadata records table hashes and effective
 thresholds. Rendering verifies its input snapshots and preserves the producer's
 RER empirical BH family. The compatibility gene-correlation table is header-only.
 The GUI regeneration change only stages the shared report style; full GUI,

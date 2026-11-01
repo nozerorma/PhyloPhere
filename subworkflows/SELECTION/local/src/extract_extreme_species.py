@@ -22,7 +22,7 @@ def load_species_sets(path: str):
     with open(path, newline="", encoding="utf-8-sig") as fh:
         lines = [line for line in fh if line.strip()]
     if not lines:
-        raise ValueError(f"Empty species input: {path}")
+        return top_species, bottom_species
     is_tsv = "\t" in lines[0]
     if is_tsv:
         rows = list(csv.reader(lines, delimiter="\t"))
@@ -60,8 +60,6 @@ def load_species_sets(path: str):
             top_species.add(species)
         elif group in {"0", "low_extreme"}:
             bottom_species.add(species)
-    if not top_species or not bottom_species:
-        raise ValueError(f"Both top and bottom species are required: {path}")
     return top_species, bottom_species
 
 

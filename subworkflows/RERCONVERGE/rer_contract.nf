@@ -5,6 +5,7 @@ def rerQuote(value) { "'" + value.toString().replace("'", "'\"'\"'") + "'" }
 
 def rerHash(paths) {
     def md = java.security.MessageDigest.getInstance('SHA-256')
+    md.update(('integrity=' + (System.getenv('PHYLOPHERE_VERIFY_CHECKSUMS') ?: '0')).getBytes('UTF-8'))
     paths.each { original ->
         def p = original
         if (original.name != 'NO_FILE') p = original.toRealPath()

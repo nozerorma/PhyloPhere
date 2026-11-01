@@ -4,7 +4,7 @@ include { fadeSources } from './fade_contract'
 process FADE_GENE_LISTS_TASK {
     tag "${direction}"
     label 'process_low'
-    cache 'deep'
+    cache true
     publishDir "${params.outdir}/selection/fade/${direction}/gene_lists", mode:'copy', overwrite:true
     input:
     val direction

@@ -9,7 +9,7 @@ def fadeArgs(paths) {
 process FADE_TABLES {
     tag "${direction}"
     label 'process_low'
-    cache 'deep'
+    cache true
     publishDir "${params.outdir}/selection/fade/${direction}", mode:'copy', overwrite:true
     input:
     val direction

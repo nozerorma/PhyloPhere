@@ -33,7 +33,7 @@ rer_write_batches <- function(res, num_batches, perms_per_batch, seed, run_batch
     colnames(stat) <- sprintf('rer_%06d', (i-1L)*perms_per_batch + seq_len(perms_per_batch))
     block <- list(corStat=stat, batch=i, seed=batch_seed, rer_settings=settings)
     saveRDS(block, file.path(output, sprintf('blk_%06d.rds', i)))
-    roster[[i]] <- list(file=sprintf('blk_%06d.rds',i),sha256=rer_file_hash(file.path(output,sprintf('blk_%06d.rds',i))),cycles=colnames(stat))
+    roster[[i]] <- list(file=sprintf('blk_%06d.rds',i),sha256=if(rer_verify_checksums()) rer_file_hash(file.path(output,sprintf('blk_%06d.rds',i))) else NULL,cycles=colnames(stat))
     for (k in seq_along(groups)) {
       saveRDS(as.matrix(batch$corRho[groups[[k]],,drop=FALSE]),
               file.path(scratch, sprintf('genes_%06d_block_%06d.rds', k, i)))

@@ -5,7 +5,7 @@
 include { scoringHash } from '../SCORING/scoring_contract.nf'
 
 process COMPUTE_UCR_POSITIONS {
-    cache 'deep'
+    cache true
     tag "auto-generate ucr_positions_file"
     label 'process_medium'
     publishDir "${params.outdir}/core_inputs", mode: 'copy', overwrite: true

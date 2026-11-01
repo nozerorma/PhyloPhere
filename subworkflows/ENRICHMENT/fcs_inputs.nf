@@ -13,7 +13,9 @@ process FCS_PREPARE_BLOCKS {
     path 'empty.tsv', emit: empty, optional: true
     script:
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
-    def code = file("${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_prepare_blocks.R").text
+    def code = file("${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_prepare_blocks.R").text +
+        file("${baseDir}/subworkflows/SCORING/local/src/caas_block_contract.R").text +
+        (System.getenv('PHYLOPHERE_VERIFY_CHECKSUMS') ?: '0')
     def hash = java.security.MessageDigest.getInstance('SHA-256').digest(code.getBytes('UTF-8')).encodeHex().toString()
     """
     # resolver: ${hash}

@@ -52,10 +52,10 @@ include { fingerprintRoots } from '../subworkflows/common/content_hash.nf'
 def asrInputHash(directory) {
     def sources = ['caas_convergence_master.csv', 'observed_scoring.json'].collect { name ->
         def source = directory.resolve(name)
-        assert source.isFile() : "[asr_diagnostics] Required observed input not found: ${source}"
-        source
+        if (name=='caas_convergence_master.csv') assert source.isFile() : "[asr_diagnostics] Required master not found: ${source}"
+        source.isFile() ? source : null
     }
-    return fingerprintRoots(sources, true)
+    return fingerprintRoots(sources.findAll { it != null }, true)
 }
 
 // ── Archive input ────────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ def extractionSourceKey() {
 }
 process EXTRACT_DISAMBIG_DIR {
     ext extractor_hash: { extractionSourceKey() }
-    cache 'deep'
+    cache true
     input: path tarball
     output: path 'extracted', emit: dir
     script:

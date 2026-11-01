@@ -35,6 +35,7 @@ import csv
 import hashlib
 import json
 import os
+from pathlib import Path
 
 import pandas as pd
 
@@ -312,7 +313,7 @@ def main():
     del pfam
     tested_keys = (set(zip(positions.loc[positions.in_tested_universe == '1','Gene'],
                            positions.loc[positions.in_tested_universe == '1','Position'].astype(int)))
-                   if manifest['universe'].get('universe_sha256') else None)
+                   if manifest['universe'].get('universe_identity',manifest['universe'].get('universe_sha256')) else None)
     coll_summary = build_collection_summary(
         collections, (frame for _, frame in pm.iter_members(positions, regions, sites)), evidence, coverage, tested_keys)
     ranking = build_ranking_summary(evidence, n_cycles)
@@ -326,7 +327,7 @@ def main():
     out_manifest = {
         'component': 'characterization',
         'contract_version': manifest.get('contract_version'),
-        'inputs': {f: sha256_file(os.path.join(args.registry_dir, f)) for f in REGISTRY_FILES},
+        'inputs': {f: {'size':Path(args.registry_dir,f).stat().st_size} for f in REGISTRY_FILES},
         'outputs': ['position_characterization.tsv', 'collection_summary.tsv',
                     'ranking_summary.tsv', 'universe_summary.tsv'],
         'thresholds': {'nominal': args.nominal_threshold, 'fdr': args.fdr_threshold,

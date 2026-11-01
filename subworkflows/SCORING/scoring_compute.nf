@@ -34,7 +34,7 @@ include { scoringQuote } from './scoring_contract'
 // ── Scoring ────────────────────────────────────────────────────────────────────
 
 process SCORING_COMPUTE {
-    cache 'deep'
+    cache true
     tag "scoring_compute|${params.traitname ?: 'unknown_trait'}"
     label 'error_retry'
 

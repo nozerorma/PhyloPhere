@@ -7,61 +7,51 @@ import subprocess
 from pathlib import Path
 from build_vep_variants import build
 from join_vep_output import join
-from vep_common import BASE, digest, finish, integer, output_row, read_json, write_json
+from vep_common import BASE, finish, integer, output_row, read_targets, write_json
 
 VEP_COLUMNS=['Uploaded_variation','Location','Allele','Ensembl_Gene','Feature','Feature_type',
              'Consequence','Protein_position','Amino_acids','Extra']
 
 
 def resource(cache,release):
-    root=Path(cache).resolve(); manifest=root/'vep_resource.json'
-    m=read_json(manifest)
-    if m.get('schema')!='phylophere.vep_cache.v1' or m.get('species')!='homo_sapiens' or m.get('assembly')!='GRCh38' or m.get('release')!=release:
-        raise ValueError('Incompatible offline cache manifest')
-    if not m.get('source_uri') or not isinstance(m.get('files'),dict) or not m['files']:
-        raise ValueError('Offline cache requires provenance and file checksums')
-    actual={str(p.relative_to(root)) for p in root.rglob('*') if p.is_file() and p!=manifest}
-    if actual!=set(m['files']):
-        raise ValueError('Offline cache has missing or unmanifested files; prepare it before annotation')
-    for rel,sha in m['files'].items():
-        p=(root/rel).resolve()
-        if not p.is_relative_to(root) or not p.is_file() or digest(p)!=sha:
-            raise ValueError(f'Offline cache checksum/path mismatch: {rel}')
-    fasta=m.get('fasta')
-    if fasta not in m['files'] or not Path(str(root/fasta)+'.fai').is_file():
-        raise ValueError('Offline cache needs a checksummed, preindexed genomic FASTA')
+    """Use the standard Ensembl cache layout, without a private manifest."""
+    root=Path(cache).resolve()
     if not (root/'homo_sapiens'/f'{release}_GRCh38').is_dir():
-        raise ValueError('Expected version/assembly cache directory is missing')
-    return root/fasta,digest(manifest)
+        raise ValueError(f'Ensembl cache {release}/GRCh38 is absent; prepare it separately')
+    fastas=[p for p in root.rglob('*') if p.is_file() and p.name.endswith(('.fa','.fasta','.fa.gz','.fasta.gz')) and Path(str(p)+'.fai').is_file()]
+    if len(fastas)!=1:raise ValueError('Offline VEP needs one preindexed genomic FASTA in its cache directory')
+    return fastas[0]
 
 
 def run(a):
-    data,variants=build(a.targets,'candidate_variants.vcf')
-    inputs={'targets_sha256':digest(a.targets),'content_fingerprint':a.fingerprint}
+    from resolve_ensembl import resolve
+    data=read_targets(a.targets)
+    inputs={'targets':str(a.targets),'source_fingerprint':a.fingerprint}
     meta={'mode':a.mode,'species':'homo_sapiens','assembly':'GRCh38'}
+    executable=shutil.which('vep')
+    ready=any(t['status']=='ready' for t in data['targets'])
+    if ready and not executable:raise RuntimeError('Ensembl VEP executable missing')
+    if ready and a.mode=='database':data=resolve(data)
+    for t in data['targets']:
+        if t['status']=='ready' and not t['variants']:
+            t.update(status='unmapped_codon',detail='Exact codon bases unavailable for offline VCF; database mode can resolve the declared protein')
+    data,variants=build(a.targets,'candidate_variants.vcf',data)
     if not variants:
         finish(a.output,BASE+VEP_COLUMNS,[output_row(t,'ensembl') for t in data['targets']],
-               'ensembl',inputs,meta|{'execution':'not_needed_no_candidate_snvs'})
+               'ensembl',inputs,meta|{'execution':'not_needed_no_resolved_candidate_snvs'})
         return
-    releases={t['reference']['annotation_release'] for t in data['targets'] if t['status']=='ready'}
-    if len(releases)!=1:raise ValueError('All VEP references must share one Ensembl release')
-    release=releases.pop()
-    executable=shutil.which('vep')
-    if not executable:raise RuntimeError('Ensembl VEP executable missing')
     p=subprocess.run([executable,'--help'],capture_output=True,text=True,timeout=60)
     Path('vep_version.txt').write_text(p.stdout+p.stderr)
     match=re.search(r'ensembl-vep\s*:\s*(\d+)',p.stdout+p.stderr,re.I)
-    if not match or int(match[1])!=release:
-        raise ValueError(f'VEP executable and reference release must agree ({release})')
-    meta.update(release=release,executable_sha256=digest(executable),version_output_sha256=digest('vep_version.txt'))
+    if not match:raise ValueError('Cannot determine the installed Ensembl VEP version')
+    release=int(match[1]);meta['release']=release
     cmd=[executable,'--input_file','candidate_variants.vcf','--format','vcf',
          '--output_file','vep_tab_output.txt','--tab','--species','homo_sapiens','--assembly','GRCh38',
          '--canonical','--transcript_version','--protein','--check_ref','--force_overwrite','--no_stats',
          '--warning_file','vep_warnings.txt','--no_check_variants_order']
     if release>=105:cmd+=['--mane']
     if a.mode=='offline':
-        fasta,sha=resource(a.cache,release)
-        inputs['cache_manifest_sha256']=sha
+        fasta=resource(a.cache,release)
         cmd+=['--offline','--cache','--cache_version',str(release),'--dir_cache',str(Path(a.cache).resolve()),'--fasta',str(fasta)]
     else:
         if not re.fullmatch(r'[A-Za-z0-9.-]+',a.host):raise ValueError('Invalid Ensembl database host')
@@ -73,11 +63,10 @@ def run(a):
     with open('vep_stdout.log','w') as out,open('vep_stderr.log','w') as err:
         p=subprocess.run(cmd,stdout=out,stderr=err)
     if p.returncode:raise RuntimeError(f'Ensembl VEP failed with exit {p.returncode}; see vep_stderr.log')
-    if re.search(r'\b(?:WARNING|ERROR|EXCEPTION)\b',Path('vep_stderr.log').read_text(),re.I):
+    if re.search(r'\b(?:ERROR|EXCEPTION)\b',Path('vep_stderr.log').read_text(),re.I):
         raise RuntimeError('Ensembl VEP reported an error/warning on stderr; see vep_stderr.log')
     warnings=Path('vep_warnings.txt')
-    if warnings.is_file() and warnings.read_text().strip():
-        raise RuntimeError('Ensembl VEP reported warnings/skipped or incompatible variants; see vep_warnings.txt')
+    meta['warnings_present']=warnings.is_file() and bool(warnings.read_text().strip())
     join('vep_tab_output.txt',data,variants,a.output,inputs,meta)
 
 

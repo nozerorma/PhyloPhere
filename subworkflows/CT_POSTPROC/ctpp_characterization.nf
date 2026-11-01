@@ -10,7 +10,7 @@ def characterizationKey() {
 
 process CT_POSTPROC_REPORT {
     ext source_hash: { characterizationKey() }
-    cache 'deep'
+    cache true
     tag 'caas_postproc_report'
     label 'process_reporting'
     publishDir path: "${params.outdir}/postproc", mode: 'copy', overwrite: true, pattern: '{CT_postproc_files/**,outliers/**,clusters/**,summary_statistics/**,disambiguation_characterization/**,postproc_inputs/**}'

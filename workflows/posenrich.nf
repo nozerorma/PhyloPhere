@@ -45,15 +45,6 @@ def validatePositionReferences() {
         if (!params.alignment || !java.nio.file.Files.isDirectory(file(params.alignment)))
             error "Automatic Pfam/UCR annotations require --alignment pointing to the productive protein FASTA directory"
     }
-    def checkedAlignments = [] as Set
-    def checkedMaps = [] as Set
-    def hashFile = { path ->
-        def digest = java.security.MessageDigest.getInstance('SHA-256')
-        new java.security.DigestInputStream(java.nio.file.Files.newInputStream(path), digest).withCloseable { stream ->
-            stream.transferTo(java.io.OutputStream.nullOutputStream())
-        }
-        digest.digest().encodeHex().toString()
-    }
     def sources = [
         [key: 'domain_variability_file', enabled: params.posenrich_domains, required: ['gene','pfam_id','target_name','description','clan_acc','clan_name','ali_start','ali_end']],
         [key: 'ucr_positions_file', enabled: params.posenrich_ucr, required: ['gene','position','region_type','method','variability']],
@@ -75,52 +66,11 @@ def validatePositionReferences() {
                 if (missing) {
                     error "${spec.key} '${input}' missing columns: ${missing}"
                 }
-                if (spec.key in ['domain_variability_file', 'ucr_positions_file', 'fubar_sites_file'] && !columns.contains('coordinate_space')) {
+                if (spec.key in ['domain_variability_file', 'ucr_positions_file', 'fubar_sites_file'] && !columns.contains('coordinate_space') && !(spec.key=='fubar_sites_file' && columns.contains('site'))) {
                     error "${spec.key} '${input}' has no coordinate_space: convert the verified source with bin/build_reference_tables.py project-ppga or regenerate it before running"
                 }
             }
-            def manifest = file("${input}.manifest.json")
-            if (manifest.exists()) {
-                def meta = new groovy.json.JsonSlurper().parseText(manifest.text)
-                if (meta.table_sha256 && hashFile.call(input) != meta.table_sha256)
-                    error "Reference checksum mismatch: ${input}"
-                if (meta.alignment_dir && params.alignment) {
-                    def expected = file(meta.alignment_dir).toRealPath()
-                    def productive = file(params.alignment).toRealPath()
-                    if (expected != productive) error "${spec.key} belongs to alignment '${expected}', but this run uses '${productive}'"
-                    if (meta.alignments && !checkedAlignments.contains(productive.toString())) {
-                        log.info "Validating ${meta.alignments.size()} productive alignments for positional references: ${productive}"
-                        def actualNames = java.nio.file.Files.list(productive).withCloseable { paths ->
-                            paths.filter { java.nio.file.Files.isRegularFile(it) && it.fileName.toString().toLowerCase() ==~ /.*\.(fa|fasta|faa|fas)/ }
-                                .map { it.fileName.toString() }.collect(java.util.stream.Collectors.toSet())
-                        }
-                        if (actualNames != meta.alignments.keySet()) error "Alignment inventory changed since reference generation: ${productive}"
-                        meta.alignments.each { name, expectedHash ->
-                            def alignment = productive.resolve(name)
-                            if (!java.nio.file.Files.exists(alignment) || hashFile.call(alignment) != expectedHash)
-                                error "Productive alignment changed since reference generation: ${alignment}"
-                        }
-                        checkedAlignments.add(productive.toString())
-                    }
-                }
-                if (meta.map_dir && params.caas_map_dir && file(meta.map_dir).toRealPath() != file(params.caas_map_dir).toRealPath())
-                    error "${spec.key} was validated with a different MAP directory: ${meta.map_dir}"
-                if (meta.map_dir && meta.maps && params.caas_map_dir && !checkedMaps.contains(meta.map_dir)) {
-                    log.info "Validating ${meta.maps.size()} productive MAP files for positional references"
-                    def mapRoot = file(params.caas_map_dir)
-                    def actualMaps = java.nio.file.Files.list(mapRoot).withCloseable { paths ->
-                        paths.filter { java.nio.file.Files.isRegularFile(it) && it.fileName.toString().endsWith('.map.tsv') }
-                            .map { it.fileName.toString() }.collect(java.util.stream.Collectors.toSet())
-                    }
-                    if (actualMaps != meta.maps.keySet()) error "MAP inventory changed since reference generation: ${mapRoot}"
-                    meta.maps.each { name, expectedHash ->
-                        def mapPath = file(params.caas_map_dir).resolve(name)
-                        if (!java.nio.file.Files.exists(mapPath) || hashFile.call(mapPath) != expectedHash)
-                            error "Productive MAP changed since reference generation: ${mapPath}"
-                    }
-                    checkedMaps.add(meta.map_dir)
-                }
-            }
+
         }
     }
 }

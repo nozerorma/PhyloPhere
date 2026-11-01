@@ -6,7 +6,7 @@ VEP rows absent for a ready candidate remain unresolved, never negative results.
 """
 import re
 from pathlib import Path
-from vep_common import BASE, digest, finish, output_row, same_id
+from vep_common import BASE, finish, output_row, same_id
 
 
 def join(output_file,data,variants,output,inputs,metadata):
@@ -41,12 +41,12 @@ def join(output_file,data,variants,output,inputs,metadata):
         matches=[];covered=set()
         for v in t['variants']:
             for r in lookup.get(v['variant_id'],[]):
-                if r['Feature_type']!='Transcript' or r['Feature']!=t['reference_transcript_id']:continue
+                if r['Feature_type']!='Transcript' or (t.get('reference_transcript_id') and not same_id(r['Feature'],t['reference_transcript_id'])):continue
                 extra_fields=dict(x.split('=',1) for x in r['Extra'].split(';') if '=' in x)
                 protein=r.get('ENSP') or extra_fields.get('ENSP','')
-                if not protein or not same_id(protein,t['reference_protein_id']):
+                if t.get('reference_protein_id') and (not protein or not same_id(protein,t['reference_protein_id'])):
                     raise ValueError('VEP protein identity differs from verified reference')
-                if not same_id(r['Gene'],t['reference_gene_id']):raise ValueError('VEP transcript has incompatible gene')
+                if t.get('reference_gene_id') and not same_id(r['Gene'],t['reference_gene_id']):raise ValueError('VEP transcript has incompatible gene')
                 if r['Protein_position']!=str(t['reference_aa_position']) or r['Amino_acids']!=v['ref_aa']+'/'+v['alt_aa']:
                     raise ValueError('VEP protein consequence differs from verified reference')
                 terms=r['Consequence'].split(',')
@@ -59,4 +59,4 @@ def join(output_file,data,variants,output,inputs,metadata):
             for r in matches:rows.append(output_row(t,'ensembl','annotated',coverage=coverage,annotated_count=len(covered),**r))
         else:rows.append(output_row(t,'ensembl','unresolved_annotation',coverage='unavailable',detail='No compatible verified-transcript consequence'))
     finish(output,BASE+['Ensembl_Gene' if k=='Gene' else k for k in header],rows,'ensembl',
-           inputs|{'raw_output_sha256':digest(output_file)},metadata|{'returned_variants':len(encountered)})
+           inputs|{'raw_output':str(output_file)},metadata|{'returned_variants':len(encountered)})

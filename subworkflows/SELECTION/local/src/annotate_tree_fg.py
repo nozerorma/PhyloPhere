@@ -10,8 +10,8 @@ from alignment_io import read_alignment
 def parse_species_file(path):
     rows = [line.strip() for line in Path(path).read_text().splitlines()
             if line.strip() and not line.lstrip().startswith('#')]
-    if not rows or len(rows) != len(set(rows)):
-        raise ValueError(f'Empty or duplicate species list: {path}')
+    if len(rows) != len(set(rows)):
+        raise ValueError(f'Duplicate species list: {path}')
     if any(any(c.isspace() for c in sp) or ',' in sp for sp in rows):
         raise ValueError(f'Invalid species identifier: {path}')
     return set(rows)

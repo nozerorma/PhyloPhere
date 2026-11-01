@@ -23,7 +23,7 @@ include { scoringHash; scoringQuote } from '../SCORING/scoring_contract.nf'
 // ── Pfam domain scan ─────────────────────────────────────────────────────────
 
 process COMPUTE_DOMAIN_VARIABILITY {
-    cache 'deep'
+    cache true
     tag "auto-generate domain_variability_file"
     label 'process_medium'
 
