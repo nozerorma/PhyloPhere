@@ -62,6 +62,32 @@ def _read_cached(gene: str, config: SingleGeneASRConfig, alignment_data) -> Tupl
     return found, ("hit" if found is not None else "miss")
 
 
+def _compute_or_read_asr(gene, config, alignment_data, tree_data):
+    """Accept a verified concurrent cache winner after a publication race.
+
+    A shared filesystem can expose a directory created by another worker after
+    the publisher's existence check, even with the advisory lock. Reuse it only
+    through the normal provenance/checksum/parser checks. Brief retries allow
+    metadata to become visible; an absent or invalid winner preserves the error.
+    """
+    import errno
+    import time
+    try:
+        return run_asr_pipeline(gene, config, skip_if_exists=False,
+                                alignment_data=alignment_data, tree_data=tree_data)
+    except OSError as exc:
+        if exc.errno not in (errno.EEXIST, errno.ENOTEMPTY, errno.ENOENT):
+            raise
+        for attempt in range(6):
+            found, _ = _read_cached(gene, config, alignment_data)
+            if found is not None:
+                logger.warning('[asr] %s: reusing validated cache entry after concurrent publication', gene)
+                return found
+            if attempt < 5:
+                time.sleep(0.1 * 2 ** attempt)
+        raise
+
+
 @contextlib.contextmanager
 def _gene_cache_lock(cache_dir: str, gene: str):
     """Exclusive lock, across processes, on one gene's cache entry.
@@ -131,8 +157,7 @@ def load_gene_context(
         node_posteriors, state = _read_cached(gene, asr_config, alignment_data)
         if node_posteriors is None:
             with codeml_slot():
-                node_posteriors = run_asr_pipeline(gene, asr_config, skip_if_exists=False,
-                                                  alignment_data=alignment_data, tree_data=tree_data)
+                node_posteriors = _compute_or_read_asr(gene, asr_config, alignment_data, tree_data)
     if not node_posteriors or not node_posteriors.posteriors_node:
         raise RuntimeError(f'ASR unavailable for {gene}')
 
