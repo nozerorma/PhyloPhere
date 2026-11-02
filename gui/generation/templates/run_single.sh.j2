@@ -58,6 +58,7 @@ if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
     RUN_FADE=false
     RUN_RER=false
     RUN_SCORING=false
+    RUN_ENRICHMENT=false
     # The evidence table is written after SCORING; main.nf rejects it without --scoring.
     CAAS_EVIDENCE_TOP_N=0
 elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
