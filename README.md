@@ -474,6 +474,8 @@ To reuse a null, keep the whole `caas_permulation/` directory and pass it with `
 
 ## Contributions
 
+See [code organization and remaining tests](docs/CODE_ORGANIZATION.md) before adding utilities or validation scripts.
+
 Issues and pull requests are welcome at <https://github.com/nozerorma/PhyloPhere>. Please name the module involved and attach the `workflow_map.html` and `pipeline_info/execution_report.html` of the failing run.
 
 | Contributor | Role |

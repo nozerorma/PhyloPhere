@@ -3,7 +3,7 @@
 # PhyloPhere | subworkflows/CT_POSTPROC/local/src/
 
 """
-Extant-species residue tally for the disambiguation table: for each (Gene, Position), how
+Extant-species residue tally for each (Gene, Position, hypothesis): how
 many foreground (top) and background (bottom) contrast species carry each residue, and how
 many contrast pairs keep the same residue on both sides.
 
@@ -14,6 +14,7 @@ Imported by: prepare_postproc_input.py (add_species_tally), which runs in the in
 from __future__ import annotations
 
 from collections import Counter
+import logging
 from typing import Dict, List, Tuple
 
 import sys
@@ -23,13 +24,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CT_DISAMBIGUATION/
 from src.core.ct_io import strict_io
 from src.utils.io_utils import _scan_alignment_dir, read_alignment
 
+logger = logging.getLogger(__name__)
+
 # ── Extant-species residue tally (alignment-based) ────────────────────────────
-# Counts, per (Gene, Position), the contrast species of the hypotheses that call the position
-# (the `participating_hypotheses` of its rows, unioned over sides) that carry each
-# residue at the alignment column (an "X of N species" check on the call). The species come from
-# the contrast design (contrast_hypotheses_pairs.tsv: species1 = top / foreground, species2 =
-# bottom / background of each pair), so the tally needs neither FADE nor the species_sets of
-# the selection step.
+# Each descriptor cell contains hypothesis-labelled values, e.g. H1=A:2;H2=T:2.
+# Only the row's participating hypotheses are described; species are never pooled
+# across hypotheses or across rows/sides. Empty provenance leaves empty descriptors.
 
 SPECIES_TALLY_COLUMNS = (
     "top_species_residues",     # e.g. "N:15,A:8" -- FG contrast species, count-desc
@@ -38,8 +38,6 @@ SPECIES_TALLY_COLUMNS = (
     "n_bottom_species",         # BG contrast species with a non-gap residue here
     "n_conserved_pairs",        # e.g. "3/6": pairs with the same residue on both sides / pairs counted
 )
-
-_TALLY_EMPTY = {c: "" for c in SPECIES_TALLY_COLUMNS}
 
 _VALID_AA = set("ACDEFGHIKLMNPQRSTVWY")
 
@@ -93,48 +91,31 @@ def _fmt_counts(counts: Counter) -> str:
                     sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
 
 
-def _fmt_conserved(per_hyp: List[Tuple[int, int]]) -> str:
-    """"k/n" over the hypotheses of a position; "k1-k2/n" when the count differs between them."""
-    if not per_hyp:
-        return ""
-    ks = [k for k, _ in per_hyp]
-    ns = [n for _, n in per_hyp]
-    if len(set(ns)) > 1:
-        return ";".join(f"{k}/{n}" for k, n in per_hyp)
-    n = ns[0]
-    return f"{min(ks)}/{n}" if min(ks) == max(ks) else f"{min(ks)}-{max(ks)}/{n}"
-
-
-def tally_position(seqs: Dict[str, str], idx: int, hyps: List[str],
+def tally_position(seqs: Dict[str, str], idx: int, hypothesis: str,
                    hyp_pairs: Dict[str, List[Tuple[str, str]]]) -> Dict[str, str]:
-    """Tally of one alignment column over the contrast pairs of `hyps`.
+    """Tally one hypothesis at one alignment column, using available valid residues.
 
-    Top / bottom counts are over the distinct species of those hypotheses. A pair is conserved
-    when both of its species have a non-gap residue here and it is the same on both sides; the
-    count is taken per hypothesis (a hypothesis is a set of independent pairs).
+    A conserved pair requires valid amino acids in both members. An available member
+    of an incomplete pair still contributes to its side's residue count.
     """
-    top_sp, bot_sp, per_hyp = set(), set(), []
-    for h in hyps:
-        k = n = 0
-        for a, b in hyp_pairs.get(h, []):
-            top_sp.add(a)
-            bot_sp.add(b)
-            ra = seqs[a][idx].upper() if a in seqs else "-"
-            rb = seqs[b][idx].upper() if b in seqs else "-"
-            if ra not in _VALID_AA or rb not in _VALID_AA:
-                continue
+    top_c, bot_c = Counter(), Counter()
+    k = n = 0
+    for a, b in hyp_pairs[hypothesis]:
+        ra = seqs[a][idx].upper() if a in seqs else "-"
+        rb = seqs[b][idx].upper() if b in seqs else "-"
+        if ra in _VALID_AA:
+            top_c[ra] += 1
+        if rb in _VALID_AA:
+            bot_c[rb] += 1
+        if ra in _VALID_AA and rb in _VALID_AA:
             n += 1
             k += ra == rb
-        if n:
-            per_hyp.append((k, n))
-    top_c = Counter(seqs[s][idx].upper() for s in top_sp if s in seqs and seqs[s][idx].upper() in _VALID_AA)
-    bot_c = Counter(seqs[s][idx].upper() for s in bot_sp if s in seqs and seqs[s][idx].upper() in _VALID_AA)
     return {
         "top_species_residues": _fmt_counts(top_c),
         "bottom_species_residues": _fmt_counts(bot_c),
         "n_top_species": str(sum(top_c.values())),
         "n_bottom_species": str(sum(bot_c.values())),
-        "n_conserved_pairs": _fmt_conserved(per_hyp),
+        "n_conserved_pairs": f"{k}/{n}",
     }
 
 
@@ -151,13 +132,16 @@ def add_species_tally(
 ) -> pd.DataFrame:
     """Add ``SPECIES_TALLY_COLUMNS`` to ``df``.
 
-    ``Position`` is a 0-based alignment-column index. The hypotheses of a position are the union
-    of ``participating_hypotheses`` over its rows (all hypotheses of the design when the column
-    is absent).
+    ``Position`` is a 0-based alignment-column index. Each cell contains semicolon-
+    separated ``Hn=value`` entries for that row's participating hypotheses, in design
+    order. Missing/empty provenance leaves descriptors empty; no design-wide fallback
+    is inferred. Counts are computed independently per hypothesis.
 
     Optional absent inputs leave empty descriptors. Supplied invalid designs,
-    missing/ambiguous alignments, missing species and out-of-range positions fail;
-    unknown residues do not contribute to species or conserved-pair counts.
+    missing/ambiguous alignments and out-of-range positions fail. Missing species
+    are warned about and, like unknown residues, do not contribute to species or
+    conserved-pair counts; available members of incomplete pairs still contribute
+    to their side's species tally.
     """
     out = df.copy()
     for c in SPECIES_TALLY_COLUMNS:
@@ -179,18 +163,20 @@ def add_species_tally(
     if not files:
         return out
 
-    # Hypotheses of each (Gene, Position): union over its rows, in design order.
+    # Cache computations per (Gene, Position, hypothesis); retain each row's provenance.
     order = {h: i for i, h in enumerate(hyp_pairs)}
     by_gene: Dict[str, Dict[object, set]] = {}
+    row_hypotheses = []
     for gene, pos, hs in zip(out[gene_col], out[position_col],
                              out[hyp_col] if hyp_col in out.columns else [""] * len(out)):
         found = {x.strip() for x in str(hs).split(',') if x.strip() and x.strip() != 'nan'}
         if found - hyp_pairs.keys():
             raise ValueError(f'Unknown participating hypotheses: {found - hyp_pairs.keys()}')
-        # Empty provenance on diagnostic rows means all design hypotheses.
-        by_gene.setdefault(gene, {}).setdefault(pos, set()).update(found or hyp_pairs)
+        row_hypotheses.append(sorted(found, key=order.get))
+        if found:
+            by_gene.setdefault(gene, {}).setdefault(pos, set()).update(found)
 
-    results: Dict[Tuple[str, object], Dict[str, str]] = {}
+    results: Dict[Tuple[str, object, str], Dict[str, str]] = {}
     for gene, positions in by_gene.items():
         path = files.get(str(gene))
         if path is None:
@@ -205,16 +191,23 @@ def add_species_tally(
                 if species in seqs and seqs[species] != seqs[str(taxid)]:
                     raise ValueError(f'Conflicting species mapping: {species}')
                 seqs[species] = seqs[str(taxid)]
-        if required_species - seqs.keys():
-            raise ValueError(f'Contrast species missing from alignment {gene}: {required_species - seqs.keys()}')
+        missing_species = required_species - seqs.keys()
+        if missing_species:
+            logger.warning(
+                'Contrast species missing from alignment %s: %s; '
+                'tallying available residues and excluding incomplete pairs',
+                gene, ', '.join(sorted(missing_species)),
+            )
         aln_len = aln.get_alignment_length()
         for pos, hs in positions.items():
             idx = int(pos)
             if not 0 <= idx < aln_len:
                 raise ValueError(f'Position outside alignment: {gene}:{idx}')
-            results[(gene, pos)] = tally_position(seqs, idx, sorted(hs, key=order.get), hyp_pairs)
+            for h in sorted(hs, key=order.get):
+                results[(gene, pos, h)] = tally_position(seqs, idx, h, hyp_pairs)
 
     keys = list(zip(out[gene_col], out[position_col]))
     for c in SPECIES_TALLY_COLUMNS:
-        out[c] = [results.get(k, _TALLY_EMPTY)[c] for k in keys]
+        out[c] = [";".join(f"{h}={results[(gene, pos, h)][c]}" for h in hs)
+                  for (gene, pos), hs in zip(keys, row_hypotheses)]
     return out

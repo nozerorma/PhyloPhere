@@ -66,7 +66,8 @@ def main() -> int:
         help="Precluster removal output TSV",
     )
     # Optional extant-species residue tally (top/bottom_species_residues, n_top/bottom_species,
-    # n_conserved_pairs). It needs the alignment directory and the contrast design; without them
+    # n_conserved_pairs), labelled per participating hypothesis (Hn=value;...).
+    # It needs the alignment directory and the contrast design; without them
     # the columns stay empty.
     parser.add_argument("--alignment", default=None,
                         help="Alignment directory (recursive, gene = basename without alignment suffix; preserves internal '.')")

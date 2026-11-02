@@ -64,7 +64,13 @@ papers
 .Rhistory
 
 # Validation fixtures and reports are kept outside the repository
-validation/
+/validation/
 
 # Local scratch files and audit outputs
 /.tmp/
+
+# One-off PP2A recovery logs (helpers live in ignored adhoc_scripts/)
+def2_pp2a-*.out
+def2_pp2a-*.err
+neoplasia_def2_pp2a-*.out
+neoplasia_def2_pp2a-*.err

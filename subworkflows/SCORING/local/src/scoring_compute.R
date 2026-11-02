@@ -132,7 +132,20 @@ cat("  FOP pooling: done in-tree per (Gene, Position, side) [core v3]\n")
 # never hit.
 if (!"n_hypotheses" %in% names(df))          df$n_hypotheses <- 1L
 if (!"participating_hypotheses" %in% names(df)) df$participating_hypotheses <- ""
-# Descriptors of the species that carry the change; empty text when the input has none.
+# Merge hypothesis-labelled descriptors without pooling species across hypotheses.
+# Reject contradictory entries rather than silently taking the first row.
+merge_hypothesis_tally <- function(values) {
+  values <- values[!is.na(values) & nzchar(values)]
+  entries <- unique(unlist(strsplit(values, ";", fixed = TRUE)))
+  if (!length(entries)) return("")
+  if (any(!grepl("^H[1-9][0-9]*=", entries))) {
+    stop("Unlabelled species tally; rerun CT_POSTPROC input preparation")
+  }
+  ids <- sub("=.*$", "", entries)
+  if (anyDuplicated(ids)) stop("Conflicting residue tallies for one hypothesis")
+  paste(entries[order(as.integer(sub("^H", "", ids)))], collapse = ";")
+}
+# Each descriptor retains Hn=value entries; empty text when provenance is absent.
 for (.c in c("top_species_residues", "bottom_species_residues",
              "n_top_species", "n_bottom_species", "n_conserved_pairs")) {
   if (!.c %in% names(df)) df[[.c]] <- ""
@@ -187,21 +200,12 @@ pos_scores <- df %>%
       .ph <- unique(participating_hypotheses[!is.na(participating_hypotheses) & nzchar(participating_hypotheses)])
       if (length(.ph)) paste(sort(unique(unlist(strsplit(.ph, ",")))), collapse = ",") else ""
     } else "",
-    # Position-level descriptors: first() carries them, falling back to caas pattern when empty.
-    caas                    = if ("caas" %in% names(df)) dplyr::first(caas) else "",
-    top_species_residues    = {
-      .tsr <- if ("top_species_residues" %in% names(df)) dplyr::first(top_species_residues) else ""
-      .c   <- if ("caas" %in% names(df)) dplyr::first(caas) else ""
-      if (is.na(.tsr) || !nzchar(.tsr) || identical(.tsr, "NA")) ifelse(grepl("/", .c), sub("/.*", "", .c), .c) else .tsr
-    },
-    bottom_species_residues = {
-      .bsr <- if ("bottom_species_residues" %in% names(df)) dplyr::first(bottom_species_residues) else ""
-      .c   <- if ("caas" %in% names(df)) dplyr::first(caas) else ""
-      if (is.na(.bsr) || !nzchar(.bsr) || identical(.bsr, "NA")) ifelse(grepl("/", .c), sub(".*/", "", .c), "") else .bsr
-    },
-    n_top_species           = if ("n_top_species" %in% names(df)) dplyr::first(n_top_species) else "",
-    n_bottom_species        = if ("n_bottom_species" %in% names(df)) dplyr::first(n_bottom_species) else "",
-    n_conserved_pairs       = if ("n_conserved_pairs" %in% names(df)) dplyr::first(n_conserved_pairs) else "",
+    caas = if ("caas" %in% names(df)) dplyr::first(caas) else "",
+    top_species_residues = merge_hypothesis_tally(top_species_residues),
+    bottom_species_residues = merge_hypothesis_tally(bottom_species_residues),
+    n_top_species = merge_hypothesis_tally(n_top_species),
+    n_bottom_species = merge_hypothesis_tally(n_bottom_species),
+    n_conserved_pairs = merge_hypothesis_tally(n_conserved_pairs),
     .groups = "drop"
   )
 
@@ -563,7 +567,7 @@ cat("\n─── Writing outputs ───────────────�
 # Position scores. The per-row factors (asr_score, derived_agreement) and asr_path_score are not
 # written: CAAS_score is the position-level number (the asr_path_score of a position equals it), and
 # the breakdown lives in filtered_discovery.tsv. top_species_residues, bottom_species_residues
-# and n_conserved_pairs (alignment-based, over the contrast pairs of the hypotheses that call the position)
+# and n_conserved_pairs (alignment-based, with separate Hn=value entries per hypothesis)
 # are the raw-residue descriptors.
 pos_out <- pos_scores %>%
   select(Gene, Position,

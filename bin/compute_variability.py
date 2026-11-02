@@ -12,8 +12,8 @@ C_trident(x) = (1 - t(x))^alpha * (1 - r(x))^beta * (1 - g(x))^gamma   (Valdar 2
   g(x): gap fraction
 Variability = 1 - C_trident. Sequence weights are those of Henikoff and Henikoff (1994).
 
-Called by:  compute_alignment_entropy.py (one call per gene); imported by aggregate_ucr.py
-            (clade_variability, load_taxonomy)
+Called by: build_reference_tables.py (active UCR generation); also used by the
+           standalone utilities in adhoc_scripts/ucr/.
 Inputs:     --prot_ali         FASTA protein alignment; the gene name is basename.replace('.fa', '')
             --taxid_tsv        taxonomy table: species in column 2, family in column 3, name class
                                in column 5 (only "scientific name" rows are used)
