@@ -230,39 +230,6 @@ if (is.null(universe)) {
   emit_plot(pn, height = 3.5)
 }
 
-check <- registry_manifest$universe$gene_list_check
-wg_check <- wg_manifest$gene_list_check
-if (is.null(check) && is.null(wg_check)) {
-  unavailable("Gene-list check", "Neither the registry manifest nor the level 2 manifest records the fingerprint of the gene list.")
-} else {
-  status_of <- function(x) if (is.null(x$status)) "not_recorded" else x$status
-  digest_of <- function(x) if (is.null(x)) NA_character_ else substr(as.character(x), 1, 12)
-  chk <- data.frame(
-    Comparison = c("Registry gene list vs. SCORING gene list", "Universe gene list vs. registry gene list"),
-    Status = c(if (is.null(check)) "not_recorded" else status_of(check), if (is.null(wg_check)) "not_recorded" else status_of(wg_check)),
-    Fingerprint_A = c(digest_of(check$registry_digest), digest_of(wg_check$universe_digest)),
-    Fingerprint_B = c(digest_of(check$scoring_digest), digest_of(wg_check$registry_digest)),
-    stringsAsFactors = FALSE)
-  names(chk) <- c("Comparison", "Status", "Fingerprint A (SHA-256, first 12)", "Fingerprint B (SHA-256, first 12)")
-  cat("**Gene-list check** (`match` means both consumers used the same set of genes; `not_recorded` means a manifest lacks the fingerprint)\n\n")
-  report_emit(report_table(chk))
-  if (any(chk$Status == "mismatch"))
-    cat("\n**Warning:** two consumers used different gene lists; their tables are not defined on the same universe.\n\n")
-}
-
-annotations <- registry_manifest$annotations
-if (length(annotations)) {
-  cat("**Annotation provenance and inferential availability**\n\n")
-  annotation_states <- do.call(rbind,lapply(names(annotations),function(source) {
-    x <- annotations[[source]]
-    data.frame(Source=source,Status=x$status,
-               Version=if(is.null(x$metadata$version)) 'not declared' else as.character(x$metadata$version),
-               Coverage=if(is.null(x$metadata$coverage)) 'not declared' else as.character(x$metadata$coverage))
-  }))
-  report_emit(report_table(annotation_states))
-  cat("Sources marked unverified_source contribute descriptive annotation only; missing hits do not establish tested coverage.\n\n")
-}
-
 states_tbl <- read_table(params$characterization_dir, "universe_summary.tsv")
 if (!is.null(states_tbl)) {
   ev <- states_tbl %>% filter(!grepl("^coverage:", evaluation_status)) %>%
@@ -655,4 +622,4 @@ if (!is.null(wg_manifest$parameters)) {
 }
 ```
 
-**Provenance.** The tables come from `posenrich/universe`, `posenrich/registry`, `posenrich/characterization`, `posenrich/accumulation`, `posenrich/within_gene` and `posenrich/proximity`; each component writes a manifest with the hashes of its inputs. Pfam, UCR and selection layers derive from related evolutionary analyses and are not independent external validation; VEP, COSMIC and PrimateAI layers are descriptive annotations.
+**Provenance.** The tables come from `posenrich/universe`, `posenrich/registry`, `posenrich/characterization`, `posenrich/accumulation`, `posenrich/within_gene` and `posenrich/proximity`; each component writes a manifest with the hashes of its inputs. Pfam, UCR and selection layers derive from related evolutionary analyses and are not independent external validation.

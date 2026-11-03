@@ -125,6 +125,8 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "resample_use_n": _bool_str(getattr(caas, 'resample_use_n', True)),
         "multi_hypothesis": _bool_str(getattr(caas, 'multi_hypothesis', True)),
         "perm_match_pss": _bool_str(getattr(caas, 'perm_match_pss', True)),
+        "perm_match_fop": _bool_str(getattr(caas, 'perm_match_fop', True)),
+        "perm_match_pss_ci": _bool_str(getattr(caas, 'perm_match_pss_ci', False)),
         "publish_intermediates": _bool_str(caas.publish_intermediates),
         "asr_diagnostics": _bool_str(disambig.asr_diagnostics),
     }

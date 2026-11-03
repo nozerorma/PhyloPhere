@@ -12,8 +12,8 @@
  *   - the Pfam and UCR tables the registry consumes, generated when none is supplied;
  *   - the report (13.POSENRICH_report).
  *
- * Data order: SCORING, POSENRICH, ENRICHMENT. ENRICHMENT reads position_characterization.tsv
- * as an optional input.
+ * SCORING + ENRICHMENT can also run POSITION_CHARACTERIZATION independently of POSENRICH.
+ * ENRICHMENT reads the resulting position_characterization.tsv as an optional input.
  */
 
 include { ACCUMULATION_TEST } from '../subworkflows/POSENRICH/accumulation_test.nf'

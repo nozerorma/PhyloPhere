@@ -603,7 +603,7 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
 #' @param pss_profile     NULL, or the PSS of the observed canonical pairs in selection order. The canonical pairs
 #'                        are then chosen by match_pss_select() from the pool without the PSS top_pct gate
 #'                        (the pairs themselves set the PSS range), and the draw is accepted (Tier 1) only if
-#'                        every pair is within `pss_tol` of its target. Ignored for count (CI) traits.
+#'                        every pair is within `pss_tol` of its target. When CI bounds are supplied, matching uses only CI-eligible pairs.
 #' @param pss_tol         Relative PSS tolerance of the matching.
 #' @param center_gate     "none" | "median" | "mean": candidate pairs must straddle that centre of the trait
 #'                        (see lean_candidate_df); the same value as the observed run.
@@ -632,7 +632,7 @@ evaluate_lean_contrast_selection <- function(trait_vec,
   if (target_pairs <= 0L) return(reject("target_pairs <= 0"))
   D <- as.matrix(D)
 
-  use_match <- !is.null(pss_profile) && is.null(ci_lb)
+  use_match <- !is.null(pss_profile)
   if (use_match && length(pss_profile) != target_pairs) return(reject("pss_profile length differs from target_pairs"))
   cc <- lean_candidate_df(trait_vec, D, target_pairs, tree, cov_bm, cov_ou,
                           selected_model, ci_lb, ci_ub, if (use_match) 1 else top_pct, ordinal, n_vec, center_gate)

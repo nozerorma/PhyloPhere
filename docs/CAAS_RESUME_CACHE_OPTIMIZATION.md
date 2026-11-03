@@ -1,7 +1,9 @@
 # CAAS resume cache optimization
 
-Deferred until the ongoing malignant and neoplasia runs have finished. Do not
-change the CAAS task keys or restart these runs to apply this optimization.
+Implemented locally in `caas_permulation.nf`: the MAP fingerprint is cached
+per path for the lifetime of the workflow invocation. The original fingerprint
+algorithm and task inputs remain unchanged. As before, do not mutate the MAP
+directory during a run.
 
 ## Finding
 
@@ -40,9 +42,11 @@ of this optimization.
 ## Cache safety
 
 The fingerprint value is interpolated in `scoring_source.sha256` in each
-`CAAS_CORE_BATCHED` task script, and therefore affects the task cache key. The
-generated script, all inputs, process identity and source-fingerprint values
-must remain identical for existing cache entries to be reusable.
+`CAAS_CORE_BATCHED` task script. The generated script, inputs, process identity
+and source-fingerprint values must remain identical for existing cache entries
+to be reusable. However, the isolated test below uncovered an important
+pre-existing limitation: an interpolated local variable alone is not reliably
+reflected in Nextflow's cache key when the underlying directory changes.
 
 `subworkflows/CT_DISAMBIGUATION/ct_observed.nf` is itself read by
 `observedSourceHash()`, which contributes to `coreScoringSourceKey()`. Editing
@@ -50,10 +54,27 @@ that file can therefore invalidate CAAS tasks even when its behavior appears
 unchanged. Avoid modifying it for this optimization. Also check all other
 explicitly fingerprinted source paths before choosing where to implement it.
 
-A local Nextflow 25.10.3 toy test changed a helper's implementation while
-keeping its returned value and the generated task script identical; `-resume`
-reported the task as cached. That demonstrates the principle only; it is not
-a guarantee for this workflow or the cluster's Nextflow version.
+A local Nextflow 25.10.3 test imported the real module in an isolated fixture
+with eight concurrent tasks, including `b0` and `blk_*` labels. Replacing the
+old helper with the optimized helper kept all eight task hashes cached and
+reduced fingerprint calls from eight to one. Independent runs produced eight
+byte-identical rendered scripts. Empty and nonexistent directories gave the
+same result before and after. These are fixture results, not a guarantee for
+the production cache or another Nextflow version.
+
+**Important existing cache limitation:** after modifying a MAP file between
+runs, both the old and optimized helpers produced a different fingerprint,
+but the fixture's resumed tasks still reused their old cached results. The
+same outcome occurred with the old helper, so this optimization did not
+introduce the problem. The actual production task uses a similar local-variable
+pattern, but the full production task was not tested. Do not rely on the MAP
+fingerprint alone to invalidate cached tasks after changing MAP files. Binding
+it as an explicit task input may fix that, but would change cache keys and
+must be evaluated separately after existing results are safe.
+
+An isolated local benchmark of 50 calls over 1,100 files measured 960 ms
+before and 142 ms after (50 traversals versus one). It excludes Nextflow task
+scheduling and shared-filesystem effects and is not a production speedup.
 
 ## Validation before use
 
@@ -66,6 +87,7 @@ a guarantee for this workflow or the cluster's Nextflow version.
    reported as cached, with no new CAAS replay submissions.
 4. Measure controller time and filesystem activity before and after; report
    the result separately from the theoretical reduction in metadata scans.
-5. Verify that a MAP metadata change between runs still changes the fingerprint
-   and invalidates the intended tasks. Document that mutations during a single
-   run are not detected after the once-per-run fingerprint is computed.
+5. Investigate the pre-existing cache limitation above using the actual process
+   and a disposable cache. Do not claim MAP changes invalidate production tasks
+   until that has been verified. Mutations during a single run are not detected
+   after the once-per-run fingerprint is computed.

@@ -81,6 +81,8 @@ class CaasConfig(ModuleConfigBase):
     multi_hypothesis: bool = True  # --multi_hypothesis
     max_fop: str = "100"  # --max_fop (max FOP alternative hypotheses H1..Hn per contrast)
     perm_match_pss: bool = True  # --perm_match_pss (null canonical pairs follow the observed PSS profile)
+    perm_match_fop: bool = True  # Require null cycles to match the observed number of hypotheses
+    perm_match_pss_ci: bool = False  # Opt in to canonical PSS matching for count traits
     perm_match_pss_tol: str = "0.25"  # --perm_match_pss_tol (relative PSS tolerance of that matching)
 
     # Precomputed discovery/resample inputs (discovery_from, resample_from) are

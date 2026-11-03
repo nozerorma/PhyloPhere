@@ -24,11 +24,13 @@
 #   args[16] max_fop              maximum FOP hypotheses (H1..Hn) per cycle (default 100)
 #   args[17] n_cpus               workers of the FOP harvest (default: SLURM allocation, else cores)
 #   args[18] seed                 RNG seed; required with multi_hypothesis
-#   args[19] match_pss            match the PSS profile of the observed canonical pairs (default true; not applied to count traits)
+#   args[19] match_pss            match the PSS profile of the observed canonical pairs (default true; count traits require match_pss_ci)
 #   args[20] match_pss_tol        relative PSS tolerance of that matching (default 0.25)
+#   args[21] pair_center_gate     none | median | mean: candidate pairs must straddle that centre of the trait (default none)
 #   args[22] allow_relaxed_null  explicit opt-in to PSS/FOP/Tier-2 fallback (default false)
 #   args[23] species_col         configured species column (default species)
-#   args[21] pair_center_gate     none | median | mean: candidate pairs must straddle that centre of the trait (default none)
+#   args[24] match_fop          require the observed hypothesis count (default true)
+#   args[25] match_pss_ci       allow PSS matching for count traits (default false)
 #
 # Method: the trait is simulated under BM on the species tree (rescaled to the fitted OU
 # when OU is the selected model), and the simulated ranks are mapped back onto the observed
@@ -39,7 +41,7 @@
 # selection is lean_contrast_selector.R). By default (match_pss) the pairs are chosen one by one so
 # that their PSS follows the PSS of the observed canonical pairs, and a permulation is accepted only
 # if every pair is within match_pss_tol of its observed counterpart and all pairs are independent
-# (Tier 1). Without matching, or for count traits, the pairs are the N_pairs_obs best ones, graded
+# (Tier 1). Without matching, or for count traits without the CI opt-in, the pairs are the N_pairs_obs best ones, graded
 # by the modified Dunn index:
 #   Tier 1 : all pairs have mod_dunn >= 1 (fully independent)
 #   Tier 2 : exactly one pair falls below mod_dunn 1 (only used to fill a shortfall)
@@ -81,7 +83,7 @@ if (length(args) < 6) {
   stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
        "[chunk_size] [pss_top_pct] [max_tries] [pheno_col] ",
        "[n_col] [c_col] [resample_use_n] [trait_type] [multi_hypothesis] [max_fop] ",
-       "[n_cpus] [seed] [match_pss] [match_pss_tol] [pair_center_gate] [allow_relaxed_null] [species_col]")
+       "[n_cpus] [seed] [match_pss] [match_pss_tol] [pair_center_gate] [allow_relaxed_null] [species_col] [match_fop] [match_pss_ci]")
 }
 
 arg_or <- function(i, default, cast = as.character) {
@@ -159,7 +161,8 @@ if (fop_null && is.na(seed_arg)) {
 # Design matching keeps only null cycles whose FOP harvest yields at least as many
 # hypotheses as the observed harvest (see "Design matching" below). It is requested here
 # and takes effect only when the FOP harvest is on and the observed count is known.
-match_fop <- TRUE
+match_fop <- arg_bool(24, TRUE, "perm_match_fop")
+match_pss_ci <- arg_bool(25, FALSE, "perm_match_pss_ci")
 
 if (!selection.strategy %in% c("auto", "best_model", "ou", "bm"))
   stop("Unknown perm_strategy: ", selection.strategy)
@@ -367,13 +370,15 @@ simulation_rate <- ratematrix(simulation_tree, starting.values)
 # The observed selector chooses its pairs until the Dunn index stops it, so they are the pairs the
 # trait offers; the permulations are matched to their PSS (see match_pss_select). The profile is
 # computed with the same candidate function on the observed trait, in the order of the pair ids of
-# the observed traitfile (the order of selection). Count traits (Jeffreys CI gate) are not matched.
+# the observed traitfile (the order of selection). Count traits retain their Jeffreys CI gate and are matched only when explicitly enabled.
 pss_profile <- NULL
-if (match_pss && use_ci) {
+if (match_pss && use_ci && !match_pss_ci) {
   log_msg("INFO", "PSS matching is not applied to count traits (CI gate): the null keeps the best Dunn-independent pairs")
 } else if (match_pss) {
   obs_cand <- lean_candidate_df(
     starting.values, D, target_pairs, pruned.tree, cov_bm, cov_ou, selected_model,
+    ci_lb = if (use_ci) setNames(phenotype.df$ci_lb, phenotype.df$species) else NULL,
+    ci_ub = if (use_ci) setNames(phenotype.df$ci_ub, phenotype.df$species) else NULL,
     top_pct = 1,
     ordinal = if (trait_type == "ordinal") TRUE else if (trait_type == "continuous") FALSE else NULL,
     center_gate = pair_center_gate)$cand_df
@@ -743,6 +748,7 @@ rbind_fast <- function(lst) {
 .add("run", "pool", value = length(pool))
 .add("run", "escalations", value = escalations)
 .add("settings", "match_pss", value = as.numeric(!is.null(pss_profile)))
+.add("settings", "match_fop", value = as.numeric(match_fop))
 .add("settings", "match_pss_tol", value = match_pss_tol)
 .add("settings", "center_gate", value = match(pair_center_gate, c("none", "median", "mean")) - 1L)
 .add("settings", "top_pct", value = pss_top_pct)
@@ -976,6 +982,7 @@ jsonlite::write_json(list(schema_version=1L, allow_relaxed_null=allow_relaxed_nu
   strategy=selection.strategy, selected_model=selected_model,
   observed_model_reused=file.exists(observed_bundle),
   match_pss_requested=match_pss, match_pss_applied=!is.null(pss_profile),
+  match_pss_ci_requested=match_pss_ci, match_fop_applied=match_fop,
   observed_hypotheses=n_hyp_obs), file.path(outdir,"permulation_provenance.json"), auto_unbox=TRUE,pretty=TRUE)
 
 # ── Summary ───────────────────────────────────────────────────────────────────

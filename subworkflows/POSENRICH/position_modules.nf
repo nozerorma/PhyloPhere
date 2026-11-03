@@ -21,7 +21,7 @@ process POSITION_REGISTRY {
     cache true
     label 'process_registry'
     memory { params.position_registry_memory ?: (background.size() < 20000 ? '8 GB' : '64 GB') }
-    publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'registry'
+    publishDir path: { universe.name.startsWith('NO_') ? "${params.outdir}/position_characterization" : "${params.outdir}/posenrich" }, mode: 'copy', overwrite: true, pattern: 'registry'
 
     input:
     path position_scores
@@ -64,7 +64,7 @@ process POSITION_REGISTRY {
         ${optionalFlag('fade_sites_bottom_file', fade_bottom)} \\
         ${optionalFlag('custom_marker_file', custom_file)} \\
         --window_size_bp ${params.scoring_window_size_bp ?: 1000000} \\
-        --universe '${universe}' --universe-manifest '${universe_manifest}' --position-calibration '${position_calibration}' \\
+        ${universe.name.startsWith('NO_') ? '' : "--universe '${universe}' --universe-manifest '${universe_manifest}' --position-calibration '${position_calibration}'"} \\
         --output_dir registry
     """
 }
@@ -73,7 +73,7 @@ process POSENRICH_CHARACTERIZE {
     cache true
     label 'process_low'
     memory { params.position_module_memory ?: (registry.toRealPath().resolve('positions.tsv').size() < 200000000 ? '4 GB' : '32 GB') }
-    publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'characterization'
+    publishDir path: { task.process.contains('POSITION_CHARACTERIZATION') ? "${params.outdir}/position_characterization" : "${params.outdir}/posenrich" }, mode: 'copy', overwrite: true, pattern: 'characterization'
 
     input:
     path registry, stageAs: 'registry'

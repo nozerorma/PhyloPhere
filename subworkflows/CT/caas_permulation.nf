@@ -40,7 +40,22 @@
  */
 
 
+import groovy.transform.Field
+
 include { observedSourceHash as scoringSourceHash; observedQuote as scoringQuote; observedInputHash as scoringInputHash } from '../CT_DISAMBIGUATION/ct_observed'
+
+// The directory is shared by every tile. Retain the existing fingerprint and
+// generated script, but traverse it once per path and workflow invocation.
+@Field final Map<String, String> caasMapFingerprints = [:]
+def caasMapFingerprint(path) {
+    if (!path) return ''
+    def key = path.toString()
+    synchronized (caasMapFingerprints) {
+        if (!caasMapFingerprints.containsKey(key))
+            caasMapFingerprints[key] = scoringInputHash(path)
+        return caasMapFingerprints[key]
+    }
+}
 def coreScoringSourceKey() {
     return scoringSourceHash("${baseDir}/subworkflows/CT_DISAMBIGUATION/local", "${baseDir}/subworkflows/CT/local/modules/design_io.py", "${baseDir}/subworkflows/CT/local") + java.security.MessageDigest.getInstance('SHA-256').digest(file("${baseDir}/subworkflows/SCORING/local/src/assemble_block_matrices.R").bytes).encodeHex().toString()
 }
@@ -137,7 +152,8 @@ process SUBSET_RESAMPLE_PERMS {
         --source "${resample_dir}" --config "${caas_config}" \
         --n "${n_perms}" --block-size "${block_size}" \
         --multi "${params.multi_hypothesis == true}" \
-        --allow-relaxed "${params.ct_allow_relaxed_null == true}"
+        --allow-relaxed "${params.ct_allow_relaxed_null == true}" \
+        --match-fop "${params.perm_match_fop == null || params.perm_match_fop.toString().toLowerCase() != 'false'}"
     """
 }
 
@@ -224,7 +240,7 @@ process CAAS_CORE_BATCHED {
     def taxid_mapping = new File(taxid_map.toString()).name != 'NO_FILE' ? taxid_map : ''
     def ensembl_file = new File(gene_lengths.toString()).name.startsWith('NO_') ? '' : gene_lengths
     def max_tasks_per_child = params.ct_disambig_max_tasks_per_child ?: 50
-    def postproc_maps_hash = params.caas_map_dir ? scoringInputHash(params.caas_map_dir) : ''
+    def postproc_maps_hash = caasMapFingerprint(params.caas_map_dir)
     def tile_args = caasTileArgs(gene_lengths)
     // The strict tables come from the same replay: the null tables pooled without the hypotheses that have conserved
     // pairs, and the b_0 rows without conserved pairs scored again (the observed labeling is a single labeling).
@@ -441,7 +457,7 @@ process CAAS_CORE_MERGE {
     tuple val(block), path("${block}"), emit: block_out
 
     script:
-    def postproc_maps_hash = params.caas_map_dir ? scoringInputHash(params.caas_map_dir) : ''
+    def postproc_maps_hash = caasMapFingerprint(params.caas_map_dir)
     def disambig_local = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
     def scoring_local  = "${baseDir}/subworkflows/SCORING/local"
     // The sentinel convention is a NO_* basename (NO_FILE here, NO_BACKGROUND from SCORING's resolved_background), so

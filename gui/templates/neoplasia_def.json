@@ -90,6 +90,8 @@
       "multi_hypothesis": true,
       "max_fop": "100",
       "perm_match_pss": true,
+      "perm_match_fop": false,
+      "perm_match_pss_ci": true,
       "perm_match_pss_tol": "0.25"
     },
     "disambiguation": {
@@ -118,7 +120,7 @@
       "gene_filter_k_near": "1.5"
     },
     "rer": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "rer_tool_build_trait": true,
       "rer_tool_build_tree": true,
@@ -179,7 +181,7 @@
       "enabled": true,
       "extra_flags": "",
       "evidence_p_threshold": "0.05",
-      "evidence_fdr_threshold": "0.15",
+      "evidence_fdr_threshold": "0.05",
       "gene_ensembl_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output",
       "auto_generate_ensembl": false,
       "ensembl_dataset": "",
@@ -204,7 +206,7 @@
       "posenrich_custom_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PP2A/pp2a_custom.tsv",
       "posenrich_collections": "",
       "posenrich_min_genes": "2",
-      "posenrich_holdout": "0",
+      "posenrich_holdout": "1000",
       "posenrich_within_gene_memory": "",
       "posenrich_radios": "0,5,10",
       "position_registry_memory": "",
@@ -237,7 +239,7 @@
       "scoring_ami": true,
       "scoring_string": true,
       "scoring_compare_fdr": "0.15",
-      "ami_description_fdr": "0.10",
+      "ami_description_fdr": "0.05",
       "scoring_compare_top_n": "25"
     }
   },
@@ -248,7 +250,7 @@
     "use_resample": false,
     "use_disambiguation": false,
     "use_postproc": false,
-    "use_rer": false,
+    "use_rer": true,
     "use_fade": true,
     "use_vep": false
   },

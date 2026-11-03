@@ -140,7 +140,7 @@ def build_position_characterization(positions, evidence, pfam_members):
     for row in positions[['Gene', 'Position', 'evaluation_status'] + attributes].itertuples(index=False):
         key = (row.Gene, int(row.Position))
         status_by_key[key] = row.evaluation_status
-        if row.ucr_region or row.fubar_call or row.fade_top_sig == '1' or row.fade_bottom_sig == '1' or row.custom_terms:
+        if row.ucr_region or row.ucr_variability or row.fubar_call or row.fade_top_sig == '1' or row.fade_bottom_sig == '1' or row.custom_terms:
             layers[key] = {'ucr_region': row.ucr_region, 'variability': row.ucr_variability,
                            'fubar_call': row.fubar_call, 'fade_top': int(row.fade_top_sig == '1'),
                            'fade_bottom': int(row.fade_bottom_sig == '1'), 'custom_terms': row.custom_terms}

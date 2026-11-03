@@ -51,6 +51,7 @@ include {CT_META_CAAS} from './workflows/ct_meta_caas.nf'
 include {CT_POSTPROC} from './workflows/ct_postproc.nf'
 include {CT_OBSERVED} from './workflows/ct_observed.nf'
 include {POSENRICH; validatePositionReferences} from './workflows/posenrich.nf'
+include {POSITION_CHARACTERIZATION} from './workflows/position_characterization.nf'
 include {FADE}           from './workflows/fade.nf'
 include {FADE_REPORT as FADE_REPORT_PRECOMP_TOP; FADE_REPORT as FADE_REPORT_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_report.nf'
 include {FADE_GENE_LISTS as FADE_GENE_LISTS_PRECOMP_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_gene_lists.nf'
@@ -109,7 +110,9 @@ workflow {
                  "pyarrow, hyphy, paml, domino and the R report stack, so most modules will fail. Use the conda environment."
     }
 
-    if (params.posenrich && !params.help) validatePositionReferences()
+    def characterize_positions = toBool(params.scoring) && (params.position_characterization?.toString()?.toLowerCase() == 'auto'
+        ? toBool(params.enrichment) : toBool(params.position_characterization))
+    if (!params.help && (toBool(params.posenrich) || characterize_positions)) validatePositionReferences()
 
     def version = "2.0.0"
 
@@ -672,6 +675,13 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             ran_any = true
         }
 
+        // The individual precomputed FADE site tables are also inputs to position
+        // characterization and the comparison report, not only to SCORING.
+        def fade_sites_top_ch = params.fade ? FADE.out.sites_csv_top :
+            (fade_precomp_sites_top_ch ?: (params.scoring_fade_site_top ? Channel.value(file(params.scoring_fade_site_top, checkIfExists: true)) : Channel.empty()))
+        def fade_sites_bottom_ch = params.fade ? FADE.out.sites_csv_bottom :
+            (fade_precomp_sites_bot_ch ?: (params.scoring_fade_site_bottom ? Channel.value(file(params.scoring_fade_site_bottom, checkIfExists: true)) : Channel.empty()))
+
         // rer_continuous_file lets RER_MAIN render 5.RERconverge_report.html from a
         // precomputed *.continuous.output RDS even when --rer_tool itself is off
         // this invocation (see rerconverge.nf's own params.rer_continuous_file branch).
@@ -846,10 +856,18 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 params.scoring ? SCORING.out.position_scores : Channel.empty(),
                 params.scoring ? SCORING.out.postproc : Channel.empty(),
                 params.scoring ? SCORING.out.null_universe_summary : Channel.empty(),
-                params.fade ? FADE.out.sites_csv_top    : (fade_precomp_sites_top_ch ?: Channel.empty()),
-                params.fade ? FADE.out.sites_csv_bottom : (fade_precomp_sites_bot_ch ?: Channel.empty())
+                fade_sites_top_ch, fade_sites_bottom_ch
             )
             ran_any = true
+        }
+
+        def position_characterization_out = null
+        if (!toBool(params.posenrich) && characterize_positions) {
+            position_characterization_out = POSITION_CHARACTERIZATION(
+                SCORING.out.position_scores, SCORING.out.postproc, SCORING.out.null_universe_summary,
+                pp_cleaned_bg,
+                fade_sites_top_ch, fade_sites_bottom_ch
+            )
         }
 
         if (params.scoring && params.enrichment) {
@@ -913,15 +931,14 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 scoring_vep_pai_ch,
                 scoring_vep_cosmic_ch,
                 scoring_vep_ensembl_ch,
-                params.fade ? FADE.out.sites_csv_top    : fade_precomp_sites_top_ch,
-                params.fade ? FADE.out.sites_csv_bottom : fade_precomp_sites_bot_ch,
+                fade_sites_top_ch, fade_sites_bottom_ch,
                 rer_gene_lists_bg_ch,
                 rer_gene_lists_interest_ch,
                 fade_gene_lists_bg_top_ch,
                 fade_gene_lists_bg_bottom_ch,
                 fade_gene_lists_sig_top_ch,
                 fade_gene_lists_sig_bottom_ch,
-                posenrich_out ? posenrich_out.position_char : Channel.empty()
+                posenrich_out ? posenrich_out.position_char : (position_characterization_out ? position_characterization_out.position_char : Channel.empty())
             )
         }
 

@@ -141,7 +141,21 @@ SPEC = ModuleTabSpec(
             label="Match observed PSS profile in the null",
             kind="bool",
             importance="default",
-            help="Builds each permulation's canonical pairs so their PSS follows the observed PSS profile; not applied to count traits; default on.",
+            help="Builds canonical pairs to follow the observed PSS profile; count traits additionally require the CI opt-in below.",
+        ),
+        FieldSpec(
+            name="perm_match_fop",
+            label="Match observed hypothesis count",
+            kind="bool",
+            importance="default",
+            help="Require each null cycle to reach the observed hypothesis count and truncate to it. Turn off to keep each cycle's available hypotheses up to max_fop.",
+        ),
+        FieldSpec(
+            name="perm_match_pss_ci",
+            label="Allow PSS matching with count intervals",
+            kind="bool",
+            importance="optional",
+            help="When PSS matching is enabled, match canonical pairs for count traits too, keeping the Jeffreys interval eligibility gate.",
         ),
         FieldSpec(
             name="perm_match_pss_tol",

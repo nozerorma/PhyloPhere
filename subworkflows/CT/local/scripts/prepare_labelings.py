@@ -35,7 +35,7 @@ def write_block(directory, labelings, weights=None):
                     writer.writerow([*key, f, b, weights[key]])
 
 
-def prepare(source, config, n, block_size, multi, allow_relaxed=False):
+def prepare(source, config, n, block_size, multi, allow_relaxed=False, match_fop=True):
     n = integer(n, 'caas_full_perms')
     block_size = integer(block_size, 'caas_cycle_block_size', 1)
     design = read_design(config, multi)
@@ -60,7 +60,7 @@ def prepare(source, config, n, block_size, multi, allow_relaxed=False):
     for tag, labeling in raw.items():
         m = TAG.fullmatch(tag)
         cycle = int(m[1]); hyp = m[2] or 'H1'
-        if cycle == 0 or hyp not in active:
+        if cycle == 0 or (not multi and hyp != 'H1') or (match_fop and hyp not in active):
             continue
         if len(labeling[0]) != k:
             raise ValueError(f'Pair count differs from observed design: {tag}')
@@ -72,10 +72,12 @@ def prepare(source, config, n, block_size, multi, allow_relaxed=False):
     selected, reasons = {}, []
     for cycle in sorted(grouped)[:n]:
         hypotheses = grouped[cycle]
-        if set(hypotheses) != active:
+        if match_fop and set(hypotheses) != active:
             if not allow_relaxed:
                 raise ValueError(f'Cycle b_{cycle} does not match active hypotheses {sorted(active)}')
             reasons.append(f'b_{cycle}: incomplete hypothesis harvest')
+        if not match_fop and {int(h[1:]) for h in hypotheses} != set(range(1, len(hypotheses) + 1)):
+            raise ValueError(f'Cycle b_{cycle} has noncontiguous hypothesis IDs')
         if 'H1' not in hypotheses:
             raise ValueError(f'Canonical H1 missing from cycle b_{cycle}')
         for hyp in sorted(hypotheses, key=lambda h: int(h[1:])):
@@ -86,7 +88,14 @@ def prepare(source, config, n, block_size, multi, allow_relaxed=False):
     if len(provenances) > 1:
         raise ValueError('Ambiguous harvest provenance')
     harvest_provenance = json.loads(provenances[0].read_text()) if provenances else None
+    recorded_match = harvest_provenance.get('match_fop_applied') if harvest_provenance else None
+    if n and multi and not match_fop and recorded_match is None:
+        if not allow_relaxed:
+            raise ValueError('Free hypothesis counts require harvest provenance declaring match_fop_applied=false')
+        reasons.append('unverified free hypothesis-count policy in reused harvest')
     if n and harvest_provenance:
+        if multi and recorded_match is not None and recorded_match != match_fop:
+            raise ValueError('Harvest hypothesis-count policy differs from perm_match_fop')
         if harvest_provenance.get('relaxed_reasons'):
             if not allow_relaxed:
                 raise ValueError('Reused harvest contains relaxed null draws; enable ct_allow_relaxed_null explicitly')
@@ -132,7 +141,7 @@ def prepare(source, config, n, block_size, multi, allow_relaxed=False):
             out.write(f"{tag}\t{','.join(fg)}\t{','.join(bg)}\n")
     Path('ct_preparation.json').write_text(json.dumps({
         'schema_version': 1, 'requested_cycles': n, 'selected_cycles': len(cycles),
-        'active_hypotheses': sorted(active), 'allow_relaxed_null': allow_relaxed,
+        'active_hypotheses': sorted(active), 'match_fop': match_fop, 'allow_relaxed_null': allow_relaxed,
         'relaxed_reasons': reasons, 'harvest_provenance': harvest_provenance,
         'harvest_provenance_available': harvest_provenance is not None, 'conservation_semantics': 'within_pair_ids_v2',
     }, indent=2) + '\n')
@@ -146,5 +155,6 @@ if __name__ == '__main__':
     ap.add_argument('--block-size', required=True)
     ap.add_argument('--multi', choices=['true', 'false'], required=True)
     ap.add_argument('--allow-relaxed', choices=['true', 'false'], default='false')
+    ap.add_argument('--match-fop', choices=['true', 'false'], default='true')
     a = ap.parse_args()
-    prepare(a.source, a.config, a.n, a.block_size, a.multi == 'true', a.allow_relaxed == 'true')
+    prepare(a.source, a.config, a.n, a.block_size, a.multi == 'true', a.allow_relaxed == 'true', a.match_fop == 'true')

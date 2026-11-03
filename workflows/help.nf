@@ -155,7 +155,9 @@ Usage:
 --tree                      <"nwtree_file">              null
 --traitname                  <"column_name">               null   (trait column of --my_traits)
 --perm_strategy              <"auto|OU|BM">               "auto"  (evolutionary model of the simulation)
---perm_match_pss             <true|false>                 true   (each permulation builds its canonical pairs so that their PSS follows the PSS of the observed pairs; accepted only if every pair is within the tolerance. Not applied to count traits)
+--perm_match_pss             <true|false>                 true   (each permulation builds its canonical pairs so that their PSS follows the PSS of the observed pairs; accepted only if every pair is within the tolerance. Count traits require --perm_match_pss_ci true)
+--perm_match_fop             <true|false>                 true   (require each null cycle to reach and use the observed hypothesis count; false keeps the available hypotheses up to max_fop)
+--perm_match_pss_ci          <true|false>                 false  (allow canonical PSS matching for count traits while retaining the CI gate)
 --perm_match_pss_tol          <FLOAT>                      0.25   (relative PSS tolerance of that matching)
 --resample_use_n             <true|false>                 true   (use N/C sample size count traits for Jeffreys CI filtering if available)
 --max_fop                    <INTEGER>                    100    (alternative hypotheses per contrast, observed and null)
@@ -269,7 +271,8 @@ Usage:
 --accumulation_caas_input            <"filtered_discovery.tsv">     null  (standalone entry: observed positives of U)
 --accumulation_background_input      <"background_file">            null  (standalone entry: gene list of U)
 --posenrich_background_file          <"background_file">            null  (tested positions, background.output)
---posenrich_domains, --posenrich_ucr <true|false>                   true  (blank tables are generated on the productive alignments)
+--position_characterization         <auto|true|false>              auto  (auto: scoring + enrichment; true: scoring alone also)
+--posenrich_domains, --posenrich_ucr <true|false>                   true  (shared Pfam/UCR layers; blank tables are generated on the productive alignments)
 --domain_variability_file, --ucr_positions_file   (optional precomputed annotation sources; each needs an explicit coordinate_space)
 --pfam_cache_dir                     <"pfam_cache_dir">             ~/.cache/phylophere/pfam
 --domain_ref_species                 <"species">                    ref_species_name

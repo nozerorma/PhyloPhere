@@ -27,10 +27,10 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *  RESAMPLE: runs permulations.R, which permulates the observed trait on the species
  *  tree and keeps params.caas_full_perms labelings that have the same number of
- *  independent pairs as the observed contrast (and, with params.multi_hypothesis, the
- *  same number of FOP hypotheses). The strategy is params.perm_strategy, the canonical pairs
+ *  independent pairs as the observed contrast. With multiple hypotheses, the count is matched
+ *  to the observed design unless params.perm_match_fop is false. The strategy is params.perm_strategy, the canonical pairs
  *  follow the PSS profile of the observed ones (params.perm_match_pss, tolerance
- *  params.perm_match_pss_tol; not for count traits) and the
+ *  params.perm_match_pss_tol; count traits require perm_match_pss_ci) and the
  *  randomness is seeded with params.seed (1998 when unset).
  *
  *  Consumes:  species tree, observed traitfile (or a directory of traitfile_H*.tab,
@@ -144,7 +144,9 @@ EMPTY_HARVEST
         ${params.perm_match_pss_tol != null ? params.perm_match_pss_tol : 0.25} \\
         "${params.pair_center_gate ?: 'none'}" \
         ${params.ct_allow_relaxed_null == true} \
-        "${species_column}"
+        "${species_column}" \\
+        ${params.perm_match_fop != null ? params.perm_match_fop : true} \\
+        ${params.perm_match_pss_ci != null ? params.perm_match_pss_ci : false}
         """
     } else {
         """
@@ -209,7 +211,9 @@ EMPTY_HARVEST
         ${params.perm_match_pss_tol != null ? params.perm_match_pss_tol : 0.25} \\
         "${params.pair_center_gate ?: 'none'}" \
         ${params.ct_allow_relaxed_null == true} \
-        "${species_column}"
+        "${species_column}" \\
+        ${params.perm_match_fop != null ? params.perm_match_fop : true} \\
+        ${params.perm_match_pss_ci != null ? params.perm_match_pss_ci : false}
         """
     }
 }

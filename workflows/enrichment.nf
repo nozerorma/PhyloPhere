@@ -138,7 +138,7 @@ workflow ENRICHMENT {
         fade_gene_lists_bg_bottom_ch  // FADE bottom direction's own background.txt
         fade_gene_lists_sig_top_ch    // fade_top_significant.txt
         fade_gene_lists_sig_bottom_ch // fade_bottom_significant.txt
-        posenrich_position_char_ch    // optional: position_characterization.tsv of POSENRICH (null or empty when --posenrich did not run)
+        posenrich_position_char_ch    // optional: descriptive position_characterization.tsv
 
     main:
         def fcs_universe_ch = (cleaned_background_ch ?: Channel.empty())
@@ -383,7 +383,7 @@ workflow ENRICHMENT {
             .ifEmpty { precomputedOrSentinel('scoring_vep_ensembl', params.scoring_vep_ensembl, 'NO_VEP_ENSEMBL') }
         def cmp_fade_top_ch   = (fade_sites_top_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_TOP') }
         def cmp_fade_bot_ch   = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_BOTTOM') }
-        // The characterization table of POSENRICH; without it the report omits the characterization columns.
+        // Descriptive position annotations; without them the report omits the characterization columns.
         def cmp_position_char_ch = (posenrich_position_char_ch ?: Channel.empty())
             .ifEmpty { file('NO_POSITION_CHAR') }
 

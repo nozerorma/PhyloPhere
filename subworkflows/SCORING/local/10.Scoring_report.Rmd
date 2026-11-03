@@ -732,8 +732,7 @@ if (nrow(.dm)) knitr::kable(.dm %>% transmute(round, `candidate target` = target
 ```
 
 A draw is rejected when it cannot give `K` mutually independent pairs, or, with the PSS matching, when the pairs it
-can give do not follow the PSS of the observed pairs. Tier 1 draws beyond the pool, and the candidates that do not
-reach the number of hypotheses of the run, are drawn and not kept.
+can give do not follow the PSS of the observed pairs. Tier 1 draws beyond the pool, and when hypothesis-count matching is enabled, candidates that do not reach the number of hypotheses of the run are drawn and not kept. With count matching disabled each cycle retains its available hypotheses up to `max_fop`.
 
 #### What the PSS rule discards
 
@@ -751,7 +750,7 @@ ggplot(.tol, aes(tol, accepted)) +
 ```
 
 ```{r null-harvest-tolerance-na, eval=.file_ok(params$perm_harvest_file) && !(.hv_match && any(.hv$section == "tolerance")), results='asis'}
-cat("_This harvest did not match the PSS profile of the observed pairs (`perm_match_pss` off, or count trait), so no pair was discarded by it._\n\n")
+cat("_This harvest did not match the PSS profile of the observed pairs (`perm_match_pss` off, or count trait without the CI opt-in), so no pair was discarded by it._\n\n")
 ```
 
 The curve is the share of all draws that would be accepted at each tolerance; the dotted line is the share that has

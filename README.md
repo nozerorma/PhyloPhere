@@ -184,6 +184,8 @@ Detects CAAS, columns where foreground and background species carry mostly disjo
 | `caas_full_perms` | 1000 | Null cycles harvested and replayed; 0 = observed only |
 | `perm_strategy` | auto | Null trait model: `auto` (BM or OU by AICc), `BM`, `OU` |
 | `perm_match_pss`, `perm_match_pss_tol` | true, 0.25 | Make null pairs follow the observed pair PSS within that relative tolerance |
+| `perm_match_fop` | true | Match the observed hypothesis count; false keeps each null cycle’s available hypotheses up to `max_fop` |
+| `perm_match_pss_ci` | false | Permit canonical PSS matching for count traits while retaining CI eligibility |
 | `max_tries` | 1000000 | Cap on simulation attempts while harvesting |
 | `chunk_size` | 500 | Labelings per resample file |
 | `resample_use_n` | true | Use sample sizes of count traits in null Jeffreys filtering |
@@ -194,6 +196,8 @@ Detects CAAS, columns where foreground and background species carry mostly disjo
 | `caas_export_single` | false | Also write the single `caas_perms.rds` export |
 | `publish_intermediates` | false | Publish discovery, background and resample files |
 | `discovery_from`, `resample_from` | empty | Standalone: `discovery.tab` or resample output of a previous run |
+
+For count traits, `--perm_match_fop false` keeps each null cycle's available FOP hypotheses (up to `--max_fop`) while maintaining the observed number of pairs and the Jeffreys CI gate. Canonical-pair PSS matching for count traits is a separate opt-in: use both `--perm_match_pss true` and `--perm_match_pss_ci true`. Existing defaults retain hypothesis-count matching and leave PSS matching disabled for counts. Reused variable-count harvests must record their policy in provenance; unverified legacy inputs require `--ct_allow_relaxed_null true` and are marked as relaxed.
 
 ### CT_DISAMBIGUATION and ASR_DIAGNOSTICS: `conf/ct_disambiguation.config`
 
