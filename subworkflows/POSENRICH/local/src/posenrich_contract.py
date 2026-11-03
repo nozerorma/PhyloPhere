@@ -4,9 +4,20 @@ import gzip
 import hashlib
 import json
 import math
+import sys
 from pathlib import Path
 
 import pandas as pd
+
+# The csv limit is process-wide and also applies to streaming readers in the
+# POSENRICH modules. Some valid annotation fields exceed Python's default.
+_csv_limit = sys.maxsize
+while True:
+    try:
+        csv.field_size_limit(_csv_limit)
+        break
+    except OverflowError:
+        _csv_limit //= 10
 
 
 def sha256_file(path):

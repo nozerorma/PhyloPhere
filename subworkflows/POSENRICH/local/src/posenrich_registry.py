@@ -464,7 +464,9 @@ def build_collections_df(coll, term_stats, sources):
         rows.append({'collection_id': cid, 'term_id': term, 'description': desc,
                      'term_type': meta[0], 'coordinate_space': meta[1],
                      'source_file': sources.get(meta[4], 'NA'),
-                     'source_sha256': sources.get(meta[4] + '_sha256', 'NA'),
+                     # Metadata inventories are kept once in the manifest; they
+                     # are not SHA256 checksums and can be very large for MAP.
+                     'source_sha256': 'NA',
                      'n_members': n_members, 'n_genes': n_genes,
                      'analyses': meta[2], 'informative_within_protein': meta[3],
                      'status': status})
@@ -631,10 +633,10 @@ def main():
         path = getattr(args, key)
         if path is None:
             sources[key] = 'NA'
-            sources[key + '_sha256'] = 'NA'
+            sources[key + '_identity'] = None
             continue
         sources[key] = path
-        sources[key + '_sha256'] = inventory(path)
+        sources[key + '_identity'] = inventory(path)
 
     universe_genes = ps.load_universe_genes(args.cleaned_background)
     map_cache = ps.build_map_cache(args.map_dir, universe_genes)
@@ -785,7 +787,8 @@ def main():
         'coordinate_space': 'CAAS_0based',
         'universe': {'source': sources.get('cleaned_background', 'NA'), 'n_genes': len(active_genes),
                      'gene_list_check': gene_check},
-        'sources': {key: {'path': sources.get(key, 'NA'), 'sha256': sources.get(key + '_sha256', 'NA')}
+        'sources': {key: {'path': sources.get(key, 'NA'), 'sha256': 'NA',
+                          'identity': sources.get(key + '_identity')}
                     for key in SOURCE_KEYS},
         'positions': {'total': int(len(positions)), 'by_status': {k: int(v) for k, v in status_counts.items()}},
         'evidence': {'rows': int(len(evidence)),
