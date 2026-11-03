@@ -8,7 +8,7 @@ import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
-from src.utils.amino import normalize_amino_list
+from src.utils.amino import normalize_amino_list, shared_residue_count
 from src.core.labelings import hyp_id
 
 
@@ -27,10 +27,10 @@ def validate_row(row, design=None):
     parts = (row.get('caas') or '').split('/')
     if len(parts) != 2 or not all(normalize_amino_list(part) for part in parts):
         raise ValueError(f'Invalid CAAS residues: {row.get("caas")}')
-    overlap = len(set(normalize_amino_list(parts[0])) & set(normalize_amino_list(parts[1])))
+    overlap = shared_residue_count(parts[0], parts[1])
     supplied = row.get('shared_residue_count')
     if supplied not in (None, '') and (not supplied.isdigit() or int(supplied) != overlap):
-        raise ValueError('shared_residue_count disagrees with the residues')
+        raise ValueError(f'shared_residue_count {supplied!r} disagrees with the residues {row.get("caas")!r} (expected {overlap})')
     supplied = row.get('is_conserved_meta')
     if supplied not in (None, ''):
         if supplied.lower() not in {'true','false','1','0'} or (supplied.lower() in {'true','1'}) != bool(overlap):
@@ -69,7 +69,10 @@ class DiscoveryRows(Mapping):
                 for row in reader:
                     if None in row or any(v is None for v in row.values()):
                         raise ValueError(f'Wrong discovery column count: {path}')
-                    gene, position, hyp = validate_row(row, design)
+                    try:
+                        gene, position, hyp = validate_row(row, design)
+                    except ValueError as exc:
+                        raise ValueError(f'{path}:{reader.line_num}: {exc}') from exc
                     try:
                         self.db.execute('INSERT INTO rows VALUES (?,?,?,?)', (gene, position, hyp, json.dumps(row)))
                     except sqlite3.IntegrityError as exc:

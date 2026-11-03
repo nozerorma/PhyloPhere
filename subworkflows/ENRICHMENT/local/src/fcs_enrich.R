@@ -554,6 +554,8 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_
                         fdr_thr = 0.15, p_perm_thr = 0.025, analytic_levels = c(0.05, 0.10, 0.15),
                         gene_stat = "max", null_block_cols = NULL, score_source = "auto") {
   if (!identical(gene_stat, "max")) stop("Only CAAS gene_stat=max is supported")
+  ranking_universe <- unique(unlist(lapply(rankings, names), use.names = FALSE))
+  gmts <- fcs_gmts_for_universe(gmts, ranking_universe)
   corStat_byrank <- NULL; base_corStat <- NULL
   observed <- fcs_observed(rankings, gmts, num_g = num_g, max_g = max_g, score_source = score_source)
   alts <- observed$alts

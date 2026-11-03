@@ -31,6 +31,7 @@ Outputs:    network.sif               geneA<TAB>pp<TAB>geneB, one line per undir
 
 # ── Standard library ──────────────────────────────────────────────────────────
 import argparse
+import re
 import gzip
 import os
 import shutil
@@ -165,6 +166,31 @@ def load_background(path):
         return {line.strip() for line in f if line.strip()}
 
 
+def resolve_background_symbols(background, symbols):
+    """Resolve STRING preferred names to original background IDs, without collapsing IDs."""
+    aliases = {}
+    for gene in background:
+        stem = re.sub(r'\.prot$', '', gene)
+        core = re.sub(r'\.[A-Z][a-z]+_[a-z]+(?:_[A-Za-z0-9]+)*$', '', stem)
+        for alias in {gene, stem, core}:
+            aliases.setdefault(alias, set()).add(gene)
+    resolved = {}
+    for symbol in symbols:
+        hits = {symbol} if symbol in background else aliases.get(symbol, set())
+        if len(hits) > 1:
+            raise ValueError(f'Ambiguous STRING symbol {symbol}: {sorted(hits)}')
+        if hits:
+            resolved[symbol] = next(iter(hits))
+    inverse = {}
+    for symbol, gene in resolved.items():
+        inverse.setdefault(gene, set()).add(symbol)
+    collisions = {gene: names for gene, names in inverse.items() if len(names) > 1}
+    if collisions:
+        gene, names = next(iter(collisions.items()))
+        raise ValueError(f'Multiple STRING symbols for background gene {gene}: {sorted(names)}')
+    return resolved
+
+
 def build_edges(links_path, id2sym, background, score_threshold):
     """Edges of the links file as {(gene_a, gene_b): combined_score}, gene_a < gene_b.
 
@@ -174,6 +200,10 @@ def build_edges(links_path, id2sym, background, score_threshold):
     kept when its score reaches score_threshold, both proteins map to different symbols
     and both symbols are in the background.
     """
+    symbols = resolve_background_symbols(background, set(id2sym.values()))
+    print(f'[build_domino_network] matched {len(symbols)}/{len(background)} background IDs to STRING symbols', file=sys.stderr)
+    if background and not symbols:
+        raise ValueError('No background identifiers match STRING preferred symbols; check gene identifiers and species')
     edge_scores = {}
     n_lines = 0
     with gzip.open(links_path, "rt") as f:
@@ -190,8 +220,8 @@ def build_edges(links_path, id2sym, background, score_threshold):
                 continue
             if score < score_threshold:
                 continue
-            s1 = id2sym.get(p1)
-            s2 = id2sym.get(p2)
+            s1 = symbols.get(id2sym.get(p1))
+            s2 = symbols.get(id2sym.get(p2))
             if s1 is None or s2 is None or s1 == s2:
                 continue
             if s1 not in background or s2 not in background:

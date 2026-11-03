@@ -29,6 +29,9 @@ pp_plot <- function(plot, filename, width = 10, height = 6) {
 }
 pp_show <- function(df, caption) {
   if (!nrow(df)) { cat('No records.\n\n'); return(invisible(NULL)) }
-  print(knitr::kable(df, caption = caption) %>% kableExtra::kable_styling(
-    bootstrap_options = c('striped','hover','condensed')))
+  widget <- DT::datatable(df, caption=caption, rownames=FALSE,
+    options=list(pageLength=10, lengthMenu=c(10,20,50,100), scrollX=TRUE))
+  rendered <- knitr::knit_print(widget)
+  knitr::knit_meta_add(attr(rendered, 'knit_meta'))
+  cat(rendered, '\n\n')
 }

@@ -26,6 +26,9 @@ params:
 <style>
 body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
 .main-container { max-width: 95%; }
+.outlier-zoom { overflow-x: auto; }
+.outlier-zoom img { cursor: zoom-in; max-width: 100%; }
+.outlier-zoom img.zoomed { max-width: none; width: 200%; cursor: zoom-out; }
 </style>
 
 ```{r setup, include=FALSE}
@@ -136,7 +139,11 @@ the genomic span in base pairs for pipeline-generated Ensembl annotations.
 Other annotations may have unspecified units. Different denominator units are
 not directly comparable; the length sources are reported explicitly.
 
-```{r outliers, results='asis'}
+Click an outlier plot to zoom in; click again to restore it.
+
+<div class="outlier-zoom">
+
+```{r outliers, results='asis', dpi=180}
 write_tsv(stats,'outliers/gene_summary_annotated.tsv')
 pp_show(count(stats,category,name='Genes'),'Gene removal categories')
 pp_show(count(stats,length_source,name='Genes'),'Effective length sources')
@@ -152,6 +159,17 @@ if (nrow(stats)) {
     labs(x='Candidate positions per 100 effective length units',y='Genes',fill='Category'),
     'outliers/outlier_density.png')
 } else cat('No candidate genes; no outlier distribution to plot.\n\n')
+```
+
+</div>
+
+<script>
+document.addEventListener('click', function(event) {
+  if (event.target.matches('.outlier-zoom img')) event.target.classList.toggle('zoomed');
+});
+</script>
+
+```{r removed_genes_table, results='asis'}
 pp_show(removed_genes,'Genes removed by the enabled gene filters')
 ```
 
@@ -197,7 +215,7 @@ cluster_display <- cluster_by_gene %>% filter(flagged_positions>0) %>%
 if (nrow(cluster_display)) {
   DT::datatable(cluster_display, rownames=FALSE,
     escape=which(names(cluster_display) != 'flagged_coordinates'),
-    options=list(pageLength=20, lengthMenu=c(10,20,50,100)))
+    options=list(pageLength=10, lengthMenu=c(10,20,50,100)))
 } else knitr::asis_output('No flagged positions.')
 ```
 
@@ -260,7 +278,7 @@ if (all(c('chr','start','end') %in% names(annotation))) {
     pp_numeric(c('start','end')) %>%
     filter(!is.na(chr),nzchar(chr),is.finite(start),is.finite(end),start>=0,end>=start) %>%
     mutate(midpoint=(start+end)/2, genomic_length=end-start+1,
-           density=positions/genomic_length*100)
+           density=positions/genomic_length)
   write_tsv(genomic,'disambiguation_characterization/retained_genomic_density.tsv')
   if (nrow(genomic)) {
     chromosomes <- genomic %>% group_by(chr) %>% summarise(chr_end=max(end),.groups='drop') %>%
@@ -276,14 +294,25 @@ if (all(c('chr','start','end') %in% names(annotation))) {
              chromosome_index=row_number())
     genomic <- genomic %>% left_join(chromosomes %>% select(chr,offset,chromosome_index),by='chr') %>%
       mutate(cumulative_position=offset+midpoint, chromosome_band=factor(chromosome_index %% 2))
-    pp_plot(ggplot(genomic,aes(cumulative_position,density,color=chromosome_band))+
-      geom_point(alpha=.8,size=1.8)+
-      scale_color_manual(values=c('0'='#2E86AB','1'='#31536B'),guide='none')+
+    pp_plot(ggplot(genomic,aes(cumulative_position,density))+
+      geom_vline(data=chromosomes,aes(xintercept=offset+chr_end),
+                 linetype='dotted',color='grey60',alpha=.7,linewidth=.4,inherit.aes=FALSE)+
+      geom_point(alpha=.85,size=3.1,color='#2E86AB')+
       scale_x_continuous(breaks=chromosomes$center,labels=chromosomes$chr_label,
                          expand=expansion(mult=c(.005,.005)))+
-      labs(x='Chromosome',y='Retained candidates per 100 genomic base pairs')+
-      theme(axis.text.x=element_text(angle=45,hjust=1)),
-      'disambiguation_characterization/manhattan_retained.png',width=14)
+      scale_y_continuous(labels=scales::label_number(scale_cut=scales::cut_short_scale()),
+                         expand=expansion(mult=c(.02,.08)))+
+      labs(title='Genomic distribution of retained CAAS density',
+           subtitle=sprintf('n = %d genes with retained CT positions | y = retained positions / gene length (bp)', nrow(genomic)),
+           x='Chromosome',y='CAAS density (retained positions / gene length)')+
+      theme_minimal(base_size=24)+
+      theme(plot.title=element_text(face='bold',size=28),plot.subtitle=element_text(size=20),
+            axis.title=element_text(size=22),axis.text=element_text(size=18),
+            panel.grid.major.x=element_blank(),panel.grid.minor.x=element_blank(),
+            panel.grid.minor.y=element_blank()),
+      'disambiguation_characterization/manhattan_retained.png',
+      width=min(22,max(16,10+.55*nrow(chromosomes))),
+      height=min(12,max(9,8+.015*nrow(genomic))))
   } else cat('No retained candidates with genomic annotation.\n\n')
 } else cat('Genomic coordinates unavailable; genomic plot omitted.\n\n')
 ```

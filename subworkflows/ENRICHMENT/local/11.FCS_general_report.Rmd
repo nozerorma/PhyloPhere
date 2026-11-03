@@ -347,9 +347,28 @@ readr::write_tsv(leading, "fcs_results/fcs_leading_edge.tsv")
 ```
 
 ```{r banner, echo=FALSE, results='asis'}
-cat(sprintf("**FCS selection: %d sets with C>0; %d pass BH of permulation (q.perm < %s).**\n\n",sum(enrich$selected_C),sum(enrich$sig_RER),params$fdr_thr))
+if (!nrow(enrich)) {
+  cat("**No tested gene-set results are available. Check gene identifiers, annotation coverage, set-size filters and the FCS computation; this is not evidence of zero significant sets.**\n\n")
+} else {
+  cat(sprintf("**FCS selection: %d sets with C>0; %d pass BH of permulation (q.perm < %s).**\n\n",sum(enrich$selected_C),sum(enrich$sig_RER),params$fdr_thr))
+}
 cat("C = [I(sig_RER) + (I(R05)+I(R10)+I(R15))/3]/2. C is support for selection, not p/FDR or four independent confirmations. Redlich rules are nested. Direction is sign(stat=AUC-0.5), including Redlich-only terms; sets may contain genes of both signs. CAAS top/bottom is independent of RER sign.\n\n")
 cat("BH of permulation uses q.perm; R05/R10/R15 use analytic p.adj < 0.05/0.10/0.15 AND p.perm < the recorded threshold. All p/q retain their original ranking/database families.\n\n")
+```
+
+# BH of permulation across thresholds
+
+Counts include all tested sets, separately by ranking and database. **Analysis threshold** marks the cutoff used in the FCS selection. These counts use `q.perm`, not the analytic Redlich rules; missing q-values are excluded.
+
+```{r bh-threshold-counts, results='asis'}
+.bh_levels <- sort(unique(c(0.05, 0.1, 0.15, if(is.finite(params$fdr_thr)) params$fdr_thr)))
+.bh_counts <- enrich %>% group_by(ranking, database) %>% group_modify(~ {
+  q <- .x$q.perm
+  tibble(`BH q.perm <`=.bh_levels,
+    `Analysis threshold`=vapply(.bh_levels, function(x) isTRUE(all.equal(x, params$fdr_thr)), logical(1)),
+    `q available`=sum(is.finite(q)), hits=vapply(.bh_levels, function(x) if(any(is.finite(q))) sum(q < x, na.rm=TRUE) else NA_integer_, integer(1)))
+}) %>% ungroup()
+report_emit(report_table(.bh_counts))
 ```
 
 # Database abbreviations
@@ -527,7 +546,7 @@ This report presents Functional Class Scoring (FCS) enrichment results for
 **`r params$traitname`** across `r length(gmts)` GMT database(s) and
 `r length(ranking_names)` ranking(s) (`r paste(ranking_names, collapse = ", ")`),
 tested with the Wilcoxon-AUC test and called significant on the BH-adjusted
-permulation p as described in Methods above. `r n_sig` set(s) are significant.
+permulation p as described in Methods above. `r if (nrow(enrich)) paste(n_sig, 'set(s) are significant.') else 'No tested gene-set results are available; significance cannot be assessed.'`
 
 ---
 

@@ -809,15 +809,36 @@ plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
 # global protein id to symbol cache.
 safe_string_map_ids <- function(genes) {
   if (length(genes) == 0) return(character(0))
-  df_in <- data.frame(gene = genes, stringsAsFactors = FALSE)
-  mapped <- tryCatch(
-    string_db$map(df_in, "gene", removeUnmappedRows = TRUE, quiet = TRUE),
+  genes <- unique(genes)
+  query <- function(ids) tryCatch(
+    string_db$map(data.frame(gene=ids, stringsAsFactors=FALSE), "gene", removeUnmappedRows = TRUE, quiet = TRUE),
     error = function(e) {
       message(sprintf("STRING ID mapping failed: %s", e$message))
       NULL
     }
   )
+  mapped <- query(genes)
+  found <- if (is.null(mapped)) character() else mapped$gene
+  missing <- setdiff(genes, found)
+  aliases <- ami_reference_symbol(missing)
+  changed <- aliases != missing
+  if (anyDuplicated(aliases[changed])) stop('Ambiguous STRING gene aliases in the supplied gene list')
+  if (any(changed)) {
+    fallback <- query(aliases[changed])
+    if (!is.null(fallback) && nrow(fallback)) {
+      fallback$gene <- missing[changed][match(fallback$gene, aliases[changed])]
+      mapped <- if (is.null(mapped)) fallback else rbind(mapped, fallback)
+    }
+  }
   if (is.null(mapped) || nrow(mapped) == 0) return(character(0))
+  if (anyDuplicated(mapped$STRING_id)) {
+    by_id <- split(mapped$gene, mapped$STRING_id)
+    ambiguous <- names(by_id)[vapply(by_id, function(x) length(unique(x)) > 1L, logical(1))]
+    if (length(ambiguous)) {
+      warning(length(ambiguous), ' STRING proteins map to multiple supplied gene IDs; excluding those proteins from functional descriptions')
+      mapped <- mapped[!mapped$STRING_id %in% ambiguous, , drop=FALSE]
+    }
+  }
   
   # Fill the global protein id to symbol cache.
   for (i in 1:nrow(mapped)) {
@@ -1124,7 +1145,12 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
       if(.direction=="Positive") .hit <- .hit & gene_scores_df$rer_rho>0
       if(.direction=="Negative") .hit <- .hit & gene_scores_df$rer_rho<0
     }
-    .expected <- gene_scores_df$Gene[.hit %in% TRUE]
+    .method_bg <- if(prefix == "fade") params$fade_background_file else params$rer_background_file
+    if (is.null(.method_bg) || !file.exists(.method_bg)) {
+      res$skip_message <- paste0("> ", toupper(prefix), " background unavailable; cannot verify the seed list.")
+      return(res)
+    }
+    .expected <- ami_method_seed_evidence(gene_scores_df, .hit, read_gene_vector(.method_bg))
     if(!setequal(.genes_sym,.expected)) {
       res$skip_message <- paste0("> ",toupper(prefix)," seeds differ from current method-specific evidence; regenerate the canonical lists and modules.")
       return(res)

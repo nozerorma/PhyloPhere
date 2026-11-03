@@ -270,6 +270,23 @@ The report shows only positions and genes whose **observed score is greater than
 - A gene with BH significance and a gene that carries a BH-significant position are different statistical results; their counts are given separately.
 </div>
 
+## BH thresholds
+
+Counts describe positive-score rows in each view using the original q-values. **Analysis threshold** identifies the cutoff saved with the evidence; when metadata are missing, the analysis threshold is unknown. Missing q-values are excluded.
+
+```{r bh-threshold-counts, results='asis'}
+.bh_levels <- sort(unique(c(0.05, 0.1, 0.15, if (is.finite(fdr)) fdr)))
+.bh_counts <- bind_rows(lapply(names(views_pos), function(rk) {
+  bind_rows(lapply(c("positions", "genes"), function(unit) {
+    q <- if(unit == "positions") views_pos[[rk]]$p.adj_bh else views_gene[[rk]]$p.gen.adj
+    bind_rows(lapply(.bh_levels, function(level) tibble(ranking=rk, unit=unit, `BH q <`=level,
+      `Analysis threshold`=if(is.finite(fdr)) isTRUE(all.equal(level, fdr)) else NA,
+      `q available`=sum(is.finite(q)), hits=if(any(is.finite(q))) sum(q < level, na.rm=TRUE) else NA_integer_)))
+  }))
+}))
+report_emit(report_table(.bh_counts))
+```
+
 ## Evidence classes
 
 ```{r classes, results='asis', fig.height=4}

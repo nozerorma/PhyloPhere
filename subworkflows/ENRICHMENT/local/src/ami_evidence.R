@@ -1,4 +1,16 @@
 # Verified DOMINO inputs and recurrence display; no recomputation of inference.
+ami_reference_symbol <- function(genes) {
+ stem <- sub('\\.prot$', '', genes)
+ sub('\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$', '', stem, perl=TRUE)
+}
+
+# The scores table also carries copies of RER/FADE evidence on CAAS IDs.
+# Each method's own background defines which rows belong to its seed family.
+ami_method_seed_evidence <- function(scores, hit, background) {
+ if (length(hit) != nrow(scores)) stop('Invalid method evidence mask')
+ scores$Gene[hit %in% TRUE & scores$Gene %in% background]
+}
+
 ami_module_provenance <- function(path,active_file,network_file,background_file=NULL) {
  bad <- function(reason)list(available=FALSE,reason=reason)
  if(!file.exists(path))return(bad('missing DOMINO provenance (historical outputs are not certified)'))

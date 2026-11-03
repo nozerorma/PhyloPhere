@@ -144,7 +144,7 @@ def write_meta(discovery: Path, out_dir: Path) -> int:
             out.write("\t".join(cols) + "\n")
             for row in reader:
                 from src.core.discovery import validate_row
-                from src.utils.amino import normalize_amino_list
+                from src.utils.amino import shared_residue_count
                 validate_row(row)
                 gene = row["gene"]
                 trait = row.get("trait")
@@ -153,7 +153,7 @@ def write_meta(discovery: Path, out_dir: Path) -> int:
                           "TRUE" if not is_strict_row(row) else "FALSE",
                           re.sub(r"^\d+:", "", pair) if pair else "NA", _na(row.get("caas"))]
                 parts = row['caas'].split('/')
-                fields.append(str(len(set(normalize_amino_list(parts[0])) & set(normalize_amino_list(parts[1])))))
+                fields.append(str(shared_residue_count(parts[0], parts[1])))
                 if has_trait:
                     hyp = _HYP_LAST.sub(r"\1", trait) if trait and _HYP.search(trait) else trait
                     fields += [_na(trait), _na(hyp)]

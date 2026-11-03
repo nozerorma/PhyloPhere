@@ -363,6 +363,19 @@ if (!length(acc_present)) {
   cat(sprintf("**Summary by direction** (BH threshold q < %s)\n\n", fdr))
   report_emit(report_table(summary_rows, sci_cols = "Smallest q"))
   cat("\n\n")
+  bh_levels <- sort(unique(c(0.05, 0.1, 0.15, if(is.finite(fdr)) fdr)))
+  bh_counts <- do.call(rbind, lapply(acc_present, function(dir) {
+    d <- level1[[dir]]
+    do.call(rbind, lapply(c("Hypergeometric", "Empirical"), function(model) {
+      q <- if(model == "Hypergeometric") d$QValue else d$EmpiricalQ
+      data.frame(Direction=dir, Model=model, `BH q <`=bh_levels,
+        `Analysis threshold`=vapply(bh_levels, function(x) isTRUE(all.equal(x, fdr)), logical(1)),
+        `q available`=sum(is.finite(q)), Hits=vapply(bh_levels, function(x) if(any(is.finite(q))) sum(q < x, na.rm=TRUE) else NA_integer_, integer(1)), check.names=FALSE)
+    }))
+  }))
+  cat("**BH thresholds by direction and model.** The analysis threshold is marked; missing q-values are excluded.\n\n")
+  report_emit(report_table(bh_counts))
+  cat("\n\n")
   cat("**Scope.** Empirical calibration preserves positional dependence and detectability represented by the compatible null cycles. It tests accumulation under that null; it does not establish positive selection or causality.\n\n")
   cat("## Genes above their share of U {.tabset}\n\n")
   for (dir in acc_present) {
@@ -418,6 +431,16 @@ if (is.null(wg_results)) {
               `Smallest p` = if (any(!is.na(p))) min(p, na.rm = TRUE) else NA, .groups = "drop")
   cat(sprintf("**Summary by collection** (BH threshold q < %s)\n\n", fdr))
   report_emit(report_table(by_coll, sci_cols = "Smallest p"))
+
+  bh_levels <- sort(unique(c(0.05, 0.1, 0.15, if(is.finite(fdr)) fdr)))
+  bh_counts <- res %>% group_by(Collection=collection_id) %>% group_modify(~ {
+    q <- .x$q
+    tibble(`BH q <`=bh_levels,
+      `Analysis threshold`=vapply(bh_levels, function(x) isTRUE(all.equal(x, fdr)), logical(1)),
+      `q available`=sum(is.finite(q)), Hits=vapply(bh_levels, function(x) if(any(is.finite(q))) sum(q < x, na.rm=TRUE) else NA_integer_, integer(1)))
+  }) %>% ungroup()
+  cat("\n\n**BH thresholds by collection.** The analysis threshold is marked; missing q-values are excluded.\n\n")
+  report_emit(report_table(bh_counts))
 
   tt <- res %>% filter(status == "tested") %>% arrange(p, desc(statistic))
   if (nrow(tt)) {

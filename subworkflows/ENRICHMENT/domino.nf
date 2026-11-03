@@ -53,6 +53,7 @@ process DOMINO_BUILD_NETWORK {
     def source_hash = java.security.MessageDigest.getInstance('SHA-256')
         .digest(file("${baseDir}/subworkflows/ENRICHMENT/local/src/build_domino_network.py").text.getBytes('UTF-8')).encodeHex().toString()
     def db_dir_arg = string_db_dir ? "--string-db-dir ${string_db_dir}" : ""
+    def string_species = params.string_species ?: 9606
     // The default --cache-dir of build_domino_network.py ("string_cache") is relative to the
     // work directory of the task, which is new for every task, so the STRING files would be
     // downloaded again on every run. A persistent directory is passed instead.
@@ -66,6 +67,7 @@ process DOMINO_BUILD_NETWORK {
     else
         ${py3} ${baseDir}/subworkflows/ENRICHMENT/local/src/build_domino_network.py \
             --cleaned-background ${background_file} \
+            --species ${string_species} \
             --score-threshold ${score_threshold} \
             ${db_dir_arg} \
             --cache-dir "${string_cache_dir}" \

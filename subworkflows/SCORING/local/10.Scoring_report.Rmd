@@ -1062,6 +1062,25 @@ for(rk in c("global","top","bottom")) {
 DT::datatable(dplyr::bind_rows(.counts),rownames=FALSE,options=list(pageLength=3,scrollX=TRUE,dom="t",order=list()))
 ```
 
+### BH thresholds
+
+Counts use the original q-values and the same observed rows as above. **Analysis threshold** marks the cutoff saved with the evidence; unavailable q-values are excluded.
+
+```{r bh-threshold-counts}
+.bh_levels <- sort(unique(c(0.05, 0.1, 0.15, if (is.finite(params$evidence_fdr_threshold)) params$evidence_fdr_threshold)))
+.bh_counts <- dplyr::bind_rows(lapply(c("global", "top", "bottom"), function(rk) {
+  suffix <- if (rk == "global") "" else paste0("_", rk)
+  gq <- .evidence_col(gene_df, paste0("caas_p.gen.adj", suffix))
+  pq <- evidence_positions(pos_df, rk)$p.adj_bh
+  dplyr::bind_rows(lapply(.bh_levels, function(level) tibble::tibble(
+    ranking = rk, `BH q <` = level,
+    `Analysis threshold` = is.finite(params$evidence_fdr_threshold) && isTRUE(all.equal(level, params$evidence_fdr_threshold)),
+    `Genes with q` = sum(is.finite(gq)), `Gene hits` = if(any(is.finite(gq))) sum(gq < level, na.rm=TRUE) else NA_integer_,
+    `Positions with q` = sum(is.finite(pq)), `Position hits` = if(any(is.finite(pq))) sum(pq < level, na.rm=TRUE) else NA_integer_)))
+}))
+DT::datatable(.bh_counts, rownames=FALSE, options=list(pageLength=15, scrollX=TRUE, dom="t", order=list()))
+```
+
 ### Gene evidence {.tabset}
 
 Each view shows the first 500 genes ordered by empirical p-value, then adjusted p-value.

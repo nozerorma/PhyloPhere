@@ -57,7 +57,8 @@ rer_rankings <- function() {
 empty_counts <- function() tibble::tibble(database=character(), pathway=character(), count=numeric(), valid=numeric(), ranking=character())
 switch(step,
   rer_observed = {
-    obs <- fcs_observed(rer_rankings(), fcs_load_gmts(get_arg('--gmt-dir')),
+    gmts <- fcs_gmts_for_universe(fcs_load_gmts(get_arg('--gmt-dir')), read_universe(get_arg('--universe')))
+    obs <- fcs_observed(rer_rankings(), gmts,
                         num_g=as.integer(get_arg('--num-g',10)), max_g=as.integer(get_arg('--max-g',0)), score_source='rer')
     write_observed(if(is.null(obs$enrich)) empty_fcs_table() else obs$enrich, get_arg('--out'))
   },
@@ -69,7 +70,7 @@ switch(step,
       fcs_check_gene_ids(rownames(m), nrow(m), 'RER block')
       obs <- read_observed(get_arg('--observed'))
       rankings <- rer_rankings()
-      gmts <- fcs_load_gmts(get_arg('--gmt-dir'))
+      gmts <- fcs_gmts_for_universe(fcs_load_gmts(get_arg('--gmt-dir')), read_universe(get_arg('--universe')))
       counts <- bind_rows(lapply(names(rankings), function(rk) {
         # RER excludes unavailable scores separately in each null column.
         # Genes unavailable in the observed ranking can be evaluable in the null.

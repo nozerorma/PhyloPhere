@@ -23,3 +23,11 @@ def clean_amino(value):
 
 def normalize_amino_list(values: List[Optional[str]]) -> List[str]:
     return list(dict.fromkeys(aa for value in values or [] if (aa := clean_amino(value)) is not None))
+
+
+def shared_residue_count(foreground: str, background: str) -> int:
+    """Count overlapping occurrences using the CT convergence-test definition."""
+    fg = [aa for value in foreground if (aa := clean_amino(value)) is not None]
+    bg = [aa for value in background if (aa := clean_amino(value)) is not None]
+    shared = set(fg) & set(bg)
+    return min(sum(aa in shared for aa in fg), sum(aa in shared for aa in bg))
