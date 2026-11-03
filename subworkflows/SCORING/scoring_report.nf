@@ -34,7 +34,7 @@ process SCORING_REPORT {
 
     publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
-               pattern: '{*.html,gene_evidence_overlap.tsv,genomic_window_accum_gene_caas.tsv,position_scores_annotated.tsv}'
+               pattern: '{*.html,gene_evidence_*.tsv,position_evidence_*.tsv,genomic_window_accum_gene_caas.tsv,position_scores_annotated.tsv}'
     publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
@@ -62,6 +62,8 @@ process SCORING_REPORT {
     output:
     path "10.Scoring_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
     path 'gene_evidence_overlap.tsv', emit: gene_overlap
+    path 'gene_evidence_{global,top,bottom}.tsv', emit: gene_evidence_tables
+    path 'position_evidence_{global,top,bottom}.tsv', emit: position_evidence_tables
     path 'genomic_window_accum_gene_caas.tsv', emit: genomic_windows, optional: true
     path 'position_scores_annotated.tsv', emit: annotated_positions, optional: true
 

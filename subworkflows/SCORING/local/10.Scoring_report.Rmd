@@ -1064,6 +1064,9 @@ DT::datatable(dplyr::bind_rows(.counts),rownames=FALSE,options=list(pageLength=3
 
 ### Gene evidence {.tabset}
 
+Each view shows the first 500 genes ordered by empirical p-value, then adjusted p-value.
+The linked TSV contains every gene in that view; table search and sorting apply to the excerpt.
+
 ```{r calibrated-gene-tables, results='asis'}
 for(rk in c("global","top","bottom")) {
   suffix <- if(rk=="global") "" else paste0("_",rk)
@@ -1085,12 +1088,18 @@ for(rk in c("global","top","bottom")) {
     "n_positions","n_positions_top","n_positions_bottom","p.gen","p.gen.adj","nominal","adjusted",
     "rer_min_pval","rer_perm_padj","rer_rho","rer_significant","rer_significant_fdr",
     "fade_max_bf_top","fade_significant_top","fade_max_bf_bottom","fade_significant_bottom"),names(x))
+  full_file <- paste0("gene_evidence_", rk, ".tsv")
+  scoring_write(x[,cols,drop=FALSE], file.path(params$output_dir, full_file))
   cat("\n#### ",rk,"\n\n",sep="")
-  emit_widget(DT::datatable(x[,cols,drop=FALSE], rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list())))
+  cat(sprintf("Showing %s of %s genes. [Download the complete table](../scoring/%s).\n\n", min(nrow(x), 500L), nrow(x), full_file))
+  emit_widget(DT::datatable(head(x[,cols,drop=FALSE], 500L), rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list())))
 }
 ```
 
 ### Position evidence {.tabset}
+
+Each view shows the first 500 positions ordered by empirical p-value, then adjusted p-value.
+The linked TSV contains every position in that view; table search and sorting apply to the excerpt.
 
 ```{r empirical-position-tables, results='asis'}
 for(rk in c("global","top","bottom")) {
@@ -1100,7 +1109,10 @@ for(rk in c("global","top","bottom")) {
  cols <- intersect(c("Gene","Position","side","CAAS_score","asr_path_score","p.emp","p.adj_bh",
    "caas_nominal","caas_adjusted","nd","null_unseen","caas","supporting_hypotheses",
    "n_hypotheses","participating_hypotheses","top_species_residues","bottom_species_residues","n_top_species","n_bottom_species"),names(x))
- emit_widget(DT::datatable(x[,cols,drop=FALSE], rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list())))
+ full_file <- paste0("position_evidence_", rk, ".tsv")
+ scoring_write(x[,cols,drop=FALSE], file.path(params$output_dir, full_file))
+ cat(sprintf("Showing %s of %s positions. [Download the complete table](../scoring/%s).\n\n", min(nrow(x), 500L), nrow(x), full_file))
+ emit_widget(DT::datatable(head(x[,cols,drop=FALSE], 500L), rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list())))
 }
 ```
 
