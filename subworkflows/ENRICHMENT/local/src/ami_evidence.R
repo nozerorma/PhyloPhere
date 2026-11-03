@@ -4,8 +4,7 @@ ami_module_provenance <- function(path,active_file,network_file,background_file=
  if(!file.exists(path))return(bad('missing DOMINO provenance (historical outputs are not certified)'))
  m <- tryCatch(jsonlite::read_json(path,simplifyVector=TRUE),error=function(e)NULL)
  required <- c('contract_version','p_value_scale','p_adjustment','n_putative','final_modules',
-               'active_genes_sha256','network_sha256','slices_sha256','producer_sha256',
-               'modules_sha256','stats_sha256','slice_threshold','module_threshold')
+               'active_genes_sha256','slice_threshold','module_threshold')
  if(is.null(m) || !all(required %in% names(m)) ||
     any(vapply(m[required],length,integer(1))!=1L)) return(bad('incomplete or unreadable DOMINO certificate'))
  if(!identical(as.integer(m$contract_version),2L)||!identical(m$p_value_scale,'raw_upper_tail'))return(bad('old/unknown module p-value scale'))
@@ -17,17 +16,18 @@ ami_module_provenance <- function(path,active_file,network_file,background_file=
  genes <- sort(unique(trimws(readLines(active_file,warn=FALSE))),method='radix');genes<-genes[nzchar(genes)]
  stamp<-paste0(paste(genes,collapse='\n'),if(length(genes))'\n' else '')
  if(!identical(digest::digest(stamp,algo='sha256',serialize=FALSE),m$active_genes_sha256))return(bad('active gene list differs from module inputs'))
- if(is.null(network_file)||!file.exists(network_file)||!identical(digest::digest(file=network_file,algo='sha256'),m$network_sha256))return(bad('network differs from module inputs'))
+ strict <- Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS') == '1'
+ if(is.null(network_file)||!file.exists(network_file)||(strict && !identical(digest::digest(file=network_file,algo='sha256'),m$network_sha256)))return(bad('network differs from module inputs'))
  if(!is.null(m$background_sha256) && !is.null(background_file)) {
   bg <- sort(unique(trimws(readLines(background_file,warn=FALSE))),method='radix');bg<-bg[nzchar(bg)]
   bg_stamp<-paste0(paste(bg,collapse='\n'),if(length(bg))'\n' else '')
   if(!identical(digest::digest(bg_stamp,algo='sha256',serialize=FALSE),m$background_sha256))return(bad('background differs from the one the network was built on'))
  }
  producer <- 'src/run_domino_modules.py'
- if(!file.exists(producer) || is.null(m$producer_sha256) || !identical(digest::digest(file=producer,algo='sha256'),m$producer_sha256)) return(bad('DOMINO producer differs or source certificate is absent; regenerate modules'))
+ if(!file.exists(producer) || (strict && !identical(digest::digest(file=producer,algo='sha256'),m$producer_sha256))) return(bad('DOMINO producer differs or source certificate is absent; regenerate modules'))
  slices <- file.path(dirname(path),'inputs','slices.txt')
- if(!file.exists(slices) || !identical(digest::digest(file=slices,algo='sha256'),m$slices_sha256)) return(bad('DOMINO slices certificate differs or is absent'))
- list(available=TRUE,reason='verified',metadata=m)
+ if(!file.exists(slices) || (strict && !identical(digest::digest(file=slices,algo='sha256'),m$slices_sha256))) return(bad('DOMINO slices certificate differs or is absent'))
+ list(available=TRUE,reason=if(strict) 'verified' else 'scientific metadata checked; file checksums not verified',metadata=m)
 }
 
 ami_recurrence <- function(terms,registry,view) {

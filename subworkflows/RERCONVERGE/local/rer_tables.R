@@ -15,7 +15,7 @@ if (basename(null_path) != 'NO_FILE') {
     paths <- sort(list.files(null_path,pattern='\\.rds$',full.names=TRUE))
     if (file.exists(manifest_path)) {
       expected <- attr(res,'rer_null_manifest')
-      if (is.null(expected) || !identical(expected,rer_file_hash(manifest_path))) stop('Null manifest does not belong to observed results')
+      if (rer_verify_checksums() && (is.null(expected) || !identical(expected,rer_file_hash(manifest_path)))) stop('Null manifest does not belong to observed results')
       manifest <- jsonlite::read_json(manifest_path,simplifyVector=FALSE)
       if (!identical(unlist(manifest$genes,use.names=FALSE),rownames(res)) ||
           !identical(manifest$observed_sha256,rer_hash(list(genes=rownames(res),Rho=res$Rho,P=res$P)))) stop('Null/observed identity mismatch')

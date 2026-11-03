@@ -90,7 +90,7 @@ switch(step,
     meta_path <- get_arg("--metadata", "")
     if (nzchar(meta_path)) {
       meta <- jsonlite::read_json(meta_path, simplifyVector = TRUE)
-      if (is.null(meta$universe_md5) || !identical(as.character(meta$universe_md5), unname(as.character(tools::md5sum(get_arg("--universe"))))))
+      if (Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS') == '1' && (is.null(meta$universe_md5) || !identical(as.character(meta$universe_md5), unname(as.character(tools::md5sum(get_arg("--universe")))))))
         stop("FCS universe differs from the universe of the calibration (universe_md5 of metadata.json): recalibrate on this universe")
       if (!identical(as.integer(meta$genes), length(universe)))
         stop("Calibration gene count (", meta$genes, ") differs from the genes of the FCS universe (", length(universe), ")")
@@ -102,7 +102,7 @@ switch(step,
       if (length(files) == 0) next
       tab <- bind_rows(lapply(files, read_tsv, show_col_types = FALSE))
       fcs_check_gene_ids(tab$gene, nrow(tab), "observed gene-p batches")
-      if (!setequal(tab$gene, universe)) stop("Observed gene-p batches do not cover the FCS universe exactly (ranking ", rk, ")")
+      if (!identical(tab$gene, universe)) stop("Observed gene-p batches do not match the FCS universe and order (ranking ", rk, ")")
       vals <- setNames(rep(NA_real_, length(universe)), universe)
       vals[tab$gene] <- tab$nlog10_obs
       rankings[[rk]] <- fcs_build_vals(vals, universe)

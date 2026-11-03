@@ -5,7 +5,8 @@
 
 def modularSourceHash(List names) {
     names = (names + ['src/posenrich_contract.py', '../../SCORING/local/src/null_position_stats.py', '../../SCORING/local/src/scoring_input.py', '../../CT_DISAMBIGUATION/local/src/core/scores.py', '../../VEP/local/src/vep_common.py']).unique()
-    def sources = names.collect { file("${baseDir}/subworkflows/POSENRICH/local/${it}").text }.join('\n')
+    def sources = names.collect { file("${baseDir}/subworkflows/POSENRICH/local/${it}").text }.join('\n') +
+        '\nintegrity=' + (System.getenv('PHYLOPHERE_VERIFY_CHECKSUMS') ?: '0')
     return java.security.MessageDigest.getInstance('SHA-256')
         .digest(sources.getBytes('UTF-8')).encodeHex().toString()
 }

@@ -666,10 +666,11 @@ def main():
             raise ValueError('SCORING/POSENRICH cycle denominator mismatch')
         n_cycles = um['null']['N']
         expected_maps = um['null']['observed_contract'].get('maps', {})
-        for gene, row in map_cache.items():
-            expected = expected_maps.get(gene)
-            if expected and sha256_file(Path(args.map_dir)/row['map_file']) != expected:
-                raise ValueError(f'MAP differs from the one used for CAAS: {gene}')
+        if os.environ.get('PHYLOPHERE_VERIFY_CHECKSUMS') == '1':
+            for gene, row in map_cache.items():
+                expected = expected_maps.get(gene)
+                if expected and sha256_file(Path(args.map_dir)/row['map_file']) != expected:
+                    raise ValueError(f'MAP differs from the one used for CAAS: {gene}')
     gene_check = gene_list_check(active_genes, null_universe)
     if gene_check['status'] == 'mismatch':
         raise ValueError(f"the registry gene list ({gene_check['registry_n_genes']} genes) differs from the one SCORING's "

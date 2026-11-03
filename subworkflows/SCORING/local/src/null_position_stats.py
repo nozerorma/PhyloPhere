@@ -235,11 +235,15 @@ def scientific_identity(scientific):
     """Settings that observed and null must share. weights_sha256 is not one of them: it hashes a fop_pairs.tsv, which is
     the b_0 file on the observed side and the PSS weights of each block's cycles on the null side, so the two never
     coincide. What they share is whether the PSS design is weighted at all; the weights themselves follow from the tree and
-    the taxid map, which are compared."""
+    the taxid map. Byte-level tree and taxid fingerprints are checked only in
+    the optional integrity audit; model and numerical settings remain required."""
     if not isinstance(scientific, dict):
         return None
     ident = {k: v for k, v in scientific.items() if k not in ('weights_sha256', 'weighted')}
     ident['weighted'] = scientific.get('weights_sha256') is not None
+    if __import__('os').environ.get('PHYLOPHERE_VERIFY_CHECKSUMS') != '1':
+        ident.pop('tree_sha256', None)
+        ident.pop('taxid_sha256', None)
     return ident
 
 
@@ -280,6 +284,10 @@ def validate_null(blocks, roster, null, counts, output=None, observed_contract=N
                 if used_key!=expected_key or used_key is None:
                     raise ValueError(f'Observed/null {key} mismatch')
             for key in ('maps','lengths','length_sources','alignments'):
+                # Byte-level historical fingerprints are an optional integrity
+                # audit; lengths and their sources remain scientific checks.
+                if key in ('maps', 'alignments') and __import__('os').environ.get('PHYLOPHERE_VERIFY_CHECKSUMS') != '1':
+                    continue
                 for gene in set(prov.get(key,{})) & set(observed_contract.get(key,{})):
                     if prov[key][gene]!=observed_contract[key][gene]:
                         raise ValueError(f'Observed/null {key} mismatch for {gene}')

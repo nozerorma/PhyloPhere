@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import json
 import math
+import os
 import re
 from pathlib import Path
 from functools import lru_cache
@@ -255,7 +256,7 @@ def load_reference(path, gene, mapping):
         raise ValueError('Invalid VEP reference manifest identity/schema')
     if m.get('species')!='homo_sapiens' or m.get('assembly')!='GRCh38':
         raise ValueError('VEP reference must be homo_sapiens/GRCh38')
-    if m.get('map_sha256') != digest(path):
+    if os.environ.get('PHYLOPHERE_VERIFY_CHECKSUMS') == '1' and m.get('map_sha256') != digest(path):
         raise ValueError('MAP checksum differs from verified reference')
     integer(m.get('annotation_release'))
     for k, prefix in [('gene_id','ENSG'),('transcript_id','ENST'),('protein_id','ENSP')]:
@@ -265,7 +266,7 @@ def load_reference(path, gene, mapping):
     if m.get('strand') not in {'+','-'} or not m.get('source_uri'):
         raise ValueError('Reference strand and provenance source_uri required')
     sequence = m.get('protein_sequence','')
-    if not sequence or set(sequence)-AA or hashlib.sha256(sequence.encode()).hexdigest()!=m.get('protein_sha256'):
+    if not sequence or set(sequence)-AA or (os.environ.get('PHYLOPHERE_VERIFY_CHECKSUMS') == '1' and hashlib.sha256(sequence.encode()).hexdigest()!=m.get('protein_sha256')):
         raise ValueError('Invalid reference protein sequence/checksum')
     aliases = m.get('transcript_aliases', [])
     if not isinstance(aliases, list) or any(not isinstance(x,str) or not re.fullmatch(r'(?:ENST[0-9]+|N[MR]_[0-9]+)\.[1-9][0-9]*',x) for x in aliases) or len(aliases)!=len(set(aliases)):

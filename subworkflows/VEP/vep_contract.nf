@@ -6,7 +6,7 @@ def vepHash(paths) {
     // VEP entries have no separator after the content (nulAfterContent = false); this is the existing cache layout.
     def roots = paths.collect { file(it) }.sort { it.toString() }
     roots.each { root -> assert root.exists() : "Missing VEP input: ${root}" }
-    return fingerprintRoots(roots, false)
+    return fingerprintRoots(roots, false) + ':integrity=' + (System.getenv('PHYLOPHERE_VERIFY_CHECKSUMS') ?: '0')
 }
 
 def vepSources(names) {

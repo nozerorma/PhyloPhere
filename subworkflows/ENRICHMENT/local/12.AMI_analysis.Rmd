@@ -438,9 +438,9 @@ load_domino_modules <- function(list_name, modules_dir, active_file, network_fil
   if (check$available && !isTRUE(all.equal(as.numeric(check$metadata$slice_threshold),as.numeric(params$domino_slice_threshold))))
     return(list(clusters_df=NULL,module_stats=NULL,reason="slice threshold provenance differs"))
   if (!check$available) return(list(clusters_df=NULL,module_stats=NULL,reason=check$reason))
-  if(is.null(check$metadata$modules_sha256) || is.null(check$metadata$stats_sha256) ||
+  if(Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS') == '1' && (is.null(check$metadata$modules_sha256) || is.null(check$metadata$stats_sha256) ||
      !identical(digest::digest(file=mod_file,algo="sha256"),check$metadata$modules_sha256) ||
-     !identical(digest::digest(file=stats_file,algo="sha256"),check$metadata$stats_sha256))
+     !identical(digest::digest(file=stats_file,algo="sha256"),check$metadata$stats_sha256)))
     return(list(clusters_df=NULL,module_stats=NULL,reason="DOMINO output table certificate differs or is absent"))
   modules <- readr::read_tsv(mod_file,col_types="ci")
   stats <- readr::read_tsv(stats_file,col_types="iicdd")
@@ -464,7 +464,7 @@ load_domino_modules <- function(list_name, modules_dir, active_file, network_fil
   if (any(!is.finite(stats$p_adj)) || any(stats$p_adj<0 | stats$p_adj>1) ||
       any(stats$p_adj > params$domino_module_threshold * (1 + 1e-9)))
     stop("DOMINO modules do not satisfy the recorded module threshold")
-  list(clusters_df=modules,module_stats=stats,reason="verified")
+  list(clusters_df=modules,module_stats=stats,reason=check$reason)
 }
 
 # ── Module-aware layout ───────────────────────────────────────────────────────

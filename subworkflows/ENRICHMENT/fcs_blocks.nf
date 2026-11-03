@@ -27,7 +27,7 @@ process FCS_OBSERVED {
     def source_hash = java.security.MessageDigest.getInstance('SHA-256').digest(
         ['fcs_blocks.R','caas_blocks.R','gene_p.R','fcs_enrich.R'].collect {
             file("${baseDir}/subworkflows/ENRICHMENT/local/src/${it}").text
-        }.join('\n').getBytes('UTF-8')).encodeHex().toString()
+        }.join('\n').getBytes('UTF-8')).encodeHex().toString() + ':integrity=' + (System.getenv('PHYLOPHERE_VERIFY_CHECKSUMS') ?: '0')
     """
     # FCS sources: ${source_hash}
     ${rs} ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_blocks.R observed --obs-dir . --universe ${universe} \\

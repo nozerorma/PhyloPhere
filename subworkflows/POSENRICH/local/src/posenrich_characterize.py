@@ -58,8 +58,20 @@ def parse_args():
 
 
 def read_tsv(path, usecols=None):
-    df = read_table(path)
-    return df[usecols] if usecols else df
+    if not usecols:
+        return read_table(path)
+    # The position registry can contain millions of rows, and legacy collection
+    # tables can have a massive inventory column. Do not materialize unneeded
+    # columns or first create a Python list of every cell.
+    with open(path, newline='') as stream:
+        header = next(csv.reader(stream, delimiter='\t', strict=True), None)
+    if not header or len(header) != len(set(header)) or any(not c for c in header):
+        raise ValueError(f'Missing/duplicate table columns: {path}')
+    if not set(usecols) <= set(header):
+        raise ValueError(f'Missing required table columns: {path}')
+    df = pd.read_csv(path, sep='\t', dtype=str, keep_default_na=False,
+                     usecols=usecols, on_bad_lines='error')
+    return df[usecols]
 
 
 def write_tsv(df, path):
@@ -299,7 +311,8 @@ def main():
     evidence = read_tsv(os.path.join(args.registry_dir, 'position_evidence.tsv'))
     regions = read_tsv(os.path.join(args.registry_dir, 'regions.tsv'))
     sites = read_tsv(os.path.join(args.registry_dir, 'sites.tsv'))
-    collections = read_tsv(os.path.join(args.registry_dir, 'collections.tsv'))
+    collections = read_tsv(os.path.join(args.registry_dir, 'collections.tsv'),
+                           usecols=['collection_id', 'term_id', 'term_type', 'status'])
     coverage = read_tsv(os.path.join(args.registry_dir, 'coverage.tsv'))
     with open(os.path.join(args.registry_dir, 'manifest.json')) as f:
         manifest = json.load(f)

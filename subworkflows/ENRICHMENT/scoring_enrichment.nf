@@ -112,7 +112,7 @@ process SCORING_AMI_REPORT {
     def gs_arg    = (gene_scores.name =~ /^NO_GENE_SCORES/) ? 'NULL' : "'${gene_scores}'"
     def ami_source_hash = ['12.AMI_analysis.Rmd', 'src/ami_evidence.R','src/report_presentation.R','src/term_blocks.R', 'src/prepare_ami_lists.py'].collect {
         file("${local_dir}/${it}").text
-    }.join('\n').with { java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString() }
+    }.join('\n').with { java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString() } + ':integrity=' + (System.getenv('PHYLOPHERE_VERIFY_CHECKSUMS') ?: '0')
 
     // A tool that did not run gets NULL for all its parameters, so that
     // 12.AMI_analysis.Rmd skips its section.
