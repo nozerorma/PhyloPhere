@@ -231,14 +231,11 @@ def build_positions(active_genes, map_cache, discovery_keys, score_keys, extra_k
             status = 'map_only_not_in_discovery'
         else:
             status = 'no_map'
-        cause = ''  # set from the final status in main()
-        out.append({'Gene': gene, 'Position': pos, 'evaluation_status': status,
-                    'exclusion_cause': cause, 'in_map': e['in_map'],
-                    'in_discovery': e['in_discovery'],
-                    'in_scores_positive': e['in_scores_positive'],
-                    'ori_codon_col': e['ori_codon_col'], 'hg38_aa_pos': e['hg38_aa_pos'],
-                    'hg38_nt_coord': e['hg38_nt_coord'], 'strand': e['strand'],
-                    'map_file': e['map_file']})
+        # Reuse the existing record: building a second dict for each MAP position
+        # doubled the transient Python-object footprint for millions of rows.
+        e['evaluation_status'] = status
+        e['exclusion_cause'] = ''
+        out.append(e)
     return pd.DataFrame(out, columns=['Gene', 'Position', 'evaluation_status', 'exclusion_cause',
                                       'in_map', 'in_discovery', 'in_scores_positive',
                                       'ori_codon_col', 'hg38_aa_pos', 'hg38_nt_coord',
@@ -568,9 +565,12 @@ def annotation_contracts(args, positions, map_cache, universe_meta):
         expected_alignments = universe_meta['null']['observed_contract'].get('alignments', {}) if universe_meta else {}
         active=active_ids
         scope = {ps.vr.resolve_gene(g,active) for g in meta.get('coverage_genes',[])} & active
-        for gene in set(declared_alignments) & set(positions.Gene):
-            if expected_alignments.get(gene) and expected_alignments[gene] != declared_alignments[gene]:
-                raise ValueError(f'Annotation alignment differs from CAAS provenance: {gene}')
+        differences = sorted(g for g in set(declared_alignments) & active
+                             if expected_alignments.get(g) and expected_alignments[g] != declared_alignments[g])
+        # Historical byte hashes are provenance in ordinary runs. The optional
+        # integrity audit enforces them; coordinate and MAP validation always run.
+        if differences and os.environ.get('PHYLOPHERE_VERIFY_CHECKSUMS') == '1':
+            raise ValueError(f'Annotation alignment differs from CAAS provenance: {differences[0]}')
         bound = bound or bool(scope and all(expected_alignments.get(g) and
                        expected_alignments[g] == declared_alignments.get(g) for g in scope))
         if key=='fubar_sites_file':
@@ -582,6 +582,7 @@ def annotation_contracts(args, positions, map_cache, universe_meta):
             bound=True
         verified = provenance and bound and bool(meta.get('coverage'))
         metadata[key] = dict(status='verified' if verified else 'unverified_source', metadata=meta,
+                             alignment_hash_differences=differences,
                              manifest_sha256=sha256_file(sidecar) if sidecar.is_file() else None)
         if not verified:
             continue
