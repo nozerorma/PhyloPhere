@@ -107,7 +107,7 @@ switch(step,
       vals[tab$gene] <- tab$nlog10_obs
       rankings[[rk]] <- fcs_build_vals(vals, universe)
     }
-    gmts <- fcs_load_gmts(get_arg("--gmt-dir"))
+    gmts <- fcs_gmts_for_universe(fcs_load_gmts(get_arg("--gmt-dir")), universe)
     obs <- fcs_observed(rankings, gmts, num_g = as.integer(get_arg("--num-g", 10)), max_g = as.integer(get_arg("--max-g", 0)))
     out <- if (is.null(obs$enrich)) empty_fcs_table() else obs$enrich
     write_observed(out, get_arg("--out"))
@@ -122,7 +122,7 @@ switch(step,
     if (is.na(batch_size)) stop("null_block needs --batch-size")
     batches <- seq_along(caas_batches(universe, batch_size))
     mats <- list(caas_assemble_block(batches, rk, get_arg("--block"), get_arg("--slices"), universe))
-    gmts <- fcs_load_gmts(get_arg("--gmt-dir"))
+    gmts <- fcs_gmts_for_universe(fcs_load_gmts(get_arg("--gmt-dir")), universe)
     counts <- if (nrow(obs_rk) == 0) NULL else
       fcs_null_counts_by_matrices(rk, obs_rk, mats, gmts, get_arg("--alt", "greater"),
                                   num_g = as.integer(get_arg("--num-g", 10)), max_g = as.integer(get_arg("--max-g", 0)))

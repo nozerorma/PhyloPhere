@@ -194,10 +194,15 @@ if (has_multi) {
 # leading edge is cross-checked against.
 le_files <- list.files(params$fcs_le_dir, pattern = "_leading_edge\\.tsv$", full.names = TRUE)
 le_by_mod <- list()
+le_keys <- c("ranking", "database", "pathway", "gene")
 for (f in le_files) {
   mod <- sub("_leading_edge\\.tsv$", "", basename(f))
-  d <- tryCatch(readr::read_tsv(f, show_col_types = FALSE), error = function(e) NULL)
-  if (!is.null(d) && all(c("ranking","database","pathway","gene") %in% names(d)))
+  # Only identifiers are used below. Explicit types keep header-only files
+  # compatible with populated files and preserve literal pathway/gene IDs.
+  d <- tryCatch(readr::read_tsv(f, col_select = tidyselect::any_of(le_keys),
+                                col_types = readr::cols(.default = readr::col_character()),
+                                show_col_types = FALSE), error = function(e) NULL)
+  if (!is.null(d) && all(le_keys %in% names(d)))
     le_by_mod[[mod]] <- dplyr::mutate(d, module = mod)
 }
 le <- if (length(le_by_mod)) dplyr::bind_rows(le_by_mod) else tibble()

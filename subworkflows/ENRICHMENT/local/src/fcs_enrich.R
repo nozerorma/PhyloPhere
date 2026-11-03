@@ -93,6 +93,43 @@ fcs_load_gmts <- function(gmt_dir) {
   gmts
 }
 
+# Match database symbols to the tested IDs without renaming the ranking or null
+# matrices. Exact IDs take precedence; a species-labelled producer suffix and
+# optional numeric suffix are aliases only if they resolve to one tested ID.
+fcs_gmts_for_universe <- function(gmts, universe) {
+  fcs_check_gene_ids(universe, length(universe), "FCS universe")
+  aliases <- new.env(hash = TRUE, parent = emptyenv())
+  exact <- new.env(hash = TRUE, parent = emptyenv())
+  for (gene in universe) {
+    exact[[gene]] <- TRUE
+    stem <- sub("\\.prot$", "", gene)
+    core <- sub("\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$", "", stem, perl = TRUE)
+    keys <- unique(c(gene, stem, core, if (core != stem) sub("\\.[0-9]+$", "", core)))
+    for (key in keys) aliases[[key]] <- c(aliases[[key]], gene)
+  }
+  version <- function(gene) {
+    stem <- sub("\\.prot$", "", gene)
+    stem <- sub("\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$", "", stem, perl = TRUE)
+    if (grepl("\\.[0-9]+$", stem)) sub("^.*\\.([0-9]+)$", "\\1", stem) else NA_character_
+  }
+  symbols <- unique(unlist(lapply(gmts, function(gmt) unlist(gmt$genesets, use.names = FALSE)), use.names = FALSE))
+  resolved <- setNames(vapply(symbols, function(symbol) {
+    if (exists(symbol, envir = exact, inherits = FALSE)) return(symbol)
+    hits <- unique(aliases[[symbol]])
+    v <- version(symbol)
+    if (!is.na(v) && length(hits)) {
+      hv <- vapply(hits, version, character(1))
+      hits <- hits[is.na(hv) | hv == v]
+    }
+    if (length(hits) > 1L) stop("Ambiguous FCS gene symbol ", symbol, ": ", paste(hits, collapse = ", "))
+    if (length(hits)) hits else symbol
+  }, character(1)), symbols)
+  lapply(gmts, function(gmt) {
+    gmt$genesets <- lapply(gmt$genesets, function(set) unique(unname(resolved[set])))
+    gmt
+  })
+}
+
 # ── Ranking construction ──────────────────────────────────────────────────────
 
 # scores: named numeric vector (gene -> score) of the signal genes only.
