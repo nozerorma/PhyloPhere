@@ -43,6 +43,7 @@ if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
     # module waits for the _complete pass, RER and FADE included (they do not depend on
     # post-processing); they run there when enabled in the project.
     RUN_ACCUMULATION=false
+    RUN_POSENRICH=false
     RUN_VEP=false
     RUN_FADE=false
     RUN_RER=false

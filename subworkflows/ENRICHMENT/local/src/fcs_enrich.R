@@ -113,22 +113,9 @@ fcs_check_gene_ids <- function(ids, n, context) {
   invisible(NULL)
 }
 
-# getStat treats a shared prefix before a dot as one gene. Reject that ambiguity
-# rather than reproducing its inconsistent choice of which score to retain.
-fcs_check_rer_gene_ids <- function(ids, n, context) {
-  fcs_check_gene_ids(ids, n, context)
-  base_ids <- sub("\\..*", "", ids)
-  if (anyDuplicated(base_ids))
-    stop(context, ": ambiguous RER gene IDs sharing a prefix before '.': ",
-         paste(head(unique(base_ids[duplicated(base_ids)]), 5), collapse = ", "))
-  invisible(NULL)
-}
-
 fcs_build_vals <- function(scores, universe, floor = 0, score_source = c("caas", "rer")) {
   fcs_check_gene_ids(names(scores), length(scores), "gene scores")
   score_source <- match.arg(score_source)
-  if (score_source == "rer")
-    fcs_check_rer_gene_ids(names(scores), length(scores), "RER gene scores")
   scores <- scores[!is.na(scores)]
   if (score_source == "rer") return(scores)
   genes  <- union(universe, names(scores))
@@ -574,7 +561,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 0, perms_file = "NO_
     if (!is.null(corperms) && (!is.null(corperms[["corStat"]]) || !is.null(corStat_byrank))) {
       base_corStat <- if (!is.null(corperms[["corStat"]])) as.matrix(corperms[["corStat"]]) else NULL
       if (!is.null(base_corStat))
-        fcs_check_rer_gene_ids(rownames(base_corStat), nrow(base_corStat), "RER null matrix")
+        fcs_check_gene_ids(rownames(base_corStat), nrow(base_corStat), "RER null matrix")
       n_perms      <- if (!is.null(base_corStat)) ncol(base_corStat)
                       else if (length(corStat_byrank)) ncol(corStat_byrank[[1]]) else 0L
       fcs_progress(sprintf("Vectorized pathway permulations: N=%d, %d GMTs, %d rankings",

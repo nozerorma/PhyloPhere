@@ -66,7 +66,7 @@ switch(step,
     counts <- empty_counts()
     if (!is.null(m)) {
       m <- as.matrix(m)
-      fcs_check_rer_gene_ids(rownames(m), nrow(m), 'RER block')
+      fcs_check_gene_ids(rownames(m), nrow(m), 'RER block')
       obs <- read_observed(get_arg('--observed'))
       rankings <- rer_rankings()
       gmts <- fcs_load_gmts(get_arg('--gmt-dir'))

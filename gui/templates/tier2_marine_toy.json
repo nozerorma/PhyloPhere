@@ -37,7 +37,7 @@
     "tax_id_file": "/homes/users/mramon/scratch/1.Mammals/tier2/input/taxid.tsv",
     "sp_colname": "species",
     "clade_name": "mammals",
-    "taxon_of_interest": "family",
+    "taxon_of_interest": "order",
     "ref_species_name": "Homo_sapiens",
     "ref_species_taxid": "9606",
     "phenotype_rows": [

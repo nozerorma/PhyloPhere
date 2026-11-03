@@ -557,6 +557,19 @@ if (nrow(gene_fade) > 0) {
   gene_scores$fade_significant_bottom <- NA
 }
 
+# Attach cross-module evidence to CAAS identifiers without renaming or deleting
+# the original RER/FADE records used by their own enrichment universes.
+caas_rows <- match(gene_caas$Gene, gene_scores$Gene)
+for (source in list(gene_rer, gene_fade)) {
+  if (!nrow(source)) next
+  matches <- scoring_match_genes(gene_caas$Gene, source$Gene)
+  for (column in setdiff(names(source), 'Gene')) {
+    values <- source[[column]][matches]
+    missing <- is.na(gene_scores[[column]][caas_rows])
+    gene_scores[[column]][caas_rows[missing]] <- values[missing]
+  }
+}
+
 # Correlation table is retained as a public header-only compatibility output.
 corr_results <- tibble(score_a=character(),score_b=character(),pearson_r=numeric(),spearman_r=numeric(),n_genes=integer())
 
@@ -646,10 +659,10 @@ cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom)\n",
 if (has_rer) {
   # The RER ranking is the signed parametric statistic sign(Rho) * -log10(P), the gene statistic of RERconverge (getStat) and the
   # one its permulations (corStat) carry for the null.
-  .rp <- suppressWarnings(as.numeric(.col(gene_scores, "rer_P")))
-  .rr <- suppressWarnings(as.numeric(.col(gene_scores, "rer_rho")))
+  .rp <- suppressWarnings(as.numeric(.col(gene_rer, "rer_P")))
+  .rr <- suppressWarnings(as.numeric(.col(gene_rer, "rer_rho")))
   scoring_write(tibble(
-    gene         = gene_scores$Gene,
+    gene         = gene_rer$Gene,
     score_global = ifelse(is.finite(.rr) & is.finite(.rp), sign(.rr) * -log10(.rp), NA_real_)
   ), "fcs_stats_rer.tsv")
   cat("  fcs_stats_rer.tsv written (RER global ranking)\n")
@@ -657,9 +670,9 @@ if (has_rer) {
 
 if (.nonempty("fade_max_bf_top") || .nonempty("fade_max_bf_bottom")) {
   scoring_write(tibble(
-    gene         = gene_scores$Gene,
-    score_top    = suppressWarnings(as.numeric(.col(gene_scores, "fade_max_bf_top"))),
-    score_bottom = suppressWarnings(as.numeric(.col(gene_scores, "fade_max_bf_bottom")))
+    gene         = gene_fade$Gene,
+    score_top    = suppressWarnings(as.numeric(.col(gene_fade, "fade_max_bf_top"))),
+    score_bottom = suppressWarnings(as.numeric(.col(gene_fade, "fade_max_bf_bottom")))
   ), "fcs_stats_fade.tsv")
   cat("  fcs_stats_fade.tsv written (FADE BF rankings)\n")
 }

@@ -14,6 +14,41 @@ scoring_keys <- function(x, keys, label) {
   if(anyDuplicated(x[keys])) stop('Duplicate ',label,' keys')
   invisible(x)
 }
+# Match producer species-labelled IDs to source IDs, preserving exact matches and
+# rejecting collisions. Numbered IDs without a species label remain literal.
+scoring_gene_aliases <- function(gene) {
+  stem <- sub('\\.prot$', '', gene)
+  core <- sub('\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$', '', stem, perl=TRUE)
+  unique(c(gene, stem, core, if (core != stem) sub('\\.[0-9]+$', '', core)))
+}
+scoring_match_genes <- function(targets, sources) {
+  version <- function(gene) {
+    stem <- sub('\\.prot$', '', gene)
+    stem <- sub('\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$', '', stem, perl=TRUE)
+    if (grepl('\\.[0-9]+$', stem)) sub('^.*\\.([0-9]+)$', '\\1', stem) else NA_character_
+  }
+  index <- new.env(hash=TRUE, parent=emptyenv())
+  for (i in seq_along(sources)) for (a in scoring_gene_aliases(sources[[i]]))
+    index[[a]] <- c(index[[a]], i)
+  exact <- match(targets, sources)
+  for (i in which(is.na(exact))) {
+    hits <- unique(unlist(lapply(scoring_gene_aliases(targets[[i]]), function(a) index[[a]]), use.names=FALSE))
+    target_version <- version(targets[[i]])
+    if (!is.na(target_version) && length(hits)) {
+      source_versions <- vapply(sources[hits], version, character(1))
+      hits <- hits[is.na(source_versions) | source_versions == target_version]
+    }
+    if (length(hits) > 1L) stop('Ambiguous producer gene alias: ', targets[[i]], ': ', paste(sources[hits], collapse=', '))
+    if (length(hits)) exact[[i]] <- hits
+  }
+  used <- exact[!is.na(exact)]
+  if (anyDuplicated(used)) {
+    hit <- used[duplicated(used)][1]
+    stop('Ambiguous producer gene alias: ', sources[[hit]], ' matches ',
+         paste(targets[!is.na(exact) & exact == hit], collapse=', '))
+  }
+  exact
+}
 scoring_number <- function(x, label, lower=-Inf, upper=Inf, missing=FALSE, integer=FALSE, positive_inf=FALSE) {
   if(is.logical(x) && any(!is.na(x))) stop('Invalid ',label,': logical value')
   if(is.numeric(x) && any(is.nan(x))) stop('Invalid ',label,': NaN')

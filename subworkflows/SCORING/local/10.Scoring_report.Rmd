@@ -1402,6 +1402,12 @@ if (has_fade_pos) {
     if (!is.null(fade_bot_df)) fade_bot_df %>% mutate(fade_direction = "BOTTOM") else NULL
   )
   if (nrow(fade_combined) > 0) {
+    # Resolve once per gene, retaining the CAAS identifier used by positions.
+    fade_genes <- unique(fade_combined$Gene)
+    caas_genes <- unique(pos_df$Gene)
+    resolved <- scoring_match_genes(fade_genes, caas_genes)
+    fade_combined$Gene <- caas_genes[resolved[match(fade_combined$Gene, fade_genes)]]
+    fade_combined <- fade_combined[!is.na(fade_combined$Gene), , drop=FALSE]
     # Match every CAAS row to its own FADE side; never annotate Bottom with Top.
     fade_for_join <- fade_combined %>%
       mutate(side = tolower(fade_direction)) %>%

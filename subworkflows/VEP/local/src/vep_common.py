@@ -322,19 +322,44 @@ def variants_for(ref, aa_position, alternatives):
 
 
 def gene_aliases(gene):
-    """Documented producer suffixes only; arbitrary dots/version strings stay literal."""
-    out={gene}
-    if gene.endswith('.prot'):out.add(gene.removesuffix('.prot'))
-    for name in list(out):
-        if name.endswith('.Homo_sapiens'):out.add(name.removesuffix('.Homo_sapiens'))
+    """Aliases for producer species suffixes, retaining literal IDs and versions."""
+    out = {gene}
+    stem = gene.removesuffix('.prot')
+    out.add(stem)
+    match = re.fullmatch(r'(.+)\.[A-Z][a-z]+_[a-z]+(?:_[A-Za-z0-9]+)*', stem)
+    if match:
+        core = match.group(1)
+        out.add(core)
+        # A numbered suffix is an alias only in the documented species-labelled form.
+        out.add(re.sub(r'\.[0-9]+$', '', core))
     return out
+
+
+_gene_index_cache = None
+
+
+def _gene_alias_index(identifiers):
+    global _gene_index_cache
+    if _gene_index_cache is None or _gene_index_cache[0] is not identifiers:
+        index = {}
+        for name in identifiers:
+            for alias in gene_aliases(name):
+                index.setdefault(alias, set()).add(name)
+        _gene_index_cache = (identifiers, index)
+    return _gene_index_cache[1]
 
 
 def resolve_gene(gene,identifiers):
     if gene in identifiers:return gene
-    aliases=gene_aliases(gene)
-    candidates={name+suffix for name in aliases for suffix in ('','.prot','.Homo_sapiens','.Homo_sapiens.prot')}
-    matches=sorted(candidates & identifiers.keys() if isinstance(identifiers,dict) else candidates & identifiers)
+    index = _gene_alias_index(identifiers)
+    matches = sorted(set().union(*(index.get(alias, set()) for alias in gene_aliases(gene))))
+    def version(name):
+        stem = name.removesuffix('.prot')
+        stem = re.sub(r'\.[A-Z][a-z]+_[a-z]+(?:_[A-Za-z0-9]+)*$', '', stem)
+        match = re.search(r'\.([0-9]+)$', stem)
+        return match.group(1) if match else None
+    query_version = version(gene)
+    matches = [name for name in matches if not (query_version and version(name) and query_version != version(name))]
     if len(matches)>1:raise ValueError(f'Ambiguous producer gene alias: {gene}: {matches}')
     return matches[0] if matches else gene
 

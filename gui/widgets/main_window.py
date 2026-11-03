@@ -438,25 +438,6 @@ class MainWindow(QMainWindow):
                 scripts.append((batch_name, batch_text))
                 scripts.append((single_name, single_text))
 
-            if run_expl and run_filt:
-                expl_name, _ = script_names("_exploratory")
-                complete_name, _ = script_names("_complete")
-                QMessageBox.information(
-                    self,
-                    "Two-step Post-processing workflow",
-                    "Both Exploratory Sweep and Complete were selected, so two independent "
-                    f"sets of scripts were generated.\n\n"
-                    f"1. Run {expl_name} first and check its report — it sweeps "
-                    "minlen_values × maxcaas_values so you can pick the cluster-filtering "
-                    "values that work best for your data.\n\n"
-                    f"2. Set Cluster min length / Cluster max CAAS value (filter mode) on the "
-                    f"Disambiguation tab to your chosen values, regenerate, then run "
-                    f"{complete_name} — it reuses {expl_name}'s CAAS/Disambiguation output "
-                    "directly (no recomputation) and runs the full downstream workflow "
-                    "(VEP/Scoring/Enrichment/POSENRICH, plus RER/FADE if you've enabled "
-                    "them) on top of it.\n\n"
-                    "Enjoy!",
-                )
         else:
             batch_name, single_name = script_names("")
             batch_text = render_batch(self.project, single_runner_filename=single_name)
@@ -464,13 +445,45 @@ class MainWindow(QMainWindow):
             scripts.append((batch_name, batch_text))
             scripts.append((single_name, single_text))
 
-        if getattr(disambig, "run_strict_analysis", False):
+        run_strict = getattr(disambig, "run_strict_analysis", False)
+        if run_strict:
             # The strict analysis: the "filter" pass again, reading the strict tables the normal run wrote under
             # <outdir>/strict/ (see strict_pass in run_single.sh.j2).
             batch_name, single_name = script_names("_strict")
             scripts.append((batch_name, render_batch(
                 self.project, postproc_mode="filter", single_runner_filename=single_name, strict_pass=True)))
             scripts.append((single_name, render_single(self.project, postproc_mode="filter", strict_pass=True)))
+
+        explanations = []
+        if disambig.enabled and run_expl:
+            expl_name, _ = script_names("_exploratory")
+            explanation = (
+                f"Exploratory sweep: run {expl_name} and inspect its report. It sweeps "
+                "minlen_values × maxcaas_values to help choose cluster filters; "
+                "downstream modules are skipped."
+            )
+            if run_filt:
+                complete_name, _ = script_names("_complete")
+                explanation += (
+                    "\n\nSet the chosen cluster filter values in the Disambiguation tab, "
+                    f"regenerate the scripts, then run {complete_name}. It reuses the "
+                    "exploratory CAAS and Disambiguation outputs and runs the enabled "
+                    "downstream modules."
+                )
+            explanations.append(explanation)
+
+        if run_strict:
+            strict_name, _ = script_names("_strict")
+            explanations.append(
+                f"Strict analysis: run {strict_name} after the normal run has produced "
+                "its strict tables. It reuses those tables and repeats post-processing "
+                "and the enabled downstream analyses using only hypotheses without "
+                "conserved pairs. Enable strict table output and set the minimum "
+                "divergent fraction below 1 in the CAAS tab."
+            )
+
+        if explanations:
+            QMessageBox.information(self, "Post-processing workflows", "\n\n".join(explanations))
 
         self._show_preview(scripts)
 

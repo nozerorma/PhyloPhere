@@ -34,8 +34,9 @@ SPEC = ModuleTabSpec(
         "• Exploratory Sweep (run_postproc_exploratory): Performs parameter grid search across "
         "minlen_values × maxcaas_values. Writes output to ${OUTDIR}_exploratory/ and automatically skips downstream tasks.\n"
         "• Production Filtering (run_postproc_filter): Executes single filtering pass with "
-        "filter_minlen & filter_maxcaas. Writes output to ${OUTDIR}_final/ and runs downstream modules.\n"
-        "• Both Selected: Produces separate script pairs (sbatch_exploratory.sh and sbatch_filtering.sh) for parallel or sequential execution.\n\n"
+        "filter_minlen & filter_maxcaas. Writes output to ${OUTDIR}_complete/ and runs downstream modules.\n"
+        "• Both Selected: Run the exploratory scripts first; the complete scripts reuse their output.\n"
+        "• Strict Analysis: Reuses the normal run's strict tables for post-processing and downstream modules.\n\n"
         "ℹ️ Gene Filter Mode (Advanced):\n"
         "• none: no gene-level filtering.\n"
         "• stratified: drops genes whose CAAS count exceeds the far fence of their gene-length stratum, or the near fence "
@@ -90,7 +91,7 @@ SPEC = ModuleTabSpec(
             kind="bool",
             importance="optional",
             help=(
-                "Single filtering pass with the fixed cluster thresholds below; writes to ${OUTDIR}_final/ and runs downstream modules (normal production path)."
+                "Single filtering pass with the fixed cluster thresholds below; writes to ${OUTDIR}_complete/ and runs downstream modules (normal production path)."
             ),
         ),
         FieldSpec(

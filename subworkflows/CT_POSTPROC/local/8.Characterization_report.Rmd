@@ -183,11 +183,24 @@ cluster_by_gene <- selected %>% group_by(Gene) %>% summarise(
            flagged_positions==0~'Retained',flagged_positions==candidate_positions~'All positions removed by cluster filter',
            TRUE~'Partial position removal by cluster filter'))
 write_tsv(cluster_by_gene,'clusters/selected_cluster_genes.tsv')
-pp_show(cluster_by_gene %>% filter(flagged_positions>0),'Selected combination: flagged positions and actual effect')
 # Exact staged inputs only: no recursive search through previous published runs.
 files <- sort(list.files(params$filter_dir,pattern='\\.filtered\\.',full.names=TRUE))
 if (length(files)!=nrow(summary)) stop('Cluster sweep artifacts differ from summary')
 ```
+
+**Selected combination: flagged positions and actual effect**
+
+```{r cluster_table}
+cluster_display <- cluster_by_gene %>% filter(flagged_positions>0) %>%
+  mutate(flagged_coordinates=paste0('<details><summary>Show ', flagged_positions,
+    ' coordinates</summary>', htmltools::htmlEscape(flagged_coordinates), '</details>'))
+if (nrow(cluster_display)) {
+  DT::datatable(cluster_display, rownames=FALSE,
+    escape=which(names(cluster_display) != 'flagged_coordinates'),
+    options=list(pageLength=20, lengthMenu=c(10,20,50,100)))
+} else knitr::asis_output('No flagged positions.')
+```
+
 
 # 3. Characterizing CAAS Disambiguation
 
@@ -202,6 +215,13 @@ all domains equally. `derived_agreement` is descriptive and does not enter the
 score. The score is **not a calibrated probability of independent origins**.
 
 ## 3.1 Actual removals and filter overlap
+
+Extreme and dubious membership comes from the filtering run's gene removal
+categories, using the length-stratified far and near fences described in section
+1.2. Dubious also requires a cluster-flagged position. `Both` contributes to
+both columns. These are removal verdicts under the configured gene filter, not
+independent classifications when that filter is disabled. Cluster removal can
+remove individual positions without removing the whole gene.
 
 ```{r overlap, results='asis'}
 flags <- stats %>% mutate(Extreme=category %in% c('Extreme','Both'),
@@ -230,19 +250,41 @@ if (nrow(patterns)) pp_plot(ggplot(patterns,aes(convergence_type,Rows,fill=stage
 
 ## 3.3 Genomic distribution of retained candidates
 
+Each point is a gene with retained candidates. Chromosomes share a continuous
+axis; density uses the annotated genomic span in base pairs for every gene.
+
 ```{r genomic, results='asis'}
 if (all(c('chr','start','end') %in% names(annotation))) {
   genomic <- retained %>% distinct(Gene,Position) %>% count(Gene,name='positions') %>%
     left_join(annotation %>% select(Gene=gene,chr,start,end),by='Gene') %>%
-    left_join(stats %>% select(Gene,length,length_source),by='Gene') %>%
-    pp_numeric(c('start','end','length')) %>%
-    filter(!is.na(chr),is.finite(start),is.finite(end),is.finite(length),length>0) %>%
-    mutate(midpoint=(start+end)/2,density=positions/length*100)
+    pp_numeric(c('start','end')) %>%
+    filter(!is.na(chr),nzchar(chr),is.finite(start),is.finite(end),start>=0,end>=start) %>%
+    mutate(midpoint=(start+end)/2, genomic_length=end-start+1,
+           density=positions/genomic_length*100)
   write_tsv(genomic,'disambiguation_characterization/retained_genomic_density.tsv')
-  if (nrow(genomic)) pp_plot(ggplot(genomic,aes(midpoint,density))+
-    geom_point(alpha=.7)+facet_wrap(~chr,scales='free_x')+
-    labs(x='Genomic midpoint',y='Retained candidates per 100 effective length units'),
-    'disambiguation_characterization/manhattan_retained.png') else cat('No retained candidates with genomic annotation.\n\n')
+  if (nrow(genomic)) {
+    chromosomes <- genomic %>% group_by(chr) %>% summarise(chr_end=max(end),.groups='drop') %>%
+      mutate(chr_label=sub('^chr','',chr,ignore.case=TRUE),
+        chr_number=suppressWarnings(as.numeric(chr_label)),
+        chr_order=case_when(is.finite(chr_number)~chr_number,
+          toupper(chr_label)=='X'~Inf, toupper(chr_label)=='Y'~Inf,
+          TRUE~Inf),
+        chr_group=case_when(is.finite(chr_number)~0L,toupper(chr_label)=='X'~1L,
+          toupper(chr_label)=='Y'~2L,TRUE~3L)) %>%
+      arrange(chr_group,chr_order,chr_label,chr) %>%
+      mutate(offset=lag(cumsum(chr_end),default=0),center=offset+chr_end/2,
+             chromosome_index=row_number())
+    genomic <- genomic %>% left_join(chromosomes %>% select(chr,offset,chromosome_index),by='chr') %>%
+      mutate(cumulative_position=offset+midpoint, chromosome_band=factor(chromosome_index %% 2))
+    pp_plot(ggplot(genomic,aes(cumulative_position,density,color=chromosome_band))+
+      geom_point(alpha=.8,size=1.8)+
+      scale_color_manual(values=c('0'='#2E86AB','1'='#31536B'),guide='none')+
+      scale_x_continuous(breaks=chromosomes$center,labels=chromosomes$chr_label,
+                         expand=expansion(mult=c(.005,.005)))+
+      labs(x='Chromosome',y='Retained candidates per 100 genomic base pairs')+
+      theme(axis.text.x=element_text(angle=45,hjust=1)),
+      'disambiguation_characterization/manhattan_retained.png',width=14)
+  } else cat('No retained candidates with genomic annotation.\n\n')
 } else cat('Genomic coordinates unavailable; genomic plot omitted.\n\n')
 ```
 
