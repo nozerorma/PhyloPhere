@@ -440,7 +440,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring": $_RUN_SCORING,
   "scoring_window_size_bp": "${SCORING_WINDOW_SIZE_BP:-1000000}",
   "evidence_p_threshold": "${EVIDENCE_P_THRESHOLD:-0.05}",
-  "evidence_fdr_threshold": "${EVIDENCE_FDR_THRESHOLD:-0.05}",
+  "evidence_fdr_levels": "${EVIDENCE_FDR_LEVELS:-0.05,0.1,0.15}",
   "caas_evidence_top_n": "${CAAS_EVIDENCE_TOP_N:-0}",
   "scoring_hypotheses_pairs": "${SCORING_HYPOTHESES_PAIRS:-}",
   "ct_disambig_hypotheses_pairs": "${CT_DISAMBIG_HYPOTHESES_PAIRS:-}",
@@ -499,7 +499,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring_compare_top_n": "${SCORING_COMPARE_TOP_N:-20}",
 
   "posenrich": $_RUN_POSENRICH,
-  "accumulation_fdr": "${ACCUMULATION_FDR:-0.1}",
   "accumulation_caas_input": "${ACCUMULATION_CAAS_INPUT:-}",
   "accumulation_background_input": "${ACCUMULATION_BACKGROUND_INPUT:-}",
   "posenrich_domains": ${POSENRICH_DOMAINS:-true},

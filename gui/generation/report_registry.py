@@ -271,12 +271,6 @@ def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(fade_top, "fade_site_bf_top.tsv")),
         _slot("fade_site_bot", "FADE per-site BF (bottom)", False,
               _first_match(fade_bot, "fade_site_bf_bottom.tsv")),
-        # The genomic-coordinates file is params.gene_ensembl_file (resolved from
-        # there in scoring.nf), the same file as the gene Ensembl slot of CT_POSTPROC.
-        _slot("genomic_info", "Gene genomic coordinates TSV", False,
-              _first_match(outdir, "postproc/postproc_inputs/gene_annotation.tsv", "postproc/postproc_inputs/*", "**/*genomic_info*.tsv", "**/*genomic*coords*.tsv")),
-        _slot("position_genomic", "Position MAP coordinates TSV", False,
-              _first_match(scoring, "position_genomic_mapping.tsv")),
         _slot("null_summary", "Null summary per cycle TSV", False,
               _first_match(outdir, "caas_permulation/cycle_summary.tsv", "**/cycle_summary.tsv")),
         _slot("null_hist", "Null score histogram per cycle TSV", False,
@@ -306,11 +300,9 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"traitname            = '{report.traitname}'",
             "output_dir           = '.'",
             "evidence_p_threshold = 0.05",
-            "evidence_fdr_threshold = 0.05",
+            "evidence_fdr_levels = '0.05,0.1,0.15'",
             f"fade_site_top_file   = {_r_arg(s['fade_site_top'])}",
             f"fade_site_bot_file   = {_r_arg(s['fade_site_bot'])}",
-            f"genomic_info_file    = {_r_arg(s['genomic_info'])}",
-            f"position_genomic_file = {_r_arg(s['position_genomic'])}",
             f"null_summary_file   = {_r_arg(s['null_summary'])}",
             f"null_hist_file      = {_r_arg(s['null_hist'])}",
             f"caas_pos_sample_file = {_r_arg(s['caas_pos_sample'])}",
@@ -318,7 +310,6 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"filtered_discovery_file = {_r_arg(s['filtered_discovery'])}",
             f"background_file      = {_r_arg(s['background_file'])}",
             f"null_universe_file   = {_r_arg(s['null_universe'])}",
-            "window_size_bp       = 1000000",
             "direction            = 'combined'",
             "seed                 = '1998'",
         ],
@@ -336,7 +327,7 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
         publish_targets=[report.html_path.parent.parent / "scoring", report.html_path.parent],
         post_lines=[
             f'mkdir -p "{report.html_path.parent.parent}/scoring"',
-            'for f in gene_evidence_overlap.tsv genomic_window_accum_gene_caas.tsv genomic_window_accum_positions.tsv position_scores_annotated.tsv; do',
+            'for f in gene_evidence_overlap.tsv position_scores_annotated.tsv; do',
             f'    if [ -f "$f" ]; then cp "$f" "{report.html_path.parent.parent}/scoring/"; fi',
             'done',
         ],
@@ -642,6 +633,7 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
             f"project_name  = 'Scoring_FCS_{report.traitname}'",
             "num_g         = 5",
             "fdr_thr       = 0.15",
+            "bh_levels     = '0.05,0.1,0.15'",
             "pperm_thr     = 0.025",
             "top_n         = 25",
             f"traitname     = '{report.traitname}'",
@@ -703,7 +695,7 @@ def _posenrich_build_script(report: DetectedReport, repo_dir: Path, use_singular
     # The report reads accumulation_<direction>_results.csv from one directory; the module publishes them per direction.
     accumulation = s.get("accumulation")
     pre_lines = ["mkdir -p accumulation_root", "mkdir -p src",
-                 f'cp "{repo_dir}/subworkflows/ENRICHMENT/local/src/report_presentation.R" src/']
+                 f'cp "{repo_dir}/subworkflows/ENRICHMENT/local/src/report_presentation.R" "{repo_dir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R" src/']
     if accumulation:
         for direction in ("top", "bottom", "all"):
             pre_lines.append(
@@ -845,7 +837,7 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
     s = {slot.key: slot.path for slot in report.slots}
     output_file = f"14.Comparison_report_{report.traitname}.html"
     pre_lines = ["mkdir -p cmp_fcs cmp_fcs_le",
-                 f'cp "{repo_dir}/subworkflows/SCORING/local/src/scoring_io.R" src/scoring_io.R']
+                 f'cp "{repo_dir}/subworkflows/SCORING/local/src/scoring_io.R" "{repo_dir}/subworkflows/SCORING/local/src/report_evidence.R" src/']
     if s["caas_fcs"]:
         pre_lines.append(f'cp "{s["caas_fcs"]}" cmp_fcs/caas_fcs_all.tsv')
     if s["rer_fcs"]:

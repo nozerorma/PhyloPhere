@@ -14,6 +14,17 @@ writeLines(x$gene,'background.txt')
 writeLines(x$gene[sig],'rer_significant.txt')
 writeLines(x$gene[sig & !is.na(x$Rho) & x$Rho>0],'rer_accelerating.txt')
 writeLines(x$gene[sig & !is.na(x$Rho) & x$Rho<0],'rer_decelerating.txt')
+# One gene list per BH level and direction, from the BH q of p.perm: rer_significant_q<level>.txt (both signs), then the positive and negative ones.
+if (!'p.perm.adj' %in% names(x)) stop('Invalid RER summary schema: p.perm.adj is required for the BH level lists')
+x$p.perm.adj <- rer_number(x$p.perm.adj,'p.perm.adj',missing=TRUE)
+for (level in rer_bh_levels(if (length(a) >= 4) a[4] else '0.05,0.1,0.15')) {
+  bh <- !is.na(x$p.perm.adj) & x$p.perm.adj < level
+  if (any(bh & is.na(x$Rho))) stop('BH gene without rho')
+  tag <- paste0('_q',format(level,scientific=FALSE),'.txt')
+  writeLines(x$gene[bh],paste0('rer_significant',tag))
+  writeLines(x$gene[bh & !is.na(x$Rho) & x$Rho>0],paste0('rer_accelerating',tag))
+  writeLines(x$gene[bh & !is.na(x$Rho) & x$Rho<0],paste0('rer_decelerating',tag))
+}
 stats <- data.frame(gene=x$gene,score_global=sign(x$Rho)*-log10(x$P),
   flag_rer_acc=sig & x$Rho>0,flag_rer_decc=sig & x$Rho<0)
 if (basename(a[2]) != 'NO_FILE') {

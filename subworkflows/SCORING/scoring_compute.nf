@@ -108,7 +108,7 @@ process SCORING_COMPUTE {
             --null_base       ${scoringQuote(base_arg)} \
             --cycle_roster    ${scoringQuote(roster_arg)} \
             --nominal_threshold ${params.evidence_p_threshold ?: 0.05} \
-            --fdr_threshold ${params.evidence_fdr_threshold ?: 0.05} \
+            --fdr_levels ${params.evidence_fdr_levels ?: '0.05,0.1,0.15'} \
             --fade_bf_threshold ${params.fade_bf_threshold ?: 100}
         """
     } else {
@@ -140,7 +140,7 @@ process SCORING_COMPUTE {
             --null_base       ${scoringQuote(base_arg)} \
             --cycle_roster    ${scoringQuote(roster_arg)} \
             --nominal_threshold ${params.evidence_p_threshold ?: 0.05} \
-            --fdr_threshold ${params.evidence_fdr_threshold ?: 0.05} \
+            --fdr_levels ${params.evidence_fdr_levels ?: '0.05,0.1,0.15'} \
             --fade_bf_threshold ${params.fade_bf_threshold ?: 100}
         """
     }

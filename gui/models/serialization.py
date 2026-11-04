@@ -56,13 +56,13 @@ _RETIRED_FIELDS = {
 
 # Fields of the POSENRICH module that older projects hold in the enrichment section.
 _POSENRICH_FIELDS = (
-    "accumulation_fdr", "accumulation_caas_input", "accumulation_background_input",
+    "accumulation_caas_input", "accumulation_background_input",
     "posenrich_domains", "domain_variability_file", "domain_ref_species", "pfam_cache_dir",
     "posenrich_ucr", "ucr_positions_file", "fubar_sites_file",
     "posenrich_radios", "position_registry_memory", "position_module_memory", "posenrich_custom_file",
 )
 # Parameters of the position-set enrichment test, which no process reads.
-_RETIRED_POSENRICH_FIELDS = ("posenrich_min_size", "posenrich_max_size", "posenrich_batch_size", "posenrich_enabled",
+_RETIRED_POSENRICH_FIELDS = ("accumulation_fdr", "posenrich_min_size", "posenrich_max_size", "posenrich_batch_size", "posenrich_enabled",
                              "posenrich_n_permutations", "posenrich_seed", "posenrich_aggregation", "position_annotation_memory",
                              "posenrich_ranking", "eggnog_taxid", "auto_fetch_eggnog", "egg_members_file", "egg_annotations_file")
 
@@ -110,6 +110,9 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
         if name in scoring:
             scoring.pop(name)
             logger.warning("Retired %s: percentiles are replaced by empirical p-values; its value is not a p-value threshold", name)
+    if "evidence_fdr_threshold" in scoring:
+        scoring.pop("evidence_fdr_threshold")
+        logger.warning("Retired evidence_fdr_threshold: BH evidence is classified at evidence_fdr_levels (default 0.05,0.1,0.15)")
     if "rer_pval_threshold" in rer:
         scoring.setdefault("evidence_p_threshold", rer.pop("rer_pval_threshold"))
     if "rer_pval_column" in rer:
@@ -142,8 +145,9 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
         # FDR in a module of its own); a value already in the posenrich section wins.
         posenrich = modules.setdefault("posenrich", {})
         old_acc = modules.pop("accumulation", None)
-        if isinstance(old_acc, dict) and "accumulation_fdr" in old_acc:
-            posenrich.setdefault("accumulation_fdr", old_acc["accumulation_fdr"])
+        retired_fdr = posenrich.pop("accumulation_fdr", None) is not None
+        if retired_fdr or (isinstance(old_acc, dict) and "accumulation_fdr" in old_acc):
+            logger.warning("Retired accumulation_fdr: the POSENRICH report classifies q at evidence_fdr_levels (default 0.05,0.1,0.15)")
         enrichment = modules.get("enrichment")
         if isinstance(enrichment, dict):
             if enrichment.pop("posenrich_modular", False):

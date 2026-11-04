@@ -24,11 +24,9 @@ params:
   traitname: "unknown_trait"
   output_dir: "."
   evidence_p_threshold: 0.05
-  evidence_fdr_threshold: 0.05
+  evidence_fdr_levels: "0.05,0.1,0.15"
   fade_site_top_file: NULL
   fade_site_bot_file: NULL
-  genomic_info_file: NULL
-  position_genomic_file: NULL
   null_summary_file: NULL
   null_hist_file: NULL
   perm_manifest_file: NULL
@@ -38,7 +36,6 @@ params:
   caas_pos_sample_file: NULL
   caas_pos_quantiles_file: NULL
   filtered_discovery_file: NULL
-  window_size_bp: 1000000
   direction: "combined"
   background_file: NULL
   seed: "1998"
@@ -143,14 +140,14 @@ gene_df <- scoring_read(params$gene_scores_file)
  .params_locked <- bindingIsLocked("params", .params_env)
  if (.params_locked) unlockBinding("params", .params_env)
  .m <- if(.known_metadata) jsonlite::read_json(.metadata,simplifyVector=TRUE) else
-   list(gene_stat="unknown",nominal_threshold=NA_real_,fdr_threshold=NA_real_)
+   list(gene_stat="unknown",nominal_threshold=NA_real_)
  if(Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS')=='1' && length(.m$table_md5)>0L) {
    .paths <- c(gene_scores.tsv=params$gene_scores_file,position_scores.tsv=params$position_scores_file)
    for(.n in names(.paths)) if(length(.m$table_md5[[.n]])>0L && !identical(unname(tools::md5sum(.paths[[.n]])),.m$table_md5[[.n]])) stop('Scoring snapshot checksum mismatch: ',.n)
  }
  if (!.known_metadata) cat("**Original scoring metadata are absent. This report describes the source scores and p/q; gene statistic and significance thresholds remain unknown.**\n\n")
  params$evidence_p_threshold <- .m$nominal_threshold
- params$evidence_fdr_threshold <- .m$fdr_threshold
+ if (length(.m$fdr_levels)) params$evidence_fdr_levels <- paste(.m$fdr_levels, collapse = ",")
  if (.params_locked) lockBinding("params", .params_env)
 }
 corr_df <- scoring_read(params$gene_corr_file)
@@ -205,7 +202,6 @@ has_rer  <- "rer_min_pval"    %in% names(gene_df) && any(!is.na(gene_df$rer_min_
 
 .file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
 
-has_genomic       <- .file_ok(params$genomic_info_file)
 # Position-level null of the permulation: per null cycle and direction, the scored entries, the genes that have one and
 # the histogram of their scores (cycle_summary.tsv, cycle_hist.tsv of CAAS_CORE_MERGE_REDUCE).
 has_pos_null      <- .file_ok(params$null_summary_file) && .file_ok(params$null_hist_file) &&
@@ -221,25 +217,6 @@ has_fade_gene     <- any(c("fade_max_bf_top", "fade_max_bf_bottom") %in% names(g
 has_fade_top <- FALSE
 has_fade_bot <- FALSE
 has_fade_any <- FALSE
-
-if (has_genomic) {
-  # Format: gene, chr, start, end, length  (no header assumed; detect if header present)
-  genomic_raw <- read_tsv(params$genomic_info_file,
-                          col_names = c("Gene", "chr", "gene_start", "gene_end", "gene_length"),
-                          col_types=cols(.default=col_character()),na=character(),quote='',show_col_types = FALSE)
-  # Drop header row if first cell is literally "gene" or "Gene"
-  if (tolower(genomic_raw$Gene[1]) == "gene") genomic_raw <- genomic_raw[-1, ]
-  scoring_keys(genomic_raw,'Gene','genomic gene')
-  genomic_raw <- genomic_raw %>%
-    mutate(
-      gene_start  = as.integer(gene_start),
-      gene_end    = as.integer(gene_end),
-      gene_length = as.integer(gene_length),
-      gene_mid    = as.integer((gene_start + gene_end) / 2L)
-    )
-} else {
-  genomic_raw <- NULL
-}
 
 # ── RERConverge availability ──────────────────────────────────────────────────
 has_rer <- "rer_min_pval" %in% names(gene_df) &&
@@ -1040,11 +1017,12 @@ cat("_No `p.emp` column in `position_scores.tsv` (no counters of the null suppli
 
 ## Empirical evidence {.tabset}
 
-Gene nominal: p.gen < `r params$evidence_p_threshold`; genes_BH: p.gen.adj < `r params$evidence_fdr_threshold`, each original full gene family per ranking. Position nominal: p.emp < `r params$evidence_p_threshold`; positions_BH: p.adj_bh < `r params$evidence_fdr_threshold` in the original pooled unique-position family (including null-only positions at p=1). Genes carrying a BH position are not gene BH hits. Counts below cover available observed rows, not the size of the position BH family. A position appearing on both sides has one pooled p.emp and is counted once globally. Missing empirical evidence remains unavailable.
+Gene nominal: p.gen < `r params$evidence_p_threshold`; gene BH class: the strictest BH level (`r params$evidence_fdr_levels`) that p.gen.adj is below, each original full gene family per ranking. Position nominal: p.emp < `r params$evidence_p_threshold`; position BH class: the strictest BH level that p.adj_bh is below in the original pooled unique-position family (including null-only positions at p=1). Genes carrying a BH position are not gene BH hits. Counts below cover available observed rows, not the size of the position BH family. A position appearing on both sides has one pooled p.emp and is counted once globally. Missing empirical evidence remains unavailable.
 
 ### Counts
 
 ```{r evidence-counts}
+.bh_labels <- scoring_bh_labels(scoring_bh_levels(params$evidence_fdr_levels))  # class labels, strictest first
 .evidence_col <- function(df,n,default=NA_real_) if(n %in% names(df)) df[[n]] else rep(default,nrow(df))
 evidence_positions <- function(d,rk) {
   d <- d[order(-d$CAAS_score, d$Gene, d$Position, d$side, na.last=TRUE),,drop=FALSE]
@@ -1055,26 +1033,25 @@ for(rk in c("global","top","bottom")) {
   suffix <- if(rk=="global") "" else paste0("_",rk)
   gp <- .evidence_col(gene_df,paste0("caas_p.gen",suffix))
   gn <- is.finite(gp) & gp < params$evidence_p_threshold
-  gq <- .evidence_col(gene_df,paste0("caas_p.gen.adj",suffix)); ga <- is.finite(gq) & gq < params$evidence_fdr_threshold
+  gq <- .evidence_col(gene_df,paste0("caas_p.gen.adj",suffix))
   pp <- evidence_positions(pos_df, rk)
-  .counts[[rk]] <- tibble::tibble(ranking=rk,genes_with_p=sum(is.finite(gp)),genes_with_q=sum(is.finite(gq)),genes_nominal=sum(gn),genes_BH=sum(ga),positions_with_p=sum(is.finite(pp$p.emp)),positions_with_q=sum(is.finite(pp$p.adj_bh)),positions_nominal=sum(is.finite(pp$p.emp) & pp$p.emp < params$evidence_p_threshold),positions_BH=sum(is.finite(pp$p.adj_bh) & pp$p.adj_bh < params$evidence_fdr_threshold))
+  .counts[[rk]] <- tibble::tibble(ranking=rk,genes_with_p=sum(is.finite(gp)),genes_with_q=sum(is.finite(gq)),genes_nominal=sum(gn),positions_with_p=sum(is.finite(pp$p.emp)),positions_with_q=sum(is.finite(pp$p.adj_bh)),positions_nominal=sum(is.finite(pp$p.emp) & pp$p.emp < params$evidence_p_threshold))
 }
 DT::datatable(dplyr::bind_rows(.counts),rownames=FALSE,options=list(pageLength=3,scrollX=TRUE,dom="t",order=list()))
 ```
 
 ### BH thresholds
 
-Counts use the original q-values and the same observed rows as above. **Analysis threshold** marks the cutoff saved with the evidence; unavailable q-values are excluded.
+Counts use the original q-values and the same observed rows as above. The levels are those saved with the evidence; unavailable q-values are excluded.
 
 ```{r bh-threshold-counts}
-.bh_levels <- sort(unique(c(0.05, 0.1, 0.15, if (is.finite(params$evidence_fdr_threshold)) params$evidence_fdr_threshold)))
+.bh_levels <- scoring_bh_levels(params$evidence_fdr_levels)
 .bh_counts <- dplyr::bind_rows(lapply(c("global", "top", "bottom"), function(rk) {
   suffix <- if (rk == "global") "" else paste0("_", rk)
   gq <- .evidence_col(gene_df, paste0("caas_p.gen.adj", suffix))
   pq <- evidence_positions(pos_df, rk)$p.adj_bh
   dplyr::bind_rows(lapply(.bh_levels, function(level) tibble::tibble(
     ranking = rk, `BH q <` = level,
-    `Analysis threshold` = is.finite(params$evidence_fdr_threshold) && isTRUE(all.equal(level, params$evidence_fdr_threshold)),
     `Genes with q` = sum(is.finite(gq)), `Gene hits` = if(any(is.finite(gq))) sum(gq < level, na.rm=TRUE) else NA_integer_,
     `Positions with q` = sum(is.finite(pq)), `Position hits` = if(any(is.finite(pq))) sum(pq < level, na.rm=TRUE) else NA_integer_)))
 }))
@@ -1093,7 +1070,7 @@ for(rk in c("global","top","bottom")) {
   x$`p.gen` <- .evidence_col(x,paste0("caas_p.gen",suffix))
   x$`p.gen.adj` <- .evidence_col(x,paste0("caas_p.gen.adj",suffix))
   x$nominal <- ifelse(is.finite(x$p.gen),x$p.gen < params$evidence_p_threshold,NA)
-  x$adjusted <- ifelse(is.finite(x$p.gen.adj),x$p.gen.adj < params$evidence_fdr_threshold,NA)
+  x$bh_class <- .evidence_col(x,paste0("caas_bh_class",suffix),NA_character_)
   .bf_top <- as.numeric(.evidence_col(x,"fade_max_bf_top"))
   .bf_bottom <- as.numeric(.evidence_col(x,"fade_max_bf_bottom"))
   .ft <- .evidence_col(x,"fade_significant_top",NA)
@@ -1104,14 +1081,14 @@ for(rk in c("global","top","bottom")) {
   x$`CAAS score in view` <- .evidence_col(x,paste0("gene_caas_score",suffix))
   x <- x[order(x$p.gen,x$p.gen.adj,na.last=TRUE),]
   cols <- intersect(c("Gene","CAAS score in view","FADE BF","FADE call",
-    "n_positions","n_positions_top","n_positions_bottom","p.gen","p.gen.adj","nominal","adjusted",
-    "rer_min_pval","rer_perm_padj","rer_rho","rer_significant","rer_significant_fdr",
+    "n_positions","n_positions_top","n_positions_bottom","p.gen","p.gen.adj","nominal","bh_class",
+    "rer_min_pval","rer_perm_padj","rer_rho","rer_significant","rer_bh_class",
     "fade_max_bf_top","fade_significant_top","fade_max_bf_bottom","fade_significant_bottom"),names(x))
   full_file <- paste0("gene_evidence_", rk, ".tsv")
   scoring_write(x[,cols,drop=FALSE], file.path(params$output_dir, full_file))
   cat("\n#### ",rk,"\n\n",sep="")
   cat(sprintf("Showing %s of %s genes. [Download the complete table](../scoring/%s).\n\n", min(nrow(x), 500L), nrow(x), full_file))
-  emit_widget(DT::datatable(head(x[,cols,drop=FALSE], 500L), rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list())))
+  emit_widget(report_bh_style(DT::datatable(head(x[,cols,drop=FALSE], 500L), rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list())), intersect(c("bh_class","rer_bh_class"),cols), .bh_labels))
 }
 ```
 
@@ -1126,12 +1103,12 @@ for(rk in c("global","top","bottom")) {
  x <- x[order(x$p.emp,x$p.adj_bh,na.last=TRUE),]
  cat("\n#### ",rk,"\n\n",sep="")
  cols <- intersect(c("Gene","Position","side","CAAS_score","asr_path_score","p.emp","p.adj_bh",
-   "caas_nominal","caas_adjusted","nd","null_unseen","caas","supporting_hypotheses",
+   "caas_nominal","caas_bh_class","nd","null_unseen","caas","supporting_hypotheses",
    "n_hypotheses","participating_hypotheses","top_species_residues","bottom_species_residues","n_top_species","n_bottom_species"),names(x))
  full_file <- paste0("position_evidence_", rk, ".tsv")
  scoring_write(x[,cols,drop=FALSE], file.path(params$output_dir, full_file))
  cat(sprintf("Showing %s of %s positions. [Download the complete table](../scoring/%s).\n\n", min(nrow(x), 500L), nrow(x), full_file))
- emit_widget(DT::datatable(head(x[,cols,drop=FALSE], 500L), rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list())))
+ emit_widget(report_bh_style(DT::datatable(head(x[,cols,drop=FALSE], 500L), rownames=FALSE, filter="top", options=list(pageLength=15,scrollX=TRUE,order=list())), intersect("caas_bh_class",cols), .bh_labels))
 }
 ```
 
@@ -1141,7 +1118,7 @@ CAAS and other are calls within their shared evaluable gene universe; overlap is
 
 ```{r empirical-overlap, results='asis'}
 source("src/report_evidence.R")
-.overlap <- scoring_overlap(gene_df, params$evidence_p_threshold, params$evidence_fdr_threshold)
+.overlap <- scoring_overlap(gene_df, params$evidence_p_threshold, params$evidence_fdr_levels)
 scoring_write(.overlap,file.path(params$output_dir,"gene_evidence_overlap.tsv"))
 for(rk in c("global","top","bottom")) {
  cat("\n#### ",rk,"\n\n",sep="")
@@ -1208,278 +1185,6 @@ fade_bot_df <- .load_fade_sites(params$fade_site_bot_file)
 
 ```
 
-## Genomic accumulation of positive positions
-
-The MAP anchor is the declared hg38 nucleotide coordinate for the alignment position. Each positive position is assigned to the window containing that coordinate; Top and Bottom are summarized separately. These are descriptive counts and score summaries, not regional enrichment tests. A position without a usable MAP coordinate is excluded from the windows and counted below.
-
-```{r position-genomic-windows, results='asis', fig.width=13, fig.height=5}
-if (!.file_ok(params$position_genomic_file)) {
-  cat("**Position coordinates unavailable:** supply the CAAS MAP directory to map positive positions.\n\n")
-} else {
-  position_map <- scoring_read(params$position_genomic_file)
-  scoring_keys(position_map,c('Gene','Position'),'position genomic mapping')
-  if (!all(c('hg38_nt_coord','mapping_status','map_gene') %in% names(position_map))) stop('Missing position MAP fields')
-  position_map$Position <- scoring_number(position_map$Position,'MAP position',0,Inf,integer=TRUE)
-  if (any(!position_map$mapping_status %in% c('mapped','no_map','position_not_in_map','no_genomic_coordinate'))) stop('Invalid position MAP status')
-  pos_genomic_exact <- pos_df %>% left_join(position_map,by=c('Gene','Position'))
-  if (anyNA(pos_genomic_exact$mapping_status)) stop('Position MAP does not cover all scored positions')
-  coordinates <- as.character(pos_genomic_exact$hg38_nt_coord)
-  valid <- !is.na(coordinates) & grepl('^[^:]+:[1-9][0-9]*$',coordinates)
-  if (any((pos_genomic_exact$mapping_status=='mapped') != valid)) stop('Inconsistent MAP coordinate status')
-  pos_genomic_exact$chr_label <- ifelse(valid,sub('^chr','',sub(':.*$','',coordinates)),NA_character_)
-  pos_genomic_exact$genomic_position <- suppressWarnings(as.numeric(ifelse(valid,sub('^.*:','',coordinates),NA_character_)))
-  mapping_counts <- pos_genomic_exact %>% count(side,mapping_status,name='n_position_sides')
-  cat('**Mapping coverage by direction**\n\n')
-  emit_widget(DT::datatable(mapping_counts,rownames=FALSE,options=list(dom='t',scrollX=TRUE)))
-  mapped <- pos_genomic_exact %>% filter(mapping_status=='mapped',side %in% c('top','bottom'),is.finite(CAAS_score),CAAS_score>0)
-  width <- as.numeric(params$window_size_bp)
-  if (!is.finite(width) || width <= 0) stop('Invalid genomic window size')
-  if (!nrow(mapped)) {
-    cat('No positive positions with a mapped genomic coordinate.\n\n')
-  } else {
-    position_windows <- mapped %>% mutate(win_start=floor((genomic_position-1)/width)*width+1,
-      win_end=win_start+width-1,win_mid=(win_start+win_end)/2) %>%
-      group_by(side,chr_label,win_start,win_end,win_mid) %>%
-      summarise(n_positions=n(),n_genes=n_distinct(Gene),mean_score=mean(CAAS_score),max_score=max(CAAS_score),.groups='drop') %>%
-      mutate(chr_num=suppressWarnings(as.integer(chr_label)),chr_order=case_when(!is.na(chr_num)~chr_num,chr_label=='X'~23L,chr_label=='Y'~24L,chr_label %in% c('M','MT')~25L,TRUE~26L))
-    position_offsets <- position_windows %>% group_by(chr_label,chr_order) %>% summarise(chr_max=max(win_end),.groups='drop') %>%
-      arrange(chr_order,chr_label) %>% mutate(offset=cumsum(lag(chr_max,default=0))+row_number()*width)
-    position_windows <- position_windows %>% left_join(position_offsets,by=c('chr_label','chr_order')) %>% mutate(win_x=win_mid+offset)
-    position_labels <- position_windows %>% group_by(chr_label,chr_order) %>% summarise(mid_x=mean(range(win_x)),.groups='drop')
-    print(ggplot(position_windows,aes(win_x,n_positions,fill=side))+geom_col(width=width*.85,alpha=.8)+facet_wrap(~side,ncol=1)+
-      scale_x_continuous(breaks=position_labels$mid_x,labels=position_labels$chr_label)+
-      labs(x='Chromosome',y='Positive positions',fill='Direction',title='Positive CAAS positions in genomic windows')+theme(legend.position='none'))
-    scoring_write(position_windows %>% select(side,chr_label,win_start,win_end,n_positions,n_genes,mean_score,max_score),file.path(params$output_dir,'genomic_window_accum_positions.tsv'))
-    emit_widget(DT::datatable(position_windows %>% select(side,chr_label,win_start,win_end,n_positions,n_genes,mean_score,max_score),rownames=FALSE,filter='top',options=list(pageLength=15,scrollX=TRUE)))
-  }
-}
-```
-
-## Genomic Accumulation
-
-`r if (!has_genomic) "> **Note:** Genomic coordinates (gene_ensembl_file) are not available for this run - genomic accumulation skipped."`
-
-```{r genomic-setup, eval=has_genomic}
-# Use the common producer-ID resolver: exact names win; documented species and
-# version aliases are considered only when unique. Keep the scored identifier.
-.gene_for_genomic <- gene_df %>%
-  select(Gene, gene_caas_score, gene_caas_top, gene_caas_bot, n_positions)
-.scored <- is.finite(.gene_for_genomic$gene_caas_score)
-.gene_key <- rep(NA_integer_, nrow(.gene_for_genomic))
-.gene_key[.scored] <- scoring_match_genes(.gene_for_genomic$Gene[.scored], genomic_raw$Gene)
-# Unscored annotation rows may name a gene already represented by a scored
-# species-qualified row. The scored row takes precedence.
-.gene_key[!.scored] <- scoring_match_genes(.gene_for_genomic$Gene[!.scored], genomic_raw$Gene)
-.used_scored <- .gene_key[.scored & !is.na(.gene_key)]
-.gene_key[!.scored & .gene_key %in% .used_scored] <- NA_integer_
-.gene_for_genomic$genomic_index <- .gene_key
-gene_genomic <- .gene_for_genomic %>%
-  filter(!is.na(genomic_index)) %>%
-  mutate(genomic_gene = genomic_raw$Gene[genomic_index]) %>%
-  inner_join(genomic_raw, by = c("genomic_gene" = "Gene")) %>%
-  filter(!is.na(chr), nzchar(chr), is.finite(gene_start),
-         is.finite(gene_end), is.finite(gene_mid)) %>%
-  # Standardise chromosome labels (remove "chr" prefix if present)
-  mutate(
-    chr_label = sub("^chr", "", chr),
-    # Order chromosomes numerically then X, Y, MT
-    chr_num   = suppressWarnings(as.integer(chr_label)),
-    chr_order = dplyr::case_when(
-      !is.na(chr_num)       ~ chr_num,
-      chr_label == "X"      ~ 23L,
-      chr_label == "Y"      ~ 24L,
-      chr_label %in% c("MT","M") ~ 25L,
-      TRUE                  ~ 26L
-    )
-  ) %>%
-  arrange(chr_order, gene_mid)
-
-# Build a cumulative x-axis offset per chromosome for a stitched Manhattan view
-chr_offsets <- gene_genomic %>%
-  group_by(chr_order, chr_label) %>%
-  summarise(chr_max = max(gene_end, na.rm = TRUE), .groups = "drop") %>%
-  arrange(chr_order) %>%
-  mutate(offset = cumsum(lag(chr_max, default = 0L)) + (chr_order - 1L) * 5e6L)
-
-gene_genomic <- gene_genomic %>%
-  left_join(chr_offsets %>% select(chr_order, offset, chr_label), by = c("chr_order", "chr_label")) %>%
-  mutate(manhattan_x = gene_mid + offset)
-
-chr_label_positions <- chr_offsets %>%
-  left_join(gene_genomic %>% group_by(chr_order) %>%
-              summarise(mid_x = mean(manhattan_x, na.rm = TRUE), .groups = "drop"),
-            by = "chr_order")
-
-# Position scores carry alignment positions, not genomic base coordinates.
-# Assign each scored row to its gene midpoint, using the same chromosome
-# metadata and offsets as the gene plots.
-pos_genomic <- pos_df %>%
-  inner_join(gene_genomic %>% select(Gene, gene_mid, chr_order, chr_label),
-             by = "Gene")
-```
-
-```{r window-helper, eval=has_genomic}
-# Helper: tile chromosomes into non-overlapping windows of win_size bp.
-# Each gene/position is assigned to the window containing its genomic midpoint.
-# Returns a dataframe with one row per window, summarising mean and max score.
-make_window_accum <- function(df, score_col,
-                               win_size = params$window_size_bp) {
-  if (nrow(df) == 0) {
-    return(tibble(
-      chr_order  = integer(),
-      chr_label  = character(),
-      win_id     = double(),
-      win_start  = double(),
-      win_end    = double(),
-      win_mid    = double(),
-      n_genes    = integer(),
-      mean_score = double(),
-      max_score  = double(),
-      genes      = character()
-    ))
-  }
-  df %>%
-    mutate(
-      win_id    = floor(gene_mid / win_size),
-      win_start = win_id * win_size,
-      win_end   = win_start + win_size - 1L,
-      win_mid   = win_start + win_size / 2L
-    ) %>%
-    group_by(chr_order, chr_label, win_id, win_start, win_end, win_mid) %>%
-    summarise(
-      n_genes    = dplyr::n(),
-      mean_score = {
-        vals <- .data[[score_col]]
-        vals <- vals[!is.na(vals) & is.finite(vals)]
-        if (length(vals) > 0) mean(vals) else NA_real_
-      },
-      max_score  = {
-        vals <- .data[[score_col]]
-        vals <- vals[!is.na(vals) & is.finite(vals)]
-        if (length(vals) > 0) max(vals) else NA_real_
-      },
-      genes      = paste(unique(Gene), collapse = ", "),
-      .groups    = "drop"
-    )
-}
-
-# Stitch window midpoints onto the cumulative chromosome x-axis (same offsets
-# as gene_genomic so windows align with the per-gene manhattans above).
-stitch_windows <- function(win_df) {
-  if (nrow(win_df) == 0) {
-    return(win_df %>% mutate(win_x = numeric(), chr_even = logical()))
-  }
-  win_df %>%
-    left_join(chr_offsets %>% select(chr_order, offset), by = "chr_order") %>%
-    mutate(win_x = win_mid + offset,
-           chr_even = chr_order %% 2 == 0)
-}
-```
-
-### CAAS gene score
-
-Each bar is the mean of individual raw gene maxima in a genomic window; each point is their maximum. Genes are assigned by genomic midpoint. Windows without a finite gene score are missing, not zero. These are descriptive window aggregates, not accumulation p-values or individual gene p.gen.
-
-`r if (!has_genomic) "> **Note:** Genomic coordinates not available - gene-level CAAS window accumulation skipped."`
-
-```{r gene-caas-window-accum, eval=has_genomic, fig.height=5, fig.width=14, results='asis'}
-win_size_label <- sprintf("%g Mb", params$window_size_bp / 1e6)
-gene_caas_wins <- gene_genomic %>%
-  make_window_accum("gene_caas_score", win_size = params$window_size_bp)
-
-if (nrow(gene_caas_wins) == 0) {
-  cat("_No genes mapped to genomic windows._\n\n")
-} else {
-  gene_caas_wins <- gene_caas_wins %>%
-    stitch_windows() %>%
-    mutate(window_mean = mean_score, window_max = max_score)
-
-  # Ranked by n_genes (window density) rather than window_mean, to surface the
-  # regions with the most genes rather than the highest mean score.
-  top_caas_wins <- gene_caas_wins %>%
-    filter(!is.na(window_max) & is.finite(window_max) & window_max > 0 & is.finite(win_x)) %>%
-    slice_max(n_genes, n = 5, with_ties = FALSE) %>%
-    mutate(region_label = sprintf("chr%s:%0.1f-%0.1f Mb", chr_label, win_start / 1e6, win_end / 1e6))
-
-  p_gene_accum <- ggplot(gene_caas_wins, aes(x = win_x, y = window_mean, fill = chr_even)) +
-    geom_col(width = params$window_size_bp * 0.9, alpha = 0.75) +
-    geom_point(aes(y = window_max, colour = chr_even), size = 1.5, alpha = 0.85, show.legend = FALSE)
-
-  if (nrow(top_caas_wins) > 0) {
-    p_gene_accum <- p_gene_accum +
-      ggrepel::geom_text_repel(
-        data = top_caas_wins,
-        aes(y = window_max, label = sprintf("%s\n(%d genes)", region_label, n_genes)),
-        size = 2.2, max.overlaps = 10, colour = "black",
-        show.legend = FALSE
-      )
-  }
-
-  p_gene_accum <- p_gene_accum +
-    scale_fill_manual(
-      values = c("FALSE" = .tableau10[1], "TRUE" = .tableau10[2]),
-      guide = "none"
-    ) +
-    scale_colour_manual(
-      values = c("FALSE" = .tableau10[3], "TRUE" = .tableau10[4]),
-      guide = "none"
-    ) +
-    scale_x_continuous(
-      breaks = chr_label_positions$mid_x,
-      labels = chr_label_positions$chr_label,
-      expand = expansion(mult = 0.01)
-    ) +
-    labs(
-      title    = sprintf("CAAS gene score - %s windows", win_size_label),
-      subtitle = sprintf("Bars = mean | Points = max | %d windows", nrow(gene_caas_wins)),
-      x = "Chromosome", y = "Raw gene maximum (window mean / maximum)"
-    ) +
-    theme(
-      plot.title         = element_text(face = "bold"),
-      axis.text.x        = element_text(size = 14),
-      axis.text.y        = element_text(size = 14),
-      axis.title         = element_text(size = 14),
-      legend.text        = element_text(size = 12),
-      panel.grid.major.x = element_blank()
-    )
-
-  print(p_gene_accum)
-}
-```
-
-```{r gene-caas-window-accum-table, eval=has_genomic && exists("gene_caas_wins") && nrow(gene_caas_wins) > 0}
-DT::datatable(
-  gene_caas_wins %>%
-    select(chr_label, win_start, win_end, n_genes, mean_score, max_score) %>%
-    mutate(
-      win_start  = format(win_start, big.mark = ",", scientific = FALSE),
-      win_end    = format(win_end,   big.mark = ",", scientific = FALSE),
-      mean_score = round(mean_score, 4),
-      max_score  = round(max_score,  4)
-    ) %>%
-    arrange(desc(n_genes)) %>%
-    rename(chr = chr_label, start = win_start, end = win_end,
-           n_genes = n_genes, mean_CAAS = mean_score, max_CAAS = max_score),
-  rownames = FALSE,
-  options = list(pageLength = 15, scrollX = TRUE),
-  caption = htmltools::tags$caption(
-    style = "caption-side: top; text-align: left; font-weight: bold;",
-    sprintf("Genomic windows: raw gene maxima (%s windows)", win_size_label)
-  )
-)
-```
-
-```{r genomic-window-tsv-export, eval=has_genomic}
-if (exists("gene_caas_wins") && nrow(gene_caas_wins) > 0) {
-  scoring_write(
-    gene_caas_wins %>% select(-chr_even, -window_mean, -window_max),
-    file.path(params$output_dir, "genomic_window_accum_gene_caas.tsv"))
-}
-cat("Exported genomic window accumulation TSVs\n")
-```
-
----
-
 ## Supplementary Exports
 
 ```{r supplementary-tsv-export}
@@ -1542,8 +1247,7 @@ summary_tbl <- tibble(
     "Gene CAAS TOP (median)", "Gene nominal empirical threshold",
     "FADE site-level analysis available",
     "FADE gene-level analysis available",
-    "RERConverge available",
-    "Genomic coordinates available"
+    "RERConverge available"
   ),
   Value = c(
     format(nrow(pos_df), big.mark = ","),
@@ -1556,8 +1260,7 @@ summary_tbl <- tibble(
     sprintf("%.4f", params$evidence_p_threshold),
     ifelse(has_fade_pos,     "Yes", "No"),
     ifelse(has_fade_gene,    "Yes", "No"),
-    ifelse(has_rer,          "Yes", "No"),
-    ifelse(has_genomic,      "Yes", "No")
+    ifelse(has_rer,          "Yes", "No")
   )
 )
 

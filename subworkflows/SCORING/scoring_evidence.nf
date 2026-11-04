@@ -28,6 +28,6 @@ process SCORING_EVIDENCE {
     export VROOM_THREADS=${task.cpus} OMP_NUM_THREADS=${task.cpus} OPENBLAS_NUM_THREADS=${task.cpus} MKL_NUM_THREADS=${task.cpus}
     # evidence sources: ${source_hash}
     ${rs} ${baseDir}/subworkflows/ENRICHMENT/local/src/fcs_prepare_blocks.R caas ${params.gene_stat} ${params.caas_cycle_block_size ?: 500} scoring
-    ${rs} ${baseDir}/subworkflows/SCORING/local/src/scoring_evidence.R --genes ${genes} --positions ${positions} --stats ${stats} --universe ${universe} --blocks blocks --batch ${params.fcs_block_batch_genes ?: 1000} --gene-stat ${params.gene_stat} --nominal ${params.evidence_p_threshold ?: 0.05} --fdr ${params.evidence_fdr_threshold ?: 0.05}
+    ${rs} ${baseDir}/subworkflows/SCORING/local/src/scoring_evidence.R --genes ${genes} --positions ${positions} --stats ${stats} --universe ${universe} --blocks blocks --batch ${params.fcs_block_batch_genes ?: 1000} --gene-stat ${params.gene_stat} --nominal ${params.evidence_p_threshold ?: 0.05} --fdr-levels ${params.evidence_fdr_levels ?: '0.05,0.1,0.15'}
     """
 }

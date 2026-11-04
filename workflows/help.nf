@@ -267,7 +267,6 @@ it the run adds registry, characterization, within_gene and proximity, and repor
 
 Usage:
 --posenrich                          <true|false>                   false
---accumulation_fdr                   <FLOAT 0-1>                    0.1   (q threshold marked in report 13 for levels 1 and 2; q itself does not depend on it)
 --accumulation_caas_input            <"filtered_discovery.tsv">     null  (standalone entry: observed positives of U)
 --accumulation_background_input      <"background_file">            null  (standalone entry: gene list of U)
 --posenrich_background_file          <"background_file">            null  (tested positions, background.output)
@@ -396,7 +395,7 @@ Usage:
 --scoring_compare_fdr          <FLOAT 0-1>             0.15
 --scoring_compare_top_n           <INTEGER>               20
 --evidence_p_threshold <FLOAT 0-1> 0.05 (nominal empirical activity)
---evidence_fdr_threshold <FLOAT 0-1> 0.05 (BH highlighting)
+--evidence_fdr_levels <FLOAT,FLOAT,...> 0.05,0.1,0.15 (BH levels of the q classes of CAAS genes/positions and RER genes)
 --scoring_window_size_bp                       <INTEGER>               1000000
 --caas_evidence_top_n                          <INTEGER>               0      (evidence table of the N best positions of position_scores.tsv, written after SCORING to scoring/evidence/: MRCA, tip species and residues and the score of each domain of each hypothesis; 0 = off; needs --scoring, the observed discovery.tab and ct_disambig_asr_cache_dir)
 --caas_evidence_discovery                   <"discovery.tab">       ""     (discovery.tab for the evidence table when the observed tables are given and not recomputed; set by the generated reuse scripts)

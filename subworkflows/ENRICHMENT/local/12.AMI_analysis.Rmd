@@ -696,7 +696,7 @@ compute_gene_shapes <- function(dir_label, attr_df) {
 
 plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
                                   cluster_labels = NULL, node_signal = NULL,
-                                  active_genes = NULL, vertex_shape = NULL, adjusted_genes = character()) {
+                                  active_genes = NULL, vertex_shape = NULL, bh_class = NULL, bh_colours = NULL) {
   n_clust <- if (!is.null(clusters_df)) length(unique(clusters_df$cluster)) else 1L
   pal     <- .safe_pal(max(n_clust, 2L))
 
@@ -753,9 +753,11 @@ plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
   vertex_colors        <- ifelse(is_active, vertex_colors, scales::alpha(vertex_colors, 0.35))
   vertex_frame_colors  <- ifelse(is_active, "black", "grey55")
 
-  is_adjusted <- is_active & igraph::V(net)$name %in% adjusted_genes
-  vertex_frame_colors[is_adjusted] <- "#D99A00"
-  vertex_frame_widths <- ifelse(is_adjusted, 3.5, ifelse(is_active,1.4,0.6))
+  # Border colour = BH class of the gene (named vector gene -> class); "ns" and missing classes keep the plain border.
+  bh_of_node <- if (is.null(bh_class)) rep(NA_character_, igraph::vcount(net)) else unname(bh_class[igraph::V(net)$name])
+  has_bh <- is_active & !is.na(bh_of_node) & bh_of_node != "ns"
+  vertex_frame_colors[has_bh] <- unname(bh_colours[bh_of_node[has_bh]])
+  vertex_frame_widths <- ifelse(has_bh, 3.5, ifelse(is_active,1.4,0.6))
 
   # Node shape: cross-tool corroboration (CAAS plots only, see compute_gene_shapes());
   # circle otherwise.
@@ -805,7 +807,7 @@ plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
   # opacity, border, shape), always in the same place.
   encoding_lines <- c("Node size = CAAS -log10(p.gen) / RER -log10(p) / FADE log10(max BF)",
                       "Solid + black border = nominal active input gene",
-                      "Gold border = active gene also passing empirical BH",
+                      "Coloured border = BH class of the active gene (legend, bottom right)",
                       "Faded + grey border = DOMINO connector gene (not in input list)")
   if (!is.null(igraph::E(net)$combined_score)) {
     encoding_lines <- c(encoding_lines, "Edge width/opacity = STRING interaction confidence")
@@ -816,6 +818,10 @@ plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
       "  hexagon=RER-negative, star=FADE+RER overlap")
   }
   legend("bottomleft", legend = encoding_lines, bty = "n", cex = 0.5, text.col = "grey30")
+  if (!is.null(bh_class) && !is.null(bh_colours)) {
+    legend("bottomright", legend = names(bh_colours), col = bh_colours, pch = 1, pt.lwd = 3, cex = 0.55, bty = "n",
+           title = "BH class (border)")
+  }
 }
 
 # Map gene symbols to STRING ids. Returns the unique STRING_id values and fills the
@@ -887,7 +893,7 @@ gene_list_files <- normalizePath(gene_list_files, mustWork = FALSE)
 gene_list_files <- gene_list_files[file.exists(gene_list_files)]
 if (length(gene_list_files) == 0) stop("Error: no valid gene list files found")
 
-gene_list_files <- gene_list_files[basename(gene_list_files) %in% c("global.txt","top.txt","bottom.txt")]
+gene_list_files <- gene_list_files[grepl("^(global|top|bottom)(_q[0-9.]+)?\\.txt$", basename(gene_list_files))]
 
 # Tab order: direction (global, top, bottom), alphabetical within a direction. The
 # alphabetical order of list.files() would interleave directions, so the names are
@@ -900,9 +906,9 @@ gene_list_files <- gene_list_files[basename(gene_list_files) %in% c("global.txt"
     grepl("^bottom", base, ignore.case = TRUE) ~ 2L,
     TRUE                                       ~ 3L
   )
-  pct <- suppressWarnings(as.numeric(sub("^(global|top|bottom)", "", base, ignore.case = TRUE)))
-  pct[is.na(pct)] <- -Inf  # unrecognized names sort last within their direction
-  paths[order(dir_rank, -pct, base)]
+  # Within a direction: the nominal list, then the BH levels from the strictest.
+  lvl <- ifelse(grepl("_q[0-9.]+$", base), suppressWarnings(as.numeric(sub("^.*_q", "", base))), 0)
+  paths[order(dir_rank, lvl, base)]
 }
 gene_list_files <- .ami_list_order(gene_list_files)
 
@@ -974,7 +980,7 @@ if (length(bg_string_ids) < 5) {
 ```{r load_gene_scores}
 gene_scores_df <- NULL
 .nominal_threshold <- .05
-.fdr_threshold <- .05
+.bh_levels <- c(.05, .1, .15)  # BH levels of the q classes
 if (!is.null(params$gene_scores_file) && file.exists(params$gene_scores_file)) {
   gene_scores_df <- readr::read_tsv(params$gene_scores_file, show_col_types = FALSE)
   if(is.null(params$gene_metadata_file) || !file.exists(params$gene_metadata_file) ||
@@ -982,7 +988,7 @@ if (!is.null(params$gene_scores_file) && file.exists(params$gene_scores_file)) {
     stop("AMI CAAS annotations require gene_stat=max metadata")
   .gene_metadata <- jsonlite::read_json(params$gene_metadata_file,simplifyVector=TRUE)
   .nominal_threshold <- as.numeric(.gene_metadata$nominal_threshold)
-  .fdr_threshold <- as.numeric(.gene_metadata$fdr_threshold)
+  if(length(.gene_metadata$fdr_levels)) .bh_levels <- sort(as.numeric(.gene_metadata$fdr_levels))
   if(anyDuplicated(gene_scores_df$Gene))stop("Duplicate gene evidence keys")
   cat("Loaded gene_scores_file:", params$gene_scores_file, "with", nrow(gene_scores_df), "genes.\n")
 } else {
@@ -995,14 +1001,18 @@ prepare_gene_attributes <- function(df) {
   .col <- function(c, default=NA) if(c %in% names(df)) df[[c]] else rep(default,nrow(df))
   .istrue <- function(x) ifelse(is.na(x),NA,x %in% c(TRUE,"TRUE","True","true",1,"1"))
   out <- tibble::tibble(gene=df$Gene)
-  for(suffix in c("","_top","_bottom"))for(kind in c("nominal","adjusted")) {
-    p <- suppressWarnings(as.numeric(.col(paste0("caas_",if(kind=="nominal")"p.gen" else "p.gen.adj",suffix))))
-    out[[paste0("caas_",kind,suffix)]] <- ifelse(is.finite(p),p < if(kind=="nominal") .nominal_threshold else .fdr_threshold,NA)
+  # BH class of each gene as written by scoring ("<0.05", ..., "ns"), and one flag per level (q below the level).
+  for(suffix in c("","_top","_bottom")) {
+    p <- suppressWarnings(as.numeric(.col(paste0("caas_p.gen",suffix))))
+    out[[paste0("caas_nominal",suffix)]] <- ifelse(is.finite(p),p < .nominal_threshold,NA)
+    cls <- as.character(.col(paste0("caas_bh_class",suffix)))
+    out[[paste0("caas_bh_class",suffix)]] <- cls
+    for(l in .bh_levels) out[[paste0("caas_q",ami_bh_token(l),suffix)]] <- ami_bh_below(cls,l)
   }
   rp <- suppressWarnings(as.numeric(.col("rer_min_pval")))
-  rq <- suppressWarnings(as.numeric(.col("rer_perm_padj")))
   out$rer_nominal <- ifelse(is.finite(rp),rp<.nominal_threshold,NA)
-  out$rer_adjusted <- ifelse(is.finite(rq),rq<.fdr_threshold,NA)
+  out$rer_bh_class <- as.character(.col("rer_bh_class"))
+  for(l in .bh_levels) out[[paste0("rer_q",ami_bh_token(l))]] <- ami_bh_below(out$rer_bh_class,l)
   # FADE
   out$flag_fade_top    <- .istrue(.col("fade_significant_top"))
   out$flag_fade_bottom <- .istrue(.col("fade_significant_bottom"))
@@ -1017,8 +1027,10 @@ prepare_gene_attributes <- function(df) {
 }
 
 compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label) {
-  cols <- c("caas_nominal","caas_adjusted","caas_nominal_top","caas_adjusted_top","caas_nominal_bottom","caas_adjusted_bottom","rer_adjusted","flag_fade","flag_fade_top","flag_fade_bottom","flag_rer_acc","flag_rer_decc")
-  labels <- c("caas_nominal","caas_adjusted","caas_nominal_top","caas_adjusted_top","caas_nominal_bottom","caas_adjusted_bottom","rer_adjusted","fade","fade_top","fade_bottom","rer_acc","rer_decc")
+  .q <- function(stem, suffix = "") paste0(stem, "_q", ami_bh_token(.bh_levels), suffix)
+  cols <- c("caas_nominal", .q("caas"), "caas_nominal_top", .q("caas", "_top"), "caas_nominal_bottom", .q("caas", "_bottom"),
+            .q("rer"), "flag_fade", "flag_fade_top", "flag_fade_bottom", "flag_rer_acc", "flag_rer_decc")
+  labels <- sub("^flag_", "", cols)
   genes <- if(length(preferred_names) && !is.na(preferred_names)) strsplit(preferred_names,"[,;]")[[1]] else character()
   x <- if(!is.null(attr_df)) attr_df[attr_df$gene %in% trimws(genes),,drop=FALSE] else NULL
   vals <- lapply(cols,function(n) if(is.null(x)||!nrow(x)||!n %in% names(x)) NA_real_ else if(all(is.na(x[[n]])))NA_real_ else round(100*mean(x[[n]],na.rm=TRUE),1))
@@ -1141,8 +1153,9 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
 
   if(prefix=="caas" && !is.null(gene_scores_df)) {
     .rk <- dir_classifier(.list_name);.sf <- if(.rk=="global")"" else paste0("_",.rk)
-    .pp <- suppressWarnings(as.numeric(gene_scores_df[[paste0("caas_p.gen",.sf)]]))
-    .expected <- gene_scores_df$Gene[is.finite(.pp)&.pp<.nominal_threshold]
+    .lv <- ami_level_value(.list_name)  # 0 for the nominal list, the BH level for a level list
+    .pp <- suppressWarnings(as.numeric(gene_scores_df[[paste0(if(.lv>0)"caas_p.gen.adj" else "caas_p.gen",.sf)]]))
+    .expected <- gene_scores_df$Gene[is.finite(.pp)&.pp<if(.lv>0).lv else .nominal_threshold]
     if(!setequal(.genes_sym,.expected)) {
       res$skip_message <- "> CAAS seeds differ from current max empirical nominal evidence; recompute modules with the correct list."
       return(res)
@@ -1154,7 +1167,9 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
       .ft <- gene_scores_df$fade_significant_top; .fb <- gene_scores_df$fade_significant_bottom
       .hit <- if(.side=="top") .ft else if(.side=="bottom") .fb else .ft | .fb
     } else {
-      .hit <- is.finite(gene_scores_df$rer_min_pval) & gene_scores_df$rer_min_pval < .nominal_threshold
+      .lv <- ami_level_value(.list_name)
+      .hit <- if(.lv>0) is.finite(gene_scores_df$rer_perm_padj) & gene_scores_df$rer_perm_padj < .lv else
+        is.finite(gene_scores_df$rer_min_pval) & gene_scores_df$rer_min_pval < .nominal_threshold
       if(.direction=="Positive") .hit <- .hit & gene_scores_df$rer_rho>0
       if(.direction=="Negative") .hit <- .hit & gene_scores_df$rer_rho<0
     }
@@ -1292,31 +1307,33 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
 
     if (nrow(.clust_desc_display) > 0) {
       if (!is.null(gene_scores_df)) {
+        .bh_sel <- function(stem, suffix, title) setNames(paste0(stem, "_q", ami_bh_token(.bh_levels), suffix),
+                                                          sprintf("%s q<%s (%%)", title, ami_bh_token(.bh_levels)))
         if (.dir_label == "top") {
           display_df <- .clust_desc_display %>%
             dplyr::select(
               Module = cluster, Genes = n_genes, `Module nodes` = n_nodes,
               `Representative genes` = genes, `Top enriched terms` = description,
-              `CAAS nominal (%)` = caas_nominal_top, `CAAS BH (%)` = caas_adjusted_top,
-              `fade_top (%)` = fade_top, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc
+              `CAAS nominal (%)` = caas_nominal_top, dplyr::all_of(.bh_sel("caas", "_top", "CAAS")),
+              `fade_top (%)` = fade_top, dplyr::all_of(.bh_sel("rer", "", "RER")), `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc
             )
         } else if (.dir_label == "bottom") {
           display_df <- .clust_desc_display %>%
             dplyr::select(
               Module = cluster, Genes = n_genes, `Module nodes` = n_nodes,
               `Representative genes` = genes, `Top enriched terms` = description,
-              `CAAS bottom nominal (%)` = caas_nominal_bottom, `CAAS bottom BH (%)` = caas_adjusted_bottom,
-              `fade_bottom (%)` = fade_bottom, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc
+              `CAAS bottom nominal (%)` = caas_nominal_bottom, dplyr::all_of(.bh_sel("caas", "_bottom", "CAAS bottom")),
+              `fade_bottom (%)` = fade_bottom, dplyr::all_of(.bh_sel("rer", "", "RER")), `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc
             )
         } else {
           display_df <- .clust_desc_display %>%
             dplyr::select(
               Module = cluster, Genes = n_genes, `Module nodes` = n_nodes,
               `Representative genes` = genes, `Top enriched terms` = description,
-              `CAAS global nominal (%)` = caas_nominal, `CAAS global BH (%)` = caas_adjusted,
-              `CAAS top nominal (%)` = caas_nominal_top, `CAAS top BH (%)` = caas_adjusted_top,
-              `CAAS bottom nominal (%)` = caas_nominal_bottom, `CAAS bottom BH (%)` = caas_adjusted_bottom,
-              `fade (%)` = fade, `RER BH (%)` = rer_adjusted, `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc
+              `CAAS global nominal (%)` = caas_nominal, dplyr::all_of(.bh_sel("caas", "", "CAAS global")),
+              `CAAS top nominal (%)` = caas_nominal_top, dplyr::all_of(.bh_sel("caas", "_top", "CAAS top")),
+              `CAAS bottom nominal (%)` = caas_nominal_bottom, dplyr::all_of(.bh_sel("caas", "_bottom", "CAAS bottom")),
+              `fade (%)` = fade, dplyr::all_of(.bh_sel("rer", "", "RER")), `RER positive (%)` = rer_acc, `RER negative (%)` = rer_decc
             )
         }
       } else {
@@ -1381,11 +1398,12 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     node_signal    = .node_signal,
     active_genes   = .genes_sym,
     vertex_shape   = .node_shape,
-    adjusted_genes = {
+    bh_class = {
       suffix <- if(.dir_label == "top") "_top" else if(.dir_label == "bottom") "_bottom" else ""
-      flag <- if(prefix == "rer") "rer_adjusted" else if(prefix == "caas") paste0("caas_adjusted",suffix) else "__no_bh_for_fade__"
-      if(is.null(.attr_df_global) || !flag %in% names(.attr_df_global)) character() else .attr_df_global$gene[.attr_df_global[[flag]] %in% TRUE]
-    }
+      col <- if(prefix == "rer") "rer_bh_class" else if(prefix == "caas") paste0("caas_bh_class",suffix) else "__no_bh_for_fade__"
+      if(is.null(.attr_df_global) || !col %in% names(.attr_df_global)) NULL else setNames(.attr_df_global[[col]], .attr_df_global$gene)
+    },
+    bh_colours = ami_bh_colours(ami_bh_labels(.bh_levels))
   )
   dev.off()
   res$png_path <- .png_path
@@ -1549,7 +1567,7 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
                                         roll_dir_classifier, dir_classifier,
                                         direction_tabs, gene_list_orders,
                                         use_shape_overlay = FALSE, bg_string_ids = NULL,
-                                        node_score_fn = NULL, write_all_lists_file = FALSE) {
+                                        node_score_fn = NULL, write_all_lists_file = FALSE, lists_dir = NULL) {
   results <- lapply(gene_list_files, compute_gene_list_result,
                      net_full = net_full, modules_dir = modules_dir, prefix = prefix,
                      roll_dir_classifier = roll_dir_classifier, dir_classifier = dir_classifier,
@@ -1573,16 +1591,40 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
     } else "Module descriptions unavailable")))
   readr::write_tsv(status_rows,file.path(ami_networks_dir,paste0(prefix,"_list_availability.tsv")))
 
+  # Level lists that were not run (prepare_ami_lists.py): same gene set as the previous BH level (alias) or no genes (empty).
+  .lists_manifest <- if (!is.null(lists_dir) && file.exists(file.path(lists_dir, "canonical_lists.json")))
+    jsonlite::read_json(file.path(lists_dir, "canonical_lists.json")) else list()
+  .alias <- unlist(.lists_manifest$aliases)
+  .empty <- unlist(.lists_manifest$empty)
+
   for (dir_label in names(direction_tabs)) {
     filter_val <- direction_tabs[[dir_label]]
-    cat(sprintf("\n\n### %s\n\n", dir_label))
 
     sel <- if (is.null(filter_val)) results else Filter(function(r) r$direction == filter_val, results)
 
-    if (length(sel) == 0) {
+    # One tab per list of the direction: the nominal one, then each BH level from the strictest (lists run, aliases, empty levels).
+    .tabs <- dplyr::bind_rows(
+      tibble::tibble(name = vapply(sel, function(r) r$list_name, ""), kind = "list", target = NA_character_),
+      tibble::tibble(name = as.character(names(.alias)), kind = "alias", target = as.character(unname(.alias))),
+      tibble::tibble(name = as.character(.empty), kind = "empty", target = NA_character_))
+    if (!is.null(filter_val) && nrow(.tabs)) .tabs <- .tabs[vapply(.tabs$name, roll_dir_classifier, "") == filter_val, ]
+    .tabs <- .tabs[order(ami_level_value(.tabs$name)), ]
+    .multi <- nrow(.tabs) > 1
+    cat(sprintf("\n\n### %s%s\n\n", dir_label, if (.multi) " {.tabset}" else ""))
+
+    if (nrow(.tabs) == 0) {
       cat("_No gene lists for this direction._\n\n")
     } else {
-      for (r in sel) print_gene_list_result(r)
+      for (i in seq_len(nrow(.tabs))) {
+        if (.multi) cat(sprintf("\n\n#### %s\n\n", ami_level_title(.tabs$name[i])))
+        if (.tabs$kind[i] == "list") {
+          print_gene_list_result(results[[match(.tabs$name[i], vapply(results, function(r) r$list_name, ""))]])
+        } else if (.tabs$kind[i] == "alias") {
+          cat(sprintf("Same gene list as %s: the modules are identical (see that tab).\n\n", ami_level_title(.tabs$target[i])))
+        } else {
+          cat("No genes at this BH level: nothing to analyse.\n\n")
+        }
+      }
     }
 
     if(!is.null(gene_scores_df))for(r in sel) {
@@ -1591,7 +1633,7 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
       ev <- gene_scores_df[gene_scores_df$Gene %in% ids,,drop=FALSE]
       direction <- dir_classifier(r$list_name)
       suffix <- if(direction=="top")"_top" else if(direction=="bottom")"_bottom" else ""
-      cols <- if(prefix=="caas")c("Gene",paste0("caas_",c("p.gen","p.gen.adj","nominal","adjusted"),suffix)) else if(prefix=="rer")c("Gene","rer_rho","rer_min_pval","rer_perm_padj","rer_significant","rer_significant_fdr") else c("Gene","fade_max_bf_top","fade_max_bf_bottom","fade_significant_top","fade_significant_bottom")
+      cols <- if(prefix=="caas")c("Gene",paste0("caas_",c("p.gen","p.gen.adj","nominal","bh_class"),suffix)) else if(prefix=="rer")c("Gene","rer_rho","rer_min_pval","rer_perm_padj","rer_significant","rer_bh_class") else c("Gene","fade_max_bf_top","fade_max_bf_bottom","fade_significant_top","fade_significant_bottom")
       ev <- ev[,intersect(cols,names(ev)),drop=FALSE]
       readr::write_tsv(ev,file.path(ami_networks_dir,paste0(prefix,"_",r$list_name,"_gene_evidence.tsv")))
 
@@ -1632,7 +1674,7 @@ Module finding + significance: **DOMINO** (Shamir-Lab) - Bonferroni-corrected hy
 
 Network plots additionally mark cross-tool corroboration by node **shape**: circle = none, square = FADE-significant, diamond = RER-positive, hexagon = RER-negative, star = FADE-significant overlapping either RER direction.
 
-Each direction uses nominal active genes. Gold borders mark active genes with BH-adjusted empirical significance; grey nodes are connectors. FADE uses its configured BF cutoff. Module significance is separate from individual-gene significance.
+Each direction uses nominal active genes. Node borders are coloured by the BH class of the active gene (grey: not below the loosest level; blue, orange and red as the level tightens); faded nodes are connectors. FADE uses its configured BF cutoff. Module significance is separate from individual-gene significance.
 
 `Genes` counts the active input genes of a module and `Module nodes` every DOMINO node, connectors included. The minimum size (3), the STRING description and the network plot use the nodes; the percentages of nominal and BH genes are over all the nodes of the module.
 
@@ -1649,7 +1691,8 @@ CAAS_clust_desc_all <- render_tool_section_nested(
   use_shape_overlay   = TRUE,
   bg_string_ids       = bg_string_ids,  # CAAS background, mapped in parse_background
   node_score_fn       = caas_node_score,
-  write_all_lists_file = TRUE
+  write_all_lists_file = TRUE,
+  lists_dir           = dirname(gene_list_files[1])
 )
 ```
 
@@ -1668,8 +1711,10 @@ if (!is.null(params$rer_domino_network_sif) && !is.null(params$rer_gene_lists_di
     grepl("decelerat", basename(.rer_gene_list_files), ignore.case = TRUE) ~ 2L,
     TRUE ~ 0L
   )
-  .rer_gene_list_files <- .rer_gene_list_files[basename(.rer_gene_list_files) %in% c("rer_significant.txt","rer_accelerating.txt","rer_decelerating.txt")]
-  .rer_gene_list_files <- .rer_gene_list_files[order(match(basename(.rer_gene_list_files),c("rer_significant.txt","rer_accelerating.txt","rer_decelerating.txt")))]
+  .rer_gene_list_files <- .rer_gene_list_files[grepl("^rer_(significant|accelerating|decelerating)(_q[0-9.]+)?\\.txt$", basename(.rer_gene_list_files))]
+  .rer_base <- sub("(_q[0-9.]+)?\\.txt$", "", basename(.rer_gene_list_files))
+  .rer_lvl <- ifelse(grepl("_q[0-9.]+\\.txt$", basename(.rer_gene_list_files)), suppressWarnings(as.numeric(sub("^.*_q([0-9.]+)\\.txt$", "\\1", basename(.rer_gene_list_files)))), 0)
+  .rer_gene_list_files <- .rer_gene_list_files[order(match(.rer_base, c("rer_significant","rer_accelerating","rer_decelerating")), .rer_lvl)]
 
   if (length(.rer_gene_list_files) > 0) {
     .rer_bg_string_ids <- if (!is.null(params$rer_background_file) && file.exists(params$rer_background_file)) {
@@ -1687,7 +1732,8 @@ if (!is.null(params$rer_domino_network_sif) && !is.null(params$rer_gene_lists_di
       ),
       use_shape_overlay   = FALSE,
       bg_string_ids       = .rer_bg_string_ids,
-      node_score_fn       = rer_node_score
+      node_score_fn       = rer_node_score,
+      lists_dir           = params$rer_gene_lists_dir
     )
   } else {
     cat("_No RER gene list files found._\n\n")
@@ -1815,31 +1861,25 @@ only after the input and output certificates pass. Missing descriptions remain
 unavailable for recurrence even when the modules themselves are verified. Small
 seed lists are not rejected by a presentation cutoff.
 
-Global uses each method's own global list, never a sum of sides. Top/Bottom use CAAS and FADE sides; RER Global (both signs) is repeated as an explicitly labelled reference, never mapped to a CAAS side. RER's own Positive/Negative module analyses remain above. Recurrence concerns the functional terms of modules, matched by exact description text, not independent pathway confirmations or FCS significance. Representatives keep the best term of each block of its module; All terms keeps every term below the description cutoff. Term rows use the union of verified descriptions across views. Fractions use only verified, evaluable lists; NA denotes unavailable modules/descriptions, while zero denotes a verified absence. Gene universes remain method-specific.
+Global uses each method's own global list, never a sum of sides. Top/Bottom use CAAS and FADE sides; RER Global (both signs) is repeated as an explicitly labelled reference, never mapped to a CAAS side. RER's own Positive/Negative module analyses remain above. Recurrence concerns the functional terms of modules, matched by exact description text, not independent pathway confirmations or FCS significance. Representatives keep the best term of each block of its module; All terms keeps every term below the description cutoff. Term rows use the union of verified descriptions across views. Fractions use only verified, evaluable lists; NA denotes unavailable modules/descriptions, while zero denotes a verified absence. Gene universes remain method-specific. The tables show the terms present in at least two evaluable lists, most recurrent first; the exported TSV files keep every term.
 
-```{r recurrence-comparison,results='asis',fig.width=11,fig.height=7}
+```{r recurrence-comparison,results='asis'}
 for(view in c("Global","Top","Bottom")) {
  cat(sprintf("\n## %s {.tabset}\n\n",view))
  rec <- ami_recurrence(.ami_all_terms[.ami_all_terms$is_representative %in% TRUE,,drop=FALSE],.ami_results_registry,view)
  readr::write_tsv(rec$cells,file.path(ami_networks_dir,paste0("recurrence_",tolower(view),"_matrix.tsv")))
  readr::write_tsv(rec$summary,file.path(ami_networks_dir,paste0("recurrence_",tolower(view),"_table.tsv")))
  readr::write_tsv(rec$availability,file.path(ami_networks_dir,paste0("recurrence_",tolower(view),"_availability.tsv")))
- cat("\n\n### Representatives {.tabset}\n\n")
- cat("\n\n#### Heatmap\n\n")
- if(nrow(rec$cells)) {
-  p <- ggplot(rec$cells,aes(list_label,term,fill=factor(present,levels=c(0,1))))+geom_tile(colour="white")+
-   scale_fill_manual(name="Description present",values=c(`0`="#eeeeee",`1`="#2c7fb8"),na.value="#bbbbbb",drop=FALSE)+
-   labs(x=NULL,y=NULL,title=paste("Module description recurrence —",view))+theme_minimal(base_size=10)+theme(axis.text.x=element_text(angle=30,hjust=1))
-  print(p);cat("\n\n")
- } else cat("_No verified module descriptions available in this view._\n\n")
- cat("\n\n#### Table\n\n")
- widget <- report_table(rec$summary)
+ cat("\n\n### Representatives\n\n")
+ cat(ami_recurrence_note(rec$summary))
+ widget <- report_table(ami_recurrent_terms(rec$summary))
  rendered_widget <- knitr::knit_print(widget)
  knitr::knit_meta_add(attr(rendered_widget,"knit_meta"))
  cat(rendered_widget)
  cat("\n\n### All terms\n\n")
  raw_rec <- ami_recurrence(.ami_all_terms,.ami_results_registry,view)
- report_emit(report_table(raw_rec$summary))
+ cat(ami_recurrence_note(raw_rec$summary))
+ report_emit(report_table(ami_recurrent_terms(raw_rec$summary)))
  readr::write_tsv(raw_rec$summary,file.path(ami_networks_dir,paste0("recurrence_",tolower(view),"_all_terms.tsv")))
  cat("<details><summary>Availability and denominators</summary>\n\n")
  report_emit(report_table(rec$availability))
@@ -1849,7 +1889,7 @@ for(view in c("Global","Top","Bottom")) {
 
 # Evidence criteria
 
-Gene nominal/BH: empirical p/q <0.05 in their original families. DOMINO uses its own slice threshold (default 0.3) and Bonferroni module threshold (default 0.05), independently of gene calls. Functional descriptions retain their source-adjusted FDR ≤ `r .description_fdr` (default 0.10) in both local and API paths; local adjustment families and API adjustment families retain their original provenance. This descriptive cutoff is not FCS 0.15. No FCS selection determines DOMINO seeds. Inputs and module p-value scale are verified against per-list provenance; missing or stale modules remain unavailable.
+Gene nominal: empirical p below its threshold; BH class: the strictest level of `r paste(.bh_levels, collapse = ", ")` above the empirical q, in the original families. DOMINO uses its own slice threshold (default 0.3) and Bonferroni module threshold (default 0.05), independently of gene calls. Functional descriptions retain their source-adjusted FDR ≤ `r .description_fdr` (default 0.10) in both local and API paths; local adjustment families and API adjustment families retain their original provenance. This descriptive cutoff is not FCS 0.15. No FCS selection determines DOMINO seeds. Inputs and module p-value scale are verified against per-list provenance; missing or stale modules remain unavailable.
 
 ---
 

@@ -11,7 +11,6 @@
 
 class Namespace:  # noqa: vulture whitelist stub
     alignment_dir = None
-    genomic_info = None
     species_list = None
     metadata_caas = None
     output_prefix = None

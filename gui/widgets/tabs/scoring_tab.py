@@ -31,7 +31,7 @@ SPEC = ModuleTabSpec(
     essential_fields=(
         Section("Empirical evidence (CAAS and RER)"),
         FieldSpec(name="evidence_p_threshold", label="Nominal empirical p-value for activity", importance="default", help="Nominal p-value cutoff that selects active CAAS genes and positions and RER genes; FCS keeps the full ranking."),
-        FieldSpec(name="evidence_fdr_threshold", label="BH threshold for highlighting", importance="default", help="BH-adjusted cutoff that highlights the subset in report tables and AMI networks; does not add a module run."),
+        FieldSpec(name="evidence_fdr_levels", label="BH levels (comma-separated)", importance="default", help="BH levels in (0, 1] of the q classes: each q of the CAAS genes and positions and of the RER genes is classified by the strictest level it is below, which sets the class columns, the report colours and the AMI networks (one network per level whose gene list differs from the previous level, so more levels add DOMINO runs)."),
         FieldSpec(
             name="gene_ensembl_file", help="Gene annotation TSV (gene, coordinates, length, human_protein_id); blank is filled from BioMart only when auto-generation is on.",
             label="Gene-Ensembl mapping file",

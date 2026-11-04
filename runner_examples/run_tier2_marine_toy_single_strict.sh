@@ -533,7 +533,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "accumulation_n_randomizations": "$N_RANDOMIZATIONS",
   "accumulation_randomization_type": "${ACCUMULATION_RANDOMIZATION_TYPE:-cons_decile}",
   "accumulation_entropy_dir": "$ENTROPY_DIR",
-  "accumulation_fdr": "${ACCUMULATION_FDR:-0.1}",
   "accumulation_caas_input": "${ACCUMULATION_CAAS_INPUT:-}",
   "accumulation_background_input": "${ACCUMULATION_BACKGROUND_INPUT:-}",
 

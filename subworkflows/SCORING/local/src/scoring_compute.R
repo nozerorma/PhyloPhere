@@ -81,7 +81,7 @@ score_aggregation <- "caas_pos_species_pss_v4"
 # Rows reach this script already pooled over hypotheses by CT_DISAMBIGUATION (one row per Gene,
 # Position and side, hypothesis NA), so scoring never pools hypotheses itself.
 nominal_threshold <- as.numeric(parse_arg("--nominal_threshold", "0.05"))
-fdr_threshold <- as.numeric(parse_arg("--fdr_threshold", "0.05"))
+fdr_levels <- scoring_bh_levels(parse_arg("--fdr_levels", "0.05,0.1,0.15"))  # BH levels of the q classes
 fade_bf_threshold <- as.numeric(parse_arg("--fade_bf_threshold", "100"))
 # Direction is not a parameter: scoring runs on the full pool and the `side` column carries it.
 
@@ -473,7 +473,7 @@ if (has_rer) {
   if(any(!is.na(rer$p.perm) & (is.na(rer$rho) | is.na(rer$p) | rer$p.perm==0))) stop('RER empirical evidence without valid association')
   # rer_significant is the nominal call (p.perm <= 0.05, not corrected for multiple testing), which RER gene lists
   # and the AMI flags use. rer_perm_padj is its BH adjustment over all genes (Saputra et al. 2021 correct the
-  # permulation p-values before calling genes) and rer_significant_fdr the call on it. With few permulations the
+  # permulation p-values before calling genes) and rer_bh_class its class at the BH levels. With few permulations the
   # floor of p.perm keeps rer_perm_padj high: it is about 1 / (N/2 + 1) per gene, so BH cannot go below
   # floor * genes / (genes at the floor).
   if (pval_col == "p.perm") {
@@ -495,7 +495,7 @@ if (has_rer) {
     mutate(
       rer_min_pval     = as.numeric(.data[[pval_col]]),
       rer_significant  = rer_min_pval < nominal_threshold,
-      rer_significant_fdr = ifelse(is.na(rer_perm_padj), NA, rer_perm_padj < fdr_threshold),
+      rer_bh_class     = scoring_bh_class(rer_perm_padj, fdr_levels),
       rer_rho          = as.numeric(.data[[rho_col]]),
       rer_acceleration = case_when(
         is.na(rer_rho) ~ NA_character_,
@@ -504,17 +504,17 @@ if (has_rer) {
         TRUE           ~ "neutral"
       )
     ) %>%
-    select(Gene = gene, rer_min_pval, rer_P, rer_significant, rer_perm_padj, rer_significant_fdr, rer_rho, rer_acceleration) %>%
+    select(Gene = gene, rer_min_pval, rer_P, rer_significant, rer_perm_padj, rer_bh_class, rer_rho, rer_acceleration) %>%
     mutate(Gene = as.character(Gene))
 
-  cat(sprintf("  RERConverge: %d genes, %d significant (p <= 0.05, uncorrected), %d with BH-adjusted p <= 0.05\n",
+  cat(sprintf("  RERConverge: %d genes, %d significant (p <= 0.05, uncorrected); BH q below %s\n",
               nrow(gene_rer), sum(gene_rer$rer_significant, na.rm = TRUE),
-              sum(gene_rer$rer_significant_fdr, na.rm = TRUE)))
+              paste(sprintf("%g: %d", fdr_levels, vapply(fdr_levels, function(l) sum(gene_rer$rer_perm_padj < l, na.rm = TRUE), 1L)), collapse = ", ")))
 } else {
   cat("RERConverge: not available, skipping\n")
   gene_rer <- tibble(Gene = character(), rer_min_pval = numeric(), rer_P = numeric(),
                      rer_significant = logical(), rer_perm_padj = numeric(),
-                     rer_significant_fdr = logical(), rer_rho = numeric(),
+                     rer_bh_class = character(), rer_rho = numeric(),
                      rer_acceleration = character())
 }
 
@@ -563,7 +563,7 @@ if (nrow(gene_rer) > 0) {
   gene_scores$rer_P             <- NA_real_
   gene_scores$rer_significant   <- NA
   gene_scores$rer_perm_padj     <- NA_real_
-  gene_scores$rer_significant_fdr <- NA
+  gene_scores$rer_bh_class      <- NA_character_
   gene_scores$rer_rho           <- NA_real_
   gene_scores$rer_acceleration  <- NA_character_
 }
@@ -612,7 +612,7 @@ gene_out <- gene_scores %>%
     Gene,
     n_positions, n_positions_top, n_positions_bottom,
     gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
-    any_of(c("rer_min_pval", "rer_P", "rer_significant", "rer_perm_padj", "rer_significant_fdr", "rer_rho", "rer_acceleration")),
+    any_of(c("rer_min_pval", "rer_P", "rer_significant", "rer_perm_padj", "rer_bh_class", "rer_rho", "rer_acceleration")),
     any_of(c("fade_max_bf_top", "fade_significant_top",
              "fade_max_bf_bottom", "fade_significant_bottom"))
   ) %>%
@@ -644,13 +644,18 @@ fcs_stats <- tibble(
   flag_fade_bottom = nullable_flag(.col(gene_scores, "fade_significant_bottom")),
   flag_rer_acc = ifelse(is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs),.rer_nom_fcs<nominal_threshold & .rer_rho_fcs>0,NA),
   flag_rer_decc = ifelse(is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs),.rer_nom_fcs<nominal_threshold & .rer_rho_fcs<0,NA),
-  flag_rer_acc_adjusted = ifelse(is.finite(.rer_q_fcs) & is.finite(.rer_rho_fcs),.rer_q_fcs<fdr_threshold & .rer_rho_fcs>0,NA),
-  flag_rer_decc_adjusted = ifelse(is.finite(.rer_q_fcs) & is.finite(.rer_rho_fcs),.rer_q_fcs<fdr_threshold & .rer_rho_fcs<0,NA),
   fade_available_top = !is.na(.col(gene_scores,"fade_max_bf_top")),
   fade_available_bottom = !is.na(.col(gene_scores,"fade_max_bf_bottom")),
   rer_available = is.finite(.rer_nom_fcs) & is.finite(.rer_rho_fcs)
 ) %>%
   mutate(flag_fade = flag_fade_top | flag_fade_bottom)
+# RER BH flags, one pair per level (q of p.perm below the level, with the sign of rho): flag_rer_acc_q<level>, flag_rer_decc_q<level>.
+for (.l in fdr_levels) {
+  .tag <- format(.l, scientific = FALSE)
+  .ok <- is.finite(.rer_q_fcs) & is.finite(.rer_rho_fcs)
+  fcs_stats[[paste0("flag_rer_acc_q", .tag)]] <- ifelse(.ok, .rer_q_fcs < .l & .rer_rho_fcs > 0, NA)
+  fcs_stats[[paste0("flag_rer_decc_q", .tag)]] <- ifelse(.ok, .rer_q_fcs < .l & .rer_rho_fcs < 0, NA)
+}
 scoring_write(fcs_stats, "fcs_stats.tsv")
 cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom)\n",
             nrow(fcs_stats), sum(!is.na(fcs_stats$score_top)),

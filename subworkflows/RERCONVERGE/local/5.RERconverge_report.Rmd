@@ -20,7 +20,7 @@ params:
   traitname:         "unknown_trait"
   trait_transform:   "unknown"
   analysis_mode:     "unknown"
-  fdr_threshold: 0.05
+  fdr_levels:        "0.05,0.1,0.15"
   pval_threshold:    0.05
   top_n_labels:      15
   output_dir:        "."
@@ -94,13 +94,15 @@ if (.locked) unlockBinding('params',.pe)
 if (!is.null(.recorded)) {
   params$traitname <- .recorded$traitname
   params$pval_threshold <- .recorded$nominal_threshold
-  params$fdr_threshold <- .recorded$fdr_threshold
+  params$fdr_levels <- paste(.recorded$fdr_levels, collapse = ",")
 }
 params$analysis_mode <- if(!is.null(attr(res,'rer_type'))) attr(res,'rer_type') else if(!is.null(.settings$mode)) .settings$mode else 'unknown'
 params$trait_transform <- if(!is.null(.settings$transformation$effective)) .settings$transformation$effective else 'unknown'
 if (.locked) lockBinding('params',.pe)
 n_perms_total <- attr(res,'n_perms')
-rer_df <- rer_summary(res,params$pval_threshold,params$fdr_threshold)
+rer_df <- rer_summary(res,params$pval_threshold,params$fdr_levels)
+.bh_levels <- rer_bh_levels(params$fdr_levels)
+.bh_labels <- rer_bh_labels(.bh_levels)  # class labels, strictest first
 has_perm <- any(!is.na(rer_df$p.perm))
 fmt_pperm <- function(x) ifelse(is.na(x),NA_character_,as.character(signif(x,3)))
 
@@ -133,8 +135,7 @@ The analysis uses the following key statistics:
 | **p.perm.adj** | BH adjustment of available gene p.perm values in the original RER family, before any directional or cross-method subset |
 
 > **Calls are nominal:** `Call` and the directional lists use `p.perm < pval_threshold`,
-> without multiple-testing correction. **BH empirical** separately marks
-> `p.perm.adj < fdr_threshold`. Unavailable empirical evidence remains NA and is not
+> without multiple-testing correction. **BH class** separately gives, for `p.adj` and `p.perm.adj`, the strictest level of `r paste(params$fdr_levels)` they are below. Unavailable empirical evidence remains NA and is not
 > a measured negative result. Analytic P supplies the signed global FCS ranking
 > `sign(Rho) × −log10(P)`; gene p.perm and pathway p.perm are different tests.
 > FCS retains one global signed ranking and a bilateral contrast. Its direction is
@@ -174,13 +175,13 @@ display_df <- rer_df %>%
 # Include p.perm column only when permutations were run
 if (has_perm) {
   display_df <- display_df %>%
-    select(gene, Rho, N, P, p.adj, p.perm, p.perm.adj, `Empirical available`, `BH empirical`, Call) %>%
-    rename(Gene = gene, `Raw P (parametric)` = P, `p.adj (parametric BH)` = p.adj,
-           `p.perm (permulation)` = p.perm, `p.perm.adj (permulation BH)` = p.perm.adj)
+    select(gene, Rho, N, P, p.adj, bh_class_param, p.perm, p.perm.adj, bh_class_perm, `Empirical available`, Call) %>%
+    rename(Gene = gene, `Raw P (parametric)` = P, `p.adj (parametric BH)` = p.adj, `BH class (parametric)` = bh_class_param,
+           `p.perm (permulation)` = p.perm, `p.perm.adj (permulation BH)` = p.perm.adj, `BH class (permulation)` = bh_class_perm)
 } else {
   display_df <- display_df %>%
-    select(gene, Rho, N, P, p.adj, `Empirical available`, `BH empirical`, Call) %>%
-    rename(Gene = gene, `Raw P (parametric)` = P, `p.adj (parametric BH)` = p.adj)
+    select(gene, Rho, N, P, p.adj, bh_class_param, `Empirical available`, Call) %>%
+    rename(Gene = gene, `Raw P (parametric)` = P, `p.adj (parametric BH)` = p.adj, `BH class (parametric)` = bh_class_param)
 }
 
 DT::datatable(
@@ -191,7 +192,7 @@ DT::datatable(
   caption  = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
     sprintf(
-      "RERconverge gene-level results (Call = nominal empirical; BH empirical = adjusted) | Trait: %s",
+      "RERconverge gene-level results (Call = nominal empirical; BH class = strictest BH level below the adjusted p) | Trait: %s",
       params$traitname
     )
   )
@@ -202,7 +203,7 @@ DT::datatable(
       c("Positively correlated", "Negatively correlated", "Significant", ""),
       c("#ffe0e0",               "#dff0ff",               "#fff0d0",      "white")
     )
-  ) %>% DT::formatStyle("BH empirical", fontWeight=DT::styleEqual(c(TRUE,FALSE),c("bold","normal")), backgroundColor=DT::styleEqual(c(TRUE,FALSE),c("#FFE5A0","white")))
+  ) %>% report_bh_style(intersect(c("BH class (parametric)", "BH class (permulation)"), names(display_df)), .bh_labels)
 ```
 
 Machine-readable tables and gene lists are produced and validated independently of this report.
@@ -421,10 +422,10 @@ if (!has_perm) {
   m <- length(pv)
   bh_candidates <- m * pv / seq_along(pv)
   j <- which.min(bh_candidates)
-  cat(sprintf("BH family: **%d available genes**; **%d unavailable**. Nominal calls: **%d** (positive **%d**, negative **%d**). BH calls at %g: **%d**.\n\n",
+  cat(sprintf("BH family: **%d available genes**; **%d unavailable**. Nominal calls: **%d** (positive **%d**, negative **%d**). BH calls by level: %s.\n\n",
               m, sum(is.na(rer_df$p.perm)), sum(rer_df$signif),
               sum(rer_df$pos_corr, na.rm=TRUE), sum(rer_df$neg_corr, na.rm=TRUE),
-              params$fdr_threshold, sum(rer_df$signif_perm_fdr)))
+              paste0("**", .bh_labels, "** ", vapply(.bh_levels, function(l) sum(rer_df$p.perm.adj < l, na.rm = TRUE), 1L), collapse = "; ")))
   cat(sprintf("Minimum adjusted empirical p: **%.10g**. The smallest BH candidate m × p / rank is %.10g at rank %d (p = %.10g). BH uses the cumulative minimum from larger ranks; this depends on the full p distribution, not just its minimum.\n\n",
               min(rer_df$p.perm.adj, na.rm=TRUE), bh_candidates[j], j, pv[j]))
   cat("No BH calls means insufficient evidence at the selected family-wide cutoff; it does not prove no biological association.\n")
@@ -437,7 +438,7 @@ if (!has_perm) {
 ```{r padj-dist, fig.height=5}
 ggplot(rer_df %>% filter(!is.na(p.adj)), aes(x = p.adj)) +
   geom_histogram(bins = 50, colour = "white", fill = .tableau10[2], alpha = 0.85) +
-  geom_vline(xintercept = params$fdr_threshold, linetype = "dashed", colour = "grey40", linewidth = 0.7) +
+  geom_vline(xintercept = .bh_levels, linetype = "dashed", colour = "grey40", linewidth = 0.7) +
   labs(
     title    = "Distribution of parametric adjusted p-values (BH p.adj)",
     subtitle = paste0("Trait: ", params$traitname),
@@ -469,8 +470,8 @@ top_pos <- rer_df %>%
 if (has_perm) {
   top_pos <- top_pos %>%
     mutate(p.perm = fmt_pperm(p.perm), p.perm.adj = signif(p.perm.adj, 3)) %>%
-    select(gene, Rho, N, p.adj, p.perm, p.perm.adj, `BH empirical`)
-  col_names <- c("Gene", "Rho", "N", "p.adj (parametric BH)", "p.perm (nominal)", "p.perm.adj (BH)", "BH empirical")
+    select(gene, Rho, N, p.adj, p.perm, p.perm.adj, bh_class_perm)
+  col_names <- c("Gene", "Rho", "N", "p.adj (parametric BH)", "p.perm (nominal)", "p.perm.adj (BH)", "BH class (permulation)")
 } else {
   top_pos <- top_pos %>% select(gene, Rho, N, p.adj)
   col_names <- c("Gene", "Rho", "N", "p.adj (parametric BH)")
@@ -500,7 +501,7 @@ top_neg <- rer_df %>%
 if (has_perm) {
   top_neg <- top_neg %>%
     mutate(p.perm = fmt_pperm(p.perm), p.perm.adj = signif(p.perm.adj, 3)) %>%
-    select(gene, Rho, N, p.adj, p.perm, p.perm.adj, `BH empirical`)
+    select(gene, Rho, N, p.adj, p.perm, p.perm.adj, bh_class_perm)
 } else {
   top_neg <- top_neg %>% select(gene, Rho, N, p.adj)
 }
@@ -561,8 +562,8 @@ if (is.null(.settings)) { cat('Original inference settings: **unknown**.\n') } e
 **Statistical inference:** In continuous mode, Pearson correlation of gene RER and phenotype
 paths after the configured winsorization. Native winsorization clips the specified number of
 observations at each end; it is not a standard-deviation rule.
-Nominal calls use **p.perm < `r params$pval_threshold`**; BH empirical calls use
-**p.perm.adj < `r params$fdr_threshold`**. With no empirical evidence both are unavailable;
+Nominal calls use **p.perm < `r params$pval_threshold`**; BH classes use the levels
+**`r params$fdr_levels`** on p.perm.adj. With no empirical evidence both are unavailable;
 analytic results are displayed without substituting analytic calls into empirical lists.
 
 **Permutation statistics:** `r if (has_perm) paste0("Available gene empirical p-values: ", sum(!is.na(rer_df$p.perm)), "; unavailable: ", sum(is.na(rer_df$p.perm)), ". Recorded total cycles: ", if (length(n_perms_total)) n_perms_total else "not stored", ".") else "Empirical p-values unavailable."`
@@ -579,7 +580,7 @@ NA empirical p. With d observations on the selected side, the smallest possible 
 [Redlich et al. 2024](https://doi.org/10.1093/molbev/msae210).
 Redlich's categorical omnibus test is unsigned and uses an upper tail; its signed post hoc
 tests and this continuous association have distinct estimands. The supplement's pathway
-filters (analytic adjusted p < 0.15 plus empirical p < 0.025) do not redefine the gene BH cutoff.
+filters (analytic adjusted p < 0.15 plus empirical p < 0.025) do not redefine the gene BH levels.
 
 ---
 

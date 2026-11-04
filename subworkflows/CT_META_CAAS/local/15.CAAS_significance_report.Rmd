@@ -69,10 +69,6 @@ source(.style[1], local = TRUE)
 set_report_style()
 .tableau10 <- report_palette(10)
 
-# Evidence classes, from strongest to weakest, and their colours (also used by the tables and the exports).
-status_levels <- c("BH","Nominal","Evaluated; not significant","p/q available; thresholds unknown","p available; q unavailable","p unavailable")
-status_colours <- c("BH"=.tableau10[3],"Nominal"=.tableau10[2],"Evaluated; not significant"="grey65",
-  "p/q available; thresholds unknown"="grey50","p available; q unavailable"=.tableau10[10],"p unavailable"="grey88")
 ranking_labels <- c(global="Global",top="Top",bottom="Bottom")
 
 seed_val <- if(!is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998L
@@ -94,11 +90,20 @@ fmt_int <- function(x) ifelse(is.na(x),"NA",format(round(x),big.mark=",",scienti
 file_ok <- function(f) !is.null(f) && length(f)==1L && !is.na(f) && !grepl("^NO_",basename(f)) && file.exists(f) && file.info(f)$size>0
 num <- function(d,n) if(n %in% names(d)) suppressWarnings(as.numeric(d[[n]])) else rep(NA_real_,nrow(d))
 below <- function(p,threshold) ifelse(is.finite(p),p<threshold,NA)
+# BH class of a q: the strictest level it is below ("q<0.05", ...), "ns" above the loosest level, NA where q is NA. The same rule
+# as the class written by scoring; "BH" below stands for a q under the loosest level.
+bh_label <- function(q) {
+  out <- rep(NA_character_,length(q))
+  for(i in rev(seq_along(fdr_levels))) out[which(q < fdr_levels[i])] <- bh_labels[i]
+  out
+}
+bh_class <- function(q) ifelse(is.finite(q),ifelse(is.na(bh_label(q)),"ns",bh_label(q)),NA_character_)
+below_any <- function(q) if(length(fdr_levels)) below(q,max(fdr_levels)) else rep(NA,length(q))
 status <- function(p,q) {
-  if (!is.finite(nominal) || !is.finite(fdr)) {
+  if (!is.finite(nominal) || !length(fdr_levels)) {
     labels <- ifelse(is.finite(p), "p/q available; thresholds unknown", "p unavailable")
   } else labels <- ifelse(!is.finite(p),"p unavailable",
-    ifelse(!is.finite(q),"p available; q unavailable",ifelse(q<fdr,"BH",ifelse(p<nominal,"Nominal","Evaluated; not significant"))))
+    ifelse(!is.finite(q),"p available; q unavailable",ifelse(!is.na(bh_label(q)),bh_label(q),ifelse(p<nominal,"Nominal","Evaluated; not significant"))))
   factor(labels, levels=status_levels)
 }
 # Source TSVs write literal identifiers, including NA and quote characters.
@@ -120,9 +125,16 @@ known_metadata <- file_ok(stamp)
 metadata <- if(known_metadata) jsonlite::read_json(stamp,simplifyVector=TRUE) else
   list(gene_stat="unknown", provenance_status="legacy_unknown")
 nominal <- if(known_metadata) as.numeric(metadata$nominal_threshold) else NA_real_
-fdr <- if(known_metadata) as.numeric(metadata$fdr_threshold) else NA_real_
+fdr_levels <- if(known_metadata) sort(as.numeric(if(length(metadata$fdr_levels)) metadata$fdr_levels else c(.05,.1,.15))) else numeric()
 if(known_metadata) stopifnot(length(nominal)==1L,is.finite(nominal),nominal>0,nominal<=1,
-          length(fdr)==1L,is.finite(fdr),fdr>0,fdr<=1)
+          length(fdr_levels)>0,all(is.finite(fdr_levels)),all(fdr_levels>0),all(fdr_levels<=1))
+bh_tok <- vapply(fdr_levels,format,"",scientific=FALSE); bh_labels <- paste0("q<",bh_tok)  # strictest first
+# Evidence classes, from strongest to weakest, and their colours (also used by the tables and the exports). The BH classes use the
+# ladder of report_bh_colours() (red for the strictest level, then orange and blue).
+status_levels <- c(bh_labels,"Nominal","Evaluated; not significant","p/q available; thresholds unknown","p available; q unavailable","p unavailable")
+bh_status_colours <- if(length(bh_tok)) setNames(unname(report_bh_colours(paste0("<",bh_tok))[paste0("<",bh_tok)]),bh_labels) else character()
+status_colours <- c(bh_status_colours,"Nominal"=.tableau10[2],"Evaluated; not significant"="grey65",
+  "p/q available; thresholds unknown"="grey50","p available; q unavailable"=.tableau10[10],"p unavailable"="grey88")
 for(n in c("Position","CAAS_score","p.emp","p.adj_bh","n_hypotheses")) pos[[n]] <- num(pos,n)
 if (anyNA(pos$Gene) || any(!nzchar(pos$Gene)) || anyNA(genes$Gene) || any(!nzchar(genes$Gene))) stop("Missing gene identifiers")
 if (any(!is.finite(pos$Position) | pos$Position < 0 | pos$Position != floor(pos$Position))) stop("Positions must be nonnegative integers")
@@ -165,7 +177,7 @@ for(rk in c("global","top","bottom")) {
   side_labels <- p %>% group_by(Gene,Position) %>% summarise(positive_sides=paste(sort(unique(side)),collapse=","),.groups="drop")
   p <- p %>% arrange(desc(CAAS_score),desc(n_hypotheses),Gene,Position,side) %>% distinct(Gene,Position,.keep_all=TRUE) %>%
     left_join(side_labels,by=c("Gene","Position")) %>%
-    mutate(nominal=below(p.emp,nominal),BH=below(p.adj_bh,fdr),evidence_status=status(p.emp,p.adj_bh)) %>%
+    mutate(nominal=below(p.emp,nominal),BH=below_any(p.adj_bh),bh_class=bh_class(p.adj_bh),evidence_status=status(p.emp,p.adj_bh)) %>%
     arrange(p.emp,desc(CAAS_score),Gene,Position)
   views_pos[[rk]] <- p
   g <- tibble(Gene=as.character(genes$Gene),score=num(genes,paste0("gene_caas_score",sf)),
@@ -180,7 +192,7 @@ for(rk in c("global","top","bottom")) {
   if(!is.null(ge)) {
     ix <- match(g$Gene,ge$gene[ge$ranking==rk]);g$N_valid <- num(ge[ge$ranking==rk,,drop=FALSE],"N_valid")[ix]
   }
-  g <- g %>% mutate(nominal=below(p.gen,nominal),BH=below(p.gen.adj,fdr),
+  g <- g %>% mutate(nominal=below(p.gen,nominal),BH=below_any(p.gen.adj),bh_class=bh_class(p.gen.adj),
     carries_position_BH=positions_BH>0,evidence_status=status(p.gen,p.gen.adj),
     min_resolvable_p=ifelse(is.finite(N_valid)&N_valid>0,1/(N_valid+1),NA_real_)) %>% arrange(p.gen,desc(score),Gene)
   views_gene[[rk]] <- g
@@ -194,9 +206,10 @@ for(rk in names(views_pos)) {
 summary_rows <- function(d,rk,unit,pcol,qcol,scol) {
   p <- d[[pcol]];q <- d[[qcol]]
   tibble(ranking=rk,unit=unit,positive_rows=nrow(d),p_available=sum(is.finite(p)),q_available=sum(is.finite(q)),
-    positive_without_p=sum(!is.finite(p)),nominal=if(is.finite(nominal)) sum(below(p,nominal) %in% TRUE) else NA_integer_,BH=if(is.finite(fdr)) sum(below(q,fdr) %in% TRUE) else NA_integer_,
-    genes_carrying_position_BH=if(!is.finite(fdr)) NA_integer_ else if(unit=="genes")sum(d$carries_position_BH) else n_distinct(d$Gene[below(q,fdr) %in% TRUE]),
-    score_median=if(nrow(d))median(d[[scol]]) else NA_real_)
+    positive_without_p=sum(!is.finite(p)),nominal=if(is.finite(nominal)) sum(below(p,nominal) %in% TRUE) else NA_integer_,BH=if(length(fdr_levels)) sum(below_any(q) %in% TRUE) else NA_integer_,
+    genes_carrying_position_BH=if(!length(fdr_levels)) NA_integer_ else if(unit=="genes")sum(d$carries_position_BH) else n_distinct(d$Gene[below_any(q) %in% TRUE]),
+    score_median=if(nrow(d))median(d[[scol]]) else NA_real_) %>%
+    bind_cols(as_tibble(setNames(lapply(fdr_levels,function(l) if(any(is.finite(q))) sum(q<l,na.rm=TRUE) else NA_integer_),bh_labels),.name_repair="minimal"))
 }
 summary <- bind_rows(lapply(names(views_pos),function(rk) bind_rows(
   summary_rows(views_pos[[rk]],rk,"positions","p.emp","p.adj_bh","CAAS_score"),
@@ -226,7 +239,7 @@ evidence_scatter <- function(d,score,p,label,floor_p,title) {
   if(!nrow(d)) {cat("_No row of this view has an available p; the scatter is omitted._\n\n");return(invisible(NULL))}
   d$y <- -log10(pmax(d[[p]],1e-300)); d$x <- d[[score]]
   # Hits tie at the resolution floor, so ties are ordered by score; the few labels sit in the headroom above the points.
-  hits <- d %>% filter(evidence_status=="BH") %>% arrange(desc(y),desc(x)) %>% head(8)
+  hits <- d %>% filter(evidence_status %in% bh_labels) %>% arrange(desc(y),desc(x)) %>% head(8)
   g <- ggplot(thin(d),aes(x,y,colour=evidence_status))+
     geom_hline(yintercept=-log10(nominal),linetype="dashed",colour="grey45")+
     geom_point(alpha=.55,size=1.5)+
@@ -261,13 +274,15 @@ $(document).on('shown.bs.tab shown.bs.collapse', function () {
 sp <- function(rk,u) summary[summary$ranking==rk & summary$unit==u,,drop=FALSE]
 cat('<div class="kpi-row">',
   kpi(fmt_int(sp("global","positions")$positive_rows),"positive positions","score > 0, one row per (Gene, Position)"),
-  kpi(fmt_int(sp("global","positions")$BH),sprintf("positions with BH q < %g",fdr),sprintf("%s nominal at p < %g",fmt_int(sp("global","positions")$nominal),nominal),"bh"),
+  kpi(fmt_int(sp("global","positions")$BH),if(length(fdr_levels)) sprintf("positions with BH q < %g",max(fdr_levels)) else "positions with BH q",
+      if(length(fdr_levels)) paste0(paste(sprintf("%s at %s",fmt_int(unlist(sp("global","positions")[bh_labels])),bh_labels),collapse="; "),sprintf("; %s nominal at p < %g",fmt_int(sp("global","positions")$nominal),nominal)) else "thresholds unknown","bh"),
   kpi(fmt_int(sp("global","positions")$genes_carrying_position_BH),"genes carrying a BH position","global ranking","bh"),
   kpi(fmt_int(sp("global","genes")$positive_rows),"positive genes","gene score > 0","gene"),
-  kpi(fmt_int(sp("global","genes")$BH),sprintf("genes with BH q < %g",fdr),sprintf("%s nominal at p < %g",fmt_int(sp("global","genes")$nominal),nominal),"bh"),
+  kpi(fmt_int(sp("global","genes")$BH),if(length(fdr_levels)) sprintf("genes with BH q < %g",max(fdr_levels)) else "genes with BH q",
+      if(length(fdr_levels)) paste0(paste(sprintf("%s at %s",fmt_int(unlist(sp("global","genes")[bh_labels])),bh_labels),collapse="; "),sprintf("; %s nominal at p < %g",fmt_int(sp("global","genes")$nominal),nominal)) else "thresholds unknown","bh"),
   '</div>\n\n',sep="\n")
 if (!known_metadata) cat("**Original metadata are absent. Gene statistic and thresholds are unknown; source scores and p/q are shown without new significance calls.**\n\n")
-if (known_metadata) cat(sprintf("Calls follow the thresholds saved with the evidence: nominal p < %g and BH q < %g. Counts above refer to the Global view; Top and Bottom are in the tabs below.\n\n",nominal,fdr))
+if (known_metadata) cat(sprintf("Calls follow the thresholds saved with the evidence: nominal p < %g and the BH levels %s (\"BH\" counts the q below the loosest level). Counts above refer to the Global view; Top and Bottom are in the tabs below.\n\n",nominal,paste(fdr_levels,collapse=", ")))
 ```
 
 The report shows only positions and genes whose **observed score is greater than 0 in the view concerned**. Global has one row per biological position `(Gene, Position)` with its maximum score over sides; Top and Bottom use the score of their own side. Coordinates are those of the trimmed alignment, zero-based, so position 0 is valid.
@@ -283,15 +298,14 @@ The report shows only positions and genes whose **observed score is greater than
 
 ## BH thresholds
 
-Counts describe positive-score rows in each view using the original q-values. **Analysis threshold** identifies the cutoff saved with the evidence; when metadata are missing, the analysis threshold is unknown. Missing q-values are excluded.
+Counts describe positive-score rows in each view using the original q-values. The levels are those saved with the evidence (the default levels when the metadata are missing). Missing q-values are excluded.
 
 ```{r bh-threshold-counts, results='asis'}
-.bh_levels <- sort(unique(c(0.05, 0.1, 0.15, if (is.finite(fdr)) fdr)))
+.bh_levels <- if(length(fdr_levels)) fdr_levels else c(0.05, 0.1, 0.15)
 .bh_counts <- bind_rows(lapply(names(views_pos), function(rk) {
   bind_rows(lapply(c("positions", "genes"), function(unit) {
     q <- if(unit == "positions") views_pos[[rk]]$p.adj_bh else views_gene[[rk]]$p.gen.adj
     bind_rows(lapply(.bh_levels, function(level) tibble(ranking=rk, unit=unit, `BH q <`=level,
-      `Analysis threshold`=if(is.finite(fdr)) isTRUE(all.equal(level, fdr)) else NA,
       `q available`=sum(is.finite(q)), hits=if(any(is.finite(q))) sum(q < level, na.rm=TRUE) else NA_integer_)))
   }))
 }))
@@ -341,7 +355,7 @@ for(rk in names(views_pos)) {
   cat("\n\n")
   evidence_histograms(d,"CAAS_score","p.emp","p.adj_bh",paste("Positions,",tolower(ranking_labels[[rk]]),"view"))
   cat("\n\n")
-  front <- c("Gene","Position","side","positive_sides","CAAS_score","p.emp","p.adj_bh","evidence_status","nominal","BH")
+  front <- c("Gene","Position","side","positive_sides","CAAS_score","p.emp","p.adj_bh","evidence_status","bh_class","nominal","BH")
   cat(cap_note(d))
   report_emit(report_table(capped(d) %>% select(-any_of(detail_cols)) %>% mutate(evidence_status=as.character(evidence_status)) %>% relocate(any_of(front)),
     sci_cols=intersect(c("p.emp","p.adj_bh"),names(d))))
@@ -365,12 +379,12 @@ for(rk in names(views_gene)) {
       scale_fill_manual(values=status_colours,drop=TRUE,name="Gene-level evidence")+
       scale_x_continuous(breaks=function(x) {b <- pretty(x); b[b==round(b)]},expand=expansion(mult=c(0,.05)))+
       labs(title=paste("Genes carrying the most BH positions,",tolower(ranking_labels[[rk]]),"view"),
-           subtitle="Bar colour is the evidence class of the gene itself, which is a separate test",x="Positions with BH q below threshold",y=NULL))
+           subtitle="Bar colour is the evidence class of the gene itself, which is a separate test",x="Positions with q below the loosest BH level",y=NULL))
     cat("\n\n")
   } else cat("_No gene of this view carries a BH-significant position._\n\n")
   evidence_histograms(d,"score","p.gen","p.gen.adj",paste("Genes,",tolower(ranking_labels[[rk]]),"ranking"))
   cat("\n\n")
-  front <- c("Gene","score","p.gen","p.gen.adj","evidence_status","nominal","BH","carries_position_BH","positive_positions","positions_BH","positions_nominal","N_valid","min_resolvable_p")
+  front <- c("Gene","score","p.gen","p.gen.adj","evidence_status","bh_class","nominal","BH","carries_position_BH","positive_positions","positions_BH","positions_nominal","N_valid","min_resolvable_p")
   cat(cap_note(d))
   report_emit(report_table(capped(d) %>% mutate(evidence_status=as.character(evidence_status)) %>% relocate(any_of(front)),
     sci_cols=intersect(c("p.gen","p.gen.adj","min_resolvable_p"),names(d))))

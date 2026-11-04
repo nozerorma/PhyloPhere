@@ -3,8 +3,8 @@ a <- commandArgs(TRUE)
 script <- sub('^--file=', '', grep('^--file=', commandArgs(FALSE), value=TRUE)[1])
 source(file.path(dirname(normalizePath(script)), 'rer_contract.R'))
 res <- rer_results(readRDS(a[1]))
-nominal <- rer_number(a[4],'nominal threshold'); fdr <- rer_number(a[5],'FDR threshold')
-if (nominal < 0 || nominal > 1 || fdr < 0 || fdr > 1) stop('Thresholds must be in [0,1]')
+nominal <- rer_number(a[4],'nominal threshold'); fdr_levels <- rer_bh_levels(a[5])
+if (nominal < 0 || nominal > 1) stop('Nominal threshold must be in [0,1]')
 null_path <- a[2]
 null_status <- 'unavailable'
 manifest <- NULL
@@ -117,10 +117,10 @@ if (basename(null_path) != 'NO_FILE') {
     }
   }
 }
-summary <- rer_summary(res,nominal,fdr)
+summary <- rer_summary(res,nominal,fdr_levels)
 metadata <- list(version='rer_v1',traitname=a[3],analysis_mode=attr(res,'rer_type'),
   inference=attr(res,'rer_settings'),n_perms=attr(res,'n_perms'),seed=attr(res,'rer_batch_seed'),
-  nominal_threshold=nominal,fdr_threshold=fdr,null_status=null_status,
+  nominal_threshold=nominal,fdr_levels=fdr_levels,null_status=null_status,
   original_result_identity=rer_file_identity(a[1]),
   original_result_sha256=if(rer_verify_checksums()) rer_file_hash(a[1]) else NULL,null_manifest=manifest,
   identifier_translation=list(reference=if(basename(reference_path)=='NO_FILE') NULL else as.character(reference_path), changed=sum(original_genes!=canonical), original_settings_sha256=if(changed && !is.null(original_settings)) rer_hash(original_settings) else NULL, original_null_manifest_sha256=if(changed) original_null_manifest else NULL),

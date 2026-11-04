@@ -52,9 +52,32 @@ def parse_args():
     p.add_argument('--output_dir', required=True)
     p.add_argument('--nominal_threshold', type=float, default=0.05,
                    help='Nominal p.emp threshold, only when flags are absent from the evidence')
-    p.add_argument('--fdr_threshold', type=float, default=0.05,
-                   help='BH threshold, only when flags are absent from the evidence')
+    p.add_argument('--fdr_levels', default='0.05,0.1,0.15',
+                   help='BH levels of the q classes of the evidence (comma-separated); one count column per level')
     return p.parse_args()
+
+
+def parse_levels(text):
+    """'0.05,0.1,0.15' -> [0.05, 0.1, 0.15] (sorted, in (0, 1], no repeats)."""
+    levels = sorted(float(x) for x in text.split(','))
+    if not levels or any(not 0 < v <= 1 for v in levels) or len(set(levels)) != len(levels):
+        raise SystemExit(f'invalid BH levels: {text!r}')
+    return levels
+
+
+def level_name(level):
+    return f'{level:g}'
+
+
+def class_level(label):
+    """BH class label '<0.05' -> 0.05; 'ns', 'NA' and '' -> None (not below any level)."""
+    return float(label[1:]) if isinstance(label, str) and label.startswith('<') else None
+
+
+def below_levels(label, levels):
+    """One 0/1 per level: the q is below that level (the class is its strictest level, so below every looser one)."""
+    lv = class_level(label)
+    return [int(lv is not None and lv <= level) for level in levels]
 
 
 def read_tsv(path, usecols=None):
@@ -111,7 +134,7 @@ def position_scores_by_key(evidence):
         if cur is None:
             out[key] = {'score': score, 'sides': [row['side']],
                         'p.emp': row['p.emp'], 'p.adj_bh': row['p.adj_bh'],
-                        'caas_nominal': row['caas_nominal'], 'caas_adjusted': row['caas_adjusted'],
+                        'caas_nominal': row['caas_nominal'], 'caas_bh_class': row['caas_bh_class'],
                         'evidence_status': row['evidence_status']}
         else:
             if score is not None and (cur['score'] is None or score > cur['score']):
@@ -174,24 +197,25 @@ def build_position_characterization(positions, evidence, pfam_members):
             'p.emp': 'NA' if sc is None else sc['p.emp'],
             'p.adj_bh': 'NA' if sc is None else sc['p.adj_bh'],
             'caas_nominal': 'NA' if sc is None else sc['caas_nominal'],
-            'caas_adjusted': 'NA' if sc is None else sc['caas_adjusted'],
+            'caas_bh_class': 'NA' if sc is None else sc['caas_bh_class'],
         })
     return pd.DataFrame(rows, columns=['Gene', 'Position', 'evaluation_status', 'hg38_nt_coord', 'reference_status', 'pfam_domain',
                                        'pfam_clan', 'ucr_region', 'position_variability',
                                        'fubar_selection', 'fade_top_sig', 'fade_bottom_sig',
                                        'custom_terms', 'CAAS_score', 'sides', 'p.emp', 'p.adj_bh',
-                                       'caas_nominal', 'caas_adjusted'])
+                                       'caas_nominal', 'caas_bh_class'])
 
 
-def build_collection_summary(collections, member_frames, evidence, coverage, tested_keys=None):
+def build_collection_summary(collections, member_frames, evidence, coverage, levels, tested_keys=None):
     """Per collection/term: sizes and exact crosses with the ranking (no inference)."""
     scores = position_scores_by_key(evidence)
     if isinstance(member_frames, pd.DataFrame):
         member_frames = [member_frames]
     # One pass over memberships, rather than scanning the entire registry for
     # every term. Keep only counters and distinct genes, not per-term row copies.
-    totals = {(r.collection_id, r.term_id): [0, set(), 0, 0, 0, 0, 0]
+    totals = {(r.collection_id, r.term_id): [0, set(), 0, 0, 0, [0] * len(levels), 0]
               for r in collections.itertuples(index=False) if r.status == 'included'}
+    below_cache = {}
     for members in member_frames:
         for collection, term, gene, position in zip(
                 members['collection_id'], members['term_id'], members['Gene'], members['Position']):
@@ -206,7 +230,11 @@ def build_collection_summary(collections, member_frames, evidence, coverage, tes
                 counts[2] += score['score'] is not None
                 counts[3] += score['score'] is None
                 counts[4] += score['caas_nominal'] == 'TRUE'
-                counts[5] += score['caas_adjusted'] == 'TRUE'
+                flags = below_cache.get(score['caas_bh_class'])
+                if flags is None:
+                    flags = below_cache[score['caas_bh_class']] = below_levels(score['caas_bh_class'], levels)
+                for i, f in enumerate(flags):
+                    counts[5][i] += f
     n_annotable = 0
     for row in coverage.itertuples(index=False):
         if row.scope == 'universe' and row.metric == 'n_positions_annotable':
@@ -215,7 +243,7 @@ def build_collection_summary(collections, member_frames, evidence, coverage, tes
     for crow in collections.itertuples(index=False):
         if crow.status != 'included':
             continue
-        n_members, genes, n_positive, n_no_score, n_nominal, n_adjusted, n_tested = totals[
+        n_members, genes, n_positive, n_no_score, n_nominal, n_bh, n_tested = totals[
             (crow.collection_id, crow.term_id)]
         n_evaluated = n_tested if tested_keys is not None else 'NA'
         n_no_score = n_tested - n_positive if tested_keys is not None else 'NA'
@@ -226,27 +254,27 @@ def build_collection_summary(collections, member_frames, evidence, coverage, tes
                      'n_members_evaluated': n_evaluated, 'n_members_without_canonical_score': n_no_score,
                      'n_members_positive': n_positive,
                      'n_members_nominal': n_nominal,
-                     'n_members_adjusted': n_adjusted,
+                     **{f'n_members_bh_{level_name(l)}': n for l, n in zip(levels, n_bh)},
                      'prop_positive_of_evaluated': prop,
                      'positions_annotable_universe': n_annotable,
                      'denominator_definition': 'n_members_evaluated: miembros del universo probado declarado; NA sin universo'})
     return pd.DataFrame(rows, columns=['collection_id', 'term_id', 'term_type', 'n_members',
                                        'n_genes', 'n_members_evaluated', 'n_members_without_canonical_score',
                                        'n_members_positive',
-                                       'n_members_nominal', 'n_members_adjusted',
+                                       'n_members_nominal', *[f'n_members_bh_{level_name(l)}' for l in levels],
                                        'prop_positive_of_evaluated',
                                        'positions_annotable_universe', 'denominator_definition'])
 
 
-def build_ranking_summary(evidence, n_cycles):
-    """Score distribution and nominal/adjusted counts per ranking; no selection percentiles."""
+def build_ranking_summary(evidence, n_cycles, levels):
+    """Score distribution and nominal/BH counts per ranking; no selection percentiles."""
     rows = []
     by_pos = {}
     for row in evidence.to_dict('records'):
         key = (row['Gene'], int(row['Position']))
         score = float(row['CAAS_score']) if row['CAAS_score'] not in ('NA', '') else None
         by_pos.setdefault(key, {'top': None, 'bottom': None, 'p.emp': row['p.emp'],
-                                'caas_nominal': row['caas_nominal'], 'caas_adjusted': row['caas_adjusted']})
+                                'caas_nominal': row['caas_nominal'], 'caas_bh_class': row['caas_bh_class']})
         if row['side'] in ('top', 'bottom') and score is not None:
             cur = by_pos[key][row['side']]
             if cur is None or score > cur:
@@ -255,7 +283,7 @@ def build_ranking_summary(evidence, n_cycles):
     def summarize(ranking, values, keys):
         vals = [v for v in values if v is not None]
         nominal = sum(1 for k in keys if by_pos[k]['caas_nominal'] == 'TRUE')
-        adjusted = sum(1 for k in keys if by_pos[k]['caas_adjusted'] == 'TRUE')
+        n_bh = [sum(below_levels(by_pos[k]['caas_bh_class'], levels)[i] for k in keys) for i in range(len(levels))]
         p_unavailable = sum(1 for k in keys if by_pos[k]['p.emp'] in ('NA', ''))
         if vals:
             s = sorted(vals)
@@ -266,10 +294,10 @@ def build_ranking_summary(evidence, n_cycles):
             dist = {'min': 'NA', 'q25': 'NA', 'median': 'NA', 'q75': 'NA', 'max': 'NA'}
         rows.append({'ranking': ranking, 'n_positions': len(keys),
                      'n_scored': len(vals), **dist,
-                     'n_nominal': nominal, 'n_adjusted': adjusted,
+                     'n_nominal': nominal, **{f'n_bh_{level_name(l)}': n for l, n in zip(levels, n_bh)},
                      'n_p_unavailable': p_unavailable,
                      'N_cycles': 'NA' if n_cycles is None else str(int(n_cycles)),
-                     'note': 'scores canónicos positivos disponibles; universo completo no disponible; nominal/adjusted son vistas'})
+                     'note': 'scores canónicos positivos disponibles; universo completo no disponible; nominal/BH son vistas'})
 
     # global: one unit per position (best side); top/bottom: directional rows.
     summarize('global', [max([v for v in (d['top'], d['bottom']) if v is not None], default=None)
@@ -333,9 +361,10 @@ def main():
     tested_keys = (set(zip(positions.loc[positions.in_tested_universe == '1','Gene'],
                            positions.loc[positions.in_tested_universe == '1','Position'].astype(int)))
                    if manifest['universe'].get('universe_identity',manifest['universe'].get('universe_sha256')) else None)
+    levels = parse_levels(args.fdr_levels)
     coll_summary = build_collection_summary(
-        collections, (frame for _, frame in pm.iter_members(positions, regions, sites)), evidence, coverage, tested_keys)
-    ranking = build_ranking_summary(evidence, n_cycles)
+        collections, (frame for _, frame in pm.iter_members(positions, regions, sites)), evidence, coverage, levels, tested_keys)
+    ranking = build_ranking_summary(evidence, n_cycles, levels)
     universe = build_universe_summary(positions, coverage)
 
     write_tsv(pos_char, os.path.join(args.output_dir, 'position_characterization.tsv'))
@@ -349,7 +378,7 @@ def main():
         'inputs': {f: {'size':Path(args.registry_dir,f).stat().st_size} for f in REGISTRY_FILES},
         'outputs': ['position_characterization.tsv', 'collection_summary.tsv',
                     'ranking_summary.tsv', 'universe_summary.tsv'],
-        'thresholds': {'nominal': args.nominal_threshold, 'fdr': args.fdr_threshold,
+        'thresholds': {'nominal': args.nominal_threshold, 'fdr_levels': levels,
                        'note': 'usados solo si la evidencia carece de flags canonicos'},
         'states': {
             'characterization': 'executed',

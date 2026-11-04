@@ -141,7 +141,6 @@ export PRECOMP_USE_POSTPROC="false"
 # ── Accumulation ──────────────────────────────────────────────────────────────
 export ACCUMULATION_RANDOMIZATION_TYPE="cons_decile"
 export ENTROPY_DIR=""
-export ACCUMULATION_FDR="0.15"
 export PRECOMP_USE_ACCUMULATION="false"
 
 # ── RERconverge ───────────────────────────────────────────────────────────────

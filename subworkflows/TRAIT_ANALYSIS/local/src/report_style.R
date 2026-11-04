@@ -28,3 +28,16 @@ set_report_style <- function() {
   ggplot2::theme_set(report_theme())
   invisible(NULL)
 }
+
+# Colours of the BH classes of scoring_bh_class(): grey for "ns", then blue, orange and red as the level tightens.
+# `labels` are the class labels strictest first (scoring_bh_labels). The result is named by class, "ns" included.
+report_bh_colours <- function(labels) {
+  ladder <- if (length(labels) == 1L) "#E15759" else grDevices::colorRampPalette(c("#4E79A7", "#F28E2B", "#E15759"))(length(labels))
+  c(ns = "#BAB0AC", stats::setNames(rev(ladder), labels))
+}
+
+# Fills the cells of a DT widget by BH class. NA cells keep the default style.
+report_bh_style <- function(widget, columns, labels) {
+  cols <- report_bh_colours(labels)
+  DT::formatStyle(widget, columns, backgroundColor = DT::styleEqual(names(cols), unname(cols)), fontWeight = "bold")
+}

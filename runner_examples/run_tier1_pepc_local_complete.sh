@@ -140,7 +140,6 @@ export PRECOMP_USE_DISAMBIGUATION="false"
 export PRECOMP_USE_POSTPROC="false"
 
 # ── POSENRICH level 1: Accumulation ───────────────────────────────────────────
-export ACCUMULATION_FDR="0.15"
 export ACCUMULATION_CAAS_INPUT=""
 export ACCUMULATION_BACKGROUND_INPUT=""
 
@@ -200,7 +199,7 @@ export GENE_ENSEMBL_FILE="/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/i
 export AUTO_GENERATE_ENSEMBL="false"
 export ENSEMBL_DATASET=""
 export EVIDENCE_P_THRESHOLD="0.05"
-export EVIDENCE_FDR_THRESHOLD="0.15"
+export EVIDENCE_FDR_LEVELS="0.05,0.1,0.15"
 export CAAS_EVIDENCE_TOP_N="10"
 export CAAS_EVIDENCE_DISCOVERY_USER=""
 export SCORING_HYPOTHESES_PAIRS=""

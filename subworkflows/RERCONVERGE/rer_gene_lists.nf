@@ -23,6 +23,6 @@ process RER_GENE_LISTS {
 
     """
     # RER sources: ${source_hash}; inputs: ${input_hash}
-    ${rs} ${rerQuote("${baseDir}/subworkflows/RERCONVERGE/local/rer_gene_lists.R")} ${rerQuote(summary_tsv)} ${rerQuote(gene_scores)} ${rerQuote(params.evidence_p_threshold == null ? 0.05 : params.evidence_p_threshold)}
+    ${rs} ${rerQuote("${baseDir}/subworkflows/RERCONVERGE/local/rer_gene_lists.R")} ${rerQuote(summary_tsv)} ${rerQuote(gene_scores)} ${rerQuote(params.evidence_p_threshold == null ? 0.05 : params.evidence_p_threshold)} ${rerQuote(params.evidence_fdr_levels == null ? '0.05,0.1,0.15' : params.evidence_fdr_levels)}
     """
 }

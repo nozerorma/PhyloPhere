@@ -80,3 +80,22 @@ scoring_write <- function(x,path,...) {
   for(n in names(x)) if(is.numeric(x[[n]])) x[[n]] <- ifelse(is.na(x[[n]]),'NA',sprintf('%.17g',x[[n]]))
   readr::write_delim(x,path,delim='\t',quote='none',escape='none',na='NA',...)
 }
+# Benjamini-Hochberg levels, e.g. "0.05,0.1,0.15", as a sorted numeric vector in (0, 1].
+scoring_bh_levels <- function(x) {
+  v <- if(is.character(x)) suppressWarnings(as.numeric(strsplit(x,',')[[1]])) else as.numeric(x)
+  if(!length(v) || anyNA(v) || any(v <= 0 | v > 1) || anyDuplicated(v)) stop('Invalid BH levels: ',paste(x,collapse=','))
+  sort(v)
+}
+# Class labels of the levels, strictest first: "<0.05", "<0.1", "<0.15".
+scoring_bh_labels <- function(levels) paste0('<',vapply(levels,format,'',scientific=FALSE))
+# BH class of each q: the strictest level it is below (strict <, as in every call), "ns" above the loosest level, NA
+# where q is NA (no evidence, which is not the same as not significant).
+scoring_bh_class <- function(q, levels) {
+  levels <- scoring_bh_levels(levels); labels <- scoring_bh_labels(levels)
+  out <- rep('ns',length(q))
+  for(i in rev(seq_along(levels))) out[which(q < levels[i])] <- labels[i]  # loosest first, so the strictest match wins
+  out[is.na(q)] <- NA_character_
+  out
+}
+# The same class as an ordered factor, strictest last, for plots and sorting.
+scoring_bh_factor <- function(x, levels) factor(x,levels=c('ns',rev(scoring_bh_labels(scoring_bh_levels(levels)))),ordered=TRUE)

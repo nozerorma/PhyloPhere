@@ -6,9 +6,13 @@ ami_reference_symbol <- function(genes) {
 
 # The scores table also carries copies of RER/FADE evidence on CAAS IDs.
 # Each method's own background defines which rows belong to its seed family.
+# Scores carry CAAS IDs (GENE.Species) and a method background may use bare symbols
+# (FADE) or suffixed IDs (RER), so rows are matched on the reference symbol and the
+# result is returned in the background's own identifier form, as the seed lists are.
 ami_method_seed_evidence <- function(scores, hit, background) {
  if (length(hit) != nrow(scores)) stop('Invalid method evidence mask')
- scores$Gene[hit %in% TRUE & scores$Gene %in% background]
+ hit_symbols <- unique(ami_reference_symbol(scores$Gene[hit %in% TRUE]))
+ background[ami_reference_symbol(background) %in% hit_symbols]
 }
 
 ami_module_provenance <- function(path,active_file,network_file,background_file=NULL) {
@@ -62,6 +66,7 @@ ami_recurrence <- function(terms,registry,view) {
  required<-c('tool','gene_list','term')
  if(!all(required %in% names(terms)))terms<-data.frame(tool=character(),gene_list=character(),term=character())
  terms<-terms[!is.na(terms$term)&nzchar(terms$term),,drop=FALSE]
+ terms<-terms[paste(terms$tool,terms$gene_list) %in% paste(availability$tool,availability$gene_list),,drop=FALSE]  # nominal lists only: BH level lists are separate analyses, not part of the cross-method recurrence
  pres<-unique(merge(terms[required],availability[availability$available,c('tool','gene_list')],by=c('tool','gene_list')))
  labels<-sort(unique(terms$term))
  cells<-data.frame(term=character(),tool=character(),gene_list=character(),list_label=character(),present=integer())
@@ -80,6 +85,38 @@ ami_recurrence <- function(terms,registry,view) {
  summary$fraction_evaluable<-ifelse(summary$n_evaluable_lists>0,summary$n_lists_with_term/summary$n_evaluable_lists,NA_real_)
  list(cells=cells,summary=summary,availability=availability)
 }
+
+# Displayed recurrence: the terms found in at least `min_lists` evaluable lists, most recurrent first (radix order, so
+# ties do not depend on the locale). A term in a single list says nothing about recurrence; the exports keep the full summary.
+ami_recurrent_terms <- function(summary, min_lists = 2L) {
+ if (!nrow(summary) || max(summary$n_evaluable_lists) < min_lists) return(summary[0, , drop = FALSE])
+ shown <- summary[summary$n_lists_with_term >= min_lists, , drop = FALSE]
+ shown[order(-shown$n_lists_with_term, shown$term, method = 'radix'), , drop = FALSE]
+}
+
+# One line above the displayed table: what the filter kept, or why recurrence cannot be evaluated.
+ami_recurrence_note <- function(summary, min_lists = 2L) {
+ if (!nrow(summary)) return('_No verified module descriptions available in this view._\n\n')
+ if (max(summary$n_evaluable_lists) < min_lists)
+  return(sprintf('_Fewer than %d evaluable lists in this view: recurrence is undefined._\n\n', min_lists))
+ sprintf('_%d of %d terms occur in at least %d evaluable lists; the exported tables keep every term._\n\n',
+         nrow(ami_recurrent_terms(summary, min_lists)), nrow(summary), min_lists)
+}
+
+# BH classes in the AMI report. The class labels ("<0.05", ..., "ns") are written by scoring; `levels` are the BH levels.
+# The colour ladder is that of report_bh_colours() in TRAIT_ANALYSIS/local/src/report_style.R, which the AMI report does not read.
+ami_bh_token <- function(levels) vapply(levels, format, '', scientific = FALSE)
+ami_bh_labels <- function(levels) paste0('<', ami_bh_token(sort(levels)))   # strictest first
+ami_bh_colours <- function(labels) {
+ ladder <- if (length(labels) == 1L) '#E15759' else grDevices::colorRampPalette(c('#4E79A7', '#F28E2B', '#E15759'))(length(labels))
+ c(ns = '#BAB0AC', stats::setNames(rev(ladder), labels))
+}
+# TRUE where the q of the class is below `level` (the class is the strictest level below q, so also below every looser one).
+ami_bh_below <- function(cls, level) ifelse(is.na(cls), NA, startsWith(cls, '<') & suppressWarnings(as.numeric(sub('^<', '', cls))) <= level)
+
+# Level lists of the tabs: "global_q0.05" is the BH level 0.05 of the list "global"; any other name is the nominal list.
+ami_level_value <- function(name) ifelse(grepl('_q[0-9.]+$', name), suppressWarnings(as.numeric(sub('^.*_q', '', name))), 0)
+ami_level_title <- function(name) ifelse(grepl('_q[0-9.]+$', name), paste0('q<', sub('^.*_q', '', name)), 'Nominal')
 
 # Legacy filenames are preserved for consumers; visible labels describe Rho.
 ami_list_label <- function(x) switch(x,rer_accelerating="RER positive",rer_decelerating="RER negative",rer_significant="RER global (both signs)",x)

@@ -19,8 +19,7 @@
  *             as NULL; caas_pos_sample, caas_pos_quantiles and background_file are
  *             passed to the report but its body does not read them.
  *  Produces:  10.Scoring_report_<trait>.html, published to scoring/ and html_reports/
- *             (the report also writes position_scores_annotated.tsv and the genomic
- *             window tables into scoring/)
+ *             (the report also writes position_scores_annotated.tsv into scoring/)
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -34,7 +33,7 @@ process SCORING_REPORT {
 
     publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
-               pattern: '{*.html,gene_evidence_*.tsv,position_evidence_*.tsv,genomic_window_accum_gene_caas.tsv,genomic_window_accum_positions.tsv,position_genomic_mapping.tsv,position_scores_annotated.tsv}'
+               pattern: '{*.html,gene_evidence_*.tsv,position_evidence_*.tsv,position_scores_annotated.tsv}'
     publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
@@ -47,8 +46,6 @@ process SCORING_REPORT {
     path evidence_metadata   // gene_evidence_metadata.json from SCORING_EVIDENCE; must sit next to gene_scores.tsv because the report looks it up by dirname(gene_scores_file) (gene_stat check, nominal/FDR thresholds)
     path fade_site_top_file  // optional: per-site FADE table, top direction (NO_FADE_SITE_TOP sentinel when absent)
     path fade_site_bot_file  // optional: per-site FADE table, bottom direction (NO_FADE_SITE_BOT sentinel when absent)
-    path genomic_info        // optional: gene genomic coords TSV (NO_GENOMIC_INFO sentinel when absent)
-    path map_dir             // optional: CAAS MAP directory (NO_MAP_DIR when absent)
     path null_summary        // optional: cycle_summary.tsv, scored entries and genes per null cycle and direction (NO_NULL_SUMMARY sentinel when absent)
     path null_hist           // optional: cycle_hist.tsv, histogram of the scores of each null cycle and direction (NO_NULL_HIST sentinel when absent)
     path caas_pos_sample     // optional: null sample (NO_CAAS_POS_SAMPLE sentinel); passed to the report, which does not read it
@@ -65,10 +62,7 @@ process SCORING_REPORT {
     path 'gene_evidence_overlap.tsv', emit: gene_overlap
     path 'gene_evidence_{global,top,bottom}.tsv', emit: gene_evidence_tables
     path 'position_evidence_{global,top,bottom}.tsv', emit: position_evidence_tables
-    path 'genomic_window_accum_gene_caas.tsv', emit: genomic_windows, optional: true
     path 'position_scores_annotated.tsv', emit: annotated_positions, optional: true
-    path 'position_genomic_mapping.tsv', emit: position_genomic_mapping, optional: true
-    path 'genomic_window_accum_positions.tsv', emit: position_windows, optional: true
 
     script:
     def local_dir      = "${baseDir}/subworkflows/SCORING/local"
@@ -79,7 +73,6 @@ process SCORING_REPORT {
     def fs_top_arg = (fade_site_top_file.name =~ /^NO_FADE_SITE_TOP/) ? 'NULL' : "'${fade_site_top_file}'"
     def fs_bot_arg = (fade_site_bot_file.name =~ /^NO_FADE_SITE_BOT/) ? 'NULL' : "'${fade_site_bot_file}'"
 
-    def gi_arg  = (genomic_info.name  =~ /^NO_GENOMIC_INFO/)  ? 'NULL' : "'${genomic_info}'"
     def null_summary_arg = (null_summary.name =~ /^NO_NULL_SUMMARY|^NO_FILE/) ? 'NULL' : "'${null_summary}'"
     def null_hist_arg = (null_hist.name =~ /^NO_NULL_HIST|^NO_FILE/) ? 'NULL' : "'${null_hist}'"
     def pos_sample_arg = (caas_pos_sample.name =~ /^NO_CAAS_POS_SAMPLE|^NO_FILE/) ? 'NULL' : "'${caas_pos_sample}'"
@@ -90,18 +83,12 @@ process SCORING_REPORT {
     def hyp_pairs_arg = (hyp_pairs.name =~ /^NO_HYP_PAIRS|^NO_FILE/) ? 'NULL' : "'${hyp_pairs}'"
     def perm_harvest_arg = (perm_harvest.name =~ /^NO_PERM_HARVEST|^NO_FILE/) ? 'NULL' : "'${perm_harvest}'"
     def null_universe_arg = (null_universe.name =~ /^NO_NULL_UNIVERSE|^NO_FILE/) ? 'NULL' : "'${null_universe}'"
-    def win_size = params.scoring_window_size_bp ?: 1000000
-    def has_map = !map_dir.name.startsWith('NO_')
-    def map_arg = has_map ? "'position_genomic_mapping.tsv'" : 'NULL'
-    def py_cmd = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
-    def map_cmd = has_map ? "${py_cmd} ${local_dir}/src/map_scoring_positions.py --scores '${position_scores}' --map-dir '${map_dir}' --vep-src '${baseDir}/subworkflows/VEP/local/src' --output position_genomic_mapping.tsv" : ''
 
     if (params.use_singularity || params.use_apptainer) {
         """
         # Scoring report source SHA256: ${source_hash}
         cp -R ${local_dir}/* .
         cp ${style_file} src/report_style.R
-        ${map_cmd}
 
         REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
@@ -113,11 +100,9 @@ process SCORING_REPORT {
                     traitname            = '${traitname}',
                     output_dir           = '${outdir}',
                     evidence_p_threshold = ${params.evidence_p_threshold ?: 0.05},
-                    evidence_fdr_threshold = ${params.evidence_fdr_threshold ?: 0.05},
+                    evidence_fdr_levels = '${params.evidence_fdr_levels ?: '0.05,0.1,0.15'}',
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
-                    genomic_info_file    = ${gi_arg},
-                    position_genomic_file = ${map_arg},
                     null_summary_file    = ${null_summary_arg},
                     null_hist_file       = ${null_hist_arg},
                     caas_pos_sample_file = ${pos_sample_arg},
@@ -128,7 +113,6 @@ process SCORING_REPORT {
                     hypotheses_pairs_file = ${hyp_pairs_arg},
                     perm_harvest_file    = ${perm_harvest_arg},
                     null_universe_file   = ${null_universe_arg},
-                    window_size_bp       = ${win_size},
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'
                 ),
@@ -141,7 +125,6 @@ process SCORING_REPORT {
         # Scoring report source SHA256: ${source_hash}
         cp -R ${local_dir}/* .
         cp ${style_file} src/report_style.R
-        ${map_cmd}
 
         REPORT_CORES=${task.cpus} Rscript -e "
             rmarkdown::render(
@@ -153,11 +136,9 @@ process SCORING_REPORT {
                     traitname            = '${traitname}',
                     output_dir           = '${outdir}',
                     evidence_p_threshold = ${params.evidence_p_threshold ?: 0.05},
-                    evidence_fdr_threshold = ${params.evidence_fdr_threshold ?: 0.05},
+                    evidence_fdr_levels = '${params.evidence_fdr_levels ?: '0.05,0.1,0.15'}',
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
-                    genomic_info_file    = ${gi_arg},
-                    position_genomic_file = ${map_arg},
                     null_summary_file    = ${null_summary_arg},
                     null_hist_file       = ${null_hist_arg},
                     caas_pos_sample_file = ${pos_sample_arg},
@@ -168,7 +149,6 @@ process SCORING_REPORT {
                     hypotheses_pairs_file = ${hyp_pairs_arg},
                     perm_harvest_file    = ${perm_harvest_arg},
                     null_universe_file   = ${null_universe_arg},
-                    window_size_bp       = ${win_size},
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'
                 ),

@@ -296,7 +296,7 @@ Integrates CAAS, FADE and RERconverge into position and gene tables, calibrates 
 | Option | Default | Meaning |
 |---|---|---|
 | `evidence_p_threshold` | 0.05 | Nominal empirical threshold for activity flags |
-| `evidence_fdr_threshold` | 0.05 | Benjamini-Hochberg threshold for highlighting |
+| `evidence_fdr_levels` | 0.05,0.1,0.15 | Benjamini-Hochberg levels of the q classes (comma-separated) |
 | `gene_stat` | max | Gene statistic; only `max` is supported |
 | `caas_evidence_top_n` | 0 | Evidence table for the N best positions; 0 = off |
 | `scoring_window_size_bp` | 1000000 | Genomic window for overlap tables |
@@ -354,7 +354,6 @@ Describes how positive positions relate to genes and to sets of positions (Pfam 
 | Option | Default | Meaning |
 |---|---|---|
 | `posenrich` | false | Enable |
-| `accumulation_fdr` | 0.1 | q threshold marked in report 13 (does not change q) |
 | `posenrich_domains`, `posenrich_ucr` | true, true | Include Pfam and UCR layers; generated from `--alignment` when their tables are blank |
 | `domain_variability_file`, `ucr_positions_file` | empty | Precomputed Pfam and UCR tables (must have a `coordinate_space` column) |
 | `domain_ref_species`, `pfam_cache_dir` | Homo_sapiens, `~/.cache/phylophere/pfam` | Species scanned with hmmscan; Pfam-A cache (about 1.5 GB) |

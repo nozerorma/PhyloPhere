@@ -183,7 +183,6 @@ export PRECOMP_USE_DISAMBIGUATION="{{ 'true' if precomputed.use_disambiguation e
 export PRECOMP_USE_POSTPROC="{{ 'true' if precomputed.use_postproc else 'false' }}"
 
 # ── POSENRICH level 1: Accumulation ───────────────────────────────────────────
-export ACCUMULATION_FDR="{{ modules.posenrich.accumulation_fdr }}"
 export ACCUMULATION_CAAS_INPUT="{{ modules.posenrich.accumulation_caas_input }}"
 export ACCUMULATION_BACKGROUND_INPUT="{{ modules.posenrich.accumulation_background_input }}"
 
@@ -243,7 +242,7 @@ export GENE_ENSEMBL_FILE="{{ modules.scoring.gene_ensembl_file }}"
 export AUTO_GENERATE_ENSEMBL="{{ run_defaults.auto_generate_ensembl }}"
 export ENSEMBL_DATASET="{{ modules.scoring.ensembl_dataset }}"
 export EVIDENCE_P_THRESHOLD="{{ modules.scoring.evidence_p_threshold }}"
-export EVIDENCE_FDR_THRESHOLD="{{ modules.scoring.evidence_fdr_threshold }}"
+export EVIDENCE_FDR_LEVELS="{{ modules.scoring.evidence_fdr_levels }}"
 export CAAS_EVIDENCE_TOP_N="{{ modules.scoring.caas_evidence_top_n }}"
 export CAAS_EVIDENCE_DISCOVERY_USER="{{ modules.scoring.caas_evidence_discovery }}"
 export SCORING_HYPOTHESES_PAIRS="{{ modules.scoring.scoring_hypotheses_pairs }}"

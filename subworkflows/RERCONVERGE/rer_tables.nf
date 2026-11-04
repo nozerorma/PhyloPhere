@@ -27,6 +27,6 @@ process RER_TABLES {
 
     """
     # RER sources: ${source_hash}; inputs: ${input_hash}
-    ${rs} ${rerQuote("${baseDir}/subworkflows/RERCONVERGE/local/rer_tables.R")} ${rerQuote(result_rds)} ${rerQuote(null_input)} ${rerQuote(params.traitname)} ${rerQuote(params.evidence_p_threshold == null ? 0.05 : params.evidence_p_threshold)} ${rerQuote(params.evidence_fdr_threshold == null ? 0.05 : params.evidence_fdr_threshold)} ${rerQuote(gene_reference)} ${rerQuote("${baseDir}/subworkflows/SCORING/local/src/scoring_io.R")}
+    ${rs} ${rerQuote("${baseDir}/subworkflows/RERCONVERGE/local/rer_tables.R")} ${rerQuote(result_rds)} ${rerQuote(null_input)} ${rerQuote(params.traitname)} ${rerQuote(params.evidence_p_threshold == null ? 0.05 : params.evidence_p_threshold)} ${rerQuote(params.evidence_fdr_levels == null ? '0.05,0.1,0.15' : params.evidence_fdr_levels)} ${rerQuote(gene_reference)} ${rerQuote("${baseDir}/subworkflows/SCORING/local/src/scoring_io.R")}
     """
 }

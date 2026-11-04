@@ -114,6 +114,7 @@ set.seed(seed_val)
 
 .src_dir <- file.path(dirname(normalizePath(knitr::current_input(), mustWork = FALSE)), "src")
 source(file.path(.src_dir,"scoring_io.R"))
+source(file.path(.src_dir,"report_evidence.R"))
 source(file.path(.src_dir,"evidence_flags.R"))
 source(file.path(.src_dir,"report_presentation.R"))
 source(file.path(.src_dir,"ami_evidence.R"))
@@ -465,7 +466,7 @@ if(!is.null(position_char_cmp_df) && "fubar_selection" %in% names(position_char_
 # evidence, same derivation as 11.FCS_general_report.Rmd) + the gene-level
 # flag_* columns fcs_stats.tsv already carries (gate/FADE/RER,
 # direction-aware).
-.nominal_cmp <- .05; .fdr_cmp <- .05
+.nominal_cmp <- .05; .levels_cmp <- c(.05, .1, .15)  # BH levels of the evidence; the metadata override them
 has_gene_scores_cmp <- .file_ok(params$gene_scores_file)
 gene_attr_df <- if(has_gene_scores_cmp) {
   gs <- readr::read_tsv(params$gene_scores_file,show_col_types=FALSE)
@@ -474,7 +475,7 @@ gene_attr_df <- if(has_gene_scores_cmp) {
   if(!.file_ok(stamp)) stamp <- file.path(dirname(params$gene_scores_file),"gene_evidence_metadata.json")
   if(!.file_ok(stamp) || !identical(jsonlite::read_json(stamp)$gene_stat,"max")) stop("Canonical gene evidence requires max metadata")
   .saved <- jsonlite::read_json(stamp,simplifyVector=TRUE)
-  .nominal_cmp <- as.numeric(.saved$nominal_threshold); .fdr_cmp <- as.numeric(.saved$fdr_threshold)
+  .nominal_cmp <- as.numeric(.saved$nominal_threshold); .levels_cmp <- if(length(.saved$fdr_levels)) as.numeric(.saved$fdr_levels) else c(.05,.1,.15)
   gs$gene <- as.character(gs$Gene)
   for(sf in c("","_top","_bottom")) {
     gs[[paste0("flag_fade",sf)]] <- if(sf=="") evidence_column(gs,"fade_significant_top",NA) | evidence_column(gs,"fade_significant_bottom",NA) else evidence_column(gs,paste0("fade_significant",sf),NA)
@@ -486,7 +487,7 @@ gene_attr_df <- if(has_gene_scores_cmp) {
   gs
 } else if (has_fcs_stats_cmp) {
   pf <- fcs_evidence_flags(fcs_stats_cmp_df)
-  for(nm in grep("^caas_p|^rer_p",names(fcs_stats_cmp_df),value=TRUE)) pf[[nm]] <- fcs_stats_cmp_df[[nm]]
+  for(nm in grep("^caas_p|^rer_p|bh_class",names(fcs_stats_cmp_df),value=TRUE)) pf[[nm]] <- fcs_stats_cmp_df[[nm]]
   flag_cols_cmp <- grep("^flag_",names(fcs_stats_cmp_df),value=TRUE)
   dplyr::left_join(pf,fcs_stats_cmp_df[,c("gene",flag_cols_cmp)],by="gene")
 } else tibble::tibble(gene=character())
@@ -851,7 +852,7 @@ for (tl in c("CAAS", "RER", "FADE")) {
 
 # AMI term recurrence across methods {.tabset}
 
-Representatives keep the best term of each block of its module (blocks of terms with overlapping module genes, as in the AMI report); All terms keeps every term below the description cutoff. Terms are matched by exact description text. Only verified, evaluable lists enter the denominator. RER Global is shown as a reference in CAAS Top/Bottom views.
+Representatives keep the best term of each block of its module (blocks of terms with overlapping module genes, as in the AMI report); All terms keeps every term below the description cutoff. Terms are matched by exact description text. Only verified, evaluable lists enter the denominator. RER Global is shown as a reference in CAAS Top/Bottom views. The tables show the terms present in at least two evaluable lists, most recurrent first; the exported TSV files keep every term.
 
 ```{r comparative-ami-recurrence, results='asis'}
 if(has_ami_term_membership && nrow(ami_availability)) {
@@ -870,7 +871,8 @@ if(has_ami_term_membership && nrow(ami_availability)) {
    tm <- ami_term_membership_df
    if(mode=="Representatives") tm <- tm[tm$is_representative %in% TRUE,,drop=FALSE]
    rec <- ami_recurrence(tm,reg,v)
-   report_emit(report_table(rec$summary))
+   cat(ami_recurrence_note(rec$summary))
+   report_emit(report_table(ami_recurrent_terms(rec$summary)))
    write_tsv(rec$summary,file.path("compare_results",paste0("ami_recurrence_",tolower(v),"_",if(mode=="Representatives")"representatives" else "all_terms",".tsv")))
   }
  }
@@ -937,75 +939,50 @@ if(has_multi) {
 
 # Gene-level overlap between methods {.tabset .tabset-fade}
 
-CAAS and RER or FADE are compared only among genes with evaluable evidence for both methods. RER includes both signs; overlap does not imply directional agreement. FADE uses the producer's selected-gene calls; Global is the union of Top and Bottom, with an unmeasured side remaining unknown unless the measured side is positive. Nominal and adjusted CAAS/RER calls use the thresholds saved with SCORING. Fisher tests are descriptive, two-sided, and BH-adjusted across the 12 planned comparisons.
+CAAS and RER or FADE are compared only among genes with evaluable evidence for both methods. RER includes both signs; overlap does not imply directional agreement. FADE uses the producer's selected-gene calls; Global is the union of Top and Bottom, with an unmeasured side remaining unknown unless the measured side is positive. Nominal and adjusted CAAS/RER calls use the thresholds saved with SCORING. Top compares CAAS Top with FADE Top and Bottom with Bottom; Global compares the CAAS global ranking with the union of both FADE sides. Each tool has its own tab, with Global, Top and Bottom side by side and the nominal call above the adjusted one. Fisher tests are descriptive, two-sided, and BH-adjusted across the 12 planned comparisons.
 
 ```{r comparison-gene-overlap-setup, include=FALSE}
-# Reporting only: preserve producer p/q and their original adjustment families.
-scoring_overlap <- function(d, nominal=.05, fdr=.05) {
-  if(anyDuplicated(d$Gene)) stop('Duplicate gene evidence keys')
-  col <- function(n) if(n %in% names(d)) d[[n]] else rep(NA_real_, nrow(d))
-  rows <- list()
-  for(rk in c('global','top','bottom')) {
-    sf <- if(rk=='global') '' else paste0('_',rk)
-    for(tool in c('RER','FADE')) for(level in c('nominal','adjusted')) {
-      cp <- col(paste0('caas_',if(level=='nominal') 'p.gen' else 'p.gen.adj',sf))
-      ca <- cp < if(level=='nominal') nominal else fdr
-      if(tool=='RER') {
-        op <- col(if(level=='nominal') 'rer_min_pval' else 'rer_perm_padj')
-        measured <- is.finite(op)
-        other <- op < if(level=='nominal') nominal else fdr
-      } else if(tool=='FADE') {
-        sides <- if(rk=='global') c('top','bottom') else rk
-        bf <- lapply(sides,function(x) col(paste0('fade_max_bf_',x)))
-        calls <- lapply(sides,function(x) col(paste0('fade_significant_',x)))
-        # Global FADE is the union of measured sides. A side with no source data
-        # stays unavailable; it does not erase evidence from the other side.
-        side_measured <- Map(function(b,c) !is.na(b) & !is.na(c), bf, calls)
-        other <- Reduce(`|`,lapply(calls,function(x)x %in% TRUE))
-        measured <- other | Reduce(`&`, side_measured)
-      }
-      ok <- is.finite(cp) & measured & !is.na(ca) & !is.na(other)
-      ca <- ca[ok]; ot <- other[ok]
-      cells <- c(sum(ca & ot),sum(ca & !ot),sum(!ca & ot),sum(!ca & !ot))
-      pv <- if(length(ca)) stats::fisher.test(matrix(cells,2,byrow=TRUE))$p.value else NA_real_
-      rows[[length(rows)+1L]] <- data.frame(ranking=rk,tool=tool,call=level,
-        shared_tested_universe=length(ca),CAAS=sum(ca),other=sum(ot),overlap=cells[1],
-        both=cells[1],caas_only=cells[2],other_only=cells[3],neither=cells[4],fisher_p=pv)
-    }
-  }
-  out <- do.call(rbind,rows)
-  out$fisher_BH <- p.adjust(out$fisher_p,'BH',n=nrow(out))
-  out$fisher_family_n <- nrow(out)
-  out
-}
-
-gene_overlap_cmp <- if (has_gene_scores_cmp) scoring_overlap(gene_attr_df, .nominal_cmp, .fdr_cmp) else NULL
+gene_overlap_cmp <- if (has_gene_scores_cmp) scoring_overlap(gene_attr_df, .nominal_cmp, .levels_cmp) else NULL
 if (!is.null(gene_overlap_cmp)) readr::write_tsv(gene_overlap_cmp, "compare_results/gene_evidence_overlap.tsv")
-.draw_overlap_cmp <- function(x) {
-  if (x$shared_tested_universe == 0) return(NULL)
-  circle <- function(cx) { t <- seq(0,2*pi,length.out=100); data.frame(x=cx+cos(t),y=sin(t),set=as.character(cx)) }
-  shape <- rbind(circle(-.55),circle(.55))
-  ggplot(shape,aes(x,y,group=set,fill=set)) + geom_polygon(alpha=.35,colour="grey35") +
-    scale_fill_manual(values=c("-.55"="#4c78a8", "-0.55"="#4c78a8", "0.55"="#f58518"),guide="none") +
-    annotate("text",x=c(-1.05,0,1.05),y=0,label=c(x$caas_only,x$both,x$other_only),size=5) +
-    annotate("text",x=c(-.8,.8),y=1.2,label=c("CAAS",x$tool),fontface="bold") +
-    coord_fixed(xlim=c(-1.7,1.7),ylim=c(-1.15,1.5),clip="off") + theme_void() +
-    labs(title=paste(toupper(x$ranking),x$tool,x$call),
-         subtitle=sprintf("Shared evaluable genes: %s; neither: %s; Fisher p: %s; BH: %s",x$shared_tested_universe,x$neither,signif(x$fisher_p,3),signif(x$fisher_BH,3)))
+# One figure per tool: columns are the rankings (Global, Top, Bottom), rows the CAAS call level (nominal on top,
+# then each BH level). Top compares CAAS top with FADE top, Bottom with Bottom; Global uses the union of FADE sides.
+.draw_overlap_tool <- function(rows) {
+  tool <- rows$tool[1]
+  rows$ranking <- factor(toupper(rows$ranking),c("GLOBAL","TOP","BOTTOM"))
+  rows$call <- factor(rows$call,unique(rows$call),sub("^nominal$","Nominal",unique(rows$call)))
+  rows <- rows[rows$shared_tested_universe>0,,drop=FALSE]
+  if (!nrow(rows)) return(NULL)
+  t <- seq(0,2*pi,length.out=100)
+  facet_cols <- function(i) rows[rep(i,length(t)),c("ranking","call")]
+  shape <- do.call(rbind,lapply(seq_len(nrow(rows)),function(i) rbind(
+    cbind(data.frame(x=-.55+cos(t),y=sin(t),set="CAAS",id=paste(i,"a")),facet_cols(i)),
+    cbind(data.frame(x=.55+cos(t),y=sin(t),set=tool,id=paste(i,"b")),facet_cols(i)))))
+  counts <- do.call(rbind,lapply(seq_len(nrow(rows)),function(i) {
+    x <- rows[i,]
+    data.frame(x=c(-1.05,0,1.05),y=0,label=c(x$caas_only,x$both,x$other_only),ranking=x$ranking,call=x$call)}))
+  info <- data.frame(x=0,y=-1.55,ranking=rows$ranking,call=rows$call,
+    label=sprintf("Shared genes: %s; neither: %s\nFisher p: %s",rows$shared_tested_universe,rows$neither,signif(rows$fisher_p,3)))
+  heads <- data.frame(x=c(-.8,.8),y=1.25,label=c("CAAS",tool))
+  heads <- merge(heads,unique(rows[c("ranking","call")]))
+  ggplot(shape,aes(x,y,group=id,fill=set)) + geom_polygon(alpha=.35,colour="grey35") +
+    scale_fill_manual(values=setNames(c("#4c78a8","#f58518"),c("CAAS",tool)),guide="none") +
+    geom_text(data=counts,aes(x,y,label=label),inherit.aes=FALSE,size=4.5) +
+    geom_text(data=heads,aes(x,y,label=label),inherit.aes=FALSE,fontface="bold",size=3.5) +
+    geom_text(data=info,aes(x,y,label=label),inherit.aes=FALSE,size=3,lineheight=.9) +
+    facet_grid(call~ranking,drop=FALSE) +
+    coord_fixed(xlim=c(-1.8,1.8),ylim=c(-1.9,1.5),clip="off") + theme_void() +
+    theme(strip.text=element_text(face="bold",size=11),panel.spacing=grid::unit(1,"lines"))
 }
 ```
 
-```{r comparison-gene-overlap, results='asis', fig.width=8, fig.height=5}
+```{r comparison-gene-overlap, results='asis', fig.width=12, fig.height=7}
 if (is.null(gene_overlap_cmp)) {
   cat("Canonical gene evidence is unavailable; gene-level overlap cannot be calculated.\n\n")
-} else for (rk in c("global","top","bottom")) {
-  cat("## ",toupper(rk),"\n\n",sep="")
-  rows <- gene_overlap_cmp[gene_overlap_cmp$ranking==rk,,drop=FALSE]
-  for (i in seq_len(nrow(rows))) {
-    x <- rows[i,,drop=FALSE]
-    if (x$shared_tested_universe > 0) print(.draw_overlap_cmp(x))
-    else cat(sprintf("**CAAS / %s (%s):** no shared evaluable gene evidence.\n\n",x$tool,x$call))
-  }
+} else for (tool in c("RER","FADE")) {
+  cat("## ",tool,"\n\n",sep="")
+  rows <- gene_overlap_cmp[gene_overlap_cmp$tool==tool,,drop=FALSE]
+  p <- .draw_overlap_tool(rows)
+  if (is.null(p)) cat(sprintf("**CAAS / %s:** no shared evaluable gene evidence.\n\n",tool)) else print(p)
   emit_widget(DT::datatable(rows,rownames=FALSE,options=list(scrollX=TRUE,dom="t")))
 }
 ```
@@ -1186,12 +1163,17 @@ cap_note <- function(n_total) {
     dplyr::full_join(fade, by = "gene")
 }
 
+# "BH" hit of the candidate tables: q below the loosest BH level, read from the class written by scoring (NA class: from the numeric q).
+.bh_hit <- function(cls, q) {
+  q <- suppressWarnings(as.numeric(q)); lv <- max(.levels_cmp)
+  ifelse(!is.na(cls), evidence_bh_below(cls, lv), ifelse(is.finite(q), q < lv, NA))
+}
 .position_emp_flags <- function(base, dir_key) {
  base$gene <- as.character(base$Gene)
  base$`CAAS p` <- suppressWarnings(as.numeric(evidence_column(base,"p.emp")))
  base$`CAAS BH` <- suppressWarnings(as.numeric(evidence_column(base,"p.adj_bh")))
  base$`CAAS nominal` <- if("caas_nominal" %in% names(base))base$caas_nominal else ifelse(is.finite(base$`CAAS p`),base$`CAAS p`<.nominal_cmp,NA)
- base$`CAAS adjusted` <- if("caas_adjusted" %in% names(base))base$caas_adjusted else ifelse(is.finite(base$`CAAS BH`),base$`CAAS BH`<.fdr_cmp,NA)
+ base$`CAAS adjusted` <- .bh_hit(evidence_column(base,"caas_bh_class",NA_character_), base$`CAAS BH`)
  base
 }
 
@@ -1206,7 +1188,7 @@ build_interesting_genes <- function(direction) {
     `CAAS p`=as.numeric(evidence_column(g,paste0("caas_p.gen",sf))),
     `CAAS BH`=as.numeric(evidence_column(g,paste0("caas_p.gen.adj",sf))),
     `CAAS nominal`=as.logical(evidence_column(g,paste0("caas_nominal",sf),NA)),
-    `CAAS adjusted`=as.logical(evidence_column(g,paste0("caas_adjusted",sf),NA)),
+    `CAAS adjusted`=.bh_hit(evidence_column(g,paste0("caas_bh_class",sf),NA_character_), evidence_column(g,paste0("caas_p.gen.adj",sf))),
     `RER p`=as.numeric(evidence_column(g,"rer_p.emp")),`RER BH`=as.numeric(evidence_column(g,"rer_p.adj")),
     `RER rho`=as.numeric(evidence_column(g,"rer_rho")),
     `RER nominal`=as.logical(evidence_column(g,"rer_significant",NA)),
@@ -1214,7 +1196,7 @@ build_interesting_genes <- function(direction) {
   bf_top <- as.numeric(evidence_column(g,"fade_max_bf_top")); bf_bot <- as.numeric(evidence_column(g,"fade_max_bf_bottom"))
   base$`FADE BF` <- if(rk=="top")bf_top else if(rk=="bottom")bf_bot else pmax(bf_top,bf_bot,na.rm=TRUE)
   base$`FADE BF`[!is.finite(base$`FADE BF`)] <- NA_real_
-  base$`RER adjusted` <- as.logical(evidence_column(g,"rer_significant_fdr",NA))
+  base$`RER adjusted` <- .bh_hit(evidence_column(g,"rer_bh_class",NA_character_), evidence_column(g,"rer_p.adj"))
   # Outer joins retain FCS-only and AMI-only candidates, including RER global
   # contributors in each view, without mapping their signs onto CAAS sides.
   out <- full_join(base,.fcs_terms_for(rk),by="gene") %>% full_join(.ami_desc_for(direction),by="gene")
@@ -1287,12 +1269,15 @@ if (has_position_scores_cmp && nrow(position_scores_cmp_df)) {
         pc$pai_score <- dd$.score[match(vep_target_key(pc,"gene"),vep_target_key(dd))]
       }
     }
-    pc$ensembl_consequence <- NA_character_
+    pc$ensembl_consequence <- NA_character_; pc$ensembl_top_consequence <- NA_character_; pc$ensembl_impact <- NA_character_
     if (!is.null(vep_ensembl_cmp_df) && "Consequence" %in% names(vep_ensembl_cmp_df)) {
       ens <- vep_ensembl_cmp_df %>% dplyr::filter(status=="annotated")
       if (nrow(ens)) {
         ens <- collapse_vep_consequence(ens,by=c("Gene","Position","side"))
-        pc$ensembl_consequence <- ens$Consequence[match(vep_target_key(pc,"gene"),vep_target_key(ens))]
+        m <- match(vep_target_key(pc,"gene"),vep_target_key(ens))
+        pc$ensembl_consequence <- ens$Consequence[m]
+        pc$ensembl_top_consequence <- ens$top_consequence[m]
+        if ("IMPACT" %in% names(ens)) pc$ensembl_impact <- ens$IMPACT[m]
       }
     }
     pc$pai_prediction <- NA_character_
@@ -1329,33 +1314,95 @@ if (has_position_scores_cmp && nrow(position_scores_cmp_df)) {
 }
 ```
 
-## VEP and variant databases
+## VEP and variant databases {.tabset}
 
-```{r positive-vep, results='asis', fig.width=9, fig.height=5}
+Each tab counts the positive position-side rows (Top and Bottom separately) by the status of their target in that source and, where the source carries one, by annotation type. Percentages are within each direction; for the type tables the denominator is the positions that the source annotated.
+
+```{r positive-vep, results='asis', fig.width=10, fig.height=4.5}
+.vep_count <- function(x, side) {
+  d <- data.frame(side = side, category = x, stringsAsFactors = FALSE)
+  d <- d[!is.na(d$category) & nzchar(d$category) & d$category != "-", , drop = FALSE]
+  if (!nrow(d)) return(NULL)
+  tab <- dplyr::count(d, side, category, name = "positions")
+  tot <- tapply(tab$positions, tab$side, sum)
+  tab$percent <- 100 * tab$positions / as.numeric(tot[tab$side])
+  tab
+}
+.vep_show <- function(tab, ylab) {
+  if (is.null(tab)) { cat("No positions carry this annotation.\n\n"); return(invisible()) }
+  tab$category <- stats::reorder(tab$category, tab$positions, FUN = sum)
+  print(ggplot(tab, aes(positions, category)) + geom_col(fill = "#4c78a8") +
+    geom_text(aes(label = sprintf("%s (%.1f%%)", format(positions, big.mark = ","), percent)), hjust = -0.1, size = 3) +
+    facet_wrap(~side) + scale_x_continuous(expand = expansion(mult = c(0, .35))) +
+    labs(x = "Positive positions", y = ylab))
+  emit_widget(DT::datatable(dplyr::mutate(tab, category = as.character(category), percent = round(percent, 2)) %>% dplyr::arrange(side, dplyr::desc(positions)),
+                            rownames = FALSE, options = list(pageLength = 10, scrollX = TRUE)))
+}
 pc <- positive_characterization
 if (is.null(pc)) cat("Positive position scores are unavailable.\n\n") else {
-  for (src in c("primateai","cosmic","ensembl")) {
-    stat <- pc[[paste0(src,"_status")]]
-    if (all(stat=="source_unavailable")) { cat(sprintf("**%s:** source unavailable.\n\n",src)); next }
-    tab <- pc %>% dplyr::count(side,status=.data[[paste0(src,"_status")]],name="positions")
-    cat(sprintf("**%s: target status by direction**\n\n",src)); emit_widget(DT::datatable(tab,rownames=FALSE,options=list(dom="t")))
+  labels <- c(primateai = "PrimateAI-3D", cosmic = "COSMIC", ensembl = "Ensembl VEP")
+  for (src in names(labels)) {
+    cat(sprintf("\n\n### %s\n\n", labels[[src]]))
+    stat <- pc[[paste0(src, "_status")]]
+    if (all(stat == "source_unavailable")) { cat("Source unavailable.\n\n"); next }
+    cat("**Status of the target in the source**\n\n")
+    .vep_show(.vep_count(stat, pc$side), "Target status")
+    annotated <- stat == "annotated"
+    if (src == "primateai") {
+      cat("\n**PrimateAI-3D prediction** (annotated positions; a benign label requires complete coverage of the candidate SNVs, otherwise the position has no label)\n\n")
+      lab <- ifelse(is.na(pc$pai_prediction), "no label", pc$pai_prediction)
+      .vep_show(.vep_count(lab[annotated], pc$side[annotated]), "Prediction")
+      pai <- pc %>% dplyr::filter(is.finite(pai_score))
+      if (nrow(pai)) print(ggplot(pai, aes(CAAS_score, pai_score, colour = side)) + geom_point(alpha = .4, size = 1) + facet_wrap(~side) +
+        labs(x = "CAAS score", y = "Maximum candidate PrimateAI score", title = "PrimateAI-3D score and CAAS score of the annotated positions") + theme(legend.position = "none"))
+    } else if (src == "ensembl") {
+      cat("\n**Most severe consequence** of the chosen transcript (MANE Select, else canonical, else most severe)\n\n")
+      .vep_show(.vep_count(pc$ensembl_top_consequence[annotated], pc$side[annotated]), "Consequence")
+      cat("\n**Impact class**\n\n")
+      .vep_show(.vep_count(pc$ensembl_impact[annotated], pc$side[annotated]), "Impact")
+    } else cat("\nCOSMIC reports a match with a source record or none; it carries no further class here.\n\n")
   }
-  for (field in c("pai_prediction","ensembl_consequence")) {
-    tab <- pc %>% dplyr::filter(!is.na(.data[[field]]) & nzchar(.data[[field]])) %>% dplyr::count(side,annotation=.data[[field]],name="positions")
-    if (nrow(tab)) { cat(sprintf("**%s by direction**\n\n",field)); emit_widget(DT::datatable(tab,rownames=FALSE,options=list(dom="t",scrollX=TRUE))) }
-  }
-  pai <- pc %>% dplyr::filter(is.finite(pai_score))
-  if (nrow(pai)) print(ggplot(pai,aes(CAAS_score,pai_score,colour=side))+geom_point(alpha=.4,size=1)+facet_wrap(~side)+labs(x="CAAS score",y="Maximum candidate PrimateAI score",title="PrimateAI and positive CAAS positions"))
 }
 ```
 
 ## FADE
 
+Proportion of the positive CAAS positions that coincide with a FADE selected site, by CAAS evidence level: all positive positions (score > 0, the reference level), nominal (p.emp below the nominal threshold saved with SCORING) and adjusted (BH below the saved FDR threshold). Top and Bottom use the FADE list of the same direction; Global counts each position once and uses the union of both FADE lists. A gene that FADE did not list counts as not selected. A direction whose FADE file is absent is left out, not read as zero; Global needs both files. The comparison is descriptive: it carries no test and the FADE lists are not a tested universe.
+
 ```{r positive-fade, results='asis', fig.width=9, fig.height=5}
-if (is.null(pc) || all(is.na(pc$fade_selected))) cat("FADE selected-site files are unavailable.\n\n") else {
-  tab <- pc %>% dplyr::filter(!is.na(fade_selected)) %>% dplyr::count(side,score_decile,fade_selected,name="positions")
-  print(ggplot(tab,aes(score_decile,positions,fill=fade_selected))+geom_col()+facet_wrap(~side)+scale_x_continuous(breaks=1:10)+labs(x="CAAS score decile within direction",y="Positive positions",fill="In selected FADE list"))
-  emit_widget(DT::datatable(tab,rownames=FALSE,options=list(pageLength=10,scrollX=TRUE)))
+has_fade_any_cmp <- has_fade_sites_top_cmp || has_fade_sites_bottom_cmp
+if (is.null(pc) || !has_fade_any_cmp) cat("FADE selected-site files are unavailable.\n\n") else {
+  pf <- .position_emp_flags(pc, "global")
+  key <- paste(pf$Gene, pf$Position, sep = "\r")
+  fkey <- function(d) paste(d$gene, d$Position, sep = "\r")
+  in_top <- if (has_fade_sites_top_cmp) key %in% fkey(fade_sites_top_cmp_df) else rep(NA, length(key))
+  in_bot <- if (has_fade_sites_bottom_cmp) key %in% fkey(fade_sites_bottom_cmp_df) else rep(NA, length(key))
+  pf$fade_dir <- ifelse(pf$side == "top", in_top, in_bot)
+  pf$fade_union <- ifelse(in_top %in% TRUE | in_bot %in% TRUE, TRUE, if (has_fade_sites_top_cmp && has_fade_sites_bottom_cmp) FALSE else NA)
+  by_dir <- pf %>% dplyr::transmute(direction = ifelse(side == "top", "Top", "Bottom"), nominal = `CAAS nominal` %in% TRUE,
+                                    adjusted = `CAAS adjusted` %in% TRUE, fade = fade_dir)
+  glob <- pf %>% dplyr::group_by(Gene, Position) %>%
+    dplyr::summarise(nominal = any(`CAAS nominal` %in% TRUE), adjusted = any(`CAAS adjusted` %in% TRUE), fade = dplyr::first(fade_union), .groups = "drop") %>%
+    dplyr::mutate(direction = "Global")
+  all_pos <- dplyr::bind_rows(by_dir, glob[c("direction", "nominal", "adjusted", "fade")]) %>% dplyr::mutate(all_positive = TRUE)
+  levels_caas <- c(all_positive = "All positive (score > 0)", nominal = sprintf("Nominal (p < %s)", .nominal_cmp), adjusted = sprintf("BH (q < %s)", max(.levels_cmp)))
+  fade_tab <- do.call(rbind, lapply(c("Global", "Top", "Bottom"), function(dr) do.call(rbind, lapply(names(levels_caas), function(lv) {
+    d <- all_pos[all_pos$direction == dr & all_pos[[lv]] & !is.na(all_pos$fade), , drop = FALSE]
+    data.frame(direction = dr, caas_level = levels_caas[[lv]], caas_positions = nrow(d), fade_overlap = sum(d$fade),
+               proportion = if (nrow(d)) sum(d$fade) / nrow(d) else NA_real_, stringsAsFactors = FALSE)
+  }))))
+  fade_tab$direction <- factor(fade_tab$direction, c("Global", "Top", "Bottom"))
+  fade_tab$caas_level <- factor(fade_tab$caas_level, levels_caas)
+  fade_tab <- fade_tab[!(fade_tab$direction == "Top" & !has_fade_sites_top_cmp) & !(fade_tab$direction == "Bottom" & !has_fade_sites_bottom_cmp) &
+                        !(fade_tab$direction == "Global" & !(has_fade_sites_top_cmp && has_fade_sites_bottom_cmp)), ]
+  readr::write_tsv(fade_tab, "compare_results/fade_position_overlap.tsv")
+  print(ggplot(fade_tab, aes(caas_level, proportion, fill = direction)) + geom_col(position = position_dodge(.8), width = .75) +
+    geom_text(aes(label = sprintf("%s/%s", fade_overlap, caas_positions)), position = position_dodge(.8), vjust = -.4, size = 3) +
+    scale_fill_manual(values = c(Global = "#7f7f7f", Top = "#4c78a8", Bottom = "#f58518")) +
+    scale_y_continuous(labels = scales::percent, expand = expansion(mult = c(0, .12))) +
+    labs(x = "CAAS evidence level of the position", y = "Positions in a FADE selected site", fill = "Direction",
+         subtitle = "Labels: positions in a FADE selected site / CAAS positions at that level"))
+  emit_widget(DT::datatable(dplyr::mutate(fade_tab, proportion = round(proportion, 4)), rownames = FALSE, options = list(dom = "t", scrollX = TRUE)))
 }
 ```
 
@@ -1374,9 +1421,20 @@ if (is.null(pc) || all(is.na(pc$biochem_groupings))) cat("Biochemical groupings 
 
 ## Regional accumulation
 
-```{r positive-regional, results='asis'}
+```{r positive-regional, results='asis', fig.width=13, fig.height=5}
 if (is.null(regional_characterization) || !nrow(regional_characterization)) cat(sprintf("Genomic windows unavailable: %d positive position-side rows lack usable mapped coordinates.\n\n",if (is.null(pc)) 0L else nrow(pc))) else {
-  cat(sprintf("Counts use MAP-declared hg38 residue coordinates; %d of %d positive position-side rows lack a usable coordinate. These are descriptive counts, not a regional enrichment test.\n\n",sum(!is.finite(pc$genomic_position)),nrow(pc)))
+  cat(sprintf("Counts use MAP-declared hg38 residue coordinates; %d of %d positive position-side rows lack a usable coordinate. Each positive position falls in the window of its coordinate; Top and Bottom are counted separately. These are descriptive counts, not a regional enrichment test.\n\n",sum(!is.finite(pc$genomic_position)),nrow(pc)))
+  width <- as.numeric(params$genomic_window_size)
+  rg <- regional_characterization %>% dplyr::mutate(chr_label=sub("^chr","",chr),win_end=window_start+width-1,win_mid=(window_start+win_end)/2,
+    chr_num=suppressWarnings(as.integer(chr_label)),
+    chr_order=dplyr::case_when(!is.na(chr_num)~chr_num,chr_label=="X"~23L,chr_label=="Y"~24L,chr_label %in% c("M","MT")~25L,TRUE~26L))
+  offsets <- rg %>% dplyr::group_by(chr_label,chr_order) %>% dplyr::summarise(chr_max=max(win_end),.groups="drop") %>%
+    dplyr::arrange(chr_order,chr_label) %>% dplyr::mutate(offset=cumsum(dplyr::lag(chr_max,default=0))+dplyr::row_number()*width)
+  rg <- rg %>% dplyr::left_join(offsets,by=c("chr_label","chr_order")) %>% dplyr::mutate(win_x=win_mid+offset)
+  chr_ticks <- rg %>% dplyr::group_by(chr_label,chr_order) %>% dplyr::summarise(mid_x=mean(range(win_x)),.groups="drop") %>% dplyr::arrange(chr_order,chr_label)
+  print(ggplot(rg,aes(win_x,n_positions,fill=side,colour=side))+geom_col(width=width*.85,linewidth=.5)+facet_wrap(~side,ncol=1)+
+    scale_x_continuous(breaks=chr_ticks$mid_x,labels=chr_ticks$chr_label)+
+    labs(x="Chromosome",y="Positive positions",title="Positive CAAS positions in genomic windows")+theme(legend.position="none"))
   emit_widget(DT::datatable(regional_characterization,rownames=FALSE,filter="top",options=list(pageLength=15,scrollX=TRUE)))
 }
 ```

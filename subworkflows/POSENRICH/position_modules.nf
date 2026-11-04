@@ -88,7 +88,7 @@ process POSENRICH_CHARACTERIZE {
     """
     # POSENRICH sources SHA256: ${source_hash}
     ${py3} ${baseDir}/subworkflows/POSENRICH/local/src/posenrich_characterize.py \\
-        --registry_dir registry --output_dir characterization
+        --registry_dir registry --output_dir characterization --fdr_levels ${params.evidence_fdr_levels ?: '0.05,0.1,0.15'}
     """
 }
 
@@ -209,15 +209,15 @@ process POSENRICH_REPORT {
 
     script:
     def rscript = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
-    def source_hash = modularSourceHash(['13.POSENRICH_report.Rmd']) + modularSourceHash(['../../ENRICHMENT/local/src/report_presentation.R'])
+    def source_hash = modularSourceHash(['13.POSENRICH_report.Rmd']) + modularSourceHash(['../../ENRICHMENT/local/src/report_presentation.R', '../../TRAIT_ANALYSIS/local/src/report_style.R'])
     def local_dir = "${baseDir}/subworkflows/POSENRICH/local"
     def traitname = params.traitname ?: 'unknown_trait'
-    def fdr = params.accumulation_fdr ?: 0.1
+    def fdr_levels = params.evidence_fdr_levels ?: '0.05,0.1,0.15'
     """
     # POSENRICH sources SHA256: ${source_hash}
     cp -R ${local_dir}/* .
     mkdir -p src
-    cp ${baseDir}/subworkflows/ENRICHMENT/local/src/report_presentation.R src/
+    cp ${baseDir}/subworkflows/ENRICHMENT/local/src/report_presentation.R ${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R src/
     ${rscript} -e "
         rmarkdown::render(
             '13.POSENRICH_report.Rmd',
@@ -229,12 +229,12 @@ process POSENRICH_REPORT {
                 within_gene_dir      = 'within_gene',
                 proximity_dir        = 'proximity',
                 traitname            = '${traitname}',
-                fdr_threshold        = ${fdr}
+                fdr_levels           = '${fdr_levels}'
             ),
             output_file = '13.POSENRICH_report_${traitname}.html'
         )
         jsonlite::write_json(list(schema='phylophere.posenrich_report.v1',
-                                 traitname='${traitname}',fdr_threshold=${fdr}),
+                                 traitname='${traitname}',fdr_levels=as.numeric(strsplit('${fdr_levels}',',')[[1]])),
                              'report_settings.json',auto_unbox=TRUE,pretty=TRUE,digits=NA)
     "
     """

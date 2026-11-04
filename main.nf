@@ -728,7 +728,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             def scoring_fade_site_top_ch = params.fade ? FADE.out.sites_csv_top    : fade_precomp_sites_top_ch
             def scoring_fade_site_bot_ch = params.fade ? FADE.out.sites_csv_bottom : fade_precomp_sites_bot_ch
             def scoring_rer_ch           = (params.rer_tool || params.rer_continuous_file || params.rer_binary_file) ? RER_MAIN.out.summary_tsv : null
-            // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
             // scoring_caas_* are built above, outside this block — see the comment there.
 
             // FOP per-pair PSS weights (contrast_hypotheses_pairs.tsv) for

@@ -10,8 +10,9 @@ source(file.path(src,'scoring_io.R'))
 read <- scoring_read
 write <- scoring_write
 if (!identical(arg('--gene-stat','max'), 'max')) stop('Only gene_stat=max is supported')
-nom <- as.numeric(arg('--nominal','0.05')); fdr <- as.numeric(arg('--fdr','0.05'))
-stopifnot(is.finite(nom), nom>0,nom<=1,is.finite(fdr),fdr>0,fdr<=1)
+nom <- as.numeric(arg('--nominal','0.05'))
+fdr_levels <- scoring_bh_levels(arg('--fdr-levels','0.05,0.1,0.15'))  # BH levels of the q classes
+stopifnot(is.finite(nom), nom>0,nom<=1)
 genes <- read(arg('--genes')); positions <- read(arg('--positions')); stats <- read(arg('--stats'))
 has_universe <- file.exists(arg('--universe'))
 u <- if(has_universe) scoring_genes(arg('--universe')) else character()
@@ -78,19 +79,21 @@ for(rk in ranks) {
    cy<-block_cycles[[i]];saveRDS(list(rows=rows,cols=cy,values=g$nlog10_null[,cy,drop=FALSE]),caas_slice_path('calibration',paste0(rk,'_gp'),k,block_ids[i]))
   }
  }
- q<-p.adjust(p,'BH');tab<-data.frame(gene=u,ranking=rep(rk,length(u)),statistic=unname(obs),available=!is.na(p),gene_stat=rep(arg('--gene-stat','max'),length(u)),p.gen=unname(p),p.gen.adj=unname(q),nominal=!is.na(p)&p<nom,adjusted=!is.na(q)&q<fdr,N_roster=rep(N,length(u)),N_valid=unname(valid),family_id=rep(paste0('CAAS:',rk),length(u)),contract_version=rep(1L,length(u)))
+ q<-p.adjust(p,'BH');tab<-data.frame(gene=u,ranking=rep(rk,length(u)),statistic=unname(obs),available=!is.na(p),gene_stat=rep(arg('--gene-stat','max'),length(u)),p.gen=unname(p),p.gen.adj=unname(q),nominal=!is.na(p)&p<nom,bh_class=scoring_bh_class(q,fdr_levels),N_roster=rep(N,length(u)),N_valid=unname(valid),family_id=rep(paste0('CAAS:',rk),length(u)),contract_version=rep(1L,length(u)))
  all_evidence[[rk]]<-tab
  suffix<-if(rk=='global')'' else paste0('_',rk)
- for(nm in c('p.gen','p.gen.adj','nominal','adjusted','available'))genes[[paste0('caas_',nm,suffix)]]<-tab[[nm]][match(genes$Gene,u)]
- for(nm in c('p.gen','p.gen.adj','nominal','adjusted','available'))stats[[paste0('caas_',nm,suffix)]]<-tab[[nm]][match(stats$gene,u)]
+ for(nm in c('p.gen','p.gen.adj','nominal','bh_class','available'))genes[[paste0('caas_',nm,suffix)]]<-tab[[nm]][match(genes$Gene,u)]
+ for(nm in c('p.gen','p.gen.adj','nominal','bh_class','available'))stats[[paste0('caas_',nm,suffix)]]<-tab[[nm]][match(stats$gene,u)]
  # Header + tab-separated rows: prepare_ami_lists.py reads these columns by name (base write() cannot write a data.frame).
  active<-tab[tab$nominal,,drop=FALSE];write(data.frame(Gene=active$gene,active[,-1,drop=FALSE]),file.path('gene_lists',paste0('active_',rk,'.tsv')))
+ # One list per BH level, from the q of the gene (active_<ranking>_q<level>.tsv); the rows below each level, not the nominal ones.
+ for(l in fdr_levels){hit<-tab[which(tab$p.gen.adj<l),,drop=FALSE];write(data.frame(Gene=hit$gene,hit[,-1,drop=FALSE]),file.path('gene_lists',paste0('active_',rk,'_q',format(l,scientific=FALSE),'.tsv')))}
 }
 write(do.call(rbind,all_evidence),'gene_evidence.tsv')
 # Existing position p-values and BH already use the pooled unique-position family.
 positions$caas_available<-!is.na(positions$p.emp)
 positions$caas_nominal<-!is.na(positions$p.emp)&positions$p.emp<nom
-positions$caas_adjusted<-!is.na(positions$p.adj_bh)&positions$p.adj_bh<fdr
+positions$caas_bh_class<-scoring_bh_class(positions$p.adj_bh,fdr_levels)
 for(rk in ranks) {
  x<-positions[positions$caas_nominal & (rk=='global' | positions$side==rk),,drop=FALSE]
  if(rk=='global')x<-x[!duplicated(paste(x$Gene,x$Position,sep='\t')),,drop=FALSE]
@@ -98,6 +101,6 @@ for(rk in ranks) {
 }
 for(n in c("rer_min_pval","rer_perm_padj")) if(n %in% names(genes)) stats[[if(n=="rer_min_pval")"rer_p.emp" else "rer_p.adj"]] <- genes[[n]][match(stats$gene,genes$Gene)]
 write(genes,'gene_scores.tsv');write(positions,'position_scores.tsv');write(stats,'fcs_stats.tsv')
-jsonlite::write_json(list(table_md5=if(Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS')=='1') as.list(tools::md5sum(c('gene_scores.tsv','position_scores.tsv','fcs_stats.tsv','gene_evidence.tsv'))) else NULL,universe_md5=unname(tools::md5sum(arg('--universe'))),null_md5=if(Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS')=='1') as.list(setNames(unname(tools::md5sum(files)),block_ids)) else NULL,contract_version=2L,available=available,N=N,genes=length(u),blocks=block_ids,nominal_threshold=nom,fdr_threshold=fdr,gene_stat=arg('--gene-stat','max')), 'calibration/metadata.json',auto_unbox=TRUE,pretty=TRUE)
+jsonlite::write_json(list(table_md5=if(Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS')=='1') as.list(tools::md5sum(c('gene_scores.tsv','position_scores.tsv','fcs_stats.tsv','gene_evidence.tsv'))) else NULL,universe_md5=unname(tools::md5sum(arg('--universe'))),null_md5=if(Sys.getenv('PHYLOPHERE_VERIFY_CHECKSUMS')=='1') as.list(setNames(unname(tools::md5sum(files)),block_ids)) else NULL,contract_version=2L,available=available,N=N,genes=length(u),blocks=block_ids,nominal_threshold=nom,fdr_levels=fdr_levels,gene_stat=arg('--gene-stat','max')), 'calibration/metadata.json',auto_unbox=TRUE,pretty=TRUE)
 file.copy('calibration/metadata.json','gene_evidence_metadata.json',overwrite=TRUE)
 if(!available)write(data.frame(ranking=character(),database=character(),pathway=character(),stat=numeric(),pval=numeric(),p.adj=numeric(),p.perm=numeric(),q.perm=numeric(),num.genes=integer(),gene.vals=character(),sig_perm=logical(),direction=character(),redlich_level=character()),'calibration/empty.tsv')

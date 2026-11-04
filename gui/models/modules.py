@@ -250,7 +250,7 @@ class VepConfig(ModuleConfigBase):
 @dataclass(kw_only=True)
 class ScoringConfig(ModuleConfigBase):
     evidence_p_threshold: str = "0.05"
-    evidence_fdr_threshold: str = "0.05"
+    evidence_fdr_levels: str = "0.05,0.1,0.15"  # --evidence_fdr_levels (BH levels of the q classes)
     gene_ensembl_file: str = ""  # --gene_ensembl_file
     auto_generate_ensembl: bool = False  # Generate gene_ensembl_file via BioMart if unset
     ensembl_dataset: str = ""  # Ensembl BioMart dataset (e.g. hsapiens_gene_ensembl); blank -> derived from ref_species_name
@@ -276,7 +276,6 @@ class PosenrichConfig(ModuleConfigBase):
     enabled: bool = False  # RUN_POSENRICH -> --posenrich
 
     # Universe U and level 1 (Accumulation). Standalone inputs; a blank value falls back to the Post-processing output (live or precomputed).
-    accumulation_fdr: str = "0.1"  # --accumulation_fdr (Benjamini-Hochberg threshold of the report tables)
     accumulation_caas_input: str = ""  # --accumulation_caas_input (filtered_discovery.tsv)
     accumulation_background_input: str = ""  # --accumulation_background_input (cleaned_background_main.txt)
 

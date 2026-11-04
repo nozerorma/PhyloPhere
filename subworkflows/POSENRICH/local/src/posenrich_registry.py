@@ -248,14 +248,14 @@ def build_evidence(position_scores_path, active_genes, n_cycles, postproc_path=N
     core.scores.position_score defines nonpositive values as unavailable, not zero.
     Keep the raw path score separately; never impute a canonical score or a p-value.
     """
-    cols = ['Gene', 'Position', 'side', 'CAAS_score', 'p.emp', 'p.adj_bh', 'nd', 'null_unseen', 'caas_nominal', 'caas_adjusted']
+    cols = ['Gene', 'Position', 'side', 'CAAS_score', 'p.emp', 'p.adj_bh', 'nd', 'null_unseen', 'caas_nominal', 'caas_bh_class']
     extra = ['p_shared', 'N_cycles', 'evidence_status', 'score_status', 'raw_asr_path_score']
     df = observed_table(position_scores_path) if position_scores_path else pd.DataFrame(columns=cols)
     df = df.reindex(columns=cols, fill_value='NA')
     if not df.Gene.isin(active_genes).all():
         raise ValueError('Observed score gene outside cleaned background')
     for key, sub in df.groupby(['Gene', 'Position']):
-        for col in ('p.emp', 'p.adj_bh', 'nd', 'null_unseen', 'caas_nominal', 'caas_adjusted'):
+        for col in ('p.emp', 'p.adj_bh', 'nd', 'null_unseen', 'caas_nominal', 'caas_bh_class'):
             if sub[col].nunique() > 1:
                 raise ValueError(f'inconsistent shared {col} for {key}')
     for row in df.to_dict('records'):

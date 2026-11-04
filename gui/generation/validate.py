@@ -34,12 +34,15 @@ def validate(project: ProjectConfig) -> list[str]:
     errors: list[str] = []
     if project.modules.caas.gene_stat != "max":
         errors.append("CAAS: only gene_stat=max is supported; rebuild legacy gene scores/null matrices.")
-    for name in ("evidence_p_threshold", "evidence_fdr_threshold"):
-        try:
-            value = float(getattr(project.modules.scoring, name))
-            if not 0 < value <= 1: raise ValueError()
-        except (TypeError, ValueError):
-            errors.append(f"Scoring: {name} must be in (0, 1].")
+    try:
+        if not 0 < float(project.modules.scoring.evidence_p_threshold) <= 1: raise ValueError()
+    except (TypeError, ValueError):
+        errors.append("Scoring: evidence_p_threshold must be in (0, 1].")
+    try:
+        levels = [float(x) for x in str(project.modules.scoring.evidence_fdr_levels).split(",")]
+        if not levels or any(not 0 < v <= 1 for v in levels) or len(set(levels)) != len(levels): raise ValueError()
+    except (TypeError, ValueError):
+        errors.append("Scoring: evidence_fdr_levels must be distinct comma-separated values in (0, 1].")
 
     def require(value: str, message: str) -> None:
         if not value.strip():

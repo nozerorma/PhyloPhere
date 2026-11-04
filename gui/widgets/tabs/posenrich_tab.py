@@ -27,7 +27,6 @@ SPEC = ModuleTabSpec(
     ),
     disclaimer="no POSENRICH component runs.",
     essential_fields=(
-        FieldSpec(name="accumulation_fdr", help="Benjamini-Hochberg FDR cutoff for the report tables of levels 1 and 2 (Accumulation); default 0.1.", label="FDR threshold of the report tables", importance="default"),
         FieldSpec(name="posenrich_domains", help="Include Pfam domain annotations; generated from productive alignments when domain_variability_file is blank.", label="Pfam domains", kind="bool", importance="optional"),
         FieldSpec(name="posenrich_ucr", help="Include UCR annotations; generated from productive alignments when ucr_positions_file is blank.", label="Conserved regions (UCR)", kind="bool", importance="optional"),
         FieldSpec(name="fubar_sites_file", help="Per-site FUBAR table from ortholog_characterizator; this pipeline does not generate it.", label="FUBAR sites file (optional)", kind="path_file", importance="optional"),

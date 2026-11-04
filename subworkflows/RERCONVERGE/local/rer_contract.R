@@ -208,16 +208,31 @@ rer_results <- function(res) {
   res
 }
 
-rer_summary <- function(res, nominal, fdr) {
+# BH levels (e.g. "0.05,0.1,0.15") and the class of a q-value: the strictest level it is below (strict <), "ns" above the
+# loosest level, NA where q is NA. The same rule as scoring_bh_class in SCORING/local/src/scoring_io.R, which this module does not read.
+rer_bh_levels <- function(x) {
+  v <- if (is.character(x)) suppressWarnings(as.numeric(strsplit(x,',')[[1]])) else as.numeric(x)
+  if (!length(v) || anyNA(v) || any(v <= 0 | v > 1) || anyDuplicated(v)) stop('Invalid BH levels: ', paste(x,collapse=','))
+  sort(v)
+}
+rer_bh_labels <- function(levels) paste0('<', vapply(levels, format, '', scientific=FALSE))
+rer_bh_class <- function(q, levels) {
+  levels <- rer_bh_levels(levels); labels <- rer_bh_labels(levels)
+  out <- rep('ns', length(q))
+  for (i in rev(seq_along(levels))) out[which(q < levels[i])] <- labels[i]
+  out[is.na(q)] <- NA_character_
+  out
+}
+
+rer_summary <- function(res, nominal, levels) {
   res <- rer_results(res)
   x <- data.frame(gene=rownames(res),res, row.names=NULL,check.names=FALSE)
-  x$signif_param <- !is.na(x$p.adj) & x$p.adj < fdr
+  x$bh_class_param <- rer_bh_class(x$p.adj, levels)
   x$signif <- !is.na(x$p.perm) & x$p.perm < nominal
-  x$signif_perm_fdr <- !is.na(x$p.perm.adj) & x$p.perm.adj < fdr
+  x$bh_class_perm <- rer_bh_class(x$p.perm.adj, levels)
   x$pos_corr <- x$signif & x$Rho > 0
   x$neg_corr <- x$signif & x$Rho < 0
   x[['Empirical available']] <- !is.na(x$p.perm)
-  x[['BH empirical']] <- ifelse(is.na(x$p.perm),NA,x$signif_perm_fdr)
   x$Call <- ifelse(x$pos_corr,'Positively correlated',ifelse(x$neg_corr,'Negatively correlated',ifelse(x$signif,'Significant','')))
   x$rer_stat <- sign(x$Rho)*-log10(x$P)
   x

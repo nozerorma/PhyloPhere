@@ -286,7 +286,7 @@ process SCORING_COMPARE_REPORT {
     def position_char_arg     = (position_char.name =~ /^NO_/)     ? 'NULL' : "'${position_char}'"
     def compare_source_hash = (['14.Comparison_report.Rmd', 'src/fcs_selection.R', 'src/evidence_flags.R','src/report_presentation.R','src/ami_evidence.R'].collect {
         file("${local_dir}/${it}").text
-    } + [file("${baseDir}/subworkflows/SCORING/local/src/scoring_io.R").text]).join('\n').with { java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString() }
+    } + [file("${baseDir}/subworkflows/SCORING/local/src/scoring_io.R").text, file("${baseDir}/subworkflows/SCORING/local/src/report_evidence.R").text]).join('\n').with { java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString() }
 
     def compare_rscript = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def render_cmd = """
@@ -325,7 +325,7 @@ process SCORING_COMPARE_REPORT {
 
     def stage_cmd = """
         cp -R ${local_dir}/* .
-        cp ${baseDir}/subworkflows/SCORING/local/src/scoring_io.R src/scoring_io.R
+        cp ${baseDir}/subworkflows/SCORING/local/src/scoring_io.R ${baseDir}/subworkflows/SCORING/local/src/report_evidence.R src/
 
         mkdir -p cmp_fcs cmp_fcs_le
 

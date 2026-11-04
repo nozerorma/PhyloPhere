@@ -1,6 +1,5 @@
 #!/usr/bin/env nextflow
 include { scoringHash } from '../subworkflows/SCORING/scoring_contract'
-include { vepHash } from '../subworkflows/VEP/vep_contract'
 
 // A file input, or the sentinel file when the value is blank (functions, not closures, for the linter).
 def optionalInput(value, sentinel) {
@@ -61,8 +60,7 @@ workflow SCORING {
 
         def compute_hash = scoringSourcesHash(['SCORING/local/src/scoring_compute.R','SCORING/local/src/scoring_io.R','SCORING/local/src/scoring_input.py','SCORING/local/src/observed_core_scores.py','SCORING/local/src/aa_grouping.R','SCORING/local/src/null_position_p.R','CT_DISAMBIGUATION/local/src/core/scores.py'])
         def evidence_hash = scoringSourcesHash(['SCORING/local/src/scoring_evidence.R','SCORING/local/src/scoring_io.R','SCORING/local/src/caas_block_contract.R','ENRICHMENT/local/src/fcs_prepare_blocks.R','ENRICHMENT/local/src/gene_p.R','ENRICHMENT/local/src/caas_blocks.R'])
-        def report_hash = scoringSourcesHash(['SCORING/local/10.Scoring_report.Rmd','SCORING/local/src/scoring_io.R','SCORING/local/src/report_evidence.R','SCORING/local/src/map_scoring_positions.py','VEP/local/src/vep_common.py','TRAIT_ANALYSIS/local/src/report_style.R'])
-        if (params.caas_map_dir) report_hash += vepHash([file(params.caas_map_dir,checkIfExists:true)])
+        def report_hash = scoringSourcesHash(['SCORING/local/10.Scoring_report.Rmd','SCORING/local/src/scoring_io.R','SCORING/local/src/report_evidence.R','TRAIT_ANALYSIS/local/src/report_style.R'])
 
         // ── Resolve each input with .ifEmpty{} fallbacks ───────────────────
 
@@ -87,13 +85,6 @@ workflow SCORING {
 
         def resolved_rer = (rer_summary_ch ?: Channel.empty())
             .ifEmpty { optionalInput(params.scoring_rer_input,'NO_RER') }.collect().map { assert it.size()==1 : 'Expected one RER summary'; it[0] }
-
-        // Gene coordinates come only from params.gene_ensembl_file (no channel input).
-        def resolved_genomic_info = Channel.empty()
-            .ifEmpty {
-                def gi = params.gene_ensembl_file ?: ''
-                gi ? file(gi,checkIfExists:true) : file('NO_GENOMIC_INFO')
-            }
 
         // .collect() turns these into value channels so they can be safely consumed
         // by both SCORING_COMPUTE and SCORING_REPORT below — without it, a regular
@@ -274,8 +265,6 @@ workflow SCORING {
             evidence_out.metadata,
             resolved_fade_site_top_ch,
             resolved_fade_site_bot_ch,
-            resolved_genomic_info,
-            Channel.value(params.caas_map_dir ? file(params.caas_map_dir,checkIfExists:true) : file("NO_MAP_DIR")),
             null_summary_v.map { it[0] },
             null_summary_v.map { it[1] },
             caas_pos_sample_resolved,

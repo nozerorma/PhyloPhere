@@ -4,7 +4,18 @@ import argparse
 import csv
 import hashlib
 import json
+import re
 from pathlib import Path
+
+# Level lists of the BH classes: active_<ranking>_q<level>.tsv (CAAS) and rer_<kind>_q<level>.txt (RER).
+CAAS_LEVEL = re.compile(r'^active_(global|top|bottom)_q([0-9.]+)\.tsv$')
+RER_LEVEL = re.compile(r'^(rer_significant|rer_accelerating|rer_decelerating)_q([0-9.]+)\.txt$')
+FAMILY = re.compile(r'^(.*)_q([0-9.]+)$')
+
+
+def below(label, level):
+    """BH class label '<0.05' is below `level` when its own level is not above it; 'ns' and 'NA' never are."""
+    return label.startswith('<') and float(label[1:]) <= level
 
 
 def read_genes(path):
@@ -42,6 +53,22 @@ def prepare(method, sources, output):
             if any(not g for g in genes) or len(set(genes)) != len(genes):
                 raise ValueError(f'{name}: empty or duplicate seed gene')
             lists[rank] = set(genes)
+        for name, path in sorted(by_name.items()):
+            m = CAAS_LEVEL.match(name)
+            if not m:
+                continue
+            rank, token = m.groups()
+            with path.open() as handle:
+                reader = csv.DictReader(handle, delimiter='\t', quoting=csv.QUOTE_NONE)
+                if not {'Gene', 'ranking', 'bh_class'}.issubset(reader.fieldnames or []):
+                    raise ValueError(f'{name}: canonical Gene/ranking/bh_class columns required')
+                rows = list(reader)
+            if any(row['ranking'] != rank or not below(row['bh_class'], float(token)) for row in rows):
+                raise ValueError(f'{name}: incompatible ranking or genes not below the BH level')
+            genes = [row['Gene'] for row in rows]
+            if any(not g or g != g.strip() for g in genes) or len(set(genes)) != len(genes):
+                raise ValueError(f'{name}: empty, padded or duplicate seed gene')
+            lists[f'{rank}_q{token}'] = set(genes)
     else:
         wanted = ('fade_top_significant', 'fade_bottom_significant') if method == 'fade' else ('rer_significant', 'rer_accelerating', 'rer_decelerating')
         for name in wanted:
@@ -63,11 +90,42 @@ def prepare(method, sources, output):
                 raise ValueError('RER positive and negative seed lists overlap')
             if not (positive | negative) <= lists['rer_significant']:
                 raise ValueError('Directional RER seeds are absent from the global RER list')
+            for name, path in sorted(by_name.items()):
+                m = RER_LEVEL.match(name)
+                if m:
+                    lists[f'{m.group(1)}_q{m.group(2)}'] = read_genes(path)
+            for token in sorted({RER_LEVEL.match(n).group(2) for n in by_name if RER_LEVEL.match(n)}):
+                tag = f'_q{token}'
+                total, pos, neg = (lists.get(k + tag) for k in ('rer_significant', 'rer_accelerating', 'rer_decelerating'))
+                if total is None or pos is None or neg is None:
+                    raise ValueError(f'RER level q{token}: the global, positive and negative lists are all required')
+                if pos & neg or not (pos | neg) <= total:
+                    raise ValueError(f'RER level q{token}: directional seeds overlap or are absent from the global list')
+    # A level list equal to the previous level of its family has the same DOMINO result, and an empty one has no seeds: neither is
+    # written (DOMINO would run twice or on nothing); the manifest records both.
+    families = {}
+    for name in lists:
+        m = FAMILY.match(name)
+        if m:
+            families.setdefault(m.group(1), []).append((float(m.group(2)), name))
+    aliases, empty = {}, []
+    for members in families.values():
+        previous = None
+        for _, name in sorted(members):
+            if not lists[name]:
+                empty.append(name)
+                del lists[name]
+            elif previous is not None and lists[name] == lists[previous]:
+                aliases[name] = previous
+                del lists[name]
+            else:
+                previous = name
     output.mkdir(parents=True, exist_ok=True)
     # Reusing a local regeneration scratch directory must not retain old view lists.
     for p in output.glob('*.txt'):
         p.unlink()
-    manifest = {'contract_version': 1, 'method': method, 'sources': [str(p) for p in sorted(files)], 'lists': {}}
+    manifest = {'contract_version': 1, 'method': method, 'sources': [str(p) for p in sorted(files)], 'lists': {},
+                'aliases': aliases, 'empty': sorted(empty)}
     for name, genes in sorted(lists.items()):
         data = ''.join(g + '\n' for g in sorted(genes)).encode()
         (output / (name + '.txt')).write_bytes(data)

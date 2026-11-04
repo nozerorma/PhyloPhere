@@ -29,6 +29,7 @@ params:
   pperm_thr:    0.025         # raw permulation-p threshold of the Redlich rule
   gene_stat: "max"      # gene statistic of the observed gene scores; the CAAS null must hold the same one
   score_source: "caas"       # pipeline source: caas (zero floor) or rer (exclude missing statistics)
+  bh_levels:    "0.05,0.1,0.15" # BH levels of the CAAS and RER evidence flags of the leading edge (one percentage column per level)
   analytic_levels: "0.05,0.1,0.15" # analytic rule (Redlich et al. 2024): BH levels of the analytic p, with p.perm < pperm_thr
   cluster_threshold:  0.2     # term blocks: minimum Jaccard of the gene sets inside a block (complete linkage)
   top_n:        20            # rows shown per database x ranking
@@ -299,7 +300,7 @@ if (anyDuplicated(enrich[c("ranking","database","pathway")])) stop("Description 
 # nominal/BH evidence flags. They come from `annot`, so a per-module report inherits the CAAS and FADE
 # annotation.
 source(if (file.exists("src/evidence_flags.R")) "src/evidence_flags.R" else "evidence_flags.R")
-evidence_flags <- fcs_evidence_flags(annot)
+evidence_flags <- fcs_evidence_flags(annot, levels = as.numeric(strsplit(params$bh_levels, ",")[[1]]))
 attr_df <- evidence_flags
 if (length(flag_cols)) attr_df <- dplyr::left_join(evidence_flags, annot[, c("gene", flag_cols)], by = "gene")
 attr_cols_all <- setdiff(names(attr_df), c("gene", "gene_stat", "flag_gene_stat"))
@@ -448,7 +449,8 @@ for(rk in ranking_names) {
 The same C>0 selection and order as the table and dotplot. Percentages describe genes with each attribute. Both RER signs are shown within every CAAS ranking. Sets with no retained leading-edge genes remain present with n_le=0 and unavailable percentages. Representatives and All terms use the same saved groups as the enrichment tables.
 
 ```{r leadingedge, results='asis'}
-disp_names <- c(flag_rer_acc="RER positive",flag_rer_decc="RER negative",flag_rer_acc_adjusted="RER positive BH",flag_rer_decc_adjusted="RER negative BH")
+.bh_tok <- vapply(sort(as.numeric(strsplit(params$bh_levels, ",")[[1]])), format, "", scientific = FALSE)
+disp_names <- c(flag_rer_acc="RER positive",flag_rer_decc="RER negative",setNames(paste0("RER positive q<", .bh_tok), paste0("flag_rer_acc_q", .bh_tok)),setNames(paste0("RER negative q<", .bh_tok), paste0("flag_rer_decc_q", .bh_tok)))
 le_comp_all <- list()
 for(rk in ranking_names) {
  cat(sprintf("\n## %s {.tabset}\n\n",rk))
