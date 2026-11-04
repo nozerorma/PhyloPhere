@@ -64,7 +64,7 @@ process SCORING_FCS_REPORT {
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     def enrich_file_arg = (enrich_file.name =~ /^NO_/) ? 'NULL' : "'${enrich_file}'"
-    def report_sources = ['11.FCS_general_report.Rmd','src/term_blocks.R','src/fcs_selection.R','src/evidence_flags.R','src/report_presentation.R'].collect { file("${local_dir}/${it}").text }.join('\n')
+    def report_sources = ['11.FCS_general_report.Rmd','src/term_blocks.R','src/fcs_selection.R','src/evidence_flags.R','src/report_presentation.R'].collect { file("${local_dir}/${it}").text }.join('\n') + file("${baseDir}/subworkflows/SCORING/local/src/scoring_io.R").text
     def report_hash = java.security.MessageDigest.getInstance('SHA-256').digest(report_sources.getBytes('UTF-8')).encodeHex().toString()
     def render = """
         # FCS reporting source SHA256: ${report_hash}
@@ -92,11 +92,13 @@ process SCORING_FCS_REPORT {
     if (params.use_singularity || params.use_apptainer) {
         """
         cp -R ${local_dir}/* .
+        cp ${baseDir}/subworkflows/SCORING/local/src/scoring_io.R src/scoring_io.R
         /usr/local/bin/_entrypoint.sh Rscript -e "${render}"
         """
     } else {
         """
         cp -R ${local_dir}/* .
+        cp ${baseDir}/subworkflows/SCORING/local/src/scoring_io.R src/scoring_io.R
         Rscript -e "${render}"
         """
     }
@@ -140,7 +142,7 @@ process RER_FCS_REPORT {
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     def enrich_file_arg = (enrich_file.name =~ /^NO_/) ? 'NULL' : "'${enrich_file}'"
-    def report_sources = ['11.FCS_general_report.Rmd','src/term_blocks.R','src/fcs_selection.R','src/evidence_flags.R','src/report_presentation.R'].collect { file("${local_dir}/${it}").text }.join('\n')
+    def report_sources = ['11.FCS_general_report.Rmd','src/term_blocks.R','src/fcs_selection.R','src/evidence_flags.R','src/report_presentation.R'].collect { file("${local_dir}/${it}").text }.join('\n') + file("${baseDir}/subworkflows/SCORING/local/src/scoring_io.R").text
     def report_hash = java.security.MessageDigest.getInstance('SHA-256').digest(report_sources.getBytes('UTF-8')).encodeHex().toString()
     def render = """
         # FCS reporting source SHA256: ${report_hash}
@@ -171,11 +173,13 @@ process RER_FCS_REPORT {
     if (params.use_singularity || params.use_apptainer) {
         """
         cp -R ${local_dir}/* .
+        cp ${baseDir}/subworkflows/SCORING/local/src/scoring_io.R src/scoring_io.R
         /usr/local/bin/_entrypoint.sh Rscript -e "${render}"
         """
     } else {
         """
         cp -R ${local_dir}/* .
+        cp ${baseDir}/subworkflows/SCORING/local/src/scoring_io.R src/scoring_io.R
         Rscript -e "${render}"
         """
     }

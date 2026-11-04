@@ -16,6 +16,7 @@ workflow RER_MAIN {
     take:
     traitfile_input
     taxid_map_input
+    caas_background_input
 
     main:
     def toolString = params.rer_tool ? params.rer_tool.toString().trim() : ''
@@ -72,14 +73,17 @@ workflow RER_MAIN {
     }
     if (!correlation && params.rer_perms_file) nulls = rerRequired(params.rer_perms_file,'rer_perms_file')
     def null_input = nulls.ifEmpty(file('NO_FILE'))
-    def tables = RER_TABLES(results,null_input,rerStage('tables'))
+    def gene_reference = (caas_background_input ?: Channel.empty()).ifEmpty {
+        params.alignment ? file(params.alignment,checkIfExists:true) : file('NO_FILE')
+    }
+    def tables = RER_TABLES(results,null_input,gene_reference,rerStage('tables'))
     RER_REPORT(tables.validated,rerStage('report'))
     def gene_scores = params.rer_gene_scores ? rerRequired(params.rer_gene_scores,'rer_gene_scores') : Channel.value(file('NO_FILE'))
     def lists = RER_GENE_LISTS(tables.summary_tsv,gene_scores,rerStage('lists'))
     def background = lists.gene_lists.flatten().filter { it.name=='background.txt' }.collect()
     def interest = lists.gene_lists.flatten().filter { it.name!='background.txt' }.collect()
     // Release the null only after its association, roster and checksums were validated.
-    def verified_null = nulls.combine(tables.summary_tsv).map { p,s -> p }
+    def verified_null = tables.normalized_null
     if (params.enrichment && !params.scoring) {
         def fcs_null = verified_null.ifEmpty(file('NO_FILE'))
         def fcs = FCS_COMPUTE(lists.fcs_stats,background,fcs_null)

@@ -152,6 +152,7 @@ src_blocks <- file.path(dirname(src), "term_blocks.R")
 if (!file.exists(src_blocks)) stop("term_blocks.R not found next to fcs_enrich.R")
 source(src_blocks)
 source(file.path(dirname(src), "report_presentation.R"))
+source(file.path(dirname(src), "scoring_io.R"))
 
 # HTML table with the report style; optional scroll box of fixed height.
 kbl_html <- function(df, height = NULL, escape = TRUE, caption = NULL, ...) {
@@ -211,11 +212,21 @@ ranking_names <- c(intersect(RANKING_ORDER, ranking_names_raw),
 annot <- stats
 if (!is.null(params$annot_file) && file.exists(params$annot_file) &&
     !grepl("^NO_", basename(params$annot_file))) {
-  annot <- readr::read_tsv(params$annot_file, show_col_types = FALSE)
+  annot <- scoring_read(params$annot_file)
   if (!"gene" %in% names(annot)) {
     gcol <- intersect(c("Gene", "GENE"), names(annot))[1]
     if (!is.na(gcol)) annot <- dplyr::rename(annot, gene = !!gcol)
   }
+}
+# Keep the ranking and null matrix in the producer's original namespace;
+# translate only the CAAS annotation overlay to that namespace. This keeps RER
+# null/gene-set keys consistent while joining cross-method evidence uniquely.
+if (!is.null(params$annot_file) && file.exists(params$annot_file) &&
+    !grepl("^NO_", basename(params$annot_file)) && "gene" %in% names(annot) && "gene" %in% names(stats)) {
+  overlay_idx <- scoring_match_genes(as.character(annot$gene), as.character(stats$gene))
+  keep_overlay <- !is.na(overlay_idx)
+  annot <- annot[keep_overlay,,drop=FALSE]
+  annot$gene <- as.character(stats$gene)[overlay_idx[keep_overlay]]
 }
 flag_cols <- grep("^flag_", names(annot), value = TRUE)
 

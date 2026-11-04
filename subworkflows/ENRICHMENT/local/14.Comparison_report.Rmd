@@ -113,6 +113,7 @@ seed_val <- if (exists("params") && !is.null(params$seed) && nzchar(as.character
 set.seed(seed_val)
 
 .src_dir <- file.path(dirname(normalizePath(knitr::current_input(), mustWork = FALSE)), "src")
+source(file.path(.src_dir,"scoring_io.R"))
 source(file.path(.src_dir,"evidence_flags.R"))
 source(file.path(.src_dir,"report_presentation.R"))
 source(file.path(.src_dir,"ami_evidence.R"))
@@ -417,13 +418,27 @@ has_fade_sites_bottom_cmp <- .file_ok(params$fade_sites_bottom_file)
 read_fade_sites_cmp <- function(path) {
  d <- readr::read_csv(path,show_col_types=FALSE,col_types=readr::cols(.default=readr::col_character()))
  if(!all(c("gene","position","max_bf","target_aa") %in% names(d))) stop("Invalid FADE selected-sites schema: ",path)
- d <- d %>% transmute(gene=sub("\\.[0-9]+$","",trimws(gene)),
+ d <- d %>% transmute(gene=gene,
    Position=suppressWarnings(as.integer(position)),max_bf=suppressWarnings(as.numeric(max_bf)),target_aa=as.character(target_aa))
  if(anyNA(d$Position) || any(d$Position<0) || anyNA(d$max_bf)) stop("Invalid FADE site position/BF: ",path)
  d
 }
 fade_sites_top_cmp_df <- if(has_fade_sites_top_cmp) read_fade_sites_cmp(params$fade_sites_top_file) else NULL
 fade_sites_bottom_cmp_df <- if(has_fade_sites_bottom_cmp) read_fade_sites_cmp(params$fade_sites_bottom_file) else NULL
+# Resolve FADE producer IDs against the actual CAAS population once per gene.
+# Exact IDs take precedence; documented species/version aliases must be unique.
+if (!is.null(position_scores_cmp_df)) {
+  caas_names <- unique(as.character(position_scores_cmp_df$Gene))
+  align_fade_genes <- function(d) {
+    if (is.null(d) || !nrow(d)) return(d)
+    producer_names <- unique(d$gene)
+    matches <- scoring_match_genes(producer_names,caas_names)
+    d$gene <- caas_names[matches[match(d$gene,producer_names)]]
+    d[!is.na(d$gene),,drop=FALSE]
+  }
+  fade_sites_top_cmp_df <- align_fade_genes(fade_sites_top_cmp_df)
+  fade_sites_bottom_cmp_df <- align_fade_genes(fade_sites_bottom_cmp_df)
+}
 
 # POSENRICH's per-position PFAM domain/clan, UCR core/flank region + per-position
 # variability, and FUBAR selection call (position_characterization.tsv) - characterization-only, like COSMIC/PAI3D

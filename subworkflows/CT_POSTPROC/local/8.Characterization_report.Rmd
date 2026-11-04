@@ -274,7 +274,14 @@ axis; density uses the annotated genomic span in base pairs for every gene.
 ```{r genomic, results='asis'}
 if (all(c('chr','start','end') %in% names(annotation))) {
   genomic <- retained %>% distinct(Gene,Position) %>% count(Gene,name='positions') %>%
-    left_join(annotation %>% select(Gene=gene,chr,start,end),by='Gene') %>%
+    mutate(annotation_gene = if_else(Gene %in% annotation$gene, Gene,
+      sub('\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$', '', sub('\\.prot$', '', Gene), perl=TRUE)))
+  .mapped_genes <- genomic$annotation_gene[genomic$annotation_gene %in% annotation$gene]
+  if (anyDuplicated(.mapped_genes)) stop('Multiple retained genes map to the same genomic annotation: ',
+    paste(unique(.mapped_genes[duplicated(.mapped_genes)]), collapse=', '))
+  genomic <- genomic %>%
+    left_join(annotation %>% select(annotation_gene=gene,chr,start,end),by='annotation_gene') %>%
+    select(-annotation_gene) %>%
     pp_numeric(c('start','end')) %>%
     filter(!is.na(chr),nzchar(chr),is.finite(start),is.finite(end),start>=0,end>=start) %>%
     mutate(midpoint=(start+end)/2, genomic_length=end-start+1,

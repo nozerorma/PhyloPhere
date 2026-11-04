@@ -691,7 +691,8 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             def rer_traitfile_ch = curated_trait_ch ?: Channel.empty()
             RER_MAIN(
                 rer_traitfile_ch,
-                taxid_map_ch
+                taxid_map_ch,
+                pp_cleaned_bg ?: Channel.empty()
             )
             ran_any = true
         }

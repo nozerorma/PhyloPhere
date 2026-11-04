@@ -28,6 +28,7 @@ params:
   fade_site_top_file: NULL
   fade_site_bot_file: NULL
   genomic_info_file: NULL
+  position_genomic_file: NULL
   null_summary_file: NULL
   null_hist_file: NULL
   perm_manifest_file: NULL
@@ -1207,15 +1208,77 @@ fade_bot_df <- .load_fade_sites(params$fade_site_bot_file)
 
 ```
 
+## Genomic accumulation of positive positions
+
+The MAP anchor is the declared hg38 nucleotide coordinate for the alignment position. Each positive position is assigned to the window containing that coordinate; Top and Bottom are summarized separately. These are descriptive counts and score summaries, not regional enrichment tests. A position without a usable MAP coordinate is excluded from the windows and counted below.
+
+```{r position-genomic-windows, results='asis', fig.width=13, fig.height=5}
+if (!.file_ok(params$position_genomic_file)) {
+  cat("**Position coordinates unavailable:** supply the CAAS MAP directory to map positive positions.\n\n")
+} else {
+  position_map <- scoring_read(params$position_genomic_file)
+  scoring_keys(position_map,c('Gene','Position'),'position genomic mapping')
+  if (!all(c('hg38_nt_coord','mapping_status','map_gene') %in% names(position_map))) stop('Missing position MAP fields')
+  position_map$Position <- scoring_number(position_map$Position,'MAP position',0,Inf,integer=TRUE)
+  if (any(!position_map$mapping_status %in% c('mapped','no_map','position_not_in_map','no_genomic_coordinate'))) stop('Invalid position MAP status')
+  pos_genomic_exact <- pos_df %>% left_join(position_map,by=c('Gene','Position'))
+  if (anyNA(pos_genomic_exact$mapping_status)) stop('Position MAP does not cover all scored positions')
+  coordinates <- as.character(pos_genomic_exact$hg38_nt_coord)
+  valid <- !is.na(coordinates) & grepl('^[^:]+:[1-9][0-9]*$',coordinates)
+  if (any((pos_genomic_exact$mapping_status=='mapped') != valid)) stop('Inconsistent MAP coordinate status')
+  pos_genomic_exact$chr_label <- ifelse(valid,sub('^chr','',sub(':.*$','',coordinates)),NA_character_)
+  pos_genomic_exact$genomic_position <- suppressWarnings(as.numeric(ifelse(valid,sub('^.*:','',coordinates),NA_character_)))
+  mapping_counts <- pos_genomic_exact %>% count(side,mapping_status,name='n_position_sides')
+  cat('**Mapping coverage by direction**\n\n')
+  emit_widget(DT::datatable(mapping_counts,rownames=FALSE,options=list(dom='t',scrollX=TRUE)))
+  mapped <- pos_genomic_exact %>% filter(mapping_status=='mapped',side %in% c('top','bottom'),is.finite(CAAS_score),CAAS_score>0)
+  width <- as.numeric(params$window_size_bp)
+  if (!is.finite(width) || width <= 0) stop('Invalid genomic window size')
+  if (!nrow(mapped)) {
+    cat('No positive positions with a mapped genomic coordinate.\n\n')
+  } else {
+    position_windows <- mapped %>% mutate(win_start=floor((genomic_position-1)/width)*width+1,
+      win_end=win_start+width-1,win_mid=(win_start+win_end)/2) %>%
+      group_by(side,chr_label,win_start,win_end,win_mid) %>%
+      summarise(n_positions=n(),n_genes=n_distinct(Gene),mean_score=mean(CAAS_score),max_score=max(CAAS_score),.groups='drop') %>%
+      mutate(chr_num=suppressWarnings(as.integer(chr_label)),chr_order=case_when(!is.na(chr_num)~chr_num,chr_label=='X'~23L,chr_label=='Y'~24L,chr_label %in% c('M','MT')~25L,TRUE~26L))
+    position_offsets <- position_windows %>% group_by(chr_label,chr_order) %>% summarise(chr_max=max(win_end),.groups='drop') %>%
+      arrange(chr_order,chr_label) %>% mutate(offset=cumsum(lag(chr_max,default=0))+row_number()*width)
+    position_windows <- position_windows %>% left_join(position_offsets,by=c('chr_label','chr_order')) %>% mutate(win_x=win_mid+offset)
+    position_labels <- position_windows %>% group_by(chr_label,chr_order) %>% summarise(mid_x=mean(range(win_x)),.groups='drop')
+    print(ggplot(position_windows,aes(win_x,n_positions,fill=side))+geom_col(width=width*.85,alpha=.8)+facet_wrap(~side,ncol=1)+
+      scale_x_continuous(breaks=position_labels$mid_x,labels=position_labels$chr_label)+
+      labs(x='Chromosome',y='Positive positions',fill='Direction',title='Positive CAAS positions in genomic windows')+theme(legend.position='none'))
+    scoring_write(position_windows %>% select(side,chr_label,win_start,win_end,n_positions,n_genes,mean_score,max_score),file.path(params$output_dir,'genomic_window_accum_positions.tsv'))
+    emit_widget(DT::datatable(position_windows %>% select(side,chr_label,win_start,win_end,n_positions,n_genes,mean_score,max_score),rownames=FALSE,filter='top',options=list(pageLength=15,scrollX=TRUE)))
+  }
+}
+```
+
 ## Genomic Accumulation
 
 `r if (!has_genomic) "> **Note:** Genomic coordinates (gene_ensembl_file) are not available for this run - genomic accumulation skipped."`
 
 ```{r genomic-setup, eval=has_genomic}
-# Join gene_df with genomic coordinates.
-gene_genomic <- gene_df %>%
-  select(Gene, gene_caas_score, gene_caas_top, gene_caas_bot, n_positions) %>%
-  inner_join(genomic_raw, by = "Gene") %>%
+# Use the common producer-ID resolver: exact names win; documented species and
+# version aliases are considered only when unique. Keep the scored identifier.
+.gene_for_genomic <- gene_df %>%
+  select(Gene, gene_caas_score, gene_caas_top, gene_caas_bot, n_positions)
+.scored <- is.finite(.gene_for_genomic$gene_caas_score)
+.gene_key <- rep(NA_integer_, nrow(.gene_for_genomic))
+.gene_key[.scored] <- scoring_match_genes(.gene_for_genomic$Gene[.scored], genomic_raw$Gene)
+# Unscored annotation rows may name a gene already represented by a scored
+# species-qualified row. The scored row takes precedence.
+.gene_key[!.scored] <- scoring_match_genes(.gene_for_genomic$Gene[!.scored], genomic_raw$Gene)
+.used_scored <- .gene_key[.scored & !is.na(.gene_key)]
+.gene_key[!.scored & .gene_key %in% .used_scored] <- NA_integer_
+.gene_for_genomic$genomic_index <- .gene_key
+gene_genomic <- .gene_for_genomic %>%
+  filter(!is.na(genomic_index)) %>%
+  mutate(genomic_gene = genomic_raw$Gene[genomic_index]) %>%
+  inner_join(genomic_raw, by = c("genomic_gene" = "Gene")) %>%
+  filter(!is.na(chr), nzchar(chr), is.finite(gene_start),
+         is.finite(gene_end), is.finite(gene_mid)) %>%
   # Standardise chromosome labels (remove "chr" prefix if present)
   mutate(
     chr_label = sub("^chr", "", chr),
@@ -1288,12 +1351,12 @@ make_window_accum <- function(df, score_col,
       mean_score = {
         vals <- .data[[score_col]]
         vals <- vals[!is.na(vals) & is.finite(vals)]
-        if (length(vals) > 0) mean(vals) else 0.0
+        if (length(vals) > 0) mean(vals) else NA_real_
       },
       max_score  = {
         vals <- .data[[score_col]]
         vals <- vals[!is.na(vals) & is.finite(vals)]
-        if (length(vals) > 0) max(vals) else 0.0
+        if (length(vals) > 0) max(vals) else NA_real_
       },
       genes      = paste(unique(Gene), collapse = ", "),
       .groups    = "drop"
@@ -1315,7 +1378,7 @@ stitch_windows <- function(win_df) {
 
 ### CAAS gene score
 
-Each bar is the mean of individual raw gene maxima in a genomic window; each point is their maximum. Genes are assigned by genomic midpoint. These are descriptive window aggregates, not accumulation p-values or individual gene p.gen.
+Each bar is the mean of individual raw gene maxima in a genomic window; each point is their maximum. Genes are assigned by genomic midpoint. Windows without a finite gene score are missing, not zero. These are descriptive window aggregates, not accumulation p-values or individual gene p.gen.
 
 `r if (!has_genomic) "> **Note:** Genomic coordinates not available - gene-level CAAS window accumulation skipped."`
 

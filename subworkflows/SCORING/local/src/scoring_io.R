@@ -19,13 +19,18 @@ scoring_keys <- function(x, keys, label) {
 scoring_gene_aliases <- function(gene) {
   stem <- sub('\\.prot$', '', gene)
   core <- sub('\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$', '', stem, perl=TRUE)
-  unique(c(gene, stem, core, if (core != stem) sub('\\.[0-9]+$', '', core)))
+  unique(c(gene, stem, core))
 }
 scoring_match_genes <- function(targets, sources) {
   version <- function(gene) {
     stem <- sub('\\.prot$', '', gene)
     stem <- sub('\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$', '', stem, perl=TRUE)
     if (grepl('\\.[0-9]+$', stem)) sub('^.*\\.([0-9]+)$', '\\1', stem) else NA_character_
+  }
+  species <- function(gene) {
+    stem <- sub('\\.prot$', '', gene)
+    pattern <- '\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$'
+    if (grepl(pattern, stem, perl=TRUE)) sub('^.*(\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*)$', '\\1', stem, perl=TRUE) else NA_character_
   }
   index <- new.env(hash=TRUE, parent=emptyenv())
   for (i in seq_along(sources)) for (a in scoring_gene_aliases(sources[[i]]))
@@ -37,6 +42,11 @@ scoring_match_genes <- function(targets, sources) {
     if (!is.na(target_version) && length(hits)) {
       source_versions <- vapply(sources[hits], version, character(1))
       hits <- hits[is.na(source_versions) | source_versions == target_version]
+    }
+    target_species <- species(targets[[i]])
+    if (!is.na(target_species) && length(hits)) {
+      source_species <- vapply(sources[hits], species, character(1))
+      hits <- hits[is.na(source_species) | source_species == target_species]
     }
     if (length(hits) > 1L) stop('Ambiguous producer gene alias: ', targets[[i]], ': ', paste(sources[hits], collapse=', '))
     if (length(hits)) exact[[i]] <- hits

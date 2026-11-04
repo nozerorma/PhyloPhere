@@ -46,6 +46,7 @@ process SCORING_COMPUTE {
     input:
     val source_hash
     path postproc_file
+    path cleaned_background
     path fade_summary_top
     path fade_summary_bottom
     path fade_site_top
@@ -93,6 +94,7 @@ process SCORING_COMPUTE {
 
         /usr/local/bin/_entrypoint.sh Rscript scoring_compute.R \
             --postproc       ${scoringQuote(postproc_file)} \
+            --background     ${scoringQuote(cleaned_background)} \
             --core_positions core_positions.tsv \
             --core_genes     core_genes.tsv \
             --fade_top       ${scoringQuote(fade_summary_top)} \
@@ -124,6 +126,7 @@ process SCORING_COMPUTE {
 
         Rscript scoring_compute.R \
             --postproc       ${scoringQuote(postproc_file)} \
+            --background     ${scoringQuote(cleaned_background)} \
             --core_positions core_positions.tsv \
             --core_genes     core_genes.tsv \
             --fade_top       ${scoringQuote(fade_summary_top)} \

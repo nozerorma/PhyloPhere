@@ -94,8 +94,8 @@ fcs_load_gmts <- function(gmt_dir) {
 }
 
 # Match database symbols to the tested IDs without renaming the ranking or null
-# matrices. Exact IDs take precedence; a species-labelled producer suffix and
-# optional numeric suffix are aliases only if they resolve to one tested ID.
+# matrices. Exact IDs take precedence; a species suffix is an alias only when
+# it resolves to one tested ID. Numeric parts remain literal.
 fcs_gmts_for_universe <- function(gmts, universe) {
   fcs_check_gene_ids(universe, length(universe), "FCS universe")
   aliases <- new.env(hash = TRUE, parent = emptyenv())
@@ -104,7 +104,7 @@ fcs_gmts_for_universe <- function(gmts, universe) {
     exact[[gene]] <- TRUE
     stem <- sub("\\.prot$", "", gene)
     core <- sub("\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$", "", stem, perl = TRUE)
-    keys <- unique(c(gene, stem, core, if (core != stem) sub("\\.[0-9]+$", "", core)))
+    keys <- unique(c(gene, stem, core))
     for (key in keys) aliases[[key]] <- c(aliases[[key]], gene)
   }
   version <- function(gene) {
@@ -112,14 +112,26 @@ fcs_gmts_for_universe <- function(gmts, universe) {
     stem <- sub("\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$", "", stem, perl = TRUE)
     if (grepl("\\.[0-9]+$", stem)) sub("^.*\\.([0-9]+)$", "\\1", stem) else NA_character_
   }
+  species <- function(gene) {
+    stem <- sub("\\.prot$", "", gene)
+    pattern <- "\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$"
+    if (grepl(pattern, stem, perl=TRUE)) sub("^.*(\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*)$", "\\1", stem, perl=TRUE) else NA_character_
+  }
   symbols <- unique(unlist(lapply(gmts, function(gmt) unlist(gmt$genesets, use.names = FALSE)), use.names = FALSE))
   resolved <- setNames(vapply(symbols, function(symbol) {
     if (exists(symbol, envir = exact, inherits = FALSE)) return(symbol)
-    hits <- unique(aliases[[symbol]])
+    stem <- sub("\\.prot$", "", symbol)
+    core <- sub("\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$", "", stem, perl=TRUE)
+    hits <- unique(unlist(lapply(unique(c(symbol,stem,core)),function(key) aliases[[key]]),use.names=FALSE))
     v <- version(symbol)
     if (!is.na(v) && length(hits)) {
       hv <- vapply(hits, version, character(1))
       hits <- hits[is.na(hv) | hv == v]
+    }
+    sp <- species(symbol)
+    if (!is.na(sp) && length(hits)) {
+      hs <- vapply(hits, species, character(1))
+      hits <- hits[is.na(hs) | hs == sp]
     }
     if (length(hits) > 1L) stop("Ambiguous FCS gene symbol ", symbol, ": ", paste(hits, collapse = ", "))
     if (length(hits)) hits else symbol

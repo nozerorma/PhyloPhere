@@ -62,6 +62,7 @@ parse_arg <- function(flag, default = "NO_FILE") {
 }
 
 postproc_file        <- parse_arg("--postproc")
+background_file      <- parse_arg("--background")
 fade_top_file        <- parse_arg("--fade_top")
 fade_bottom_file     <- parse_arg("--fade_bottom")
 fade_site_top_file   <- parse_arg("--fade_site_top")
@@ -432,6 +433,22 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
             sum(!is.na(gene_caas$gene_caas_score_top)),
             sum(!is.na(gene_caas$gene_caas_score_bottom))))
 
+# Align producer gene IDs to the CAAS background whenever a unique match exists.
+# CAAS names and the observed/null keys are not rewritten. Producer-only genes
+# remain available under their original ID. Ambiguous aliases fail explicitly.
+caas_gene_ids <- if (file_exists(background_file)) scoring_genes(background_file) else gene_caas$Gene
+caas_gene_ids <- unique(c(caas_gene_ids, gene_caas$Gene))
+align_producer_ids <- function(d, label) {
+  if (!nrow(d)) return(d)
+  producer <- d$Gene
+  idx <- scoring_match_genes(producer, caas_gene_ids)
+  d$Gene[!is.na(idx)] <- caas_gene_ids[idx[!is.na(idx)]]
+  if (anyDuplicated(d$Gene)) stop('Multiple ',label,' IDs resolve to the same CAAS gene')
+  d
+}
+fade_top_df <- align_producer_ids(fade_top_df, 'FADE top')
+fade_bottom_df <- align_producer_ids(fade_bottom_df, 'FADE bottom')
+
 # ── 4c. Gene RERConverge Score (optional) ─────────────────────────────────────
 has_rer <- file_exists(rer_file)
 if (has_rer) {
@@ -501,6 +518,9 @@ if (has_rer) {
                      rer_acceleration = character())
 }
 
+gene_rer_native <- gene_rer
+gene_rer <- align_producer_ids(gene_rer, 'RER')
+
 # ── 4d. Gene FADE Significance (optional) ─────────────────────────────────────
 # BF >= fade_bf_threshold per direction. fade_significant_top / _bottom used separately
 # to characterise top-CAAS and bottom-CAAS gene sets respectively.
@@ -555,19 +575,6 @@ if (nrow(gene_fade) > 0) {
   gene_scores$fade_significant_top    <- NA
   gene_scores$fade_max_bf_bottom      <- NA_real_
   gene_scores$fade_significant_bottom <- NA
-}
-
-# Attach cross-module evidence to CAAS identifiers without renaming or deleting
-# the original RER/FADE records used by their own enrichment universes.
-caas_rows <- match(gene_caas$Gene, gene_scores$Gene)
-for (source in list(gene_rer, gene_fade)) {
-  if (!nrow(source)) next
-  matches <- scoring_match_genes(gene_caas$Gene, source$Gene)
-  for (column in setdiff(names(source), 'Gene')) {
-    values <- source[[column]][matches]
-    missing <- is.na(gene_scores[[column]][caas_rows])
-    gene_scores[[column]][caas_rows[missing]] <- values[missing]
-  }
 }
 
 # Correlation table is retained as a public header-only compatibility output.
@@ -659,10 +666,10 @@ cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom)\n",
 if (has_rer) {
   # The RER ranking is the signed parametric statistic sign(Rho) * -log10(P), the gene statistic of RERconverge (getStat) and the
   # one its permulations (corStat) carry for the null.
-  .rp <- suppressWarnings(as.numeric(.col(gene_rer, "rer_P")))
-  .rr <- suppressWarnings(as.numeric(.col(gene_rer, "rer_rho")))
+  .rp <- suppressWarnings(as.numeric(.col(gene_rer_native, "rer_P")))
+  .rr <- suppressWarnings(as.numeric(.col(gene_rer_native, "rer_rho")))
   scoring_write(tibble(
-    gene         = gene_rer$Gene,
+    gene         = gene_rer_native$Gene,
     score_global = ifelse(is.finite(.rr) & is.finite(.rp), sign(.rr) * -log10(.rp), NA_real_)
   ), "fcs_stats_rer.tsv")
   cat("  fcs_stats_rer.tsv written (RER global ranking)\n")

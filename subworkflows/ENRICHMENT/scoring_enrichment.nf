@@ -284,9 +284,9 @@ process SCORING_COMPARE_REPORT {
     def fade_sites_top_arg    = (fade_sites_top.name =~ /^NO_/)    ? 'NULL' : "'${fade_sites_top}'"
     def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_/) ? 'NULL' : "'${fade_sites_bottom}'"
     def position_char_arg     = (position_char.name =~ /^NO_/)     ? 'NULL' : "'${position_char}'"
-    def compare_source_hash = ['14.Comparison_report.Rmd', 'src/fcs_selection.R', 'src/evidence_flags.R','src/report_presentation.R','src/ami_evidence.R'].collect {
+    def compare_source_hash = (['14.Comparison_report.Rmd', 'src/fcs_selection.R', 'src/evidence_flags.R','src/report_presentation.R','src/ami_evidence.R'].collect {
         file("${local_dir}/${it}").text
-    }.join('\n').with { java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString() }
+    } + [file("${baseDir}/subworkflows/SCORING/local/src/scoring_io.R").text]).join('\n').with { java.security.MessageDigest.getInstance('SHA-256').digest(it.getBytes('UTF-8')).encodeHex().toString() }
 
     def compare_rscript = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def render_cmd = """
@@ -325,6 +325,7 @@ process SCORING_COMPARE_REPORT {
 
     def stage_cmd = """
         cp -R ${local_dir}/* .
+        cp ${baseDir}/subworkflows/SCORING/local/src/scoring_io.R src/scoring_io.R
 
         mkdir -p cmp_fcs cmp_fcs_le
 

@@ -50,6 +50,7 @@ def rerStage(stage) {
         report:['local/5.RERconverge_report.Rmd','local/render_rer.R','rer_report.nf']]
     assert stages.containsKey(stage)
     def h = rerSources(stages[stage])
+    if (stage=='tables') h += rerHash([file("${baseDir}/subworkflows/SCORING/local/src/scoring_io.R")])
     if (stage=='report') h += rerHash([file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R")])
     h
 }

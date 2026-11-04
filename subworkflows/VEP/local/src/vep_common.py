@@ -153,13 +153,17 @@ def map_index(directory):
 
 
 def map_path(gene, directory):
-    exact, prefixed = map_index(str(Path(directory).resolve()))
+    exact, _ = map_index(str(Path(directory).resolve()))
     if gene in exact:
         return exact[gene]
-    paths = prefixed.get(gene, [])
-    if len(paths)>1:
-        raise ValueError(f'Multiple MAP references for {gene}: {[p.name for p in paths]}')
-    return paths[0] if paths else None
+    # The scored ID may carry a producer species/version suffix while the
+    # MAP stem is the canonical ID (or vice versa). Use the same collision-
+    # rejecting resolver as the other annotation joins.
+    resolved = resolve_gene(gene, exact)
+    if resolved in exact:
+        return exact[resolved]
+    # Arbitrary dotted prefixes may be distinct literal gene IDs (e.g. X.1).
+    return None
 
 
 def genomic_coord(text):
@@ -331,8 +335,7 @@ def gene_aliases(gene):
     if match:
         core = match.group(1)
         out.add(core)
-        # A numbered suffix is an alias only in the documented species-labelled form.
-        out.add(re.sub(r'\.[0-9]+$', '', core))
+        # Numeric suffixes belong to the literal gene ID and are not stripped.
     return out
 
 
@@ -361,6 +364,11 @@ def resolve_gene(gene,identifiers):
         return match.group(1) if match else None
     query_version = version(gene)
     matches = [name for name in matches if not (query_version and version(name) and query_version != version(name))]
+    def species(name):
+        match = re.search(r'\.([A-Z][a-z]+_[a-z]+(?:_[A-Za-z0-9]+)*)$', name.removesuffix('.prot'))
+        return match.group(1) if match else None
+    query_species = species(gene)
+    matches = [name for name in matches if not (query_species and species(name) and query_species != species(name))]
     if len(matches)>1:raise ValueError(f'Ambiguous producer gene alias: {gene}: {matches}')
     return matches[0] if matches else gene
 

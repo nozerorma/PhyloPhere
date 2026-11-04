@@ -275,6 +275,8 @@ def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
         # there in scoring.nf), the same file as the gene Ensembl slot of CT_POSTPROC.
         _slot("genomic_info", "Gene genomic coordinates TSV", False,
               _first_match(outdir, "postproc/postproc_inputs/gene_annotation.tsv", "postproc/postproc_inputs/*", "**/*genomic_info*.tsv", "**/*genomic*coords*.tsv")),
+        _slot("position_genomic", "Position MAP coordinates TSV", False,
+              _first_match(scoring, "position_genomic_mapping.tsv")),
         _slot("null_summary", "Null summary per cycle TSV", False,
               _first_match(outdir, "caas_permulation/cycle_summary.tsv", "**/cycle_summary.tsv")),
         _slot("null_hist", "Null score histogram per cycle TSV", False,
@@ -308,6 +310,7 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"fade_site_top_file   = {_r_arg(s['fade_site_top'])}",
             f"fade_site_bot_file   = {_r_arg(s['fade_site_bot'])}",
             f"genomic_info_file    = {_r_arg(s['genomic_info'])}",
+            f"position_genomic_file = {_r_arg(s['position_genomic'])}",
             f"null_summary_file   = {_r_arg(s['null_summary'])}",
             f"null_hist_file      = {_r_arg(s['null_hist'])}",
             f"caas_pos_sample_file = {_r_arg(s['caas_pos_sample'])}",
@@ -333,7 +336,7 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
         publish_targets=[report.html_path.parent.parent / "scoring", report.html_path.parent],
         post_lines=[
             f'mkdir -p "{report.html_path.parent.parent}/scoring"',
-            'for f in gene_evidence_overlap.tsv genomic_window_accum_gene_caas.tsv position_scores_annotated.tsv; do',
+            'for f in gene_evidence_overlap.tsv genomic_window_accum_gene_caas.tsv genomic_window_accum_positions.tsv position_scores_annotated.tsv; do',
             f'    if [ -f "$f" ]; then cp "$f" "{report.html_path.parent.parent}/scoring/"; fi',
             'done',
         ],
@@ -657,6 +660,7 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
         local_dir="subworkflows/ENRICHMENT/local",
         pre_lines=[
             'mkdir -p fcs_regen',
+            f'cp "{repo_dir}/subworkflows/SCORING/local/src/scoring_io.R" src/scoring_io.R',
             f'cp "{s["enrich_file"]}" fcs_regen/fcs_enrich_input.tsv',
             f'cp "{s["metadata"]}" fcs_regen/fcs_report_metadata.json',
         ],
@@ -840,7 +844,8 @@ def _compare_find_slots(outdir: Listing) -> list[InputSlot]:
 def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
     output_file = f"14.Comparison_report_{report.traitname}.html"
-    pre_lines = ["mkdir -p cmp_fcs cmp_fcs_le"]
+    pre_lines = ["mkdir -p cmp_fcs cmp_fcs_le",
+                 f'cp "{repo_dir}/subworkflows/SCORING/local/src/scoring_io.R" src/scoring_io.R']
     if s["caas_fcs"]:
         pre_lines.append(f'cp "{s["caas_fcs"]}" cmp_fcs/caas_fcs_all.tsv')
     if s["rer_fcs"]:

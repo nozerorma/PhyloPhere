@@ -1,0 +1,23 @@
+# Usage: Rscript test_fcs_identifier_invariance.R <repo> <scratch>
+a <- commandArgs(TRUE); root <- normalizePath(a[1]);dir.create(a[2],recursive=TRUE,showWarnings=FALSE);setwd(normalizePath(a[2]))
+source(file.path(root,'subworkflows/ENRICHMENT/local/src/fcs_enrich.R'))
+genes <- sprintf('g%02d',1:40); normalized <- paste0(genes,'.Homo_sapiens')
+dir.create('gmts',showWarnings=FALSE)
+writeLines(c(paste(c('A','set A',genes[1:15]),collapse='\t'),paste(c('B','set B',genes[12:28]),collapse='\t')),'gmts/test.gmt')
+invisible(capture.output(suppressMessages(gmts<-fcs_load_gmts('gmts'))))
+values<-setNames(seq(-2,2,length.out=40),genes);set.seed(3)
+null<-matrix(rnorm(40*10),40,dimnames=list(genes,paste0('c',1:10)))
+saveRDS(list(corStat=null),'native.rds')
+native<-fcs_run_all(list(global=values),gmts,num_g=2,perms_file='native.rds',score_source='rer')
+names(values)<-normalized;rownames(null)<-normalized;saveRDS(list(corStat=null),'normalized.rds')
+renamed<-fcs_run_all(list(global=values),gmts,num_g=2,perms_file='normalized.rds',score_source='rer')
+a<-native[order(native$pathway),];b<-renamed[order(renamed$pathway),]
+for (col in c('stat','pval','p.adj','p.perm','q.perm','num.genes')) stopifnot(isTRUE(all.equal(a[[col]],b[[col]],tolerance=1e-12)))
+# A literal numeric gene suffix is never dropped to satisfy a symbol match.
+g<-list(db=list(genesets=list(one=c('AC005551','AC005551.1'))))
+y<-fcs_gmts_for_universe(g,c('AC005551.1.Homo_sapiens'))
+stopifnot(identical(y$db$genesets$one,c('AC005551','AC005551.1.Homo_sapiens')))
+g<-list(db=list(genesets=list(one=c('KMT2D.Homo_sapiens','Y.Homo_sapiens'))))
+y<-fcs_gmts_for_universe(g,c('KMT2D','Y.Papio_anubis'))
+stopifnot(identical(y$db$genesets$one,c('KMT2D','Y.Homo_sapiens')))
+cat('FCS_IDENTIFIER_INVARIANCE_PASS\n')
