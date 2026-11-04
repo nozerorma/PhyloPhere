@@ -29,7 +29,9 @@ Path templates, relative to base_path/<TRAIT>, matched to the publishDir of each
                   postproc/cleaned_backgrounds/cleaned_background_main.txt
   RER           : rerconverge/rer_results/<TRAIT>.continuous.{output,perms.rds},
                   rerconverge/rer_results/rerconverge_summary_<TRAIT>.tsv (resolved by glob
-                  at generation time, because the filename carries a variable suffix)
+                  at generation time, because the filename carries a variable suffix);
+                  a run that reused a precomputed RER publishes rerconverge/rer_results/rer_inputs/validated_rer.output
+                  and rerconverge/rer_results/normalized_null instead, which are taken when the raw files are absent
   FADE          : selection/fade/{top,bottom} (dir),
                   selection/fade/{top,bottom}/fade_summary_{top,bottom}.tsv,
                   selection/fade/{top,bottom}/fade_site_bf_{top,bottom}.tsv
@@ -128,13 +130,20 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
 
     if config.use_rer:
         rer_dir = os.path.join(outdir, "rerconverge", "rer_results")
-        # Same rule as run_single.sh.j2: binary output only when no continuous one exists.
-        binary_only = os.path.isfile(os.path.join(rer_dir, f"{trait}.binary.output")) and not os.path.isfile(
-            os.path.join(rer_dir, f"{trait}.continuous.output")
-        )
-        kind = "binary" if binary_only else "continuous"
-        entries.append((f"rer_{kind}_file", os.path.join(rer_dir, f"{trait}.{kind}.output"), "file"))
-        entries.append(("rer_perms_file / scoring_rer_perms_input", os.path.join(rer_dir, f"{trait}.{kind}.perms.rds"), "path"))
+        # Same rule as run_single.sh.j2: binary output only when no continuous one exists; a source run that reused a
+        # precomputed RER has neither and publishes the validated result and its null instead.
+        raw_continuous = os.path.isfile(os.path.join(rer_dir, f"{trait}.continuous.output"))
+        raw_binary = os.path.isfile(os.path.join(rer_dir, f"{trait}.binary.output"))
+        validated = os.path.join(rer_dir, "rer_inputs", "validated_rer.output")
+        if not (raw_continuous or raw_binary) and os.path.isfile(validated):
+            entries.append(("rer_continuous_file / rer_binary_file", validated, "file"))
+            null_dir = os.path.join(rer_dir, "normalized_null")
+            if os.path.exists(null_dir):
+                entries.append(("rer_perms_file / scoring_rer_perms_input", null_dir, "path"))
+        else:
+            kind = "binary" if raw_binary and not raw_continuous else "continuous"
+            entries.append((f"rer_{kind}_file", os.path.join(rer_dir, f"{trait}.{kind}.output"), "file"))
+            entries.append(("rer_perms_file / scoring_rer_perms_input", os.path.join(rer_dir, f"{trait}.{kind}.perms.rds"), "path"))
         matches = sorted(glob.glob(os.path.join(rer_dir, "rerconverge_summary_*.tsv")))
         if matches:
             entries.append(("scoring_rer_input", matches[0], "file"))

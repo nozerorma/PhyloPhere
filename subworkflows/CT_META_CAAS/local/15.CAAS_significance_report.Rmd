@@ -78,6 +78,10 @@ ranking_labels <- c(global="Global",top="Top",bottom="Bottom")
 seed_val <- if(!is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998L
 set.seed(seed_val)
 plot_cap <- 20000L # points drawn per scatter; every point that is not "Evaluated; not significant" is always drawn
+# Per-hypothesis lists (about 85% of the bytes of the position table). They are shown in reports 10 and 14 and kept in
+# the published TSVs; embedding them here multiplies the HTML size and the memory of the pandoc step.
+detail_cols <- c("participating_hypotheses","top_species_residues","bottom_species_residues",
+                 "n_top_species","n_bottom_species","n_conserved_pairs")
 
 fmt_int <- function(x) ifelse(is.na(x),"NA",format(round(x),big.mark=",",scientific=FALSE,trim=TRUE))
 file_ok <- function(f) !is.null(f) && length(f)==1L && !is.na(f) && !grepl("^NO_",basename(f)) && file.exists(f) && file.info(f)$size>0
@@ -331,7 +335,7 @@ for(rk in names(views_pos)) {
   evidence_histograms(d,"CAAS_score","p.emp","p.adj_bh",paste("Positions,",tolower(ranking_labels[[rk]]),"view"))
   cat("\n\n")
   front <- c("Gene","Position","side","positive_sides","CAAS_score","p.emp","p.adj_bh","evidence_status","nominal","BH")
-  report_emit(report_table(d %>% mutate(evidence_status=as.character(evidence_status)) %>% relocate(any_of(front)),
+  report_emit(report_table(d %>% select(-any_of(detail_cols)) %>% mutate(evidence_status=as.character(evidence_status)) %>% relocate(any_of(front)),
     sci_cols=intersect(c("p.emp","p.adj_bh"),names(d))))
 }
 ```
@@ -366,7 +370,7 @@ for(rk in names(views_gene)) {
 
 # Complete tables
 
-The paginated tables hold every positive row and can be searched, sorted and exported. The complete numeric TSV files are published under `meta_caas/significance/`:
+The paginated tables hold every positive row and can be searched, sorted and exported. The per-hypothesis columns (participating hypotheses, species residues, species counts and conserved pairs) are omitted from them and appear in the Scoring and Comparison reports. The complete numeric TSV files are published under `meta_caas/significance/`:
 
 | File | Content |
 |---|---|

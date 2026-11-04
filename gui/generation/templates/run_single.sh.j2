@@ -98,14 +98,6 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     # Post-processing" box of the project (written for the normal run) does not apply and must not switch it off.
     PRECOMP_USE_POSTPROC=false
     RUN_CT_POSTPROC=true
-    # FADE and RER are computed by the pass that runs the downstream modules (the complete pass, not the exploratory one),
-    # so each is looked for among the normal runs on its own.
-    FADE_SOURCE_OUTDIR=""
-    RER_SOURCE_OUTDIR=""
-    for _d in "${NORMAL_RUN_OUTDIRS[@]}"; do
-        [ -z "$FADE_SOURCE_OUTDIR" ] && [ -f "${_d}/selection/fade/top/fade_summary_top.tsv" -o -f "${_d}/selection/fade/bottom/fade_summary_bottom.tsv" ] && FADE_SOURCE_OUTDIR="$_d"
-        [ -z "$RER_SOURCE_OUTDIR" ] && [ -d "${_d}/rerconverge/rer_results" ] && RER_SOURCE_OUTDIR="$_d"
-    done
 {% else %}
     PASS_SOURCE_OUTDIR="${CAAS_OUTBASE}/${TRAIT}${TAG}_exploratory"
     CAAS_REUSE_OUTDIR="$PASS_SOURCE_OUTDIR"
@@ -207,6 +199,14 @@ PRECOMP_CAAS_OUTDIR="$PRECOMP_OUTDIR"
 # FADE and RER do not depend on conservation: the strict pass reads the tables of the run it derives from instead of
 # running them again (only when that run has them). Every CAAS-derived table does depend on it and comes from the
 # strict tables (<outdir>/strict/), never from the top level of the normal run.
+# Each is looked for by the file it is read from, first in the normal runs and then in the outdir of the Precomputed tab:
+# a normal run that itself reused FADE or RER publishes only part of their tables, so the directory alone proves nothing.
+FADE_SOURCE_OUTDIR=""
+RER_SOURCE_OUTDIR=""
+for _d in "${NORMAL_RUN_OUTDIRS[@]}" "$PRECOMP_OUTDIR"; do
+    [ -z "$FADE_SOURCE_OUTDIR" ] && [ -f "${_d}/selection/fade/top/fade_summary_top.tsv" -o -f "${_d}/selection/fade/bottom/fade_summary_bottom.tsv" ] && FADE_SOURCE_OUTDIR="$_d"
+    [ -z "$RER_SOURCE_OUTDIR" ] && [ -f "${_d}/rerconverge/rer_results/${TRAIT}.continuous.output" -o -f "${_d}/rerconverge/rer_results/${TRAIT}.binary.output" -o -f "${_d}/rerconverge/rer_results/rer_inputs/validated_rer.output" ] && RER_SOURCE_OUTDIR="$_d"
+done
 PRECOMP_OUTDIR="$PASS_SOURCE_OUTDIR"
 PRECOMP_CAAS_OUTDIR="$CAAS_REUSE_OUTDIR"
 if [ "${RUN_FADE:-false}" = true ] && [ -n "$FADE_SOURCE_OUTDIR" ]; then
@@ -263,18 +263,33 @@ done
 {% endif %}
 
 if [ "${PRECOMP_USE_RER:-false}" = true ]; then
-    # The source run wrote <trait>.binary.* for a binary trait and <trait>.continuous.* otherwise.
     _RER_RES="${RER_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/rerconverge/rer_results"
-    if [ -f "${_RER_RES}/${TRAIT}.binary.output" ] && [ ! -f "${_RER_RES}/${TRAIT}.continuous.output" ]; then
-        _RER_KIND=binary
-        RER_BINARY_FILE="${_RER_RES}/${TRAIT}.binary.output"
+    if [ -f "${_RER_RES}/${TRAIT}.continuous.output" ] || [ -f "${_RER_RES}/${TRAIT}.binary.output" ]; then
+        # The source run computed RER: <trait>.binary.* for a binary trait and <trait>.continuous.* otherwise.
+        if [ -f "${_RER_RES}/${TRAIT}.binary.output" ] && [ ! -f "${_RER_RES}/${TRAIT}.continuous.output" ]; then
+            _RER_KIND=binary
+            RER_BINARY_FILE="${_RER_RES}/${TRAIT}.binary.output"
+        else
+            _RER_KIND=continuous
+            RER_CONTINUOUS_FILE="${_RER_RES}/${TRAIT}.continuous.output"
+        fi
+        # The perms RDS exists only if the source run had permulation on for this phenotype.
+        RER_PERMS_FILE="${_RER_RES}/${TRAIT}.${_RER_KIND}.perms.rds"
+    elif [ -f "${_RER_RES}/rer_inputs/validated_rer.output" ]; then
+        # The source run reused a precomputed RER and published only the validated result and its null. Both go through
+        # the validation again with the identifiers they already carry, so the pass sees the same RER as that run.
+        if grep -Eq '"analysis_mode" *: *"binary"' "${_RER_RES}/rer_run_metadata.json" 2>/dev/null; then
+            RER_BINARY_FILE="${_RER_RES}/rer_inputs/validated_rer.output"
+        else
+            RER_CONTINUOUS_FILE="${_RER_RES}/rer_inputs/validated_rer.output"
+        fi
+        # normalized_null exists only if the source run had a null.
+        [ -e "${_RER_RES}/normalized_null" ] && RER_PERMS_FILE="${_RER_RES}/normalized_null"
     else
-        _RER_KIND=continuous
-        RER_CONTINUOUS_FILE="${_RER_RES}/${TRAIT}.continuous.output"
+        echo "[ERROR] precomputed RER: no ${TRAIT}.{continuous,binary}.output or rer_inputs/validated_rer.output under ${_RER_RES}" >&2
+        exit 1
     fi
-    # The perms RDS exists only if the source run had permulation on for this phenotype.
-    RER_PERMS_FILE="${_RER_RES}/${TRAIT}.${_RER_KIND}.perms.rds"
-    SCORING_RER_PERMS_INPUT="$RER_PERMS_FILE"
+    SCORING_RER_PERMS_INPUT="${RER_PERMS_FILE:-}"
     # Scoring takes the summary table of RER_REPORT, not the raw RER_CONT output above:
     # a different producer, whose filename carries a variable suffix, so it is resolved
     # with a glob here instead of a fixed path.
@@ -295,6 +310,7 @@ if [ "${PRECOMP_USE_FADE:-false}" = true ]; then
         SCORING_FADE_SUMMARY_BOTTOM="${FADE_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/selection/fade/bottom/fade_summary_bottom.tsv"
         SCORING_FADE_SITE_BOTTOM="${FADE_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/selection/fade/bottom/fade_site_bf_bottom.tsv"
     fi
+    [ -n "${FADE_TABLES_DIR_TOP:-}${FADE_TABLES_DIR_BOTTOM:-}" ] || echo "[WARN] precomputed FADE: no fade_summary_{top,bottom}.tsv under ${FADE_SOURCE_OUTDIR:-$PRECOMP_OUTDIR}/selection/fade; the run goes without FADE tables" >&2
 fi
 
 if [ "${PRECOMP_USE_VEP:-false}" = true ]; then
