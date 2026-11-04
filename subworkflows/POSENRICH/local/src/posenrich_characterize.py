@@ -136,10 +136,14 @@ def build_position_characterization(positions, evidence, pfam_members):
 
     layers = {}
     status_by_key = {}
+    genomic_by_key = {}
+    reference_by_key = {}
     attributes = ['ucr_region', 'ucr_variability', 'fubar_call', 'fade_top_sig', 'fade_bottom_sig', 'custom_terms']
-    for row in positions[['Gene', 'Position', 'evaluation_status'] + attributes].itertuples(index=False):
+    for row in positions[['Gene', 'Position', 'evaluation_status', 'hg38_nt_coord', 'reference_status'] + attributes].itertuples(index=False):
         key = (row.Gene, int(row.Position))
         status_by_key[key] = row.evaluation_status
+        genomic_by_key[key] = row.hg38_nt_coord
+        reference_by_key[key] = row.reference_status
         if row.ucr_region or row.ucr_variability or row.fubar_call or row.fade_top_sig == '1' or row.fade_bottom_sig == '1' or row.custom_terms:
             layers[key] = {'ucr_region': row.ucr_region, 'variability': row.ucr_variability,
                            'fubar_call': row.fubar_call, 'fade_top': int(row.fade_top_sig == '1'),
@@ -155,6 +159,8 @@ def build_position_characterization(positions, evidence, pfam_members):
         rows.append({
             'Gene': gene, 'Position': pos,
             'evaluation_status': status_by_key.get((gene, pos), 'NA'),
+            'hg38_nt_coord': genomic_by_key.get((gene, pos), ''),
+            'reference_status': reference_by_key.get((gene, pos), ''),
             'pfam_domain': ';'.join(sorted(domains)),
             'pfam_clan': ';'.join(sorted(clans)),
             'ucr_region': layer['ucr_region'],
@@ -170,7 +176,7 @@ def build_position_characterization(positions, evidence, pfam_members):
             'caas_nominal': 'NA' if sc is None else sc['caas_nominal'],
             'caas_adjusted': 'NA' if sc is None else sc['caas_adjusted'],
         })
-    return pd.DataFrame(rows, columns=['Gene', 'Position', 'evaluation_status', 'pfam_domain',
+    return pd.DataFrame(rows, columns=['Gene', 'Position', 'evaluation_status', 'hg38_nt_coord', 'reference_status', 'pfam_domain',
                                        'pfam_clan', 'ucr_region', 'position_variability',
                                        'fubar_selection', 'fade_top_sig', 'fade_bottom_sig',
                                        'custom_terms', 'CAAS_score', 'sides', 'p.emp', 'p.adj_bh',
@@ -307,7 +313,7 @@ def main():
 
     verify_registry(args.registry_dir)
     positions = read_tsv(os.path.join(args.registry_dir, 'positions.tsv'),
-                         usecols=['Gene', 'Position', 'evaluation_status', 'in_tested_universe'] + pm.ATTRIBUTE_COLUMNS)
+                         usecols=['Gene', 'Position', 'evaluation_status', 'in_tested_universe', 'hg38_nt_coord', 'reference_status'] + pm.ATTRIBUTE_COLUMNS)
     evidence = read_tsv(os.path.join(args.registry_dir, 'position_evidence.tsv'))
     regions = read_tsv(os.path.join(args.registry_dir, 'regions.tsv'))
     sites = read_tsv(os.path.join(args.registry_dir, 'sites.tsv'))

@@ -315,6 +315,7 @@ process SCORING_COMPARE_REPORT {
                     fade_sites_top_file      = ${fade_sites_top_arg},
                     fade_sites_bottom_file   = ${fade_sites_bottom_arg},
                     position_characterization_file = ${position_char_arg},
+                    genomic_window_size = ${params.scoring_window_size_bp ?: 1000000},
                     seed               = '${params.seed ?: 1998}'
                 ),
                 output_file = '14.Comparison_report_${traitname}.html'

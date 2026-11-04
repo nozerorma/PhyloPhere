@@ -833,7 +833,7 @@ def _compare_find_slots(outdir: Listing) -> list[InputSlot]:
         _slot("fade_sites_bottom", "FADE selected sites (bottom)", False,
               _first_match(outdir, "selection/fade/bottom/fade_sites_bottom.csv")),
         _slot("position_characterization", "Position characterization TSV", False,
-              _first_match(outdir, "posenrich/characterization/position_characterization.tsv")),
+              _first_match(outdir, "position_characterization/characterization/position_characterization.tsv", "posenrich/characterization/position_characterization.tsv")),
     ]
 
 
@@ -877,6 +877,7 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"fade_sites_top_file      = {_r_arg(s['fade_sites_top'])}",
             f"fade_sites_bottom_file   = {_r_arg(s['fade_sites_bottom'])}",
             f"position_characterization_file = {_r_arg(s['position_characterization'])}",
+            "genomic_window_size = if (!is.null(saved[['genomic_window_size']])) saved[['genomic_window_size']] else 1000000",
             "seed               = saved[['seed']]",
         ],
         output_file,
