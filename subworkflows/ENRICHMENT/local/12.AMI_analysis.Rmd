@@ -219,27 +219,40 @@ load_local_enrichment_db <- function(species, cache_dir) {
   db
 }
 
+# Term sizes in the background and the protein universe of the database depend only on the background, which every
+# module of a gene list shares. They are computed once per background instead of once per module: scanning and
+# grouping the whole terms database dominated the run time of this report.
+.enrichment_memo <- new.env(parent = emptyenv())
+memoized <- function(key, compute) {
+  if (is.null(.enrichment_memo[[key]])) .enrichment_memo[[key]] <- compute()
+  .enrichment_memo[[key]]
+}
+database_proteins <- function() memoized("database_proteins", function() unique(enrich_terms_db$string_protein_id))
+background_term_counts <- function(bg_ids) {
+  memoized(paste0("terms_", rlang::hash(sort(unique(bg_ids)))), function() {
+    enrich_terms_db %>%
+      dplyr::filter(string_protein_id %in% bg_ids) %>%
+      dplyr::group_by(category, term, description) %>%
+      dplyr::summarise(M = dplyr::n(), .groups = "drop") %>%
+      dplyr::filter(M >= 2)  # the test requires at least 2 background genes per term
+  })
+}
+
 get_enrichment_local <- function(fg_ids, bg_ids = NULL, fdr_threshold = .description_fdr) {
   if (is.null(enrich_terms_db)) return(NULL)
   if (length(fg_ids) == 0) return(tibble::tibble())
-  
+
   # With a missing or tiny background, use all proteins of the terms database.
   if (is.null(bg_ids) || length(bg_ids) < 5) {
-    bg_ids <- unique(enrich_terms_db$string_protein_id)
+    bg_ids <- database_proteins()
   }
-  
+
   # The foreground must lie inside the background.
   fg_ids <- intersect(fg_ids, bg_ids)
   if (length(fg_ids) == 0) return(tibble::tibble())
-  
-  # Term sizes in the background (the test requires at least 2 background genes per term).
-  bg_data <- enrich_terms_db %>% dplyr::filter(string_protein_id %in% bg_ids)
-  
-  term_bg_counts <- bg_data %>%
-    dplyr::group_by(category, term, description) %>%
-    dplyr::summarise(M = dplyr::n(), .groups = "drop") %>%
-    dplyr::filter(M >= 2)
-    
+
+  term_bg_counts <- background_term_counts(bg_ids)
+
   # Term counts in the foreground.
   fg_data <- enrich_terms_db %>% dplyr::filter(string_protein_id %in% fg_ids)
   fg_counts <- fg_data %>%

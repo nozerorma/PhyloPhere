@@ -25,7 +25,7 @@ params:
   traitname: "trait"
   output_dir: "." # Compatibility; exports are task-local under significance/.
   seed: "1998"
-  max_table_rows: 0 # Compatibility only: all positive-score rows are accessible.
+  max_table_rows: 500 # Rows embedded per table, ordered by p-value; 0 embeds every row. The TSVs hold all rows.
 ---
 
 <style type="text/css">
@@ -82,6 +82,13 @@ plot_cap <- 20000L # points drawn per scatter; every point that is not "Evaluate
 # the published TSVs; embedding them here multiplies the HTML size and the memory of the pandoc step.
 detail_cols <- c("participating_hypotheses","top_species_residues","bottom_species_residues",
                  "n_top_species","n_bottom_species","n_conserved_pairs")
+# Rows embedded in each interactive table. The views are already ordered by p-value, so the head holds the strongest rows.
+max_rows <- suppressWarnings(as.integer(params$max_table_rows))
+if(length(max_rows)!=1L || is.na(max_rows) || max_rows < 0L) max_rows <- 0L
+capped <- function(d) if(max_rows > 0L && nrow(d) > max_rows) head(d,max_rows) else d
+cap_note <- function(d) if(max_rows > 0L && nrow(d) > max_rows)
+  sprintf("_The table shows the first %s of %s rows, ordered by p-value; the complete view is in the published TSV (see Complete tables)._\n\n",
+          fmt_int(max_rows),fmt_int(nrow(d))) else ""
 
 fmt_int <- function(x) ifelse(is.na(x),"NA",format(round(x),big.mark=",",scientific=FALSE,trim=TRUE))
 file_ok <- function(f) !is.null(f) && length(f)==1L && !is.na(f) && !grepl("^NO_",basename(f)) && file.exists(f) && file.info(f)$size>0
@@ -335,7 +342,8 @@ for(rk in names(views_pos)) {
   evidence_histograms(d,"CAAS_score","p.emp","p.adj_bh",paste("Positions,",tolower(ranking_labels[[rk]]),"view"))
   cat("\n\n")
   front <- c("Gene","Position","side","positive_sides","CAAS_score","p.emp","p.adj_bh","evidence_status","nominal","BH")
-  report_emit(report_table(d %>% select(-any_of(detail_cols)) %>% mutate(evidence_status=as.character(evidence_status)) %>% relocate(any_of(front)),
+  cat(cap_note(d))
+  report_emit(report_table(capped(d) %>% select(-any_of(detail_cols)) %>% mutate(evidence_status=as.character(evidence_status)) %>% relocate(any_of(front)),
     sci_cols=intersect(c("p.emp","p.adj_bh"),names(d))))
 }
 ```
@@ -363,14 +371,15 @@ for(rk in names(views_gene)) {
   evidence_histograms(d,"score","p.gen","p.gen.adj",paste("Genes,",tolower(ranking_labels[[rk]]),"ranking"))
   cat("\n\n")
   front <- c("Gene","score","p.gen","p.gen.adj","evidence_status","nominal","BH","carries_position_BH","positive_positions","positions_BH","positions_nominal","N_valid","min_resolvable_p")
-  report_emit(report_table(d %>% mutate(evidence_status=as.character(evidence_status)) %>% relocate(any_of(front)),
+  cat(cap_note(d))
+  report_emit(report_table(capped(d) %>% mutate(evidence_status=as.character(evidence_status)) %>% relocate(any_of(front)),
     sci_cols=intersect(c("p.gen","p.gen.adj","min_resolvable_p"),names(d))))
 }
 ```
 
 # Complete tables
 
-The paginated tables hold every positive row and can be searched, sorted and exported. The per-hypothesis columns (participating hypotheses, species residues, species counts and conserved pairs) are omitted from them and appear in the Scoring and Comparison reports. The complete numeric TSV files are published under `meta_caas/significance/`:
+The paginated tables hold the strongest rows of each view (the first `r if(max_rows > 0L) fmt_int(max_rows) else "all"` by p-value) and can be searched, sorted and exported; search and sorting apply to that excerpt. The per-hypothesis columns (participating hypotheses, species residues, species counts and conserved pairs) are omitted from them and appear in the Scoring and Comparison reports. The complete numeric TSV files, with every positive row, are published under `meta_caas/significance/`:
 
 | File | Content |
 |---|---|
