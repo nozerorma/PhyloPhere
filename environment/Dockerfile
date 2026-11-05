@@ -50,10 +50,11 @@ RUN apt-get update \
 
 USER $MAMBA_USER
 
-# The environment recipe: the same script and file as a local installation (install_env.sh creates the conda
-# environment "phylophere" from phylophere.yml and builds the R packages conda does not provide).
+# The environment recipe: the same script and files as a local installation (install_env.sh creates the conda
+# environment "phylophere" from phylophere.yml, the environment "vep" from vep.yml, and builds the R packages
+# conda does not provide).
 WORKDIR /home/mambauser/environment
-COPY --chown=$MAMBA_USER:$MAMBA_USER install_env.sh phylophere.yml /home/mambauser/environment/
+COPY --chown=$MAMBA_USER:$MAMBA_USER install_env.sh phylophere.yml vep.yml /home/mambauser/environment/
 RUN chmod +x install_env.sh \
     && bash install_env.sh /home/mambauser/environment/phylophere.yml \
     && micromamba clean --all --yes
@@ -61,8 +62,9 @@ RUN chmod +x install_env.sh \
 # _entrypoint.sh activates ${ENV_NAME:-base}: without this variable the base environment is activated, its bin comes
 # first on the PATH, and python3 and Rscript would not be the ones of the phylophere environment.
 ENV ENV_NAME=phylophere
-# Without the entrypoint (apptainer exec) the environment is still the first on the PATH.
-ENV PATH=/opt/conda/envs/phylophere/bin:$PATH
+# Without the entrypoint (apptainer exec) the environment is still the first on the PATH. The vep environment is last, so
+# `vep` is found and nothing of that environment shadows a program of phylophere.
+ENV PATH=/opt/conda/envs/phylophere/bin:$PATH:/opt/conda/envs/vep/bin
 
 # Set the image to be run inside the phylophere environment directly
 ENTRYPOINT ["/usr/local/bin/_entrypoint.sh"]

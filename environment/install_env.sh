@@ -4,7 +4,8 @@
 #
 # Called by:  the user, once, from the repository root (./environment/install_env.sh)
 # Inputs:     $1  environment file (default: phylophere.yml in the current directory; the repository ships environment/phylophere.yml)
-# Outputs:    the conda environment "phylophere": created from the file, or updated when it exists
+# Outputs:    the conda environment "phylophere": created from the file, or updated when it exists, and the
+#             environment "vep" (Ensembl VEP alone) from vep.yml next to the file, when that file exists
 #
 # The solver is the first of micromamba, mamba and conda found on the PATH (micromamba is also
 # searched at its usual install locations). The R packages installed afterwards are DT, the
@@ -17,6 +18,9 @@ set -euo pipefail
 
 ENV_YML="${1:-phylophere.yml}"
 ENV_NAME="phylophere"
+# Ensembl VEP does not solve together with the phylophere set, so it has an environment of its own.
+VEP_YML="$(dirname "$ENV_YML")/vep.yml"
+VEP_NAME="vep"
 
 # ── Solver selection ──────────────────────────────────────────────────────────
 
@@ -85,6 +89,18 @@ elif [[ "$SOLVER" == "conda" ]]; then
   conda env create -n "$ENV_NAME" -f "$ENV_YML" -y || \
   conda env update -n "$ENV_NAME" -f "$ENV_YML"
   RUN=(conda run -n "$ENV_NAME")
+fi
+
+# ── Ensembl VEP environment ───────────────────────────────────────────────────
+
+if [[ -f "$VEP_YML" ]]; then
+  echo "Creating env: $VEP_NAME from $VEP_YML"
+  if [[ "$SOLVER" == "mamba" || "$SOLVER" == "conda" ]]; then
+    "$SOLVER" env create -n "$VEP_NAME" -f "$VEP_YML" -y || "$SOLVER" env update -n "$VEP_NAME" -f "$VEP_YML"
+  else
+    "$SOLVER" env create -n "$VEP_NAME" -f "$VEP_YML" -y --log-level info || \
+    "$SOLVER" env update -n "$VEP_NAME" -f "$VEP_YML" --log-level info
+  fi
 fi
 
 # ── R packages ────────────────────────────────────────────────────────────────

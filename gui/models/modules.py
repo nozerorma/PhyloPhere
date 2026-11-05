@@ -300,7 +300,6 @@ class PosenrichConfig(ModuleConfigBase):
     # Level 2: concentration of the signal inside genes, calibrated with the null cycles.
     posenrich_collections: str = ""  # --posenrich_collections (blank: the collections informative inside a protein)
     posenrich_min_genes: str = "2"  # --posenrich_min_genes (genes of U a term needs members in to be tested)
-    posenrich_holdout: str = "0"  # --posenrich_holdout (validation mode: null cycles played as the observed one; 0 = off)
 
     # Registry components: characterization, proximity.
     posenrich_radios: str = "0,5,10"  # --posenrich_radios (descriptive proximity radii)

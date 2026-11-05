@@ -1,0 +1,16 @@
+# PhyloPhere conda environment "vep": Ensembl VEP alone.
+#
+# The pipeline calls `vep` and `vep_install` (optional consequence annotation, --vep_ensembl; the offline cache is
+# populated on first use, see subworkflows/VEP/ensembl_vep.nf) and finds them on the PATH. VEP is kept out of
+# phylophere.yml because the solver does not finish on the union of the two sets.
+#
+# Created by environment/install_env.sh. To use it outside the container, put its bin directory on the PATH after
+# the phylophere environment's, or: micromamba activate vep.
+
+name: vep
+channels:
+  - bioconda
+  - conda-forge
+  - nodefaults
+dependencies:
+  - ensembl-vep

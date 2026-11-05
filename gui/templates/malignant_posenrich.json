@@ -202,7 +202,6 @@
       "posenrich_custom_file": "/homes/users/mramon/scratch/PhyloPhere_references/position/20261024/ppga/pp2a/pp2a_custom.tsv",
       "posenrich_collections": "",
       "posenrich_min_genes": "2",
-      "posenrich_holdout": "0",
       "posenrich_within_gene_memory": "",
       "posenrich_radios": "0,5,10",
       "position_registry_memory": "",

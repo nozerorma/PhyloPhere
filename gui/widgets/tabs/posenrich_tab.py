@@ -53,7 +53,6 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="posenrich_collections", label="Collections", placeholder="pfam_domains,ucr_core", importance="optional",
                   help="Comma-separated level 2 collection ids; blank uses the collections informative inside a protein."),
         FieldSpec(name="posenrich_min_genes", help="Minimum genes of U a term needs to be tested in level 2; default 2, so single-gene terms are never tested.", label="Minimum genes per term", placeholder="2", importance="optional"),
-        FieldSpec(name="posenrich_holdout", help="Validation mode: this many null cycles stand in for the observed run and only holdout_fpr.tsv is written; 0 = off. Practical recommendation: about 10% of the permulations (100 of 1000). The held-out cycles are left out of the null that calibrates, so a larger share lowers its resolution; it is not enforced, the only requirement is fewer cycles than the null has.", label="Hold-out null cycles (validation, 0 = off)", placeholder="0", importance="optional"),
         FieldSpec(name="posenrich_radios", help="Radii of the protein proximity window, in reference residues, comma-separated; default 0,5,10.", label="Proximity radii (residues)", placeholder="0,5,10", importance="optional"),
     ),
 )

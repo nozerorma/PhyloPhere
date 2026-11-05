@@ -2217,14 +2217,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "it": "Numero minimo di cicli nulli con segnale per gene",
         "de": "Mindestzahl Null-Zyklen mit Signal pro Gen",
     },
-    "Hold-out null cycles (validation, 0 = off)": {
-        "en": "Hold-out null cycles (validation, 0 = off)",
-        "es": "Ciclos nulos reservados (validación, 0 = desactivado)",
-        "ca": "Cicles nuls reservats (validació, 0 = desactivat)",
-        "fr": "Cycles nuls réservés (validation, 0 = désactivé)",
-        "it": "Cicli nulli riservati (validazione, 0 = disattivato)",
-        "de": "Zurückgehaltene Null-Zyklen (Validierung, 0 = aus)",
-    },
     "Level 2 memory (blank = 16 GB)": {
         "en": "Level 2 memory (blank = 16 GB)",
         "es": "Memoria del nivel 2 (en blanco = 16 GB)",

@@ -359,8 +359,6 @@ Eligible genes have members and non-members of $S$ in the covered part of $U$, s
 
 **Overlaps and proximity.** Positives that coincide with, or lie within `--posenrich_radios` (0, 5, 10 residues) of, a member of a term, per gene and detection, without p-values. Genomic windows (size `--scoring_window_size_bp`, 1 Mb) are descriptive too; genomic proximity is measured in nucleotides on the same chromosome. Level 2 collections are the Pfam domains and clans, UCR core and flank, FUBAR positive and purifying sites, FADE top and bottom sites and the custom list; a source without a verified coverage contract stays descriptive. Reports show q classes at `--evidence_fdr_levels`.
 
-`--posenrich_holdout K` lets $K$ null cycles play the observed one. Only `holdout_fpr.tsv` is written: the fraction of (term, held-out cycle) pairs with p at or below each nominal level, by collection. The held cycles leave the calibration denominator, so the table checks level 2 at the null size and term sets of your own run.
-
 Code: `subworkflows/POSENRICH/local/src/accumulation_test.py`, `posenrich_within_gene.py`.
 
 ![Detectability across the universe](img/posenrich_universe.png)

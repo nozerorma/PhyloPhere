@@ -19,7 +19,7 @@ params:
   registry_dir: NULL           # registry manifest (gene-list check) and coverage
   characterization_dir: NULL   # collection_summary.tsv, ranking_summary.tsv, universe_summary.tsv
   accumulation_dir: NULL       # accumulation_{all,top,bottom}_results.csv (level 1)
-  within_gene_dir: NULL        # within_gene_results.tsv, within_gene_by_gene.tsv, holdout_fpr.tsv (level 2)
+  within_gene_dir: NULL        # within_gene_results.tsv, within_gene_by_gene.tsv (level 2)
   proximity_dir: NULL          # proximity_{protein,genomic}_summary.tsv, proximity_protein_{hits,by_gene}.tsv
   traitname: "trait"
   fdr_levels: NULL             # BH levels, comma-separated; explicit override, otherwise report_settings.json, then 0.05,0.1,0.15
@@ -171,7 +171,6 @@ wg_by_gene <- read_table(params$within_gene_dir, "within_gene_by_gene.tsv",
                                                positives_members = col_double(), expected_members = col_double(),
                                                residual = col_double(), eligible = col_integer(),
                                                excluded_reason = col_character()))
-holdout <- read_table(params$within_gene_dir, "holdout_fpr.tsv")
 ```
 <script>
 $(document).on('shown.bs.tab shown.bs.collapse', function () {
@@ -184,7 +183,7 @@ $(document).on('shown.bs.tab shown.bs.collapse', function () {
 A position is **positive** when its canonical score of convergent amino acid substitution (CAAS) is greater than 0. Every question refers to positive positions and to sets of positions (layers: protein domains, conserved regions, selection calls, site lists). The unit is a position of the trimmed CAAS alignment, `(Gene, Position)`, zero-based. A **layer** is a source of annotation and a **term** is one of its sets of positions.
 
 ```{r states, results='asis'}
-wg_state <- if (!is.null(wg_results)) "available" else if (!is.null(holdout)) "validation mode: only the false-positive table was written" else "not available"
+wg_state <- if (!is.null(wg_results)) "available" else "not available"
 acc_present <- names(accumulation)[!vapply(accumulation, is.null, logical(1))]
 states <- data.frame(
   Component = c("Universe", "Registry", "Characterization", "Level 1 (genes)", "Level 2 (terms within genes)", "Proximity"),
@@ -262,6 +261,9 @@ if (!is.null(coll_sum)) {
   if (!is.null(res)) term_view <- term_view %>% left_join(
     res %>% transmute(Layer = collection_id, Term = term_id, `Genes eligible` = n_genes_eligible, Statistic = statistic,
                       p = p, q = q, `Frequency difference` = frequency_difference), by = c("Layer", "Term"))
+  # Without level-2 results p and q must still exist as (empty) columns; a bare `q` would resolve to base::q().
+  if (is.null(res)) term_view <- term_view %>% mutate(`Genes eligible` = NA_integer_, Statistic = NA_real_, p = NA_real_, q = NA_real_,
+                                                      `Frequency difference` = NA_real_)
   if (!is.null(prox_p)) {
     evaluated <- paste(prox_p$collection_id, prox_p$term_id)
     pc_ <- if (is.null(prox_counts)) tibble(Layer = character(), Term = character()) else
@@ -288,7 +290,7 @@ cat("- **[Overlaps and proximity](#proximity).** ", if (is.null(prox_hits)) "not
       sprintf("%s positive positions coincide with a member of a term; %s lie within %s residues of one", fmt_int(sum(prox_hits$relation == "overlap")),
               fmt_int(sum(prox_hits$relation == "near")), near_radius), ".\n", sep = "")
 cat("- **[By term](#termview)** gathers the three analyses in one row per term. **[Characterization](#characterization)** counts the positive positions by layer", if (!is.null(universe)) sprintf(": %s of %s positions of U are positive", fmt_int(sum(universe$observed_positive)), fmt_int(n_u)), "", ".\n", sep = "")
-cat("- **[Appendix](#appendix)**: universe and coverage, BH thresholds, terms not tested, held-out calibration and methods.\n\n")
+cat("- **[Appendix](#appendix)**: universe and coverage, BH thresholds, terms not tested and methods.\n\n")
 ```
 
 # Level 1: genes that accumulate positive positions {#level1}
@@ -347,10 +349,7 @@ Inside the genes that carry a term, do the positive positions fall in the term m
 
 ```{r level2, results='asis'}
 if (is.null(res)) {
-  if (is.null(holdout))
-    unavailable("Level 2", "`within_gene_results.tsv` was not found: the module ran without level 2 or the engine did not finish.")
-  else
-    unavailable("Level 2 term results", "The engine ran in validation mode (`--holdout`), which writes only the false-positive table.")
+  unavailable("Level 2", "`within_gene_results.tsv` was not found: the module ran without level 2 or the engine did not finish.")
 } else {
   cat(sprintf("%s terms were evaluated against %s null cycles (smallest attainable p = 1 / (N + 1) = %s). Terms with status `below_min_genes` have within-gene contrasts in fewer than %s source-covered genes and `not_identifiable` terms have no eligible gene: neither has a p or q (they are listed in the appendix).\n\n",
               fmt_int(nrow(res)), fmt_int(n_cycles), if (is.na(p_floor)) "NA" else format(p_floor, digits = 3), min_genes))
@@ -644,21 +643,6 @@ if (is.null(term_tbl)) unavailable("Terms not tested", "Level 2 results are not 
 }
 ```
 
-## Held-out calibration
-
-```{r holdout, results='asis'}
-if (!is.null(holdout)) {
-  cat("A subset of the null cycles plays the observed data; the rate of terms called at each nominal level estimates the false-positive rate of the procedure. Term-cycle pairs are not independent (terms share positions and each cycle shifts all its terms), so the precision of a rate is set by the number of held-out cycles, not by the number of pairs.\n\n")
-  hf <- holdout %>% transmute(Layer = collection_id, `Nominal level` = alpha,
-                              `Terms tested` = n_terms_tested, `Held-out cycles` = n_holdout_cycles,
-                              `Term-cycle pairs` = n_pairs, `False-positive rate` = fpr,
-                              `Rate minus nominal level` = fpr - alpha)
-  report_emit(report_table(hf))
-} else {
-  cat("Not available: the engine ran without `--holdout`, so the calibration of level 2 was not checked in this run.\n\n")
-}
-```
-
 ## Methods
 
 ```{r methods, results='asis'}
@@ -676,19 +660,16 @@ cat(paste0(
   if (is.null(min_genes_m)) "a minimum number of" else min_genes_m,
   " source-covered genes supplying both members and nonmembers. The rule depends on annotation, coverage and U only, never on the observed positives: a term in one gene is a test inside that gene, not a concentration across genes.\n",
   "- **Rankings.** Level 2 deliberately pools sides by their best score. Level 1 reports separate all/top/bottom analyses using the corresponding observed and null directions.\n",
-  "- **Validation.** ",
-  if (is.null(holdout)) "This run has no held-out cycles, so the false-positive rate of level 2 was not measured here. "
-  else sprintf("The held-out cycles of this run (%s) bound the false-positive rate only to the precision they allow. ", paste(unique(holdout$n_holdout_cycles), collapse = ", ")),
-  "Attainable p-value resolution is 1/(N+1); holdout precision depends on the number of held-out cycles and their dependence.\n",
+  "- **Resolution.** The attainable p-value resolution is 1/(N+1).\n",
   "- **Overlaps and proximity.** Descriptive; the positions queried are the positive ones, an overlap is identity of the position and no control of distances is applied.\n"))
 cat("\n**Symbols.** U: universe of tested positions; M: positions in U; K: observed positive positions; n~g~: positions of gene g in U; nd: null cycles that score a position; N: null cycles; layer: source of annotation; term: one set of positions of a layer.\n\n")
 if (!is.null(wg_manifest$parameters)) {
   p <- wg_manifest$parameters
   cat("\n**Level 2 parameters.**\n\n")
   report_emit(report_table(data.frame(
-    Parameter = c("Layers", "Minimum genes per term", "Held-out cycles", "Null cycles", "Null blocks", "Terms", "Term-gene pairs", "Eligible pairs"),
+    Parameter = c("Layers", "Minimum genes per term", "Null cycles", "Null blocks", "Terms", "Term-gene pairs", "Eligible pairs"),
     Value = c(if (is.null(p$collections)) "informative layers" else paste(unlist(p$collections), collapse = ", "),
-              as.character(p$min_genes), as.character(p$holdout), as.character(n_cycles),
+              as.character(p$min_genes), as.character(n_cycles),
               as.character(wg_manifest$counts$n_blocks), as.character(wg_manifest$counts$n_terms),
               as.character(wg_manifest$counts$n_pairs), as.character(wg_manifest$counts$n_pairs_eligible)),
     stringsAsFactors = FALSE)))

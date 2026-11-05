@@ -204,7 +204,6 @@
       "posenrich_custom_file": "",
       "posenrich_collections": "",
       "posenrich_min_genes": "2",
-      "posenrich_holdout": "0",
       "posenrich_within_gene_memory": "",
       "posenrich_radios": "0,5,10",
       "position_registry_memory": "",

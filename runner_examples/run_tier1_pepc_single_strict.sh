@@ -636,7 +636,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "posenrich_background_file": "${POSENRICH_BACKGROUND_FILE:-}",
   "posenrich_collections": "${POSENRICH_COLLECTIONS:-}",
   "posenrich_min_genes": "${POSENRICH_MIN_GENES:-2}",
-  "posenrich_holdout": "${POSENRICH_HOLDOUT:-0}",
   "posenrich_radios": "${POSENRICH_RADIOS:-0,5,10}"
 }
 PARAMS_EOF

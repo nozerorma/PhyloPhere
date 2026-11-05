@@ -221,7 +221,6 @@
       "posenrich_custom_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PP2A/pp2a_custom.tsv",
       "posenrich_collections": "",
       "posenrich_min_genes": "2",
-      "posenrich_holdout": "100",
       "posenrich_within_gene_memory": "",
       "posenrich_radios": "0,5,10",
       "position_registry_memory": "",

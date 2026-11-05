@@ -23,9 +23,6 @@ members and non-members in the source-covered subset of U. A term is tested with
 a term in one gene is a test inside that gene, not a concentration across genes); the rest are listed with the
 reason and carry no p.
 
-Hold-out mode (--holdout K): K null cycles play the observed one and the exceedances come from the other cycles.
-The false-positive rate over all (term, cycle) pairs checks the procedure that is applied to the observed.
-
 Descriptive effect sizes (no p): frequency, the proportion of positives among the positions of the term against the
 same proportion in the rest of its eligible genes; intensity, the difference of mean score between the positives
 inside and outside the term.
@@ -39,7 +36,6 @@ Inputs:
 Outputs (in --output_dir):
   within_gene_results.tsv  one row per (collection, term)
   within_gene_by_gene.tsv  one row per (term, gene) with members in U
-  holdout_fpr.tsv          only with --holdout
   within_gene_manifest.json
 """
 
@@ -67,7 +63,6 @@ from posenrich_universe import POS_BITS, pair_keys, sha256_file  # noqa: E402
 
 TIE_TOL = 1e-9                       # relative tolerance of ties between statistics
 MIN_GENES = 2                        # genes of U a term needs members in to be tested
-ALPHAS = (0.001, 0.01, 0.05)
 
 
 # ── Inputs ────────────────────────────────────────────────────────────────────
@@ -318,19 +313,14 @@ def eligibility(design, min_genes):
     return term_ok, (design.pair_m < design.pair_n) & term_ok[design.pair_term]
 
 
-def run(U, design, blocks, observed_score, min_genes=MIN_GENES, holdout=0, holdout_seed=1, chunk=20000):
-    """Count the null cycles whose statistic reaches the target (the observed vector or the held-out cycles)."""
-    if not blocks or min_genes < 1 or holdout < 0 or chunk < 1:
+def run(U, design, blocks, observed_score, min_genes=MIN_GENES, chunk=20000):
+    """Count the null cycles whose statistic reaches the observed one."""
+    if not blocks or min_genes < 1 or chunk < 1:
         raise ValueError('Null blocks and positive min_genes/pair_chunk required')
     cycle_lists = [block_cycles(b) for b in blocks]
     all_cycles = sorted(c for cs in cycle_lists for c in cs)
     if len(all_cycles) != len(set(all_cycles)):
         raise ValueError("a cycle appears in more than one block")
-    held = set()
-    if holdout:
-        if holdout >= len(all_cycles):
-            raise ValueError("--holdout must leave null cycles for the calibration")
-        held = set(np.random.default_rng(holdout_seed).choice(all_cycles, size=holdout, replace=False).tolist())
     if not all_cycles:
         raise ValueError('No valid null cycles')
     term_ok, eligible_pair = eligibility(design, min_genes)
@@ -338,33 +328,20 @@ def run(U, design, blocks, observed_score, min_genes=MIN_GENES, holdout=0, holdo
     pair_to_term = sp.csr_matrix((np.ones(len(eligible)), (np.arange(len(eligible)), design.pair_term[eligible])),
                                  shape=(len(eligible), len(design.terms)))
 
-    # targets: the observed vector, or the held-out cycles (read first: they must be known to count exceedances)
-    if holdout:
-        rows, target_names = [], []
-        for block in blocks:
-            cycles, W = read_positives(block, U)
-            is_held = np.array([c in held for c in cycles])
-            if is_held.any():
-                rows.append(W[np.flatnonzero(is_held)])
-                target_names += [c for c, h in zip(cycles, is_held) if h]
-        Wt = sp.vstack(rows).tocsr()
-    else:
-        Wt = sp.csr_matrix((observed_score > 0).astype(np.float64).reshape(1, -1))
-        target_names = ['observed']
+    # target: the observed vector (one row)
+    Wt = sp.csr_matrix((observed_score > 0).astype(np.float64).reshape(1, -1))
     Tt = term_statistic(Wt, design, eligible, pair_to_term, chunk)
 
     ge = np.zeros(Tt.shape, dtype=np.int64)
     n_null = 0
     for block in blocks:
         cycles, W = read_positives(block, U)
-        is_held = np.array([c in held for c in cycles])
-        Wr = W[np.flatnonzero(~is_held)]
-        n_null += Wr.shape[0]
-        if Wr.shape[0] == 0 or len(eligible) == 0:
+        n_null += W.shape[0]
+        if W.shape[0] == 0 or len(eligible) == 0:
             continue
-        ge += count_at_least(term_statistic(Wr, design, eligible, pair_to_term, chunk), Tt)
-    return {'eligible': eligible, 'term_ok': term_ok, 'targets': target_names, 'T': Tt, 'ge': ge,
-            'n_null': n_null, 'n_cycles_total': len(all_cycles), 'held': sorted(held)}
+        ge += count_at_least(term_statistic(W, design, eligible, pair_to_term, chunk), Tt)
+    return {'eligible': eligible, 'term_ok': term_ok, 'T': Tt, 'ge': ge,
+            'n_null': n_null, 'n_cycles_total': len(all_cycles)}
 
 
 # ── Outputs ───────────────────────────────────────────────────────────────────
@@ -428,24 +405,6 @@ def results_tables(U, design, out, observed_score):
     return results, by_gene
 
 
-def holdout_table(design, out):
-    """False-positive rate over all (term, held-out cycle) pairs, by collection and alpha."""
-    testable = np.zeros(len(design.terms), dtype=bool)
-    testable[np.unique(design.pair_term[out['eligible']])] = True
-    P = (1.0 + out['ge']) / (out['n_null'] + 1.0)
-    rows = []
-    for collection, idx in design.terms.groupby('collection_id').groups.items():
-        cols = np.asarray(idx)[testable[np.asarray(idx)]]
-        if len(cols) == 0:
-            continue
-        block = P[:, cols]
-        for alpha in ALPHAS:
-            rows.append({'collection_id': collection, 'alpha': alpha, 'n_terms_tested': len(cols),
-                         'n_holdout_cycles': block.shape[0], 'n_pairs': block.size,
-                         'fpr': float((block <= alpha).mean())})
-    return pd.DataFrame(rows)
-
-
 def gene_list_check(universe_path, registry_dir):
     """Compare the gene-list digest of the universe with the one the registry recorded (digest of the list as a set).
 
@@ -487,8 +446,6 @@ def main(argv=None):
     ap.add_argument('--blocks', nargs='+', required=True)
     ap.add_argument('--output-dir', required=True)
     ap.add_argument('--min-genes', type=int, default=MIN_GENES, help='minimum source-covered genes with both members and nonmembers')
-    ap.add_argument('--holdout', type=int, default=0)
-    ap.add_argument('--holdout-seed', type=int, default=1)
     ap.add_argument('--pair-chunk', type=int, default=20000)
     ap.add_argument('--log-level', default='INFO', choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'])
     a = ap.parse_args(argv)
@@ -533,29 +490,25 @@ def main(argv=None):
         raise ValueError('SCORING and universe observed detections disagree')
     logging.info(f"U: {len(U.keys)} positions; {len(design.terms)} terms, {design.n_pairs} (term, gene) pairs; "
                  f"{int((observed_score > 0).sum())} observed positives")
-    out = run(U, design, a.blocks, observed_score, a.min_genes, a.holdout, a.holdout_seed, a.pair_chunk)
+    out = run(U, design, a.blocks, observed_score, a.min_genes, a.pair_chunk)
     if out['n_cycles_total'] != um['null']['N']:
         raise ValueError('Null cycle denominator differs from universe')
     logging.info(f"null cycles used: {out['n_null']} of {out['n_cycles_total']}; eligible pairs: {len(out['eligible'])}")
 
     os.makedirs(a.output_dir, exist_ok=True)
-    if a.holdout:
-        write_tsv(holdout_table(design, out), os.path.join(a.output_dir, 'holdout_fpr.tsv'))
-    else:
-        results, by_gene = results_tables(U, design, out, observed_score)
-        write_tsv(results, os.path.join(a.output_dir, 'within_gene_results.tsv'))
-        write_tsv(by_gene, os.path.join(a.output_dir, 'within_gene_by_gene.tsv'))
+    results, by_gene = results_tables(U, design, out, observed_score)
+    write_tsv(results, os.path.join(a.output_dir, 'within_gene_results.tsv'))
+    write_tsv(by_gene, os.path.join(a.output_dir, 'within_gene_by_gene.tsv'))
     manifest = {'component': 'within_gene', 'contract_version': 3,
                 'inputs': {k: {'path': os.path.abspath(v), 'sha256': sha256_file(v)}
                            for k, v in (('universe', a.universe), ('observed', a.observed),
                                         ('collections', os.path.join(a.registry_dir, 'collections.tsv')))},
                 'gene_list_check': gene_list_check(a.universe, a.registry_dir),
                 'parameters': {'collections': collections, 'min_genes': a.min_genes,
-                               'holdout': a.holdout, 'holdout_seed': a.holdout_seed, 'tie_tol': TIE_TOL},
+                               'tie_tol': TIE_TOL},
                 'counts': {'n_universe': int(len(U.keys)), 'n_terms': int(len(design.terms)),
                            'n_pairs': int(design.n_pairs), 'n_pairs_eligible': int(len(out['eligible'])),
-                           'n_null_cycles': int(out['n_null']), 'n_blocks': len(a.blocks),
-                           'n_held_out': len(out['held'])},
+                           'n_null_cycles': int(out['n_null']), 'n_blocks': len(a.blocks)},
                 'null_blocks': um['null']['blocks'],
                 'registry_inputs': inventory(a.registry_dir),
                 'state': 'no_annotations_in_universe' if members.empty else 'executed',

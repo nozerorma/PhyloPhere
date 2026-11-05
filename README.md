@@ -355,7 +355,7 @@ FCS ranks gene sets by Wilcoxon AUC against the CAAS gene-p and RER rankings (re
 
 ### POSENRICH: `conf/posenrich.config`
 
-Describes how positive positions relate to genes and to sets of positions (Pfam domains and clans, ultraconserved regions, FUBAR and FADE sites, genomic windows, custom lists). Level 1 tests, per gene and direction, whether a gene holds more positive positions than the null cycles (empirical) or than a uniform allocation over the universe (hypergeometric, reference); level 2 tests concentration inside genes; overlaps and proximity are descriptive (report 13). Level 1 needs `--ct_postproc` or `--accumulation_background_input`; the registry, level 2 and report need `--scoring`. See the [walkthrough](docs/WALKTHROUGH.md#12-posenrich) for the statistics and `--posenrich_holdout` for a calibration check.
+Describes how positive positions relate to genes and to sets of positions (Pfam domains and clans, ultraconserved regions, FUBAR and FADE sites, genomic windows, custom lists). Level 1 tests, per gene and direction, whether a gene holds more positive positions than the null cycles (empirical) or than a uniform allocation over the universe (hypergeometric, reference); level 2 tests concentration inside genes; overlaps and proximity are descriptive (report 13). Level 1 needs `--ct_postproc` or `--accumulation_background_input`; the registry, level 2 and report need `--scoring`. See the [walkthrough](docs/WALKTHROUGH.md#12-posenrich) for the statistics.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -369,7 +369,6 @@ Describes how positive positions relate to genes and to sets of positions (Pfam 
 | `posenrich_collections` | empty | Collections to test; blank = those informative within proteins |
 | `posenrich_min_genes` | 2 | Eligible genes (members and non-members of the term in the covered universe) a term needs to be tested |
 | `posenrich_radios` | `0,5,10` | Proximity radii in residues |
-| `posenrich_holdout` | 0 | Validation: null cycles that play the observed one |
 | `accumulation_caas_input`, `accumulation_background_input`, `posenrich_background_file` | empty | Standalone: filtered discovery, cleaned background, tested positions |
 
 ---

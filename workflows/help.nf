@@ -289,7 +289,6 @@ Usage:
 --posenrich_custom_file              (custom position sets; TSV: gene, zero-based CAAS position, term, description; no header)
 --posenrich_collections              <"id1,id2">                    "" (level 2 collections; blank = those informative inside a protein)
 --posenrich_min_genes                <int>                          2 (eligible genes, with members and non-members of the term in covered U, a term needs to be tested by level 2)
---posenrich_holdout                  <int>                          0 (validation: null cycles played as the observed one; 0 = off; recommended about 10% of the permulations, only fewer cycles than the null has are required)
 --posenrich_radios                   <LIST>                         0,5,10 (descriptive protein-proximity radii)
 '''
 }

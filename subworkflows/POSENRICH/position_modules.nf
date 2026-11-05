@@ -160,7 +160,7 @@ process POSENRICH_WITHIN_GENE {
         --universe universe.tsv.gz --universe-manifest universe_manifest.json --observed '${observed}' --registry-dir registry \\
         --blocks blk_* --output-dir within_gene \\
         --min-genes ${params.posenrich_min_genes ?: 2} \\
-        --holdout ${params.posenrich_holdout ?: 0} ${collections_arg}
+        ${collections_arg}
     """
 }
 

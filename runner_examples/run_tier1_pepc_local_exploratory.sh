@@ -247,7 +247,6 @@ export UCR_POSITIONS_FILE=""
 export FUBAR_SITES_FILE="/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc/oc_run/reference_tables/fubar_sites.tsv.gz"
 export POSENRICH_COLLECTIONS=""
 export POSENRICH_MIN_GENES="2"
-export POSENRICH_HOLDOUT="0"
 export POSENRICH_RADIOS="0,5,10"
 
 REPO_DIR="/home/miguel/IBE-UPF/PhD/PhyloPhere"
