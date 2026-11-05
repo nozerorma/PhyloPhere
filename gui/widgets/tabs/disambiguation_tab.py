@@ -37,10 +37,13 @@ SPEC = ModuleTabSpec(
         "filter_minlen & filter_maxcaas. Writes output to ${OUTDIR}_complete/ and runs downstream modules.\n"
         "• Both Selected: Run the exploratory scripts first; the complete scripts reuse their output.\n"
         "• Strict Analysis: Reuses the normal run's strict tables for post-processing and downstream modules.\n\n"
-        "ℹ️ Gene Filter Mode (Advanced):\n"
-        "• none: no gene-level filtering.\n"
-        "• stratified: drops genes whose CAAS count exceeds the far fence of their gene-length stratum, or the near fence "
-        "when they also carry a cluster train (needs a cluster file)."
+        "ℹ️ Gene filter (Advanced):\n"
+        "• Extreme: a gene whose CAAS count exceeds the far fence of its gene-length stratum (Q3 + k_far x scale), any gene. "
+        "Uses gene_filter_strata and gene_filter_k_far.\n"
+        "• Dubious: a gene whose count exceeds the near fence of its stratum (Q3 + k_near x scale) AND that carries a cluster train. "
+        "Uses gene_filter_strata, gene_filter_k_near and the cluster parameters (filter_minlen, filter_maxcaas, filter_min_positions).\n"
+        "• Workflow: the exploratory sweep reports what each rule would remove; in the complete run, decide from that report "
+        "to remove Extreme genes, Dubious genes, both or none. The same switches apply to the observed table and to the permulation null."
     ),
     disclaimer=(
         "Accumulation and Scoring need this module's output. Check 'Use precomputed "
@@ -142,14 +145,27 @@ SPEC = ModuleTabSpec(
                  "Filtering; ignored when Exploratory Sweep is selected instead.",
         ),
         FieldSpec(
-            name="gene_filter_mode",
-            label="Gene filter mode",
-            kind="choice",
-            choices=("none", "stratified"),
+            name="remove_extreme_genes",
+            label="Remove Extreme genes",
+            kind="bool",
             importance="default",
             help=(
-                "none: no gene filter; stratified: one rule that compares each gene with genes of its own length "
-                "(see the fence fields below)."
+                "Remove genes whose CAAS count exceeds the far fence of their gene-length stratum (Q3 + far multiplier x scale), "
+                "whether or not they carry a cluster train. Uses Gene-length strata and Far-fence IQR multiplier. "
+                "Applied to the observed table and to every cycle of the permulation null. The exploratory run reports "
+                "what this rule would remove; decide here for the complete run."
+            ),
+        ),
+        FieldSpec(
+            name="remove_dubious_genes",
+            label="Remove Dubious genes",
+            kind="bool",
+            importance="default",
+            help=(
+                "Remove genes whose CAAS count exceeds the near fence of their stratum (Q3 + near multiplier x scale) AND that "
+                "carry a cluster train. Uses Gene-length strata, Near-fence IQR multiplier and the cluster parameters "
+                "(minimum length, maximum CAAS value, minimum candidates per interval). Applied to the observed table "
+                "and to every cycle of the permulation null."
             ),
         ),
         FieldSpec(
@@ -158,7 +174,7 @@ SPEC = ModuleTabSpec(
             kind="bool",
             importance="default",
             help=(
-                "Discard positions in spatial CAAS clusters from the discovery, independent of the gene filter mode."
+                "Discard positions in spatial CAAS clusters from the discovery, independent of the gene removal switches."
             ),
         ),
         Section("ASR diagnostics"),
@@ -201,21 +217,21 @@ SPEC = ModuleTabSpec(
             label="Gene-length strata",
             importance="default",
             help="Number of equal-size gene-length strata in which the outlier fences are computed, so that a gene "
-                 "is compared with genes of its own length. Only used when Gene filter mode is 'stratified'.",
+                 "is compared with genes of its own length. Used by both Remove Extreme genes and Remove Dubious genes.",
         ),
         FieldSpec(
             name="gene_filter_k_far",
             label="Far-fence IQR multiplier",
             importance="default",
-            help="A gene whose CAAS count exceeds Q3 + k x IQR of its length stratum is removed. "
-                 "Only used when Gene filter mode is 'stratified'.",
+            help="A gene whose CAAS count exceeds Q3 + k x scale of its length stratum is Extreme (scale: the larger of the "
+                 "stratum IQR and the IQR of all genes). Only used by Remove Extreme genes.",
         ),
         FieldSpec(
             name="gene_filter_k_near",
             label="Near-fence IQR multiplier",
             importance="default",
-            help="A gene above this lower fence is removed only when it also carries a cluster train "
-                 "(needs a cluster file). Only used when Gene filter mode is 'stratified'.",
+            help="A gene above this lower fence is Dubious only when it also carries a cluster train "
+                 "(needs a cluster file). Only used by Remove Dubious genes.",
         ),
     ),
 )
@@ -234,4 +250,5 @@ class DisambiguationTab(ModuleTabWidget):
             lang
         )
         guidance = tr("Postproc Guidance", lang)
-        self.blurb_label.setText(f"{main_blurb}\n\n{guidance}")
+        gene_guidance = tr("Gene filter guidance", lang)
+        self.blurb_label.setText(f"{main_blurb}\n\n{guidance}\n\n{gene_guidance}")

@@ -19,7 +19,8 @@ Inputs:     --tiles       the null_tables/ directories (units.parquet, scores.pa
             --labelings   the block's labelings file (resample_perms.tab): its cycles are the cycles of the block, the
                           ones with no detection included
             --universe    gene universe (cleaned_background_main.txt), optional
-            --gene-lengths / --map-dir, --gene-filter-mode  gene removal, optional
+            --gene-lengths-table, --remove-extreme-genes, --remove-dubious-genes  gene removal, optional: gene_lengths.tsv (gene_lengths.py), the same
+                          table the observed filter reads, so every gene with units in a cycle is evaluated
 Outputs:    <out>/matrices/   raw matrices and manifest.json (assemble_block_matrices.R turns them into an RDS)
             <out>/positions.parquet, cycle_summary.tsv, cycle_hist.tsv, perm_pos_sample.tsv, perm_pos_quantiles.tsv,
             cycles.txt, counts.json, removed_units.tsv with gene removal
@@ -41,6 +42,14 @@ from src.utils.null_merge import GENE_STATS, merge_block  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _bool(text: str) -> bool:
+    """true|false (also yes|no, 1|0) of a switch passed by Nextflow."""
+    value = str(text).strip().lower()
+    if value not in ("true", "false", "yes", "no", "1", "0"):
+        raise argparse.ArgumentTypeError(f"expected true or false, got {text!r}")
+    return value in ("true", "yes", "1")
 
 
 def read_roster(labelings_path: Path, by_labeling: bool, include_b0: bool):
@@ -72,13 +81,12 @@ def main() -> int:
     ap.add_argument("--gene-stat", default="max", choices=GENE_STATS,
                     help="gene statistic of the matrices named `stat` (the others stay in the parts)")
     ap.add_argument("--seed", type=int, default=1998, help="pipeline seed (params.seed): the per-cycle sample")
-    ap.add_argument("--gene-lengths", default=None, help="gene annotation TSV (gene, length ...); enables the gene removal")
-    ap.add_argument("--gene-filter-mode", default="none", choices=["none", "stratified"])
-    ap.add_argument("--gene-strata", type=int, default=10, help="stratified mode: number of length strata")
-    ap.add_argument("--gene-k-far", type=float, default=3.0, help="stratified mode: IQR multiplier of the far fence")
-    ap.add_argument("--gene-k-near", type=float, default=1.5, help="stratified mode: IQR multiplier of the near fence (with a train position)")
-    ap.add_argument("--map-dir", "--train-map-dir", type=Path, default=None, help="directory of the trimmer's MAP tables (untrimmed lengths)")
-    ap.add_argument("--map-suffix", type=str, default=".map.tsv")
+    ap.add_argument("--gene-lengths-table", default=None, help="gene_lengths.tsv (gene, length, length_source); enables the gene removal")
+    ap.add_argument("--remove-extreme-genes", type=_bool, default=False, help="remove the units above the far fence of their length stratum (true|false)")
+    ap.add_argument("--remove-dubious-genes", type=_bool, default=False, help="remove the units above the near fence that carry a train (true|false)")
+    ap.add_argument("--gene-strata", type=int, default=10, help="number of length strata")
+    ap.add_argument("--gene-k-far", type=float, default=3.0, help="IQR multiplier of the far fence")
+    ap.add_argument("--gene-k-near", type=float, default=1.5, help="IQR multiplier of the near fence (Dubious needs a train position)")
     args = ap.parse_args()
 
     for d in args.tiles:
@@ -99,17 +107,15 @@ def main() -> int:
     if args.universe is not None and args.universe.is_file():
         universe = [g.strip() for g in args.universe.read_text().splitlines() if g.strip() and g.strip() != "Gene"]
 
-    removal_on = (bool(args.gene_lengths) or bool(args.map_dir)) and args.gene_filter_mode != "none"
+    removal_on = bool(args.gene_lengths_table) and (args.remove_extreme_genes or args.remove_dubious_genes)
     lengths = {}
     length_sources = {}
     if removal_on:
-        from src.core.postproc import load_gene_lengths
-        lengths = load_gene_lengths(path=str(args.gene_lengths) if args.gene_lengths else None,
-                                    map_dir=str(args.map_dir) if args.map_dir else None, map_suffix=args.map_suffix,
-                                    genes=universe, sources=length_sources)
+        from src.core.gene_rules import read_gene_lengths_table
+        lengths, length_sources, _ = read_gene_lengths_table(args.gene_lengths_table)
     per_cycle = int(os.environ.get("CAAS_PERMS_SAMPLE_PER_CYCLE", "200"))
     counts = merge_block(args.tiles, args.output_dir, cycles, universe=universe, lengths=lengths, length_sources=length_sources,
-                         gene_filter_mode=args.gene_filter_mode if removal_on else "none",
+                         remove_extreme=args.remove_extreme_genes and removal_on, remove_dubious=args.remove_dubious_genes and removal_on,
                          gene_strata=args.gene_strata, gene_k_far=args.gene_k_far, gene_k_near=args.gene_k_near,
                          gene_stat=args.gene_stat, seed=args.seed, sample_per_cycle=per_cycle)
     silent = len(cycles) - len(counts["cycles_present"])

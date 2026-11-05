@@ -9,7 +9,7 @@ The positions of a tight cluster ("train") of substitutions are flagged "Discard
 clustered substitutions do not pass as independent CAAS.
 For each gene every interval [start, end]
 of the sorted positions with span >= minlen and count / span >= maxcaas flags all the
-positions it holds (core.postproc.ctrain, shared with the permulation null). With --map-dir
+positions it holds (core.trains.ctrain, shared with the permulation null). With --map-dir
 the span is measured in untrimmed alignment columns.
 
 Called by:  CT_FILTER process (ctpp_clustfilter.nf), once per (minlen, maxcaas) pair
@@ -30,10 +30,10 @@ import logging
 import sys
 from pathlib import Path
 
-# core.postproc holds the one implementation of trains, shared by the observed chain and the null.
+# core.trains holds the one implementation of trains, shared by the observed chain and the null.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CT_DISAMBIGUATION" / "local"))
 from src.core.columns import gene_columns, index_files  # noqa: E402
-from src.core.postproc import ctrain  # noqa: E402
+from src.core.trains import ctrain  # noqa: E402
 
 # ── Argument Parsing ──────────────────────────────────────────────────────────
 

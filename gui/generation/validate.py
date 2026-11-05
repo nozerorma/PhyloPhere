@@ -203,6 +203,21 @@ def validate(project: ProjectConfig) -> list[str]:
     fmp = project.modules.disambiguation.filter_min_positions.strip()
     if fmp and not (fmp.isdigit() and int(fmp) > 0):
         errors.append(f"Post-processing: minimum candidates per interval must be a positive integer or blank (got {fmp!r}).")
+    # The gene-removal fences: positive integer strata, finite non-negative multipliers, far fence not below the near fence.
+    dis = project.modules.disambiguation
+    strata = dis.gene_filter_strata.strip()
+    if not (strata.isdigit() and int(strata) >= 1):
+        errors.append(f"Post-processing: gene-length strata must be a positive integer (got {strata!r}).")
+    fences = {}
+    for label, value in (("far-fence", dis.gene_filter_k_far), ("near-fence", dis.gene_filter_k_near)):
+        try:
+            fences[label] = float(value)
+        except ValueError:
+            fences[label] = None
+        if fences[label] is None or not 0 <= fences[label] < float("inf"):
+            errors.append(f"Post-processing: {label} IQR multiplier must be a finite number >= 0 (got {value.strip()!r}).")
+    if None not in fences.values() and all(0 <= v < float("inf") for v in fences.values()) and fences["far-fence"] < fences["near-fence"]:
+        errors.append("Post-processing: the far-fence IQR multiplier must not be below the near-fence multiplier.")
     # Enrichment reads the SCORING outputs (FCS, AMI and comparison inputs); main.nf rejects the combination.
     if project.modules.enrichment.enabled and not scoring.enabled:
         errors.append(

@@ -12,7 +12,7 @@ Outputs: ``units`` and ``scores`` tables (Parquet, float64 values) and the reade
 ``units``: one row per (gene, cycle) with a detection
     gene, cycle
     n_pos       distinct detected positions of the unit, every row counted (scored or not, trains included): the
-                count of core.postproc.gene_removal
+                count of core.gene_rules.gene_removal
     clust       some detected position lies in a cluster train (the dubious-gene test of gene_removal)
     n_rows      records kept once the trains are removed (when they are removed): the rows of the null the position
                 sample draws from
@@ -42,7 +42,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.core.postproc import ctrain
+from src.core.trains import ctrain
 from src.core.scores import collapse_sides, position_score
 
 __all__ = ["UNITS_SCHEMA", "SCORES_SCHEMA", "CycleReducer", "CycleResult", "gene_tables", "concat_tables",
@@ -83,7 +83,7 @@ class CycleResult(NamedTuple):
 class CycleReducer:
     """Reduces the pooled records of one cycle of one gene to a CycleResult.
 
-    The cluster trains are computed here over the positions of every record of the cycle (core.postproc.ctrain, with
+    The cluster trains are computed here over the positions of every record of the cycle (core.trains.ctrain, with
     the gene's position -> column map when there is one); they are flagged only with ``postproc_filter`` and their
     rows are dropped only with ``remove_clusters``, but they count for ``n_pos`` and ``clust`` either way.
 

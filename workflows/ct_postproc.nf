@@ -40,6 +40,7 @@ workflow CT_POSTPROC {
     disambiguation_dir_channel
     hyp_pairs_channel
     taxid_map_channel   // curated tax_id map (NAME_CURATION) or null: then --tax_id is read as given
+    gene_lengths_channel   // gene_lengths.tsv of GENE_LENGTHS: the lengths of the gene filter, shared with the null merge
 
     main:
     assert disambiguation_input_channel != null || params.disambiguation_input : 'CT_POSTPROC requires observed master input'
@@ -120,7 +121,7 @@ workflow CT_POSTPROC {
         assert found.size()==1 : 'Expected one selected cluster contract'
         found[0]
     }
-    def genes = CAAS_FILTER_GENES(prepared.prepared_discovery, prepared.quality_universe, selected_contract, lengths, selected, maps, map_hash)
+    def genes = CAAS_FILTER_GENES(prepared.prepared_discovery, prepared.quality_universe, selected_contract, gene_lengths_channel, selected)
     def background = CAAS_BACKGROUND_CLEANUP(background_ch, genes.removed_genes)
     CT_POSTPROC_REPORT(prepared.prepared_discovery, summary.summary, all_filters, selected,
         lengths, genes.gene_stats, genes.removed_genes, genes.filtered_discovery, prepared.quality_universe)
@@ -128,5 +129,6 @@ workflow CT_POSTPROC {
     filter_summary = summary.summary
     filter_dir = Channel.value("${params.outdir}/postproc")
     filtered_discovery = genes.filtered_discovery
+    removed_genes = genes.removed_genes
     cleaned_background = background.cleaned_background_main
 }

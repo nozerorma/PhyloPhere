@@ -113,7 +113,7 @@ fi
 
 if [ "${PRECOMP_USE_POSTPROC:-false}" = true ]; then
     # gene_filtering/ and cleaned_backgrounds/ exist only if the source run had
-    # gene_filter_mode other than 'none' (the default).
+    # a gene-removal switch (remove_extreme_genes or remove_dubious_genes) on.
     _PP_CAAS="${PRECOMP_CAAS_OUTDIR}/postproc/gene_filtering/filtered_discovery.tsv"
     _PP_BACKGROUND="${PRECOMP_CAAS_OUTDIR}/postproc/cleaned_backgrounds/cleaned_background_main.txt"
     SCORING_POSTPROC_INPUT="$_PP_CAAS"
@@ -384,7 +384,8 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "filter_minlen": "$POSTPROC_MINLEN",
   "filter_min_positions": ${POSTPROC_MIN_POSITIONS:-null},
   "filter_maxcaas": "$POSTPROC_MAXCAAS",
-  "gene_filter_mode": "$POSTPROC_GENE_FILTER_MODE",
+  "remove_extreme_genes": ${POSTPROC_REMOVE_EXTREME:-true},
+  "remove_dubious_genes": ${POSTPROC_REMOVE_DUBIOUS:-true},
   "remove_caas_clusters": ${POSTPROC_REMOVE_CLUSTERS:-true},
   "minlen_values": "${POSTPROC_MINLEN_VALUES:-2,3,4,10}",
   "maxcaas_values": "${POSTPROC_MAXCAAS_VALUES:-0.6,0.7,0.8}",

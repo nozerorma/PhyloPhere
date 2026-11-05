@@ -234,10 +234,11 @@ Quality masks use all distinct CT candidate positions, including diagnostic `sid
 | `filter_min_positions` | null | Minimum candidates per interval; unset preserves the legacy `filter_minlen` candidate-count gate per gene |
 | `filter_maxcaas` | 0.7 | Maximum CAAS density of a cluster window |
 | `remove_caas_clusters` | true | Discard clusters from the filtered discovery |
-| `gene_filter_mode` | stratified | Outlier genes to remove: `none` or `stratified` |
+| `remove_extreme_genes` | true | Remove the genes whose CAAS count exceeds the far fence of their length stratum (Extreme, any gene). In exploratory mode both rules are reported and decide nothing; in complete mode choose one, both or none |
+| `remove_dubious_genes` | true | Remove the genes above the near fence of their stratum that also carry a cluster train (Dubious) |
 | `gene_filter_strata` | 10 | Number of equal-size gene-length strata; a gene is compared with genes of its own length |
-| `gene_filter_k_far` | 3.0 | IQR multiplier of the far fence (Q3 of the stratum + k x IQR); a gene above it is removed |
-| `gene_filter_k_near` | 1.5 | IQR multiplier of the near fence; a gene above it is removed only when it also carries a cluster train |
+| `gene_filter_k_far` | 3.0 | IQR multiplier of the far fence (Q3 of the stratum + k x IQR); a gene above it is Extreme |
+| `gene_filter_k_near` | 1.5 | IQR multiplier of the near fence; a gene above it is Dubious only when it also carries a cluster train |
 | `caas_map_dir` | `vep_map_dir` or empty | Per-gene MAP tables (alignment column to protein residue) from the [Ortholog Characterizator](https://github.com/nozerorma/ortholog_characterizator.git) |
 | `minlen_values`, `maxcaas_values` | `2,3,4,10`; `0.6,0.7,0.8` | Sweep values in exploratory mode |
 | `disambiguation_input`, `disambiguation_dir`, `background_input` | empty | Standalone inputs |

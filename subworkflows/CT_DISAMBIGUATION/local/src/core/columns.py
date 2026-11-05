@@ -12,7 +12,7 @@ Discovery positions are 0-based columns of the trimmed alignment. The MAP table 
 column of the untrimmed alignment (``ori_codon_col``, 1-based) with ``status`` (``selected`` | ``removed``) and,
 for the selected columns, ``prot_ali_col``: the 1-based column of the trimmed alignment. A position ``p`` therefore
 sits at untrimmed column ``ori_of_prot[p + 1]``. Removed columns cannot hold a CAAS; measured in untrimmed columns
-they count towards a window's span and not towards its CAAS count (see :func:`core.postproc.ctrain`).
+they count towards a window's span and not towards its CAAS count (see :func:`core.trains.ctrain`).
 
 Files are named ``<gene>[.<version>].<species><tail>`` and a gene is found by the part of the name before the first
 ``.``, whatever its reference species. Pure Python, no numpy/pandas: the null workers import it too.

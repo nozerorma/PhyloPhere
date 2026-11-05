@@ -4,19 +4,21 @@
 
 """
 Gene-level filter of the pooled CAAS discovery table, with the implementation of the
-permulation null (core.postproc):
+permulation null (core.gene_rules):
 
 A gene is an outlier when its count of distinct positions exceeds the fences of its gene-length stratum
-(core.postproc.stratified_fences): Extreme above the far fence (k_far), Dubious above the near fence (k_near) with a
-cluster-train position, Both when both hold.
+(core.gene_rules.stratified_fences): Extreme above the far fence (k_far), Dubious above the near fence (k_near) with a
+cluster-train position, Both when both hold. Each rule has its own switch (--remove-extreme, --remove-dubious): a gene is
+removed when a rule that is on flags it. gene_stats.tsv carries both marks (extreme, dubious) and the verdict (removed)
+whatever the switches say.
 
 Thresholds are calibrated over the pooled rows (one unit per gene). Cluster positions are dropped only with --remove-clusters.
 
 Called by:  CAAS_FILTER_GENES process (ctpp_clustfilter.nf)
 Inputs:     -i  pooled discovery TSV (Gene, Position)
-            -l  gene annotation TSV with gene and length columns
-            -c  cluster file of filter_caas_clusters-param.py (needed for the dubious and
-                both modes and for --remove-clusters)
+            -l  gene_lengths.tsv (gene_lengths.py): the lengths of every gene of the run, shared with the null merge
+            -c  cluster file of filter_caas_clusters-param.py (needed for the Dubious mark, for
+                --remove-clusters and for gene_stats.tsv)
 Outputs:    -o  filtered discovery TSV
             -s  removed (Gene, category) units
             -g  statistics of every candidate gene, including missing lengths (gene_stats.tsv)
@@ -30,13 +32,21 @@ from pathlib import Path
 
 import pandas as pd
 
-# core.postproc lives with the disambiguation core and is shared with the null chain.
+# core.gene_rules lives with the disambiguation core and is shared with the null chain.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CT_DISAMBIGUATION" / "local"))
-from src.core.postproc import GeneUnit, gene_removal, gene_unit_stats, load_gene_lengths  # noqa: E402
+from src.core.gene_rules import GeneUnit, gene_removal, gene_unit_stats, read_gene_lengths_table  # noqa: E402
 
-# Labeling of the observed slice in core.postproc units, and the hyp_id column of gene_stats.tsv.
+# Labeling of the observed slice in core.gene_rules units, and the hyp_id column of gene_stats.tsv.
 OBSERVED = "b_0"
 POOL_ID = "ALL"
+
+
+def _bool(text):
+    """true|false (also yes|no, 1|0) of a switch passed by Nextflow."""
+    value = str(text).strip().lower()
+    if value not in ("true", "false", "yes", "no", "1", "0"):
+        raise argparse.ArgumentTypeError(f"expected true or false, got {text!r}")
+    return value in ("true", "yes", "1")
 
 
 def read_discarded(cluster_file, discovery=None):
@@ -53,7 +63,7 @@ def read_discarded(cluster_file, discovery=None):
 
 
 def build_units(discovery_df, discarded):
-    """One core.postproc unit per Gene of the pooled table."""
+    """One core.gene_rules unit per Gene of the pooled table."""
     clustered = {gene for gene, _pos in discarded}
     counts = discovery_df.groupby("Gene")["Position"].nunique()
     return [GeneUnit(OBSERVED, str(gene), int(n), str(gene) in clustered)
@@ -61,19 +71,29 @@ def build_units(discovery_df, discarded):
 
 
 def gene_stats_table(stats, removal, length_sources=None):
-    """gene_stats.tsv: one row per candidate Gene; category is the removal verdict (Extreme, Dubious, Both or Normal)."""
+    """gene_stats.tsv: one row per candidate Gene, with the statistics of its length stratum (range, Q1, median, Q3, IQR,
+    the scale of the fences and whether it is the pooled IQR), both marks (extreme, dubious), the removal verdict (removed) and the
+    category the marks name (Extreme, Dubious, Both or Normal), whichever switch is on."""
     rows = []
     for s in stats:
-        cat = removal.get((s["labeling"], s["Gene"]), "Normal")
+        ext, dub = bool(s["extreme"]), bool(s["dubious"])
         rows.append({
             "hyp_id": POOL_ID, "Gene": s["Gene"],
             "length_source": (length_sources or {}).get(s["Gene"], "missing"),
             "length": s["length"], "n_CAAS": s["n_caas"], "n_CAAS_per_length": s["density"],
             "threshold_extreme": s["threshold_extreme"], "threshold_dubious": s["threshold_dubious"],
-            "category": cat,
+            "stratum": s["stratum"], "stratum_genes": s["stratum_genes"],
+            "stratum_min_length": s["length_min"], "stratum_max_length": s["length_max"],
+            "q1": s["q1"], "median": s["median"], "q3": s["q3"], "iqr": s["iqr"], "pool_iqr": s["pool_iqr"],
+            "scale": s["scale"], "scale_source": s["scale_source"],
+            "has_clustered": s["has_clustered"], "extreme": ext, "dubious": dub,
+            "removed": (s["labeling"], s["Gene"]) in removal,
+            "category": "Both" if ext and dub else "Extreme" if ext else "Dubious" if dub else "Normal",
         })
     cols = ["hyp_id", "Gene", "length_source", "length", "n_CAAS", "n_CAAS_per_length",
-            "threshold_extreme", "threshold_dubious", "category"]
+            "stratum", "stratum_genes", "stratum_min_length", "stratum_max_length", "q1", "median", "q3", "iqr", "pool_iqr",
+            "scale", "scale_source", "threshold_extreme", "threshold_dubious",
+            "has_clustered", "extreme", "dubious", "removed", "category"]
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -111,8 +131,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Remove outlier genes with the default fences (10 length strata, k_far 3, k_near 1.5)
-  python filter_caas_genes.py -i discovery.tsv -l gene_lengths.tsv -c clusters.tsv -m stratified -o filtered.tsv
+  # Remove Extreme and Dubious genes with the default fences (10 length strata, k_far 3, k_near 1.5)
+  python filter_caas_genes.py -i discovery.tsv -l gene_lengths.tsv -c clusters.tsv -o filtered.tsv
+
+  # Remove only the Extreme genes
+  python filter_caas_genes.py -i discovery.tsv -l gene_lengths.tsv -c clusters.tsv --remove-dubious false -o filtered.tsv
 
   # Custom fences
   python filter_caas_genes.py -i discovery.tsv -l gene_lengths.tsv -c clusters.tsv \\
@@ -122,19 +145,15 @@ Examples:
 
     parser.add_argument('-i', '--disambiguation-input', required=True,
                         help='Pooled CAAS discovery file (TSV with Gene and Position)')
-    parser.add_argument('-l', '--gene-ensembl-file', default=None,
-                        help='Gene annotation file (TSV with gene and length columns), used as fallback')
-    parser.add_argument('--map-dir', type=str, default=None,
-                        help="Directory of the trimmer's per-gene MAP tables for untrimmed lengths")
-    parser.add_argument('--map-suffix', type=str, default=".map.tsv",
-                        help='File-name tail of the MAP tables')
+    parser.add_argument('-l', '--gene-lengths', default=None,
+                        help='gene_lengths.tsv (gene, length, length_source), the lengths shared with the null merge')
     parser.add_argument('-c', '--cluster-file', default=None,
                         help='Cluster filtering output (required for dubious gene detection)')
 
-    parser.add_argument('-m', '--filter-mode',
-                        choices=['none', 'stratified'],
-                        default='stratified',
-                        help='Filtering mode (default: stratified)')
+    parser.add_argument('--remove-extreme', type=_bool, default=True,
+                        help='Remove the genes above the far fence of their length stratum (true|false, default true)')
+    parser.add_argument('--remove-dubious', type=_bool, default=True,
+                        help='Remove the genes above the near fence that carry a cluster train (true|false, default true)')
     parser.add_argument('--remove-clusters', action='store_true', default=False,
                         help='Remove positions flagged as Discarded by cluster filtering, decoupled from gene filter mode')
     parser.add_argument('--strata', type=int, default=10,
@@ -161,13 +180,14 @@ Examples:
     if not Path(args.disambiguation_input).exists():
         print(f"Error: Disambiguation file not found: {args.disambiguation_input}", file=sys.stderr)
         sys.exit(1)
-    if args.gene_ensembl_file and not Path(args.gene_ensembl_file).exists():
-        print(f"Error: Gene ensembl file not found: {args.gene_ensembl_file}", file=sys.stderr)
+    if args.gene_lengths and not Path(args.gene_lengths).exists():
+        print(f"Error: Gene lengths table not found: {args.gene_lengths}", file=sys.stderr)
         sys.exit(1)
 
-    needs_clusters = args.remove_clusters or args.filter_mode == 'stratified'
+    removal_on = args.remove_extreme or args.remove_dubious
+    needs_clusters = args.remove_clusters or args.remove_dubious or bool(args.gene_stats_output)
     if needs_clusters and args.cluster_file is None:
-        print("Error: --cluster-file required when --remove-clusters is set or for the 'stratified' filter mode", file=sys.stderr)
+        print("Error: --cluster-file required with --remove-clusters, --remove-dubious or a gene statistics output", file=sys.stderr)
         sys.exit(1)
     if needs_clusters and not Path(args.cluster_file).exists():
         print(f"Error: Cluster file not found: {args.cluster_file}", file=sys.stderr)
@@ -177,23 +197,19 @@ Examples:
     discovery_df = read_table(args.disambiguation_input)
     discovery_df['Position'] = positions(discovery_df.Position)
 
-    length_sources = {}
-    gene_lengths = load_gene_lengths(
-        path=args.gene_ensembl_file,
-        map_dir=args.map_dir,
-        map_suffix=args.map_suffix,
-        genes=discovery_df['Gene'].unique(),
-        sources=length_sources,
-    )
-    if not discovery_df.empty and not gene_lengths and args.filter_mode == 'stratified':
-        print("Error: Could not load gene lengths from MAP directory or gene ensembl file", file=sys.stderr)
+    gene_lengths, length_sources, n_table_genes = read_gene_lengths_table(args.gene_lengths) if args.gene_lengths else ({}, {}, 0)
+    if not discovery_df.empty and not gene_lengths and removal_on:
+        print("Error: No gene length in the gene lengths table", file=sys.stderr)
         sys.exit(1)
+    unlisted = sorted(set(map(str, discovery_df['Gene'].unique())) - set(gene_lengths))
+    if unlisted:
+        print(f"Warning: {len(unlisted)} of {discovery_df['Gene'].nunique()} candidate genes have no length and are never flagged", file=sys.stderr)
 
     discarded = read_discarded(args.cluster_file, discovery_df) if needs_clusters else set()
     print(f"Loaded {len(discovery_df)} CAAS positions across {discovery_df['Gene'].nunique()} genes", file=sys.stderr)
 
     units = build_units(discovery_df, discarded)
-    removal = gene_removal(units, gene_lengths, args.filter_mode, strata=args.strata, k_far=args.k_far, k_near=args.k_near)
+    removal = gene_removal(units, gene_lengths, args.remove_extreme, args.remove_dubious, strata=args.strata, k_far=args.k_far, k_near=args.k_near)
     removed_genes_df = pd.DataFrame(
         sorted((gene, cat) for (_lab, gene), cat in removal.items()),
         columns=['Gene', 'category'])
@@ -217,7 +233,7 @@ Examples:
         cluster['remove'] = args.remove_clusters
         save(str(args.output)+'.scoring.json',dict(version=1,observed_sha256=digest(args.output),
              excluded_genes=quality.get('excluded_genes',[]),scientific=quality['scientific'],alignments=quality.get('alignments',{}),cluster=cluster,maps=maps,strict=quality.get('strict',False),
-             gene_filter=dict(mode=args.filter_mode,strata=args.strata,k_far=args.k_far,k_near=args.k_near),lengths=gene_lengths,
+             gene_filter=dict(remove_extreme=args.remove_extreme,remove_dubious=args.remove_dubious,strata=args.strata,k_far=args.k_far,k_near=args.k_near),lengths=gene_lengths,
              length_sources=length_sources))
 
     if args.summary:
@@ -230,7 +246,7 @@ Examples:
         gene_stats_table(stats, removal, length_sources).to_csv(args.gene_stats_output, sep='\t', index=False)
 
     print("\n=== Post-Processing Filtering Summary ===", file=sys.stderr)
-    print(f"Gene filter mode: {args.filter_mode}", file=sys.stderr)
+    print(f"Remove Extreme genes: {args.remove_extreme}; remove Dubious genes: {args.remove_dubious}", file=sys.stderr)
     print(f"Cluster removal: {'enabled' if args.remove_clusters else 'disabled'}", file=sys.stderr)
     for category in ['Extreme', 'Dubious', 'Both']:
         count = int((removed_genes_df['category'] == category).sum())

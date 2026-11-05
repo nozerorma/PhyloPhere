@@ -20,7 +20,8 @@ def ppHash(paths) {
 def ppSources() {
     return files("${baseDir}/subworkflows/CT_POSTPROC/local/**/*.py", type: 'file')
             .findAll { !it.toString().contains('__pycache__') && !it.name.endsWith('.pyc') } + [
-        file("${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/core/postproc.py"),
+        file("${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/core/trains.py"),
+        file("${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/core/gene_rules.py"),
         file("${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/data/loaders.py"),
         file("${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/core/scoring_provenance.py"),
         file("${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/core/columns.py"),
@@ -111,20 +112,48 @@ process CT_FILTER_SUMMARY {
     """
 }
 
+// One table of gene lengths for every alignment of the run (columns of the trimmer's MAP tables, annotation as fallback).
+// CAAS_FILTER_GENES (observed) and every CAAS_CORE_MERGE (null) read it, so the gene-removal rule sees the same genes and
+// lengths on both sides. genes_text is the manifest of gene IDs, one per line; empty, it lists the genes of the sources.
+process GENE_LENGTHS {
+    ext source_hash: { ppSourceKey() }
+    cache true
+    tag 'gene_lengths'
+    publishDir "${params.outdir}/postproc/gene_lengths", mode: 'copy', overwrite: true
+    input:
+    val genes_text
+    path annotation, stageAs: 'inputs/annotation/*'
+    path map_dir, stageAs: 'inputs/maps/*'
+    val map_hash
+    output:
+    path 'gene_lengths.tsv', emit: lengths
+    path 'gene_lengths.json', emit: summary
+    script:
+    def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
+    def annotation_arg = annotation.name.startsWith('NO_') ? '' : "--annotation ${ppQuote(annotation)}"
+    def map_arg = map_dir ? "--map-dir ${ppQuote(map_dir)}" : ''
+    def genes_arg = genes_text ? '--genes genes.txt' : ''
+    """
+    echo '${task.ext.source_hash}:${map_hash}' > inputs.sha256
+    cat > genes.txt <<'PHYLOPHERE_GENES'
+""" + genes_text + """PHYLOPHERE_GENES
+    ${run} ${ppQuote("${baseDir}/subworkflows/CT_POSTPROC/local/src/gene_lengths.py")} \
+        ${genes_arg} ${annotation_arg} ${map_arg} -o gene_lengths.tsv --summary gene_lengths.json
+    """
+}
+
 process CAAS_FILTER_GENES {
     ext source_hash: { ppSourceKey() }
     cache true
-    tag "gene_filter:${params.gene_filter_mode}"
+    tag "gene_filter:extreme=${params.remove_extreme_genes}:dubious=${params.remove_dubious_genes}"
     label 'CT_FILTER'
     publishDir "${params.outdir}/postproc/gene_filtering", mode: 'copy', overwrite: true
     input:
     path discovery_file
     path quality_universe
     path cluster_contract
-    path gene_ensembl_file, stageAs: 'inputs/lengths/*'
+    path gene_lengths, stageAs: 'inputs/lengths/*'   // gene_lengths.tsv of GENE_LENGTHS
     path cluster_file
-    path map_dir, stageAs: 'inputs/maps/*'
-    val map_hash
     output:
     path 'filtered_discovery.tsv', emit: filtered_discovery
     path 'filtered_discovery.tsv.scoring.json', emit: scoring_contract
@@ -132,12 +161,11 @@ process CAAS_FILTER_GENES {
     path 'gene_stats.tsv', emit: gene_stats
     script:
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
-    def map_arg = map_dir ? "--map-dir ${ppQuote(map_dir)}" : ''
     """
-    echo '${task.ext.source_hash}:${map_hash}' > inputs.sha256
+    echo '${task.ext.source_hash}' > inputs.sha256
     ${run} ${ppQuote("${baseDir}/subworkflows/CT_POSTPROC/local/src/filter_caas_genes.py")} \
-        -i ${ppQuote(discovery_file)} -l ${ppQuote(gene_ensembl_file)} -c ${ppQuote(cluster_file)} ${map_arg} \
-        ${params.remove_caas_clusters ? '--remove-clusters' : ''} -m ${ppQuote(params.gene_filter_mode)} \
+        -i ${ppQuote(discovery_file)} -l ${ppQuote(gene_lengths)} -c ${ppQuote(cluster_file)} \
+        ${params.remove_caas_clusters ? '--remove-clusters' : ''} --remove-extreme ${ppQuote(params.remove_extreme_genes)} --remove-dubious ${ppQuote(params.remove_dubious_genes)} \
         --strata ${ppQuote(params.gene_filter_strata)} --k-far ${ppQuote(params.gene_filter_k_far)} --k-near ${ppQuote(params.gene_filter_k_near)} \
         -o filtered_discovery.tsv -s removed_genes_summary.tsv -g gene_stats.tsv \
         --quality-universe ${ppQuote(quality_universe)} --cluster-contract ${ppQuote(cluster_contract)}

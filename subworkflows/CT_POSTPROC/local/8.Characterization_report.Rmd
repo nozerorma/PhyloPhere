@@ -66,8 +66,17 @@ if (known_universe) {
   }
 }
 stats <- pp_table(params$gene_stats_file, c('Gene','length','length_source','n_CAAS','n_CAAS_per_length','category')) %>%
-  pp_numeric(c('length','n_CAAS','n_CAAS_per_length','threshold_extreme','threshold_dubious'))
+  pp_numeric(c('length','n_CAAS','n_CAAS_per_length','threshold_extreme','threshold_dubious','stratum','stratum_genes',
+               'stratum_min_length','stratum_max_length','q1','median','q3','iqr','pool_iqr','scale'))
 removed_genes <- pp_table(params$removed_genes_file,c('Gene','category'))
+# Both marks and the verdict are columns of gene_stats.tsv; an older table carries only the category.
+as_flag <- function(x) tolower(as.character(x)) %in% c('true','t','1')
+stats <- if (all(c('extreme','dubious','removed') %in% names(stats))) {
+  stats %>% mutate(extreme=as_flag(extreme),dubious=as_flag(dubious),removed=as_flag(removed))
+} else stats %>% mutate(extreme=category %in% c('Extreme','Both'),dubious=category %in% c('Dubious','Both'),
+                        removed=Gene %in% removed_genes$Gene)
+has_strata <- all(c('stratum','q1','q3','scale','scale_source') %in% names(stats))
+switch_state <- function(name) if (known_settings && !is.null(cfg[[name]])) as_flag(cfg[[name]]) else NA
 summary <- pp_table(params$filter_summary_file,c('Parameter','Minlen','Maxcaas','DiscardedCount')) %>%
   pp_numeric(c('Minlen','Maxcaas','DiscardedCount'))
 selected <- pp_table(params$selected_cluster_file,c('Gene','Position','clustering_flag')) %>% pp_numeric('Position')
@@ -128,11 +137,13 @@ write_tsv(counts,'summary_statistics/filter_impact.tsv')
 
 ## 1.2 Gene outliers
 
-Genes are ordered by length and partitioned into equal-size strata. Far and near
-fences use Q3 + k × max(stratum IQR, pooled IQR); `extreme` is a count above the far
-fence, `dubious` a count above the near fence together with a flagged cluster
-position, and `both` applies both. `none` disables gene removal. Genes without usable
-lengths remain visible but cannot receive stratified thresholds. Densities are
+Genes are ordered by length and partitioned into equal-size strata. Within a stratum the fences are
+Q3 + k × scale, with scale = max(stratum IQR, IQR of all genes with a length). **Extreme** is a count above the
+far fence (k = `gene_filter_k_far`), for any gene. **Dubious** is a count above the near fence
+(k = `gene_filter_k_near`) together with a cluster-train position. **Both** is a gene with the two marks.
+Each rule has its own switch (`remove_extreme_genes`, `remove_dubious_genes`); this report shows both marks
+whatever the switches say, so that each rule can be judged before deciding which to apply (section 1.3).
+Genes without usable lengths remain visible but cannot receive thresholds. Densities are
 candidate positions per **100 units of the effective length**. MAP lengths are untrimmed
 alignment columns; the annotation fallback uses its `length` column, which is
 the genomic span in base pairs for pipeline-generated Ensembl annotations.
@@ -145,7 +156,7 @@ Click an outlier plot to zoom in; click again to restore it.
 
 ```{r outliers, results='asis', dpi=180}
 write_tsv(stats,'outliers/gene_summary_annotated.tsv')
-pp_show(count(stats,category,name='Genes'),'Gene removal categories')
+pp_show(count(stats,category,name='Genes'),'Gene categories by mark (Extreme, Dubious, Both)')
 pp_show(count(stats,length_source,name='Genes'),'Effective length sources')
 if (nrow(stats)) {
   pp_plot(ggplot(stats,aes(n_CAAS,fill=category))+geom_histogram(bins=30)+
@@ -169,8 +180,93 @@ document.addEventListener('click', function(event) {
 });
 </script>
 
+## 1.3 Gene filter diagnostic
+
+### Fences by length stratum
+
+```{r strata, results='asis'}
+strata_tbl <- tibble()
+if (has_strata && any(is.finite(stats$stratum))) {
+  strata_tbl <- stats %>% filter(is.finite(stratum)) %>% group_by(Stratum=stratum) %>% summarise(
+    Genes=n(), Min_length=first(stratum_min_length), Max_length=first(stratum_max_length),
+    Q1=first(q1), Median=first(median), Q3=first(q3), IQR=first(iqr), Pooled_IQR=first(pool_iqr),
+    Scale=first(scale), Scale_from=if_else(first(scale_source)=='pool','pooled IQR','stratum IQR'),
+    Far_fence=first(threshold_extreme), Near_fence=first(threshold_dubious),
+    Extreme=sum(extreme), Dubious=sum(dubious), .groups='drop')
+  write_tsv(strata_tbl,'outliers/stratum_summary.tsv')
+  pp_show(strata_tbl %>% mutate(across(where(is.double),~round(.x,2))),
+          'Length strata: range, count quartiles, scale, fences and genes marked by each rule')
+  flat <- strata_tbl %>% filter(IQR==0, Pooled_IQR==0)
+  if (nrow(flat)) cat(sprintf(paste0('**No dispersion in %d of %d strata (stratum %s): the stratum IQR and the pooled IQR are both 0, ',
+    'so the scale is 0 and both fences equal Q3. In those strata every gene above Q3 is Extreme, and Dubious when it also ',
+    'carries a train; the fence marks the step above Q3 of a count distribution without spread, not a statistical outlier.**\n\n'),
+    nrow(flat), nrow(strata_tbl), paste(flat$Stratum, collapse=', ')))
+  if (any(strata_tbl$Scale_from=='pooled IQR' & strata_tbl$Pooled_IQR>0))
+    cat('Strata marked "pooled IQR" take the IQR of all genes as scale because their own IQR is smaller.\n\n')
+} else cat('Stratum statistics are not in this gene table (no gene has a length, or the table predates them).\n\n')
+```
+
+```{r strata_plot, results='asis', dpi=180}
+if (nrow(strata_tbl)) {
+  stratum_labels <- strata_tbl %>% transmute(stratum=Stratum, Stratum_label=sprintf('Stratum %d (%s-%s)', Stratum,
+    format(round(Min_length),big.mark=','), format(round(Max_length),big.mark=',')))
+  fence_lines <- strata_tbl %>% select(stratum=Stratum, Far=Far_fence, Near=Near_fence) %>%
+    pivot_longer(c(Far,Near), names_to='Fence', values_to='count') %>% left_join(stratum_labels, by='stratum') %>%
+    mutate(Stratum_label=factor(Stratum_label, levels=stratum_labels$Stratum_label))
+  by_stratum <- stats %>% filter(is.finite(stratum)) %>% left_join(stratum_labels, by='stratum') %>%
+    mutate(Stratum_label=factor(Stratum_label, levels=stratum_labels$Stratum_label))
+  pp_plot(ggplot(by_stratum, aes(n_CAAS, fill=category)) + geom_histogram(binwidth=1, boundary=-0.5) +
+    geom_vline(data=fence_lines, aes(xintercept=count, linetype=Fence), color='grey20') +
+    scale_fill_manual(values=colors) + scale_linetype_manual(values=c(Far='dashed', Near='dotted')) +
+    facet_wrap(~Stratum_label, scales='free') +
+    labs(x='Distinct candidate positions per gene', y='Genes', fill='Category', linetype='Fence'),
+    'outliers/stratum_count_distributions.png', width=12, height=8)
+}
+```
+
+### Genes marked by each rule
+
+```{r flagged_genes, results='asis'}
+train_positions <- cluster_hits %>% count(Gene, name='Train_positions')
+flagged <- stats %>% filter(extreme | dubious) %>% left_join(train_positions, by='Gene') %>%
+  mutate(Train_positions=coalesce(Train_positions, 0L)) %>%
+  transmute(Gene, Length=length, CAAS_positions=n_CAAS, Stratum=if (has_strata) stratum else NA_real_,
+            Rule=category, Cluster_train=Train_positions>0, Train_positions, Removed_in_this_run=removed) %>%
+  arrange(desc(CAAS_positions), Gene)
+write_tsv(flagged,'outliers/flagged_genes.tsv')
+pp_show(flagged, 'Genes marked Extreme, Dubious or Both')
+```
+
+### What each switch would remove
+
+Positions are distinct `(gene, position)` pairs of the input table; a gene removal drops all of its positions.
+`Extreme rule` is `remove_extreme_genes` alone, `Dubious rule` is `remove_dubious_genes` alone.
+
+```{r switch_scenarios, results='asis'}
+positions_by_gene <- discovery %>% distinct(Gene, Position) %>% count(Gene, name='positions')
+total_positions <- sum(positions_by_gene$positions); total_genes <- nrow(positions_by_gene)
+scenario <- function(label, genes) {
+  lost <- sum(positions_by_gene$positions[positions_by_gene$Gene %in% genes])
+  tibble(Scenario=label, Genes=length(genes), Genes_pct=round(100*length(genes)/max(total_genes,1),2),
+         CAAS_positions=lost, CAAS_positions_pct=round(100*lost/max(total_positions,1),2))
+}
+extreme_genes <- stats$Gene[stats$extreme]; dubious_genes <- stats$Gene[stats$dubious]
+scenarios <- bind_rows(
+  scenario('Neither rule', character()),
+  scenario('Extreme rule', extreme_genes),
+  scenario('Dubious rule', dubious_genes),
+  scenario('Both rules', union(extreme_genes, dubious_genes)),
+  scenario('Marked by both (Both)', intersect(extreme_genes, dubious_genes)),
+  scenario('Removed in this run', stats$Gene[stats$removed]))
+write_tsv(scenarios,'outliers/switch_scenarios.tsv')
+pp_show(scenarios, sprintf('Genes and CAAS positions lost (of %d genes, %d positions)', total_genes, total_positions))
+state <- function(x) if (is.na(x)) 'unknown' else if (x) 'on' else 'off'
+cat(sprintf('Switches in this run: `remove_extreme_genes` %s, `remove_dubious_genes` %s.\n\n',
+            state(switch_state('remove_extreme_genes')), state(switch_state('remove_dubious_genes'))))
+```
+
 ```{r removed_genes_table, results='asis'}
-pp_show(removed_genes,'Genes removed by the enabled gene filters')
+pp_show(removed_genes,'Genes removed under the switches of this run')
 ```
 
 # 2. Cluster Filtering Analysis
@@ -234,12 +330,11 @@ score. The score is **not a calibrated probability of independent origins**.
 
 ## 3.1 Actual removals and filter overlap
 
-Extreme and dubious membership comes from the filtering run's gene removal
-categories, using the length-stratified far and near fences described in section
-1.2. Dubious also requires a cluster-flagged position. `Both` contributes to
-both columns. These are removal verdicts under the configured gene filter, not
-independent classifications when that filter is disabled. Cluster removal can
-remove individual positions without removing the whole gene.
+Extreme and dubious membership comes from the marks of `gene_stats.tsv`, using the
+length-stratified far and near fences described in section 1.2; the marks do not
+depend on the switches. Dubious also requires a cluster-flagged position. `Both`
+contributes to both columns. Cluster removal can remove individual positions
+without removing the whole gene.
 
 ```{r overlap, results='asis'}
 flags <- stats %>% mutate(Extreme=category %in% c('Extreme','Both'),
@@ -249,7 +344,7 @@ flags <- stats %>% mutate(Extreme=category %in% c('Extreme','Both'),
 overlap <- flags %>% count(Extreme,Dubious,Cluster_removed,name='Genes')
 write_tsv(flags,'outliers/filter_overlap_gene_table.tsv')
 write_tsv(overlap,'outliers/filter_overlap_summary.tsv')
-pp_show(overlap,'Gene membership in enabled removal rules; cluster removal can be partial')
+pp_show(overlap,'Gene membership in the Extreme and Dubious rules; cluster removal can be partial')
 if (nrow(removal_events)) pp_show(removal_events %>% count(removal_stage,side,convergence_type,name='Rows'),
   'Removal events by stage and side (stages can overlap)') else cat('No removal events.\n\n')
 ```

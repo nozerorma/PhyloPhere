@@ -42,7 +42,7 @@
 
 import groovy.transform.Field
 
-include { observedSourceHash as scoringSourceHash; observedQuote as scoringQuote; observedInputHash as scoringInputHash } from '../CT_DISAMBIGUATION/ct_observed'
+include { observedQuote as scoringQuote; observedInputHash as scoringInputHash } from '../CT_DISAMBIGUATION/ct_observed'
 
 // The directory is shared by every tile. Retain the existing fingerprint and
 // generated script, but traverse it once per path and workflow invocation.
@@ -56,9 +56,165 @@ def caasMapFingerprint(path) {
         return caasMapFingerprints[key]
     }
 }
-def coreScoringSourceKey() {
-    return scoringSourceHash("${baseDir}/subworkflows/CT_DISAMBIGUATION/local", "${baseDir}/subworkflows/CT/local/modules/design_io.py", "${baseDir}/subworkflows/CT/local") + java.security.MessageDigest.getInstance('SHA-256').digest(file("${baseDir}/subworkflows/SCORING/local/src/assemble_block_matrices.R").bytes).encodeHex().toString()
+// ── Source lists and cache keys per process ──────────────────────────────────
+// One explicit list of files per process (paths relative to subworkflows/); its key is the SHA-256 of the paths and
+// contents, and each process writes its key into its script, so editing a listed file recomputes that process and
+// nothing else. A listed file that does not exist stops the run. The lists are the import closures (by AST) of the
+// entry points that each process runs, the `modules` package of `ct` included, plus the data files and R scripts
+// they read; tests/test_caas_source_keys.py in PhyloPhere_validation recomputes the closures and compares them with these lists.
+//   SUBSET_RESAMPLE_PERMS  caasLabelingSources   prepare_labelings.py
+//   CAAS_UNIVERSE          caasKernelSources     ct perm-replay, run_ct_perm_replay_batch.sh, the CT modules
+//   CAAS_CORE_BATCHED,
+//   CAAS_CORE_OBSERVED     caasTileSources       kernel + the tile entry points (disambiguation_perms_main.py, observed_b0_main.py,
+//                                                contract_main.py), the cluster-train module and the ASR rate tables;
+//                                                no gene-removal rule, no merge, no reduce, no R
+//   CAAS_CORE_MERGE (+ _STRICT)  caasMergeSources   merge_null_block.py, the gene-removal rule, null_merge.py, assemble_block_matrices.R
+//   CAAS_CORE_MERGE_REDUCE caasReduceSources     merge sources + reduce_null_blocks.py, scoring_caas_perms.R, caas_block_contract.R
+//   CAAS_REMOVAL_INVARIANT caasInvariantSources  check_b0_removal.py
+def caasKernelSources() {
+    return [
+        'CT/local/ct',
+        'CT/local/modules/__init__.py',
+        'CT/local/modules/alimport.py',
+        'CT/local/modules/caas_id.py',
+        'CT/local/modules/design_io.py',
+        'CT/local/modules/perm_replay.py',
+        'CT/local/modules/perm_replay_io.py',
+        'CT/local/modules/pindex.py',
+        'CT/local/modules/runslice.py',
+        'CT/local/modules/universe.py',
+        'CT/local/scripts/run_ct_perm_replay_batch.sh'
+    ]
 }
+def caasLabelingSources() {
+    return [
+        'CT/local/modules/__init__.py',
+        'CT/local/modules/design_io.py',
+        'CT/local/scripts/prepare_labelings.py'
+    ]
+}
+def caasTileSources() {
+    return caasKernelSources() + [
+        'CT_DISAMBIGUATION/local/contract_main.py',
+        'CT_DISAMBIGUATION/local/disambiguation_perms_main.py',
+        'CT_DISAMBIGUATION/local/observed_b0_main.py',
+        'CT_DISAMBIGUATION/local/src/__init__.py',
+        'CT_DISAMBIGUATION/local/src/asr/__init__.py',
+        'CT_DISAMBIGUATION/local/src/asr/asr_single.py',
+        'CT_DISAMBIGUATION/local/src/asr/cache.py',
+        'CT_DISAMBIGUATION/local/src/asr/posterior.py',
+        'CT_DISAMBIGUATION/local/src/asr/reconstruct.py',
+        'CT_DISAMBIGUATION/local/src/asr/tree_parser.py',
+        'CT_DISAMBIGUATION/local/src/convergence/__init__.py',
+        'CT_DISAMBIGUATION/local/src/convergence/convergence.py',
+        'CT_DISAMBIGUATION/local/src/convergence/disambiguate_single.py',
+        'CT_DISAMBIGUATION/local/src/convergence/fop_pool.py',
+        'CT_DISAMBIGUATION/local/src/convergence/path_scores.py',
+        'CT_DISAMBIGUATION/local/src/convergence/support_fmt.py',
+        'CT_DISAMBIGUATION/local/src/core/__init__.py',
+        'CT_DISAMBIGUATION/local/src/core/columns.py',
+        'CT_DISAMBIGUATION/local/src/core/contract.py',
+        'CT_DISAMBIGUATION/local/src/core/ct_io.py',
+        'CT_DISAMBIGUATION/local/src/core/discovery.py',
+        'CT_DISAMBIGUATION/local/src/core/driver.py',
+        'CT_DISAMBIGUATION/local/src/core/labelings.py',
+        'CT_DISAMBIGUATION/local/src/core/master.py',
+        'CT_DISAMBIGUATION/local/src/core/meta.py',
+        'CT_DISAMBIGUATION/local/src/core/observed.py',
+        'CT_DISAMBIGUATION/local/src/core/pooling.py',
+        'CT_DISAMBIGUATION/local/src/core/scores.py',
+        'CT_DISAMBIGUATION/local/src/core/scoring_provenance.py',
+        'CT_DISAMBIGUATION/local/src/core/trains.py',
+        'CT_DISAMBIGUATION/local/src/core/universe.py',
+        'CT_DISAMBIGUATION/local/src/data/__init__.py',
+        'CT_DISAMBIGUATION/local/src/data/loaders.py',
+        'CT_DISAMBIGUATION/local/src/data/models.py',
+        'CT_DISAMBIGUATION/local/src/phylo/__init__.py',
+        'CT_DISAMBIGUATION/local/src/phylo/species_mapping.py',
+        'CT_DISAMBIGUATION/local/src/phylo/tree_utils.py',
+        'CT_DISAMBIGUATION/local/src/utils/__init__.py',
+        'CT_DISAMBIGUATION/local/src/utils/amino.py',
+        'CT_DISAMBIGUATION/local/src/utils/concurrency.py',
+        'CT_DISAMBIGUATION/local/src/utils/gene_wrapper.py',
+        'CT_DISAMBIGUATION/local/src/utils/io_utils.py',
+        'CT_DISAMBIGUATION/local/src/utils/logger.py',
+        'CT_DISAMBIGUATION/local/src/utils/null_tables.py',
+        'CT_DISAMBIGUATION/local/src/utils/perm_stream.py',
+        'CT_DISAMBIGUATION/local/dat/dayhoff.dat',
+        'CT_DISAMBIGUATION/local/dat/jones.dat',
+        'CT_DISAMBIGUATION/local/dat/jtt.dat',
+        'CT_DISAMBIGUATION/local/dat/lg.dat',
+        'CT_DISAMBIGUATION/local/dat/wag.dat'
+    ]
+}
+def caasMergeSources() {
+    return [
+        'CT_DISAMBIGUATION/local/merge_null_block.py',
+        'CT_DISAMBIGUATION/local/src/__init__.py',
+        'CT_DISAMBIGUATION/local/src/asr/__init__.py',
+        'CT_DISAMBIGUATION/local/src/asr/posterior.py',
+        'CT_DISAMBIGUATION/local/src/asr/reconstruct.py',
+        'CT_DISAMBIGUATION/local/src/asr/tree_parser.py',
+        'CT_DISAMBIGUATION/local/src/convergence/__init__.py',
+        'CT_DISAMBIGUATION/local/src/convergence/convergence.py',
+        'CT_DISAMBIGUATION/local/src/convergence/disambiguate_single.py',
+        'CT_DISAMBIGUATION/local/src/convergence/fop_pool.py',
+        'CT_DISAMBIGUATION/local/src/convergence/path_scores.py',
+        'CT_DISAMBIGUATION/local/src/convergence/support_fmt.py',
+        'CT_DISAMBIGUATION/local/src/core/__init__.py',
+        'CT_DISAMBIGUATION/local/src/core/columns.py',
+        'CT_DISAMBIGUATION/local/src/core/ct_io.py',
+        'CT_DISAMBIGUATION/local/src/core/gene_rules.py',
+        'CT_DISAMBIGUATION/local/src/core/labelings.py',
+        'CT_DISAMBIGUATION/local/src/core/pooling.py',
+        'CT_DISAMBIGUATION/local/src/core/scores.py',
+        'CT_DISAMBIGUATION/local/src/core/trains.py',
+        'CT_DISAMBIGUATION/local/src/data/__init__.py',
+        'CT_DISAMBIGUATION/local/src/data/loaders.py',
+        'CT_DISAMBIGUATION/local/src/data/models.py',
+        'CT_DISAMBIGUATION/local/src/utils/__init__.py',
+        'CT_DISAMBIGUATION/local/src/utils/amino.py',
+        'CT_DISAMBIGUATION/local/src/utils/concurrency.py',
+        'CT_DISAMBIGUATION/local/src/utils/io_utils.py',
+        'CT_DISAMBIGUATION/local/src/utils/logger.py',
+        'CT_DISAMBIGUATION/local/src/utils/null_merge.py',
+        'CT_DISAMBIGUATION/local/src/utils/null_tables.py',
+        'SCORING/local/src/assemble_block_matrices.R'
+    ]
+}
+def caasInvariantSources() {
+    return ['CT_POSTPROC/local/src/check_b0_removal.py']
+}
+def caasReduceSources() {
+    return caasMergeSources() + [
+        'CT_DISAMBIGUATION/local/reduce_null_blocks.py',
+        'SCORING/local/src/scoring_caas_perms.R',
+        'SCORING/local/src/caas_block_contract.R'
+    ]
+}
+
+@Field final Map<String, String> caasSourceKeys = [:]
+def caasSourceKey(String name, List<String> sources) {
+    synchronized (caasSourceKeys) {
+        if (!caasSourceKeys.containsKey(name)) {
+            def md = java.security.MessageDigest.getInstance('SHA-256')
+            sources.unique().sort(false).each { rel ->
+                def f = file("${baseDir}/subworkflows/${rel}")
+                assert f.exists() : "Source listed for the ${name} key is missing: ${rel}"
+                md.update(rel.getBytes('UTF-8'))
+                md.update(f.bytes)
+            }
+            caasSourceKeys[name] = md.digest().encodeHex().toString()
+        }
+        return caasSourceKeys[name]
+    }
+}
+def caasLabelingKey() { return caasSourceKey('labeling', caasLabelingSources()) }
+def caasUniverseKey() { return caasSourceKey('universe', caasKernelSources()) }
+def caasTileKey()     { return caasSourceKey('tile', caasTileSources()) }
+def caasMergeKey()    { return caasSourceKey('merge', caasMergeSources()) }
+def caasReduceKey()   { return caasSourceKey('reduce', caasReduceSources()) }
+def caasInvariantKey() { return caasSourceKey('invariant', caasInvariantSources()) }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -92,11 +248,11 @@ def caasTileArgs(gene_lengths) {
 }
 
 // CLI arguments that give merge_null_block.py the observed gene removal (dubious and extreme genes, or the length-stratified
-// fences, each cycle against its own units). Empty when the filters are off or the gene annotation file is a NO_* sentinel.
-def caasRemovalArgs(gene_lengths) {
-    if (!caasPostprocOn() || new File(gene_lengths.toString()).name =~ /^NO_/) return ""
-    def map_arg = params.caas_map_dir ? "--map-dir ${scoringQuote(params.caas_map_dir)}" : ""
-    return "--gene-lengths ${scoringQuote(gene_lengths)} ${map_arg} --gene-filter-mode ${scoringQuote(params.gene_filter_mode)} --gene-strata ${scoringQuote(params.gene_filter_strata)} --gene-k-far ${scoringQuote(params.gene_filter_k_far)} --gene-k-near ${scoringQuote(params.gene_filter_k_near)}"
+// fences, each cycle against its own units). The lengths are the gene_lengths.tsv of GENE_LENGTHS, the table the observed filter
+// reads too, so every gene with units in a cycle is evaluated. Empty when the filters are off or there is no table (NO_* sentinel).
+def caasRemovalArgs(gene_lengths_table) {
+    if (!caasPostprocOn() || new File(gene_lengths_table.toString()).name =~ /^NO_/) return ""
+    return "--gene-lengths-table ${scoringQuote(gene_lengths_table)} --remove-extreme-genes ${scoringQuote(params.remove_extreme_genes)} --remove-dubious-genes ${scoringQuote(params.remove_dubious_genes)} --gene-strata ${scoringQuote(params.gene_filter_strata)} --gene-k-far ${scoringQuote(params.gene_filter_k_far)} --gene-k-near ${scoringQuote(params.gene_filter_k_near)}"
 }
 
 // Shell lines that write .ct_perm_replay_batch_args, the effective CAAS limits of `ct perm-replay` (patterns, miss_pair,
@@ -130,6 +286,7 @@ def replayArgsScript(caas_config) {
 //   blocks/blk_NNNN/fop_pairs.tsv       the PSS weights of the block's cycles (FOP mirror only)
 //   blocks/b0/                          the same two files for the real labeling b_0, never part of a block
 process SUBSET_RESAMPLE_PERMS {
+    ext labeling_source_hash: { caasLabelingKey() }
     tag "caas_perms_subset|N=${n_perms}|block=${block_size}"
     label 'process_low'
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: '{resample_perms.tab,ct_preparation.json}'
@@ -148,6 +305,7 @@ process SUBSET_RESAMPLE_PERMS {
     script:
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     """
+    echo '${task.ext.labeling_source_hash}' > labeling_source.sha256
     ${run} "${baseDir}/subworkflows/CT/local/scripts/prepare_labelings.py" \
         --source "${resample_dir}" --config "${caas_config}" \
         --n "${n_perms}" --block-size "${block_size}" \
@@ -165,6 +323,7 @@ process SUBSET_RESAMPLE_PERMS {
 // scored over the same positions, and CAAS_CORE_OBSERVED writes it as background.output. With the strict tables on, the
 // strict universe (`<gene>.b0.universe_strict`) is the same test with no conserved pair allowed.
 process CAAS_UNIVERSE {
+    ext universe_source_hash: { caasUniverseKey() }
     tag "$batchID (${batchSize} genes)"
     label 'process_resample'
 
@@ -181,6 +340,7 @@ process CAAS_UNIVERSE {
         ? "/usr/local/bin/_entrypoint.sh ${scoringQuote("${baseDir}/subworkflows/CT/local/ct")}"
         : scoringQuote("${baseDir}/subworkflows/CT/local/ct")
     """
+    echo '${task.ext.universe_source_hash}' > universe_source.sha256
     export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     cat > ${batchID}.manifest.tsv <<'EOF'
 """ + manifestText + """EOF
@@ -213,7 +373,7 @@ process CAAS_UNIVERSE {
 // Output: null_tables/ (the tile's tables, with the name of its block) and, for the b_0 tile, b0_observed/ (per gene
 // with b_0 hits: its discovery rows, its tested positions and its master rows).
 process CAAS_CORE_BATCHED {
-    ext scoring_source_hash: { coreScoringSourceKey() }
+    ext scoring_source_hash: { caasTileKey() }
     tag "$batchID (${batchSize} genes) ${block.name}"
     label 'process_resample'
 
@@ -399,7 +559,7 @@ workflow CAAS_CORE {
 // where the rest of the pipeline reads them: caastools/, meta_caas/meta_caas/ and
 // ct_disambiguation/.
 process CAAS_CORE_OBSERVED {
-    ext scoring_source_hash: { coreScoringSourceKey() }
+    ext scoring_source_hash: { caasTileKey() }
     tag "caas_core_observed"
     label 'process_low'
     // The publish prefix is empty for this process and "/strict" for its strict alias (CAAS_CORE_OBSERVED_STRICT), which
@@ -440,7 +600,7 @@ process CAAS_CORE_OBSERVED {
 // is computed. Observed and null gene scores both use max; FCS calibrates the
 // same statistic on both sides. Position-level null products are unchanged.
 process CAAS_CORE_MERGE {
-    ext scoring_source_hash: { coreScoringSourceKey() }
+    ext scoring_source_hash: { caasMergeKey() }
     cache true
     tag "caas_core_merge|${block}"
     label 'process_medium'
@@ -451,7 +611,7 @@ process CAAS_CORE_MERGE {
     input:
     tuple val(block), path(tiles, stageAs: 'tile_*'), path(block_dir, stageAs: 'block_input')   // the block's tile tables and its directory of SUBSET_RESAMPLE_PERMS (staged under a name other than the output's)
     path universe       // gene universe (cleaned_background_main.txt) or NO_FILE
-    path gene_lengths   // gene_ensembl_file (gene removal) or NO_FILE
+    path gene_lengths_table   // gene_lengths.tsv of GENE_LENGTHS (gene removal) or NO_FILE
 
     output:
     tuple val(block), path("${block}"), emit: block_out
@@ -478,7 +638,7 @@ process CAAS_CORE_MERGE {
         --labelings ${block_dir}/resample_perms.tab \
         --output-dir ${block} ${b0_arg} ${universe_arg} \
         --gene-stat ${params.gene_stat ?: 'max'} \
-        --seed ${params.seed ?: 1998} ${caasRemovalArgs(gene_lengths)}
+        --seed ${params.seed ?: 1998} ${caasRemovalArgs(gene_lengths_table)}
 
     # The matrices go to one RDS per block; the raw files are only the hand-over.
     ${rs} ${scoring_local}/src/assemble_block_matrices.R --dir ${block}/matrices --output ${block}/matrices.rds
@@ -490,6 +650,7 @@ process CAAS_CORE_MERGE {
 // null scores (nd per position, the universe of the accumulation test and of the position p).
 // Canonical matrices stay in blocks; caas_export_single requests a compatibility export.
 process CAAS_CORE_MERGE_REDUCE {
+    ext scoring_source_hash: { caasReduceKey() }
     tag "caas_core_merge_reduce"
     label 'process_medium'
     // The publish prefix is "/strict" for the strict alias (CAAS_CORE_MERGE_REDUCE_STRICT)
@@ -520,6 +681,7 @@ process CAAS_CORE_MERGE_REDUCE {
     def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript'  : 'Rscript'
     """
+    echo '${task.ext.scoring_source_hash}' > scoring_source.sha256
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     cp -R ${disambig_local}/* .
     find . -name '*.pyc' -delete 2>/dev/null || true
@@ -531,6 +693,31 @@ process CAAS_CORE_MERGE_REDUCE {
         ${universe_arg} \
         --metadata null_metadata.json \\
         ${params.caas_export_single == true ? '--output caas_perms.rds' : '--validate-only'}
+    """
+}
+
+// The genes removed from b_0 by CAAS_CORE_MERGE must be the genes the observed filter removed (removed_genes_summary.tsv of
+// CAAS_FILTER_GENES): b_0 is the real labeling merged with the rule and the lengths of every null cycle. A difference stops
+// the run with the genes named. The strict null is not checked, since the observed filter does not see its counts.
+process CAAS_REMOVAL_INVARIANT {
+    ext b0_check_hash: { caasInvariantKey() }
+    tag 'caas_removal_invariant'
+    label 'process_low'
+    publishDir path: "${params.outdir}/caas_permulation/b0", mode: 'copy', overwrite: true, pattern: 'check_b0_removal.json'
+
+    input:
+    path b0_block, stageAs: 'b0_in'   // the output directory of CAAS_CORE_MERGE for b_0
+    path observed_removed             // removed_genes_summary.tsv of CAAS_FILTER_GENES
+
+    output:
+    path 'check_b0_removal.json', emit: report
+
+    script:
+    def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
+    """
+    echo '${task.ext.b0_check_hash}' > b0_check.sha256
+    ${py} ${scoringQuote("${baseDir}/subworkflows/CT_POSTPROC/local/src/check_b0_removal.py")} \\
+        --b0 b0_in --observed ${scoringQuote(observed_removed)} --report check_b0_removal.json
     """
 }
 

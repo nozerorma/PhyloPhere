@@ -21,7 +21,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from src.core.postproc import GeneUnit, gene_removal
+from src.core.gene_rules import GeneUnit, gene_removal
 from src.core.scores import SCORE_RULE, TIE_TOL, cycle_order_key
 from src.utils.null_tables import SCORES_SCHEMA, UNITS_SCHEMA, read_scores, read_units
 
@@ -72,19 +72,19 @@ class BlockTables:
 CATEGORIES = ("Extreme", "Dubious", "Both")   # codes 0, 1, 2 of the category column of units.parquet
 
 
-def removal_units(t: BlockTables, lengths: Dict[str, float], mode: str, detail: Optional[dict] = None, *,
-                  strata: int = 10, k_far: float = 3.0, k_near: float = 1.5) -> np.ndarray:
-    """Boolean per unit: removed by gene removal (core.postproc.gene_removal, each cycle against its own units).
+def removal_units(t: BlockTables, lengths: Dict[str, float], remove_extreme: bool, remove_dubious: bool,
+                  detail: Optional[dict] = None, *, strata: int = 10, k_far: float = 3.0, k_near: float = 1.5) -> np.ndarray:
+    """Boolean per unit: removed by gene removal (core.gene_rules.gene_removal, each cycle against its own units).
 
     `detail`, when given, receives `flagged` ((cycle, gene) -> category); the decisions do not depend on it.
     """
     removed = np.zeros(len(t.u_gene), dtype=bool)
-    if (mode or "none").lower() == "none" or not len(t.u_gene):
+    if not (remove_extreme or remove_dubious) or not len(t.u_gene):
         return removed
     n_pos, clust = t.units["n_pos"], t.units["clust"]
     stream = (GeneUnit(t.cycles[c], t.genes[g], int(n), bool(k))
               for c, g, n, k in zip(t.u_cycle.tolist(), t.u_gene.tolist(), n_pos.tolist(), clust.tolist()))
-    flagged = gene_removal(stream, lengths, mode=mode, strata=strata, k_far=k_far, k_near=k_near)
+    flagged = gene_removal(stream, lengths, remove_extreme, remove_dubious, strata=strata, k_far=k_far, k_near=k_near)
     if detail is not None:
         detail["flagged"] = flagged
     if flagged:
@@ -287,7 +287,7 @@ def _write_tsv(path: Path, header: Sequence[str], rows: Iterable[Sequence]) -> N
 
 
 def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str], *, universe: Optional[Iterable[str]] = None,
-                lengths: Optional[Dict[str, float]] = None, gene_filter_mode: str = "none", gene_stat: str = "max", seed: int = 1998,
+                lengths: Optional[Dict[str, float]] = None, remove_extreme: bool = False, remove_dubious: bool = False, gene_stat: str = "max", seed: int = 1998,
                 sample_per_cycle: int = 200, gene_strata: int = 10, gene_k_far: float = 3.0,
                 gene_k_near: float = 1.5, length_sources: Optional[Dict[str,str]] = None) -> dict:
     """Merge the tiles of one block into `out_dir`; returns counts (units, removed units, scored positions, cycles present)."""
@@ -299,7 +299,7 @@ def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str],
     out_dir.mkdir(parents=True, exist_ok=True)
     t = BlockTables(tile_dirs, cycles, universe)
     detail: dict = {}
-    removed = removal_units(t, lengths or {}, gene_filter_mode, detail,
+    removed = removal_units(t, lengths or {}, remove_extreme, remove_dubious, detail,
                             strata=gene_strata, k_far=gene_k_far, k_near=gene_k_near)
     keep = kept_scores(t, removed)
     parts = gene_statistics(t, removed)
@@ -316,7 +316,7 @@ def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str],
     # The unit table (n_pos, cluster flag, category of the removal): what the gene filter decided on, kept so any
     # gene rule can be evaluated later without replaying the tiles.
     pq.write_table(units_table(t, removed, detail.get("flagged")), out_dir / "units.parquet", compression="zstd")
-    if (gene_filter_mode or "none").lower() != "none":
+    if remove_extreme or remove_dubious:
         _write_tsv(out_dir / "removed_units.tsv", ("cycle", "Gene"), _flagged_pairs(t, removed))
     summary, hist = cycle_summaries(t, removed, keep)
     _write_tsv(out_dir / "cycle_summary.tsv", ("cycle", "direction", "n", "n_genes"), summary)
@@ -349,7 +349,8 @@ def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str],
                     raise ValueError('Null MAP content mismatch')
                 maps[g]=v
         provenance = dict(version=1,scientific=base['scientific'],cluster=base['cluster'],strict=base.get('strict',False),maps=maps,alignments=alignments,universe=universe,
-                          gene_filter=dict(mode=gene_filter_mode,strata=gene_strata,k_far=gene_k_far,k_near=gene_k_near),lengths=lengths or {},length_sources=length_sources or {})
+                          gene_filter=dict(remove_extreme=bool(remove_extreme),remove_dubious=bool(remove_dubious),strata=gene_strata,k_far=gene_k_far,k_near=gene_k_near),lengths=lengths or {},length_sources=length_sources or {},
+                          genes_without_length=sorted(t.block_genes - set(lengths)) if lengths else [])
     counts = {"units": int(len(t.u_gene)), "removed_units": int(removed.sum()), "scored_positions": int(keep.sum()),
               "cycles": len(t.cycles), "cycles_present": present, "score_rule": SCORE_RULE, "scoring_provenance": provenance}
     (out_dir / "counts.json").write_text(json.dumps(counts))

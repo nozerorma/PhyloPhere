@@ -121,7 +121,8 @@ class DisambiguationConfig(ModuleConfigBase):
     # Exploratory-mode (parameter sweep) threshold lists.
     minlen_values: str = "2,3,4,10"  # --minlen_values
     maxcaas_values: str = "0.6,0.7,0.8"  # --maxcaas_values
-    gene_filter_mode: str = "stratified"  # --gene_filter_mode (none|stratified)
+    remove_extreme_genes: bool = True  # --remove_extreme_genes (count above the far fence of the length stratum, any gene)
+    remove_dubious_genes: bool = True  # --remove_dubious_genes (count above the near fence and a cluster train)
     remove_caas_clusters: bool = True  # --remove_caas_clusters (discard spatial clusters)
     gene_filter_strata: str = "10"  # --gene_filter_strata
     gene_filter_k_far: str = "3.0"  # --gene_filter_k_far

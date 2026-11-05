@@ -243,10 +243,11 @@ Usage:
 --filter_maxcaas                          <FLOAT 0-1>                          0.7   (filter mode)
 --caas_map_dir                              <"map_dir">                          ""    (trimmer MAP tables: trains in untrimmed columns, observed and null; required by --vep)
 --remove_caas_clusters                      <BOOLEAN>                            true  (discard spatial clusters)
---gene_filter_mode                          <"none|stratified">                   "stratified"
---gene_filter_strata                         <INTEGER>                            10    (gene-length strata)
---gene_filter_k_far                           <FLOAT>                              3.0   (far fence: a gene above it is removed)
---gene_filter_k_near                          <FLOAT>                              1.5   (near fence: a gene above it is removed only with a cluster train)
+--remove_extreme_genes                      <BOOLEAN>                            true  (remove genes above the far fence of their length stratum, any gene; exploratory shows what it would remove)
+--remove_dubious_genes                      <BOOLEAN>                            true  (remove genes above the near fence of their stratum that carry a cluster train)
+--gene_filter_strata                         <INTEGER>                            10    (gene-length strata, both rules)
+--gene_filter_k_far                           <FLOAT>                              3.0   (far fence: Extreme above Q3 + k x scale)
+--gene_filter_k_near                          <FLOAT>                              1.5   (near fence: Dubious above it with a cluster train)
 '''
 }
 

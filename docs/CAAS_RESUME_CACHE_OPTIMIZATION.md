@@ -48,10 +48,10 @@ to be reusable. However, the isolated test below uncovered an important
 pre-existing limitation: an interpolated local variable alone is not reliably
 reflected in Nextflow's cache key when the underlying directory changes.
 
-`subworkflows/CT_DISAMBIGUATION/ct_observed.nf` is itself read by
-`observedSourceHash()`, which contributes to `coreScoringSourceKey()`. Editing
-that file can therefore invalidate CAAS tasks even when its behavior appears
-unchanged. Avoid modifying it for this optimization. Also check all other
+The source key of each CAAS core process is the hash of an explicit file list
+(`caasTileSources()`, `caasMergeSources()`, ... in `subworkflows/CT/caas_permulation.nf`).
+`ct_observed.nf` is not in those lists, but it still feeds `observedSourceKey()` of
+`CAAS_OBSERVED`, so avoid modifying it for this optimization. Also check all other
 explicitly fingerprinted source paths before choosing where to implement it.
 
 A local Nextflow 25.10.3 test imported the real module in an isolated fixture

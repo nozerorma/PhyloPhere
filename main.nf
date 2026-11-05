@@ -59,7 +59,8 @@ include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}                       from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
 include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_META_CAAS/ctpp_meta_caas.nf'
-include {CAAS_CORE; CAAS_CORE_OBSERVED; CAAS_CORE_MERGE; CAAS_CORE_MERGE_REDUCE; CAAS_PERMS_PREP; strictOutputOn} from './subworkflows/CT/caas_permulation.nf'
+include {CAAS_CORE; CAAS_CORE_OBSERVED; CAAS_CORE_MERGE; CAAS_CORE_MERGE_REDUCE; CAAS_REMOVAL_INVARIANT; CAAS_PERMS_PREP; caasPostprocOn; strictOutputOn} from './subworkflows/CT/caas_permulation.nf'
+include {GENE_LENGTHS; ppHash} from './subworkflows/CT_POSTPROC/ctpp_clustfilter.nf'
 include {CAAS_CORE_OBSERVED as CAAS_CORE_OBSERVED_STRICT; CAAS_CORE_MERGE as CAAS_CORE_MERGE_STRICT; CAAS_CORE_MERGE_REDUCE as CAAS_CORE_MERGE_REDUCE_STRICT} from './subworkflows/CT/caas_permulation.nf'
 include {CAAS_EVIDENCE}   from './subworkflows/CT_DISAMBIGUATION/ct_evidence.nf'
 include {ENRICHMENT}      from './workflows/enrichment.nf'
@@ -103,6 +104,7 @@ def fade_precomp_tables(direction, tdir) {
  */
 
 workflow {
+    if (params.containsKey("gene_filter_mode")) error "--gene_filter_mode was replaced by --remove_extreme_genes and --remove_dubious_genes (stratified: both true; none: both false)."
     if (params.gene_stat != "max") error "Only --gene_stat max is supported; rebuild legacy gene scores/null matrices."
 
     if (params.use_apptainer || params.use_singularity) {
@@ -355,6 +357,15 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         def evidence_inputs = null    // [discovery, design, tree] of the observed labeling, for CAAS_EVIDENCE
         def caas_gene_lengths_ch = Channel.value(
             params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE'))
+        // One table of gene lengths for every alignment of the run: the observed gene filter (CT_POSTPROC) and every null block
+        // merge read it. The manifest is the alignment directory, whole even in toy mode, so it covers every gene with units.
+        def caas_lengths_table_ch = Channel.value(file('NO_FILE'))
+        if ((run_ct_postproc || (run_caas_permulation && caasPostprocOn())) && (params.gene_ensembl_file || params.caas_map_dir)) {
+            def lengths_manifest = params.alignment ? listAlignmentFiles(params.alignment).collect { f -> f.baseName }.sort().join('\n') : ''
+            def lengths_maps = params.caas_map_dir ? file(params.caas_map_dir, checkIfExists: true) : []
+            caas_lengths_table_ch = GENE_LENGTHS(lengths_manifest ? lengths_manifest + '\n' : '', caas_gene_lengths_ch,
+                                                 lengths_maps, ppHash(lengths_maps ? [lengths_maps] : [])).lengths.collect().map { items -> items[0] }
+        }
         if (run_caas_permulation) {
 
             def perm_align_ch = Channel.empty()   // alignments to replay
@@ -535,7 +546,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                           (f && f.exists()) ? f : file('NO_HYP_PAIRS')
                       }
                 : null
-            postproc_results = CT_POSTPROC(disambiguation_ch, background_genes_ch, disambiguation_dir_ch, postproc_hyp_pairs_ch, taxid_map_ch)
+            postproc_results = CT_POSTPROC(disambiguation_ch, background_genes_ch, disambiguation_dir_ch, postproc_hyp_pairs_ch, taxid_map_ch, caas_lengths_table_ch)
             ran_any = true
 
             // Capture postproc outputs as reusable references.
@@ -561,10 +572,15 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
 
         if (core) {
             def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }.collect().map { items -> items[0] }
-            def caas_lengths_bc = caas_gene_lengths_ch.collect().map { items -> items[0] }
+            def caas_lengths_bc = caas_lengths_table_ch.collect().map { items -> items[0] }
             // One merge per block of cycles (and one for b_0), from the tiles of all the gene batches of the block; the
             // blocks are then joined: the roster, the small tables, the validated block index and the positions the null scores.
             def merged = CAAS_CORE_MERGE(core.null_tables.groupTuple().join(core.blocks), caas_universe_ch, caas_lengths_bc)
+            // b_0 is merged with the rule and lengths of the null: its removed genes must be the observed filter's (not checked with
+            // --discovery_from, where the observed labeling is not the replayed one)
+            if (postproc_results && caasPostprocOn() && !params.discovery_from) {
+                CAAS_REMOVAL_INVARIANT(merged.block_out.filter { it[0] == 'b0' }.map { it[1] }, postproc_results.removed_genes)
+            }
             // With --caas_full_perms 0 only b_0 is replayed: its block is merged (b0/), and the null has no permuted cycle to
             // join (written without `?:`, because Groovy reads a numeric 0 as false).
             def null_has_cycles = !(params.caas_full_perms != null && (params.caas_full_perms as int) == 0)

@@ -14,7 +14,7 @@ list[PhenotypeRow] and each module config) without per-class code. Keys absent f
 dict take the dataclass default.
 
 `migrate()` runs first in `from_dict`: it rejects an unsupported schema_version, renames
-vep.vep_map_dir to disambiguation.caas_map_dir, and drops the parameters that no
+vep.vep_map_dir to disambiguation.caas_map_dir, replaces disambiguation.gene_filter_mode by the two gene-removal switches, and drops the parameters that no
 process reads, with a logged warning.
 
 Imported by: gui/project_io.py, gui/autosave_io.py
@@ -165,6 +165,16 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
         disambiguation = modules.get("disambiguation")
         if old and isinstance(disambiguation, dict) and not disambiguation.get("caas_map_dir"):
             disambiguation["caas_map_dir"] = old
+        # gene_filter_mode (none|stratified) became two switches, one per rule.
+        if isinstance(disambiguation, dict) and "gene_filter_mode" in disambiguation:
+            mode = disambiguation.pop("gene_filter_mode")
+            if mode == "none":
+                disambiguation["remove_extreme_genes"] = disambiguation["remove_dubious_genes"] = False
+                logger.warning("Retired gene_filter_mode=none: remove_extreme_genes and remove_dubious_genes are now both off")
+            else:
+                if mode != "stratified":
+                    logger.warning("Retired gene_filter_mode=%r is not a known value: both gene-removal switches are left on", mode)
+                disambiguation["remove_extreme_genes"] = disambiguation["remove_dubious_genes"] = True
         caas = modules.get("caas")
         if isinstance(caas, dict):
             old_stat = caas.get("gene_stat", "max")

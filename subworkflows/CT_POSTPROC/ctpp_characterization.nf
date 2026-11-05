@@ -35,7 +35,7 @@ process CT_POSTPROC_REPORT {
     script:
     def local_dir = "${baseDir}/subworkflows/CT_POSTPROC/local"
     def settings = groovy.json.JsonOutput.toJson([
-        processing_mode: params.caas_postproc_mode, gene_filter_mode: params.gene_filter_mode,
+        processing_mode: params.caas_postproc_mode, remove_extreme_genes: params.remove_extreme_genes, remove_dubious_genes: params.remove_dubious_genes,
         gene_filter_strata: params.gene_filter_strata, gene_filter_k_far: params.gene_filter_k_far,
         gene_filter_k_near: params.gene_filter_k_near, remove_caas_clusters: params.remove_caas_clusters,
         selected_filter_minlen: params.filter_minlen, selected_filter_maxcaas: params.filter_maxcaas,
