@@ -33,9 +33,9 @@ SPEC = ModuleTabSpec(
         "ℹ️ Scripts to generate:\n"
         "• Exploratory (diagnostic): works on the real labeling only and never builds the permulation null. It sweeps "
         "minlen_values × maxcaas_values, reports what the gene filter would remove, skips the downstream modules and writes to "
-        "${OUTDIR}_exploratory/.\n"
+        "<results dir>/<phenotype>_exploratory/.\n"
         "• Production (complete analysis): one script that runs CAAS, Disambiguation, post-processing with the parameters set here, "
-        "the permulation null built with them and the enabled downstream modules; it writes to ${OUTDIR}_complete/ and does not "
+        "the permulation null built with them and the enabled downstream modules; it writes to <results dir>/<phenotype>_complete/ and does not "
         "reuse the exploratory output.\n"
         "• Strict analysis (hypotheses without conserved pairs): the exploratory script also runs a strict exploratory pass with "
         "its own report, after the normal one and in the same task, and the production script also runs the strict pass after "
@@ -91,7 +91,7 @@ SPEC = ModuleTabSpec(
             importance="optional",
             help=(
                 "Real labeling only, never the permulation null: sweeps cluster length and CAAS density (Advanced) and reports what "
-                "the gene filter would remove. Skips the downstream modules; writes to ${OUTDIR}_exploratory/."
+                "the gene filter would remove. Skips the downstream modules; writes to <results dir>/<phenotype>_exploratory/."
             ),
         ),
         FieldSpec(
@@ -101,7 +101,7 @@ SPEC = ModuleTabSpec(
             importance="optional",
             help=(
                 "The complete analysis in one script: CAAS, Disambiguation, post-processing with the parameters below, the "
-                "permulation null built with them and the enabled downstream modules. Writes to ${OUTDIR}_complete/."
+                "permulation null built with them and the enabled downstream modules. Writes to <results dir>/<phenotype>_complete/."
             ),
         ),
         FieldSpec(

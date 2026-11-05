@@ -182,7 +182,7 @@ Detects CAAS, columns where foreground and background species carry mostly disjo
 | `max_bg_gaps_fraction`, `max_fg_gaps_fraction`, `max_gaps_fraction` | 0.0 | Gap tolerance per side and overall |
 | `max_bg_miss_fraction`, `max_fg_miss_fraction`, `max_miss_fraction` | 0.0 | Missing-data tolerance per side and overall |
 | `miss_pair` | true | Discard a labeling when both sides have gapped species in different pairs; applied only when the foreground and background limits are equal |
-| `strict_conservation_output` | true | With tolerance, also write under `strict/` the observed tables and the null restricted to the position-hypothesis rows in which the two sides share no residue type |
+| `strict_conservation_output` | true | With tolerance, also write under `strict/` the observed tables and the null restricted to the position-hypothesis rows in which the two sides share no residue type. The GUI has no field for it: it sets the option from "Run strict analysis" |
 | `caas_full_perms` | 1000 | Null cycles harvested and replayed; 0 = observed only |
 | `perm_strategy` | auto | Null trait model: `auto` (OU if AIC_OU + 2 < AIC_BM, otherwise BM), `BM`, `OU` |
 | `perm_match_pss`, `perm_match_pss_tol` | true, 0.25 | Make null pairs follow the observed pair PSS within that relative tolerance |
@@ -231,7 +231,7 @@ The cluster and gene filters use all distinct CT candidate positions, including 
 
 | Option | Default | Meaning |
 |---|---|---|
-| `caas_postproc_mode` | filter | `filter` (single run) or `exploratory` (sweep) |
+| `caas_postproc_mode` | filter | `filter` (single run) or `exploratory` (sweep; the GUI exploratory script runs it with `--caas_full_perms 0`, so it has no null) |
 | `filter_minlen` | 3 | Minimum cluster interval span in alignment columns |
 | `filter_min_positions` | null | Minimum candidates per interval. Unset: intervals have no minimum count, but a gene is searched for clusters only if it has at least `filter_minlen` candidates |
 | `filter_maxcaas` | 0.7 | Density (candidates per alignment column) at or above which an interval is flagged as a cluster; higher values flag fewer positions |
@@ -241,12 +241,12 @@ The cluster and gene filters use all distinct CT candidate positions, including 
 | `gene_filter_strata` | 10 | Number of gene-length strata of equal size, cut by length within the genes that have at least one candidate; a gene is compared with its stratum |
 | `gene_filter_k_far` | 3.0 | Far fence = Q3 + k x scale, where scale is the larger of the IQR of the length stratum and the IQR of all genes in the pool; a gene above it is Extreme. Must not be below `gene_filter_k_near` |
 | `gene_filter_k_near` | 1.5 | Near fence, same form with k_near; a gene above it is Dubious only when it also carries a cluster train |
-| `strict_remove_extreme_genes`, `strict_remove_dubious_genes`, `strict_gene_filter_strata`, `strict_gene_filter_k_far`, `strict_gene_filter_k_near` | null | Gene-removal settings used when merging the strict null; null takes the value of the ordinary option. The observed filter always reads the ordinary options, and a pass whose observed filter differs from the null it reuses stops, so a strict pass runs with the ordinary options set to the strict values. Cluster parameters have no strict counterpart: they act inside the replay tiles |
+| `strict_remove_extreme_genes`, `strict_remove_dubious_genes`, `strict_gene_filter_strata`, `strict_gene_filter_k_far`, `strict_gene_filter_k_near` | null | Gene-removal settings used when merging the strict null; null takes the value of the ordinary option. The observed filter always reads the ordinary options, and a pass whose observed filter differs from the null it reuses stops, so a strict pass runs with the ordinary options set to the strict values. Cluster parameters have no strict counterpart: they act inside the replay tiles. The GUI scripts set the ordinary options to the strict values in the strict pass |
 | `caas_map_dir` | `vep_map_dir` or empty | Per-gene MAP tables (alignment column to protein residue) from the [Ortholog Characterizator](https://github.com/nozerorma/ortholog_characterizator.git) |
 | `minlen_values`, `maxcaas_values` | `2,3,4,10`; `0.6,0.7,0.8` | Sweep values in exploratory mode |
 | `disambiguation_input`, `disambiguation_dir`, `background_input` | empty | Standalone inputs |
 
-`gene_stats.tsv` and report 8 mark Extreme and Dubious genes in any mode, whatever the switches say. The switches, fences and strata are applied to the observed table and to every null cycle when the null is merged. To change them after reading report 8, rerun that pass with `-resume`: only the null merges and later steps are recomputed. A later pass that reuses the null with `--caas_null_dir` must use the same settings, otherwise the run stops. Changing `filter_minlen`, `filter_maxcaas`, `filter_min_positions` or `caas_map_dir` recomputes the replay tiles.
+`gene_stats.tsv` and report 8 mark Extreme and Dubious genes in any mode, whatever the switches say. The switches, fences and strata are applied to the observed table and to every null cycle when the null is merged. The GUI scripts separate the two steps: the exploratory pass replays only the real labeling (`--caas_full_perms 0`), so it reports what each setting would remove without building a null, and the complete pass builds the null with the settings you chose and never reuses the exploratory output. In a command-line run that already built a null, changing the switches, fences or strata with `-resume` recomputes only the null merges and later steps, whereas changing `filter_minlen`, `filter_maxcaas`, `filter_min_positions` or `caas_map_dir` recomputes the replay tiles. A pass that reuses a null with `--caas_null_dir` must use the same gene-removal settings, otherwise it stops.
 
 ### RERconverge: `conf/rerconverge.config`
 
@@ -415,7 +415,7 @@ Tabs, left to right:
 |---|---|
 | General | Project name, repository directory, plugin directory, seed, remote host |
 | Runtime | Local or Slurm, work and results directories, input files, Seqera token, toy mode, cleanup |
-| CAAS, Disambiguation, RERconverge, FADE, VEP, Scoring, Enrichment, POSENRICH | One tab per module, with an enable switch and one field per option of its `conf/*.config` |
+| CAAS, Disambiguation, RERconverge, FADE, VEP, Scoring, Enrichment, POSENRICH | One tab per module, with an enable switch and one field per option of its `conf/*.config`. In CAAS the null options are advanced and grouped as design, harvest and files, and use of the result. Disambiguation holds, in this order, the ancestral reconstruction, the scripts to generate, the cluster filter, the gene filter, advanced fine tuning, the sweep values, the length strata and fences, and the strict gene filter |
 | Precomputed Run | Standalone inputs that replace upstream modules |
 | Resources | CPU, memory and time ceilings and Slurm executor settings |
 | About | Version, credits, links to this README and the walkthrough |
@@ -428,7 +428,15 @@ Reading a module tab:
 - A disabled module shows what the downstream modules need instead, and where to supply it (Precomputed Run).
 - The box at the bottom of each tab accepts raw Nextflow flags that are appended verbatim.
 
-File menu: New, Open, Save Project As, Load Template (example projects in `gui/templates/`: cancer prevalence, diet, longevity quotient and the PEPC tier-1 and marine-mammal tier-2 validation fixtures; they contain the paths of the developers' machines, so replace the paths in General and Runtime before use), Validate Paths, **Generate Scripts** and Regenerate HTML Reports. Generate Scripts writes, for the chosen runtime, either a local loop or a Slurm array script plus a single-phenotype script; with the post-processing options enabled it also writes exploratory, complete and strict passes. Scripts write a `params.json`, resolve the taxid and Ensembl maps and call `nextflow run main.nf -params-file params.json`. Fill the phenotype table of the Runtime tab with one row per phenotype.
+File menu: New, Open, Save Project As, Load Template (example projects in `gui/templates/`: cancer prevalence, diet, longevity quotient and the PEPC tier-1 and marine-mammal tier-2 validation fixtures; they contain the paths of the developers' machines, so replace the paths in General and Runtime before use), Validate Paths, **Generate Scripts** and Regenerate HTML Reports. Generate Scripts writes, for the chosen runtime, either a local loop or a Slurm array script plus a single-phenotype script per pass. The Disambiguation tab selects the passes:
+
+| Pass | Output directory (under the results directory of the Runtime tab) | What it runs |
+|---|---|---|
+| Exploratory | `<phenotype>_exploratory/` | The real labeling only, never the permulation null: the cluster sweep and report 8 with what the gene filter would remove; downstream modules are skipped |
+| Production (complete) | `<phenotype>_complete/` | The whole analysis in one script: CAAS, Disambiguation, post-processing with the chosen parameters, the null built with them and the enabled downstream modules; it does not reuse the exploratory output |
+| Strict ("Run strict analysis") | `<phenotype>_strict_exploratory/`, `<phenotype>_strict/` | The same two passes over the hypotheses without conserved pairs, reading the strict tables of the exploratory and complete runs |
+
+The strict pass has no script of its own when its normal pass is generated: each task runs it after the normal pass, in the same task of each phenotype, and only if that pass succeeded, so set the time limit of the Runtime tab for both passes. "Run strict analysis" enables every strict option of the tab, needs `min_divergent_fraction` below 1 and writes the strict tables and null of the normal run. Scripts write a `params.json`, resolve the taxid and Ensembl maps and call `nextflow run main.nf -params-file params.json`. Fill the phenotype table of the Runtime tab with one row per phenotype.
 
 Typical session: load a template or start a project, set the three inputs and the work and results directories in Runtime, enable modules, run Validate Paths, Generate Scripts, copy the scripts to the machine that will run them and launch them there (with `sbatch` on a cluster).
 
@@ -487,8 +495,6 @@ To reuse a null, keep the whole `caas_permulation/` directory and pass it with `
 ---
 
 ## Contributions
-
-See [code organization](docs/CODE_ORGANIZATION.md) before adding utilities or validation scripts.
 
 Issues and pull requests are welcome at <https://github.com/nozerorma/PhyloPhere>. Please name the module involved and attach the `workflow_map.html` and `pipeline_info/execution_report.html` of the failing run.
 

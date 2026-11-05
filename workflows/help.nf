@@ -123,7 +123,7 @@ Usage:
 --patterns                  <"1,2,3,4">                  "1,2,3"
 --min_divergent_fraction    <FLOAT 0-1>                  0.5
 --min_non_overlapping       <INTEGER>                    2      (minimum non-overlapping species required on FG or BG to define a CAAS)
---strict_conservation_output <true|false>   true   (with min_divergent_fraction < 1, also write under <outdir>/strict/ the observed tables and the null restricted to the position-hypothesis rows in which the two sides share no residue type)
+--strict_conservation_output <true|false>   true   (with min_divergent_fraction < 1, also write under <outdir>/strict/ the observed tables and the null restricted to the position-hypothesis rows in which the two sides share no residue type; the GUI sets it from "Run strict analysis")
 --max_bg_gaps_fraction      <FLOAT 0-1>                  0.0
 --max_fg_gaps_fraction      <FLOAT 0-1>                  0.0
 --max_gaps_fraction         <FLOAT 0-1>                  0.0
@@ -238,7 +238,7 @@ Usage:
 --disambiguation_input        <"caas_convergence_master.csv">   null  (standalone entry)
 --disambiguation_dir            <"disambiguation_dir|.tar.gz">     null
 --background_input                <"background_file">                 null
---caas_postproc_mode                <"exploratory|filter">              "filter"
+--caas_postproc_mode                <"exploratory|filter">              "filter"  (the GUI exploratory script runs the sweep with --caas_full_perms 0, so it builds no null; the complete script builds it with the chosen settings)
 --minlen_values                       <"2,3,4,10">                        (exploratory mode)
 --maxcaas_values                        <"0.6,0.7,0.8">                     (exploratory mode)
 --filter_minlen                          <INTEGER>                            3     (filter mode)
