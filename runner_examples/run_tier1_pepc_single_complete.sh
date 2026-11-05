@@ -350,7 +350,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "min_non_overlapping": "${MIN_NON_OVERLAPPING:-2}",
   "strict_conservation_output": true,
   "ct_allow_relaxed_null": false,
-  "caas_evidence_discovery": "${CAAS_EVIDENCE_DISCOVERY:-${CAAS_EVIDENCE_DISCOVERY_USER:-}}",
+  "caas_evidence_discovery": "${CAAS_EVIDENCE_DISCOVERY:-}",
   "max_bg_gaps_fraction": "${MAX_BG_GAPS_FRACTION:-0.0}",
   "max_fg_gaps_fraction": "${MAX_FG_GAPS_FRACTION:-0.0}",
   "max_gaps_fraction": "${MAX_GAPS_FRACTION:-0.0}",
@@ -519,10 +519,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "posenrich_collections": "${POSENRICH_COLLECTIONS:-}",
   "posenrich_min_genes": "${POSENRICH_MIN_GENES:-2}",
   "posenrich_holdout": "${POSENRICH_HOLDOUT:-0}",
-  "posenrich_within_gene_memory": "${POSENRICH_WITHIN_GENE_MEMORY:-}",
-  "posenrich_radios": "${POSENRICH_RADIOS:-0,5,10}",
-  "position_registry_memory": "${POSITION_REGISTRY_MEMORY:-}",
-  "position_module_memory": "${POSITION_MODULE_MEMORY:-}"
+  "posenrich_radios": "${POSENRICH_RADIOS:-0,5,10}"
 }
 PARAMS_EOF
 

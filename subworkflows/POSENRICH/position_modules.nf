@@ -20,7 +20,7 @@ def optionalFlag(flag, source) {
 process POSITION_REGISTRY {
     cache true
     label 'process_registry'
-    memory { params.position_registry_memory ?: (background.size() < 20000 ? '8 GB' : '64 GB') }
+    memory { background.size() < 20000 ? '8 GB' : '64 GB' }
     publishDir path: { universe.name.startsWith('NO_') ? "${params.outdir}/position_characterization" : "${params.outdir}/posenrich" }, mode: 'copy', overwrite: true, pattern: 'registry'
 
     input:
@@ -72,7 +72,7 @@ process POSITION_REGISTRY {
 process POSENRICH_CHARACTERIZE {
     cache true
     label 'process_low'
-    memory { params.position_module_memory ?: (registry.toRealPath().resolve('positions.tsv').size() < 200000000 ? '4 GB' : '32 GB') }
+    memory { registry.toRealPath().resolve('positions.tsv').size() < 200000000 ? '4 GB' : '32 GB' }
     publishDir path: { task.process.contains('POSITION_CHARACTERIZATION') ? "${params.outdir}/position_characterization" : "${params.outdir}/posenrich" }, mode: 'copy', overwrite: true, pattern: 'characterization'
 
     input:
@@ -137,7 +137,7 @@ process POSENRICH_WITHIN_GENE {
     cache true
     tag "posenrich_within_gene"
     label 'process_medium'
-    memory { params.posenrich_within_gene_memory ?: '16 GB' }
+    memory '16 GB'
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'within_gene'
 
     input:
@@ -167,7 +167,7 @@ process POSENRICH_WITHIN_GENE {
 process POSENRICH_PROXIMITY {
     cache true
     label 'process_low'
-    memory { params.position_module_memory ?: (registry.toRealPath().resolve('positions.tsv').size() < 200000000 ? '4 GB' : '32 GB') }
+    memory { registry.toRealPath().resolve('positions.tsv').size() < 200000000 ? '4 GB' : '32 GB' }
     publishDir path: "${params.outdir}/posenrich", mode: 'copy', overwrite: true, pattern: 'proximity'
 
     input:

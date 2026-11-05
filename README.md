@@ -370,7 +370,6 @@ Describes how positive positions relate to genes and to sets of positions (Pfam 
 | `posenrich_min_genes` | 2 | Eligible genes (members and non-members of the term in the covered universe) a term needs to be tested |
 | `posenrich_radios` | `0,5,10` | Proximity radii in residues |
 | `posenrich_holdout` | 0 | Validation: null cycles that play the observed one |
-| `position_registry_memory`, `position_module_memory`, `posenrich_within_gene_memory` | derived | Memory of the heavy steps |
 | `accumulation_caas_input`, `accumulation_background_input`, `posenrich_background_file` | empty | Standalone: filtered discovery, cleaned background, tested positions |
 
 ---
@@ -386,7 +385,7 @@ Describes how positive positions relate to genes and to sets of positions (Pfam 
 | RERconverge trees, matrix, correlation | 8 cpus, 32 GB | Whole gene-tree set in memory |
 | FADE | 8 to 12 cpus, 16 GB | One task per gene batch |
 | SCORING_COMPUTE | 2 cpus, 32 GB | Reads the null |
-| POSENRICH | 4 to 64 GB | Registry and characterization sized from the input; universe 8 GB; level 2 16 GB (`--posenrich_within_gene_memory`) |
+| POSENRICH | 4 to 64 GB | Registry and characterization sized from the input; universe 8 GB; level 2 16 GB; change them with a per-process override (`POSITION_REGISTRY`, `POSENRICH_CHARACTERIZE|POSENRICH_PROXIMITY`, `POSENRICH_WITHIN_GENE`) in the Resources tab |
 
 Ceilings and executor behaviour:
 

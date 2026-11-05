@@ -49,6 +49,8 @@ class FieldSpec:
     help: str = ""  # tooltip text; shown on both the label and the input widget
     disabled_when: str = ""  # name of a "bool" field of the same config: while it is checked, this field (label, input
     # and hint) is greyed out and not editable. Empty: always editable.
+    enabled_when: str = ""  # name of a "bool" field of the same config: the field is editable only while it is checked.
+    # Both can be set; the field is editable when `enabled_when` is checked and `disabled_when` is not.
 
 
 def Section(label: str) -> FieldSpec:

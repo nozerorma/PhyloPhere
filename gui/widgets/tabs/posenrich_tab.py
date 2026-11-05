@@ -53,12 +53,8 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="posenrich_collections", label="Collections", placeholder="pfam_domains,ucr_core", importance="optional",
                   help="Comma-separated level 2 collection ids; blank uses the collections informative inside a protein."),
         FieldSpec(name="posenrich_min_genes", help="Minimum genes of U a term needs to be tested in level 2; default 2, so single-gene terms are never tested.", label="Minimum genes per term", placeholder="2", importance="optional"),
-        FieldSpec(name="posenrich_holdout", help="Validation mode: this many null cycles stand in for the observed run and only holdout_fpr.tsv is written; 0 = off.", label="Hold-out null cycles (validation, 0 = off)", placeholder="0", importance="optional"),
+        FieldSpec(name="posenrich_holdout", help="Validation mode: this many null cycles stand in for the observed run and only holdout_fpr.tsv is written; 0 = off. Practical recommendation: about 10% of the permulations (100 of 1000). The held-out cycles are left out of the null that calibrates, so a larger share lowers its resolution; it is not enforced, the only requirement is fewer cycles than the null has.", label="Hold-out null cycles (validation, 0 = off)", placeholder="0", importance="optional"),
         FieldSpec(name="posenrich_radios", help="Radii of the protein proximity window, in reference residues, comma-separated; default 0,5,10.", label="Proximity radii (residues)", placeholder="0,5,10", importance="optional"),
-        Section("Memory"),
-        FieldSpec(name="posenrich_within_gene_memory", help="Memory for level 2, which reads one block of the null at a time; blank uses 16 GB.", label="Level 2", placeholder="16 GB", importance="optional"),
-        FieldSpec(name="position_registry_memory", help="Memory for the full normalized position registry; blank sizes it from the background.", label="Registry", placeholder="64 GB", importance="optional"),
-        FieldSpec(name="position_module_memory", help="Memory for the full positional tables; blank sizes it from the registry.", label="Components", placeholder="32 GB", importance="optional"),
     ),
 )
 

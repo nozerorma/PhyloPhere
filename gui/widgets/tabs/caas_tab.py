@@ -82,25 +82,6 @@ SPEC = ModuleTabSpec(
             help="Minimum number of non-overlapping (exclusive) species required on FG or BG to call a CAAS (default: 2).",
         ),
         FieldSpec(
-            name="ct_allow_relaxed_null",
-            label="Allow relaxed null (unmatched designs)",
-            kind="bool",
-            importance="optional",
-            help=(
-                "Permits unmatched PSS/FOP designs and the Tier-2 fallback in the null. Off by default; "
-                "the choice is recorded in the provenance."
-            ),
-        ),
-        FieldSpec(
-            name="strict_conservation_output",
-            label="Also write the strict tables (no conserved pair)",
-            kind="bool",
-            importance="default",
-            help=(
-                "With a min divergent fraction below 1, also writes the observed tables and null of hypotheses without conserved pairs under <outdir>/strict/."
-            ),
-        ),
-        FieldSpec(
             name="multi_hypothesis",
             label="Multi-hypothesis mode",
             kind="bool",
@@ -114,72 +95,13 @@ SPEC = ModuleTabSpec(
             importance="default",
             help="Cap on alternative Dunn-independent hypotheses (H1..Hn) per contrast, observed and null; default 100.",
         ),
-        Section("Resample / permulation params"),
-        FieldSpec(
-            name="chunk_size",
-            label="Resampled groups per output file",
-            importance="optional",
-            help="Number of permulation cycles written per resample_*.tab output file; default 500.",
-        ),
-        FieldSpec(
-            name="resample_use_n",
-            label="Use sample size counts (n/c)",
-            kind="bool",
-            importance="default",
-            help="For count traits with sample sizes (N/C), filters permulations by Jeffreys confidence intervals when those sizes are available; default on.",
-        ),
-        FieldSpec(
-            name="perm_strategy",
-            label="Permutation strategy",
-            kind="choice",
-            choices=("auto", "OU", "BM"),
-            importance="default",
-            help="Evolutionary model used to simulate the null trait: auto picks BM or OU by AICc; OU and BM force one model; default auto.",
-        ),
-        FieldSpec(
-            name="perm_match_pss",
-            label="Match observed PSS profile in the null",
-            kind="bool",
-            importance="default",
-            help="Builds canonical pairs to follow the observed PSS profile; count traits additionally require the CI opt-in below.",
-        ),
-        FieldSpec(
-            name="perm_match_fop",
-            label="Match observed hypothesis count",
-            kind="bool",
-            importance="default",
-            help="Require each null cycle to reach the observed hypothesis count and truncate to it. Turn off to keep each cycle's available hypotheses up to max_fop.",
-        ),
-        FieldSpec(
-            name="perm_match_pss_ci",
-            label="Allow PSS matching with count intervals",
-            kind="bool",
-            importance="optional",
-            help="When PSS matching is enabled, match canonical pairs for count traits too, keeping the Jeffreys interval eligibility gate.",
-        ),
-        FieldSpec(
-            name="perm_match_pss_tol",
-            label="PSS matching tolerance",
-            placeholder="relative tolerance of each pair; default 0.25",
-            importance="optional",
-            help="Tolerance of that PSS matching: each null pair's PSS must lie within a factor of (1 + tol) of its observed PSS; default 0.25.",
-        ),
+        Section("Permulation null"),
         FieldSpec(
             name="caas_full_perms",
             label="Permulations",
             placeholder="accepted permulations to harvest AND replay for the CAAS FCS null; 0 replays only the real labeling",
             importance="default",
             help="Accepted permulations harvested and replayed as the CAAS null; 0 replays only the real labeling, with no null; default 1000.",
-        ),
-        # Rated "optional" although borderline: it is a draw-budget cap (raised 50%
-        # up to twice if the pool falls short) and does not redefine the null, but
-        # a very low value can truncate the permulation pool.
-        FieldSpec(
-            name="max_tries",
-            label="Max permulation tries",
-            placeholder="draw budget; raised 50% up to twice if the pool falls short",
-            importance="optional",
-            help="Draw budget for harvesting permulations; raised by 50% up to twice if the pool falls short, then the run fails; default 1000000.",
         ),
     ),
     advanced_fields=(
@@ -235,20 +157,87 @@ SPEC = ModuleTabSpec(
             importance="default",
             help="Requires missing or gapped species to come from matching pairs; applies when the max thresholds are equal; default on.",
         ),
-        Section("Batching logic (performance)"),
+        Section("Permulation null: design (conf/ct.config)"),
         FieldSpec(
-            name="ct_core_batch_size",
-            label="Permulation-null genes per task (replay + ASR replay)",
-            importance="optional",
-            help="Genes per permulation-core task (replay and ASR replay); 1 = one task per gene; default 20.",
+            name="perm_strategy",
+            label="Permutation strategy",
+            kind="choice",
+            choices=("auto", "OU", "BM"),
+            importance="default",
+            help="Evolutionary model used to simulate the null trait: auto picks BM or OU by AICc; OU and BM force one model; default auto.",
         ),
         FieldSpec(
-            name="caas_cycle_block_size",
-            label="Permulation-null cycles per block",
-            importance="optional",
-            help="Permulation cycles per block; each task replays one gene batch against one block, so memory does not grow with caas_full_perms; default 500.",
+            name="resample_use_n",
+            label="Use sample size counts (n/c)",
+            kind="bool",
+            importance="default",
+            help="For count traits with sample sizes (N/C), filters permulations by Jeffreys confidence intervals when those sizes are available; default on.",
         ),
-        Section("Permulation null"),
+        FieldSpec(
+            name="perm_match_pss",
+            label="Match observed PSS profile in the null",
+            kind="bool",
+            importance="default",
+            help=(
+                "Design of the null: each permulation builds its canonical pairs so that their PSS follows the PSS of the "
+                "observed pairs; count traits additionally require the count-interval option below. If it cannot be met the run "
+                "stops, unless the relaxed null is allowed."
+            ),
+        ),
+        FieldSpec(
+            name="perm_match_pss_tol",
+            label="PSS matching tolerance",
+            placeholder="relative tolerance of each pair; default 0.25",
+            importance="optional",
+            help="Tolerance of that PSS matching: each null pair's PSS must lie within a factor of (1 + tol) of its observed PSS; default 0.25.",
+        ),
+        FieldSpec(
+            name="perm_match_pss_ci",
+            label="Allow PSS matching with count intervals",
+            kind="bool",
+            importance="optional",
+            help="When PSS matching is enabled, match canonical pairs for count traits too, keeping the Jeffreys interval eligibility gate.",
+        ),
+        FieldSpec(
+            name="perm_match_fop",
+            label="Match observed hypothesis count",
+            kind="bool",
+            importance="default",
+            help=(
+                "Design of the null: require each null cycle to reach the observed hypothesis count and truncate to it. Turn "
+                "off to keep each cycle's available hypotheses up to max_fop."
+            ),
+        ),
+        FieldSpec(
+            name="ct_allow_relaxed_null",
+            label="Allow relaxed null (continue when the design cannot be matched)",
+            kind="bool",
+            importance="optional",
+            help=(
+                "Safety override, not a design choice. By default the run stops when the null cannot be built as the options "
+                "above ask (a PSS profile or a hypothesis count that cannot be matched, a design-matched pool that falls "
+                "short). On: it continues with unmatched draws (Tier 2) or a shorter pool and records the relaxation in the "
+                "provenance. Off by default."
+            ),
+        ),
+        Section("Permulation null: harvest and files (conf/ct.config)"),
+        FieldSpec(
+            name="max_tries",
+            label="Max permulation tries",
+            placeholder="draw budget; raised 50% up to twice if the pool falls short",
+            importance="optional",
+            help="Draw budget for harvesting permulations; raised by 50% up to twice if the pool falls short, then the run fails; default 1000000.",
+        ),
+        FieldSpec(
+            name="chunk_size",
+            label="Resampled groups per output file",
+            importance="optional",
+            help=(
+                "Number of permulation cycles written per resample_*.tab file; it only sets how the harvest is split on disk, "
+                "not the null itself; default 500."
+            ),
+        ),
+        Section("Permulation null: use of the result (conf/ct.config)"),
         FieldSpec(
             name="caas_export_single",
             label="Export single CAAS null RDS",
@@ -269,6 +258,19 @@ SPEC = ModuleTabSpec(
             kind="bool",
             importance="default",
             help="Uses the CAAS permulation null as the null of the FCS Wilcoxon enrichment test; default on.",
+        ),
+        Section("Batching logic (performance)"),
+        FieldSpec(
+            name="ct_core_batch_size",
+            label="Permulation-null genes per task (replay + ASR replay)",
+            importance="optional",
+            help="Genes per permulation-core task (replay and ASR replay); 1 = one task per gene; default 20.",
+        ),
+        FieldSpec(
+            name="caas_cycle_block_size",
+            label="Permulation-null cycles per block",
+            importance="optional",
+            help="Permulation cycles per block; each task replays one gene batch against one block, so memory does not grow with caas_full_perms; default 500.",
         ),
         Section("Publishing norms (debug)"),
         FieldSpec(

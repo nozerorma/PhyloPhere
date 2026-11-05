@@ -152,8 +152,9 @@ class ModuleTabWidget(QWidget):
         self._field_widgets: dict[str, QWidget] = {}
         self._label_widgets: list[tuple[QLabel | QCheckBox, FieldSpec]] = []
         self._hint_widgets: list[tuple[QLabel, FieldSpec]] = []
-        # controlling bool field -> widgets that follow it (FieldSpec.disabled_when)
-        self._dependents: dict[str, list[QWidget]] = {}
+        # (widgets, FieldSpec) of the fields that follow another field (FieldSpec.enabled_when / disabled_when)
+        self._conditional: list[tuple[list[QWidget], FieldSpec]] = []
+        self._controllers: set[str] = set()
         for f in spec.essential_fields:
             self._add_field(self._essential_form, f)
         for f in spec.advanced_fields:
@@ -245,8 +246,9 @@ class ModuleTabWidget(QWidget):
             form.addRow(hint_lbl)
             self._hint_widgets.append((hint_lbl, f))
             followers.append(hint_lbl)
-        if f.disabled_when:
-            self._dependents.setdefault(f.disabled_when, []).extend(followers)
+        if f.disabled_when or f.enabled_when:
+            self._conditional.append((followers, f))
+            self._controllers.update(n for n in (f.disabled_when, f.enabled_when) if n)
 
     def retranslate(self, lang: str = "en") -> None:
         from gui.i18n import tr
@@ -281,16 +283,17 @@ class ModuleTabWidget(QWidget):
 
     def _set_field(self, name: str, value) -> None:
         setattr(self._config, name, value)
-        if name in self._dependents:
+        if name in self._controllers:
             self._sync_dependent_fields()
         self.changed.emit()
 
     def _sync_dependent_fields(self) -> None:
-        """Grey out the fields whose FieldSpec.disabled_when names a bool field that is checked."""
-        for controller, widgets in self._dependents.items():
-            disabled = bool(getattr(self._config, controller))
+        """Grey out the fields that FieldSpec.enabled_when / disabled_when switch off."""
+        for widgets, f in self._conditional:
+            enabled = (not f.enabled_when or bool(getattr(self._config, f.enabled_when))) \
+                and not (f.disabled_when and bool(getattr(self._config, f.disabled_when)))
             for widget in widgets:
-                widget.setEnabled(not disabled)
+                widget.setEnabled(enabled)
 
     # ── Enable toggle ────────────────────────────────────────────────────────
 

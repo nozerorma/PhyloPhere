@@ -37,8 +37,9 @@ SPEC = ModuleTabSpec(
         "• Production (complete analysis): one script that runs CAAS, Disambiguation, post-processing with the parameters set here, "
         "the permulation null built with them and the enabled downstream modules; it writes to ${OUTDIR}_complete/ and does not "
         "reuse the exploratory output.\n"
-        "• Strict analysis: a strict exploratory report and a strict production script over the hypotheses without conserved "
-        "pairs, reading the strict tables of the normal run.\n\n"
+        "• Strict analysis (hypotheses without conserved pairs): the exploratory script also runs a strict exploratory pass with "
+        "its own report, after the normal one and in the same task, and the production script also runs the strict pass after "
+        "the complete one.\n\n"
         "ℹ️ Gene filter (Advanced):\n"
         "• Extreme: a gene whose CAAS count exceeds the far fence of its gene-length stratum (Q3 + k_far x scale), any gene. "
         "Uses gene_filter_strata and gene_filter_k_far.\n"
@@ -105,12 +106,14 @@ SPEC = ModuleTabSpec(
         ),
         FieldSpec(
             name="run_strict_analysis",
-            label="Generate strict analysis scripts",
+            label="Run strict analysis",
             kind="bool",
             importance="optional",
             help=(
-                "A strict exploratory report (with the exploratory script) and a strict production script over the hypotheses "
-                "without conserved pairs; run the normal scripts first. Needs a min divergent fraction below 1."
+                "Over the hypotheses without conserved pairs: the exploratory script also runs a strict exploratory pass (its own "
+                "report) after the normal one, and the production script also runs the strict pass after the complete one. "
+                "Writes the strict tables and null of the normal run. Needs a min divergent fraction below 1. Unchecked: every "
+                "strict option below is disabled."
             ),
         ),
         Section("Cluster filter (conf/ct_postproc.config)"),
@@ -244,12 +247,12 @@ SPEC = ModuleTabSpec(
             label="Strict: same gene filter as the normal run",
             kind="bool",
             importance="optional",
+            enabled_when="run_strict_analysis",
             help=(
                 "Checked: the strict analysis removes genes with the settings above, and the fields below are disabled. Unchecked: "
-                "it uses the fields below. The strict gene marks come from the strict counts, so they can differ from the normal "
+                "it uses the fields below. Disabled while 'Run strict analysis' is unchecked. The strict gene marks come from the strict counts, so they can differ from the normal "
                 "ones. The strict null takes these values when the production script builds it. Cluster parameters have no strict "
-                "counterpart: they act in the replay, which produces the normal and the strict tables together. Only used with "
-                "the strict analysis scripts."
+                "counterpart: they act in the replay, which produces the normal and the strict tables together."
             ),
         ),
         FieldSpec(
@@ -257,6 +260,7 @@ SPEC = ModuleTabSpec(
             label="Strict: remove Extreme genes",
             kind="bool",
             importance="optional",
+            enabled_when="run_strict_analysis",
             disabled_when="strict_same_gene_filter",
             help="Remove genes above the far fence of their length stratum in the strict analysis (strict counts).",
         ),
@@ -265,6 +269,7 @@ SPEC = ModuleTabSpec(
             label="Strict: remove Dubious genes",
             kind="bool",
             importance="optional",
+            enabled_when="run_strict_analysis",
             disabled_when="strict_same_gene_filter",
             help="Remove genes above the near fence of their stratum that carry a cluster train in the strict analysis (strict counts).",
         ),
@@ -272,6 +277,7 @@ SPEC = ModuleTabSpec(
             name="strict_gene_filter_strata",
             label="Strict: gene-length strata",
             importance="optional",
+            enabled_when="run_strict_analysis",
             disabled_when="strict_same_gene_filter",
             help="Number of equal-size gene-length strata of the strict analysis.",
         ),
@@ -279,6 +285,7 @@ SPEC = ModuleTabSpec(
             name="strict_gene_filter_k_far",
             label="Strict: far-fence IQR multiplier",
             importance="optional",
+            enabled_when="run_strict_analysis",
             disabled_when="strict_same_gene_filter",
             help="Far-fence multiplier of the strict analysis (Extreme above Q3 + k x scale).",
         ),
@@ -286,6 +293,7 @@ SPEC = ModuleTabSpec(
             name="strict_gene_filter_k_near",
             label="Strict: near-fence IQR multiplier",
             importance="optional",
+            enabled_when="run_strict_analysis",
             disabled_when="strict_same_gene_filter",
             help="Near-fence multiplier of the strict analysis (Dubious above it with a cluster train).",
         ),

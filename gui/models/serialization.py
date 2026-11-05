@@ -23,6 +23,7 @@ Imported by: gui/project_io.py, gui/autosave_io.py
 # ── Standard library ──────────────────────────────────────────────────────────
 import dataclasses
 import logging
+import re
 import typing
 from typing import Any
 
@@ -59,8 +60,14 @@ _POSENRICH_FIELDS = (
     "accumulation_caas_input", "accumulation_background_input",
     "posenrich_domains", "domain_variability_file", "domain_ref_species", "pfam_cache_dir",
     "posenrich_ucr", "ucr_positions_file", "fubar_sites_file",
-    "posenrich_radios", "position_registry_memory", "position_module_memory", "posenrich_custom_file",
+    "posenrich_radios", "posenrich_custom_file",
 )
+# Memory parameters of POSENRICH that became per-process resource overrides (Resources tab): parameter -> process selector.
+_POSENRICH_MEMORY_OVERRIDES = {
+    "posenrich_within_gene_memory": "POSENRICH_WITHIN_GENE",
+    "position_registry_memory": "POSITION_REGISTRY",
+    "position_module_memory": "POSENRICH_CHARACTERIZE|POSENRICH_PROXIMITY",
+}
 # Parameters of the position-set enrichment test, which no process reads.
 _RETIRED_POSENRICH_FIELDS = ("accumulation_fdr", "posenrich_min_size", "posenrich_max_size", "posenrich_batch_size", "posenrich_enabled",
                              "posenrich_n_permutations", "posenrich_seed", "posenrich_aggregation", "position_annotation_memory",
@@ -90,6 +97,26 @@ def _dataclass_from_dict(cls: type, data: dict[str, Any]) -> Any:
             continue  # the dataclass default or default_factory applies
         kwargs[f.name] = _reconstruct(hints[f.name], data[f.name])
     return cls(**kwargs)
+
+
+def _memory_params_to_overrides(data: dict[str, Any], *sections: Any) -> None:
+    """POSENRICH memory parameters of older projects (kept in the posenrich section, or in the enrichment one of the oldest) become
+    rows of the per-process resource overrides (a row already there wins)."""
+    resources = None
+    for name, selector in _POSENRICH_MEMORY_OVERRIDES.items():
+        values = [str(section.pop(name, "") or "").strip() for section in sections if isinstance(section, dict)]
+        value = next((v for v in values if v), "")
+        if not value:
+            continue
+        match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([KMGT]B)", value, re.I)
+        expression = f"{match.group(1)}.{match.group(2).upper()}" if match else value
+        resources = data.setdefault("resources", {}) if resources is None else resources
+        rows = resources.setdefault("process_overrides", [])
+        if any(row.get("selector") == selector for row in rows):
+            logger.warning("project parameter %s was replaced by a process override; the existing override of %s is kept", name, selector)
+            continue
+        rows.append({"selector_type": "withName", "selector": selector, "cpus": "", "memory": expression})
+        logger.warning("project parameter %s became a process override of %s (memory %s) in the Resources tab", name, selector, expression)
 
 
 def migrate(data: dict[str, Any]) -> dict[str, Any]:
@@ -158,6 +185,15 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
             gone = [k for k in _RETIRED_POSENRICH_FIELDS if enrichment.pop(k, None) is not None]
             if gone:
                 logger.warning("project parameters %s were retired (module posenrich): no process reads them any more", ", ".join(gone))
+        _memory_params_to_overrides(data, posenrich, modules.get("enrichment"))
+        scoring_section = modules.get("scoring")
+        if isinstance(scoring_section, dict):
+            evidence_file = scoring_section.pop("caas_evidence_discovery", "")
+            if evidence_file:
+                flag = f"--caas_evidence_discovery {evidence_file}"
+                scoring_section["extra_flags"] = (str(scoring_section.get("extra_flags", "")).strip() + " " + flag).strip()
+                logger.warning("project parameter caas_evidence_discovery left the GUI (the generated scripts set it when they reuse tables); "
+                               "its value was added to the extra flags of the Scoring tab")
         precomputed = data.get("precomputed")
         if isinstance(precomputed, dict):
             precomputed.pop("use_accumulation", None)
@@ -181,6 +217,8 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
             if old_stat != "max":
                 logger.warning("Retired CAAS gene_stat=%s: max is now the only statistic; legacy gene scores/null matrices must be rebuilt", old_stat)
                 caas["gene_stat"] = "max"
+            if caas.pop("strict_conservation_output", None) is not None:
+                logger.warning("project parameter strict_conservation_output was retired: the strict tables are written exactly when 'Run strict analysis' is on")
             if caas.pop("caas_b0_diagnostic", None) is not None:
                 logger.warning("project parameter caas_b0_diagnostic was retired: the real labeling (b_0) is always replayed with the null")
             dropped = [k for k in _RETIRED_CAAS_FIELDS if caas.pop(k, None) is not None]

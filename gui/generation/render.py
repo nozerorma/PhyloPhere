@@ -45,6 +45,7 @@ def render_batch(
     reuse_exploratory: bool = False,
     single_runner_filename: str | None = None,
     strict_pass: bool = False,
+    then_single_runner_filename: str | None = None,
 ) -> str:
     """Render the batch-runner script for the given project.
 
@@ -56,6 +57,10 @@ def render_batch(
     run_single.sh.j2): the "filter" pass, or, with postproc_mode "exploratory", the strict exploratory pass (the sweep and its
     own characterization report, no downstream modules).
 
+    then_single_runner_filename names a second single-phenotype script that each task runs after the first one, in the same
+    task and only when the first succeeded (the exploratory script of a project with the strict analysis runs the strict
+    exploratory pass this way).
+
     single_runner_filename overrides the derived name of the per-phenotype script
     this one dispatches to (SINGLE_RUNNER). It must match the filename under which
     that script is saved (MainWindow.generate_scripts applies
@@ -65,6 +70,7 @@ def render_batch(
     ctx = build_context(project)
     ctx["reuse_exploratory"] = reuse_exploratory
     ctx["strict_pass"] = strict_pass
+    ctx["then_single_runner_filename"] = then_single_runner_filename or ""
     ctx["postproc_mode"] = postproc_mode or ""
     ctx["single_runner_filename"] = ""
     if postproc_mode:

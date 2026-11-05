@@ -66,7 +66,6 @@ class CaasConfig(ModuleConfigBase):
     min_divergent_fraction: str = "0.5"  # --min_divergent_fraction
     min_non_overlapping: str = "2"  # --min_non_overlapping
     ct_allow_relaxed_null: bool = False  # --ct_allow_relaxed_null (permit unmatched PSS/FOP designs and the Tier-2 fallback in the null; in provenance)
-    strict_conservation_output: bool = True  # --strict_conservation_output (strict tables of the hypotheses without conserved pairs; active when min_divergent_fraction < 1)
     max_bg_gaps_fraction: str = "0.0"  # --max_bg_gaps_fraction
     max_fg_gaps_fraction: str = "0.0"  # --max_fg_gaps_fraction
     max_gaps_fraction: str = "0.0"  # --max_gaps_fraction
@@ -267,7 +266,6 @@ class ScoringConfig(ModuleConfigBase):
 
     # Advanced parameters (conf/scoring.config)
     scoring_window_size_bp: str = "1000000"  # --scoring_window_size_bp
-    caas_evidence_discovery: str = ""  # --caas_evidence_discovery (discovery.tab of the observed labeling; blank = from the reuse box)
     caas_evidence_top_n: str = "0"  # --caas_evidence_top_n (evidence table of the N best positions after SCORING; 0 = off)
     scoring_hypotheses_pairs: str = ""  # --scoring_hypotheses_pairs (contrast_hypotheses_pairs.tsv override for SCORING)
 
@@ -303,12 +301,9 @@ class PosenrichConfig(ModuleConfigBase):
     posenrich_collections: str = ""  # --posenrich_collections (blank: the collections informative inside a protein)
     posenrich_min_genes: str = "2"  # --posenrich_min_genes (genes of U a term needs members in to be tested)
     posenrich_holdout: str = "0"  # --posenrich_holdout (validation mode: null cycles played as the observed one; 0 = off)
-    posenrich_within_gene_memory: str = ""  # --posenrich_within_gene_memory (blank: 16 GB)
 
     # Registry components: characterization, proximity.
     posenrich_radios: str = "0,5,10"  # --posenrich_radios (descriptive proximity radii)
-    position_registry_memory: str = ""  # --position_registry_memory (blank: sized from the background)
-    position_module_memory: str = ""  # --position_module_memory (blank: sized from the registry)
 
     # posenrich_background_file (CT's background.output, used when CT is off) is derived
     # from PrecomputedConfig.use_discovery.

@@ -6,7 +6,7 @@
    gui/generation/context.py. Dispatches to the script rendered from run_single.sh.j2.
 
    Consumes: runtime, general, resources, modules, precomputed, run_defaults, profile,
-             array_spec, array_size, rer_tool_string, postproc_mode, single_runner_filename.
+             array_spec, array_size, rer_tool_string, postproc_mode, single_runner_filename, then_single_runner_filename.
    Produces: bash script; with profile 'slurm' an sbatch array job (one task per
              phenotype row), with profile 'local' a sequential loop over the rows. #}
 {% if profile == 'slurm' %}
@@ -252,7 +252,6 @@ export ENSEMBL_DATASET="{{ modules.scoring.ensembl_dataset }}"
 export EVIDENCE_P_THRESHOLD="{{ modules.scoring.evidence_p_threshold }}"
 export EVIDENCE_FDR_LEVELS="{{ modules.scoring.evidence_fdr_levels }}"
 export CAAS_EVIDENCE_TOP_N="{{ modules.scoring.caas_evidence_top_n }}"
-export CAAS_EVIDENCE_DISCOVERY_USER="{{ modules.scoring.caas_evidence_discovery }}"
 export SCORING_HYPOTHESES_PAIRS="{{ modules.scoring.scoring_hypotheses_pairs }}"
 export CT_DISAMBIG_HYPOTHESES_PAIRS="{{ modules.disambiguation.ct_disambig_hypotheses_pairs }}"
 
@@ -293,13 +292,14 @@ export FUBAR_SITES_FILE="{{ modules.posenrich.fubar_sites_file }}"
 export POSENRICH_COLLECTIONS="{{ modules.posenrich.posenrich_collections }}"
 export POSENRICH_MIN_GENES="{{ modules.posenrich.posenrich_min_genes }}"
 export POSENRICH_HOLDOUT="{{ modules.posenrich.posenrich_holdout }}"
-export POSENRICH_WITHIN_GENE_MEMORY="{{ modules.posenrich.posenrich_within_gene_memory }}"
 export POSENRICH_RADIOS="{{ modules.posenrich.posenrich_radios }}"
-export POSITION_REGISTRY_MEMORY="{{ modules.posenrich.position_registry_memory }}"
-export POSITION_MODULE_MEMORY="{{ modules.posenrich.position_module_memory }}"
 
 REPO_DIR="{{ general.repo_dir }}"
 SINGLE_RUNNER="${REPO_DIR}/{{ single_runner_filename if single_runner_filename else 'run_phenotype_single.sh' }}"
+{% if then_single_runner_filename %}
+# Run after SINGLE_RUNNER, in the same task and only when it succeeded.
+THEN_RUNNER="${REPO_DIR}/{{ then_single_runner_filename }}"
+{% endif %}
 
 # ── Phenotype catalogue ───────────────────────────────────────────────────────
 # One bash function serves both dispatch paths below: SLURM calls it once per array
@@ -323,7 +323,15 @@ dispatch_phenotype() {
     echo " TRAIT         : $TRAIT"
     echo "======================================================"
 
+{% if then_single_runner_filename %}
+    bash "$SINGLE_RUNNER" "$TRAIT" "$SECONDARY" "$NTRAIT" "$CTRAIT" "$PRUNE" "$PRUNE_SEC" "$TRAIT_TYPE" || return $?
+    echo "------------------------------------------------------"
+    echo " $TRAIT: next pass ($(basename "$THEN_RUNNER"))"
+    echo "------------------------------------------------------"
+    bash "$THEN_RUNNER" "$TRAIT" "$SECONDARY" "$NTRAIT" "$CTRAIT" "$PRUNE" "$PRUNE_SEC" "$TRAIT_TYPE"
+{% else %}
     bash "$SINGLE_RUNNER" "$TRAIT" "$SECONDARY" "$NTRAIT" "$CTRAIT" "$PRUNE" "$PRUNE_SEC" "$TRAIT_TYPE"
+{% endif %}
 }
 
 {% if profile == 'slurm' %}

@@ -71,8 +71,6 @@ def validate(project: ProjectConfig) -> list[str]:
             fraction = None
         if fraction is None or fraction >= 1.0:
             errors.append("Disambiguation: the strict analysis needs a min divergent fraction below 1 (a fraction of 1 is already strict).")
-        if not caas.strict_conservation_output:
-            errors.append("Disambiguation: the strict analysis reads the strict tables of the normal run; turn on 'Also write the strict tables' in the CAAS tab.")
 
     if rt.toy_mode and not (rt.toy_perms.strip().isascii() and rt.toy_perms.strip().isdigit() and int(rt.toy_perms) >= 0):
         errors.append(f"Runtime: toy permulation cycles must be a non-negative integer (0 replays only the real labeling) (got {rt.toy_perms!r}).")

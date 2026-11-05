@@ -408,11 +408,21 @@ class MainWindow(QMainWindow):
         run_expl = getattr(disambig, "run_postproc_exploratory", False)
         run_filt = getattr(disambig, "run_postproc_filter", False)
 
+        run_strict = getattr(disambig, "run_strict_analysis", False)
+        run_strict_expl = run_strict and disambig.enabled and run_expl
+        strict_expl_single_name = script_names("_strict_exploratory")[1] if run_strict_expl else None
+        # The strict production pass reads the strict tables and the null of the normal run, so when this project generates that
+        # run (the complete script, or the plain script when no pass is selected) the strict pass runs after it, in the same task.
+        strict_chained = run_strict and (not (disambig.enabled and (run_expl or run_filt)) or (disambig.enabled and run_filt))
+        strict_single_name = script_names("_strict")[1] if run_strict else None
+
         if disambig.enabled and (run_expl or run_filt):
             if run_expl:
                 batch_name, single_name = script_names("_exploratory")
+                # With the strict analysis, each task of the exploratory script also runs the strict exploratory pass after it.
                 batch_text = render_batch(
-                    self.project, postproc_mode="exploratory", single_runner_filename=single_name
+                    self.project, postproc_mode="exploratory", single_runner_filename=single_name,
+                    then_single_runner_filename=strict_expl_single_name,
                 )
                 single_text = render_single(self.project, postproc_mode="exploratory")
                 scripts.append((batch_name, batch_text))
@@ -426,6 +436,7 @@ class MainWindow(QMainWindow):
                     self.project,
                     postproc_mode="filter",
                     single_runner_filename=single_name,
+                    then_single_runner_filename=strict_single_name if strict_chained else None,
                 )
                 single_text = render_single(self.project, postproc_mode="filter")
                 scripts.append((batch_name, batch_text))
@@ -433,27 +444,28 @@ class MainWindow(QMainWindow):
 
         else:
             batch_name, single_name = script_names("")
-            batch_text = render_batch(self.project, single_runner_filename=single_name)
+            batch_text = render_batch(
+                self.project, single_runner_filename=single_name,
+                then_single_runner_filename=strict_single_name if strict_chained else None,
+            )
             single_text = render_single(self.project)
             scripts.append((batch_name, batch_text))
             scripts.append((single_name, single_text))
 
-        run_strict = getattr(disambig, "run_strict_analysis", False)
-        run_strict_expl = run_strict and disambig.enabled and run_expl
         if run_strict_expl:
             # The strict exploratory pass: the sweep and the characterization report on the strict tables, so the cluster
             # parameters and the gene-removal switches are judged on strict counts too (see strict_pass in run_single.sh.j2).
-            batch_name, single_name = script_names("_strict_exploratory")
-            scripts.append((batch_name, render_batch(
-                self.project, postproc_mode="exploratory", single_runner_filename=single_name, strict_pass=True)))
-            scripts.append((single_name, render_single(self.project, postproc_mode="exploratory", strict_pass=True)))
+            # Its single-phenotype script is run by the exploratory script, so it has no batch script of its own.
+            scripts.append((strict_expl_single_name, render_single(self.project, postproc_mode="exploratory", strict_pass=True)))
         if run_strict:
             # The strict analysis: the "filter" pass again, reading the strict tables the normal run wrote under
-            # <outdir>/strict/ (see strict_pass in run_single.sh.j2).
-            batch_name, single_name = script_names("_strict")
-            scripts.append((batch_name, render_batch(
-                self.project, postproc_mode="filter", single_runner_filename=single_name, strict_pass=True)))
-            scripts.append((single_name, render_single(self.project, postproc_mode="filter", strict_pass=True)))
+            # <outdir>/strict/ (see strict_pass in run_single.sh.j2). Chained after the normal run, its single-phenotype script
+            # is run by that script; without a normal run in this project it gets a batch script of its own.
+            if not strict_chained:
+                batch_name, single_name = script_names("_strict")
+                scripts.append((batch_name, render_batch(
+                    self.project, postproc_mode="filter", single_runner_filename=single_name, strict_pass=True)))
+            scripts.append((strict_single_name, render_single(self.project, postproc_mode="filter", strict_pass=True)))
 
         explanations = []
         if disambig.enabled and run_expl:
@@ -474,22 +486,31 @@ class MainWindow(QMainWindow):
             explanations.append(explanation)
 
         if run_strict_expl:
-            strict_expl_name, _ = script_names("_strict_exploratory")
+            expl_name, _ = script_names("_exploratory")
             explanations.append(
-                f"Strict exploratory: run {strict_expl_name} after the exploratory script has produced its strict tables. "
-                "It sweeps the cluster parameters and writes its own characterization report on the strict counts, so "
-                "Extreme and Dubious genes can be judged there. Cluster parameters are shared with the normal analysis; "
-                "the strict gene filter can have its own settings (Advanced)."
+                f"Strict exploratory: {expl_name} also runs it, after the normal exploratory pass and in the same task of each "
+                "phenotype (only if that pass succeeded), so one script gives both reports. The strict pass sweeps the "
+                "cluster parameters and writes its own characterization report on the strict counts, so Extreme and Dubious "
+                "genes can be judged there. The task covers both passes: set the time limit of the Runtime tab accordingly. "
+                "Cluster parameters are shared with the normal analysis; the strict gene filter can have its own settings (Advanced)."
             )
         if run_strict:
             strict_name, _ = script_names("_strict")
-            explanations.append(
-                f"Strict analysis: run {strict_name} after the production script has produced "
-                "its strict tables and null. It reuses them and repeats post-processing "
-                "and the enabled downstream analyses using only hypotheses without "
-                "conserved pairs. Enable strict table output and set the minimum "
-                "divergent fraction below 1 in the CAAS tab."
-            )
+            if strict_chained:
+                normal_name, _ = script_names("_complete" if disambig.enabled and run_filt else "")
+                explanations.append(
+                    f"Strict analysis: {normal_name} also runs it, after the normal analysis and in the same task of each "
+                    "phenotype (only if that analysis succeeded), so one script gives both. The strict pass reuses the strict "
+                    "tables and null of the normal analysis and repeats post-processing and the enabled downstream analyses "
+                    "using only hypotheses without conserved pairs. The task covers both: set the time limit of the Runtime "
+                    "tab accordingly. Set the minimum divergent fraction below 1 in the CAAS tab."
+                )
+            else:
+                explanations.append(
+                    f"Strict analysis: run {strict_name} after a normal analysis with the strict analysis on has produced its "
+                    "strict tables and null. It reuses them and repeats post-processing and the enabled downstream analyses "
+                    "using only hypotheses without conserved pairs. Set the minimum divergent fraction below 1 in the CAAS tab."
+                )
 
         if explanations:
             QMessageBox.information(self, "Post-processing workflows", "\n\n".join(explanations))
