@@ -1,7 +1,0 @@
-# RER gene identifiers and precomputed nulls
-
-The RER result tables and the RER null sent to downstream analyses use the gene identifiers from the cleaned CAAS background when it is available. Otherwise, the alignment basenames are used; if neither is available, the original RER identifiers are retained. A producer ID without a species suffix can match a unique species-qualified reference ID and vice versa. Numeric components such as `.1` are part of the gene name. Different explicit species or ambiguous aliases are not silently merged.
-
-RER first validates the original observed result and null. If IDs change, it writes a coherent derived result and null without recalculating correlations or permulations. The input RDS and null remain unchanged. `rer_gene_identifiers.tsv` records the original and resulting names. The normalized summary, validated result snapshot and null are published under `rerconverge/rer_results/`; the normalized null is in `normalized_null/`. The derived null may require additional disk space and I/O proportional to its size. If no identifiers change, the workflow reuses the existing null.
-
-FCS aligns gene-set symbols against its tested identifiers while preserving literal numeric suffixes. Its ranking, background and null share the same RER identifiers. This name conversion does not require rerunning CAAS discovery or its permutation batches; the usual workflow reuse settings still determine which tasks Nextflow executes.
