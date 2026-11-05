@@ -52,8 +52,9 @@ def render_batch(
     pair of scripts runs; reuse_exploratory makes the "filter" pass read the output
     of the exploratory pass instead of recomputing it.
 
-    strict_pass renders the pair of scripts of the strict analysis: the "filter" pass reading the strict tables of the
-    normal run (see run_single.sh.j2).
+    strict_pass renders the pair of scripts of the strict analysis, reading the strict tables of the normal run (see
+    run_single.sh.j2): the "filter" pass, or, with postproc_mode "exploratory", the strict exploratory pass (the sweep and its
+    own characterization report, no downstream modules).
 
     single_runner_filename overrides the derived name of the per-phenotype script
     this one dispatches to (SINGLE_RUNNER). It must match the filename under which

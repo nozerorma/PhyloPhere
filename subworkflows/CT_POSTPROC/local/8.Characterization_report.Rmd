@@ -110,6 +110,11 @@ write_tsv(removal_events,'disambiguation_characterization/removal_events.tsv')
 
 # 1. Post-Processing Characterization
 
+```{r analysis_label, results='asis'}
+if (known_universe && isTRUE(universe$strict))
+  cat('**Analysis: strict.** Only hypotheses without conserved pairs; every count, stratum and fence below comes from the strict tables and can differ from the normal analysis.\n\n')
+```
+
 ## 1.1 Quality universe and configuration
 
 These are quality filters on **all CT candidate positions**, including diagnostic

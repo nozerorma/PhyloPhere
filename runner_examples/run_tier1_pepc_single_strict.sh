@@ -53,6 +53,12 @@ if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
 elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_strict"
     RUN_TAG="_strict"
+    # The observed filter of this pass uses the gene-removal settings of the strict analysis, the ones the strict null was merged with.
+    POSTPROC_REMOVE_EXTREME="${POSTPROC_STRICT_REMOVE_EXTREME:-${POSTPROC_REMOVE_EXTREME:-true}}"
+    POSTPROC_REMOVE_DUBIOUS="${POSTPROC_STRICT_REMOVE_DUBIOUS:-${POSTPROC_REMOVE_DUBIOUS:-true}}"
+    POSTPROC_GENE_FILTER_STRATA="${POSTPROC_STRICT_GENE_FILTER_STRATA:-${POSTPROC_GENE_FILTER_STRATA:-10}}"
+    POSTPROC_GENE_FILTER_K_FAR="${POSTPROC_STRICT_GENE_FILTER_K_FAR:-${POSTPROC_GENE_FILTER_K_FAR:-3.0}}"
+    POSTPROC_GENE_FILTER_K_NEAR="${POSTPROC_STRICT_GENE_FILTER_K_NEAR:-${POSTPROC_GENE_FILTER_K_NEAR:-1.5}}"
     # This pass reuses the CAAS and Disambiguation output of another pass by file instead of recomputing it (no -resume
     # or shared work directory involved): the exploratory pass generated alongside this script, or, for the strict
     # pass, the strict tables of the normal run. CT discovery/resample and live Disambiguation are off. CT_POSTPROC
@@ -504,6 +510,11 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "gene_filter_strata": "${POSTPROC_GENE_FILTER_STRATA:-10}",
   "gene_filter_k_far": "${POSTPROC_GENE_FILTER_K_FAR:-3.0}",
   "gene_filter_k_near": "${POSTPROC_GENE_FILTER_K_NEAR:-1.5}",
+  "strict_remove_extreme_genes": ${POSTPROC_STRICT_REMOVE_EXTREME:-${POSTPROC_REMOVE_EXTREME:-true}},
+  "strict_remove_dubious_genes": ${POSTPROC_STRICT_REMOVE_DUBIOUS:-${POSTPROC_REMOVE_DUBIOUS:-true}},
+  "strict_gene_filter_strata": "${POSTPROC_STRICT_GENE_FILTER_STRATA:-${POSTPROC_GENE_FILTER_STRATA:-10}}",
+  "strict_gene_filter_k_far": "${POSTPROC_STRICT_GENE_FILTER_K_FAR:-${POSTPROC_GENE_FILTER_K_FAR:-3.0}}",
+  "strict_gene_filter_k_near": "${POSTPROC_STRICT_GENE_FILTER_K_NEAR:-${POSTPROC_GENE_FILTER_K_NEAR:-1.5}}",
   "gene_ensembl_file": "${GENE_ENSEMBL_FILE:-}",
   "auto_generate_ensembl": ${AUTO_GENERATE_ENSEMBL:-false},
   "ensembl_dataset": "${ENSEMBL_DATASET:-}",

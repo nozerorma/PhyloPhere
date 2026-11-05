@@ -47,6 +47,12 @@ set -u
 # ${TRAIT}${RUN_TAG} as RESULTS_BASE is. Otherwise the exploratory and complete passes
 # of one trait would share NXF_HOME, RUN_DIR and WORK_DIR and collide on the locks of
 # the history database and the session cache.
+{% set strict_expl = strict_pass and postproc_mode == "exploratory" %}
+{% set diagnostic_expl = (not strict_pass) and postproc_mode == "exploratory" and modules.disambiguation.exploratory_without_null %}
+{% if strict_expl %}
+# The strict exploratory pass: the sweep and the characterization report of post-processing on the strict tables.
+if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
+{% else %}
 if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
     RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_exploratory"
     RUN_TAG="_exploratory"
@@ -61,10 +67,27 @@ if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
     RUN_ENRICHMENT=false
     # The evidence table is written after SCORING; main.nf rejects it without --scoring.
     CAAS_EVIDENCE_TOP_N=0
+{% if diagnostic_expl %}
+    # Diagnostic exploratory pass: only the real labeling (b_0) is replayed, so the sweep and the characterization report come
+    # without the permulation null. The complete pass computes the null with the parameters chosen from them.
+    CAAS_FULL_PERMS=0
+{% endif %}
 elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
+{% endif %}
 {% if strict_pass %}
+{% if strict_expl %}
+    RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_strict_exploratory"
+    RUN_TAG="_strict_exploratory"
+{% else %}
     RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_strict"
     RUN_TAG="_strict"
+{% endif %}
+    # The observed filter of this pass uses the gene-removal settings of the strict analysis, the ones the strict null was merged with.
+    POSTPROC_REMOVE_EXTREME="${POSTPROC_STRICT_REMOVE_EXTREME:-${POSTPROC_REMOVE_EXTREME:-true}}"
+    POSTPROC_REMOVE_DUBIOUS="${POSTPROC_STRICT_REMOVE_DUBIOUS:-${POSTPROC_REMOVE_DUBIOUS:-true}}"
+    POSTPROC_GENE_FILTER_STRATA="${POSTPROC_STRICT_GENE_FILTER_STRATA:-${POSTPROC_GENE_FILTER_STRATA:-10}}"
+    POSTPROC_GENE_FILTER_K_FAR="${POSTPROC_STRICT_GENE_FILTER_K_FAR:-${POSTPROC_GENE_FILTER_K_FAR:-3.0}}"
+    POSTPROC_GENE_FILTER_K_NEAR="${POSTPROC_STRICT_GENE_FILTER_K_NEAR:-${POSTPROC_GENE_FILTER_K_NEAR:-1.5}}"
 {% else %}
     RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_complete"
     RUN_TAG="_complete"
@@ -161,6 +184,17 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     if [ -d "${PASS_SOURCE_OUTDIR}/data_exploration" ] && [ ! -e "${RESULTS_BASE}/data_exploration" ]; then
         ln -sfn "${PASS_SOURCE_OUTDIR}/data_exploration" "${RESULTS_BASE}/data_exploration"
     fi
+{% if strict_expl %}
+    # Like the exploratory pass, this one only sweeps the cluster parameters and writes the report: every downstream module
+    # waits for the strict pass, RER and FADE included.
+    RUN_POSENRICH=false
+    RUN_VEP=false
+    RUN_FADE=false
+    RUN_RER=false
+    RUN_SCORING=false
+    RUN_ENRICHMENT=false
+    CAAS_EVIDENCE_TOP_N=0
+{% endif %}
 {% endif %}
 else
     RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}"
@@ -574,6 +608,11 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "gene_filter_strata": "${POSTPROC_GENE_FILTER_STRATA:-10}",
   "gene_filter_k_far": "${POSTPROC_GENE_FILTER_K_FAR:-3.0}",
   "gene_filter_k_near": "${POSTPROC_GENE_FILTER_K_NEAR:-1.5}",
+  "strict_remove_extreme_genes": ${POSTPROC_STRICT_REMOVE_EXTREME:-${POSTPROC_REMOVE_EXTREME:-true}},
+  "strict_remove_dubious_genes": ${POSTPROC_STRICT_REMOVE_DUBIOUS:-${POSTPROC_REMOVE_DUBIOUS:-true}},
+  "strict_gene_filter_strata": "${POSTPROC_STRICT_GENE_FILTER_STRATA:-${POSTPROC_GENE_FILTER_STRATA:-10}}",
+  "strict_gene_filter_k_far": "${POSTPROC_STRICT_GENE_FILTER_K_FAR:-${POSTPROC_GENE_FILTER_K_FAR:-3.0}}",
+  "strict_gene_filter_k_near": "${POSTPROC_STRICT_GENE_FILTER_K_NEAR:-${POSTPROC_GENE_FILTER_K_NEAR:-1.5}}",
   "gene_ensembl_file": "${GENE_ENSEMBL_FILE:-}",
   "auto_generate_ensembl": ${AUTO_GENERATE_ENSEMBL:-false},
   "ensembl_dataset": "${ENSEMBL_DATASET:-}",

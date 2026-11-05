@@ -18,7 +18,8 @@ Called by:  CAAS_CORE_MERGE (subworkflows/CT/caas_permulation.nf) → merge_null
 Inputs:     --tiles       the null_tables/ directories (units.parquet, scores.parquet) of every tile of the block
             --labelings   the block's labelings file (resample_perms.tab): its cycles are the cycles of the block, the
                           ones with no detection included
-            --universe    gene universe (cleaned_background_main.txt), optional
+            --universe    gene universe (cleaned_background_main.txt), optional: it adds matrix rows for the genes that have no
+                          unit in the block; the genes with units have a row whatever the universe says
             --gene-lengths-table, --remove-extreme-genes, --remove-dubious-genes  gene removal, optional: gene_lengths.tsv (gene_lengths.py), the same
                           table the observed filter reads, so every gene with units in a cycle is evaluated
 Outputs:    <out>/matrices/   raw matrices and manifest.json (assemble_block_matrices.R turns them into an RDS)

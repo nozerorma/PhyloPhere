@@ -248,6 +248,11 @@ Usage:
 --gene_filter_strata                         <INTEGER>                            10    (gene-length strata, both rules)
 --gene_filter_k_far                           <FLOAT>                              3.0   (far fence: Extreme above Q3 + k x scale)
 --gene_filter_k_near                          <FLOAT>                              1.5   (near fence: Dubious above it with a cluster train)
+--strict_remove_extreme_genes               <BOOLEAN>                            null  (strict analysis; null takes --remove_extreme_genes)
+--strict_remove_dubious_genes               <BOOLEAN>                            null  (strict analysis; null takes --remove_dubious_genes)
+--strict_gene_filter_strata                  <INTEGER>                            null  (strict analysis; null takes --gene_filter_strata)
+--strict_gene_filter_k_far                    <FLOAT>                              null  (strict analysis; null takes --gene_filter_k_far)
+--strict_gene_filter_k_near                   <FLOAT>                              null  (strict analysis; null takes --gene_filter_k_near)
 '''
 }
 

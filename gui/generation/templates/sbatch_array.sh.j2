@@ -177,6 +177,13 @@ export POSTPROC_MAXCAAS_VALUES="{{ modules.disambiguation.maxcaas_values }}"
 export POSTPROC_GENE_FILTER_STRATA="{{ modules.disambiguation.gene_filter_strata }}"
 export POSTPROC_GENE_FILTER_K_FAR="{{ modules.disambiguation.gene_filter_k_far }}"
 export POSTPROC_GENE_FILTER_K_NEAR="{{ modules.disambiguation.gene_filter_k_near }}"
+{% set sd = modules.disambiguation %}
+# Gene-removal settings of the strict analysis: those of the normal run unless the project gives its own.
+export POSTPROC_STRICT_REMOVE_EXTREME="{{ 'true' if (sd.remove_extreme_genes if sd.strict_same_gene_filter else sd.strict_remove_extreme_genes) else 'false' }}"
+export POSTPROC_STRICT_REMOVE_DUBIOUS="{{ 'true' if (sd.remove_dubious_genes if sd.strict_same_gene_filter else sd.strict_remove_dubious_genes) else 'false' }}"
+export POSTPROC_STRICT_GENE_FILTER_STRATA="{{ sd.gene_filter_strata if sd.strict_same_gene_filter else sd.strict_gene_filter_strata }}"
+export POSTPROC_STRICT_GENE_FILTER_K_FAR="{{ sd.gene_filter_k_far if sd.strict_same_gene_filter else sd.strict_gene_filter_k_far }}"
+export POSTPROC_STRICT_GENE_FILTER_K_NEAR="{{ sd.gene_filter_k_near if sd.strict_same_gene_filter else sd.strict_gene_filter_k_near }}"
 # ── Precomputed upstream inputs ───────────────────────────────────────────────
 # The per-phenotype paths (base_path/<TRAIT>/...) are built in run_single.sh.j2,
 # where $TRAIT is bound. gui/models/precomputed.py lists the path templates.

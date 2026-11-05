@@ -203,6 +203,11 @@ def validate(project: ProjectConfig) -> list[str]:
     fmp = project.modules.disambiguation.filter_min_positions.strip()
     if fmp and not (fmp.isdigit() and int(fmp) > 0):
         errors.append(f"Post-processing: minimum candidates per interval must be a positive integer or blank (got {fmp!r}).")
+    # An exploratory pass without the null leaves it to the complete pass.
+    expl = project.modules.disambiguation
+    if expl.enabled and expl.run_postproc_exploratory and expl.exploratory_without_null and not expl.run_postproc_filter:
+        errors.append("Post-processing: the exploratory pass without the permulation null needs the complete pass, "
+                      "which is the one that builds the null. Select the production filtering pass or uncheck the option.")
     # The gene-removal fences: positive integer strata, finite non-negative multipliers, far fence not below the near fence.
     dis = project.modules.disambiguation
     strata = dis.gene_filter_strata.strip()
@@ -218,6 +223,22 @@ def validate(project: ProjectConfig) -> list[str]:
             errors.append(f"Post-processing: {label} IQR multiplier must be a finite number >= 0 (got {value.strip()!r}).")
     if None not in fences.values() and all(0 <= v < float("inf") for v in fences.values()) and fences["far-fence"] < fences["near-fence"]:
         errors.append("Post-processing: the far-fence IQR multiplier must not be below the near-fence multiplier.")
+    # The strict analysis gene-removal fences, when the project gives its own (not "same as the normal run").
+    if dis.run_strict_analysis and not dis.strict_same_gene_filter:
+        strict_strata = dis.strict_gene_filter_strata.strip()
+        if not (strict_strata.isdigit() and int(strict_strata) >= 1):
+            errors.append(f"Strict analysis: gene-length strata must be a positive integer (got {strict_strata!r}).")
+        strict_fences = {}
+        for label, value in (("far-fence", dis.strict_gene_filter_k_far), ("near-fence", dis.strict_gene_filter_k_near)):
+            try:
+                strict_fences[label] = float(value)
+            except ValueError:
+                strict_fences[label] = None
+            if strict_fences[label] is None or not 0 <= strict_fences[label] < float("inf"):
+                errors.append(f"Strict analysis: {label} IQR multiplier must be a finite number >= 0 (got {value.strip()!r}).")
+        if None not in strict_fences.values() and all(0 <= v < float("inf") for v in strict_fences.values()) \
+                and strict_fences["far-fence"] < strict_fences["near-fence"]:
+            errors.append("Strict analysis: the far-fence IQR multiplier must not be below the near-fence multiplier.")
     # Enrichment reads the SCORING outputs (FCS, AMI and comparison inputs); main.nf rejects the combination.
     if project.modules.enrichment.enabled and not scoring.enabled:
         errors.append(

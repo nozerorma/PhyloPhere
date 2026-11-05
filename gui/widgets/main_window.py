@@ -424,7 +424,8 @@ class MainWindow(QMainWindow):
                 # sibling _exploratory run's outdir (see the POSTPROC_MODE="filter"
                 # branch of run_single.sh.j2). With the filter mode alone, every step
                 # runs live in the _complete scripts.
-                reuse_exploratory = run_expl
+                # (not with the diagnostic exploratory pass: it replays only the real labeling, so there is no null to reuse)
+                reuse_exploratory = run_expl and not getattr(disambig, "exploratory_without_null", False)
                 batch_name, single_name = script_names("_complete")
                 batch_text = render_batch(
                     self.project,
@@ -446,6 +447,14 @@ class MainWindow(QMainWindow):
             scripts.append((single_name, single_text))
 
         run_strict = getattr(disambig, "run_strict_analysis", False)
+        run_strict_expl = run_strict and disambig.enabled and run_expl
+        if run_strict_expl:
+            # The strict exploratory pass: the sweep and the characterization report on the strict tables, so the cluster
+            # parameters and the gene-removal switches are judged on strict counts too (see strict_pass in run_single.sh.j2).
+            batch_name, single_name = script_names("_strict_exploratory")
+            scripts.append((batch_name, render_batch(
+                self.project, postproc_mode="exploratory", single_runner_filename=single_name, strict_pass=True)))
+            scripts.append((single_name, render_single(self.project, postproc_mode="exploratory", strict_pass=True)))
         if run_strict:
             # The strict analysis: the "filter" pass again, reading the strict tables the normal run wrote under
             # <outdir>/strict/ (see strict_pass in run_single.sh.j2).
@@ -464,14 +473,35 @@ class MainWindow(QMainWindow):
             )
             if run_filt:
                 complete_name, _ = script_names("_complete")
-                explanation += (
-                    "\n\nSet the chosen cluster filter values in the Disambiguation tab, "
-                    f"regenerate the scripts, then run {complete_name}. It reuses the "
-                    "exploratory CAAS and Disambiguation outputs and runs the enabled "
-                    "downstream modules."
-                )
+                if getattr(disambig, "exploratory_without_null", False):
+                    explanation += (
+                        "\n\nThis exploratory pass replays only the real labeling (no permulation null). Set the chosen "
+                        "cluster filter values and gene-removal switches in the Disambiguation tab, regenerate the scripts, "
+                        f"then run {complete_name}. It does not reuse the exploratory output: it runs CAAS, Disambiguation and "
+                        "the null with the chosen parameters, then the enabled downstream modules."
+                    )
+                else:
+                    explanation += (
+                        "\n\nSet the chosen cluster filter values in the Disambiguation tab, "
+                        f"regenerate the scripts, then run {complete_name}. It reuses the "
+                        "exploratory CAAS and Disambiguation outputs and runs the enabled "
+                        "downstream modules. The null was merged in the exploratory pass with the cluster "
+                        "values and gene-removal switches of that pass: if you change a switch, rerun the exploratory "
+                        "script with -resume first (only the merges are recomputed); a different cluster pair recomputes "
+                        "the replay tiles, so choose it with the option to run the exploratory pass without the null."
+                    )
             explanations.append(explanation)
 
+        if run_strict_expl:
+            strict_expl_name, _ = script_names("_strict_exploratory")
+            explanations.append(
+                f"Strict exploratory: run {strict_expl_name} after the normal exploratory pass has produced its strict tables. "
+                "It sweeps the cluster parameters and writes its own characterization report on the strict counts, so "
+                "Extreme and Dubious genes can be judged there. Strict gene-removal settings are applied to the strict null "
+                "when the normal scripts run: if you change them after seeing this report, rerun the normal exploratory "
+                "script with -resume (only the merges are recomputed). Cluster parameters are shared with the normal run "
+                "and changing them recomputes the replay tiles."
+            )
         if run_strict:
             strict_name, _ = script_names("_strict")
             explanations.append(

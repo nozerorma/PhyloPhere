@@ -130,5 +130,6 @@ workflow CT_POSTPROC {
     filter_dir = Channel.value("${params.outdir}/postproc")
     filtered_discovery = genes.filtered_discovery
     removed_genes = genes.removed_genes
+    scoring_contract = genes.scoring_contract
     cleaned_background = background.cleaned_background_main
 }

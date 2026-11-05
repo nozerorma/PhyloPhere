@@ -35,15 +35,21 @@ SPEC = ModuleTabSpec(
         "minlen_values × maxcaas_values. Writes output to ${OUTDIR}_exploratory/ and automatically skips downstream tasks.\n"
         "• Production Filtering (run_postproc_filter): Executes single filtering pass with "
         "filter_minlen & filter_maxcaas. Writes output to ${OUTDIR}_complete/ and runs downstream modules.\n"
-        "• Both Selected: Run the exploratory scripts first; the complete scripts reuse their output.\n"
+        "• Both Selected: Run the exploratory scripts first; the complete scripts reuse their output, including the "
+        "permulation null built with the cluster values and gene-removal switches of the exploratory pass. With "
+        "'Exploratory without the permulation null' the exploratory pass replays only the real labeling and the complete "
+        "scripts compute everything with the values you choose.\n"
         "• Strict Analysis: Reuses the normal run's strict tables for post-processing and downstream modules.\n\n"
         "ℹ️ Gene filter (Advanced):\n"
         "• Extreme: a gene whose CAAS count exceeds the far fence of its gene-length stratum (Q3 + k_far x scale), any gene. "
         "Uses gene_filter_strata and gene_filter_k_far.\n"
         "• Dubious: a gene whose count exceeds the near fence of its stratum (Q3 + k_near x scale) AND that carries a cluster train. "
         "Uses gene_filter_strata, gene_filter_k_near and the cluster parameters (filter_minlen, filter_maxcaas, filter_min_positions).\n"
-        "• Workflow: the exploratory sweep reports what each rule would remove; in the complete run, decide from that report "
-        "to remove Extreme genes, Dubious genes, both or none. The same switches apply to the observed table and to the permulation null."
+        "• Workflow: the exploratory report shows both marks whatever the switches say. The switches are applied to the observed "
+        "table and to the permulation null in the pass that builds the null, and the complete pass reuses that null: to change "
+        "them after reading the report, regenerate the scripts and rerun the exploratory pass with -resume (only the merges are "
+        "recomputed), or use 'Exploratory without the permulation null', whose complete pass builds the null with the values you "
+        "choose."
     ),
     disclaimer=(
         "Accumulation and Scoring need this module's output. Check 'Use precomputed "
@@ -89,6 +95,19 @@ SPEC = ModuleTabSpec(
             ),
         ),
         FieldSpec(
+            name="exploratory_without_null",
+            label="Exploratory without the permulation null",
+            kind="bool",
+            importance="optional",
+            help=(
+                "The exploratory scripts replay only the real labeling (caas_full_perms 0): the cluster sweep and the gene-filter "
+                "report come without the permulation null, so a cluster pair can be chosen before paying for it. The complete "
+                "scripts then do not reuse the exploratory output: they run CAAS, Disambiguation and the null with the chosen "
+                "parameters. Needs the complete pass; without this option the exploratory pass builds the null with the "
+                "values it is given and the complete pass can only change the gene-removal settings by rerunning it."
+            ),
+        ),
+        FieldSpec(
             name="run_postproc_filter",
             label="Run Filtering Production Post-Processing",
             kind="bool",
@@ -104,6 +123,18 @@ SPEC = ModuleTabSpec(
             importance="optional",
             help=(
                 "Also generates scripts that repeat the run from post-processing with only hypotheses without conserved pairs; run the normal scripts first. Needs a min divergent fraction below 1."
+            ),
+        ),
+        FieldSpec(
+            name="strict_same_gene_filter",
+            label="Strict: same gene filter as the normal run",
+            kind="bool",
+            importance="optional",
+            help=(
+                "Checked: the strict analysis removes genes with the settings of the normal run (the Remove Extreme genes, Remove "
+                "Dubious genes, strata and fence fields). Unchecked: it uses the Strict fields of the gene-level outlier fences "
+                "section. The strict gene marks come from the strict counts, so they can differ from the normal ones. Cluster "
+                "parameters are always shared. Only used with the strict analysis scripts."
             ),
         ),
         FieldSpec(
@@ -153,7 +184,8 @@ SPEC = ModuleTabSpec(
                 "Remove genes whose CAAS count exceeds the far fence of their gene-length stratum (Q3 + far multiplier x scale), "
                 "whether or not they carry a cluster train. Uses Gene-length strata and Far-fence IQR multiplier. "
                 "Applied to the observed table and to every cycle of the permulation null. The exploratory run reports "
-                "what this rule would remove; decide here for the complete run."
+                "what this rule would remove. The switch reaches the null in the pass that builds it: after changing it, rerun "
+                "the exploratory pass with -resume (only the merges are recomputed) before the complete pass."
             ),
         ),
         FieldSpec(
@@ -233,6 +265,42 @@ SPEC = ModuleTabSpec(
             help="A gene above this lower fence is Dubious only when it also carries a cluster train "
                  "(needs a cluster file). Only used by Remove Dubious genes.",
         ),
+        Section("Strict analysis: gene-level outlier fences (used when 'Strict: same gene filter' is unchecked)"),
+        FieldSpec(
+            name="strict_remove_extreme_genes",
+            label="Strict: remove Extreme genes",
+            kind="bool",
+            importance="optional",
+            help=("Remove genes above the far fence of their length stratum in the strict analysis (strict counts). It is "
+                  "applied to the strict null when the normal scripts run, so changing it after that recomputes only the "
+                  "merges of the strict null, with -resume; cluster parameters are shared and are not affected."),
+        ),
+        FieldSpec(
+            name="strict_remove_dubious_genes",
+            label="Strict: remove Dubious genes",
+            kind="bool",
+            importance="optional",
+            help=("Remove genes above the near fence of their stratum that carry a cluster train in the strict analysis "
+                  "(strict counts). Applied to the strict null like Strict: remove Extreme genes."),
+        ),
+        FieldSpec(
+            name="strict_gene_filter_strata",
+            label="Strict: gene-length strata",
+            importance="optional",
+            help="Number of equal-size gene-length strata of the strict analysis.",
+        ),
+        FieldSpec(
+            name="strict_gene_filter_k_far",
+            label="Strict: far-fence IQR multiplier",
+            importance="optional",
+            help="Far-fence multiplier of the strict analysis (Extreme above Q3 + k x scale).",
+        ),
+        FieldSpec(
+            name="strict_gene_filter_k_near",
+            label="Strict: near-fence IQR multiplier",
+            importance="optional",
+            help="Near-fence multiplier of the strict analysis (Dubious above it with a cluster train).",
+        ),
     ),
 )
 
@@ -251,4 +319,5 @@ class DisambiguationTab(ModuleTabWidget):
         )
         guidance = tr("Postproc Guidance", lang)
         gene_guidance = tr("Gene filter guidance", lang)
-        self.blurb_label.setText(f"{main_blurb}\n\n{guidance}\n\n{gene_guidance}")
+        null_guidance = tr("Exploratory null guidance", lang)
+        self.blurb_label.setText(f"{main_blurb}\n\n{guidance}\n\n{gene_guidance}\n\n{null_guidance}")

@@ -571,15 +571,19 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         }
 
         if (core) {
+            // The universe only adds matrix rows for genes with no unit in the block; a gene with units has its row whatever the
+            // universe says. The strict null takes this same background (the normal run's), which can differ from the strict one
+            // only in genes that have no unit in any cycle.
             def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }.collect().map { items -> items[0] }
             def caas_lengths_bc = caas_lengths_table_ch.collect().map { items -> items[0] }
             // One merge per block of cycles (and one for b_0), from the tiles of all the gene batches of the block; the
             // blocks are then joined: the roster, the small tables, the validated block index and the positions the null scores.
             def merged = CAAS_CORE_MERGE(core.null_tables.groupTuple().join(core.blocks), caas_universe_ch, caas_lengths_bc)
-            // b_0 is merged with the rule and lengths of the null: its removed genes must be the observed filter's (not checked with
-            // --discovery_from, where the observed labeling is not the replayed one)
-            if (postproc_results && caasPostprocOn() && !params.discovery_from) {
-                CAAS_REMOVAL_INVARIANT(merged.block_out.filter { it[0] == 'b0' }.map { it[1] }, postproc_results.removed_genes)
+            // b_0 is merged with the rule and lengths of the null: its removed genes must be the observed filter's (with --discovery_from
+            // the observed table is not the replayed labeling: only the settings are compared)
+            if (postproc_results && caasPostprocOn()) {
+                CAAS_REMOVAL_INVARIANT(merged.block_out.filter { it[0] == 'b0' }.map { it[1] }, postproc_results.removed_genes, postproc_results.scoring_contract,
+                                       params.discovery_from ? true : false)
             }
             // With --caas_full_perms 0 only b_0 is replayed: its block is merged (b0/), and the null has no permuted cycle to
             // join (written without `?:`, because Groovy reads a numeric 0 as false).
@@ -604,6 +608,19 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             ran_any = true
         }
 
+
+        // A pass that reuses a null (--caas_null_dir: the complete pass of a two-pass run, the strict pass) merges nothing; its observed
+        // filter is checked against the b_0 of that null (the settings only, with --discovery_from), so a change of gene-removal setting or cluster parameter after the null was
+        // built stops here with the setting named instead of failing in SCORING.
+        if (!core && postproc_results && caasPostprocOn() && params.caas_null_dir) {
+            def reused_b0 = file("${params.caas_null_dir}/b0")
+            if (reused_b0.isDirectory()) {
+                CAAS_REMOVAL_INVARIANT(Channel.value(reused_b0), postproc_results.removed_genes, postproc_results.scoring_contract,
+                                       params.discovery_from ? true : false)
+            } else {
+                log.warn "The b0/ directory of the reused null is missing (${reused_b0}): the gene removal of b_0 cannot be checked against the observed filter."
+            }
+        }
 
         // VEP is invoked further down after SCORING: it consumes position_scores.tsv
         // directly from SCORING (SCORING -> VEP).

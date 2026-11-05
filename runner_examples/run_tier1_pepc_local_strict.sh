@@ -134,6 +134,12 @@ export POSTPROC_MAXCAAS_VALUES="0.6,0.7,0.8"
 export POSTPROC_GENE_FILTER_STRATA="10"
 export POSTPROC_GENE_FILTER_K_FAR="3.0"
 export POSTPROC_GENE_FILTER_K_NEAR="1.5"
+# Gene-removal settings of the strict analysis: those of the normal run unless the project gives its own.
+export POSTPROC_STRICT_REMOVE_EXTREME="true"
+export POSTPROC_STRICT_REMOVE_DUBIOUS="true"
+export POSTPROC_STRICT_GENE_FILTER_STRATA="10"
+export POSTPROC_STRICT_GENE_FILTER_K_FAR="3.0"
+export POSTPROC_STRICT_GENE_FILTER_K_NEAR="1.5"
 # ── Precomputed upstream inputs ───────────────────────────────────────────────
 # The per-phenotype paths (base_path/<TRAIT>/...) are built in run_single.sh.j2,
 # where $TRAIT is bound. gui/models/precomputed.py lists the path templates.

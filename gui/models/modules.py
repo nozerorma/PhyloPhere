@@ -108,6 +108,9 @@ class DisambiguationConfig(ModuleConfigBase):
     run_postproc_exploratory: bool = True  # Run exploratory parameter sweep
     run_postproc_filter: bool = True  # Run filtering production run
     run_strict_analysis: bool = False  # Generate the scripts of the strict analysis (needs min_divergent_fraction < 1)
+    # GUI only: the exploratory scripts replay only the real labeling (they set caas_full_perms to 0), so the sweep and the
+    # characterization report come without the permulation null; the complete scripts then do not reuse the exploratory output.
+    exploratory_without_null: bool = False
     caas_postproc_mode: str = "filter"  # --caas_postproc_mode (filter|exploratory); the generated scripts set it per pass
     # Filter-mode (single run) thresholds.
     filter_minlen: str = "3"  # --filter_minlen
@@ -127,6 +130,15 @@ class DisambiguationConfig(ModuleConfigBase):
     gene_filter_strata: str = "10"  # --gene_filter_strata
     gene_filter_k_far: str = "3.0"  # --gene_filter_k_far
     gene_filter_k_near: str = "1.5"  # --gene_filter_k_near
+    # Gene-removal settings of the strict analysis. With strict_same_gene_filter the generated scripts give strict the values
+    # of the normal run; otherwise they give it the strict_* values below (--strict_remove_extreme_genes, ...). Cluster
+    # parameters have no strict counterpart: they act inside the replay tiles, shared by the normal and strict tables.
+    strict_same_gene_filter: bool = True  # GUI only: strict takes the gene-removal settings of the normal run
+    strict_remove_extreme_genes: bool = True  # --strict_remove_extreme_genes
+    strict_remove_dubious_genes: bool = True  # --strict_remove_dubious_genes
+    strict_gene_filter_strata: str = "10"  # --strict_gene_filter_strata
+    strict_gene_filter_k_far: str = "3.0"  # --strict_gene_filter_k_far
+    strict_gene_filter_k_near: str = "1.5"  # --strict_gene_filter_k_near
 
     # Precomputed inputs (disambiguation_input, disambiguation_dir,
     # background_input) are derived from PrecomputedConfig.

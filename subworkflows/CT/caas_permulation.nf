@@ -247,12 +247,21 @@ def caasTileArgs(gene_lengths) {
     return "--postproc-filter ${count_arg} --clust-minlen ${scoringQuote(params.filter_minlen)} --clust-maxcaas ${scoringQuote(params.filter_maxcaas)} ${params.remove_caas_clusters ? '' : '--keep-clusters'} ${map_arg}"
 }
 
+// A gene-removal setting of the run; the strict analysis takes its own value (params.strict_<name>) when it is set.
+def caasGeneFilterParam(name, strict) {
+    def strictName = "strict_${name}".toString()   // a GString key is not found in the params map
+    def own = strict && params.containsKey(strictName) ? params[strictName] : null
+    return own != null ? own : params[name]
+}
+
 // CLI arguments that give merge_null_block.py the observed gene removal (dubious and extreme genes, or the length-stratified
 // fences, each cycle against its own units). The lengths are the gene_lengths.tsv of GENE_LENGTHS, the table the observed filter
-// reads too, so every gene with units in a cycle is evaluated. Empty when the filters are off or there is no table (NO_* sentinel).
-def caasRemovalArgs(gene_lengths_table) {
+// reads too, so every gene with units in a cycle is evaluated. The strict null (strict = true) uses the strict settings of the
+// gene rule where they are set. Empty when the filters are off or there is no table (NO_* sentinel).
+def caasRemovalArgs(gene_lengths_table, strict = false) {
     if (!caasPostprocOn() || new File(gene_lengths_table.toString()).name =~ /^NO_/) return ""
-    return "--gene-lengths-table ${scoringQuote(gene_lengths_table)} --remove-extreme-genes ${scoringQuote(params.remove_extreme_genes)} --remove-dubious-genes ${scoringQuote(params.remove_dubious_genes)} --gene-strata ${scoringQuote(params.gene_filter_strata)} --gene-k-far ${scoringQuote(params.gene_filter_k_far)} --gene-k-near ${scoringQuote(params.gene_filter_k_near)}"
+    def setting = { name -> scoringQuote(caasGeneFilterParam(name, strict)) }
+    return "--gene-lengths-table ${scoringQuote(gene_lengths_table)} --remove-extreme-genes ${setting('remove_extreme_genes')} --remove-dubious-genes ${setting('remove_dubious_genes')} --gene-strata ${setting('gene_filter_strata')} --gene-k-far ${setting('gene_filter_k_far')} --gene-k-near ${setting('gene_filter_k_near')}"
 }
 
 // Shell lines that write .ct_perm_replay_batch_args, the effective CAAS limits of `ct perm-replay` (patterns, miss_pair,
@@ -638,7 +647,7 @@ process CAAS_CORE_MERGE {
         --labelings ${block_dir}/resample_perms.tab \
         --output-dir ${block} ${b0_arg} ${universe_arg} \
         --gene-stat ${params.gene_stat ?: 'max'} \
-        --seed ${params.seed ?: 1998} ${caasRemovalArgs(gene_lengths_table)}
+        --seed ${params.seed ?: 1998} ${caasRemovalArgs(gene_lengths_table, task.process.toString().endsWith('_STRICT'))}
 
     # The matrices go to one RDS per block; the raw files are only the hand-over.
     ${rs} ${scoring_local}/src/assemble_block_matrices.R --dir ${block}/matrices --output ${block}/matrices.rds
@@ -696,9 +705,11 @@ process CAAS_CORE_MERGE_REDUCE {
     """
 }
 
-// The genes removed from b_0 by CAAS_CORE_MERGE must be the genes the observed filter removed (removed_genes_summary.tsv of
-// CAAS_FILTER_GENES): b_0 is the real labeling merged with the rule and the lengths of every null cycle. A difference stops
-// the run with the genes named. The strict null is not checked, since the observed filter does not see its counts.
+// The genes removed from b_0 by the merge of the null must be the genes the observed filter removed (removed_genes_summary.tsv of
+// CAAS_FILTER_GENES): b_0 is the real labeling merged with the rule and the lengths of every null cycle. The settings the
+// null was built with (cluster parameters, gene filter, strict flag) are compared first. A difference stops the run with
+// the settings or genes named. It runs in the pass that merges the null and in the passes that reuse it (the b0/ directory
+// of the null), for the normal and the strict null, each against the observed filter of its own pass.
 process CAAS_REMOVAL_INVARIANT {
     ext b0_check_hash: { caasInvariantKey() }
     tag 'caas_removal_invariant'
@@ -706,8 +717,10 @@ process CAAS_REMOVAL_INVARIANT {
     publishDir path: "${params.outdir}/caas_permulation/b0", mode: 'copy', overwrite: true, pattern: 'check_b0_removal.json'
 
     input:
-    path b0_block, stageAs: 'b0_in'   // the output directory of CAAS_CORE_MERGE for b_0
+    path b0_block, stageAs: 'b0_in'   // the output directory of CAAS_CORE_MERGE for b_0, or the b0/ directory of a reused null
     path observed_removed             // removed_genes_summary.tsv of CAAS_FILTER_GENES
+    path observed_contract            // filtered_discovery.tsv.scoring.json of CAAS_FILTER_GENES
+    val  settings_only                // true: compare the settings and not the genes (the observed table is a given discovery.tab)
 
     output:
     path 'check_b0_removal.json', emit: report
@@ -717,7 +730,7 @@ process CAAS_REMOVAL_INVARIANT {
     """
     echo '${task.ext.b0_check_hash}' > b0_check.sha256
     ${py} ${scoringQuote("${baseDir}/subworkflows/CT_POSTPROC/local/src/check_b0_removal.py")} \\
-        --b0 b0_in --observed ${scoringQuote(observed_removed)} --report check_b0_removal.json
+        --b0 b0_in --observed ${scoringQuote(observed_removed)} --observed-contract ${scoringQuote(observed_contract)} ${settings_only ? '--settings-only' : ''} --report check_b0_removal.json
     """
 }
 
