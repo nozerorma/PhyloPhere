@@ -25,7 +25,7 @@ gui/widgets/common/remote_browse_dialog.py, gui/widgets/common/regenerate_dialog
 import shlex
 import subprocess
 
-DEFAULT_TIMEOUT = 15
+DEFAULT_TIMEOUT = 60
 
 
 class RemoteCheckError(Exception):
@@ -42,7 +42,7 @@ def _run_ssh(host: str, remote_command: str, *, stdin: str | None, timeout: int)
             [
                 "ssh",
                 "-o", "BatchMode=yes",
-                "-o", f"ConnectTimeout={min(timeout, 30)}",
+                "-o", f"ConnectTimeout={min(timeout, 60)}",
                 "-o", "StrictHostKeyChecking=accept-new",
                 host,
                 remote_command,
