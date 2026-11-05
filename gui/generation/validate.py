@@ -203,11 +203,6 @@ def validate(project: ProjectConfig) -> list[str]:
     fmp = project.modules.disambiguation.filter_min_positions.strip()
     if fmp and not (fmp.isdigit() and int(fmp) > 0):
         errors.append(f"Post-processing: minimum candidates per interval must be a positive integer or blank (got {fmp!r}).")
-    # An exploratory pass without the null leaves it to the complete pass.
-    expl = project.modules.disambiguation
-    if expl.enabled and expl.run_postproc_exploratory and expl.exploratory_without_null and not expl.run_postproc_filter:
-        errors.append("Post-processing: the exploratory pass without the permulation null needs the complete pass, "
-                      "which is the one that builds the null. Select the production filtering pass or uncheck the option.")
     # The gene-removal fences: positive integer strata, finite non-negative multipliers, far fence not below the near fence.
     dis = project.modules.disambiguation
     strata = dis.gene_filter_strata.strip()

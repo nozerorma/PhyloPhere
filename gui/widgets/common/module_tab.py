@@ -152,6 +152,8 @@ class ModuleTabWidget(QWidget):
         self._field_widgets: dict[str, QWidget] = {}
         self._label_widgets: list[tuple[QLabel | QCheckBox, FieldSpec]] = []
         self._hint_widgets: list[tuple[QLabel, FieldSpec]] = []
+        # controlling bool field -> widgets that follow it (FieldSpec.disabled_when)
+        self._dependents: dict[str, list[QWidget]] = {}
         for f in spec.essential_fields:
             self._add_field(self._essential_form, f)
         for f in spec.advanced_fields:
@@ -160,6 +162,7 @@ class ModuleTabWidget(QWidget):
             self._add_field(self._fallback_form, f)
 
         self._sync_group_enabled_state()
+        self._sync_dependent_fields()
 
     # ── Field widget construction ────────────────────────────────────────────
 
@@ -230,6 +233,9 @@ class ModuleTabWidget(QWidget):
         if tooltip:
             widget.setToolTip(tooltip)
         self._field_widgets[f.name] = widget
+        followers = [widget]
+        if self._label_widgets and self._label_widgets[-1][1] is f and self._label_widgets[-1][0] is not widget:
+            followers.append(self._label_widgets[-1][0])
 
         # Visible one-line hint under the field, so the guidance does not depend on hovering.
         if f.help:
@@ -238,6 +244,9 @@ class ModuleTabWidget(QWidget):
             hint_lbl.setStyleSheet(_HINT_STYLE)
             form.addRow(hint_lbl)
             self._hint_widgets.append((hint_lbl, f))
+            followers.append(hint_lbl)
+        if f.disabled_when:
+            self._dependents.setdefault(f.disabled_when, []).extend(followers)
 
     def retranslate(self, lang: str = "en") -> None:
         from gui.i18n import tr
@@ -272,7 +281,16 @@ class ModuleTabWidget(QWidget):
 
     def _set_field(self, name: str, value) -> None:
         setattr(self._config, name, value)
+        if name in self._dependents:
+            self._sync_dependent_fields()
         self.changed.emit()
+
+    def _sync_dependent_fields(self) -> None:
+        """Grey out the fields whose FieldSpec.disabled_when names a bool field that is checked."""
+        for controller, widgets in self._dependents.items():
+            disabled = bool(getattr(self._config, controller))
+            for widget in widgets:
+                widget.setEnabled(not disabled)
 
     # ── Enable toggle ────────────────────────────────────────────────────────
 

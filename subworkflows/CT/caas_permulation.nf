@@ -275,11 +275,12 @@ def replayArgsScript(caas_config) {
     else
         _cfg_file=${scoringQuote(caas_config)}
     fi
+    # floor(n * fraction) with a 1e-9 guard: products that are exact in decimal (5 * (1 - 0.8)) fall just below the integer in floating point
     n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' "\$_cfg_file" | sort -nu | wc -l | tr -d ' ')
-    _frac() { awk -v n="\$n_pairs" -v f="\$1" 'BEGIN{printf "%d", int(n*f)}'; }
+    _frac() { awk -v n="\$n_pairs" -v f="\$1" 'BEGIN{printf "%d", int(n*f + 1e-9)}'; }
     declare -a extra_opts=(--patterns "${params.patterns}")
     if [ "${params.miss_pair}" = "true" ]; then extra_opts+=(--miss_pair); fi
-    extra_opts+=(--max_conserved \$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}'))
+    extra_opts+=(--max_conserved \$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f) + 1e-9)}'))
     extra_opts+=(--min_non_overlapping "${params.min_non_overlapping ?: 2}")
     extra_opts+=(--max_bg_gaps \$(_frac ${params.max_bg_gaps_fraction}) --max_fg_gaps \$(_frac ${params.max_fg_gaps_fraction}) --max_gaps \$(_frac ${params.max_gaps_fraction}))
     extra_opts+=(--max_bg_miss \$(_frac ${params.max_bg_miss_fraction}) --max_fg_miss \$(_frac ${params.max_fg_miss_fraction}) --max_miss \$(_frac ${params.max_miss_fraction}))

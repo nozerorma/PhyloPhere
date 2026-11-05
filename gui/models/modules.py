@@ -108,9 +108,6 @@ class DisambiguationConfig(ModuleConfigBase):
     run_postproc_exploratory: bool = True  # Run exploratory parameter sweep
     run_postproc_filter: bool = True  # Run filtering production run
     run_strict_analysis: bool = False  # Generate the scripts of the strict analysis (needs min_divergent_fraction < 1)
-    # GUI only: the exploratory scripts replay only the real labeling (they set caas_full_perms to 0), so the sweep and the
-    # characterization report come without the permulation null; the complete scripts then do not reuse the exploratory output.
-    exploratory_without_null: bool = False
     caas_postproc_mode: str = "filter"  # --caas_postproc_mode (filter|exploratory); the generated scripts set it per pass
     # Filter-mode (single run) thresholds.
     filter_minlen: str = "3"  # --filter_minlen

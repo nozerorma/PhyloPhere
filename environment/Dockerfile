@@ -18,6 +18,10 @@
 # File: Dockerfile
 #
 
+# Build context: this directory (docker build -t phylophere:local environment/).
+# The image holds the software environment only. The pipeline code is not copied into it: Nextflow runs the processes
+# with the code of the checkout (baseDir), which the container runtimes mount.
+
 # Set image origin to micromamba for a stripped down, immutable Debian-Conda environment.
 FROM mambaorg/micromamba:2.5.0
 
@@ -30,45 +34,35 @@ USER root
 # Reset SHELL to avoid conflicts with micromamba's entrypoint during apt operations
 SHELL ["/bin/bash", "-c"]
 
-# Download some basic debian tools + procps (Nextflow dependency).
+# Download some basic debian tools + procps (Nextflow dependency) + git (the RERconverge build clones it).
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive \
     apt-get install -qq -y --no-install-recommends \
         dirmngr \
         ed \
         gpg-agent \
-		less \
-		locales \
-		ca-certificates \
+        less \
+        locales \
+        ca-certificates \
         procps \
         git \
-        && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 USER $MAMBA_USER
 
-# Add project files to the Docker image (recursive, preserving directory layout).
-# Set Phylophere as WD and create build directory structure.
-RUN mkdir -p /home/mambauser/phylophere && chown -R $MAMBA_USER:$MAMBA_USER /home/mambauser/phylophere
-WORKDIR /home/mambauser/phylophere
+# The environment recipe: the same script and file as a local installation (install_env.sh creates the conda
+# environment "phylophere" from phylophere.yml and builds the R packages conda does not provide).
+WORKDIR /home/mambauser/environment
+COPY --chown=$MAMBA_USER:$MAMBA_USER install_env.sh phylophere.yml /home/mambauser/environment/
+RUN chmod +x install_env.sh \
+    && bash install_env.sh /home/mambauser/environment/phylophere.yml \
+    && micromamba clean --all --yes
 
-COPY --chown=$MAMBA_USER:$MAMBA_USER phylophere/ /home/mambauser/phylophere/
-
-# Create micromamba environment with the specifics from env.yml.
-RUN chmod +x /home/mambauser/phylophere/environment/install_env.sh
-RUN bash /home/mambauser/phylophere/environment/install_env.sh /home/mambauser/phylophere/environment/phylophere.yml
-
-# There's a high chance I need to make ct executable as docker does not seem to preserve permissions
-RUN chmod +x /home/mambauser/phylophere/subworkflows/CT/local/ct
-
-# Clone hyphy-analyses so that molerate.bf is available inside the container.
-# Pinned to master; update the ref when a newer release is required.
-RUN git clone --depth 1 --branch master \
-        https://github.com/veg/hyphy-analyses.git /home/mambauser/hyphy-analyses && \
-    chmod -R a+rX /home/mambauser/hyphy-analyses
-
-# Add ct and conda binary to $PATH
-ENV PATH=/home/mambauser/phylophere:$PATH
+# _entrypoint.sh activates ${ENV_NAME:-base}: without this variable the base environment is activated, its bin comes
+# first on the PATH, and python3 and Rscript would not be the ones of the phylophere environment.
+ENV ENV_NAME=phylophere
+# Without the entrypoint (apptainer exec) the environment is still the first on the PATH.
 ENV PATH=/opt/conda/envs/phylophere/bin:$PATH
 
-# Set the image to be run inside base environment directly
+# Set the image to be run inside the phylophere environment directly
 ENTRYPOINT ["/usr/local/bin/_entrypoint.sh"]

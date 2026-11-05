@@ -46,7 +46,7 @@ _RETIRED_PROCESS_SELECTORS = {
 # the observed disambiguation) and the ASR mode (a gene is read from the ASR cache when it is there and computed when not).
 _RETIRED_FIELDS = {
     "caas": ("ct_discovery_batch_size", "export_groups", "export_perm_discovery"),
-    "disambiguation": ("ct_disambig_asr_mode", "ct_disambig_batch_size"),
+    "disambiguation": ("ct_disambig_asr_mode", "ct_disambig_batch_size", "exploratory_without_null"),
     "scoring": ("scoring_weight_caas", "scoring_weight_rer", "scoring_weight_fade", "scoring_rer_direction", "scoring_stress", "scoring_stress_top_n",
                 "scoring_stress_rank_metric"),
     "enrichment": ("posenrich_eggnog", "cosmic_db", "fcs_fdr_wilcoxon", "fcs_fdr_lachenbruch"),

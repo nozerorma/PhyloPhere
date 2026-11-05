@@ -33,7 +33,7 @@ PHYLOPHERE Nextflow pipeline
 A complete set of phylogenetic comparative tools for Phenome-Genome studies:
 convergent amino acid substitution (CAAS) discovery, ancestral-state
 scoring, relative evolutionary rate (RERconverge), directional selection
-(HyPhy FADE), composite scoring, variant annotation, position-level
+(HyPhy FADE), joint scoring tables, variant annotation, position-level
 enrichment (POSENRICH) and functional/network enrichment.
 
 General usage:            > nextflow run main.nf [options]
@@ -50,7 +50,7 @@ Common inputs:
 --outdir                  <"dir">  <projectDir>/out  (reports and results)
 --my_traits, --traitname  <"traits.csv">, <"column_name">  (trait table and the trait column analysed)
 --tree                    <"nwtree_file">  (species tree; --my_traits and --tree are curated against the alignments by NAME_CURATION)
---alignment, --ali_format <"input_dir|.tar.gz">, <"fasta">  (alignments and their format)
+--alignment, --ali_format <"input_dir">, <"fasta">  (directory with one alignment per gene, file name without extension = unique gene ID; and their format)
 --tax_id                  <"taxid_map">  ""  (taxid-to-species map; blank: the generated run scripts build it from the tree with
                                          bin/resolve_core_inputs.py before the pipeline starts, it cannot be built inside main.nf)
 --gene_ensembl_file       <"gene_map">  ""  (gene ID to gene name; blank: built by BioMart only with --auto_generate_ensembl)
@@ -63,8 +63,9 @@ Module flag              Description
 ------------------------  -------------------------------------------------
 --reporting               Preliminary dataset/phenotype exploration reports
                           (independent of CAAS discovery).
---contrast_selection      Prune data and select foreground/background
-                          contrasts from a continuous or discrete trait.
+--contrast_selection      Optionally prune data (--prune_data) and select foreground/background
+                          contrasts from a continuous or discrete trait. Ends the run with
+                          status 0 when fewer than --min_contrasts pairs exist.
 --ct_tool <tools>         CAAStools stages (comma-separated, e.g.
                           "discovery,resample"). resample harvests the
                           permulated labelings (the null) and can run alone;
@@ -74,9 +75,9 @@ Module flag              Description
 --ct_disambiguation       Score each CAAS by ancestral state reconstruction (ASR) and
                           label it convergent, divergent, single or no_change.
 --ct_postproc             Cluster/gene-level filtering + characterization report.
---posenrich               POSENRICH: level 1 tests the share of the detections held by each
-                          gene against the null cycles; the position registry, level 2 and
-                          report 13 need --scoring.
+--posenrich               POSENRICH: level 1 tests, per gene, whether it holds more CAAS positions than
+                          the null cycles (empirical) or a uniform allocation (hypergeometric, reference);
+                          the position registry, level 2 and report 13 need --scoring.
 --vep                     Annotate scored positions with PrimateAI-3D, COSMIC and Ensembl VEP.
                           On by default; requires --scoring (use --vep false otherwise).
 --fade                    HyPhy FADE directional (top/bottom) selection scan.
@@ -98,7 +99,7 @@ invocation. See the README for all options and docs/WALKTHROUGH.md for the stati
 
 def discovery_help() {
     return '''
-CT Discovery — Help
+CT Discovery: Help
 =============================================
 Detects Candidate Amino Acid Substitutions (CAAS) from Multiple Sequence
 Alignments (MSA) against a foreground/background trait split.
@@ -114,7 +115,7 @@ Usage:
 --alignment                <"input_dir">                null
 --caas_config               <"caas_config_file">         null
 --resample_from             <"resample_dir">             ""     (labelings of a previous resample stage; also looked for next to --discovery_from, next to --background_input and in <outdir>/caastools)
---discovery_from            <"discovery.tab">            ""     (score the discovery.tab of a previous run with the same code as the b_0 slice instead of replaying the observed labeling; needs the design files of the same contrast selection)
+--discovery_from            <"discovery.tab">            ""     (score the discovery.tab of a previous run instead of writing the contract files from the b_0 replay; b_0 is still replayed for the null merge and the strict tables; needs the design files of the same contrast selection)
 --multi_hypothesis          <true|false>                 true   (discover across every generated non-replacement contrast hypothesis)
 --ct_allow_relaxed_null     <true|false>                 false  (permit unmatched PSS/FOP designs and the Tier-2 fallback in the null; recorded in the provenance)
 --caas_perms_postproc       <true|false>                 true   (apply the cluster and gene filters of post-processing to the null, so that its blocks follow filtered_discovery.tsv; needs --gene_ensembl_file)
@@ -122,17 +123,17 @@ Usage:
 --patterns                  <"1,2,3,4">                  "1,2,3"
 --min_divergent_fraction    <FLOAT 0-1>                  0.5
 --min_non_overlapping       <INTEGER>                    2      (minimum non-overlapping species required on FG or BG to define a CAAS)
---strict_conservation_output <true|false>   true   (with min_divergent_fraction < 1, also write the observed tables and the null of the hypotheses with no conserved pair under <outdir>/strict/)
+--strict_conservation_output <true|false>   true   (with min_divergent_fraction < 1, also write under <outdir>/strict/ the observed tables and the null restricted to the position-hypothesis rows in which the two sides share no residue type)
 --max_bg_gaps_fraction      <FLOAT 0-1>                  0.0
 --max_fg_gaps_fraction      <FLOAT 0-1>                  0.0
 --max_gaps_fraction         <FLOAT 0-1>                  0.0
 --max_bg_miss_fraction      <FLOAT 0-1>                  0.0
 --max_fg_miss_fraction      <FLOAT 0-1>                  0.0
 --max_miss_fraction         <FLOAT 0-1>                  0.0
---miss_pair                 <true|false>                 true
+--miss_pair                 <true|false>                 true   (discard a labeling when both sides have gapped species in different pairs; applied only when the fg and bg limits are equal)
 --ct_core_batch_size        <INTEGER>                    20    (permulation core: genes per replay + ASR replay task; 1 = one task per gene)
 --caas_export_single       <BOOL>                       false (export global caas_perms.rds for compatibility; blocks + roster are canonical)
---caas_cycle_block_size    <INTEGER>                    500   (permulation core: cycles per block; a task replays its genes against one block, the observed labeling against none; one merge task per block)
+--caas_cycle_block_size    <INTEGER>                    500   (permulation core: cycles per block; a task replays its genes against one block or against b_0; one merge task per block, b_0 included)
 --gene_stat                max                         max            (only supported gene statistic: largest positive position score)
 --publish_intermediates     <true|false>                 false
 
@@ -143,7 +144,7 @@ With the observed discovery, report 7 (pattern annotation) is written.
 
 def resample_help() {
     return '''
-CT Resample — Help
+CT Resample: Help
 =============================================
 Harvests the permulated foreground/background labelings that make the CAAS null.
 The trait is simulated under BM (or OU) on the species tree, its ranks are mapped
@@ -164,10 +165,12 @@ Usage:
 --chunk_size                  <INTEGER>                    500
 
 Permulation sizing:
---max_tries                  <INTEGER>                    1000000 (draw budget; raised 50% up to twice if the pool is short, then fails)
+--max_tries                  <INTEGER>                    1000000 (initial draw budget; extended toward the projected need while Tier 1 acceptance is at least 5%, up to max(max_tries, 50 x caas_full_perms) draws; below 5% it is raised 1.5-fold at most three times; the harvest then fails)
 --caas_full_perms            <INTEGER>                    1000    (accepted permulations harvested AND replayed as the null; 0 = replay only the real labeling)
 
 Output: directory of resample_*.tab files (one per chunk_size cycles),
+permulation_provenance.json (settings applied and relaxations), with --multi_hypothesis
+fop_labelings.tab and fop_pairs.tsv (hypothesis labelings and PSS weights of each cycle),
 permulation_manifest.tsv (tier, Dunn index and design of the canonical pairs of
 each cycle) and permulation_harvest.tsv (draws tried, rejections by reason,
 acceptance by PSS tolerance, pool and capacity of a sample of the draws).
@@ -178,7 +181,7 @@ acceptance by PSS tolerance, pool and capacity of a sample of the draws).
 
 def contrast_selection_help() {
     return '''
-Contrast Selection — Help
+Contrast Selection: Help
 =============================================
 Prunes the trait/tree pair and selects foreground/background extremes via
 an independent-contrasts algorithm before CAAS discovery.
@@ -193,14 +196,14 @@ Usage:
 --perm_strategy                  <"auto|OU|BM">               "auto"  (evolutionary model for PSS / permulation)
 --max_contrasts                   <INTEGER>                     0     (0 = dynamic discovery)
 --min_contrasts                    <INTEGER>                     3     (min foreground pairs required)
---prune_data                        <true|false>                   false  (requires --reporting)
+--prune_data                        <true|false>                   false  (requires --prune_list; also runs with --reporting false)
 --prune_list                         <"species_list">               null
 --prune_list_secondary                 <"species_list">               null
 --secondary_trait                      <"column_name">                ""     (second trait column shown in the reports)
 --branch_trait                         <"column_name">                ""     (trait column that colours the branches of the trait reports)
 --n_trait, --c_trait                   <"column_name">                ""     (sample size and case count columns of a count trait, for the Jeffreys intervals)
 --toy_mode                           <true|false>                    false  (smoke test on a random subset of alignments; species are never subsampled)
---toy_n                               <INTEGER>                      1000   (alignments kept in --toy_mode: the first N of a shuffle seeded by --seed; an empty value or 0 falls back to 50)
+--toy_n                               <INTEGER>                      1000   (alignments kept in --toy_mode: the first N of a shuffle seeded by --seed; N must be at least 1)
 '''
 }
 
@@ -208,7 +211,7 @@ Usage:
 
 def disambiguation_help() {
     return '''
-CT Disambiguation — Help
+CT Disambiguation: Help
 =============================================
 Scores each discovered CAAS with ancestral state reconstruction (ASR): how likely the
 shared residue arose independently in the contrast domains. Positions are labeled
@@ -217,7 +220,7 @@ convergent, divergent, single or no_change.
 Usage:
 --ct_disambig_asr_model             <"lg">                          "lg"
 --ct_disambig_asr_cache_dir          <"cache_dir">                   <projectDir>/caches/.asr_cache  (created if absent)
---ct_disambig_hypotheses_pairs       <"contrast_hypotheses_pairs.tsv"> ""   (PSS weights of the FOP pooling; the one of this run's contrast selection, else found in <outdir>/data_exploration/2.CT/1.Traitfiles/, else equal weights)
+--ct_disambig_hypotheses_pairs       <"contrast_hypotheses_pairs.tsv"> ""   (PSS weights of the FOP pooling for observed scoring from --discovery_from; see README)
 --ct_disambig_posterior_threshold      <FLOAT 0-1>                     0.1
 --ct_disambig_max_tasks_per_child       <INTEGER>                       50
 --asr_diagnostics                        <true|false>                    true   (render the ASR diagnostics report, 9)
@@ -226,7 +229,7 @@ Usage:
 
 def postproc_help() {
     return '''
-CT Post-processing — Help
+CT Post-processing: Help
 =============================================
 Cluster/gene-level filtering of disambiguated CAAS, background cleanup, and
 the Characterization report (8).
@@ -239,8 +242,8 @@ Usage:
 --minlen_values                       <"2,3,4,10">                        (exploratory mode)
 --maxcaas_values                        <"0.6,0.7,0.8">                     (exploratory mode)
 --filter_minlen                          <INTEGER>                            3     (filter mode)
---filter_min_positions        <INTEGER>                      null (minimum candidates per interval; unset preserves legacy count gate per gene)
---filter_maxcaas                          <FLOAT 0-1>                          0.7   (filter mode)
+--filter_min_positions        <INTEGER>                      null (minimum candidates per interval; unset: a gene needs at least filter_minlen candidates)
+--filter_maxcaas                          <FLOAT 0-1>                          0.7   (an interval is a cluster at density >= this value)
 --caas_map_dir                              <"map_dir">                          ""    (trimmer MAP tables: trains in untrimmed columns, observed and null; required by --vep)
 --remove_caas_clusters                      <BOOLEAN>                            true  (discard spatial clusters)
 --remove_extreme_genes                      <BOOLEAN>                            true  (remove genes above the far fence of their length stratum, any gene; exploratory shows what it would remove)
@@ -248,7 +251,7 @@ Usage:
 --gene_filter_strata                         <INTEGER>                            10    (gene-length strata, both rules)
 --gene_filter_k_far                           <FLOAT>                              3.0   (far fence: Extreme above Q3 + k x scale)
 --gene_filter_k_near                          <FLOAT>                              1.5   (near fence: Dubious above it with a cluster train)
---strict_remove_extreme_genes               <BOOLEAN>                            null  (strict analysis; null takes --remove_extreme_genes)
+--strict_remove_extreme_genes               <BOOLEAN>                            null  (strict null merge; null takes --remove_extreme_genes)
 --strict_remove_dubious_genes               <BOOLEAN>                            null  (strict analysis; null takes --remove_dubious_genes)
 --strict_gene_filter_strata                  <INTEGER>                            null  (strict analysis; null takes --gene_filter_strata)
 --strict_gene_filter_k_far                    <FLOAT>                              null  (strict analysis; null takes --gene_filter_k_far)
@@ -260,12 +263,12 @@ Usage:
 
 def posenrich_help() {
     return '''
-POSENRICH — Help
+POSENRICH: Help
 =============================================
 Position-level enrichment of CAAS detections on the universe U of positions (the same U as
 SCORING). The universe table (universe.tsv.gz) is shared by both levels. Level 1 (Accumulation)
-is an exact hypergeometric test of whether a gene holds more CAAS positions than its share of U
-predicts; it runs once per direction (top/bottom/all). The position registry, its characterization, level 2 (concentration of the
+counts the distinct positive positions of each gene and compares the count with the null cycles (empirical,
+headline) and with a uniform allocation over U (hypergeometric, reference); it runs once per direction (top/bottom/all). The position registry, its characterization, level 2 (concentration of the
 signal inside genes, calibrated with the null cycles) and the overlap and proximity components read SCORING's
 tables and need --scoring. Without --scoring only posenrich/universe and posenrich/accumulation are written; with
 it the run adds registry, characterization, within_gene and proximity, and report 13
@@ -276,7 +279,7 @@ Usage:
 --accumulation_caas_input            <"filtered_discovery.tsv">     null  (standalone entry: observed positives of U)
 --accumulation_background_input      <"background_file">            null  (standalone entry: gene list of U)
 --posenrich_background_file          <"background_file">            null  (tested positions, background.output)
---position_characterization         <auto|true|false>              auto  (auto: scoring + enrichment; true: scoring alone also)
+--position_characterization         <auto|true|false>              auto  (descriptive registry and characterization without POSENRICH; auto: scoring + enrichment; true: scoring alone also; they feed report 14)
 --posenrich_domains, --posenrich_ucr <true|false>                   true  (shared Pfam/UCR layers; blank tables are generated on the productive alignments)
 --domain_variability_file, --ucr_positions_file   (optional precomputed annotation sources; each needs an explicit coordinate_space)
 --pfam_cache_dir                     <"pfam_cache_dir">             ~/.cache/phylophere/pfam
@@ -285,7 +288,7 @@ Usage:
                                       -- see github.com/nozerorma/ortholog_characterizator)
 --posenrich_custom_file              (custom position sets; TSV: gene, zero-based CAAS position, term, description; no header)
 --posenrich_collections              <"id1,id2">                    "" (level 2 collections; blank = those informative inside a protein)
---posenrich_min_genes                <int>                          2 (genes of U a term needs members in to be tested by level 2)
+--posenrich_min_genes                <int>                          2 (eligible genes, with members and non-members of the term in covered U, a term needs to be tested by level 2)
 --posenrich_holdout                  <int>                          0 (validation: null cycles played as the observed one; 0 = off)
 --posenrich_within_gene_memory       <"16 GB">                      "" (level 2 memory; blank = 16 GB)
 --posenrich_radios                   <LIST>                         0,5,10 (descriptive protein-proximity radii)
@@ -297,12 +300,12 @@ Usage:
 
 def vep_help() {
     return '''
-VEP Characterization — Help
+VEP Characterization: Help
 =============================================
 Annotates the positions of SCORING with PrimateAI-3D pathogenicity scores,
 COSMIC somatic-mutation evidence, and/or Ensembl VEP consequence prediction
 (each source skipped independently if its param is empty/unset).
-Requires --scoring. Annotations are descriptive and do not change any score.
+Requires --scoring; with any source enabled it also needs --caas_map_dir. Annotations are descriptive and do not change any score.
 
 VEP reads the per-gene MAP directory from --caas_map_dir (post-processing parameter).
 It has no in-house generation path: it maps each alignment codon
@@ -314,12 +317,12 @@ Usage:
 --vep_primateai_db                 <"primateai_db">          ""   (PrimateAI-3D hg38 table; not bundled)
 --cosmic_db                          <"cosmic_db">              ""   (COSMIC Mutant Census GRCh38 table; not bundled)
 --vep_ensembl                         <BOOLEAN>                 false (runs the official Ensembl VEP CLI, independent of the two DBs above; needs --gene_ensembl_file)
---vep_mode                             <"mode">                   "auto"  (auto = existing standard offline cache when present, otherwise database; database; offline)
+--vep_mode                             <"mode">                   "auto"  (auto = offline when <cache>/homo_sapiens exists, otherwise database; database = Ensembl MySQL and REST, never cached; offline = standard cache with one indexed FASTA)
 --vep_db_host                           <"host">                   "ensembldb.ensembl.org"
 --vep_db_port                            <PORT>                    3306
---vep_cache_dir                        <"vep_cache_dir">          ""    (existing standard offline cache and preindexed FASTA; no automatic installation or private manifest)
---vep_species                            <"species">                "homo_sapiens"
---vep_assembly                             <"assembly">               "GRCh38"
+--vep_cache_dir                        <"vep_cache_dir">          ""    (existing standard offline cache and preindexed FASTA; blank: ~/.cache/phylophere/vep/homo_sapiens_GRCh38; nothing is downloaded)
+--vep_species                            <"species">                "homo_sapiens"  (fixed; another value stops the run)
+--vep_assembly                             <"assembly">               "GRCh38"  (fixed; another value stops the run)
 '''
 }
 
@@ -327,7 +330,7 @@ Usage:
 
 def fade_help() {
     return '''
-FADE (directional selection) — Help
+FADE (directional selection): Help
 =============================================
 Runs HyPhy FADE to test directional substitution bias towards amino acids
 on foreground branches in a rooted tree. Technical failures stop complete output.
@@ -340,13 +343,13 @@ Usage:
 --selection_prep_batch_size          <INTEGER>                500
 --fade_batch_size                      <INTEGER>                200
 --fade_bf_threshold                      <FLOAT>                100  (Bayes Factor cutoff)
---fade_model                               <"LG|WAG|JTT|...">       "LG" (HyPhy built-in model; Dayhoff is unsupported)
+--fade_model                               <"LG|WAG|JTT|JC69|mtMet|mtVer|gcpREV|HIVBm|HIVWm|GTR">  "LG" (other names, Dayhoff included, stop the run)
 --fade_method                                <"Variational-Bayes|Collapsed-Gibbs|Metropolis-Hastings">  "Variational-Bayes"
 --fade_grid                                    <INTEGER>                20
 --fade_chains, --fade_chain_length,
 --fade_burn_in, --fade_samples               (MCMC-only settings; ignored by Variational-Bayes)
 --fade_concentration                            <FLOAT>                  0.5
---fade_universe_file                              <"gene_list">            null  (else falls back to cleaned background)
+--fade_universe_file                              <"gene_list">            null  (else the genes tested by FADE)
 --fade_tables_dir_top / --fade_tables_dir_bottom    <"dir/selection/fade/<direction>">   null  (scoring and report from the merged FADE tables of a prior run)
 '''
 }
@@ -355,10 +358,10 @@ Usage:
 
 def rer_help() {
     return '''
-RERconverge (RER) — Help
+RERconverge (RER): Help
 =============================================
-Computes Relative Evolutionary Rate — branch-length deviation correlated with
-the trait — auto-routing to continuous or binary correlation.
+Computes Relative Evolutionary Rate, the branch-length deviation correlated with
+the trait, with automatic routing to continuous or binary correlation.
 
 Usage:
 --rer_tool                    <"build_trait,build_tree,build_matrix,continuous,binary">   ""
@@ -371,7 +374,7 @@ Usage:
 --rer_binary_clade                        <"all|ancestral|terminal">                           "all"
 --rer_min_pos                               <INTEGER>                                            2
 --rer_transform                                 <"auto|ha_logit|logit|arcsin|log10|none">            "ha_logit"
---rer_universe_file                               <"gene_list">                                        null  (else falls back to cleaned background)
+--rer_universe_file                               <"gene_list">                                        null  (else the genes tested by RER; the cleaned background if RER did not run)
 --rer_continuous_file                               <"trait.continuous.output">                          null  (validated tables + report from one precomputed RDS)
 --rer_binary_file                                    <"trait.binary.output">                              null  (same, for binary traits; mutually exclusive with continuous file)
 --rer_perms_file                                      <"perms.rds|corStat block dir">                  null  (standalone null)
@@ -385,7 +388,7 @@ Usage:
 
 def scoring_help() {
     return """
-CAAS Scoring — Help
+CAAS Scoring: Help
 =============================================
 Computes CAAS position and gene scores from CT_POSTPROC, calibrates them against the
 CAAS permulation null (empirical p, Benjamini-Hochberg q) and joins FADE and RER
@@ -394,7 +397,7 @@ evidence. VEP runs after SCORING and annotates its positions.
 Usage:
 --scoring                   <true|false>            false
 --scoring_ami                <true|false>            true    (downstream DOMINO/AMI active module analysis)
---scoring_string             <true|false>            true    (read only when --scoring_ami is unset)
+--scoring_string             <true|false>            true    (the AMI analysis runs when either --scoring_ami or --scoring_string is true)
 --gene_stat                  <"max">                 max     (only supported gene statistic: largest positive position score)
 --auto_generate_ensembl      <true|false>            false   (build --gene_ensembl_file from BioMart; read by bin/resolve_core_inputs.py)
 --ensembl_dataset            <"dataset">             ""      (BioMart dataset; blank derives it from --ref_species_name)
@@ -431,12 +434,12 @@ rer_min_pval, rer_acceleration, fade_max_bf_<direction>.
 
 def enrichment_help() {
     return '''
-Enrichment (FCS / DOMINO-STRING) — Help
+Enrichment (FCS / DOMINO-STRING): Help
 =============================================
 Ranked gene-set enrichment (FCS, Wilcoxon-AUC on GMT gene sets) for the CAAS and RER
 rankings, DOMINO active-module detection with STRING labels, and a cross-module
 Comparison report that reads the POSENRICH position characterization when it exists.
-Needs --scoring; without it only the RER FCS report can run (from RER output).
+Requires --scoring; the run stops with an error otherwise.
 
 Usage:
 --enrichment                        <true|false>          false
@@ -455,7 +458,7 @@ Usage:
 --caas_permulation_enrichment                    <true|false>             true
 
 DOMINO / STRING:
---string_species                    <NCBI taxon id>          9606   (taxon of the report 12 STRING labels; the DOMINO network is human)
+--string_species                    <NCBI taxon id>          9606   (STRING taxon of the DOMINO network and of the report 12 labels)
 --string_db_dir                           <"dir">                  ""     (pre-downloaded STRING files, checked before any download)
 --string_cache_dir                          <"dir">                  ""     (download cache; blank = ~/.cache/phylophere/string)
 --ami_description_fdr                         <FLOAT 0-1>              0.10   (FDR of the descriptive STRING labels)
@@ -476,7 +479,7 @@ workflow HELP {
         // runs unless explicitly disabled), so there is no boolean signal that reliably
         // means "the user explicitly asked for this module." Instead: always show the
         // general overview first, then append detail for every module that WOULD run
-        // given the current params — i.e. help for the run you are about to launch.
+        // given the current params, that is, help for the run you are about to launch.
         // To see only the overview, explicitly disable the modules you don't need
         // (e.g. --ct_disambiguation false --ct_postproc false --posenrich false --vep false --help;
         // an empty --ct_tool on the command line reads as true, so it is set to "" in a -params-file).

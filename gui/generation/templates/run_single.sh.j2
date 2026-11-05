@@ -48,7 +48,6 @@ set -u
 # of one trait would share NXF_HOME, RUN_DIR and WORK_DIR and collide on the locks of
 # the history database and the session cache.
 {% set strict_expl = strict_pass and postproc_mode == "exploratory" %}
-{% set diagnostic_expl = (not strict_pass) and postproc_mode == "exploratory" and modules.disambiguation.exploratory_without_null %}
 {% if strict_expl %}
 # The strict exploratory pass: the sweep and the characterization report of post-processing on the strict tables.
 if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
@@ -67,9 +66,9 @@ if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
     RUN_ENRICHMENT=false
     # The evidence table is written after SCORING; main.nf rejects it without --scoring.
     CAAS_EVIDENCE_TOP_N=0
-{% if diagnostic_expl %}
-    # Diagnostic exploratory pass: only the real labeling (b_0) is replayed, so the sweep and the characterization report come
-    # without the permulation null. The complete pass computes the null with the parameters chosen from them.
+{% if postproc_mode is defined and postproc_mode == "exploratory" %}
+    # The exploratory pass replays only the real labeling (b_0): the sweep and the characterization report come without the
+    # permulation null, which the _complete pass builds with the parameters chosen from them.
     CAAS_FULL_PERMS=0
 {% endif %}
 elif [ "${POSTPROC_MODE:-}" = "filter" ]; then

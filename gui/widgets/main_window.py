@@ -419,23 +419,15 @@ class MainWindow(QMainWindow):
                 scripts.append((single_name, single_text))
 
             if run_filt:
-                # With both modes selected (reuse_exploratory=True), the _complete pass
-                # does not rerun CAAS/Disambiguation: it reads their output from the
-                # sibling _exploratory run's outdir (see the POSTPROC_MODE="filter"
-                # branch of run_single.sh.j2). With the filter mode alone, every step
-                # runs live in the _complete scripts.
-                # (not with the diagnostic exploratory pass: it replays only the real labeling, so there is no null to reuse)
-                reuse_exploratory = run_expl and not getattr(disambig, "exploratory_without_null", False)
+                # The _complete pass is the complete analysis: it runs CAAS, Disambiguation and the permulation null itself.
+                # The exploratory pass replays only the real labeling, so there is no null for it to reuse.
                 batch_name, single_name = script_names("_complete")
                 batch_text = render_batch(
                     self.project,
                     postproc_mode="filter",
-                    reuse_exploratory=reuse_exploratory,
                     single_runner_filename=single_name,
                 )
-                single_text = render_single(
-                    self.project, postproc_mode="filter", reuse_exploratory=reuse_exploratory
-                )
+                single_text = render_single(self.project, postproc_mode="filter")
                 scripts.append((batch_name, batch_text))
                 scripts.append((single_name, single_text))
 
@@ -467,46 +459,33 @@ class MainWindow(QMainWindow):
         if disambig.enabled and run_expl:
             expl_name, _ = script_names("_exploratory")
             explanation = (
-                f"Exploratory sweep: run {expl_name} and inspect its report. It sweeps "
-                "minlen_values × maxcaas_values to help choose cluster filters; "
-                "downstream modules are skipped."
+                f"Exploratory (diagnostic): run {expl_name} and inspect its report. It works on the real labeling only "
+                "and never builds the permulation null; it sweeps minlen_values × maxcaas_values, shows what the gene "
+                "filter would remove and skips the downstream modules."
             )
             if run_filt:
                 complete_name, _ = script_names("_complete")
-                if getattr(disambig, "exploratory_without_null", False):
-                    explanation += (
-                        "\n\nThis exploratory pass replays only the real labeling (no permulation null). Set the chosen "
-                        "cluster filter values and gene-removal switches in the Disambiguation tab, regenerate the scripts, "
-                        f"then run {complete_name}. It does not reuse the exploratory output: it runs CAAS, Disambiguation and "
-                        "the null with the chosen parameters, then the enabled downstream modules."
-                    )
-                else:
-                    explanation += (
-                        "\n\nSet the chosen cluster filter values in the Disambiguation tab, "
-                        f"regenerate the scripts, then run {complete_name}. It reuses the "
-                        "exploratory CAAS and Disambiguation outputs and runs the enabled "
-                        "downstream modules. The null was merged in the exploratory pass with the cluster "
-                        "values and gene-removal switches of that pass: if you change a switch, rerun the exploratory "
-                        "script with -resume first (only the merges are recomputed); a different cluster pair recomputes "
-                        "the replay tiles, so choose it with the option to run the exploratory pass without the null."
-                    )
+                explanation += (
+                    "\n\nSet the chosen cluster filter values and gene-removal switches in the Disambiguation tab, "
+                    f"regenerate the scripts, then run {complete_name}. It does not reuse the exploratory output: it runs "
+                    "CAAS, Disambiguation and the permulation null with the chosen parameters, then the enabled downstream "
+                    "modules."
+                )
             explanations.append(explanation)
 
         if run_strict_expl:
             strict_expl_name, _ = script_names("_strict_exploratory")
             explanations.append(
-                f"Strict exploratory: run {strict_expl_name} after the normal exploratory pass has produced its strict tables. "
+                f"Strict exploratory: run {strict_expl_name} after the exploratory script has produced its strict tables. "
                 "It sweeps the cluster parameters and writes its own characterization report on the strict counts, so "
-                "Extreme and Dubious genes can be judged there. Strict gene-removal settings are applied to the strict null "
-                "when the normal scripts run: if you change them after seeing this report, rerun the normal exploratory "
-                "script with -resume (only the merges are recomputed). Cluster parameters are shared with the normal run "
-                "and changing them recomputes the replay tiles."
+                "Extreme and Dubious genes can be judged there. Cluster parameters are shared with the normal analysis; "
+                "the strict gene filter can have its own settings (Advanced)."
             )
         if run_strict:
             strict_name, _ = script_names("_strict")
             explanations.append(
-                f"Strict analysis: run {strict_name} after the normal run has produced "
-                "its strict tables. It reuses those tables and repeats post-processing "
+                f"Strict analysis: run {strict_name} after the production script has produced "
+                "its strict tables and null. It reuses them and repeats post-processing "
                 "and the enabled downstream analyses using only hypotheses without "
                 "conserved pairs. Enable strict table output and set the minimum "
                 "divergent fraction below 1 in the CAAS tab."

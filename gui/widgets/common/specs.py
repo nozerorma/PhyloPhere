@@ -47,6 +47,8 @@ class FieldSpec:
     # instead of a strict closed dropdown.
     placeholder: str = ""
     help: str = ""  # tooltip text; shown on both the label and the input widget
+    disabled_when: str = ""  # name of a "bool" field of the same config: while it is checked, this field (label, input
+    # and hint) is greyed out and not editable. Empty: always editable.
 
 
 def Section(label: str) -> FieldSpec:
