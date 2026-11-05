@@ -103,10 +103,14 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     ASR_DIAGNOSTICS=false
 {% if strict_pass %}
     # The strict pass reads the strict tables (<outdir>/strict/) that the normal run wrote, and everything that does not
-    # depend on conservation (curated tree, data exploration, permulation design) from that run itself. The strict
-    # tables come from the pass that ran the permulation core: the plain run, the complete pass, or, when the exploratory
-    # and complete passes were both generated, the exploratory pass (the complete pass reuses its CAAS output).
-    NORMAL_RUN_OUTDIRS=("${CAAS_OUTBASE}/${TRAIT}${TAG}_complete" "${CAAS_OUTBASE}/${TRAIT}${TAG}" "${CAAS_OUTBASE}/${TRAIT}${TAG}_exploratory")
+    # depend on conservation (curated tree, data exploration, permulation design) from that run itself. The exploratory
+    # pass replays only the real labeling, so the strict exploratory pass reads its strict tables (the other runs are the
+    # fallback); the strict production pass also needs the strict null, which only the complete pass or the plain run builds.
+{% if strict_expl %}
+    NORMAL_RUN_OUTDIRS=("${CAAS_OUTBASE}/${TRAIT}${TAG}_exploratory" "${CAAS_OUTBASE}/${TRAIT}${TAG}_complete" "${CAAS_OUTBASE}/${TRAIT}${TAG}")
+{% else %}
+    NORMAL_RUN_OUTDIRS=("${CAAS_OUTBASE}/${TRAIT}${TAG}_complete" "${CAAS_OUTBASE}/${TRAIT}${TAG}")
+{% endif %}
     PASS_SOURCE_OUTDIR=""
     for _d in "${NORMAL_RUN_OUTDIRS[@]}"; do
         if [ -d "${_d}/strict" ]; then PASS_SOURCE_OUTDIR="$_d"; break; fi
