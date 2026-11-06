@@ -150,9 +150,12 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     CAAS_NULL_DIR="${CAAS_REUSE_OUTDIR}/caas_permulation"
     CAAS_PERM_MANIFEST_FILE="${PASS_SOURCE_OUTDIR}/caastools/permulation_manifest.tsv"
     CAAS_PERM_HARVEST_FILE="${PASS_SOURCE_OUTDIR}/caastools/permulation_harvest.tsv"
+    # A source pass without a null (caas_full_perms 0) has no caas_permulation/ in the strict tables: the pass then
+    # runs with no null directory, as the branch below does.
     for _f in "$CAAS_NULL_DIR/cycle_roster.txt" "$CAAS_NULL_DIR/cycle_summary.tsv"; do
         [ -f "$_f" ] || echo "[WARN] expected canonical null output missing: $_f" >&2
     done
+    [ -f "$CAAS_NULL_DIR/cycle_roster.txt" ] || CAAS_NULL_DIR=""
 
     # REPORTING (dataset exploration, tree name curation and, for a row with a
     # PRUNE_FILE, pruning) ran identically in the exploratory pass, with the same

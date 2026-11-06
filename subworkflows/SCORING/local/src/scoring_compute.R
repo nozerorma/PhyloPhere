@@ -438,17 +438,14 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
 # remain available under their original ID. Ambiguous aliases fail explicitly.
 caas_gene_ids <- if (file_exists(background_file)) scoring_genes(background_file) else gene_caas$Gene
 caas_gene_ids <- unique(c(caas_gene_ids, gene_caas$Gene))
-align_producer_ids <- function(d, label) {
+align_producer_ids <- function(d, label, reference = caas_gene_ids) {
   if (!nrow(d)) return(d)
   producer <- d$Gene
-  idx <- scoring_match_genes(producer, caas_gene_ids)
-  d$Gene[!is.na(idx)] <- caas_gene_ids[idx[!is.na(idx)]]
-  if (anyDuplicated(d$Gene)) stop('Multiple ',label,' IDs resolve to the same CAAS gene')
+  idx <- scoring_match_genes(producer, reference)
+  d$Gene[!is.na(idx)] <- reference[idx[!is.na(idx)]]
+  if (anyDuplicated(d$Gene)) stop('Multiple ',label,' IDs resolve to the same gene')
   d
 }
-fade_top_df <- align_producer_ids(fade_top_df, 'FADE top')
-fade_bottom_df <- align_producer_ids(fade_bottom_df, 'FADE bottom')
-
 # ── 4c. Gene RERConverge Score (optional) ─────────────────────────────────────
 has_rer <- file_exists(rer_file)
 if (has_rer) {
@@ -520,6 +517,12 @@ if (has_rer) {
 
 gene_rer_native <- gene_rer
 gene_rer <- align_producer_ids(gene_rer, 'RER')
+
+# FADE is aligned after RER, against the CAAS IDs plus the RER IDs that CAAS does not cover. A gene outside the CAAS
+# background (e.g. removed by a stricter filter) then keeps one row, not one RER row and one FADE row.
+fade_reference <- c(caas_gene_ids, setdiff(gene_rer$Gene, caas_gene_ids))
+fade_top_df <- align_producer_ids(fade_top_df, 'FADE top', fade_reference)
+fade_bottom_df <- align_producer_ids(fade_bottom_df, 'FADE bottom', fade_reference)
 
 # ── 4d. Gene FADE Significance (optional) ─────────────────────────────────────
 # BF >= fade_bf_threshold per direction. fade_significant_top / _bottom used separately
