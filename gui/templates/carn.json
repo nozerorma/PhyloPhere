@@ -75,7 +75,6 @@
       "min_divergent_fraction": "0",
       "min_non_overlapping": "3",
       "ct_allow_relaxed_null": false,
-      "strict_conservation_output": true,
       "max_bg_gaps_fraction": "0",
       "max_fg_gaps_fraction": "0",
       "max_gaps_fraction": "0",
@@ -90,6 +89,8 @@
       "multi_hypothesis": true,
       "max_fop": "100",
       "perm_match_pss": true,
+      "perm_match_fop": true,
+      "perm_match_pss_ci": false,
       "perm_match_pss_tol": "0.25"
     },
     "disambiguation": {
@@ -111,11 +112,22 @@
       "caas_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
       "minlen_values": "2,3,4,10",
       "maxcaas_values": "0.6,0.7,0.8",
-      "gene_filter_mode": "stratified",
+      "remove_extreme_genes": true,
+      "remove_dubious_genes": true,
       "remove_caas_clusters": true,
       "gene_filter_strata": "10",
       "gene_filter_k_far": "3.0",
-      "gene_filter_k_near": "1.5"
+      "gene_filter_k_near": "1.5",
+      "removed_genes_report": true,
+      "removed_genes_window_mb": "100",
+      "gene_variability_file": "",
+      "position_variability_dir": "",
+      "strict_same_gene_filter": true,
+      "strict_remove_extreme_genes": true,
+      "strict_remove_dubious_genes": true,
+      "strict_gene_filter_strata": "10",
+      "strict_gene_filter_k_far": "3.0",
+      "strict_gene_filter_k_near": "1.5"
     },
     "rer": {
       "enabled": true,
@@ -179,19 +191,17 @@
       "enabled": true,
       "extra_flags": "",
       "evidence_p_threshold": "0.05",
-      "evidence_fdr_threshold": "0.15",
+      "evidence_fdr_levels": "0.05,0.1,0.15",
       "gene_ensembl_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output",
       "auto_generate_ensembl": false,
       "ensembl_dataset": "",
       "scoring_window_size_bp": "100000",
-      "caas_evidence_discovery": "",
       "caas_evidence_top_n": "20",
       "scoring_hypotheses_pairs": ""
     },
     "posenrich": {
       "enabled": true,
       "extra_flags": "",
-      "accumulation_fdr": "0.15",
       "accumulation_caas_input": "",
       "accumulation_background_input": "",
       "posenrich_domains": true,
@@ -204,10 +214,7 @@
       "posenrich_custom_file": "",
       "posenrich_collections": "",
       "posenrich_min_genes": "2",
-      "posenrich_within_gene_memory": "",
-      "posenrich_radios": "0,5,10",
-      "position_registry_memory": "",
-      "position_module_memory": ""
+      "posenrich_radios": "0,5,10"
     },
     "enrichment": {
       "enabled": true,
