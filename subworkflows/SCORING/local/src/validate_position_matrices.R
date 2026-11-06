@@ -1,4 +1,7 @@
 # Compare each canonical global matrix to independently aggregated position rows.
+# The position rows hold the positions of the positional universe U; the matrix is the gene statistic over every
+# detected position, inside U or not, so each cell must be at least the maximum of the position rows of its unit,
+# and a cell without position rows is unconstrained (its positions lie outside U).
 a <- commandArgs(TRUE)
 for(i in seq_along(a[-1])) {
   b <- readRDS(file.path(a[i+1],'matrices.rds'))
@@ -9,5 +12,5 @@ for(i in seq_along(a[-1])) {
     if(anyNA(g)||anyNA(c))stop('Position gene/cycle missing from matrix')
     expected[cbind(g,c)] <- as.numeric(x$max)
   }
-  if(!isTRUE(all.equal(as.numeric(expected),as.numeric(b$stat$global),tolerance=1e-12)))stop('Global null matrix disagrees with positions')
+  if(any(as.numeric(b$stat$global) < as.numeric(expected) - 1e-12))stop('Global null matrix is below the maxima of its position rows')
 }
