@@ -136,6 +136,7 @@ if (!"participating_hypotheses" %in% names(df)) df$participating_hypotheses <- "
 # Merge hypothesis-labelled descriptors without pooling species across hypotheses.
 # Reject contradictory entries rather than silently taking the first row.
 merge_hypothesis_tally <- function(values) {
+  values <- as.character(values)  # a table without rows reads these columns as logical
   values <- values[!is.na(values) & nzchar(values)]
   entries <- unique(unlist(strsplit(values, ";", fixed = TRUE)))
   if (!length(entries)) return("")

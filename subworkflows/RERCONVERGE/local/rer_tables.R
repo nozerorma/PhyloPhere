@@ -94,17 +94,23 @@ rer_write_tsv(translation,'rer_gene_identifiers.tsv')
 # Materialize a coherent renamed copy of the already validated null only when
 # names changed; the numerical values, cycles and original files are untouched.
 if (basename(null_path) != 'NO_FILE') {
+  # A precomputed null is staged under the name of the output ('normalized_null', a link to the source run's directory).
+  # file.symlink() onto it would create the link inside that directory, and writing the renamed copy to it would
+  # overwrite the source blocks. The staged link is therefore left in place when nothing changes, and replaced by the
+  # renamed copy (built under another name first) when names changed.
+  staged <- basename(null_path) == 'normalized_null' && nzchar(Sys.readlink('normalized_null'))
+  out_dir <- if (staged) 'normalized_null_renamed' else 'normalized_null'
   if (!changed) {
-    if (!file.symlink(normalizePath(null_path),'normalized_null')) stop('Cannot link RER null')
+    if (!staged && !file.symlink(normalizePath(null_path),'normalized_null')) stop('Cannot link RER null')
   } else {
-    dir.create('normalized_null')
+    dir.create(out_dir)
     for (i in seq_along(paths)) {
       b <- readRDS(paths[i]); m <- as.matrix(b$corStat)
       rownames(m) <- canonical
       if (is.null(colnames(m))) colnames(m) <- paste0('legacy_',seq_len(ncol(m)))
       b$corStat <- m
       if (!is.null(b$rer_settings)) b$rer_settings <- attr(res,'rer_settings')
-      target <- file.path('normalized_null',basename(paths[i]))
+      target <- file.path(out_dir,basename(paths[i]))
       saveRDS(b,target)
       if (!is.null(manifest)) manifest$blocks[[i]]$sha256 <- if(rer_verify_checksums()) rer_file_hash(target) else NULL
     }
@@ -112,9 +118,10 @@ if (basename(null_path) != 'NO_FILE') {
       manifest$genes <- as.list(canonical)
       manifest$settings <- attr(res,'rer_settings')
       manifest$observed_sha256 <- rer_hash(list(genes=canonical,Rho=res$Rho,P=res$P))
-      jsonlite::write_json(manifest,file.path('normalized_null','rer_null_manifest.json'),auto_unbox=TRUE,null='null',digits=NA)
-      attr(res,'rer_null_manifest') <- rer_file_hash(file.path('normalized_null','rer_null_manifest.json'))
+      jsonlite::write_json(manifest,file.path(out_dir,'rer_null_manifest.json'),auto_unbox=TRUE,null='null',digits=NA)
+      attr(res,'rer_null_manifest') <- rer_file_hash(file.path(out_dir,'rer_null_manifest.json'))
     }
+    if (staged && !(file.remove('normalized_null') && file.rename(out_dir,'normalized_null'))) stop('Cannot replace the staged RER null')
   }
 }
 summary <- rer_summary(res,nominal,fdr_levels)
