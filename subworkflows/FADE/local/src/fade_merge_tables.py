@@ -39,8 +39,13 @@ def validate(genes, sites, audits, expected, threshold):
     status={}
     for audit in audits:
         key=(audit['gene'],audit['direction'])
-        if key in status or key not in expected or audit['status'] not in {'complete','excluded'}:
-            raise ValueError(f'Duplicate, unexpected or failed audit: {key}')
+        if key in status or key not in expected or audit['status'] not in {'complete','excluded','technical_failure'}:
+            raise ValueError(f'Duplicate, unexpected or invalid audit: {key}')
+        if audit['status']=='technical_failure':
+            # Isolated by run_fade.py: no result rows; the error is kept for the failed-genes list.
+            if not isinstance(audit.get('error'),str) or not audit['error']:raise ValueError(f'Failure without error: {key}')
+            status[key]=audit
+            continue
         integer(audit.get('alignment_columns',''),1)
         retained=audit.get('retained_taxa')
         fg=audit.get('foreground_taxa')
@@ -114,10 +119,13 @@ def main():
     write(f'fade_gene_counts_{a.direction}.tsv',SUMMARY+[f'sigcount_{aa}' for aa in AA_LETTERS],genes)
     write(f'fade_site_bf_{a.direction}.tsv',SITES,sites)
     write(f'fade_sites_{a.direction}.csv',SITES,sites,',')
-    audit_rows=[dict(gene=k[0],direction=k[1],status=v['status'],reason=v.get('reason','')) for k,v in sorted(status.items()) if k[1]==a.direction]
+    audit_rows=[dict(gene=k[0],direction=k[1],status=v['status'],reason=v.get('reason',v.get('error',''))) for k,v in sorted(status.items()) if k[1]==a.direction]
     write('fade_audit.tsv',['gene','direction','status','reason'],audit_rows)
+    failed=[dict(gene=r['gene'],direction=r['direction'],error=r['reason']) for r in audit_rows if r['status']=='technical_failure']
+    write(f'fade_failed_{a.direction}.tsv',['gene','direction','error'],failed)
     metadata=dict(schema_version=1,complete=True,direction=a.direction,settings=settings,
-                  expected=len(audit_rows),tested=len(genes),excluded=sum(r['status']=='excluded' for r in audit_rows))
+                  expected=len(audit_rows),tested=len(genes),excluded=sum(r['status']=='excluded' for r in audit_rows),
+                  failed=len(failed))
     metadata['output_sha256']={name:hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in
         [f'fade_gene_counts_{a.direction}.tsv',f'fade_sites_{a.direction}.csv','fade_audit.tsv']} if os.environ.get('PHYLOPHERE_VERIFY_CHECKSUMS')=='1' else {}
     foreground={v['input_sha256']['foreground'] for k,v in status.items() if k[1]==a.direction}

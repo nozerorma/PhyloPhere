@@ -116,8 +116,12 @@ def main():
         results=list(pool.map(lambda g:run_group(g,settings,args.cpu_per_worker,args.container),jobs))
     audits=[a for _,_,aa in results for a in aa]
     failures=[a for a in audits if a['status']=='technical_failure']
+    # A gene whose HyPhy run or reduction fails is isolated: its audit records the error and the merge lists it apart.
+    # A batch of several runs that all failed points to a systematic problem (missing binary, bad inputs) and stops.
     if failures:
-        raise RuntimeError('FADE technical failures: '+'; '.join(f"{a['gene']}/{a['direction']}: {a['error']}" for a in failures))
+        print('FADE technical failures (isolated): '+'; '.join(f"{a['gene']}/{a['direction']}: {a['error']}" for a in failures),file=sys.stderr)
+    if len(audits)>1 and len(failures)==len(audits):
+        raise RuntimeError('FADE: every run in the batch failed: '+'; '.join(f"{a['gene']}/{a['direction']}: {a['error']}" for a in failures))
     if len(audits)!=len(seen):raise RuntimeError('Incomplete FADE audit coverage')
     write_tables(args.batch_id+'.fade_genes.tsv',args.batch_id+'.fade_sites.tsv',
                  [r for gg,_,_ in results for r in gg],[r for _,ss,_ in results for r in ss])

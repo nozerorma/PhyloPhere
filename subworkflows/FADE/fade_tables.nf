@@ -26,6 +26,7 @@ process FADE_TABLES {
     path "fade_sites_${direction}.csv", emit: sites_csv
     path 'fade_run_metadata.json', emit: metadata
     path 'fade_audit.tsv', emit: audit
+    path "fade_failed_${direction}.tsv", emit: failed
     script:
     def py=(params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python' : 'python'
     """

@@ -157,8 +157,9 @@ if (known_settings) {
   if (has_fg && !is.null(metadata$foreground_sha256)) check_hash(params$fg_list_file, metadata$foreground_sha256)
 }
 if (known_settings) {
-  cat(sprintf('Coverage: %d expected gene/direction runs; %d tested; %d biological exclusions.\n',
-              metadata$expected, metadata$tested, metadata$excluded))
+  failed_n <- if (is.null(metadata$failed)) 0L else metadata$failed
+  cat(sprintf('Coverage: %d expected gene/direction runs; %d tested; %d biological exclusions; %d technical failures (listed in fade_failed_%s.tsv).\n',
+              metadata$expected, metadata$tested, metadata$excluded, failed_n, params$direction))
 } else {
   cat('Original settings and completion audit were not recorded. These legacy tables do not establish full run coverage.\n')
 }
