@@ -65,6 +65,8 @@ def main():
     stats = pd.read_csv(args.gene_stats, sep='\t', usecols=['Gene', 'category', 'length', 'n_CAAS', 'stratum'])
     disc = pd.read_csv(args.discovery, sep='\t', usecols=['Gene', 'Position', 'side'], dtype={'Gene': str})
     disc = disc.drop_duplicates(['Gene', 'Position', 'side'])
+    if disc.empty:
+        sys.exit('the discovery has no candidate positions; nothing to profile')
     if args.clusters:
         cl = pd.read_csv(args.clusters, sep='\t', usecols=['Gene', 'Position', 'clustering_flag'])
         disc = disc.merge(cl, on=['Gene', 'Position'], how='left')

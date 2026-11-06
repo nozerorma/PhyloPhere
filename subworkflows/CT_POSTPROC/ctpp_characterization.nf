@@ -126,6 +126,13 @@ process CT_POSTPROC_REMOVED_REPORT {
         window_mb: params.removed_genes_window_mb, output_dir: '.'])
     """
     echo '${task.ext.source_hash}' > report_source.sha256
+    # A run without candidate positions (e.g. a strict pass with none) has nothing to characterize: leave a note, not a failure.
+    if [ "\$(wc -l < ${ppQuote(discovery_file)})" -lt 2 ]; then
+        mkdir -p removed_genes_characterization removed_genes_profile
+        echo 'No candidate positions in the observed discovery.' | tee removed_genes_characterization/EMPTY.txt > removed_genes_profile/EMPTY.txt
+        echo '<html><body><p>The observed discovery has no candidate positions; there are no genes to characterize.</p></body></html>' > 8.1.Removed_genes_report.html
+        exit 0
+    fi
     cp -R ${ppQuote(local_dir)}/. .
     cp ${ppQuote("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R")} src/
     ${py3} src/removed_genes_profile.py --discovery ${ppQuote(discovery_file)} --gene-stats ${ppQuote(gene_stats_file)} \
