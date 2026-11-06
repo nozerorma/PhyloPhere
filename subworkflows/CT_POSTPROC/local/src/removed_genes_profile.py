@@ -16,16 +16,27 @@ Outputs: gene_profile.tsv, position_profile.tsv, pfam_by_category.tsv (in --out-
 Coordinates: the reference tables must declare coordinate_space CAAS_0based; any other space stops the run, so that
 a column is never compared across spaces.
 """
-import argparse, os, sys
+import argparse, os, re, sys
 import numpy as np
 import pandas as pd
 
 CHUNK = 2_000_000
 
 
-def base(gene):
-    """Gene key without the protein suffix used by the PPGA tables."""
-    return gene[:-5] if gene.endswith('.prot') else gene
+SPECIES = re.compile(r'\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$')
+
+
+def make_resolver(genes):
+    """Maps a reference-table gene to the gene name of the run, or None. The tables of one family name genes as
+    'A1BG', 'A1BG.Homo_sapiens' or 'A1BG.Homo_sapiens.prot'; the first form present among the run genes wins."""
+    cache = {}
+
+    def resolve(g):
+        if g not in cache:
+            c = g[:-5] if g.endswith('.prot') else g
+            cache[g] = next((x for x in (g, c, SPECIES.sub('', c)) if x in genes), None)
+        return cache[g]
+    return resolve
 
 
 def check_space(df, path):
@@ -33,12 +44,12 @@ def check_space(df, path):
         sys.exit(f'{path}: coordinate_space must be CAAS_0based')
 
 
-def read_chunks(path, usecols, genes):
-    """Stream a large table, keeping the rows of the candidate genes."""
+def read_chunks(path, usecols, resolve):
+    """Stream a large table, keeping the rows of the candidate genes (renamed to the run gene names)."""
     for ch in pd.read_csv(path, sep='\t', usecols=usecols, chunksize=CHUNK, dtype={'gene': str}):
         check_space(ch, path) if 'coordinate_space' in ch else None
-        ch['gene'] = ch['gene'].map(base)
-        yield ch[ch['gene'].isin(genes)]
+        ch['gene'] = ch['gene'].map(resolve)
+        yield ch[ch['gene'].notna()]
 
 
 def main():
@@ -64,6 +75,7 @@ def main():
     if disc['category'].isna().any():
         sys.exit('discovery genes missing from gene_stats')
     genes = set(stats['Gene'])
+    resolve = make_resolver(genes)
     pos = disc[['Gene', 'Position', 'side', 'train', 'category']].copy()
     key = pos['Gene'] + '|' + pos['Position'].astype(str)
 
@@ -71,8 +83,8 @@ def main():
     gene = stats.set_index('Gene')
     if args.gene_variability:
         gv = pd.read_csv(args.gene_variability, sep='\t')
-        gv['Gene'] = gv['gene'].map(base)
-        gv = gv.set_index('Gene')[['n_positions', 'pct_variable', 'mean_variability', 'mean_gap_fraction']]
+        gv['Gene'] = gv['gene'].map(resolve)
+        gv = gv.dropna(subset=['Gene']).set_index('Gene')[['n_positions', 'pct_variable', 'mean_variability', 'mean_gap_fraction']]
         gene = gene.join(gv.rename(columns={'n_positions': 'n_columns', 'mean_variability': 'gene_mean_variability',
                                             'mean_gap_fraction': 'gene_mean_gap'}))
     if args.entropy_dir:
@@ -98,8 +110,8 @@ def main():
     if args.domains:
         dom = pd.read_csv(args.domains, sep='\t', dtype=str)
         check_space(dom, args.domains)
-        dom = dom[dom['gene'].map(base).isin(genes)].copy()
-        dom['gene'] = dom['gene'].map(base)
+        dom['gene'] = dom['gene'].map(resolve)
+        dom = dom[dom['gene'].notna()].copy()
         rows = []
         for r in dom.itertuples():
             for p in str(r.alignment_positions).split(','):
@@ -129,7 +141,7 @@ def main():
     if args.ucr:
         reg, ncore = {}, {}
         want = set(key)
-        for ch in read_chunks(args.ucr, ['gene', 'position', 'region_type', 'coordinate_space'], genes):
+        for ch in read_chunks(args.ucr, ['gene', 'position', 'region_type', 'coordinate_space'], resolve):
             ch['k'] = ch['gene'] + '|' + ch['position'].astype(str)
             for k, r in zip(ch['k'], ch['region_type']):
                 if k in want and reg.get(k) != 'core':
@@ -145,7 +157,7 @@ def main():
         acc, rows = {}, []
         want = set(key)
         for ch in read_chunks(args.fubar, ['gene', 'alignment_position', 'prob_pos', 'prob_neg', 'is_pos_hit', 'is_neg_hit',
-                                           'coordinate_space'], genes):
+                                           'coordinate_space'], resolve):
             for g, d in ch.groupby('gene'):
                 s = acc.setdefault(g, [0, 0, 0])
                 s[0] += len(d); s[1] += int(d['is_pos_hit'].sum()); s[2] += int(d['is_neg_hit'].sum())

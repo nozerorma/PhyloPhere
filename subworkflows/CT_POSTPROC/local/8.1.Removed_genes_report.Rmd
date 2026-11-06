@@ -140,6 +140,8 @@ if (has(gene,'caas_mean_variability','mean_variability_noncaas')) {
 
 ```{r pfam, results='asis'}
 if (has(gene,'n_pfam_columns')) {
+  # Alignment columns come from the variability tables; without them the column fraction is not computed.
+  if (!'n_columns' %in% names(gene)) gene$n_columns <- NA_real_
   gene <- gene %>% mutate(pfam_column_fraction = replace_na(n_pfam_columns,0)/n_columns)
   p <- pos %>% group_by(Category=category) %>% summarise(Positions=n(), `CAAS in a Pfam domain`=mean(in_pfam),
     Train_positions=sum(train), `Train in a Pfam domain`=mean(in_pfam[train]), .groups='drop')
