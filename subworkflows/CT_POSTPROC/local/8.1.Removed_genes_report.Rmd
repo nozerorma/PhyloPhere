@@ -1,0 +1,242 @@
+---
+title: "Characterization of the genes removed by the gene filter"
+author: "PhyloPhere pipeline"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    code_folding: hide
+    self_contained: true
+params:
+  profile_dir: NULL           # output directory of src/removed_genes_profile.py
+  gene_stats_file: NULL
+  gene_ensembl_file: NULL
+  window_mb: 100              # genomic window size in Mb
+  output_dir: "."
+---
+
+<style>
+body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+.main-container { max-width: 95%; }
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE, fig.width=10, fig.height=6)
+suppressPackageStartupMessages({ library(tidyverse); library(paletteer); library(knitr); library(kableExtra) })
+source('src/report_style.R'); source('src/report_io.R'); set_report_style()
+out <- 'removed_genes_characterization'; dir.create(out, showWarnings=FALSE, recursive=TRUE)
+num <- function(x) suppressWarnings(as.numeric(x))
+gene <- read_tsv(file.path(params$profile_dir,'gene_profile.tsv'), show_col_types=FALSE, progress=FALSE)
+pos <- read_tsv(file.path(params$profile_dir,'position_profile.tsv'), show_col_types=FALSE, progress=FALSE)
+pfam <- if (file.exists(file.path(params$profile_dir,'pfam_by_category.tsv')))
+  read_tsv(file.path(params$profile_dir,'pfam_by_category.tsv'), show_col_types=FALSE, progress=FALSE) else NULL
+lv <- c('Normal','Extreme','Dubious','Both')
+gene$category <- factor(gene$category, lv); pos$category <- factor(pos$category, lv)
+palette <- report_palette(10); colors <- c(Normal=palette[10],Extreme=palette[3],Dubious=palette[1],Both=palette[7])
+has <- function(df, ...) all(c(...) %in% names(df)) && any(!is.na(df[[c(...)[1]]]))
+removed <- gene %>% filter(category != 'Normal')
+w <- as.numeric(params$window_mb)
+```
+
+# Scope
+
+Genes are grouped by the verdict of the gene filter on the observed discovery: **Normal** (retained)
+and the three removed categories **Extreme** (CAAS count above the far fence of the gene-length stratum),
+**Dubious** (above the near fence and carrying a cluster train) and **Both**. All genes are the CT candidates of the run
+(`r nrow(gene)` genes, `r sum(gene$category!='Normal')` removed). A *cluster train* is a CAAS position flagged by the selected
+cluster filter. Every comparison is descriptive: the filter selects genes on CAAS count, which grows with gene length, so
+each removed gene is compared with Normal genes of its own length stratum (stratum residuals) and not with the whole set.
+The contrasts on CAAS count and CAAS per kb of section 1 hold by construction, since the filter selects on them; they are shown as a
+reference for the other metrics.
+Positions are alignment columns (0-based, `CAAS_0based`).
+
+```{r counts}
+gene %>% group_by(Category=category) %>% summarise(Genes=n(), Median_length=median(length), Median_CAAS=median(n_CAAS),
+  Positions=sum(n_positions,na.rm=TRUE), Train_positions=sum(n_train,na.rm=TRUE), .groups='drop') %>%
+  kable(caption='Genes by filter category') %>% kable_styling(full_width=FALSE)
+```
+
+```{r helpers}
+# Value minus the median of the Normal genes of the same length stratum; the contrast of each removed category with Normal uses
+# a Wilcoxon rank-sum test on these residuals, BH-adjusted over the metrics and categories of one table.
+resid_table <- function(df, metrics) {
+  rows <- map_dfr(names(metrics), function(m) {
+    d <- df %>% filter(is.finite(.data[[m]])) %>% group_by(stratum) %>%
+      mutate(res = .data[[m]] - median(.data[[m]][category=='Normal'], na.rm=TRUE)) %>% ungroup()
+    ref <- d$res[d$category=='Normal']
+    map_dfr(setdiff(lv,'Normal'), function(k) {
+      x <- d$res[d$category==k]
+      if (length(x) < 3 || length(ref) < 3) return(NULL)
+      tibble(Metric=metrics[[m]], Category=k, n=length(x), Median=median(d[[m]][d$category==k]),
+             Median_residual=median(x), p=wilcox.test(x, ref)$p.value)
+    })
+  })
+  if (nrow(rows)) rows$q <- p.adjust(rows$p, 'BH')
+  rows
+}
+box <- function(df, y, lab, title) {
+  pp_plot(ggplot(df %>% filter(is.finite(.data[[y]])), aes(category, .data[[y]], fill=category)) +
+    geom_boxplot(outlier.size=.6, alpha=.85) + scale_fill_manual(values=colors, guide='none') +
+    labs(title=title, x=NULL, y=lab), file.path(out, paste0(y, '.png')), width=8, height=5)
+}
+```
+
+# 1. Gene size and CAAS load
+
+```{r size}
+g <- gene %>% mutate(caas_per_kb = n_CAAS / length * 1000)
+box(g, 'length', 'Gene length (aligned columns)', 'Length by filter category')
+box(g, 'n_CAAS', 'CAAS candidates per gene', 'CAAS count by filter category')
+rt <- resid_table(g, c(length='Length', n_CAAS='CAAS count', caas_per_kb='CAAS per kb'))
+write_tsv(rt, file.path(out,'size_residuals.tsv')); pp_show(rt, 'Stratum-adjusted contrasts with Normal genes (descriptive)')
+```
+
+# 2. Variability
+
+Variability is the Valdar score of each alignment column (`1 - C_trident`, 0 = conserved, 1 = fully variable).
+BMGE has already trimmed the alignments, so the gap fraction is a residual quality measure.
+
+## 2.1 Whole gene
+
+```{r var-gene, results='asis'}
+if (has(gene,'gene_mean_variability')) {
+  box(gene, 'gene_mean_variability', 'Mean column variability', 'Whole-gene variability')
+  box(gene, 'gene_mean_gap', 'Mean gap fraction', 'Whole-gene gap fraction')
+  rt <- resid_table(gene, c(gene_mean_variability='Gene mean variability', gene_mean_gap='Gene mean gap fraction',
+                            pct_variable='Percent variable columns'))
+  write_tsv(rt, file.path(out,'variability_gene_residuals.tsv')); pp_show(rt, 'Stratum-adjusted contrasts with Normal genes')
+} else cat('No gene variability table supplied.\n\n')
+```
+
+## 2.2 CAAS positions against the rest of the gene
+
+Within each gene the mean variability of its CAAS columns is paired with that of all its other columns. Cluster-train
+positions are shown apart.
+
+```{r var-pos, results='asis'}
+if (has(gene,'caas_mean_variability','mean_variability_noncaas')) {
+  long <- gene %>% select(Gene, category, `CAAS columns`=caas_mean_variability, `Cluster-train columns`=train_mean_variability,
+                          `Other columns`=mean_variability_noncaas) %>%
+    pivot_longer(-c(Gene,category), names_to='Set', values_to='variability') %>% filter(is.finite(variability)) %>%
+    mutate(Set=factor(Set, c('Other columns','CAAS columns','Cluster-train columns')))
+  pp_plot(ggplot(long, aes(Set, variability, fill=Set)) + geom_boxplot(outlier.size=.5, alpha=.85) +
+    facet_wrap(~category, nrow=1) + scale_fill_manual(values=unname(palette[c(10,2,4)]), guide='none') +
+    labs(title='Variability of CAAS columns, cluster trains and the rest of each gene', x=NULL, y='Mean column variability') +
+    theme(axis.text.x=element_text(angle=30, hjust=1)), file.path(out,'variability_sets.png'), width=11, height=5.5)
+  d <- gene %>% filter(is.finite(caas_mean_variability), is.finite(mean_variability_noncaas)) %>%
+    group_by(Category=category) %>% summarise(Genes=n(), CAAS=median(caas_mean_variability), Other=median(mean_variability_noncaas),
+      Median_paired_difference=median(caas_mean_variability-mean_variability_noncaas), .groups='drop')
+  write_tsv(d, file.path(out,'variability_caas_vs_rest.tsv')); pp_show(d, 'CAAS columns minus other columns, per gene')
+  if (any(is.finite(gene$caas_mean_gap_fraction))) {
+    rt <- resid_table(gene, c(caas_mean_gap_fraction='Gap fraction at CAAS columns'))
+    pp_show(rt, 'Gap fraction at CAAS columns, stratum-adjusted')
+  }
+} else cat('No per-column variability supplied (position_variability_dir).\n\n')
+```
+
+# 3. Pfam domains
+
+```{r pfam, results='asis'}
+if (has(gene,'n_pfam_columns')) {
+  gene <- gene %>% mutate(pfam_column_fraction = replace_na(n_pfam_columns,0)/n_columns)
+  p <- pos %>% group_by(Category=category) %>% summarise(Positions=n(), `CAAS in a Pfam domain`=mean(in_pfam),
+    Train_positions=sum(train), `Train in a Pfam domain`=mean(in_pfam[train]), .groups='drop')
+  cov <- gene %>% group_by(Category=category) %>% summarise(`Gene columns in a Pfam domain`=median(pfam_column_fraction), .groups='drop')
+  tab <- left_join(p, cov, by='Category'); write_tsv(tab, file.path(out,'pfam_overlap.tsv'))
+  pp_show(mutate(tab, across(where(is.double), ~round(.x,3))), 'Fraction of columns inside a Pfam domain')
+  if (!is.null(pfam)) {
+    totals <- gene %>% count(category, name='category_genes')
+    for (lev in c('clan','pfam')) {
+      t <- pfam %>% filter(level==lev) %>% left_join(totals, by=c('category'='category')) %>%
+        mutate(gene_fraction=genes/category_genes)
+      wide <- t %>% filter(category!='Normal') %>% left_join(t %>% filter(category=='Normal') %>%
+        select(term, normal_gene_fraction=gene_fraction), by='term') %>%
+        mutate(normal_gene_fraction=replace_na(normal_gene_fraction,0)) %>%
+        arrange(category, desc(genes)) %>% group_by(category) %>% slice_head(n=15) %>% ungroup()
+      write_tsv(t, file.path(out, paste0(lev,'_by_category.tsv')))
+      cat(sprintf('\n\n## Most frequent %s terms of the removed genes\n\n', if (lev=='clan') 'Pfam clan' else 'Pfam domain'))
+      pp_show(wide %>% transmute(Category=category, Term=term, Genes=genes, Gene_fraction=round(gene_fraction,3),
+        Normal_gene_fraction=round(normal_gene_fraction,3), CAAS_positions=caas_positions, Train_positions=train_positions),
+        'Gene fraction is within each category; Normal gives the background frequency')
+    }
+  }
+} else cat('No Pfam table supplied.\n\n')
+```
+
+# 4. Ultraconserved regions (UCR)
+
+```{r ucr, results='asis'}
+if ('ucr_region' %in% names(pos)) {
+  u <- pos %>% count(category, ucr_region) %>% group_by(category) %>% mutate(fraction=n/sum(n)) %>% ungroup() %>%
+    mutate(ucr_region=factor(ucr_region, c('core','flank','none')))
+  pp_plot(ggplot(u, aes(category, fraction, fill=ucr_region)) + geom_col() +
+    scale_fill_manual(values=unname(palette[c(2,4,10)]), name='UCR region') +
+    labs(title='UCR region of the CAAS columns', x=NULL, y='Fraction of CAAS positions'),
+    file.path(out,'ucr_region.png'), width=8, height=5)
+  write_tsv(u, file.path(out,'ucr_region.tsv'))
+  tr <- pos %>% filter(train) %>% count(category, ucr_region) %>% group_by(category) %>% mutate(fraction=round(n/sum(n),3))
+  pp_show(tr, 'UCR region of cluster-train positions')
+} else cat('No UCR table supplied.\n\n')
+```
+
+# 5. FUBAR selection calls
+
+```{r fubar, results='asis'}
+if ('is_pos_hit' %in% names(pos)) {
+  f <- pos %>% group_by(Category=category) %>% summarise(Positions=n(), `With a FUBAR call`=sum(!is.na(prob_pos)),
+    `Positive (diversifying)`=sum(is_pos_hit==1, na.rm=TRUE), `Negative (purifying)`=sum(is_neg_hit==1, na.rm=TRUE),
+    `Median P(positive)`=median(prob_pos, na.rm=TRUE), .groups='drop') %>%
+    mutate(`Positive %`=round(100*`Positive (diversifying)`/`With a FUBAR call`,2),
+           `Negative %`=round(100*`Negative (purifying)`/`With a FUBAR call`,2))
+  write_tsv(f, file.path(out,'fubar_caas.tsv')); pp_show(f, 'FUBAR calls at the CAAS columns')
+  g2 <- gene %>% filter(n_fubar_sites > 0) %>% mutate(pos_fraction=n_fubar_pos/n_fubar_sites, neg_fraction=n_fubar_neg/n_fubar_sites)
+  box(g2, 'pos_fraction', 'Fraction of sites with positive FUBAR hit', 'Whole-gene FUBAR positive fraction')
+  box(g2, 'neg_fraction', 'Fraction of sites with negative FUBAR hit', 'Whole-gene FUBAR negative fraction')
+} else cat('No FUBAR table supplied.\n\n')
+```
+
+# 6. Genomic location
+
+Windows of `r w` Mb on the genome. For each window the number of removed genes is compared with its expected number if removal
+were independent of position (binomial, with the share of all candidate genes in that window as probability);
+BH-adjusted over the windows with candidates.
+
+```{r genomic, results='asis'}
+ann <- pp_table(params$gene_ensembl_file, c('gene','chr','start','end')) %>% pp_numeric(c('start','end'))
+sym <- function(x) sub('\\.[A-Z][a-z]+_[a-z]+(_[A-Za-z0-9]+)*$', '', sub('\\.prot$', '', x), perl=TRUE)
+gg <- gene %>% mutate(symbol=sym(Gene)) %>% inner_join(ann %>% select(symbol=gene,chr,start,end) %>% distinct(symbol,.keep_all=TRUE),
+        by='symbol') %>% filter(is.finite(start), is.finite(end)) %>%
+  mutate(window=floor((start+end)/2/(w*1e6)), removed=category!='Normal')
+cat(sprintf('%d of %d genes have a genomic annotation.\n\n', nrow(gg), nrow(gene)))
+if (nrow(gg) && any(gg$removed)) {
+  N <- nrow(gg); R <- sum(gg$removed)
+  win <- gg %>% group_by(chr, window) %>% summarise(candidates=n(), removed_genes=sum(removed),
+    Extreme=sum(category=='Extreme'), Dubious=sum(category=='Dubious'), Both=sum(category=='Both'), .groups='drop') %>%
+    mutate(start_mb=window*w, end_mb=(window+1)*w, expected=R*candidates/N, ratio=removed_genes/expected,
+      p=pbinom(removed_genes-1, R, candidates/N, lower.tail=FALSE)) %>%   # P(X >= observed)
+    mutate(q=p.adjust(p,'BH'))
+  chrs <- win %>% mutate(n=suppressWarnings(as.numeric(sub('^chr','',chr)))) %>% distinct(chr,n) %>%
+    arrange(is.na(n), n, chr) %>% pull(chr)
+  win <- win %>% mutate(chr=factor(chr, chrs)) %>% arrange(chr, window)
+  write_tsv(win, file.path(out, 'removed_genes_windows.tsv'))
+  pp_plot(ggplot(win, aes(window*w, removed_genes/pmax(candidates,1))) +
+    geom_col(fill=colors[['Both']]) + facet_grid(.~chr, scales='free_x', space='free_x') +
+    labs(title=sprintf('Fraction of candidate genes removed per %g-Mb window', w), x=sprintf('Position (%g-Mb windows)', w),
+         y='Removed / candidate genes') + theme(axis.text.x=element_blank(), panel.spacing=unit(.1,'lines')),
+    file.path(out,'removed_windows.png'), width=14, height=4.5)
+  pp_show(win %>% filter(removed_genes > 0) %>% arrange(p) %>% mutate(across(c(expected,ratio), ~round(.x,2)),
+    across(c(p,q), ~signif(.x,3))) %>% select(chr, start_mb, end_mb, candidates, removed_genes, Extreme, Dubious, Both,
+    expected, ratio, p, q), 'Windows with removed genes, ordered by p')
+}
+```
+
+# 7. Removed genes
+
+```{r list}
+cols <- intersect(c('Gene','category','length','n_CAAS','n_positions','n_train','gene_mean_variability','caas_mean_variability',
+  'mean_variability_noncaas','n_pfam_domains','n_ucr_core_columns','n_fubar_pos'), names(gene))
+rg <- removed %>% select(all_of(cols)) %>% arrange(category, desc(n_CAAS)) %>% mutate(across(where(is.double), ~round(.x,3)))
+write_tsv(rg, file.path(out,'removed_genes_profile.tsv')); pp_show(rg, 'Removed genes and their profile')
+```

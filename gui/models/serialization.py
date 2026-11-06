@@ -158,6 +158,10 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
     if isinstance(runtime, dict) and "remove_intermediates" in runtime:
         runtime.pop("remove_intermediates")
         logger.warning("project parameter remove_intermediates was retired: task hygiene is unconditional; published null blocks are preserved")
+    posenrich = data["modules"].get("posenrich")
+    if isinstance(posenrich, dict) and "posenrich_holdout" in posenrich:
+        posenrich.pop("posenrich_holdout")
+        logger.warning("project parameter posenrich_holdout was retired: no process reads it")
     resources = data.get("resources")
     if isinstance(resources, dict) and isinstance(resources.get("process_overrides"), list):
         rows = resources["process_overrides"]

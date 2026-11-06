@@ -191,18 +191,19 @@ def validate(project: ProjectConfig) -> list[str]:
         # with vep_install on first use (subworkflows/VEP/ensembl_vep.nf).
 
     # ── Scoring ───────────────────────────────────────────────────────────────
-    # The checkbox is disabled in the Runtime tab; a project file that still carries it on would emit use_apptainer.
-    if project.runtime.use_apptainer:
-        errors.append(
-            "Apptainer is not operational: the available container image predates the current environment "
-            "(no pyarrow, hyphy, paml, domino or R report stack). Uncheck it and use the conda environment."
-        )
     # filter_min_positions is emitted as a bare JSON number, so only a positive integer (or blank) is accepted.
     fmp = project.modules.disambiguation.filter_min_positions.strip()
     if fmp and not (fmp.isdigit() and int(fmp) > 0):
         errors.append(f"Post-processing: minimum candidates per interval must be a positive integer or blank (got {fmp!r}).")
     # The gene-removal fences: positive integer strata, finite non-negative multipliers, far fence not below the near fence.
     dis = project.modules.disambiguation
+    # Report 8.1 window: a positive number of Mb.
+    try:
+        window_ok = float(dis.removed_genes_window_mb) > 0
+    except ValueError:
+        window_ok = False
+    if not window_ok:
+        errors.append(f"Post-processing: report 8.1 window must be a positive number of Mb (got {dis.removed_genes_window_mb!r}).")
     strata = dis.gene_filter_strata.strip()
     if not (strata.isdigit() and int(strata) >= 1):
         errors.append(f"Post-processing: gene-length strata must be a positive integer (got {strata!r}).")
@@ -320,6 +321,8 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("Enrichment: GMT directory", m.enrichment.gmt_dir, "dir"),
         ("POSENRICH: Pfam cache directory", m.posenrich.pfam_cache_dir, "dir"),
         ("Enrichment: STRING database directory", m.enrichment.string_db_dir, "dir"),
+        ("Report 8.1: gene variability file", m.disambiguation.gene_variability_file, "file"),
+        ("Report 8.1: per-column variability directory", m.disambiguation.position_variability_dir, "dir"),
         ("POSENRICH: domain variability file", m.posenrich.domain_variability_file, "file"),
         ("POSENRICH: UCR positions file", m.posenrich.ucr_positions_file, "file"),
         ("POSENRICH: FUBAR sites file", m.posenrich.fubar_sites_file, "file"),

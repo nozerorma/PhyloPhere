@@ -84,23 +84,12 @@ class RuntimeTab(QWidget):
         form.addRow(self.toy_mode)
         _tip("Smoke test on a random subset of alignments (--toy_mode). Species are not subsampled.", self.toy_mode)
 
-        # Disabled and unchecked while the available image predates the current environment (no pyarrow, hyphy,
-        # paml, domino or R report stack). The model field stays, so enabling it later is a one-line change here.
         self.use_apptainer = QCheckBox("Apptainer container (--use_apptainer)")
-        self.use_apptainer.setChecked(False)
-        self.use_apptainer.setEnabled(False)
+        self.use_apptainer.setChecked(self._config.use_apptainer)
+        self.use_apptainer.toggled.connect(self._on_use_apptainer_changed)
         form.addRow(self.use_apptainer)
-        _tip("Not operational: the available container image predates the current environment. Use the conda environment.", self.use_apptainer)
-        self.apptainer_notice = QLabel(
-            "Apptainer is not operational yet: the available image (miralnso/phylophere:latest, June 2025) lacks pyarrow, "
-            "hyphy, paml, domino and the R report stack. Run with the conda environment."
-        )
-        self.apptainer_notice.setWordWrap(True)
-        self.apptainer_notice.setStyleSheet(
-            "QLabel { background-color: rgba(234, 179, 8, 0.12); color: #d97706; "
-            "border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 6px; padding: 8px 12px; font-weight: 500; }"
-        )
-        form.addRow(self.apptainer_notice)
+        _tip("Runs every process in the local SIF image (apptainer/phylophere.sif, built from environment/Dockerfile). "
+             "The generated scripts add the apptainer profile to the run.", self.use_apptainer)
 
         self.remove_work = QCheckBox("Remove work/ after a successful run (--remove_work)")
         self.remove_work.setChecked(self._config.remove_work)
@@ -363,6 +352,10 @@ class RuntimeTab(QWidget):
 
     def _on_toy_mode_changed(self, value: bool) -> None:
         self._config.toy_mode = value
+        self.changed.emit()
+
+    def _on_use_apptainer_changed(self, value: bool) -> None:
+        self._config.use_apptainer = value
         self.changed.emit()
 
     def _on_remove_work_changed(self, value: bool) -> None:

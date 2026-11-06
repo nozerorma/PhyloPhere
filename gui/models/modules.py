@@ -126,6 +126,11 @@ class DisambiguationConfig(ModuleConfigBase):
     gene_filter_strata: str = "10"  # --gene_filter_strata
     gene_filter_k_far: str = "3.0"  # --gene_filter_k_far
     gene_filter_k_near: str = "1.5"  # --gene_filter_k_near
+    # Report 8.1 (genes removed by the gene filter). Pfam, UCR and FUBAR tables are the POSENRICH reference fields.
+    removed_genes_report: bool = True  # --removed_genes_report
+    removed_genes_window_mb: str = "100"  # --removed_genes_window_mb
+    gene_variability_file: str = ""  # --gene_variability_file
+    position_variability_dir: str = ""  # --position_variability_dir
     # Gene-removal settings of the strict analysis. With strict_same_gene_filter the generated scripts give strict the values
     # of the normal run; otherwise they give it the strict_* values below (--strict_remove_extreme_genes, ...). Cluster
     # parameters have no strict counterpart: they act inside the replay tiles, shared by the normal and strict tables.

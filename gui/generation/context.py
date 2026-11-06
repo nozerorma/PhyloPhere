@@ -74,7 +74,8 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
     ctx["ct_tool_string"] = _ct_tool_string(caas)
     ctx["rer_tool_string"] = _rer_tool_string(project.modules.rer)
 
-    ctx["profile"] = project.runtime.runtime_type  # "local" or "slurm"
+    # "local" or "slurm"; with the container option the apptainer profile is added, the one that sets process.container
+    ctx["profile"] = project.runtime.runtime_type + (",apptainer" if project.runtime.use_apptainer else "")
 
     pc = project.precomputed
     # A "use precomputed X" box on the Precomputed Run tab wins over that module's own

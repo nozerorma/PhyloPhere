@@ -201,7 +201,8 @@
                           "${outdir}/postproc/preprocessed",
                           "${outdir}/postproc/gene_filtering",
                           "${outdir}/postproc/cleaned_backgrounds"],
-              htmlCandidates: ["${outdir}/html_reports/8.Characterization_report.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/8.Characterization_report.html",
+                                "${outdir}/html_reports/8.1.Removed_genes_report.html"] ],
 
             [ id: 'ct_acc',      name: 'POSENRICH level 1: accumulation',   type: 'processes',
               filesDirs: ["${outdir}/posenrich/accumulation",

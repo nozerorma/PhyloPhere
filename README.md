@@ -38,7 +38,14 @@ micromamba activate phylophere      # or: conda activate phylophere
 nextflow -version
 ```
 
-The `singularity` and `apptainer` profiles are not operational: the image they expect (`apptainer/miralnso-phylophere-latest.img`, not in the repository) lacks several tools, and `main.nf` warns when either profile is active. Use the conda environment.
+The `apptainer` and `singularity` profiles run every process in a local SIF image, `apptainer/phylophere.sif`, which is not in the repository. It holds the environments of `environment/phylophere.yml` and `environment/vep.yml` (the pipeline code is not copied into it) and is built once from `environment/Dockerfile`:
+
+```bash
+docker build -t phylophere:local environment/
+apptainer build apptainer/phylophere.sif docker-daemon://phylophere:local
+```
+
+Run with `-profile local,apptainer` (the GUI adds the profile when the Apptainer option is checked). `vep` is available through wrappers in `/usr/local/bin`, because its Perl libraries live in the `vep` environment.
 
 ## Quick start
 
@@ -241,6 +248,9 @@ The cluster and gene filters use all distinct CT candidate positions, including 
 | `gene_filter_strata` | 10 | Number of gene-length strata of equal size, cut by length within the genes that have at least one candidate; a gene is compared with its stratum |
 | `gene_filter_k_far` | 3.0 | Far fence = Q3 + k x scale, where scale is the larger of the IQR of the length stratum and the IQR of all genes in the pool; a gene above it is Extreme. Must not be below `gene_filter_k_near` |
 | `gene_filter_k_near` | 1.5 | Near fence, same form with k_near; a gene above it is Dubious only when it also carries a cluster train |
+| `removed_genes_report` | true | Render report 8.1, the characterization of the genes of each filter category (Normal, Extreme, Dubious, Both): length and CAAS load, variability, Pfam, UCR, FUBAR and genomic windows. Descriptive; each removed gene is compared with Normal genes of its own length stratum |
+| `removed_genes_window_mb` | 100 | Genomic window of report 8.1, in Mb |
+| `gene_variability_file`, `position_variability_dir` | "" | `gene_variability.tsv` and the per-gene `<gene>.prot.entropy.tsv` tables of the PPGA run; a blank one omits whole-gene or per-column variability from report 8.1. Pfam, UCR and FUBAR use `domain_variability_file`, `ucr_positions_file` and `fubar_sites_file`, which must carry `coordinate_space` CAAS_0based; a blank one omits its section |
 | `strict_remove_extreme_genes`, `strict_remove_dubious_genes`, `strict_gene_filter_strata`, `strict_gene_filter_k_far`, `strict_gene_filter_k_near` | null | Gene-removal settings used when merging the strict null; null takes the value of the ordinary option. The observed filter always reads the ordinary options, and a pass whose observed filter differs from the null it reuses stops, so a strict pass runs with the ordinary options set to the strict values. Cluster parameters have no strict counterpart: they act inside the replay tiles. The GUI scripts set the ordinary options to the strict values in the strict pass |
 | `caas_map_dir` | `vep_map_dir` or empty | Per-gene MAP tables (alignment column to protein residue) from the [Ortholog Characterizator](https://github.com/nozerorma/ortholog_characterizator.git) |
 | `minlen_values`, `maxcaas_values` | `2,3,4,10`; `0.6,0.7,0.8` | Sweep values in exploratory mode |

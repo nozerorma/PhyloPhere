@@ -30,8 +30,11 @@
  */
 
 include { CAAS_PREPARE_POSTPROC_INPUT; CT_FILTER; CT_FILTER_SUMMARY; CAAS_FILTER_GENES; CAAS_BACKGROUND_CLEANUP; clusterParameterGrid; clusterFileSuffix; ppHash } from '../subworkflows/CT_POSTPROC/ctpp_clustfilter'
-include { CT_POSTPROC_REPORT } from '../subworkflows/CT_POSTPROC/ctpp_characterization'
+include { CT_POSTPROC_REPORT; CT_POSTPROC_REMOVED_REPORT } from '../subworkflows/CT_POSTPROC/ctpp_characterization'
 include { ASR_DIAGNOSTICS } from './asr_diagnostics'
+
+// A blank parameter becomes an empty input.
+def optionalFile(v) { v ? file(v, checkIfExists: true) : [] }
 
 workflow CT_POSTPROC {
     take:
@@ -125,6 +128,12 @@ workflow CT_POSTPROC {
     def background = CAAS_BACKGROUND_CLEANUP(background_ch, genes.removed_genes)
     CT_POSTPROC_REPORT(prepared.prepared_discovery, summary.summary, all_filters, selected,
         lengths, genes.gene_stats, genes.removed_genes, genes.filtered_discovery, prepared.quality_universe)
+    if (params.removed_genes_report) {
+        // Optional references: a blank parameter passes an empty input and the report omits that section.
+        CT_POSTPROC_REMOVED_REPORT(prepared.prepared_discovery, selected, genes.gene_stats, lengths,
+            optionalFile(params.gene_variability_file), optionalFile(params.position_variability_dir),
+            optionalFile(params.domain_variability_file), optionalFile(params.ucr_positions_file), optionalFile(params.fubar_sites_file))
+    }
     emit:
     filter_summary = summary.summary
     filter_dir = Channel.value("${params.outdir}/postproc")

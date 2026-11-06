@@ -241,6 +241,38 @@ SPEC = ModuleTabSpec(
             help="A gene above this lower fence is Dubious only when it also carries a cluster train "
                  "(needs a cluster file). Only used by Remove Dubious genes.",
         ),
+        Section("Report 8.1: genes removed by the gene filter (conf/ct_postproc.config)"),
+        FieldSpec(
+            name="removed_genes_report",
+            label="Render report 8.1",
+            kind="bool",
+            importance="default",
+            help="Characterizes the Normal, Extreme, Dubious and Both genes of the observed gene filter: length and CAAS load, "
+                 "variability, Pfam, UCR, FUBAR and genomic windows. It reads reference tables and needs no extra computation. "
+                 "Pfam, UCR and FUBAR use the POSENRICH reference files (their tab), which here must already exist in CAAS_0based "
+                 "coordinates: a blank one omits its section instead of generating it.",
+        ),
+        FieldSpec(
+            name="removed_genes_window_mb",
+            label="Genomic window (Mb)",
+            importance="optional",
+            help="Window size of the genomic section of report 8.1: removed genes per window against the share of all candidates.",
+        ),
+        FieldSpec(
+            name="gene_variability_file",
+            label="Gene variability table (optional)",
+            kind="path_file",
+            importance="optional",
+            help="gene_variability.tsv of the PPGA run (per-gene Valdar summary). Blank omits whole-gene variability in report 8.1.",
+        ),
+        FieldSpec(
+            name="position_variability_dir",
+            label="Per-column variability directory (optional)",
+            kind="path_dir",
+            importance="optional",
+            help="Directory of per-gene <gene>.prot.entropy.tsv tables (PROT_VAR_RAW of the PPGA run). Blank omits the variability "
+                 "of CAAS columns and cluster trains in report 8.1.",
+        ),
         Section("Strict analysis: gene filter (conf/ct_postproc.config)"),
         FieldSpec(
             name="strict_same_gene_filter",

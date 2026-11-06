@@ -107,11 +107,6 @@ workflow {
     if (params.containsKey("gene_filter_mode")) error "--gene_filter_mode was replaced by --remove_extreme_genes and --remove_dubious_genes (stratified: both true; none: both false)."
     if (params.gene_stat != "max") error "Only --gene_stat max is supported; rebuild legacy gene scores/null matrices."
 
-    if (params.use_apptainer || params.use_singularity) {
-        log.warn "The container profiles are not operational: their image (miralnso/phylophere:latest, June 2025) lacks " +
-                 "pyarrow, hyphy, paml, domino and the R report stack, so most modules will fail. Use the conda environment."
-    }
-
     def characterize_positions = toBool(params.scoring) && (params.position_characterization?.toString()?.toLowerCase() == 'auto'
         ? toBool(params.enrichment) : toBool(params.position_characterization))
     if (!params.help && (toBool(params.posenrich) || characterize_positions)) validatePositionReferences()

@@ -177,6 +177,10 @@ export POSTPROC_MAXCAAS_VALUES="{{ modules.disambiguation.maxcaas_values }}"
 export POSTPROC_GENE_FILTER_STRATA="{{ modules.disambiguation.gene_filter_strata }}"
 export POSTPROC_GENE_FILTER_K_FAR="{{ modules.disambiguation.gene_filter_k_far }}"
 export POSTPROC_GENE_FILTER_K_NEAR="{{ modules.disambiguation.gene_filter_k_near }}"
+export POSTPROC_REMOVED_REPORT="{{ 'true' if modules.disambiguation.removed_genes_report else 'false' }}"
+export POSTPROC_REMOVED_WINDOW_MB="{{ modules.disambiguation.removed_genes_window_mb }}"
+export GENE_VARIABILITY_FILE="{{ modules.disambiguation.gene_variability_file }}"
+export POSITION_VARIABILITY_DIR="{{ modules.disambiguation.position_variability_dir }}"
 {% set sd = modules.disambiguation %}
 # Gene-removal settings of the strict analysis: those of the normal run unless the project gives its own.
 export POSTPROC_STRICT_REMOVE_EXTREME="{{ 'true' if (sd.remove_extreme_genes if sd.strict_same_gene_filter else sd.strict_remove_extreme_genes) else 'false' }}"

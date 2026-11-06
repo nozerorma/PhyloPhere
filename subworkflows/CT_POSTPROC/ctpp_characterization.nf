@@ -81,3 +81,63 @@ PHYLOPHERE_PARAMS
 PHYLOPHERE_RENDER
     """
 }
+
+// Optional CLI argument: empty when the input was not supplied.
+def ppOpt(flag, f) { f ? "${flag} ${ppQuote(f)}" : '' }
+
+def removedReportKey() {
+    return ppHash([
+        file("${baseDir}/subworkflows/CT_POSTPROC/local/8.1.Removed_genes_report.Rmd"),
+        file("${baseDir}/subworkflows/CT_POSTPROC/local/src/removed_genes_profile.py"),
+        file("${baseDir}/subworkflows/CT_POSTPROC/local/src/report_io.R"),
+        file("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R")])
+}
+
+// Report 8.1: per-gene and per-position profile of the genes of each filter category. References are optional: an empty
+// input drops its section. Runs on the observed discovery, before the cluster/gene filter output is consumed downstream.
+process CT_POSTPROC_REMOVED_REPORT {
+    ext source_hash: { removedReportKey() }
+    cache true
+    tag 'caas_postproc_removed_genes'
+    label 'process_reporting'
+    publishDir path: "${params.outdir}/postproc", mode: 'copy', overwrite: true, pattern: '{removed_genes_characterization/**,removed_genes_profile/**}'
+    publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'
+    input:
+    path discovery_file, stageAs: 'inputs/discovery/*'
+    path selected_cluster, stageAs: 'inputs/selected/*'
+    path gene_stats_file, stageAs: 'inputs/stats/*'
+    path gene_ensembl_file, stageAs: 'inputs/annotation/*'
+    path gene_variability, stageAs: 'inputs/gene_variability/*'
+    path entropy_dir, stageAs: 'inputs/entropy/*'
+    path domains, stageAs: 'inputs/domains/*'
+    path ucr, stageAs: 'inputs/ucr/*'
+    path fubar, stageAs: 'inputs/fubar/*'
+    output:
+    path '8.1.Removed_genes_report.html', emit: report
+    path 'removed_genes_characterization/**', emit: tables
+    path 'removed_genes_profile/**', emit: profile
+    script:
+    def local_dir = "${baseDir}/subworkflows/CT_POSTPROC/local"
+    def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
+    def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
+    def report_params = groovy.json.JsonOutput.toJson([
+        profile_dir: 'removed_genes_profile', gene_stats_file: 'inputs/stats/' + gene_stats_file.name,
+        gene_ensembl_file: 'inputs/annotation/' + gene_ensembl_file.name,
+        window_mb: params.removed_genes_window_mb, output_dir: '.'])
+    """
+    echo '${task.ext.source_hash}' > report_source.sha256
+    cp -R ${ppQuote(local_dir)}/. .
+    cp ${ppQuote("${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/report_style.R")} src/
+    ${py3} src/removed_genes_profile.py --discovery ${ppQuote(discovery_file)} --gene-stats ${ppQuote(gene_stats_file)} \
+        --clusters ${ppQuote(selected_cluster)} ${ppOpt('--gene-variability', gene_variability)} ${ppOpt('--entropy-dir', entropy_dir)} \
+        ${ppOpt('--domains', domains)} ${ppOpt('--ucr', ucr)} ${ppOpt('--fubar', fubar)} --out-dir removed_genes_profile
+    cat > report_params.json <<'PHYLOPHERE_PARAMS'
+${report_params}
+PHYLOPHERE_PARAMS
+    ${run} - <<'PHYLOPHERE_RENDER'
+    rmarkdown::render('8.1.Removed_genes_report.Rmd',
+        params = jsonlite::read_json('report_params.json', simplifyVector = TRUE),
+        output_file = '8.1.Removed_genes_report.html', envir = new.env())
+PHYLOPHERE_RENDER
+    """
+}

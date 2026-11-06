@@ -481,6 +481,46 @@ cp 8.Characterization_report.html {q(str(target))}/
 """
 
 
+def _removed_genes_find_slots(outdir: Listing) -> list[InputSlot]:
+    post = outdir / "postproc"
+    return [
+        _slot("profile_dir", "Removed-genes profile tables", True, _first_match(post, "removed_genes_profile")),
+        _slot("gene_stats_file", "Gene statistics", True, _first_match(post / "postproc_inputs", "gene_stats.tsv")),
+        _slot("gene_ensembl_file", "Gene annotation", True, _first_match(post / "postproc_inputs", "gene_annotation.tsv")),
+    ]
+
+
+def _removed_genes_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
+    import json
+    import shlex
+    payload = {slot.key: str(slot.path) if slot.path is not None else None for slot in report.slots}
+    payload["output_dir"] = "."
+    q = shlex.quote
+    target = report.html_path.parent
+    return f"""#!/usr/bin/env bash
+# CT_POSTPROC report 8.1: renders the saved profile tables again (the references are not re-read).
+set -euo pipefail
+WORKDIR=$(mktemp -d)
+trap 'rm -rf "$WORKDIR"' EXIT
+cd "$WORKDIR"
+cp -R {q(str(repo_dir / 'subworkflows/CT_POSTPROC/local'))}/. .
+cp {q(str(repo_dir / 'subworkflows/TRAIT_ANALYSIS/local/src/report_style.R'))} src/
+cat > report_params.json <<'PHYLOPHERE_PARAMS'
+{json.dumps(payload)}
+PHYLOPHERE_PARAMS
+{_entrypoint_prefix(use_singularity)}Rscript - <<'PHYLOPHERE_RENDER'
+rmarkdown::render('8.1.Removed_genes_report.Rmd',
+    params=jsonlite::read_json('report_params.json',simplifyVector=TRUE),
+    output_file='8.1.Removed_genes_report.html',envir=new.env())
+PHYLOPHERE_RENDER
+mkdir -p {q(str(target))}
+if [ -f {q(str(target / '8.1.Removed_genes_report.html'))} ]; then
+  cp {q(str(target / '8.1.Removed_genes_report.html'))} {q(str(target / '8.1.Removed_genes_report.html.bak'))}
+fi
+cp 8.1.Removed_genes_report.html {q(str(target))}/
+"""
+
+
 # ── CT_META_CAAS ──────────────────────────────────────────────────────────────
 
 
@@ -1155,6 +1195,13 @@ REPORTS: list[ReportSpec] = [
         html_regex=re.compile(r"^8\.Characterization_report\.html$"),
         find_slots=_postproc_find_slots,
         build_script=_postproc_build_script,
+    ),
+    ReportSpec(
+        id="removed_genes",
+        display_name="CT_POSTPROC — Removed genes characterization",
+        html_regex=re.compile(r"^8\.1\.Removed_genes_report\.html$"),
+        find_slots=_removed_genes_find_slots,
+        build_script=_removed_genes_build_script,
     ),
     ReportSpec(
         id="meta_caas",

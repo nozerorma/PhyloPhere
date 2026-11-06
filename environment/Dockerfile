@@ -59,12 +59,19 @@ RUN chmod +x install_env.sh \
     && bash install_env.sh /home/mambauser/environment/phylophere.yml \
     && micromamba clean --all --yes
 
+# The programs of the vep environment are run through wrappers that put that environment first for the program alone.
+COPY --chown=$MAMBA_USER:$MAMBA_USER vep_wrapper.sh /home/mambauser/environment/
+USER root
+RUN for program in vep vep_install filter_vep haplo variant_recoder vep_convert_cache; do \
+        install -m 0755 /home/mambauser/environment/vep_wrapper.sh /usr/local/bin/$program; \
+    done
+USER $MAMBA_USER
+
 # _entrypoint.sh activates ${ENV_NAME:-base}: without this variable the base environment is activated, its bin comes
 # first on the PATH, and python3 and Rscript would not be the ones of the phylophere environment.
 ENV ENV_NAME=phylophere
-# Without the entrypoint (apptainer exec) the environment is still the first on the PATH. The vep environment is last, so
-# `vep` is found and nothing of that environment shadows a program of phylophere.
-ENV PATH=/opt/conda/envs/phylophere/bin:$PATH:/opt/conda/envs/vep/bin
+# Without the entrypoint (apptainer exec) the environment is still the first on the PATH.
+ENV PATH=/opt/conda/envs/phylophere/bin:$PATH
 
 # Set the image to be run inside the phylophere environment directly
 ENTRYPOINT ["/usr/local/bin/_entrypoint.sh"]
