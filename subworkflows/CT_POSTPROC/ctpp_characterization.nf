@@ -121,8 +121,8 @@ process CT_POSTPROC_REMOVED_REPORT {
     def py3 = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     def report_params = groovy.json.JsonOutput.toJson([
-        profile_dir: 'removed_genes_profile', gene_stats_file: 'inputs/stats/' + gene_stats_file.name,
-        gene_ensembl_file: 'inputs/annotation/' + gene_ensembl_file.name,
+        profile_dir: 'removed_genes_profile', gene_stats_file: gene_stats_file.toString(),
+        gene_ensembl_file: gene_ensembl_file.toString(),
         window_mb: params.removed_genes_window_mb, output_dir: '.'])
     """
     echo '${task.ext.source_hash}' > report_source.sha256
