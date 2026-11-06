@@ -112,7 +112,7 @@
       "caas_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
       "minlen_values": "2,3,4,10",
       "maxcaas_values": "0.6,0.7,0.8",
-      "remove_extreme_genes": true,
+      "remove_extreme_genes": false,
       "remove_dubious_genes": true,
       "remove_caas_clusters": true,
       "gene_filter_strata": "10",
