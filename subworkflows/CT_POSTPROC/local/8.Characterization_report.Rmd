@@ -368,8 +368,8 @@ if (nrow(patterns)) pp_plot(ggplot(patterns,aes(convergence_type,Rows,fill=stage
 
 ## 3.3 Genomic distribution of retained candidates
 
-Each point is a gene with retained candidates. Chromosomes share a continuous
-axis; density uses the annotated genomic span in base pairs for every gene.
+Retained positions are counted in 10-Mb windows (each gene in the window of its midpoint). Chromosomes share a
+continuous axis. The per-gene table keeps the density (retained positions per base pair of the annotated span).
 
 ```{r genomic, results='asis'}
 if (all(c('chr','start','end') %in% names(annotation))) {
@@ -388,38 +388,32 @@ if (all(c('chr','start','end') %in% names(annotation))) {
            density=positions/genomic_length)
   write_tsv(genomic,'disambiguation_characterization/retained_genomic_density.tsv')
   if (nrow(genomic)) {
-    chromosomes <- genomic %>% group_by(chr) %>% summarise(chr_end=max(end),.groups='drop') %>%
-      mutate(chr_label=sub('^chr','',chr,ignore.case=TRUE),
-        chr_number=suppressWarnings(as.numeric(chr_label)),
-        chr_order=case_when(is.finite(chr_number)~chr_number,
-          toupper(chr_label)=='X'~Inf, toupper(chr_label)=='Y'~Inf,
-          TRUE~Inf),
-        chr_group=case_when(is.finite(chr_number)~0L,toupper(chr_label)=='X'~1L,
-          toupper(chr_label)=='Y'~2L,TRUE~3L)) %>%
-      arrange(chr_group,chr_order,chr_label,chr) %>%
-      mutate(offset=lag(cumsum(chr_end),default=0),center=offset+chr_end/2,
-             chromosome_index=row_number())
-    genomic <- genomic %>% left_join(chromosomes %>% select(chr,offset,chromosome_index),by='chr') %>%
-      mutate(cumulative_position=offset+midpoint, chromosome_band=factor(chromosome_index %% 2))
-    pp_plot(ggplot(genomic,aes(cumulative_position,density))+
-      geom_vline(data=chromosomes,aes(xintercept=offset+chr_end),
-                 linetype='dotted',color='grey60',alpha=.7,linewidth=.4,inherit.aes=FALSE)+
-      geom_point(alpha=.85,size=3.1,color='#2E86AB')+
-      scale_x_continuous(breaks=chromosomes$center,labels=chromosomes$chr_label,
-                         expand=expansion(mult=c(.005,.005)))+
-      scale_y_continuous(labels=scales::label_number(scale_cut=scales::cut_short_scale()),
-                         expand=expansion(mult=c(.02,.08)))+
-      labs(title='Genomic distribution of retained CAAS density',
-           subtitle=sprintf('n = %d genes with retained CT positions | y = retained positions / gene length (bp)', nrow(genomic)),
-           x='Chromosome',y='CAAS density (retained positions / gene length)')+
-      theme_minimal(base_size=24)+
-      theme(plot.title=element_text(face='bold',size=28),plot.subtitle=element_text(size=20),
-            axis.title=element_text(size=22),axis.text=element_text(size=18),
-            panel.grid.major.x=element_blank(),panel.grid.minor.x=element_blank(),
-            panel.grid.minor.y=element_blank()),
+    # Retained positions per fixed genomic window, each gene counted in the window of its midpoint. Windows
+    # sit on one cumulative axis with bars as wide as the window (same layout as the comparative report).
+    win_bp <- 10e6
+    chr_rank <- function(x) { l <- sub('^chr','',x,ignore.case=TRUE); n <- suppressWarnings(as.numeric(l))
+      case_when(is.finite(n)~n, toupper(l)=='X'~1e3, toupper(l)=='Y'~1e3+1, TRUE~1e3+2) }
+    win <- genomic %>% mutate(window=floor(midpoint/win_bp)) %>% group_by(chr,window) %>%
+      summarise(positions=sum(positions), genes=n(), .groups='drop') %>%
+      mutate(chr_label=sub('^chr','',chr,ignore.case=TRUE), rank=chr_rank(chr))
+    ext <- win %>% group_by(chr,chr_label,rank) %>% summarise(chr_end=(max(window)+1)*win_bp, .groups='drop') %>%
+      arrange(rank,chr_label) %>% mutate(offset=cumsum(lag(chr_end,default=0))+(row_number()-1)*win_bp)
+    win <- win %>% left_join(ext %>% select(chr,offset),by='chr') %>% mutate(x=offset+(window+.5)*win_bp)
+    ticks <- win %>% group_by(chr,chr_label) %>% summarise(mid=mean(range(x)), .groups='drop') %>%
+      left_join(ext %>% select(chr,rank),by='chr') %>% arrange(rank,chr_label)
+    write_tsv(win %>% select(chr,window,positions,genes), 'disambiguation_characterization/retained_genomic_windows.tsv')
+    pp_plot(ggplot(win,aes(x,positions))+
+      geom_col(width=win_bp*.9,fill='#1F5F7A',colour='#1F5F7A',linewidth=.5)+
+      scale_x_continuous(breaks=ticks$mid,labels=ticks$chr_label,expand=expansion(mult=.01))+
+      scale_y_continuous(expand=expansion(mult=c(0,.08)))+
+      labs(title='Retained CAAS positions in genomic windows',
+           subtitle=sprintf('%d genes with retained CT positions; %g-Mb windows', nrow(genomic), win_bp/1e6),
+           x='Chromosome',y='Retained positions')+
+      theme_minimal(base_size=14)+
+      theme(plot.title=element_text(face='bold'),panel.grid.major.x=element_blank(),
+            panel.grid.minor=element_blank(),axis.text.x=element_text(size=10)),
       'disambiguation_characterization/manhattan_retained.png',
-      width=min(22,max(16,10+.55*nrow(chromosomes))),
-      height=min(12,max(9,8+.015*nrow(genomic))))
+      width=14,height=5)
   } else cat('No retained candidates with genomic annotation.\n\n')
 } else cat('Genomic coordinates unavailable; genomic plot omitted.\n\n')
 ```

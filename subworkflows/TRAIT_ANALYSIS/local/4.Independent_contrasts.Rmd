@@ -607,8 +607,8 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
       is_selected = contrast_label != "Not selected",
       is_canonical = species %in% canon_species,
       display_label = dplyr::case_when(
-        is_canonical ~ paste0("[H1] ", species, " (", contrast_label, " · ", n_hyp, "/", total_hypotheses, ")"),
-        is_selected  ~ paste0(species, " (", contrast_label, " · ", n_hyp, "/", total_hypotheses, ")"),
+        is_canonical ~ paste0("[H1] ", species, " (", n_hyp, "/", total_hypotheses, ")"),
+        is_selected  ~ paste0(species, " (", n_hyp, "/", total_hypotheses, ")"),
         TRUE         ~ species
       )
     )

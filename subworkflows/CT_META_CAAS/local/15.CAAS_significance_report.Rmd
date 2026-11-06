@@ -37,7 +37,7 @@ params:
   .kpi-row { display: flex; flex-wrap: wrap; gap: 14px; margin: 14px 0 22px 0; }
   .kpi { flex: 1 1 190px; background: #f7f9fb; border: 1px solid #e3e8ee; border-left: 5px solid #4E79A7; border-radius: 6px; padding: 12px 16px; }
   .kpi.bh { border-left-color: #E15759; }
-  .kpi.nom { border-left-color: #F28E2B; }
+  .kpi.nom { border-left-color: #B07AA1; }
   .kpi.gene { border-left-color: #59A14F; }
   .kpi .v { font-size: 30px; font-weight: 700; color: #2c3e50; line-height: 1.1; }
   .kpi .l { font-size: 13px; color: #5d6d7e; margin-top: 4px; }
@@ -130,10 +130,10 @@ if(known_metadata) stopifnot(length(nominal)==1L,is.finite(nominal),nominal>0,no
           length(fdr_levels)>0,all(is.finite(fdr_levels)),all(fdr_levels>0),all(fdr_levels<=1))
 bh_tok <- vapply(fdr_levels,format,"",scientific=FALSE); bh_labels <- paste0("q<",bh_tok)  # strictest first
 # Evidence classes, from strongest to weakest, and their colours (also used by the tables and the exports). The BH classes use the
-# ladder of report_bh_colours() (red for the strictest level, then orange and blue).
+# ladder of report_bh_colours() (red for the strictest level, then orange and blue); Nominal is purple so it never matches a BH level.
 status_levels <- c(bh_labels,"Nominal","Evaluated; not significant","p/q available; thresholds unknown","p available; q unavailable","p unavailable")
 bh_status_colours <- if(length(bh_tok)) setNames(unname(report_bh_colours(paste0("<",bh_tok))[paste0("<",bh_tok)]),bh_labels) else character()
-status_colours <- c(bh_status_colours,"Nominal"=.tableau10[2],"Evaluated; not significant"="grey65",
+status_colours <- c(bh_status_colours,"Nominal"=.tableau10[8],"Evaluated; not significant"="grey65",
   "p/q available; thresholds unknown"="grey50","p available; q unavailable"=.tableau10[10],"p unavailable"="grey88")
 for(n in c("Position","CAAS_score","p.emp","p.adj_bh","n_hypotheses")) pos[[n]] <- num(pos,n)
 if (anyNA(pos$Gene) || any(!nzchar(pos$Gene)) || anyNA(genes$Gene) || any(!nzchar(genes$Gene))) stop("Missing gene identifiers")

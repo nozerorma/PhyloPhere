@@ -22,9 +22,12 @@ Inputs:     --tiles       the null_tables/ directories (units.parquet, scores.pa
                           unit in the block; the genes with units have a row whatever the universe says
             --gene-lengths-table, --remove-extreme-genes, --remove-dubious-genes  gene removal, optional: gene_lengths.tsv (gene_lengths.py), the same
                           table the observed filter reads, so every gene with units in a cycle is evaluated
-Outputs:    <out>/matrices/   raw matrices and manifest.json (assemble_block_matrices.R turns them into an RDS)
-            <out>/positions.parquet, cycle_summary.tsv, cycle_hist.tsv, perm_pos_sample.tsv, perm_pos_quantiles.tsv,
-            cycles.txt, counts.json, removed_units.tsv with gene removal
+Outputs:    <out>/matrices/   raw matrices and manifest.json (assemble_block_matrices.R turns them into an RDS); the gene
+                          statistic of a cycle covers every detected position, inside the positional universe or not
+            <out>/positions.parquet, cycle_summary.tsv, cycle_hist.tsv, perm_pos_sample.tsv, perm_pos_quantiles.tsv
+                          (the positions of the positional universe), cycle_summary_total.tsv and cycle_hist_total.tsv
+                          (every detected position; the histogram for the cycles that keep the bins outside the universe),
+                          cycles.txt, counts.json, removed_units.tsv with gene removal
 
 Run from the CT_DISAMBIGUATION/local directory (the process copies it to the work directory first).
 """

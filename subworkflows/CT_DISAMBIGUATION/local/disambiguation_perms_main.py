@@ -90,7 +90,10 @@ def parse_arguments():
     )
     p.add_argument("--universe-dir", required=True, type=Path,
                    help="Directory of the *.b0.universe files (ct perm-replay --export_b0_universe) of the manifest genes: the "
-                        "positional universe, the only positions the null scores; with --strict-output also the *.b0.universe_strict files")
+                        "positional universe of the position tables of the null; with --strict-output also the *.b0.universe_strict files")
+    p.add_argument("--diag-cycles", type=int, default=0,
+                   help="Cycles b_0 and b_1..b_<N> that also keep the bins of the position scores outside the universe "
+                        "(scores_diag.parquet, diagnostic plots only); 0 keeps none")
     p.add_argument("--output-dir", required=True, help="Output directory")
     p.add_argument("--asr-model", default="lg", help="ASR substitution model (default: lg)")
     p.add_argument("--asr-cache-dir", required=True, help="Precomputed ASR cache dir")
@@ -133,6 +136,8 @@ def parse_arguments():
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--log-file", type=Path, default=None)
     args = p.parse_args()
+    if args.diag_cycles < 0:
+        p.error('--diag-cycles must be 0 or a positive number of cycles')
     import math
     if (args.clust_minlen < 1 or (args.clust_min_positions is not None and args.clust_min_positions < 1)
             or not math.isfinite(args.clust_maxcaas) or not 0 <= args.clust_maxcaas <= 1):
@@ -220,6 +225,7 @@ def main():
         strict_output=args.strict_output,
         universe=read_universe_dir(args.universe_dir),
         universe_strict=read_universe_dir(args.universe_dir, STRICT_SUFFIX) if args.strict_output else None,
+        diag_cycles=args.diag_cycles,
     )
     logger.info(f"Done in {time.time() - t0:.1f}s → {out_path}")
 

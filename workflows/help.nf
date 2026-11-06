@@ -133,6 +133,7 @@ Usage:
 --miss_pair                 <true|false>                 true   (discard a labeling when both sides have gapped species in different pairs; applied only when the fg and bg limits are equal)
 --ct_core_batch_size        <INTEGER>                    20    (permulation core: genes per replay + ASR replay task; 1 = one task per gene)
 --caas_export_single       <BOOL>                       false (export global caas_perms.rds for compatibility; blocks + roster are canonical)
+--caas_null_diag_cycles    <INTEGER>                    1000  (null cycles b_1..b_N that keep the bins of the position scores outside the positional universe U, for the scoring report diagnostics; 0 = none; the gene statistic covers all detected positions regardless)
 --caas_cycle_block_size    <INTEGER>                    500   (permulation core: cycles per block; a task replays its genes against one block or against b_0; one merge task per block, b_0 included)
 --gene_stat                max                         max            (only supported gene statistic: largest positive position score)
 --publish_intermediates     <true|false>                 false

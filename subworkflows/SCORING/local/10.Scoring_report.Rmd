@@ -29,6 +29,8 @@ params:
   fade_site_bot_file: NULL
   null_summary_file: NULL
   null_hist_file: NULL
+  null_summary_total_file: NULL
+  null_hist_total_file: NULL
   perm_manifest_file: NULL
   hypotheses_pairs_file: NULL
   perm_harvest_file: NULL
@@ -206,6 +208,12 @@ has_rer  <- "rer_min_pval"    %in% names(gene_df) && any(!is.na(gene_df$rer_min_
 # the histogram of their scores (cycle_summary.tsv, cycle_hist.tsv of CAAS_CORE_MERGE_REDUCE).
 has_pos_null      <- .file_ok(params$null_summary_file) && .file_ok(params$null_hist_file) &&
                      length(readLines(params$null_summary_file, n = 2L)) >= 2L
+# The same summaries over every detected position, inside the positional universe or not: the counts for every cycle and
+# the histogram for the cycles that keep the bins of the scores outside it (absent for a null of an older layout).
+has_total_counts  <- .file_ok(params$null_summary_total_file) &&
+                     length(readLines(params$null_summary_total_file, n = 2L)) >= 2L
+has_total_hist    <- .file_ok(params$null_hist_total_file) &&
+                     length(readLines(params$null_hist_total_file, n = 2L)) >= 2L
 has_filtered      <- .file_ok(params$filtered_discovery_file) # observed asr_path_score
 # FADE site (position-level) data: use top direction if available, otherwise try bottom
 has_fade_pos      <- .file_ok(params$fade_site_top_file) || .file_ok(params$fade_site_bot_file)
@@ -388,6 +396,9 @@ The formal per-pathway `p.perm` (ASR axis) is in the companion **FCS** report.
 #   cycle_hist.tsv     cycle, direction, bin, n: the scores in bins of 0.01 (bin = floor(100 * score)); empty bins are absent
 .null_sum  <- readr::read_tsv(params$null_summary_file, show_col_types = FALSE, col_types = "ccii")
 .null_hist <- readr::read_tsv(params$null_hist_file, show_col_types = FALSE, col_types = "ccii")
+# Over every detected position (inside U or not); the observed positions all lie inside U.
+.null_sum_total  <- if (has_total_counts) readr::read_tsv(params$null_summary_total_file, show_col_types = FALSE, col_types = "ccii") else NULL
+.null_hist_total <- if (has_total_hist) readr::read_tsv(params$null_hist_total_file, show_col_types = FALSE, col_types = "ccii") else NULL
 
 .obs_pos <- pos_df %>%
   mutate(CAAS_score = suppressWarnings(as.numeric(CAAS_score))) %>%
@@ -425,6 +436,22 @@ The formal per-pathway `p.perm` (ASR axis) is in the companion **FCS** report.
   m[cbind(d$bin + 1L, match(d$cycle, .null_cycles))] <- d$n
   m
 }
+# The same over every detected position, for the cycles that keep the bins outside U.
+.null_cycles_total <- if (has_total_hist) unique(.null_hist_total$cycle) else character(0)
+.n_cyc_total <- length(.null_cycles_total)
+.null_bins_total <- function(direction) {
+  m <- matrix(0, nrow = 101, ncol = .n_cyc_total)
+  d <- .null_hist_total[.null_hist_total$direction == direction, ]
+  m[cbind(d$bin + 1L, match(d$cycle, .null_cycles_total))] <- d$n
+  m
+}
+# Per-cycle value of a total summary column (counts over every detected position), as .null_per_cycle.
+.null_per_cycle_total <- function(direction, column = "n") {
+  d <- .null_sum_total[.null_sum_total$direction == direction, ]
+  v <- d[[column]][match(.null_cycles, d$cycle)]
+  v[is.na(v)] <- 0
+  v
+}
 ```
 
 ```{r pos-null-na, eval=!has_pos_null, results='asis'}
@@ -437,7 +464,7 @@ cat("_No position-level permulation null available for this run",
 ```{r pos-null-excedance, eval=has_pos_null, fig.height=4.8, fig.width=10}
 # The null scores are binned at 0.01, so a score counts at the threshold of its own bin: the grid is the one of the observed
 # scores and of the highest null bin.
-.null_top_bin <- max(c(0L, .null_hist$bin[.null_hist$n > 0]))
+.null_top_bin <- max(c(0L, .null_hist$bin[.null_hist$n > 0], if (has_total_hist) .null_hist_total$bin[.null_hist_total$n > 0]))
 .max_s <- max(c(.obs_pos$score[is.finite(.obs_pos$score)], (.null_top_bin + 1) / 100))
 .grid  <- seq(0, max(0.01, ceiling(100 * .max_s) / 100), by = 0.01)
 .cnt   <- function(x) {
@@ -452,22 +479,33 @@ cat("_No position-level permulation null available for this run",
 }
 .exc <- dplyr::bind_rows(lapply(.dirs, function(d) {
   m <- .cnt_hist(.null_bins(d))
-  tibble::tibble(direction = d, s = .grid, obs = .cnt(.sets[[d]]$obs$score),
-                 med = apply(m, 1, median),
-                 lo  = apply(m, 1, quantile, .025),
-                 hi  = apply(m, 1, quantile, .975))
+  out <- tibble::tibble(direction = d, s = .grid, obs = .cnt(.sets[[d]]$obs$score),
+                        med = apply(m, 1, median),
+                        lo  = apply(m, 1, quantile, .025),
+                        hi  = apply(m, 1, quantile, .975),
+                        med_t = NA_real_, lo_t = NA_real_, hi_t = NA_real_)
+  if (has_total_hist) {   # the null over every detected position, inside U or not
+    mt <- .cnt_hist(.null_bins_total(d))
+    out$med_t <- apply(mt, 1, median); out$lo_t <- apply(mt, 1, quantile, .025); out$hi_t <- apply(mt, 1, quantile, .975)
+  }
+  out
 })) %>% mutate(direction = factor(direction, levels = c("global", "top", "bottom")))
 
 .fl <- 0.5   # log axis floor for counts of 0
+.exc_t <- dplyr::filter(.exc, is.finite(med_t))
 ggplot(.exc, aes(s)) +
-  geom_ribbon(aes(ymin = pmax(lo, .fl), ymax = pmax(hi, .fl), fill = "null, 95% of cycles"), alpha = .4) +
-  geom_line(aes(y = pmax(med, .fl), colour = "null, median cycle"), linewidth = .7) +
+  geom_ribbon(aes(ymin = pmax(lo, .fl), ymax = pmax(hi, .fl), fill = "null inside U, 95% of cycles"), alpha = .4) +
+  geom_line(aes(y = pmax(med, .fl), colour = "null inside U, median cycle"), linewidth = .7) +
+  geom_ribbon(data = .exc_t, aes(ymin = pmax(lo_t, .fl), ymax = pmax(hi_t, .fl), fill = "null, all detected positions, 95% of cycles"), alpha = .3) +
+  geom_line(data = .exc_t, aes(y = pmax(med_t, .fl), colour = "null, all detected positions, median cycle"), linewidth = .7) +
   geom_line(aes(y = pmax(obs, .fl), colour = "observed"), linewidth = .9) +
   scale_y_log10() + facet_wrap(~direction) +
-  scale_colour_manual(values = c("null, median cycle" = "grey35", observed = "#E15759"), name = NULL) +
-  scale_fill_manual(values = c("null, 95% of cycles" = "grey65"), name = NULL) +
+  scale_colour_manual(values = c("null inside U, median cycle" = "grey35", "null, all detected positions, median cycle" = "#4E79A7",
+                                 observed = "#E15759"), name = NULL) +
+  scale_fill_manual(values = c("null inside U, 95% of cycles" = "grey65", "null, all detected positions, 95% of cycles" = "#A0CBE8"), name = NULL) +
   labs(title = "Positions with CAAS Score >= s: observed vs one permulated cycle",
-       subtitle = sprintf("%d null cycles | top, bottom: position-side rows | global: positions (best side)", .n_cyc),
+       subtitle = sprintf("%d null cycles inside U%s | top, bottom: position-side rows | global: positions (best side)", .n_cyc,
+                          if (has_total_hist) sprintf(", %d with all detected positions", .n_cyc_total) else ""),
        x = "score threshold s", y = "positions (log10)") +
   theme_minimal(base_size = 11) + theme(legend.position = "top")
 ```
@@ -477,6 +515,11 @@ the same count in one permulated cycle (median over cycles) and the band holds 9
 the band means the run has more positions at that score than almost any null labeling. The number of detections of
 a cycle depends on its own contrasts, so the cycles differ widely in volume, and the band is the range of that
 variation and not a confidence interval.
+
+The grey null counts only the positions of the positional universe U, the set that the position p-values condition on
+and that contains every observed position. The blue null counts every position a cycle detects, inside U or not, for the
+cycles that keep the scores outside U (`caas_null_diag_cycles`). The gene statistic of the null (gene p-value, FCS)
+is computed over all detected positions, as the blue null.
 
 ### Composition of detections
 
@@ -568,6 +611,12 @@ on the other; the run is in red.
                `genes with a detection` = .null_per_cycle("global", "n_genes"))
 .vol_o <- c(`rows, top` = .o_t, `rows, bottom` = .o_b, `positions, global` = nrow(.sets$global$obs),
             `genes with a detection` = dplyr::n_distinct(.obs_pos$Gene))
+if (has_total_counts) {   # the same counts over every detected position (the observed ones all lie inside U)
+  .vol_n[["positions, global, all detected"]] <- .null_per_cycle_total("global")
+  .vol_n[["genes with a detection, all detected"]] <- .null_per_cycle_total("global", "n_genes")
+  .vol_o[["positions, global, all detected"]] <- nrow(.sets$global$obs)
+  .vol_o[["genes with a detection, all detected"]] <- dplyr::n_distinct(.obs_pos$Gene)
+}
 .vol_long <- dplyr::bind_rows(lapply(names(.vol_n), function(m) tibble::tibble(metric = m, value = .vol_n[[m]]))) %>%
   mutate(metric = factor(metric, levels = names(.vol_n)))
 ggplot(.vol_long, aes(pmax(value, 1))) +
@@ -1114,7 +1163,7 @@ for(rk in c("global","top","bottom")) {
 
 ### Cross-method gene overlap {.tabset}
 
-CAAS and other are calls within their shared evaluable gene universe; overlap is their intersection. RER includes both signs in every CAAS view: intersection is not biological concordance. Missing p/q is excluded at the corresponding level. FADE uses its original BF calls; Global is their union, with a missing side remaining unknown unless the measured side is positive. Original gene BH values are preserved. Fisher is two-sided; its BH family comprises the 12 planned ranking × method × call comparisons, including unavailable comparisons in the family size. Degenerate measured tables have Fisher p=1; empty universes are unavailable.
+CAAS and other are calls within their shared evaluable gene universe; overlap is their intersection. RER includes both signs in every CAAS view: intersection is not biological concordance. Missing p/q is excluded at the corresponding level. FADE uses its original BF calls; Global is their union, with a missing side remaining unknown unless the measured side is positive. Original gene BH values are preserved. FADE has no BH of its own, so its call is crossed with the CAAS call at each level. Fisher is two-sided; BH levels are nested, so p-values are raw and not corrected across rows. Degenerate measured tables have Fisher p=1; empty universes are unavailable.
 
 ```{r empirical-overlap, results='asis'}
 source("src/report_evidence.R")

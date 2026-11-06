@@ -939,7 +939,7 @@ if(has_multi) {
 
 # Gene-level overlap between methods {.tabset .tabset-fade}
 
-CAAS and RER or FADE are compared only among genes with evaluable evidence for both methods. RER includes both signs; overlap does not imply directional agreement. FADE uses the producer's selected-gene calls; Global is the union of Top and Bottom, with an unmeasured side remaining unknown unless the measured side is positive. Nominal and adjusted CAAS/RER calls use the thresholds saved with SCORING. Top compares CAAS Top with FADE Top and Bottom with Bottom; Global compares the CAAS global ranking with the union of both FADE sides. Each tool has its own tab, with Global, Top and Bottom side by side and the nominal call above the adjusted one. Fisher tests are descriptive, two-sided, and BH-adjusted across the 12 planned comparisons.
+CAAS and RER or FADE are compared only among genes with evaluable evidence for both methods. RER includes both signs; overlap does not imply directional agreement. FADE uses the producer's selected-gene calls; Global is the union of Top and Bottom, with an unmeasured side remaining unknown unless the measured side is positive. Nominal and adjusted CAAS/RER calls use the thresholds saved with SCORING. Top compares CAAS Top with FADE Top and Bottom with Bottom; Global compares the CAAS global ranking with the union of both FADE sides. Each tool has its own tab, with Global, Top and Bottom side by side and the nominal call above the BH levels. FADE has no BH adjustment of its own: its call is crossed with the CAAS call at each level. Fisher tests are descriptive and two-sided; the BH calls are nested, so p-values are raw and not corrected across rows.
 
 ```{r comparison-gene-overlap-setup, include=FALSE}
 gene_overlap_cmp <- if (has_gene_scores_cmp) scoring_overlap(gene_attr_df, .nominal_cmp, .levels_cmp) else NULL
@@ -960,8 +960,8 @@ if (!is.null(gene_overlap_cmp)) readr::write_tsv(gene_overlap_cmp, "compare_resu
   counts <- do.call(rbind,lapply(seq_len(nrow(rows)),function(i) {
     x <- rows[i,]
     data.frame(x=c(-1.05,0,1.05),y=0,label=c(x$caas_only,x$both,x$other_only),ranking=x$ranking,call=x$call)}))
-  info <- data.frame(x=0,y=-1.55,ranking=rows$ranking,call=rows$call,
-    label=sprintf("Shared genes: %s; neither: %s\nFisher p: %s",rows$shared_tested_universe,rows$neither,signif(rows$fisher_p,3)))
+  info <- data.frame(x=0,y=-1.6,ranking=rows$ranking,call=rows$call,
+    label=sprintf("Shared genes: %s\nNeither: %s\nFisher p: %s",rows$shared_tested_universe,rows$neither,signif(rows$fisher_p,3)))
   heads <- data.frame(x=c(-.8,.8),y=1.25,label=c("CAAS",tool))
   heads <- merge(heads,unique(rows[c("ranking","call")]))
   ggplot(shape,aes(x,y,group=id,fill=set)) + geom_polygon(alpha=.35,colour="grey35") +
@@ -970,12 +970,12 @@ if (!is.null(gene_overlap_cmp)) readr::write_tsv(gene_overlap_cmp, "compare_resu
     geom_text(data=heads,aes(x,y,label=label),inherit.aes=FALSE,fontface="bold",size=3.5) +
     geom_text(data=info,aes(x,y,label=label),inherit.aes=FALSE,size=3,lineheight=.9) +
     facet_grid(call~ranking,drop=FALSE) +
-    coord_fixed(xlim=c(-1.8,1.8),ylim=c(-1.9,1.5),clip="off") + theme_void() +
-    theme(strip.text=element_text(face="bold",size=11),panel.spacing=grid::unit(1,"lines"))
+    coord_fixed(xlim=c(-2.2,2.2),ylim=c(-2.3,1.5),clip="off") + theme_void() +
+    theme(strip.text=element_text(face="bold",size=11),panel.spacing=grid::unit(2.5,"lines"))
 }
 ```
 
-```{r comparison-gene-overlap, results='asis', fig.width=12, fig.height=7}
+```{r comparison-gene-overlap, results='asis', fig.width=16, fig.height=14}
 if (is.null(gene_overlap_cmp)) {
   cat("Canonical gene evidence is unavailable; gene-level overlap cannot be calculated.\n\n")
 } else for (tool in c("RER","FADE")) {

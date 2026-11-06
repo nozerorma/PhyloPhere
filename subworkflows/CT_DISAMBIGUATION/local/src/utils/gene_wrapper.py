@@ -208,10 +208,10 @@ def _replay_gene_task(task: Tuple[str, str, Optional[Dict[int, int]]]):
                 alignment_path=alignment_path, alignment_format=st["settings"].ali_format)
 
         reducer = CycleReducer(st["postproc_filter"], st["remove_clusters"], st["clust_minlen"], st["clust_maxcaas"], train_columns, st.get("clust_min_positions"),
-                               universe=st["universe"][gene])
+                               universe=st["universe"][gene], diag_cycles=st.get("diag_cycles", 0))
         # the strict pooling is scored over the strict universe (no conserved pair allowed)
         strict_reducer = CycleReducer(st["postproc_filter"], st["remove_clusters"], st["clust_minlen"], st["clust_maxcaas"], train_columns, st.get("clust_min_positions"),
-                                      universe=st["universe_strict"][gene]) if st["strict_output"] else None
+                                      universe=st["universe_strict"][gene], diag_cycles=st.get("diag_cycles", 0)) if st["strict_output"] else None
         streamed = stream_gene(gene, alignment_path, replay, load_ctx, st["posterior_threshold"], st["strict_output"], reduce=reducer, reduce_strict=strict_reducer)
         if streamed is None:
             return (gene, None, None, None)
@@ -275,6 +275,7 @@ def process_all_genes_perms(
     clust_min_positions: Optional[int] = None,
     universe: Optional[Dict[str, Tuple[int, ...]]] = None,
     universe_strict: Optional[Dict[str, Tuple[int, ...]]] = None,
+    diag_cycles: int = 0,
 ) -> Path:
     """Replay of the labelings of a tile over each gene, written as the tile tables of the null.
 
@@ -292,12 +293,14 @@ def process_all_genes_perms(
     out of the scores; the gene-removal thresholds and the reference pools are the merge's.
 
     `universe` ({gene: positions of the positional universe}, src.core.universe) is required and must cover every gene:
-    only its positions are scored, before the gene maximum of each cycle is taken, and its identity per gene is part of
-    the tile provenance (meta.json) so a null cannot be reused with another universe. With `strict_output` the strict
-    pooling is scored over `universe_strict` (the same test with no conserved pair allowed) and records that one.
+    the position tables (units n_*/max_*, scores) hold only its positions, and its identity per gene is part of the tile
+    provenance (meta.json) so a null cannot be reused with another universe. The gene level of each unit (gn_*, gmax_*)
+    covers every detected position, and the cycles b_0 and b_1..b_<diag_cycles> keep the bins of the scores outside the
+    universe (scores_diag). With `strict_output` the strict pooling uses `universe_strict` (the same test with no
+    conserved pair allowed) and records that one.
     """
     if universe is None or (strict_output and universe_strict is None):
-        raise ValueError("[perms] the positional universe is required: the null scores only its positions")
+        raise ValueError("[perms] the positional universe is required: the position tables of the null hold only its positions")
     missing_universe = [g for g in genes if g not in universe or (strict_output and g not in universe_strict)]
     if missing_universe:
         raise ValueError(f"[perms] genes without a positional universe, e.g. {sorted(missing_universe)[:5]}")
@@ -370,6 +373,7 @@ def process_all_genes_perms(
         "clust_min_positions": clust_min_positions, "clust_minlen": clust_minlen, "clust_maxcaas": clust_maxcaas, "strict_output": strict_output,
         "universe": {g: universe[g] for g in genes},
         "universe_strict": {g: universe_strict[g] for g in genes} if strict_output else None,
+        "diag_cycles": int(diag_cycles),
     }
 
     cycles_seen: Set[str] = set()
@@ -405,7 +409,7 @@ def process_all_genes_perms(
 
     from src.core.scoring_provenance import scientific, digest
     from src.core.universe import digest as universe_digest
-    meta = {"by_labeling": not fop_mirror, "strict": False,
+    meta = {"by_labeling": not fop_mirror, "strict": False, "diag_cycles": int(diag_cycles),
             "scientific": scientific(tree_file,asr_model,posterior_threshold,taxid_mapping_path,fop_pairs_file),
             "cluster": dict(enabled=postproc_filter,remove=remove_clusters,minlen=clust_minlen,maxcaas=clust_maxcaas,min_positions=clust_min_positions),
             "alignments": {g:digest(gene_alignments[g]) for g in genes},

@@ -267,6 +267,12 @@ SPEC = ModuleTabSpec(
             help="Genes per permulation-core task (replay and ASR replay); 1 = one task per gene; default 20.",
         ),
         FieldSpec(
+            name="caas_null_diag_cycles",
+            label="Null cycles that keep the scores outside U (diagnostics)",
+            importance="optional",
+            help="Null cycles b_1..b_N (and b_0) that keep the bins of the position scores outside the positional universe U, for the diagnostic plots of the scoring report; 0 keeps none; default 1000. The gene statistic covers all detected positions whatever this value.",
+        ),
+        FieldSpec(
             name="caas_cycle_block_size",
             label="Permulation-null cycles per block",
             importance="optional",

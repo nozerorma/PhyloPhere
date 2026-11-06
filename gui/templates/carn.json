@@ -89,7 +89,7 @@
       "multi_hypothesis": true,
       "max_fop": "100",
       "perm_match_pss": true,
-      "perm_match_fop": true,
+      "perm_match_fop": false,
       "perm_match_pss_ci": false,
       "perm_match_pss_tol": "0.25"
     },

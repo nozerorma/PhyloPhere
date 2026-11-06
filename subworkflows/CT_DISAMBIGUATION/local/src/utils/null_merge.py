@@ -3,9 +3,11 @@
 
 """Merge a block's gene/cycle units after the same post-processing as observed.
 
-The sole gene statistic is the raw maximum positive position score. Matrices
-contain max and n only; absent or removed units are zero-filled. Position-level
-null products and their diagnostics retain their previous definitions.
+The sole gene statistic is the raw maximum positive position score of a labeling over every position it
+detects (the gene level of the units, gn_* and gmax_*). Matrices contain max and n only; absent or removed units are
+zero-filled. The position-level null products (positions, detections, sample, quantiles, cycle_summary, cycle_hist)
+cover the positions of the positional universe U. The *_total diagnostics add the positions outside U: the counts per
+cycle for every cycle, and the score histogram for the cycles that keep the bins of those positions (scores_diag).
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ import pyarrow.compute as pc
 
 from src.core.gene_rules import GeneUnit, gene_removal
 from src.core.scores import SCORE_RULE, TIE_TOL, cycle_order_key
-from src.utils.null_tables import SCORES_SCHEMA, UNITS_SCHEMA, read_scores, read_units
+from src.utils.null_tables import DIAG_NA, DIAG_SCHEMA, SCORES_SCHEMA, UNITS_SCHEMA, diag_cycle, read_diag, read_scores, read_units
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +46,19 @@ def _vocabulary_codes(column: pa.ChunkedArray, vocabulary: Sequence[str]) -> np.
 
 
 class BlockTables:
-    """Units and scores of one block, as numpy arrays indexed by gene and cycle codes."""
+    """Units, scores and the bins of the scores outside U of one block, as numpy arrays indexed by gene and cycle codes."""
 
     def __init__(self, tile_dirs: Sequence[Path], cycles: Sequence[str], universe: Optional[Iterable[str]] = None):
         units = [read_units(d) for d in tile_dirs]
         scores = [read_scores(d) for d in tile_dirs]
+        diag = [read_diag(d) for d in tile_dirs]
         units = pa.concat_tables(units) if units else UNITS_SCHEMA.empty_table()
         scores = pa.concat_tables(scores) if scores else SCORES_SCHEMA.empty_table()
+        diag = pa.concat_tables(diag) if diag else DIAG_SCHEMA.empty_table()
+        levels = {int(json.loads((Path(d) / "meta.json").read_text()).get("diag_cycles", 0)) for d in tile_dirs}
+        if len(levels) > 1:
+            raise ValueError(f"the tiles of the block disagree on diag_cycles: {sorted(levels)}")
+        self.diag_cycles = levels.pop() if levels else 0
         self.cycles = list(cycles)
         stray = sorted(set(pc.unique(units["cycle"]).to_pylist()) - set(self.cycles))
         if stray:
@@ -67,6 +75,10 @@ class BlockTables:
         self.s_position = scores["position"].to_numpy(zero_copy_only=False).astype(np.int64)
         self.s_top = scores["top"].to_numpy(zero_copy_only=False).astype(np.float64)
         self.s_bottom = scores["bottom"].to_numpy(zero_copy_only=False).astype(np.float64)
+        self.d_gene = _vocabulary_codes(diag["gene"], self.genes)
+        self.d_cycle = _vocabulary_codes(diag["cycle"], self.cycles)
+        self.d_top = diag["top"].to_numpy(zero_copy_only=False).astype(np.int16)
+        self.d_bottom = diag["bottom"].to_numpy(zero_copy_only=False).astype(np.int16)
 
 
 CATEGORIES = ("Extreme", "Dubious", "Both")   # codes 0, 1, 2 of the category column of units.parquet
@@ -127,15 +139,24 @@ def kept_scores(t: BlockTables, removed: np.ndarray) -> np.ndarray:
     return ~np.isin(t.s_cycle * len(t.genes) + t.s_gene, keys)
 
 
-def gene_statistics(t: BlockTables, removed: np.ndarray):
-    """Raw maximum and positive-position counts by gene, cycle and direction.
+def kept_diag(t: BlockTables, removed: np.ndarray) -> np.ndarray:
+    """Boolean per scores_diag row: its unit is not removed."""
+    if not removed.any():
+        return np.ones(len(t.d_gene), dtype=bool)
+    keys = (t.u_cycle * len(t.genes) + t.u_gene)[removed]
+    return ~np.isin(t.d_cycle * len(t.genes) + t.d_gene, keys)
 
-    Removed/absent/unscored units are zero-filled. No score pool is computed.
+
+def gene_statistics(t: BlockTables, removed: np.ndarray):
+    """Raw maximum and positive-position counts by gene, cycle and direction, over every detected position.
+
+    The gene level of the units (gmax_*, gn_*) is used, not the one limited to U. Removed/absent/unscored units are
+    zero-filled. No score pool is computed.
     """
     n_genes, n_cycles = len(t.genes), len(t.cycles)
     out = {p: {} for p in ("max", "n")}
     for name, direction in DIRECTIONS.items():
-        n_d, max_d = t.units[f"n_{direction}"], t.units[f"max_{direction}"]
+        n_d, max_d = t.units[f"gn_{direction}"], t.units[f"gmax_{direction}"]
         m_max = np.zeros((n_genes, n_cycles))
         m_n = np.zeros((n_genes, n_cycles), dtype=np.int32)
         sel = np.flatnonzero(~removed & (n_d > 0))
@@ -218,6 +239,49 @@ def cycle_summaries(t: BlockTables, removed: np.ndarray, keep: np.ndarray):
             summary.append((cyc, name, int(n_cycle[c]), int(genes_cycle[c])))
             for b in np.flatnonzero(counts[c]).tolist():
                 hist.append((cyc, name, b, int(counts[c, b])))
+    return summary, hist
+
+
+def _bin_counts(cycle_codes: np.ndarray, bins: np.ndarray, n_cycles: int) -> np.ndarray:
+    """Histogram counts (cycles x HIST_BINS) of the given bins."""
+    return np.bincount(cycle_codes * HIST_BINS + bins, minlength=n_cycles * HIST_BINS).reshape(n_cycles, HIST_BINS)
+
+
+def cycle_summaries_total(t: BlockTables, removed: np.ndarray, keep: np.ndarray, keep_d: np.ndarray):
+    """The summaries of cycle_summaries over every detected position, inside U or not.
+
+    The counts per cycle come from the gene level of the units for every cycle. The histogram adds the bins of the
+    positions outside U (scores_diag) to those of the positions inside U, and is written only for the cycles that keep
+    them (b_0 and b_1..b_<diag_cycles>). Returns (summary rows [(cycle, direction, n, n_genes)], histogram rows
+    [(cycle, direction, bin, n)]).
+    """
+    n_cycles = len(t.cycles)
+    keep_unit = ~removed
+    covered = np.array([diag_cycle(c, t.diag_cycles) for c in t.cycles], dtype=bool)
+    summary, hist = [], []
+    s_cyc = t.s_cycle[keep]
+    in_best = np.fmax(t.s_top[keep], t.s_bottom[keep])
+    d_cyc = t.d_cycle[keep_d]
+    d_top, d_bottom = t.d_top[keep_d].astype(np.int64), t.d_bottom[keep_d].astype(np.int64)
+    d_top = np.where(d_top == DIAG_NA, -1, d_top)
+    d_bottom = np.where(d_bottom == DIAG_NA, -1, d_bottom)
+    outside = {"all": np.maximum(d_top, d_bottom), "top": d_top, "bottom": d_bottom}
+    inside = {"all": in_best, "top": t.s_top[keep], "bottom": t.s_bottom[keep]}
+    for name, direction in DIRECTIONS.items():
+        n_d = t.units[f"gn_{direction}"]
+        n_cycle = np.bincount(t.u_cycle[keep_unit], weights=n_d[keep_unit], minlength=n_cycles)
+        genes_cycle = np.bincount(t.u_cycle[keep_unit & (n_d > 0)], minlength=n_cycles)
+        values = inside[direction]
+        ok = ~np.isnan(values)
+        counts = _bin_counts(s_cyc[ok], np.minimum(np.floor(values[ok] * 100.0).astype(np.int64), HIST_BINS - 1), n_cycles)
+        ob = outside[direction]
+        oka = ob >= 0
+        counts = counts + _bin_counts(d_cyc[oka], np.minimum(ob[oka], HIST_BINS - 1), n_cycles)
+        for c, cyc in enumerate(t.cycles):
+            summary.append((cyc, name, int(n_cycle[c]), int(genes_cycle[c])))
+            if covered[c]:
+                for b in np.flatnonzero(counts[c]).tolist():
+                    hist.append((cyc, name, b, int(counts[c, b])))
     return summary, hist
 
 
@@ -321,11 +385,15 @@ def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str],
     summary, hist = cycle_summaries(t, removed, keep)
     _write_tsv(out_dir / "cycle_summary.tsv", ("cycle", "direction", "n", "n_genes"), summary)
     _write_tsv(out_dir / "cycle_hist.tsv", ("cycle", "direction", "bin", "n"), hist)
+    keep_d = kept_diag(t, removed)
+    summary_total, hist_total = cycle_summaries_total(t, removed, keep, keep_d)
+    _write_tsv(out_dir / "cycle_summary_total.tsv", ("cycle", "direction", "n", "n_genes"), summary_total)
+    _write_tsv(out_dir / "cycle_hist_total.tsv", ("cycle", "direction", "bin", "n"), hist_total)
     sample, quantiles = sample_and_quantiles(t, removed, keep, seed, sample_per_cycle)
     _write_tsv(out_dir / "perm_pos_sample.tsv", ("Gene", "Position", "cycle", "asr_path_score"), sample)
     quant_fields = ["cycle", "metric", "n_sampled", "n_total", "mean"] + [f"q{q}" for q in QUANT_LEVELS]
     _write_tsv(out_dir / "perm_pos_quantiles.tsv", quant_fields, ([rec[f] for f in quant_fields] for rec in quantiles))
-    present = sorted({t.cycles[c] for c in np.unique(t.u_cycle[~removed & (t.units["n_rows"] > 0)]).tolist()})
+    present = sorted({t.cycles[c] for c in np.unique(t.u_cycle[~removed & (t.units["gn_rows"] > 0)]).tolist()})
     (out_dir / "cycles.txt").write_text("".join(f"{c}\n" for c in t.cycles))
     tile_meta = [json.loads((Path(d)/'meta.json').read_text()) for d in tile_dirs]
     provenance = None
@@ -352,6 +420,7 @@ def merge_block(tile_dirs: Sequence[Path], out_dir: Path, cycles: Sequence[str],
                           gene_filter=dict(remove_extreme=bool(remove_extreme),remove_dubious=bool(remove_dubious),strata=gene_strata,k_far=gene_k_far,k_near=gene_k_near),lengths=lengths or {},length_sources=length_sources or {},
                           genes_without_length=sorted(t.block_genes - set(lengths)) if lengths else [])
     counts = {"units": int(len(t.u_gene)), "removed_units": int(removed.sum()), "scored_positions": int(keep.sum()),
-              "cycles": len(t.cycles), "cycles_present": present, "score_rule": SCORE_RULE, "scoring_provenance": provenance}
+              "cycles": len(t.cycles), "cycles_present": present, "score_rule": SCORE_RULE, "scoring_provenance": provenance,
+              "diag_cycles": int(t.diag_cycles), "diag_rows": int(keep_d.sum())}
     (out_dir / "counts.json").write_text(json.dumps(counts))
     return counts

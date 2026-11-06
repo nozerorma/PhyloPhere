@@ -1,7 +1,7 @@
 # Reporting only: preserve producer p/q and their original adjustment families.
 # One row per ranking, tool and call: the nominal call and one call per BH level (q < level, labelled "q<0.05", ...).
-# FADE has no BH, so only its nominal call is tested. The Fisher p of a row is raw: the BH calls are nested, so their tests
-# are not independent and nothing is corrected across rows.
+# FADE has no BH of its own: its selected-gene call is crossed with the CAAS call at every level (nominal and each q).
+# The Fisher p of a row is raw: the BH calls are nested, so their tests are not independent and nothing is corrected across rows.
 scoring_overlap <- function(d, nominal=.05, levels=c(.05,.1,.15)) {
   if(anyDuplicated(d$Gene)) stop('Duplicate gene evidence keys')
   call_levels <- c(list(list(name='nominal',cut=nominal)),lapply(scoring_bh_levels(levels),function(l)list(name=paste0('q',scoring_bh_labels(l)),cut=l)))
@@ -11,7 +11,6 @@ scoring_overlap <- function(d, nominal=.05, levels=c(.05,.1,.15)) {
     sf <- if(rk=='global') '' else paste0('_',rk)
     for(tool in c('RER','FADE')) for(cl in call_levels) {
       is_nominal <- cl$name=='nominal'
-      if(tool=='FADE' && !is_nominal) next
       cp <- col(paste0('caas_',if(is_nominal) 'p.gen' else 'p.gen.adj',sf))
       ca <- cp < cl$cut
       if(tool=='RER') {

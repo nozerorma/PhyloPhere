@@ -487,6 +487,7 @@ process CAAS_CORE_BATCHED {
         --ct-dir ${scoringQuote("${baseDir}/subworkflows/CT/local")} \\
         --replay-args-file .ct_perm_replay_batch_args \\
         --universe-dir universe_in \\
+        --diag-cycles ${params.caas_null_diag_cycles == null ? 1000 : (params.caas_null_diag_cycles as int)} \\
         --ali-format ${scoringQuote(params.ali_format)} \\
         --resample-dir ${block} \\
         --output-dir caas_perms_out \\
@@ -665,7 +666,7 @@ process CAAS_CORE_MERGE_REDUCE {
     label 'process_medium'
     // The publish prefix is "/strict" for the strict alias (CAAS_CORE_MERGE_REDUCE_STRICT)
     publishDir path: { "${params.outdir}${strictPrefix(task.process)}/caas_permulation" }, mode: 'copy', overwrite: true,
-               pattern: '{null_metadata.json,caas_perms.rds,perm_pos_sample.tsv,perm_pos_quantiles.tsv,cycle_roster.txt,removed_units.tsv,cycle_summary.tsv,cycle_hist.tsv,null_positions.parquet,counts.json}'
+               pattern: '{null_metadata.json,caas_perms.rds,perm_pos_sample.tsv,perm_pos_quantiles.tsv,cycle_roster.txt,removed_units.tsv,cycle_summary.tsv,cycle_hist.tsv,cycle_summary_total.tsv,cycle_hist_total.tsv,null_positions.parquet,counts.json}'
 
     input:
     path blocks, stageAs: 'blk_*'    // the block directories of CAAS_CORE_MERGE (permuted cycles only)
@@ -681,6 +682,8 @@ process CAAS_CORE_MERGE_REDUCE {
     path "perm_pos_quantiles.tsv",    emit: pos_quantiles
     path "cycle_summary.tsv",         emit: cycle_summary
     path "cycle_hist.tsv",            emit: cycle_hist
+    path "cycle_summary_total.tsv",   emit: cycle_summary_total   // counts per cycle over every detected position, inside U or not
+    path "cycle_hist_total.tsv",      emit: cycle_hist_total      // score histogram over every detected position, for the cycles that keep the bins outside U
     path "null_positions.parquet",    emit: null_positions
     path "counts.json",               emit: counts
 

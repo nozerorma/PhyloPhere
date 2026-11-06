@@ -14,7 +14,9 @@ Outputs:    <out>/cycle_roster.txt   every replayed cycle, the ones with no dete
             <out>/null_positions.parquet  per scored position of the null (gene, position): nd, the number of cycles that
                                      score it, and first_rank, the position in replay order (0-based) of the first one
             <out>/removed_units.tsv  (cycle, Gene) units dropped by gene removal, when any block applied it
-            <out>/perm_pos_sample.tsv, perm_pos_quantiles.tsv, cycle_summary.tsv, cycle_hist.tsv
+            <out>/perm_pos_sample.tsv, perm_pos_quantiles.tsv, cycle_summary.tsv, cycle_hist.tsv (positions inside U) and
+            cycle_summary_total.tsv, cycle_hist_total.tsv (every detected position; the histogram only for the cycles
+            that keep the bins of the scores outside U)
             <out>/counts.json        units, removed units, scored positions and the cycles with a row
 """
 
@@ -124,6 +126,10 @@ def main() -> int:
         if not join_tables(blocks, name, args.output_dir):
             print(f"no block wrote {name}", file=sys.stderr)
             return 1
+
+    # the diagnostics over every detected position (inside U or not); a block of an older layout does not write them
+    for name in ("cycle_summary_total.tsv", "cycle_hist_total.tsv"):
+        join_tables(blocks, name, args.output_dir)
 
     n_positions = join_detections(blocks, roster, args.output_dir)
 

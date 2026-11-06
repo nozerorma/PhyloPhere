@@ -135,6 +135,8 @@ Code: `subworkflows/CT/local/scripts/permulations.R:73-77` (BM simulation), `:36
 
 *Distinct null-positive positions of the universe seen as cycles accumulate.*
 
+Each (gene, cycle) unit of the null keeps two levels of the same records. The position level (the scored positions, the position p-values and the per-position tables) holds the positions of the positional universe $U$. The gene level holds every position the labeling detects, inside $U$ or not: the gene statistic of a cycle (the maximum position score, with the number of scored positions) is taken over all of them, as it is for $b_0$, so the gene p-value and the CAAS ranking of the FCS compare a labeling with the null under the same definition. The score bins of the positions outside $U$ are kept for the cycles $b_0$ and $b_1$ to $b_N$ (`--caas_null_diag_cycles`, default 1000) and feed the diagnostic plots of report 10.
+
 ## 5. CAAS discovery
 
 A CAAS is a column where the foreground and background species carry mostly disjoint residues. For a labeling with foreground species $F$ and background species $B$, let $F_u$ and $B_u$ be their sets of standard amino acids and $S = F_u \cap B_u$:

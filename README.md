@@ -202,6 +202,7 @@ Detects CAAS, columns where foreground and background species carry mostly disjo
 | `caas_config` | empty | CAAStools table of the contrasts when `--contrast_selection` is off |
 | `ct_core_batch_size` | 20 | Genes per replay task |
 | `caas_cycle_block_size` | 500 | Cycles per block; bounds task memory |
+| `caas_null_diag_cycles` | 1000 | Null cycles b_1..b_N that keep the bins of the position scores outside the positional universe, for the scoring report diagnostics; 0 keeps none. The gene statistic covers all detected positions whatever this value |
 | `caas_export_single` | false | Also write the single `caas_perms.rds` export |
 | `publish_intermediates` | false | Also publish the resample harvest directory (`resample_*.tab`, manifest, harvest and provenance files) under `resample/` |
 | `discovery_from`, `resample_from` | empty | Standalone: `discovery.tab` or resample output of a previous run |

@@ -223,10 +223,18 @@ if (nrow(gg) && any(gg$removed)) {
     arrange(is.na(n), n, chr) %>% pull(chr)
   win <- win %>% mutate(chr=factor(chr, chrs)) %>% arrange(chr, window)
   write_tsv(win, file.path(out, 'removed_genes_windows.tsv'))
-  pp_plot(ggplot(win, aes(window*w, removed_genes/pmax(candidates,1))) +
-    geom_col(fill=colors[['Both']]) + facet_grid(.~chr, scales='free_x', space='free_x') +
-    labs(title=sprintf('Fraction of candidate genes removed per %g-Mb window', w), x=sprintf('Position (%g-Mb windows)', w),
-         y='Removed / candidate genes') + theme(axis.text.x=element_blank(), panel.spacing=unit(.1,'lines')),
+  # Windows are laid on one cumulative axis (as in the comparative report); the bar width is the window
+  # size, so bars stay wide however many chromosomes or windows there are.
+  ext <- win %>% group_by(chr) %>% summarise(chr_end=max(end_mb), .groups='drop') %>% arrange(chr) %>%
+    mutate(offset=cumsum(lag(chr_end, default=0)) + (row_number()-1)*w)
+  win <- win %>% left_join(ext %>% select(chr, offset), by='chr') %>% mutate(x=offset + (window+.5)*w)
+  ticks <- win %>% group_by(chr) %>% summarise(mid=mean(range(x)), .groups='drop')
+  bar_col <- grDevices::rgb(t(grDevices::col2rgb(colors[['Both']])*.65), maxColorValue=255)
+  pp_plot(ggplot(win, aes(x, removed_genes/pmax(candidates,1))) +
+    geom_col(width=w*.9, fill=bar_col, colour=bar_col, linewidth=.5) +
+    scale_x_continuous(breaks=ticks$mid, labels=sub('^chr','',ticks$chr), expand=expansion(mult=.01)) +
+    labs(title=sprintf('Fraction of candidate genes removed per %g-Mb window', w), x='Chromosome',
+         y='Removed / candidate genes') + theme(panel.grid.major.x=element_blank()),
     file.path(out,'removed_windows.png'), width=14, height=4.5)
   pp_show(win %>% filter(removed_genes > 0) %>% arrange(p) %>% mutate(across(c(expected,ratio), ~round(.x,2)),
     across(c(p,q), ~signif(.x,3))) %>% select(chr, start_mb, end_mb, candidates, removed_genes, Extreme, Dubious, Both,

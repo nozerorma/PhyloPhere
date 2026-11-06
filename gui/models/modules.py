@@ -62,6 +62,7 @@ class CaasConfig(ModuleConfigBase):
     # Discovery/resample fine-tuning (conf/ct.config)
     publish_intermediates: bool = False  # --publish_intermediates
     ct_core_batch_size: str = "20"  # --ct_core_batch_size (genes per CAAS_CORE_BATCHED task of the permulation null; 1 = one task per gene)
+    caas_null_diag_cycles: str = "1000"  # --caas_null_diag_cycles (null cycles b_1..b_N that keep the bins of the scores outside the positional universe, for the report's diagnostic plots; 0 = none)
     caas_cycle_block_size: str = "500"  # --caas_cycle_block_size (permulation cycles per block; a task replays one batch of genes against one block)
     min_divergent_fraction: str = "0.5"  # --min_divergent_fraction
     min_non_overlapping: str = "2"  # --min_non_overlapping

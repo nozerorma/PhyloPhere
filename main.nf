@@ -342,7 +342,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         def scoring_null_positions_ch = null        // null_positions.parquet: the positions the null scores, with nd
         def scoring_null_blocks_ch = null           // the blocks' scored positions (permuted cycles)
         def scoring_null_counts_ch = null           // counts.json of the null (cycles with a row)
-        def scoring_null_summary_ch = null          // cycle_summary.tsv + cycle_hist.tsv: the report's null panels
+        def scoring_null_summary_ch = null          // cycle_summary.tsv + cycle_hist.tsv + their *_total versions: the report's null panels
         def scoring_caas_pos_sample_ch = null
         def scoring_caas_pos_quantiles_ch = null
         def scoring_caas_cycle_roster_ch = null      // cycle_roster.txt — N of the null for SCORING and POSENRICH
@@ -597,7 +597,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 scoring_null_counts_ch = caas_perm_out.counts
                 scoring_caas_pos_sample_ch = caas_perm_out.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))  // cycle-stratified sample for distribution plots
                 scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))  // per-cycle distribution shape
-                scoring_null_summary_ch = caas_perm_out.cycle_summary.combine(caas_perm_out.cycle_hist)   // per-cycle detections and score histogram: the report's null panels
+                scoring_null_summary_ch = caas_perm_out.cycle_summary.combine(caas_perm_out.cycle_hist).combine(caas_perm_out.cycle_summary_total).combine(caas_perm_out.cycle_hist_total)   // per-cycle detections and score histogram, inside U and over every detected position: the report's null panels
                 scoring_caas_cycle_roster_ch = caas_perm_out.cycle_roster.ifEmpty(file('NO_CAAS_CYCLE_ROSTER'))  // every replayed cycle, the empty ones included
             }
             ran_any = true

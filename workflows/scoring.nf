@@ -46,7 +46,7 @@ workflow SCORING {
         null_positions_ch        // Channel<path> or null, null_positions.parquet: the positions the null scores, with nd
         null_blocks_ch           // Channel<List<path>> or null, the blocks' directories (scored positions of the permuted cycles)
         null_counts_ch           // Channel<path> or null, counts.json of the null
-        null_summary_ch          // Channel<tuple(cycle_summary.tsv, cycle_hist.tsv)> or null, the report's null panels
+        null_summary_ch          // Channel<tuple(cycle_summary.tsv, cycle_hist.tsv, cycle_summary_total.tsv, cycle_hist_total.tsv)> or null, the report's null panels
         caas_pos_sample_ch       // Channel<path> or null — cycle-stratified sample for report distribution plots
         caas_pos_quantiles_ch    // Channel<path> or null — per-cycle null distribution shape
         hypotheses_pairs_ch      // Channel<path> or null — contrast_hypotheses_pairs.tsv (FOP domain-pool weights)
@@ -192,7 +192,9 @@ workflow SCORING {
             resolved_cycle_roster = cycle_roster_ch != null ? cycle_roster_ch.collect().map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] } : Channel.value(file("${null_dir}/cycle_roster.txt"))
             // Preserve each summary/histogram pair; collect() otherwise flattens it
             // and the report's [0]/[1] indexing selects components of one Path.
-            null_summary_v = null_summary_ch != null ? null_summary_ch.collect(flat: false).map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] } : Channel.value([file("${null_dir}/cycle_summary.tsv"), file("${null_dir}/cycle_hist.tsv")])
+            null_summary_v = null_summary_ch != null ? null_summary_ch.collect(flat: false).map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] } : Channel.value([file("${null_dir}/cycle_summary.tsv"), file("${null_dir}/cycle_hist.tsv"),
+                                                                                                                                               file("${null_dir}/cycle_summary_total.tsv").exists() ? file("${null_dir}/cycle_summary_total.tsv") : file('NO_NULL_SUMMARY_TOTAL'),
+                                                                                                                                               file("${null_dir}/cycle_hist_total.tsv").exists() ? file("${null_dir}/cycle_hist_total.tsv") : file('NO_NULL_HIST_TOTAL')])
             def null_stats = SCORING_NULL_POSITIONS(null_positions_v, null_blocks_v, null_counts_v, resolved_postproc.collect().map { assert it.size()==1 : "SCORING expected exactly one artifact"; it[0] },
                                                     resolved_tested_pos, resolved_background, resolved_cycle_roster)
             null_counters_v = null_stats.counters
@@ -203,7 +205,7 @@ workflow SCORING {
             null_fit_v = Channel.value(file('NO_NULL_FIT'))
             null_base_v = Channel.value(file('NO_NULL_BASE'))
             resolved_cycle_roster = Channel.value(file('NO_CYCLE_ROSTER'))
-            null_summary_v = Channel.value([file('NO_NULL_SUMMARY'), file('NO_NULL_HIST')])
+            null_summary_v = Channel.value([file('NO_NULL_SUMMARY'), file('NO_NULL_HIST'), file('NO_NULL_SUMMARY_TOTAL'), file('NO_NULL_HIST_TOTAL')])
         }
 
         // ── Run scoring — single pass on full postproc pool ────────────────
@@ -267,6 +269,8 @@ workflow SCORING {
             resolved_fade_site_bot_ch,
             null_summary_v.map { it[0] },
             null_summary_v.map { it[1] },
+            null_summary_v.map { it[2] },
+            null_summary_v.map { it[3] },
             caas_pos_sample_resolved,
             caas_pos_quantiles_resolved,
             resolved_postproc,
